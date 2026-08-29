@@ -62,6 +62,26 @@ def bare_repository(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def read_only_here(leased: Lease, found: Path) -> bool:
+    """Whether the deepest mount covering this path is a read-only one.
+
+    The lease nests, so "is this under something writable" answers the wrong
+    question: everything in the shared directory is under a writable mount,
+    and a sibling's administrative entry is read-only inside it regardless.
+    A mount engine settles that by applying parents first and letting the
+    deepest entry win, so this has to as well -- a flat test withholds
+    nothing here and passes without exercising anything.
+    """
+    covering = [
+        (root, writable)
+        for roots, writable in ((leased.writable, True), (leased.read_only, False))
+        for root in roots
+        if root == found or root in found.parents
+    ]
+    deepest = max(covering, key=lambda pair: len(pair[0].parts), default=None)
+    return deepest is not None and not deepest[1]
+
+
 def test_no_path_is_leased_writable_and_read_only_at_once(
     bare_repository: Path,
 ) -> None:
@@ -113,21 +133,22 @@ def test_a_lease_does_not_mount_the_worktree_it_is_for_as_a_sibling(
     assert repository / "mine" not in leased.read_only
 
 
-def test_the_shared_directory_is_writable_with_only_worktrees_held_back(
+def test_the_shared_directory_is_writable_with_only_sibling_entries_held_back(
     repository: Path,
 ) -> None:
-    """`config` has to be writable to cut a worktree; `worktrees/` must not be.
+    """`config` has to be writable to cut a worktree; a sibling's entry must not be.
 
-    Three nested modes rather than two: the shared directory writable,
-    `worktrees/` read-only inside it, and this worktree's own entry writable
-    again within that. Which is what keeps every sibling's entry present and
-    unwritable while this worktree's own entry stays writable.
+    Three nested modes rather than two: the shared directory writable, each
+    sibling's administrative entry read-only inside it, and this worktree's
+    own entry writable alongside them. Which is what keeps every sibling's
+    entry present and unwritable while this worktree's own entry stays
+    writable.
     """
     layout = repository_layout(repository / "mine")
     leased = lease_for(repository / "mine")
     assert layout.common in leased.writable
     assert layout.common not in leased.read_only
-    assert layout.common / "worktrees" in leased.read_only
+    assert layout.common / "worktrees" / "other" in leased.read_only
     assert layout.common / "worktrees" / "other" not in leased.writable
     assert layout.private in leased.writable
 
@@ -153,25 +174,6 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
     leased = lease_for(worktree)
     layout = repository_layout(worktree)
 
-    def read_only_here(found: Path) -> bool:
-        """Whether the deepest mount covering this path is a read-only one.
-
-        The lease nests, so "is this under something writable" answers the
-        wrong question: everything in the shared directory is under a
-        writable mount, and `worktrees/` is read-only inside it regardless.
-        A mount engine settles that by applying parents first and letting the
-        deepest entry win, so this has to as well -- a flat test withholds
-        nothing here and passes without exercising anything.
-        """
-        covering = [
-            (root, writable)
-            for roots, writable in ((leased.writable, True), (leased.read_only, False))
-            for root in roots
-            if root == found or root in found.parents
-        ]
-        deepest = max(covering, key=lambda pair: len(pair[0].parts), default=None)
-        return deepest is not None and not deepest[1]
-
     # Every file too, not only the directories holding them. A directory with
     # its write bit off still lets an existing file inside it be rewritten,
     # which a read-only mount does not -- and modelling only the directories
@@ -180,7 +182,7 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
     withheld = [
         found
         for found in [layout.common, *layout.common.rglob("*")]
-        if read_only_here(found)
+        if read_only_here(leased, found)
     ]
     # The sibling's administrative entry is the one this has to cover, and
     # naming it here is what stops the set quietly emptying again.
@@ -197,6 +199,53 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
         for entry, mode in restored.items():
             entry.chmod(mode)
     assert git.out("-C", str(worktree), "log", "-1", "--format=%s").strip() == "second"
+
+
+def test_a_new_worktree_can_be_cut_under_everything_the_lease_withholds(
+    repository: Path,
+) -> None:
+    """Cutting a worktree is the workflow this repository mandates, run rather than named.
+
+    `git worktree add` writes a whole administrative entry of its own beside
+    the siblings', so the directory holding them has to admit a new child
+    while every child already in it stays unwritable. Those two are one
+    permission on a directory and separate ones on its entries, which is why
+    the lease names the entries.
+
+    Modelled the way the commit test models it -- withhold write permission
+    from exactly what the lease calls read-only, then run the real command --
+    because a lease asserted about by name passes whether or not git can do
+    anything under it.
+    """
+    worktree = repository / "mine"
+    leased = lease_for(worktree)
+    layout = repository_layout(worktree)
+    withheld = [
+        found
+        for found in [layout.common, *layout.common.rglob("*")]
+        if read_only_here(leased, found)
+    ]
+    assert layout.common / "worktrees" / "other" in withheld
+
+    restored = {entry: entry.stat().st_mode for entry in withheld}
+    try:
+        for entry in withheld:
+            entry.chmod(restored[entry] & ~0o222)
+        git(
+            "-C",
+            str(worktree),
+            "worktree",
+            "add",
+            "-q",
+            str(repository / "cut"),
+            "-b",
+            "cut",
+        )
+    finally:
+        for entry, mode in restored.items():
+            entry.chmod(mode)
+    assert (repository / "cut").is_dir()
+    assert (layout.common / "worktrees" / "cut").is_dir()
 
 
 def test_a_plain_checkout_leases_its_own_git_directory(tmp_path: Path) -> None:
