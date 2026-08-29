@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "799f705f05aa755569d53a7f8c1860d70522bfdf614171943f2f8f49c6b43858",
+  "source_digest": "b5d15d530e73afe32cfba9289c12c2ca8ad90ac39bcf768cda245e1c0cc2b2db",
   "target_requirements": [
     "claude-code"
   ],
@@ -261,7 +261,7 @@
     {
       "path": ".claude/plugins/lup/commands/report.md",
       "category": "generated",
-      "sha256": "7d07f2e45690d38e8fb51b2397a9b2660706f9bab464964a52faac41e6e88d76",
+      "sha256": "ca29da1d20a182f97e72ac65276bbfa70c95509fb24b2b508e5b67ac00421d45",
       "semantic_id": "skill.report",
       "executable": false
     },
