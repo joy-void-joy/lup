@@ -38,6 +38,54 @@ def repository(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture
+def bare_repository(tmp_path: Path) -> Path:
+    """A bare repository with its worktrees beside it, not under a checkout.
+
+    The layout this rail actually runs in, and the one that puts the shared
+    directory in `git worktree list`: a bare repository is reported as the
+    main worktree, so it comes back from `sibling_worktrees` as well as from
+    `repository_layout`. A normal checkout never produces that, which is why
+    the collision it causes needs its own fixture to reach.
+    """
+    source = tmp_path / "source"
+    source.mkdir()
+    git("-C", str(source), "init", "-q", "-b", "main")
+    git("-C", str(source), "config", "user.email", "test@example.invalid")
+    git("-C", str(source), "config", "user.name", "Test")
+    (source / "README.md").write_text("readme\n", encoding="utf-8")
+    git("-C", str(source), "add", "-A")
+    git("-C", str(source), "commit", "-qm", "first")
+    bare = tmp_path / "repo.git"
+    git("clone", "-q", "--bare", str(source), str(bare))
+    git("-C", str(bare), "worktree", "add", "-q", str(tmp_path / "mine"), "-b", "mine")
+    return tmp_path
+
+
+def test_no_path_is_leased_writable_and_read_only_at_once(
+    bare_repository: Path,
+) -> None:
+    """One path, one mode: two mounts at one target have no tie-break to trust.
+
+    The shared directory arrives twice here -- once as the directory this
+    lease deliberately makes writable, once as its own sibling, because a
+    bare repository is the main worktree git reports. Both spellings said
+    read-only until the shared directory became writable, so the collision
+    was invisible rather than absent, and it resolves toward writable.
+    """
+    layout = repository_layout(bare_repository / "mine")
+    leased = lease_for(bare_repository / "mine")
+
+    # The collision this pins is only real while git reports it, so the
+    # premise is asserted rather than assumed: without this line the test
+    # would keep passing against a git that stopped listing the bare main
+    # worktree, having quietly stopped exercising anything.
+    assert layout.common in sibling_worktrees(bare_repository / "mine")
+    assert not set(leased.writable) & set(leased.read_only)
+    assert layout.common in leased.writable
+    assert layout.common not in leased.read_only
+
+
 def test_a_lease_makes_its_own_worktree_writable(repository: Path) -> None:
     leased = lease_for(repository / "mine")
     assert repository / "mine" in leased.writable

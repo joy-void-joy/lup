@@ -244,7 +244,18 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
         for owned in (worktree / path for path in human_owned or [])
         if owned.exists()
     ]
-    return Lease(writable=same_path(writable), read_only=same_path(read_only))
+    # One path, one mode. `git worktree list` reports the main worktree, and
+    # in a bare layout that directory *is* the shared one -- so the shared
+    # directory arrives as its own sibling and would be declared read-only
+    # and read-write at once. Both spellings were read-only before this
+    # module made the shared directory writable, which is what kept the
+    # collision invisible rather than absent. Resolved toward writable
+    # because the paths that reach here writable are the ones named
+    # deliberately, and toward it here rather than in the engine, where two
+    # mounts at one target settle by whichever order they happen to be
+    # applied in.
+    kept = [path for path in read_only if path not in writable]
+    return Lease(writable=same_path(writable), read_only=same_path(kept))
 
 
 def hold_worktree_pruning(worktree: Path) -> bool:
