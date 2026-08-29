@@ -33,6 +33,7 @@ from lup.sandbox.models import (
     DockerUnreachableError,
     ReplCrashedError,
     RootfulDaemonError,
+    SandboxNameInUseError,
     SandboxNotInitializedError,
 )
 from lup.types import JsonObject
@@ -426,6 +427,19 @@ class TestStaleRemoval:
         sandbox.remove_stale_container()
 
         assert stale.removed
+
+    def test_a_live_owners_container_is_refused_not_taken(self) -> None:
+        # Two sessions that named themselves alike both reach this name; the
+        # one already working inside it keeps it.
+        client = FakeDockerClient()
+        sandbox = make_sandbox(client)
+        working = FakeContainer(sandbox.container_name, sandbox.infrastructure_labels())
+        client.containers.existing[sandbox.container_name] = working
+
+        with pytest.raises(SandboxNameInUseError):
+            sandbox.remove_stale_container()
+
+        assert not working.removed
 
     def test_absent_container_is_a_no_op(self) -> None:
         sandbox = make_sandbox(FakeDockerClient())
