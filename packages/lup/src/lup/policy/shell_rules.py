@@ -242,12 +242,16 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     ``read_verbs`` name action-selecting flags that pin a one-action-at-a-time
     subcommand to its query form (``git config --get``); their presence among
     literal, unguarded words de-escalates a non-allow effect to allow.
+    ``guarded_keys`` state the inverse, for a subcommand whose writes are not
+    all alike: their *absence* among legible words de-escalates, so the
+    effect is kept only for the settings that redirect how commands execute.
     """
 
     name: str
     effect: CommandEffect = ROOT_EFFECT
     ask_flags: list[str] = []
     read_verbs: list[str] = []
+    guarded_keys: list[str] = []
     operations: list[ShellOperationRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
     recovery: Recovery = ROOT_RECOVERY
@@ -306,6 +310,24 @@ class ShellCommandRule(SelectableRule, frozen=True):
     read of `if=` to stdout. There is no verb to list, because the read-only
     form is the one with nothing extra in it, so a membership test can never
     recognize it and every such invocation stopped for approval as a write.
+    """
+    guarded_keys: list[str] = []
+    """Setting names whose *absence* makes this command's write an ordinary one.
+
+    The same absence test as `write_markers`, asked about a write's subject
+    instead of its form. That one asks whether a command writes at all; this
+    assumes it does and asks whether what it writes decides how later
+    commands execute. `git config` is the case: it can set `user.email` or it
+    can set `core.hooksPath`, and only the second arranges for a program to
+    run. A row without this can only hold one effect over both, which makes
+    its reason -- "git config can change how commands execute" -- false for
+    nearly every invocation it stops, and an approval question whose stated
+    reason does not hold is one nobody can weigh.
+
+    Glob patterns, matched case-blind. Git reads a key's section and name
+    without regard to case, so a guard written `core.hookspath` has to catch
+    `core.hooksPath`, and the families worth naming are shaped around a
+    subsection the caller chooses (`merge.*.driver`).
     """
     bare_reads: bool = False
     """Whether this command only reads when handed no arguments at all.
@@ -403,6 +425,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 allow_flags=[],
                 read_verbs=[],
                 write_markers=[],
+                guarded_keys=[],
                 bare_reads=False,
                 value_flags=[],
                 reason=operation.reason,
@@ -418,6 +441,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
             write_markers=[],
+            guarded_keys=list(subcommand.guarded_keys),
             bare_reads=False,
             value_flags=[],
             reason=subcommand.reason,
@@ -435,6 +459,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
             write_markers=list(command.write_markers),
+            guarded_keys=list(command.guarded_keys),
             bare_reads=command.bare_reads,
             value_flags=list(command.value_flags),
             reason=command.reason,

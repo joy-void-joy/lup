@@ -3,6 +3,7 @@
 """Word-level shell helpers: expansion safety, flags, and payloads."""
 
 import posixpath
+from fnmatch import fnmatchcase
 from typing import TypedDict
 
 from .archives import archive_write
@@ -638,6 +639,36 @@ def opaque_argument(word: str) -> bool:
     if word.startswith("$") or SUBSTITUTION_SENTINEL in word:
         return True
     return "}" in word and ("{-" in word or ",-" in word)
+
+
+def key_matches(word: str, patterns: list[str]) -> bool:
+    """Match a setting name against a rule's guarded-key globs, case-blind.
+
+    Lowercased on both sides because git resolves a configuration key's
+    section and name without regard to case: `core.hooksPath`,
+    `CORE.HOOKSPATH` and `Core.hooksPath` are one key, and a guard comparing
+    literally would catch the spelling in the pattern and no other. A
+    subsection is the one case-sensitive part, and the patterns that reach
+    into one match it with `*` rather than by naming it, so nothing is lost
+    by folding it too.
+
+    Globbing rather than prefix-matching because the shapes worth guarding
+    sit around a subsection the caller chooses -- `merge.<name>.driver` names
+    a program, and the name is theirs. `fnmatchcase` lets `*` cross a `.`,
+    which is right here: a subsection may contain dots, so `merge.*.driver`
+    should still answer for `merge.a.b.driver`.
+
+    A `key=value` word answers to the key's own pattern, the way
+    ``flag_matches`` reads `--flag=value`. Some settings arrive joined --
+    `git -c core.pager=x` is the shape -- and a guard reading only the whole
+    word would compare `core.pager=x` against `core.pager`, find no match,
+    and wave through the one spelling that carries its value with it.
+    """
+    folded = word.lower()
+    return any(
+        fnmatchcase(folded, pattern) or fnmatchcase(folded, f"{pattern}=*")
+        for pattern in patterns
+    )
 
 
 HELP_UNSAFE = set("/=$*?~<>|&;`\\'\" \t\n")

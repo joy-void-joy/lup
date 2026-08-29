@@ -630,15 +630,49 @@ GIT_REVERSIBLE_SUBCOMMANDS = (
     "stage",
 )
 
+GIT_CONFIG_EXECUTING_KEYS = (
+    "core.hookspath",
+    "core.pager",
+    "core.editor",
+    "core.sshcommand",
+    "core.fsmonitor",
+    "alias.*",
+    "credential.helper",
+    "credential.*.helper",
+    "init.templatedir",
+    "merge.*.driver",
+    "filter.*.clean",
+    "filter.*.smudge",
+    "diff.*.command",
+    "diff.*.textconv",
+    "url.*.insteadof",
+)
+"""The git settings whose value is a program, or decides which one runs.
+
+Writing any of these arranges for code to run at somebody else's next git
+command, which is what separates them from the rest of `git config`: setting
+`user.email` or a branch's base records a fact, and setting `core.hooksPath`
+hands over execution. The distinction is the whole reason the row can ask
+about one and not the other, and it is why this list is about execution
+rather than about importance -- a key that merely matters is not one of
+these.
+
+Lowercase because the match folds case, and globbed where git lets the caller
+name the middle segment. `credential.*.helper` is listed beside
+`credential.helper` because the per-URL form is a separate key rather than a
+spelling of the same one, and it runs a program just as readily.
+"""
+
 
 def git_rule(
     guard_force_push: bool = True,
     redirect_checkout: bool = False,
     sandbox: SandboxPlacement = "outside",
+    config_executing_keys: tuple[str, ...] = GIT_CONFIG_EXECUTING_KEYS,
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
 
-    Two judgements a project can reasonably differ on are parameters rather
+    Three judgements a project can reasonably differ on are parameters rather
     than a reason to fork the table.
 
     ``guard_force_push`` decides whether replacing what a remote ref points
@@ -664,6 +698,14 @@ def git_rule(
     tool rather than a list of its verbs. A project whose sandbox does reach
     its remotes answers ``escalable`` instead, which keeps the ordinary fetch
     confined and leaves the way out to the agent that finds it needs one.
+
+    ``config_executing_keys`` are the settings whose value is a program, and
+    so the only `git config` writes worth a question. A project can add to
+    them -- a bespoke `merge.*.driver` family, or a key its own tooling reads
+    and executes -- and one that keeps its configuration under review by
+    other means can pass fewer. Passing none makes every config write allow,
+    which is a coherent answer for a project whose config is not writable
+    from where the agent runs; it is not the default, because it usually is.
     """
     leaf = [
         ShellSubcommandRule(name=name, effect="allow")
@@ -788,6 +830,11 @@ def git_rule(
         ShellSubcommandRule(
             name="config",
             effect="ask",
+            # Where the write lands, when the key says nothing about it. The
+            # guarded keys below judge a write to this repository's own
+            # configuration; these flags aim the same write at a file the
+            # caller names, so a key that reads as ordinary is not.
+            ask_flags=["--file", "-f", "--blob"],
             read_verbs=[
                 "--get",
                 "--get-all",
@@ -798,7 +845,11 @@ def git_rule(
                 "--list",
                 "-l",
             ],
-            reason="git config can change how commands execute",
+            guarded_keys=list(config_executing_keys),
+            reason=(
+                "git config can set what program git runs — this names such a"
+                " key, redirects the write to a named file, or cannot be read"
+            ),
         ),
         ShellSubcommandRule(
             name="checkout",

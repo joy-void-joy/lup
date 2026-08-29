@@ -146,6 +146,53 @@ def test_the_git_family_is_drawn_by_what_a_verb_reaches_not_by_what_it_writes() 
     assert (outside.effect, outside.sandbox) == ("allow", "outside")
 
 
+def test_a_config_write_asks_only_where_the_key_names_a_program() -> None:
+    """A question is only answerable while its stated reason holds.
+
+    The row's reason is that `git config` can change how commands execute,
+    which is true of `core.hooksPath` and false of `user.email` or of the
+    base branch this repository records per worktree. Asking about all of
+    them spent the question on writes it did not describe, which is how a
+    prompt becomes something to click through rather than to read.
+    """
+    rules = default_vocabulary()
+
+    assert verdict("git config --local core.hooksPath /tmp/x", rules).effect == "ask"
+    assert verdict("git config --local alias.co checkout", rules).effect == "ask"
+    assert verdict("git config merge.ours.driver true", rules).effect == "ask"
+    assert verdict("git config --local credential.helper store", rules).effect == "ask"
+    assert verdict("git config --local branch.x.lup-base dev", rules).effect == "allow"
+    assert verdict("git config user.email a@b.invalid", rules).effect == "allow"
+    assert verdict("git config --get core.hooksPath", rules).effect == "allow"
+
+
+def test_a_config_key_this_cannot_read_holds_the_question() -> None:
+    """Absence is the test, so an illegible word has to fail closed.
+
+    `git config --local "$KEY" v` names whatever the variable holds, and a
+    de-escalation resting on "no guarded key is present" would really be
+    resting on "none was readable". `--file` is the same gap spelled as a
+    destination: the key reads as ordinary and the write lands elsewhere.
+    """
+    rules = default_vocabulary()
+
+    assert verdict('git config --local "$KEY" value', rules).effect == "ask"
+    assert verdict("git config --file /tmp/x user.name y", rules).effect == "ask"
+
+
+def test_a_guarded_config_key_is_matched_without_regard_to_case() -> None:
+    """Git resolves a key's section and name case-blind, so a guard must too.
+
+    `core.hooksPath` is the spelling git's own documentation uses and
+    `core.hookspath` is the same key; a guard comparing literally would catch
+    whichever one it was written with and wave the other past.
+    """
+    rules = default_vocabulary()
+
+    assert verdict("git config CORE.HOOKSPATH /tmp/x", rules).effect == "ask"
+    assert verdict("git config Core.Pager less", rules).effect == "ask"
+
+
 def test_a_global_that_moves_git_to_another_tree_is_judged_before_the_verb() -> None:
     """The criterion is about refs, index and working tree — not about whose.
 

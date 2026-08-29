@@ -208,6 +208,17 @@ class ShellRuleRow(TypedDict):
     fields, since a bare invocation is an action for plenty of commands --
     ``ssh-add`` with no words adds the default key.
 
+    ``guarded_keys`` states the same absence test about a write's *subject*
+    rather than its form. ``write_markers`` asks whether a command writes at
+    all; this asks whether what it writes is one of the settings that decide
+    how later commands execute (``git config core.hooksPath``), and holds the
+    row's effect only for those. Glob patterns matched case-blind, because
+    the families worth guarding are shaped around a subsection
+    (``merge.*.driver``) and git reads a key's section and name without
+    regard to case. Without it a row can only ask about every write it
+    judges, which makes its stated reason false for most of them -- and a
+    question whose reason does not hold is one nobody can answer well.
+
     ``sandbox`` says where this command has to run, independently of who
     decides it: a verb that reaches a remote is unusable confined however the
     effect reads, and a verb whose blast radius wants the OS boundary keeps it
@@ -239,6 +250,7 @@ class ShellRuleRow(TypedDict):
     allow_flags: list[str]
     read_verbs: list[str]
     write_markers: list[str]
+    guarded_keys: list[str]
     bare_reads: bool
     value_flags: list[str]
     reason: str

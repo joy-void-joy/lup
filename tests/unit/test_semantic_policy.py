@@ -548,15 +548,23 @@ SHELL_POLICY_CASES = [
         effect="allow",
     ),
     DecisionCase(input="git config core.pager=x", effect="ask"),
-    # Read verbs pin git config to its query action; writes, scoped writes,
-    # and opaque words keep the row's ask.
+    # Read verbs pin git config to its query action. Among writes, the key
+    # decides: one naming a program git will run keeps the row's ask, an
+    # ordinary setting does not, and a word this cannot read fails closed.
     DecisionCase(input="git config --get user.name", effect="allow"),
     DecisionCase(input="git config --get-regexp 'branch\\..*'", effect="allow"),
     DecisionCase(input="git config --list", effect="allow"),
     DecisionCase(input="git config -l", effect="allow"),
-    DecisionCase(input="git config user.name me", effect="ask"),
-    DecisionCase(input="git config --unset user.name", effect="ask"),
-    DecisionCase(input="git config --global user.name me", effect="ask"),
+    DecisionCase(input="git config user.name me", effect="allow"),
+    DecisionCase(input="git config --unset user.name", effect="allow"),
+    DecisionCase(input="git config --global user.name me", effect="allow"),
+    DecisionCase(input="git config branch.x.lup-base dev", effect="allow"),
+    DecisionCase(input="git config core.hooksPath /tmp/x", effect="ask"),
+    DecisionCase(input="git config --unset core.pager", effect="ask"),
+    DecisionCase(input="git config alias.co checkout", effect="ask"),
+    DecisionCase(input="git config merge.ours.driver true", effect="ask"),
+    DecisionCase(input="git config --file /tmp/x user.name me", effect="ask"),
+    DecisionCase(input="git config $KEY value", effect="ask"),
     DecisionCase(input="git config --get $KEY", effect="ask"),
     # Global value flags are consumed, never read as the subcommand; globals
     # that change execution behavior or move git to another repository ask.
