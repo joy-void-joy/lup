@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "5e4430acb8aea50ddb9ee26f3fea62330ea3419ae6b8f434bbb14ae07627291d",
+  "source_digest": "4b8d1e4dca029e5596eaf676cae9949d45bae1bd894ab0d70b8337f5c6eeb7ee",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -345,7 +345,7 @@
     {
       "path": ".codex/plugins/lup/skills/modify-command/SKILL.md",
       "category": "generated",
-      "sha256": "9ebee655d8539b4e8fd3ad9106edd9994ed0848e65c17ebb105c7b489da12927",
+      "sha256": "efdf16a18db1c7f78c784bd7649d8a7bb8cc33dd9903fc148283ddfc089b098c",
       "semantic_id": "skill.modify-command",
       "executable": false
     },
@@ -380,7 +380,7 @@
     {
       "path": ".codex/plugins/lup/skills/report/SKILL.md",
       "category": "generated",
-      "sha256": "babfb50eeb6b885dc7f95184e82d8a94f80ed628161a002b923798773921a116",
+      "sha256": "dfdf2f3b0f99c7637aa8af1b7f46c288858aad990024c45d8e458bbd7cd00b8a",
       "semantic_id": "skill.report",
       "executable": false
     },
