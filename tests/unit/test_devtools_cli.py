@@ -105,23 +105,19 @@ class FakeGh:
         return '{"headRefName": "feature"}'
 
 
-def raise_typer_exit() -> Path:
-    raise typer.Exit(1)
-
-
 @pytest.fixture
 def merge_stubs(monkeypatch: pytest.MonkeyPatch) -> FakeGh:
     fake = FakeGh()
     monkeypatch.setattr(pr, "gh", fake)
     monkeypatch.setattr(pr, "get_integration_branch", lambda: "dev")
-    monkeypatch.setattr(pr, "get_tree_dir", raise_typer_exit)
+    monkeypatch.setattr(pr, "parse_worktrees", dict)
     # Stubbed rather than let through: the real one deletes whatever branch the
     # stubbed head ref names, and these tests run inside a live checkout.
     monkeypatch.setattr(pr, "cleanup_merged_branch", fake.cleaned.append)
     return fake
 
 
-def test_merge_prints_json_result_when_tree_dir_lookup_exits(
+def test_merge_prints_json_result_when_no_worktree_holds_the_integration_branch(
     merge_stubs: FakeGh,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -134,7 +130,7 @@ def test_merge_prints_json_result_when_tree_dir_lookup_exits(
     assert merge_stubs.calls[0][:2] == ("pr", "merge")
 
 
-def test_merge_prints_text_result_when_tree_dir_lookup_exits(
+def test_merge_prints_text_result_when_no_worktree_holds_the_integration_branch(
     merge_stubs: FakeGh,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -219,7 +215,7 @@ def test_a_cleanup_that_failed_is_not_a_merge_that_failed(
     """
     monkeypatch.setattr(pr, "gh", FailingGh("MERGED"))
     monkeypatch.setattr(pr, "get_integration_branch", lambda: "dev")
-    monkeypatch.setattr(pr, "get_tree_dir", raise_typer_exit)
+    monkeypatch.setattr(pr, "parse_worktrees", dict)
 
     pr.merge(42, dry_run=False)
 
@@ -231,7 +227,7 @@ def test_a_merge_that_did_not_happen_still_fails(
 ) -> None:
     monkeypatch.setattr(pr, "gh", FailingGh("OPEN"))
     monkeypatch.setattr(pr, "get_integration_branch", lambda: "dev")
-    monkeypatch.setattr(pr, "get_tree_dir", raise_typer_exit)
+    monkeypatch.setattr(pr, "parse_worktrees", dict)
 
     with pytest.raises(typer.Exit):
         pr.merge(42, dry_run=False)
