@@ -63,3 +63,37 @@ def test_a_base_nothing_fetched_is_merged_and_reported_as_unrefreshed(
     assert reported["base_synced"] is False
     assert reported["sync_complaint"]
     assert "dev" in reported["sync_complaint"]
+
+
+def test_a_directory_named_after_the_base_is_not_taken_for_the_base(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Which worktree holds the base is git's answer, not the path's spelling.
+
+    A sibling directory is named for the branch it was created to hold, and
+    goes on answering to that name after somebody checks something else out
+    in it. Reading the name as the answer pulls -- and pushes -- whichever
+    branch is standing there, which is how syncing `dev` reaches for a
+    feature branch that merely lives at `tree/dev`.
+    """
+    work = build_history(tmp_path)
+    decoy = work / "tree" / "dev"
+    launcher = LocalProcessLauncher()
+    for arguments in (
+        ["git", "-C", str(work), "branch", "decoy"],
+        ["git", "-C", str(work), "worktree", "add", str(decoy), "decoy"],
+    ):
+        status = launcher.launch(LaunchRequest(arguments=arguments, cwd=tmp_path))
+        if status.code != 0:
+            raise AssertionError(status.stderr)
+    monkeypatch.chdir(work)
+
+    pr.sync_base("dev", as_json=True)
+
+    reported = json.loads(capsys.readouterr().out)
+    assert reported["base_synced"] is False
+    assert reported["sync_complaint"] == (
+        "no worktree for dev, so it was merged as it stands"
+    )
