@@ -1780,7 +1780,13 @@ def survey(as_json: bool) -> None:
                 )
 
 
-type ActionVerdict = Literal["ok", "forced", "blocked"]
+type ActionVerdict = Literal["ok", "forced", "blocked", "refused"]
+"""What a preflight probe made of one step.
+
+``blocked`` is a judgement the caller can overrule, and ``--force`` is how.
+``refused`` is one they cannot: the step has no safe form, so no flag turns
+it into one and the diagnostic offers a different route instead.
+"""
 
 
 class PlannedAction(BaseModel):
@@ -1802,6 +1808,8 @@ class PlannedAction(BaseModel):
                 return f"{self.description} (force: {self.detail})"
             case "blocked":
                 return f"{self.description} (blocked: {self.detail})"
+            case "refused":
+                return f"{self.description} (refused: {self.detail})"
 
 
 class DeletionPlan(BaseModel):
@@ -1822,7 +1830,16 @@ class DeletionPlan(BaseModel):
     actions: list[PlannedAction] = []
 
     def blocked(self) -> list[PlannedAction]:
-        return [action for action in self.actions if action.verdict == "blocked"]
+        """Every step that stops the run, whether or not forcing would lift it."""
+        return [
+            action
+            for action in self.actions
+            if action.verdict in ("blocked", "refused")
+        ]
+
+    def forceable(self) -> bool:
+        """Whether ``--force`` would change any of those answers."""
+        return any(action.verdict == "blocked" for action in self.actions)
 
 
 def worktree_changes(path: str) -> WorktreeChanges:
@@ -1835,6 +1852,29 @@ def worktree_changes(path: str) -> WorktreeChanges:
         else:
             modified += 1
     return WorktreeChanges(modified=modified, untracked=untracked)
+
+
+def locked_worktrees() -> dict[str, str]:  # lup: ignore[dict-str-payload]
+    """Map worktree path -> why it was locked, from ``git worktree list``.
+
+    A lock is the one claim on a checkout that survives this command's own
+    judgement. Dirt says a checkout holds work; a lock says somebody is
+    *using* it, which a clean tree cannot rule out — a session that has just
+    committed looks exactly like an abandoned one, and removing it takes the
+    directory out from under a process still writing there.
+
+    The reason is whatever the locker passed, empty when they passed none.
+    """
+    locked: dict[str, str] = {}  # lup: ignore[dict-str-payload, empty-collection]
+    current_path = ""
+
+    for line in git.lines("worktree", "list", "--porcelain"):
+        if line.startswith("worktree "):
+            current_path = line.removeprefix("worktree ")
+        elif line == "locked" or line.startswith("locked "):
+            locked[current_path] = line.removeprefix("locked").strip()
+
+    return locked
 
 
 def remote_branch_exists(name: str) -> bool:
@@ -1879,8 +1919,21 @@ def plan_worktree_step(path: str, stranded: bool, force: bool) -> PlannedAction:
             detail="checkout already gone",
         )
 
-    changes = worktree_changes(path)
     description = f"Remove worktree: {path}"
+    lock = locked_worktrees().get(path)
+    if lock is not None:
+        return PlannedAction(
+            description=description,
+            verdict="refused",
+            detail=(
+                f"the checkout is locked{f': {lock}' if lock else ''} — the "
+                "lock is how whoever is working there says so, and no force "
+                "this command offers lifts it; `git worktree unlock "
+                f"{path}` once they are not"
+            ),
+        )
+
+    changes = worktree_changes(path)
     if not changes.dirty():
         return PlannedAction(description=description)
 
@@ -2146,7 +2199,8 @@ def delete_branch(
         typer.echo(f"Refusing to delete {name} — nothing was changed:", err=True)
         for action in blocked:
             typer.echo(f"  {action.render()}", err=True)
-        typer.echo("Use --force to override.", err=True)
+        if plan.forceable():
+            typer.echo("Use --force to override.", err=True)
         raise typer.Exit(1)
 
     integration = get_integration_branch()
@@ -2193,7 +2247,12 @@ class RetirementPlan(BaseModel):
     actions: list[PlannedAction] = []
 
     def blocked(self) -> list[PlannedAction]:
-        return [action for action in self.actions if action.verdict == "blocked"]
+        """Every step that stops the run, whether or not forcing would lift it."""
+        return [
+            action
+            for action in self.actions
+            if action.verdict in ("blocked", "refused")
+        ]
 
     def body(self, reason: str, number: int) -> str:
         """The record the pull request exists to keep.

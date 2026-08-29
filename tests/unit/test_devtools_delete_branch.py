@@ -74,6 +74,75 @@ def test_force_removes_a_worktree_holding_changes(
     assert not (repo.parent / "feature").exists()
 
 
+def test_a_locked_worktree_is_refused(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The claim a clean checkout cannot make for itself.
+
+    Dirt says a worktree holds work. A lock says somebody is using it, which
+    is the part no inspection of the tree recovers: a session that has just
+    committed looks exactly like an abandoned one.
+    """
+    sh.Command("git")("-C", str(repo), "worktree", "lock", str(repo.parent / "feature"))
+    monkeypatch.chdir(repo)
+
+    with pytest.raises(typer.Exit):
+        branches.delete_branch("feature", dry_run=False, force=False)
+
+    assert (repo.parent / "feature").exists()
+    assert "feature" in branch_names(repo)
+    assert "refused" in capsys.readouterr().err
+
+
+def test_forcing_does_not_lift_a_lock(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one verdict no flag answers, on the tree where force answers the rest.
+
+    This worktree is dirty as well, which `--force` does resolve. It cannot
+    resolve the lock: git refuses a locked checkout to every force this
+    command passes, so the step stays refused, and the offer to force is
+    withheld because there is nothing left for it to lift.
+    """
+    sh.Command("git")("-C", str(repo), "worktree", "lock", str(repo.parent / "feature"))
+    monkeypatch.chdir(repo)
+
+    with pytest.raises(typer.Exit):
+        branches.delete_branch("feature", dry_run=False, force=True)
+
+    assert (repo.parent / "feature").exists()
+    assert "feature" in branch_names(repo)
+
+    # Refused before the removal rather than by git during it: forcing past
+    # the dirt used to carry the run as far as the destructive step, where
+    # the lock stopped it with the branch half-judged.
+    err = capsys.readouterr().err
+    assert "Refusing to delete feature" in err
+    assert "worktree removal failed" not in err
+    assert "Use --force to override." not in err
+
+
+def test_the_lock_reason_reaches_the_refusal(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Whoever locked it said why, and that is the whole of what a reader needs."""
+    sh.Command("git")(
+        "-C",
+        str(repo),
+        "worktree",
+        "lock",
+        "--reason",
+        "session 7 is working here",
+        str(repo.parent / "feature"),
+    )
+    monkeypatch.chdir(repo)
+
+    with pytest.raises(typer.Exit):
+        branches.delete_branch("feature", dry_run=False, force=False)
+
+    assert "session 7 is working here" in capsys.readouterr().err
+
+
 def test_without_force_a_dirty_worktree_survives(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
