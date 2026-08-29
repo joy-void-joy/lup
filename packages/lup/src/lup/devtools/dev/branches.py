@@ -1819,17 +1819,6 @@ class DeletionPlan(BaseModel):
     for existing — and a copy that exists is the thing that made deleting
     the local branch survivable in the first place.
     """
-    left_upstream_behind: bool = False
-    """Whether ``-d`` will refuse over an upstream the branch has outgrown.
-
-    Deleting it is still safe: the branch step reached this only because HEAD
-    contains every commit. But git judges a tracking branch against its
-    upstream rather than against HEAD, so the plain delete refuses — and it
-    refuses at run time, after the worktree removal ahead of it has already
-    happened, which is how a preflight promising that a refusal changes
-    nothing came to leave a checkout gone and a remote branch orphaned.
-    Recorded so the plan predicts what the run will meet.
-    """
     actions: list[PlannedAction] = []
 
     def blocked(self) -> list[PlannedAction]:
@@ -1909,21 +1898,26 @@ def plan_worktree_step(path: str, stranded: bool, force: bool) -> PlannedAction:
 
 
 def plan_branch_step(name: str, force: bool) -> PlannedAction:
-    """Judge the branch deletion the way ``git branch -d`` would.
+    """Judge the branch deletion against the branch work lands on.
 
-    Which is not merely whether HEAD contains it. A branch that tracks an
-    upstream is judged against that upstream, so one whose every commit is
-    already in the integration branch is still refused while its remote copy
-    sits behind. Reporting that as forced rather than blocked is the honest
-    reading: nothing is discarded, because HEAD holds all of it.
+    Not against HEAD, which is whichever worktree the caller happens to be
+    standing in — routinely a feature branch holding nothing but its own
+    work. Read from there, every landed branch is unmerged, and the cleanup
+    a merge just asked for is refused as though something were at stake.
+
+    A branch that tracks an upstream is judged against that upstream too, so
+    one whose every commit is already in the integration branch is still
+    refused while its remote copy sits behind. Reporting that as forced
+    rather than blocked is the honest reading: nothing is discarded.
     """
     description = f"Delete local branch: {name}"
-    if is_ancestor(name, "HEAD"):
+    integration = get_integration_branch()
+    if is_ancestor(name, integration):
         if outgrew_upstream(name):
             return PlannedAction(
                 description=description,
                 verdict="forced",
-                detail=f"ahead of origin/{name}, which HEAD already contains",
+                detail=f"ahead of origin/{name}, which {integration} already contains",
             )
         return PlannedAction(description=description)
     if force:
@@ -2019,8 +2013,7 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
 
     actions.append(plan_branch_step(name, force=force))
 
-    merged = is_ancestor(name, "HEAD")
-    left_upstream_behind = merged and outgrew_upstream(name)
+    merged = is_ancestor(name, get_integration_branch())
     has_remote = remote_branch_exists(name)
     delete_remote = has_remote and (merged if remote is None else remote)
     if delete_remote:
@@ -2032,7 +2025,6 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
         stranded=stranded,
         has_remote=has_remote,
         delete_remote=delete_remote,
-        left_upstream_behind=left_upstream_behind,
         actions=actions,
     )
 
@@ -2093,7 +2085,12 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
             )
 
     try:
-        git("branch", "-D" if force or plan.left_upstream_behind else "-d", plan.branch)
+        # The preflight is what judges containment, and it judges against the
+        # integration branch. `-d` would ask git the same question again from
+        # HEAD and from the upstream, refuse on either, and refuse here — past
+        # the worktree removal above, which is the one place a refusal was
+        # promised to change nothing.
+        git("branch", "-D", plan.branch)
         typer.echo(f"Deleted branch: {plan.branch}")
         completed.append("deleted branch")
     except sh.ErrorReturnCode as error:
@@ -2152,9 +2149,10 @@ def delete_branch(
         typer.echo("Use --force to override.", err=True)
         raise typer.Exit(1)
 
-    if plan.delete_remote and not is_ancestor(name, "HEAD") and not preserved:
+    integration = get_integration_branch()
+    if plan.delete_remote and not is_ancestor(name, integration) and not preserved:
         typer.echo(
-            f"Warning: {name} holds commits HEAD does not, and origin/{name} "
+            f"Warning: {name} holds commits {integration} does not, and origin/{name} "
             "is going with it — after this the work is in no branch. To keep "
             f"it, `dev retire {name} --reason ...` closes a pull request over "
             "it first, which preserves the commits past the deletion.",

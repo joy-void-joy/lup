@@ -119,6 +119,16 @@ class SandboxNotInitializedError(RuntimeError):
     """Raised when sandbox operations are called on an inactive sandbox."""
 
 
+class SandboxNameInUseError(RuntimeError):
+    """Raised when this sandbox's container name belongs to a live owner.
+
+    A name is derived from a session, so two sessions reaching this one are
+    two sessions that named themselves the same thing. Starting anyway would
+    take a working sandbox — and whatever is running inside it — away from a
+    process that is still using it, which is worse than refusing to start.
+    """
+
+
 class DockerUnreachableError(RuntimeError):
     """Raised when the Docker daemon cannot be reached at all."""
 

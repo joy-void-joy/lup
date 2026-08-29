@@ -29,9 +29,9 @@ from lup.devtools.dev.branches import (
     detect_base_branch,
     get_integration_branch,
     parse_branches,
+    parse_worktrees,
 )
 from lup.devtools.dev.remote_auth import check_forge_api
-from lup.devtools.layout import get_tree_dir
 
 from lup.execution.shell import git
 from lup.devtools.utils import (
@@ -487,13 +487,9 @@ def merge(
             err=True,
         )
 
-    try:
-        tree_dir = get_tree_dir()
-    except (typer.Exit, SystemExit):
-        tree_dir = None
-    integration_path = tree_dir / integration if tree_dir else None
+    integration_path = parse_worktrees().get(integration)
     pulled = False
-    if integration_path and integration_path.is_dir():
+    if integration_path and Path(integration_path).is_dir():
         try:
             git("-C", str(integration_path), "pull", "--ff-only")
             typer.echo(f"Pulled changes into {integration}")
@@ -571,15 +567,11 @@ def sync_base(
         )
         raise typer.Exit(1)
 
-    try:
-        tree_dir = get_tree_dir()
-    except (typer.Exit, SystemExit):
-        tree_dir = None
-    base_path = tree_dir / base_branch if tree_dir else None
+    base_path = parse_worktrees().get(base_branch)
 
     synced = False
     complaint = f"no worktree for {base_branch}, so it was merged as it stands"
-    if base_path and base_path.is_dir():
+    if base_path and Path(base_path).is_dir():
         if not as_json:
             typer.echo(f"Syncing {base_branch}...", err=True)
         try:

@@ -95,6 +95,7 @@ from lup.sandbox.models import (
     Mount,
     NetworkMode,
     ReplCrashedError,
+    SandboxNameInUseError,
     SandboxNotInitializedError,
     SandboxReplayInput,
 )
@@ -626,11 +627,30 @@ class Sandbox:
             logger.warning("Failed to remove egress configuration: %s", error)
 
     def remove_stale_container(self) -> None:
-        """Remove a pre-existing container with the same name, if any."""
+        """Remove a pre-existing container with the same name, if it is stale.
+
+        Stale means its owner is gone. A name that two live sessions both
+        derived is not staleness: the container answering to it is somebody's
+        working sandbox, and forcing it out takes whatever is running inside
+        away from a process still talking to it.
+
+        Owner liveness decides, off the same labels
+        :meth:`sweep_orphaned_containers` reads — that sweep skips this name
+        because this method owns it, so leaving the judgement out of here left
+        the one collision that matters unjudged.
+        """
         if self.docker_client is None:
             return
         try:
             old = self.docker_client.containers.get(self.container_name)
+            if not self.container_is_orphaned(old.labels or {}):
+                raise SandboxNameInUseError(
+                    f"Sandbox container {self.container_name!r} belongs to a "
+                    "session that is still running. Two sessions naming "
+                    "themselves the same thing is what puts them both here; "
+                    "give this one its own session id and it gets its own "
+                    "container."
+                )
             logger.warning("Removing stale container: %s", self.container_name)
             old.remove(force=True)
         except NotFound:
