@@ -348,7 +348,7 @@ def test_a_person_at_the_terminal_decides_whether_the_session_opens(
     with pytest.raises(typer.Abort):
         admit_an_unread_base()
 
-    assert asked == ["Open the session on a base nothing could read?"]
+    assert asked == ["Could not check the remote. Continue opening the session?"]
 
 
 def test_a_person_who_says_yes_gets_the_session(
