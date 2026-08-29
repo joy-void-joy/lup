@@ -17,8 +17,7 @@ So the lease is a mount fact. Absolute paths stay identical on both sides --
 forced rather than chosen, because a linked worktree's `.git` is a file
 holding an absolute `gitdir:` pointer -- and only the modes vary: this
 worktree read-write, every sibling read-only, the shared admin directory
-read-write with its `worktrees/` directory read-only inside it, and this
-worktree's own entry read-write again within that.
+read-write, and each sibling's administrative entry read-only inside it.
 
 **The trap that makes read-only siblings load-bearing.** The obvious move is
 not to mount siblings at all. It is wrong, and quietly so. `git gc` runs
@@ -27,8 +26,8 @@ not to mount siblings at all. It is wrong, and quietly so. `git gc` runs
 siblings would look around, find every one of their directories absent, and
 delete their administrative state from the shared repository -- as ordinary
 housekeeping, with no error anywhere. Hence three guards rather than one:
-siblings are mounted so they exist, `worktrees/` is read-only so only this
-worktree's own entry can be written, and `gc.worktreePruneExpire` is set to
+siblings are mounted so they exist, each sibling's administrative entry is
+read-only so nothing can remove it, and `gc.worktreePruneExpire` is set to
 never.
 
 **What the shared directory being writable costs.** It holds `config`, and a
@@ -192,10 +191,10 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
 
     Three nested modes rather than two flat ones: this worktree writable,
     every sibling read-only, and the shared administrative directory writable
-    with `worktrees/` read-only inside it and this worktree's own entry
-    writable again within that. The shared directory is writable so `config`
-    can be written -- without which no worker can cut a worktree -- and the
-    comment below records what that deliberately exposes.
+    with each sibling's own entry read-only inside it. The shared directory is
+    writable so `config` and a new worktree's entry can both be written --
+    without which no session can cut a worktree -- and the comment below
+    records what that deliberately exposes.
 
     ``human_owned`` are paths inside the checkout the project already
     declared its author owns; they come back read-only here rather than being
@@ -207,14 +206,19 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
     writable = [worktree]
     read_only = list(sibling_worktrees(worktree))
     if layout.linked():
-        # The shared directory is mounted writable as a whole, with
-        # `worktrees/` punched read-only back over it and this worktree's own
-        # entry writable again inside that -- so every sibling's
-        # administrative entry stays present and unwritable, which is what
-        # keeps `worktree prune` from removing it. That nesting is the whole
-        # arrangement, and `Sandbox.declared_mounts` is what holds it up: it
-        # emits mounts parent before child, so the read-only hole is applied
-        # after the writable base it sits in instead of being shadowed by it.
+        # The shared directory is mounted writable as a whole, with each
+        # sibling's administrative entry punched read-only back over it -- so
+        # every one stays present and unwritable, which is what keeps
+        # `worktree prune` from removing it. Each entry rather than the
+        # `worktrees/` directory holding them, because a read-only directory
+        # refuses two different acts and only one of them was the subject:
+        # rewriting an entry that is already there endangers a sibling, and
+        # creating a new one beside them endangers nobody. Held read-only,
+        # the second goes with the first and no session in a container can
+        # cut a worktree at all. That nesting is the whole arrangement, and
+        # `Sandbox.declared_mounts` is what holds it up: it emits mounts
+        # parent before child, so a read-only hole is applied after the
+        # writable base it sits in instead of being shadowed by it.
         #
         # Writable rather than read-only because `config` lives here, and a
         # worker that cannot write it cannot cut a worktree or record a base
@@ -232,7 +236,11 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
         # holds an approval question against those keys by name -- so the
         # barrier here is a judgement, and the mount table is not pretending
         # to be one.
-        read_only.append(layout.common / "worktrees")
+        read_only += [
+            entry
+            for entry in sorted((layout.common / "worktrees").iterdir())
+            if entry != layout.private
+        ]
         writable += [
             layout.common,
             layout.private,
