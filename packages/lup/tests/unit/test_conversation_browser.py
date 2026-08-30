@@ -1,6 +1,6 @@
 """Persistent conversation browser and profile lifecycle."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -13,6 +13,7 @@ from lup.providers.codex.login import CODEX_LOGIN
 from lup.devtools.conversation import app as conversation_app
 from lup.devtools.conversation import browser
 from lup.devtools.conversation import chatgpt
+from lup.devtools.conversation import selection
 from lup.devtools.harness.composition import local_profile_directory
 from lup.devtools.setup import create_setup_app
 
@@ -110,23 +111,27 @@ def test_chatgpt_command_reuses_the_active_codex_profile_container(
     profiles.add("work")
     opened: list[Path] = []
 
-    async def download(
-        _url: str,
+    async def retain(
+        requests: Sequence[selection.RetentionRequest],
         _root: Path,
         directories: conversation_app.BrowserDirectories,
         output: Path,
-    ) -> Path:
+    ) -> list[selection.RetentionAttempt]:
         opened.append(directories.primary)
         destination = output / "chatgpt" / "conversation-1"
         destination.mkdir(parents=True)
-        return destination
+        return [
+            selection.RetentionAttempt(
+                position=0, request=requests[0], destination=destination
+            )
+        ]
 
     monkeypatch.setattr(conversation_app, "project_root", lambda: tmp_path)
-    monkeypatch.setattr(conversation_app, "authenticated_chatgpt", download)
+    monkeypatch.setattr(conversation_app, "retain_chatgpt", retain)
     monkeypatch.setattr(
         conversation_app,
         "checkpoint_delivery",
-        lambda _root, _destination, *, provider: None,
+        lambda _root, _destinations, *, provider: None,
     )
 
     result = CliRunner().invoke(
@@ -138,6 +143,22 @@ def test_chatgpt_command_reuses_the_active_codex_profile_container(
     assert opened == [tmp_path / ".lup" / "profiles" / "work" / "chatgpt-web"]
 
 
+def recording_browser(monkeypatch: pytest.MonkeyPatch, opened: list[Path]) -> None:
+    """Record each persistent state a retention opens, launching no browser."""
+
+    @asynccontextmanager
+    async def opener(directory: Path, *, headless: bool) -> AsyncIterator[Mock]:
+        opened.append(directory)
+        yield Mock(request=Mock())
+
+    monkeypatch.setattr(conversation_app, "browser_context", opener)
+
+
+def one_conversation() -> list[selection.RetentionRequest]:
+    """The single request every persistent-state test asks to retain."""
+    return [selection.RetentionRequest(url="https://chatgpt.com/c/conversation-1")]
+
+
 @pytest.mark.asyncio
 async def test_download_exhausts_persisted_state_without_opening_login(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -147,16 +168,17 @@ async def test_download_exhausts_persisted_state_without_opening_login(
     current.mkdir(parents=True)
     legacy.mkdir()
     opened: list[Path] = []
+    recording_browser(monkeypatch, opened)
 
     async def download(
         _reference: chatgpt.ConversationReference,
         *,
         root: Path,
-        directory: Path,
+        api: object,
         output: Path,
+        artifact: str = "",
     ) -> Path:
-        opened.append(directory)
-        if directory == current:
+        if opened[-1] == current:
             raise chatgpt.ChatGPTAuthenticationRequired("missing")
         return output / "chatgpt" / "conversation-1"
 
@@ -165,14 +187,14 @@ async def test_download_exhausts_persisted_state_without_opening_login(
     monkeypatch.setattr(conversation_app, "login", interactive_login)
     directories = conversation_app.browser_directories(tmp_path, "chatgpt", None, None)
 
-    await conversation_app.authenticated_chatgpt(
-        "https://chatgpt.com/c/conversation-1",
-        tmp_path,
-        directories,
-        tmp_path / "retained",
+    attempts = await conversation_app.retain_chatgpt(
+        one_conversation(), tmp_path, directories, tmp_path / "retained"
     )
 
     assert opened == [current, legacy]
+    assert [attempt.destination for attempt in attempts] == [
+        tmp_path / "retained" / "chatgpt" / "conversation-1"
+    ]
     interactive_login.assert_not_awaited()
 
 
@@ -180,12 +202,15 @@ async def test_download_exhausts_persisted_state_without_opening_login(
 async def test_download_refuses_with_the_explicit_setup_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    recording_browser(monkeypatch, [])
+
     async def missing(
         _reference: chatgpt.ConversationReference,
         *,
         root: Path,
-        directory: Path,
+        api: object,
         output: Path,
+        artifact: str = "",
     ) -> Path:
         raise chatgpt.ChatGPTAuthenticationRequired("missing")
 
@@ -194,17 +219,12 @@ async def test_download_refuses_with_the_explicit_setup_command(
     monkeypatch.setattr(conversation_app, "login", interactive_login)
     directories = conversation_app.browser_directories(tmp_path, "chatgpt", None, None)
 
-    with pytest.raises(
-        chatgpt.ChatGPTAuthenticationRequired,
-        match="uv run lup-devtools setup conversation chatgpt",
-    ):
-        await conversation_app.authenticated_chatgpt(
-            "https://chatgpt.com/c/conversation-1",
-            tmp_path,
-            directories,
-            tmp_path / "retained",
-        )
+    attempts = await conversation_app.retain_chatgpt(
+        one_conversation(), tmp_path, directories, tmp_path / "retained"
+    )
 
+    assert attempts[0].destination is None
+    assert "uv run lup-devtools setup conversation chatgpt" in attempts[0].error
     interactive_login.assert_not_awaited()
 
 

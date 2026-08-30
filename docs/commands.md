@@ -19,8 +19,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 
 | Command | What it does |
 | --- | --- |
-| `conversation chatgpt` | Retain a ChatGPT conversation and all downloadable attachments. |
-| `conversation claude` | Retain a Claude conversation and its API-provided attachment content. |
+| `conversation chatgpt` | Retain ChatGPT conversations and their downloadable attachments. |
+| `conversation claude` | Retain Claude conversations and their API-provided attachments. |
 
 ## `dev`
 

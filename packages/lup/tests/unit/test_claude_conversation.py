@@ -1,5 +1,6 @@
 """Authenticated Claude retention adapted from forumboard's conversation path."""
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from lup.types import JsonValue
 from lup.devtools import roster
 from lup.devtools.conversation import app as conversation
 from lup.devtools.conversation import claude as claude_conversation
+from lup.devtools.conversation import selection
 
 
 def sample_payload() -> JsonValue:
@@ -99,7 +101,10 @@ def test_renderer_keeps_tool_results_sources_resources_and_gap_markers() -> None
         value="https://claude.ai/chat/conversation-1"
     )
 
-    rendered = claude_conversation.render_conversation(reference, sample_conversation())
+    conversation_payload = sample_conversation()
+    rendered = claude_conversation.render_conversation(
+        reference, conversation_payload, conversation_payload.retained_paths()
+    )
 
     assert "<user>\nPlease inspect these." in rendered
     assert "[tool call: search via drive]" in rendered
@@ -172,25 +177,32 @@ def test_delivery_can_be_placed_under_a_caller_selected_output(tmp_path: Path) -
 def test_provider_commands_are_nested_under_conversation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    checkpoints: list[Path] = []
+    checkpoints: list[list[Path]] = []
 
-    async def download(
-        url: str,
+    async def retain(
+        requests: Sequence[selection.RetentionRequest],
         root: Path,
         directories: conversation.BrowserDirectories,
         output: Path,
-    ) -> Path:
-        reference = claude_conversation.ConversationReference(value=url)
-        destination = output / "claude" / reference.identifier()
-        destination.mkdir(parents=True)
-        return destination
+    ) -> list[selection.RetentionAttempt]:
+        attempts: list[selection.RetentionAttempt] = []
+        for position, request in enumerate(requests):
+            reference = claude_conversation.ConversationReference(value=request.url)
+            destination = output / "claude" / reference.identifier()
+            destination.mkdir(parents=True)
+            attempts.append(
+                selection.RetentionAttempt(
+                    position=position, request=request, destination=destination
+                )
+            )
+        return attempts
 
-    monkeypatch.setattr(conversation, "authenticated_claude", download)
+    monkeypatch.setattr(conversation, "retain_claude", retain)
     monkeypatch.setattr(conversation, "project_root", lambda: tmp_path)
     monkeypatch.setattr(
         conversation,
         "checkpoint_delivery",
-        lambda _root, destination, *, provider: checkpoints.append(destination),
+        lambda _root, destinations, *, provider: checkpoints.append(destinations),
     )
 
     result = CliRunner().invoke(
@@ -204,7 +216,48 @@ def test_provider_commands_are_nested_under_conversation(
     )
 
     assert result.exit_code == 0
-    assert checkpoints == [tmp_path / "retained" / "claude" / "conversation-1"]
+    assert checkpoints == [[tmp_path / "retained" / "claude" / "conversation-1"]]
     assert "retained/claude/conversation-1" in result.stdout
     assert "conversation" in [spec.name for spec in roster.LIBRARY_SPECS]
     assert "chatgpt" not in [spec.name for spec in roster.LIBRARY_SPECS]
+
+
+def test_a_selector_retains_only_the_named_extraction(tmp_path: Path) -> None:
+    reference = claude_conversation.ConversationReference(
+        value="https://claude.ai/chat/conversation-1"
+    )
+
+    destination = claude_conversation.write_delivery(
+        tmp_path,
+        reference,
+        sample_payload(),
+        sample_conversation(),
+        tmp_path / "retained",
+        "file-two",
+    )
+
+    assert (destination / "attachments" / "file-two" / "notes.md").is_file()
+    assert not (destination / "attachments" / "file-one").exists()
+    transcript = (destination / "conversation.md").read_text()
+    assert "attachments/file-two/notes.md" in transcript
+    assert "notes.md → not retained" in transcript
+    manifest = claude_conversation.DownloadManifest.model_validate_json(
+        (destination / "manifest.json").read_text()
+    )
+    assert manifest.selected_artifact == "file-two"
+    assert manifest.declared_attachment_count == 2
+    assert [record.id for record in manifest.attachments] == ["file-two"]
+
+
+def test_an_unknown_selector_names_what_the_conversation_offers() -> None:
+    with pytest.raises(claude_conversation.ClaudeDownloadError, match="notes.md"):
+        claude_conversation.selected_attachment(
+            sample_conversation().attachments(), "absent.md"
+        )
+
+
+def test_an_ambiguous_selector_asks_for_the_file_id() -> None:
+    with pytest.raises(claude_conversation.ClaudeDownloadError, match="file id"):
+        claude_conversation.selected_attachment(
+            sample_conversation().attachments(), "notes.md"
+        )
