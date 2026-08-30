@@ -152,7 +152,14 @@ async def retain_chatgpt(
                         ),
                     )
                 except ConversationDownloadError as error:
-                    logger.exception("Could not retain %s", item.request.describe())
+                    # The message reaches the operator through the attempt, so
+                    # a traceback per refused URL would only bury the batch's
+                    # own report under a stack the message already summarises.
+                    logger.debug(
+                        "Could not retain %s",
+                        item.request.describe(),
+                        exc_info=True,
+                    )
                     attempted += (settled(item, error=str(error)),)
                 else:
                     attempted += (settled(item, destination=destination),)

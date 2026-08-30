@@ -1,5 +1,6 @@
 """Persistent conversation browser and profile lifecycle."""
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -45,6 +46,35 @@ async def test_browser_context_enables_chromium_sandbox(
         executable_path="/usr/bin/chromium",
         chromium_sandbox=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_a_chromium_that_never_closes_does_not_strand_the_caller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def never_closing() -> None:
+        """A Chromium that accepts the close and never reports having gone."""
+        await asyncio.Event().wait()
+
+    context = AsyncMock()
+    context.close = never_closing
+    chromium = Mock(launch_persistent_context=AsyncMock(return_value=context))
+    playwright = Mock(chromium=chromium)
+
+    @asynccontextmanager
+    async def started() -> AsyncIterator[Mock]:
+        yield playwright
+
+    monkeypatch.setattr(playwright_api, "async_playwright", started)
+    monkeypatch.setattr(browser, "browser_executable", lambda: None)
+
+    with caplog.at_level("WARNING", logger=browser.logger.name):
+        async with browser.browser_context(tmp_path, headless=True, close_seconds=0.01):
+            pass
+
+    assert "did not close" in caplog.text
 
 
 @pytest.mark.asyncio
