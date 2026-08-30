@@ -1,5 +1,6 @@
 """Persistent browser sessions for authenticated conversation providers."""
 
+import asyncio
 import logging
 import shutil
 from collections.abc import AsyncIterator
@@ -52,9 +53,13 @@ def browser_executable() -> str | None:
 
 @asynccontextmanager
 async def browser_context(
-    directory: Path, *, headless: bool
+    directory: Path, *, headless: bool, close_seconds: float = 15.0
 ) -> AsyncIterator["BrowserContext"]:
-    """Open one persistent Chromium context at an explicit profile directory."""
+    """Open one persistent Chromium context at an explicit profile directory.
+
+    ``close_seconds`` bounds the wait for Chromium to report itself closed;
+    raise it where a slow machine needs longer to shut a heavy profile down.
+    """
     require_playwright()
     from playwright.async_api import Error as PlaywrightError, async_playwright
 
@@ -77,10 +82,19 @@ async def browser_context(
         try:
             yield context
         finally:
+            # A persistent context can leave `close()` awaiting a Chromium that
+            # never reports having gone, which strands the caller after its work
+            # is already on disk. Bound the wait and let the driver's own
+            # teardown end the browser instead.
             try:
-                await context.close()
+                await asyncio.wait_for(context.close(), timeout=close_seconds)
             except PlaywrightError:
                 logger.debug("The browser context was already closed", exc_info=True)
+            except TimeoutError:
+                logger.warning(
+                    "Chromium did not close within %ss; stopping its driver instead",
+                    close_seconds,
+                )
 
 
 async def cookie_header(context: "BrowserContext", origin: str) -> str:
