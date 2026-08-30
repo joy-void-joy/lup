@@ -1,5 +1,5 @@
 {
-  "revision": "c0b2d8143c67ef40dd56b72339f3fb42cf38e059",
+  "revision": "fac2a43f0f0c0703a1075e507bcb3b6d27f11bb1",
   "roots": [
     "lup",
     "lup_template"
@@ -332,8 +332,13 @@
         "BrowserDirectories.candidates",
         "browser_directory",
         "browser_directories",
-        "authenticated_chatgpt",
-        "authenticated_claude",
+        "StateRun",
+        "settled",
+        "retained_through",
+        "retain_chatgpt",
+        "retain_chatgpt.run",
+        "retain_claude",
+        "retain_claude.run",
         "setup_browser_login",
         "create_conversation_setup_app",
         "create_conversation_setup_app.chatgpt_login",
@@ -452,11 +457,14 @@
         "DownloadManifest.identifier",
         "DownloadManifest.active_message_count",
         "DownloadManifest.mapping_node_count",
+        "DownloadManifest.selected_artifact",
+        "DownloadManifest.declared_attachment_count",
         "DownloadManifest.attachments",
         "FetchedAttachment",
         "FetchedAttachment.declaration",
         "FetchedAttachment.body",
         "conversation_from",
+        "selected_attachment",
         "attachment_marker",
         "render_part",
         "render_message",
@@ -468,6 +476,8 @@
         "redirected_download",
         "attachment_response_body",
         "fetch_attachment",
+        "delivery_directory",
+        "carried_attachments",
         "write_delivery",
         "download_chatgpt"
       ]
@@ -509,6 +519,7 @@
         "Attachment.stored_name",
         "Attachment.relative_path",
         "Attachment.label",
+        "selected_attachment",
         "BlockMetadata",
         "BlockMetadata.site_name",
         "BlockMetadata.site_domain",
@@ -556,6 +567,7 @@
         "ConversationPayload.updated_at",
         "ConversationPayload.chat_messages",
         "ConversationPayload.title",
+        "ConversationPayload.retained_paths",
         "ConversationPayload.rendered_messages",
         "ConversationPayload.attachments",
         "AttachmentRecord",
@@ -577,6 +589,8 @@
         "DownloadManifest.message_count",
         "DownloadManifest.reported_file_count",
         "DownloadManifest.reported_image_count",
+        "DownloadManifest.selected_artifact",
+        "DownloadManifest.declared_attachment_count",
         "DownloadManifest.attachments",
         "conversation_from",
         "render_conversation",
@@ -596,6 +610,22 @@
       "declares": [
         "ConversationDownloadError",
         "ConversationBrowserError"
+      ]
+    },
+    {
+      "module": "lup.devtools.conversation.selection",
+      "declares": [
+        "RetentionRequest",
+        "RetentionRequest.url",
+        "RetentionRequest.artifact",
+        "RetentionRequest.parse",
+        "RetentionRequest.describe",
+        "RetentionAttempt",
+        "RetentionAttempt.position",
+        "RetentionAttempt.request",
+        "RetentionAttempt.destination",
+        "RetentionAttempt.error",
+        "RetentionAttempt.unauthenticated"
       ]
     },
     {

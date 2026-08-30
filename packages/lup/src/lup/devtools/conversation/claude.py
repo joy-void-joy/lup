@@ -15,7 +15,6 @@ import httpx
 from pydantic import BaseModel, TypeAdapter, ValidationError, model_validator
 
 from lup.types import JsonObject, JsonValue, StringMap
-from lup.devtools.conversation.browser import browser_context, cookie_header
 from lup.devtools.conversation.errors import ConversationDownloadError
 
 logger = logging.getLogger(__name__)
@@ -143,9 +142,36 @@ class Attachment(Payload, frozen=True):
             )
         return Path("attachments") / identifier / self.stored_name()
 
-    def label(self) -> str:
-        """The transcript pointer to this retained extraction."""
-        return f"[Attachment: {self.stored_name()} → {self.relative_path().as_posix()}]"
+    def label(self, path: Path | None) -> str:
+        """The transcript pointer to this extraction, retained or not."""
+        if path is None:
+            return (
+                f"[Attachment: {self.stored_name()} → not retained; "
+                "this delivery selected a single artifact]"
+            )
+        return f"[Attachment: {self.stored_name()} → {path.as_posix()}]"
+
+
+def selected_attachment(attachments: list["Attachment"], artifact: str) -> "Attachment":
+    """The one declared attachment a ``:artifact`` selector names."""
+    matched = [
+        item for item in attachments if artifact in {item.stored_name(), item.id} - {""}
+    ]
+    match matched:
+        case [only]:
+            return only
+        case []:
+            offered = ", ".join(sorted(item.stored_name() for item in attachments))
+            raise ClaudeDownloadError(
+                f"This conversation declares no artifact {artifact!r}. "
+                f"It offers: {offered or '(no files)'}"
+            )
+        case ambiguous:
+            raise ClaudeDownloadError(
+                f"Artifact {artifact!r} names {len(ambiguous)} files here; "
+                "select one by its file id instead: "
+                + ", ".join(sorted(item.id for item in ambiguous))
+            )
 
 
 class BlockMetadata(Payload, frozen=True):
@@ -267,9 +293,12 @@ class Message(Payload, frozen=True):
             case blocks:
                 return [text for block in blocks if (text := block.text_payload())]
 
-    def uploads(self) -> list[str]:
-        """Every attachment, pointing to its retained extracted content."""
-        return [attachment.label() for attachment in self.attachments]
+    def uploads(self, retained: dict[str, Path]) -> list[str]:
+        """Every attachment, pointing to its extraction or to its absence."""
+        return [
+            attachment.label(retained.get(attachment.id))
+            for attachment in self.attachments
+        ]
 
     def completeness_notes(self) -> list[str]:
         """Provider-reported gaps that the rendered text must make visible."""
@@ -295,9 +324,11 @@ class Message(Payload, frozen=True):
             if note
         ]
 
-    def spoken(self) -> str:
+    def spoken(self, retained: dict[str, Path]) -> str:
         """This turn as a speaker-tagged Markdown span."""
-        body = "\n\n".join(self.blocks() + self.uploads() + self.completeness_notes())
+        body = "\n\n".join(
+            self.blocks() + self.uploads(retained) + self.completeness_notes()
+        )
         if not body.strip():
             return ""
         speaker = "user" if self.sender == "human" else "claude"
@@ -318,10 +349,16 @@ class ConversationPayload(Payload, frozen=True):
         """The title field used by either route."""
         return self.name or self.snapshot_name
 
-    def rendered_messages(self) -> list[str]:
+    def retained_paths(self, artifact: str = "") -> dict[str, Path]:
+        """Where each held extraction goes: every one, or the selected one."""
+        declared = self.attachments()
+        held = [selected_attachment(declared, artifact)] if artifact else declared
+        return {attachment.id: attachment.relative_path() for attachment in held}
+
+    def rendered_messages(self, retained: dict[str, Path]) -> list[str]:
         """Every readable speaker-tagged message."""
         messages = [
-            text for message in self.chat_messages if (text := message.spoken())
+            text for message in self.chat_messages if (text := message.spoken(retained))
         ]
         if not messages:
             raise ClaudeDownloadError("Claude conversation has no readable messages")
@@ -372,7 +409,13 @@ class AttachmentRecord(BaseModel, frozen=True):
 
 
 class DownloadManifest(BaseModel, frozen=True):
-    """A replayable account of one retained Claude delivery."""
+    """A replayable account of one retained Claude delivery.
+
+    ``selected_artifact`` names the ``:artifact`` selector that narrowed this
+    download, and is empty for a complete one. ``declared_attachment_count``
+    is what the payload declares, so a delivery holding fewer files than it
+    counts cannot be mistaken for a complete one.
+    """
 
     provider: str = "claude"
     source_url: str
@@ -383,6 +426,8 @@ class DownloadManifest(BaseModel, frozen=True):
     message_count: int
     reported_file_count: int
     reported_image_count: int
+    selected_artifact: str = ""
+    declared_attachment_count: int = 0
     attachments: list[AttachmentRecord]
 
 
@@ -394,17 +439,22 @@ def conversation_from(payload: JsonValue) -> ConversationPayload:
         raise ClaudeDownloadError(
             "Claude conversation payload changed shape"
         ) from error
-    conversation.rendered_messages()
-    conversation.attachments()
+    conversation.rendered_messages(conversation.retained_paths())
     return conversation
 
 
 def render_conversation(
-    reference: ConversationReference, conversation: ConversationPayload
+    reference: ConversationReference,
+    conversation: ConversationPayload,
+    retained: dict[str, Path],
 ) -> str:
-    """Render all messages beside the untouched provider payload."""
+    """Render all messages beside the untouched provider payload.
+
+    ``retained`` carries the path of every attachment this delivery holds,
+    which is every declared one unless a ``:artifact`` selector narrowed it.
+    """
     title = conversation.title() or "Untitled Claude conversation"
-    messages = "\n\n".join(conversation.rendered_messages())
+    messages = "\n\n".join(conversation.rendered_messages(retained))
     return (
         f"# {title}\n\n"
         f"Source: {reference.page_url()}\n\n"
@@ -548,8 +598,10 @@ def write_delivery(
     raw: JsonValue,
     conversation: ConversationPayload,
     output: Path | None = None,
+    artifact: str = "",
 ) -> Path:
-    """Atomically replace one Claude delivery with the complete API response."""
+    """Atomically replace one Claude delivery with the API response's files."""
+    retained = conversation.retained_paths(artifact)
     workspace = (
         (output if output is not None else root / "tmp" / "conversations") / "claude"
     ).resolve()
@@ -568,12 +620,14 @@ def write_delivery(
             json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         (staged / "conversation.md").write_text(
-            render_conversation(reference, conversation), encoding="utf-8"
+            render_conversation(reference, conversation, retained), encoding="utf-8"
         )
         records: tuple[AttachmentRecord, ...] = ()
         for attachment in conversation.attachments():
+            relative = retained.get(attachment.id)
+            if relative is None:
+                continue
             body = attachment.extracted_content.encode()
-            relative = attachment.relative_path()
             path = staged / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(body)
@@ -601,6 +655,8 @@ def write_delivery(
             reported_image_count=sum(
                 message.image_count for message in conversation.chat_messages
             ),
+            selected_artifact=artifact,
+            declared_attachment_count=len(conversation.attachments()),
             attachments=list(records),
         )
         (staged / "manifest.json").write_text(
@@ -629,11 +685,20 @@ def write_delivery(
 
 
 async def download_claude(
-    reference: ConversationReference, *, root: Path, directory: Path, output: Path
+    reference: ConversationReference,
+    *,
+    root: Path,
+    cookie: str,
+    output: Path,
+    artifact: str = "",
 ) -> Path:
-    """Fetch and retain one Claude conversation and its attachment extracts."""
-    async with browser_context(directory, headless=True) as context:
-        cookie = await cookie_header(context, CLAUDE_ORIGIN)
-        raw = await fetch_payload(reference, cookie)
+    """Fetch and retain one Claude conversation and its attachment extracts.
+
+    An ``artifact`` selector retains that one extraction instead of every
+    declared one; the transcript, the raw payload, and the manifest are
+    retained either way, and every extraction Claude supplied is in the raw
+    payload whether or not this delivery wrote it out as a file.
+    """
+    raw = await fetch_payload(reference, cookie)
     conversation = conversation_from(raw)
-    return write_delivery(root, reference, raw, conversation, output)
+    return write_delivery(root, reference, raw, conversation, output, artifact)

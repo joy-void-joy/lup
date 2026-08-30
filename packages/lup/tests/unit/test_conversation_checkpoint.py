@@ -25,6 +25,8 @@ def test_an_ignored_destination_is_not_staged(
     destination.mkdir(parents=True)
     monkeypatch.setattr(checkpoint, "git", IgnoringGit())
 
-    revision = checkpoint.checkpoint_delivery(tmp_path, destination, provider="chatgpt")
+    revision = checkpoint.checkpoint_delivery(
+        tmp_path, [destination], provider="chatgpt"
+    )
 
     assert revision is None

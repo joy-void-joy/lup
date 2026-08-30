@@ -1,6 +1,7 @@
 """Git checkpoint for retained conversation deliveries."""
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import sh
@@ -12,31 +13,44 @@ from lup.execution.shell import git
 logger = logging.getLogger(__name__)
 
 
-def checkpoint_delivery(root: Path, destination: Path, *, provider: str) -> str | None:
-    """Commit one retained input only when Git does not ignore its destination."""
+def checkpoint_delivery(
+    root: Path, destinations: Sequence[Path], *, provider: str
+) -> str | None:
+    """Commit every retained input Git does not ignore, as one checkpoint.
+
+    One command run reaches the history as one commit however many URLs it was
+    given, and a destination Git ignores or holds outside the repository is
+    reported and left out rather than force-added.
+    """
+    inside: tuple[str, ...] = ()
+    for destination in destinations:
+        try:
+            inside += (str(destination.resolve().relative_to(root.resolve())),)
+        except ValueError:
+            typer.echo(f"{destination} is outside the repository; not committed.")
     try:
-        relative = destination.resolve().relative_to(root.resolve())
-    except ValueError:
-        typer.echo("Retained destination is outside the repository; not committed.")
-        return None
-    try:
-        ignored = git.out(
-            "check-ignore",
-            "--",
-            str(relative),
-            _cwd=str(root),
-            _ok_code=[0, 1],
-        )
-        if ignored:
-            typer.echo("Retained destination is gitignored; not committed.")
+        tracked: tuple[str, ...] = ()
+        for relative in inside:
+            ignored = git.out(
+                "check-ignore",
+                "--",
+                relative,
+                _cwd=str(root),
+                _ok_code=[0, 1],
+            )
+            if ignored:
+                typer.echo(f"{relative} is gitignored; not committed.")
+                continue
+            tracked += (relative,)
+        if not tracked:
             return None
-        git.add("-A", "--", str(relative), _cwd=str(root))
+        git.add("-A", "--", *tracked, _cwd=str(root))
         staged = git.out(
             "diff",
             "--cached",
             "--name-only",
             "--",
-            str(relative),
+            *tracked,
             _cwd=str(root),
             _ok_code=[0, 1],
         )
@@ -46,7 +60,7 @@ def checkpoint_delivery(root: Path, destination: Path, *, provider: str) -> str 
             "-m",
             f"data(conversations): retain {provider}",
             "--",
-            str(relative),
+            *tracked,
             _cwd=str(root),
         )
         revision = git.out("rev-parse", "--short", "HEAD", _cwd=str(root))

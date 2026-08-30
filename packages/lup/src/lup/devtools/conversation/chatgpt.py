@@ -29,7 +29,6 @@ from pydantic import (
 )
 
 from lup.types import JsonValue
-from lup.devtools.conversation.browser import browser_context
 from lup.devtools.conversation.errors import ConversationDownloadError
 
 logger = logging.getLogger(__name__)
@@ -411,7 +410,13 @@ class AttachmentRecord(BaseModel, frozen=True):
 
 
 class DownloadManifest(BaseModel, frozen=True):
-    """A complete, replayable account of one retained ChatGPT delivery."""
+    """A replayable account of one retained ChatGPT delivery.
+
+    ``selected_artifact`` names the ``:artifact`` selector that narrowed this
+    download, and is empty for a complete one. ``declared_attachment_count``
+    is what the payload declares, so a delivery holding fewer files than it
+    counts cannot be mistaken for a complete one.
+    """
 
     provider: str = "chatgpt"
     source_url: str
@@ -421,6 +426,8 @@ class DownloadManifest(BaseModel, frozen=True):
     identifier: str
     active_message_count: int
     mapping_node_count: int
+    selected_artifact: str = ""
+    declared_attachment_count: int = 0
     attachments: list[AttachmentRecord]
 
 
@@ -452,8 +459,47 @@ def conversation_from(payload: JsonValue) -> ChatGPTConversation:
         ) from error
 
 
-def attachment_marker(attachment: ChatGPTAttachment, path: Path) -> str:
-    """The transcript pointer to one retained attachment."""
+def selected_attachment(
+    attachments: list[ChatGPTAttachment], artifact: str
+) -> ChatGPTAttachment:
+    """The one declared file a ``:artifact`` selector names."""
+    paths = attachment_paths(attachments)
+    named = next(
+        (item for item in attachments if paths[item.identity()].name == artifact), None
+    )
+    if named is not None:
+        return named
+    matched = [
+        item
+        for item in attachments
+        if artifact in {item.stored_name(), item.identifier, item.sandbox_path} - {""}
+    ]
+    match matched:
+        case [only]:
+            return only
+        case []:
+            offered = ", ".join(
+                sorted(paths[item.identity()].name for item in attachments)
+            )
+            raise ChatGPTDownloadError(
+                f"This conversation declares no artifact {artifact!r}. "
+                f"It offers: {offered or '(no files)'}"
+            )
+        case ambiguous:
+            raise ChatGPTDownloadError(
+                f"Artifact {artifact!r} names {len(ambiguous)} files here; "
+                "select one by the filename it is retained under: "
+                + ", ".join(sorted(paths[item.identity()].name for item in ambiguous))
+            )
+
+
+def attachment_marker(attachment: ChatGPTAttachment, path: Path | None) -> str:
+    """The transcript pointer to one attachment, retained or deliberately not."""
+    if path is None:
+        return (
+            f"[Attachment: {attachment.stored_name()} → not retained; "
+            "this delivery selected a single artifact]"
+        )
     return f"[Attachment: {attachment.stored_name()} → {path.as_posix()}]"
 
 
@@ -482,7 +528,7 @@ def render_message(
     if message.content.text:
         content.append(message.content.text)
     content.extend(
-        attachment_marker(item, paths[item.identity()])
+        attachment_marker(item, paths.get(item.identity()))
         for item in message.attachments()
     )
     body = "\n\n".join(text for text in content if text)
@@ -493,13 +539,20 @@ def render_message(
 
 
 def render_conversation(
-    reference: ConversationReference, conversation: ChatGPTConversation
+    reference: ConversationReference,
+    conversation: ChatGPTConversation,
+    retained: dict[AttachmentIdentity, Path] | None = None,
 ) -> str:
-    """The selected branch as speaker-tagged Markdown beside the raw mapping."""
+    """The selected branch as speaker-tagged Markdown beside the raw mapping.
+
+    ``retained`` carries the path of every file this delivery actually holds,
+    which is every declared file unless a ``:artifact`` selector narrowed it.
+    """
     title = conversation.title or "Untitled ChatGPT conversation"
-    paths = attachment_paths(conversation.attachments())
+    declared = attachment_paths(conversation.attachments())
     messages = "\n\n".join(
-        render_message(message, paths) for message in conversation.active_messages()
+        render_message(message, declared if retained is None else retained)
+        for message in conversation.active_messages()
     )
     return (
         f"# {title}\n\n"
@@ -670,20 +723,10 @@ async def fetch_attachment(
     )
 
 
-def write_delivery(
-    root: Path,
-    reference: ConversationReference,
-    raw: JsonValue,
-    conversation: ChatGPTConversation,
-    fetched: list[FetchedAttachment],
-    output: Path | None = None,
+def delivery_directory(
+    root: Path, reference: ConversationReference, output: Path | None = None
 ) -> Path:
-    """Atomically replace one retained conversation with a complete download."""
-    expected = {item.identity() for item in conversation.attachments()}
-    received = {item.declaration.identity() for item in fetched}
-    if expected != received:
-        raise ChatGPTDownloadError("Downloaded attachments do not match the payload")
-    paths = attachment_paths(conversation.attachments())
+    """The directory one retained conversation occupies, refusing an escape."""
     workspace = (
         (output if output is not None else root / "tmp" / "conversations") / "chatgpt"
     ).resolve()
@@ -692,6 +735,72 @@ def write_delivery(
         raise ChatGPTDownloadError(
             "Conversation destination escapes tmp/conversations/chatgpt"
         )
+    return destination
+
+
+def carried_attachments(
+    destination: Path, declared: list[ChatGPTAttachment]
+) -> list[FetchedAttachment]:
+    """Bytes a prior delivery holds, readmitted only on their recorded digest.
+
+    A selective download re-fetches one file, and everything a previous pass
+    already paid for would otherwise be discarded by the atomic replacement.
+    """
+    manifest_path = destination / "manifest.json"
+    if not manifest_path.is_file():
+        return []
+    try:
+        prior = DownloadManifest.model_validate_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+    except ValueError:
+        logger.warning("Ignoring an unreadable prior manifest at %s", manifest_path)
+        return []
+    wanted = {attachment.identity(): attachment for attachment in declared}
+    carried: tuple[FetchedAttachment, ...] = ()
+    for record in prior.attachments:
+        attachment = wanted.get(
+            AttachmentIdentity(
+                representation=record.representation,
+                identifier=record.id,
+                message_id=record.message_id,
+                sandbox_path=record.sandbox_path,
+            )
+        )
+        path = destination / record.relative_path
+        if attachment is None or not path.is_file():
+            continue
+        if not path.resolve().is_relative_to(destination.resolve()):
+            logger.warning("A prior manifest points outside its delivery: %s", path)
+            continue
+        body = path.read_bytes()
+        if hashlib.sha256(body).hexdigest() != record.sha256:
+            logger.warning(
+                "A retained attachment no longer matches its digest: %s", path
+            )
+            continue
+        carried += (FetchedAttachment(declaration=attachment, body=body),)
+    return list(carried)
+
+
+def write_delivery(
+    root: Path,
+    reference: ConversationReference,
+    raw: JsonValue,
+    conversation: ChatGPTConversation,
+    fetched: list[FetchedAttachment],
+    output: Path | None = None,
+    artifact: str = "",
+) -> Path:
+    """Atomically replace one retained conversation with what was downloaded."""
+    expected = {item.identity() for item in conversation.attachments()}
+    received = {item.declaration.identity() for item in fetched}
+    if received - expected or (not artifact and expected != received):
+        raise ChatGPTDownloadError("Downloaded attachments do not match the payload")
+    declared = attachment_paths(conversation.attachments())
+    paths = {identity: declared[identity] for identity in received}
+    destination = delivery_directory(root, reference, output)
+    workspace = destination.parent
     workspace.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=".chatgpt-staging-", dir=workspace
@@ -702,7 +811,7 @@ def write_delivery(
             json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         (staged / "conversation.md").write_text(
-            render_conversation(reference, conversation), encoding="utf-8"
+            render_conversation(reference, conversation, paths), encoding="utf-8"
         )
         records: tuple[AttachmentRecord, ...] = ()
         for item in fetched:
@@ -731,6 +840,8 @@ def write_delivery(
             identifier=reference.identifier(),
             active_message_count=len(conversation.active_messages()),
             mapping_node_count=len(conversation.mapping),
+            selected_artifact=artifact,
+            declared_attachment_count=len(expected),
             attachments=list(records),
         )
         (staged / "manifest.json").write_text(
@@ -759,21 +870,39 @@ def write_delivery(
 
 
 async def download_chatgpt(
-    reference: ConversationReference, *, root: Path, directory: Path, output: Path
+    reference: ConversationReference,
+    *,
+    root: Path,
+    api: APIRequestContext,
+    output: Path,
+    artifact: str = "",
 ) -> Path:
-    """Fetch, validate, and retain one conversation and every attachment."""
-    async with browser_context(directory, headless=True) as context:
-        session = await fetch_session(context.request, reference)
-        raw = await fetch_payload(context.request, reference, session)
-        conversation = conversation_from(raw)
-        fetched = [
-            await fetch_attachment(
-                context.request,
-                reference,
-                attachment,
-                session,
-                conversation_id=conversation.conversation_id,
-            )
-            for attachment in conversation.attachments()
-        ]
-    return write_delivery(root, reference, raw, conversation, fetched, output)
+    """Fetch, validate, and retain one conversation and the files it declares.
+
+    An ``artifact`` selector downloads that one file instead of every declared
+    one; the transcript, the raw mapping, and the manifest are retained either
+    way, and files a previous delivery already holds are carried forward.
+    """
+    session = await fetch_session(api, reference)
+    raw = await fetch_payload(api, reference, session)
+    conversation = conversation_from(raw)
+    declared = conversation.attachments()
+    wanted = [selected_attachment(declared, artifact)] if artifact else declared
+    fetched = [
+        await fetch_attachment(
+            api,
+            reference,
+            attachment,
+            session,
+            conversation_id=conversation.conversation_id,
+        )
+        for attachment in wanted
+    ]
+    downloaded = {item.declaration.identity() for item in fetched}
+    prior = (
+        carried_attachments(delivery_directory(root, reference, output), declared)
+        if artifact
+        else []
+    )
+    fetched += [item for item in prior if item.declaration.identity() not in downloaded]
+    return write_delivery(root, reference, raw, conversation, fetched, output, artifact)

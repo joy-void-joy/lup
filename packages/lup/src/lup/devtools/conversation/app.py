@@ -2,14 +2,21 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.conversation.browser import login, require_playwright
+from lup.devtools.conversation.browser import (
+    browser_context,
+    cookie_header,
+    login,
+    require_playwright,
+)
 from lup.devtools.conversation.checkpoint import checkpoint_delivery
 from lup.devtools.conversation.errors import ConversationDownloadError
+from lup.devtools.conversation.selection import RetentionAttempt, RetentionRequest
 from lup.providers.profiles import ProfileDirectory
 from lup.workspace.paths import project_root
 
@@ -62,56 +69,157 @@ def browser_directories(
     return BrowserDirectories(primary=primary, fallbacks=fallbacks)
 
 
-async def authenticated_chatgpt(
-    url: str, root: Path, directories: BrowserDirectories, output: Path
-) -> Path:
-    """Download through stored states, refusing when explicit setup is needed."""
+type StateRun = Callable[
+    [Path, Sequence[RetentionAttempt]], Awaitable[tuple[RetentionAttempt, ...]]
+]
+
+
+def settled(
+    pending: RetentionAttempt, destination: Path | None = None, error: str = ""
+) -> RetentionAttempt:
+    """One pending request carried to what its attempt produced."""
+    return RetentionAttempt(
+        position=pending.position,
+        request=pending.request,
+        destination=destination,
+        error=error,
+    )
+
+
+async def retained_through(
+    directories: BrowserDirectories,
+    requests: Sequence[RetentionRequest],
+    run: StateRun,
+    expired: str,
+) -> list[RetentionAttempt]:
+    """Retain every request, trying each browser state a login may live in.
+
+    Only an unauthenticated request moves on to the next stored state, so one
+    expired login costs the batch nothing that a working state can serve, and
+    a refusal a fresh login would not fix is reported where it happened.
+    """
     require_playwright()
+    pending = tuple(
+        RetentionAttempt(position=position, request=request)
+        for position, request in enumerate(requests)
+    )
+    attempts: tuple[RetentionAttempt, ...] = ()
+    for directory in directories.candidates():
+        if not pending:
+            break
+        attempted = await run(directory, pending)
+        attempts += tuple(item for item in attempted if not item.unauthenticated)
+        pending = tuple(item for item in attempted if item.unauthenticated)
+    attempts += tuple(settled(item, error=expired) for item in pending)
+    return sorted(attempts, key=lambda item: item.position)
+
+
+async def retain_chatgpt(
+    requests: Sequence[RetentionRequest],
+    root: Path,
+    directories: BrowserDirectories,
+    output: Path,
+) -> list[RetentionAttempt]:
+    """Retain every requested ChatGPT conversation through one browser each."""
     from lup.devtools.conversation.chatgpt import (
         ChatGPTAuthenticationRequired,
         ConversationReference,
         download_chatgpt,
     )
 
-    reference = ConversationReference(value=url)
-    authentication_error: ChatGPTAuthenticationRequired | None = None
-    for directory in directories.candidates():
-        try:
-            return await download_chatgpt(
-                reference, root=root, directory=directory, output=output
-            )
-        except ChatGPTAuthenticationRequired as error:
-            authentication_error = error
-    raise ChatGPTAuthenticationRequired(
+    async def run(
+        directory: Path, pending: Sequence[RetentionAttempt]
+    ) -> tuple[RetentionAttempt, ...]:
+        """Retain every still-pending request through one persistent state."""
+        attempted: tuple[RetentionAttempt, ...] = ()
+        async with browser_context(directory, headless=True) as context:
+            for item in pending:
+                try:
+                    destination = await download_chatgpt(
+                        ConversationReference(value=item.request.url),
+                        root=root,
+                        api=context.request,
+                        output=output,
+                        artifact=item.request.artifact,
+                    )
+                except ChatGPTAuthenticationRequired as error:
+                    attempted += (
+                        RetentionAttempt(
+                            position=item.position,
+                            request=item.request,
+                            error=str(error),
+                            unauthenticated=True,
+                        ),
+                    )
+                except ConversationDownloadError as error:
+                    logger.exception("Could not retain %s", item.request.describe())
+                    attempted += (settled(item, error=str(error)),)
+                else:
+                    attempted += (settled(item, destination=destination),)
+        return attempted
+
+    return await retained_through(
+        directories,
+        requests,
+        run,
         "The ChatGPT browser login is missing or expired. Run "
-        "`uv run lup-devtools setup conversation chatgpt`, then retry."
-    ) from authentication_error
+        "`uv run lup-devtools setup conversation chatgpt`, then retry.",
+    )
 
 
-async def authenticated_claude(
-    url: str, root: Path, directories: BrowserDirectories, output: Path
-) -> Path:
-    """Download through stored states, refusing when explicit setup is needed."""
-    require_playwright()
+async def retain_claude(
+    requests: Sequence[RetentionRequest],
+    root: Path,
+    directories: BrowserDirectories,
+    output: Path,
+) -> list[RetentionAttempt]:
+    """Retain every requested Claude conversation through one cookie each."""
     from lup.devtools.conversation.claude import (
+        CLAUDE_ORIGIN,
         ClaudeAuthenticationRequired,
         ConversationReference,
         download_claude,
     )
 
-    reference = ConversationReference(value=url)
-    authentication_error: ClaudeAuthenticationRequired | None = None
-    for directory in directories.candidates():
-        try:
-            return await download_claude(
-                reference, root=root, directory=directory, output=output
-            )
-        except ClaudeAuthenticationRequired as error:
-            authentication_error = error
-    raise ClaudeAuthenticationRequired(
+    async def run(
+        directory: Path, pending: Sequence[RetentionAttempt]
+    ) -> tuple[RetentionAttempt, ...]:
+        """Retain every still-pending request through one persistent state."""
+        async with browser_context(directory, headless=True) as context:
+            cookie = await cookie_header(context, CLAUDE_ORIGIN)
+        attempted: tuple[RetentionAttempt, ...] = ()
+        for item in pending:
+            try:
+                destination = await download_claude(
+                    ConversationReference(value=item.request.url),
+                    root=root,
+                    cookie=cookie,
+                    output=output,
+                    artifact=item.request.artifact,
+                )
+            except ClaudeAuthenticationRequired as error:
+                attempted += (
+                    RetentionAttempt(
+                        position=item.position,
+                        request=item.request,
+                        error=str(error),
+                        unauthenticated=True,
+                    ),
+                )
+            except ConversationDownloadError as error:
+                logger.exception("Could not retain %s", item.request.describe())
+                attempted += (settled(item, error=str(error)),)
+            else:
+                attempted += (settled(item, destination=destination),)
+        return attempted
+
+    return await retained_through(
+        directories,
+        requests,
+        run,
         "The Claude browser login is missing or expired. Run "
-        "`uv run lup-devtools setup conversation claude`, then retry."
-    ) from authentication_error
+        "`uv run lup-devtools setup conversation claude`, then retry.",
+    )
 
 
 def setup_browser_login(
@@ -164,14 +272,28 @@ def create_conversation_setup_app(
     return application
 
 
-def report(destination: Path, provider: str, root: Path) -> None:
-    """Checkpoint a retained delivery and report its repository path."""
-    checkpoint_delivery(root, destination, provider=provider)
-    try:
-        displayed = destination.relative_to(root)
-    except ValueError:
-        displayed = destination
-    typer.echo(f"Retained {provider} conversation at {displayed}")
+def report(attempts: list[RetentionAttempt], provider: str, root: Path) -> None:
+    """Announce every retention, checkpoint them together, then refuse a gap.
+
+    One command run is one checkpoint however many URLs it was given, so a
+    batch reaches the history as the single act the operator asked for.
+    """
+    for attempt in attempts:
+        if attempt.destination is None:
+            typer.echo(f"{attempt.request.describe()}: {attempt.error}", err=True)
+            continue
+        try:
+            displayed = attempt.destination.relative_to(root)
+        except ValueError:
+            displayed = attempt.destination
+        typer.echo(f"Retained {provider} conversation at {displayed}")
+    retained = [
+        attempt.destination for attempt in attempts if attempt.destination is not None
+    ]
+    if retained:
+        checkpoint_delivery(root, retained, provider=provider)
+    if len(retained) != len(attempts):
+        raise typer.Exit(1)
 
 
 def create_conversation_app(
@@ -182,8 +304,10 @@ def create_conversation_app(
 
     @application.command("chatgpt")
     def chatgpt_cmd(
-        url: str = typer.Argument(
-            help="A chatgpt.com/c/... conversation or /share/... URL", metavar="URL"
+        urls: list[str] = typer.Argument(
+            help="chatgpt.com/c/... or /share/... URLs, each optionally suffixed "
+            ":<artifact> to retain that one file instead of every attachment",
+            metavar="URL...",
         ),
         profile: str | None = typer.Option(
             None,
@@ -197,24 +321,23 @@ def create_conversation_app(
             help="Directory under which provider and conversation ids are stored",
         ),
     ) -> None:
-        """Retain a ChatGPT conversation and all downloadable attachments."""
+        """Retain ChatGPT conversations and their downloadable attachments."""
         root = project_root()
         directories = browser_directories(root, "chatgpt", profiles, profile)
-        try:
-            target = output if output.is_absolute() else root / output
-            destination = asyncio.run(
-                authenticated_chatgpt(url, root, directories, target)
-            )
-        except ConversationDownloadError as error:
-            logger.exception("Could not retain the ChatGPT conversation")
-            typer.echo(str(error), err=True)
-            raise typer.Exit(1) from error
-        report(destination, "chatgpt", root)
+        target = output if output.is_absolute() else root / output
+        requests = [RetentionRequest.parse(value) for value in urls]
+        report(
+            asyncio.run(retain_chatgpt(requests, root, directories, target)),
+            "chatgpt",
+            root,
+        )
 
     @application.command("claude")
     def claude_cmd(
-        url: str = typer.Argument(
-            help="A claude.ai/chat/... conversation or /share/... URL", metavar="URL"
+        urls: list[str] = typer.Argument(
+            help="claude.ai/chat/... or /share/... URLs, each optionally suffixed "
+            ":<artifact> to retain that one file instead of every attachment",
+            metavar="URL...",
         ),
         profile: str | None = typer.Option(
             None,
@@ -228,19 +351,16 @@ def create_conversation_app(
             help="Directory under which provider and conversation ids are stored",
         ),
     ) -> None:
-        """Retain a Claude conversation and its API-provided attachment content."""
+        """Retain Claude conversations and their API-provided attachments."""
         root = project_root()
         directories = browser_directories(root, "claude", profiles, profile)
-        try:
-            target = output if output.is_absolute() else root / output
-            destination = asyncio.run(
-                authenticated_claude(url, root, directories, target)
-            )
-        except ConversationDownloadError as error:
-            logger.exception("Could not retain the Claude conversation")
-            typer.echo(str(error), err=True)
-            raise typer.Exit(1) from error
-        report(destination, "claude", root)
+        target = output if output.is_absolute() else root / output
+        requests = [RetentionRequest.parse(value) for value in urls]
+        report(
+            asyncio.run(retain_claude(requests, root, directories, target)),
+            "claude",
+            root,
+        )
 
     return application
 
