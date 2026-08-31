@@ -50,11 +50,18 @@ def test_a_marker_denied_without_a_human_keeps_the_reason_it_stated() -> None:
     assert decision.escalated == "it is my own scratch"
 
 
-def test_an_ordinary_refusal_carries_no_escalation() -> None:
-    """Only what an agent deliberately escalated is worth anybody's attention."""
+def test_an_ordinary_question_nobody_can_answer_carries_no_escalation() -> None:
+    """Only what an agent deliberately escalated is worth anybody's attention.
+
+    Unmarked, on a host with nobody to ask and no route to anybody, the
+    question is no question and settles as a deferral — the runtime's own
+    gate takes it from here. That is the whole difference the marker buys:
+    the one above refuses on this same host, because a stated reason must
+    never resolve to the call simply proceeding.
+    """
     decision = classified("rm junk.txt", False)
 
-    assert decision.effect == "deny"
+    assert decision.effect == "defer"
     assert decision.escalated == ""
 
 

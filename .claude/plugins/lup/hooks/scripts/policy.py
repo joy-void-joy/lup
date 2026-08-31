@@ -1037,6 +1037,7 @@ def bash_decision(
     escapable: bool,
     cwd: Path | None,
     relayed: bool = False,
+    reachable: bool = False,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -1097,6 +1098,7 @@ def bash_decision(
         # refusal that named no route sent it to queue a blocking question
         # instead.
         relayed=relayed,
+        reachable=reachable,
         escapable=escapable,
         # Read here rather than passed by each dispatcher, unlike `escapable`
         # above: whether this process sits inside the container is a fact

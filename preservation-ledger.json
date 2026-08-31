@@ -1,5 +1,5 @@
 {
-  "revision": "c0b2d8143c67ef40dd56b72339f3fb42cf38e059",
+  "revision": "fac2a43f0f0c0703a1075e507bcb3b6d27f11bb1",
   "roots": [
     "lup",
     "lup_template"
@@ -7086,7 +7086,8 @@
         "KernelDecision.recovery",
         "KernelDecision.__init__",
         "KernelDecision.placed",
-        "unjudged"
+        "unjudged",
+        "unresolved"
       ]
     },
     {
@@ -7333,7 +7334,8 @@
         "tokenize_shell.flush",
         "SENTINEL_OPS",
         "is_control_operator",
-        "literal_target",
+        "target_recovery",
+        "assigned_literals",
         "redirection_writes",
         "python_script_targets",
         "shell_write_targets",
@@ -7350,6 +7352,7 @@
         "GENERATED_PLUGIN_ROOTS",
         "GENERATED_PLUGIN_REFUSAL",
         "FOREIGN_REPOSITORY_REFERRAL",
+        "spells_its_path",
         "is_generated_plugin_target",
         "is_session_scratch_target",
         "role_pattern_covers",
@@ -7444,6 +7447,7 @@
         "SettlementFacts.escapable",
         "SettlementFacts.recovered",
         "SettlementFacts.interactive",
+        "SettlementFacts.relayed",
         "SettlementFacts.hint",
         "SettlementFacts.__init__",
         "SettlementFacts.rewritten",
@@ -7463,10 +7467,9 @@
         "UnanswerableQuestion",
         "UnanswerableQuestion.settles",
         "UnanswerableQuestion.reached",
-        "ConfinedElsewhere",
-        "ConfinedElsewhere.reached",
-        "Unjudged",
-        "Unjudged.reached",
+        "NoJudgment",
+        "NoJudgment.reached",
+        "NoJudgment.reached.beneath",
         "JudgedRefusal",
         "JudgedRefusal.reached",
         "Standing",
@@ -7838,6 +7841,7 @@
         "JudgedCommand.bare_reads",
         "read_only_rules",
         "judged_ask_rules",
+        "classifier_bypass_rules",
         "redirected_rules",
         "guarded_tool_rules",
         "runner_target_rules",

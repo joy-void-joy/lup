@@ -586,13 +586,11 @@ The policy classifies every shell command against the vocabulary declared in
 `devtools/harness/content/shell_vocabulary.py`, every URL scope, and every edit
 in a batch. Segments join deny > ask > defer > allow, so a judged deny wins the
 batch and malformed input fails conservatively. Ask is reserved for judged
-risk: an unjudged command denies with a hint naming the
-`# lup: escalate: <why>` marker, and that marker as a command's leading line
-promotes the decision into an approval question carrying your stated reason.
-Under a launcher-verified sandbox (`LUP_SANDBOX_ACTIVE`), unjudged work defers
-to that boundary rather than denying. A `dangerouslyDisableSandbox` escape re-enters the deny lattice, and
-the sandbox block in `.claude/settings.json` derives from the same `HookSet`
-declaration. Where a command runs is a second axis a rule declares beside its
+risk: an unjudged command defers to the runtime's own gate wherever it runs,
+and `# lup: escalate: <why>` as a command's leading line promotes a decision
+into an approval question carrying your stated reason. The sandbox block in `.claude/settings.json` derives from the same
+`HookSet` declaration. Where a command runs is a second axis a rule declares
+beside its
 effect and cascades to the levels beneath it, so every `git` verb already runs
 outside the sandbox unasked. [docs/permissions.md](docs/permissions.md) carries
 the full lattice. Use

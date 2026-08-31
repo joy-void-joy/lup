@@ -25,14 +25,25 @@ project states only where it differs from what the library offers — a
 downstream toolchain to add, a command it judges differently, one it drops —
 so declaring `lake` costs one entry rather than a copy of every command the
 library already judged. The shell
-lattice reserves ask for judged risk; unjudged work denies, hinting the
-escalation recipe. Under a launcher-verified OS sandbox
-(`LUP_SANDBOX_ACTIVE`), unjudged work defers to that boundary, and a
-`dangerouslyDisableSandbox` escape re-enters the deny lattice; the sandbox
-block derives from the same `HookSet` declaration. A command the sandbox's
-`excluded_commands` takes out of isolation re-enters it too, without the
-escape: the boundary was told to leave that command alone, so there is
-nothing for unjudged work to defer to.
+lattice reserves ask for judged risk; unjudged work **defers**, wherever it
+runs. A deferral is not a permission — it hands the call to the runtime's own
+gate, which is where an operator's configuration lives — so what a boundary
+changes is not whether the call defers but what sits beneath it when it runs.
+The reason names which: the container, the OS sandbox, or nothing at all. The
+sandbox block still derives from the same `HookSet` declaration.
+
+Gating that on a verified sandbox is what this stopped doing, and the
+contained session is the case that settled it. The launcher declines to
+export `LUP_SANDBOX_ACTIVE` inside a container precisely because the
+container is already a boundary — `boundary = sandboxed or contained`, in its
+own words — while the kernel read only the flag. So unjudged work denied
+behind the strongest boundary the project ships. Deferring everywhere costs
+the escalation recipe on an unprotected host, and buys a lattice that means
+the same thing in every session.
+
+A judged deny is untouched by all of it: `JudgedRefusal` reads a `deny` where
+`NoJudgment` reads a `defer`, so a rule's refusal — inline code, a generated
+tree — stands under every boundary alike.
 
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively.
@@ -54,8 +65,7 @@ The rows, in order, each stating its own claim:
 | `TrappedPlacement` | A call declared ``outside`` on a host that cannot place it there. |
 | `RestoredBySession` | An approval question about a loss this session can already put back. |
 | `UnanswerableQuestion` | A question on a host with nobody to put it to is not a question. |
-| `ConfinedElsewhere` | No judgment, and a boundary beneath it: the boundary carries it. |
-| `Unjudged` | No judgment and no boundary: the only thing left is to refuse. |
+| `NoJudgment` | No judgment to offer, so the runtime&#x27;s own gate is what decides. |
 | `JudgedRefusal` | A rule refused this, and no sandbox rescues a judged deny. |
 | `Standing` | Whatever reached here stands: a permission, or an answerable question. |
 
@@ -101,9 +111,9 @@ does not overrule it.
 
 That makes `defer` two things reaching one word, which the rows below it have
 to keep apart: an unjudged deferral means *nobody looked*, and this one means
-*somebody looked and the boundary answers*. `Unjudged` refuses the first for
-want of anybody having looked, so the second settles rather than rewrites and
-never reaches it.
+*somebody looked and the boundary answers*. `NoJudgment` speaks for the first
+and claims nothing was weighed, so the second settles rather than rewrites and
+never reaches it — the claim it would lose there is the whole of what it says.
 
 **And it is written down**, which is what makes the relaxation honest rather
 than merely quieter. The lattice asked about everything unjudged for an

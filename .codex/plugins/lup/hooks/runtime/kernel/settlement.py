@@ -43,6 +43,8 @@ class SettlementFacts:
     escapable: bool
     recovered: bool
     interactive: bool
+    relayed: bool
+    reachable: bool
     hint: str
 
     def __init__(
@@ -56,6 +58,8 @@ class SettlementFacts:
         recovered: bool,
         interactive: bool,
         hint: str,
+        relayed: bool = False,
+        reachable: bool = False,
     ) -> None:
         self.decision = decision
         self.escalation = escalation
@@ -65,6 +69,14 @@ class SettlementFacts:
         self.escapable = escapable
         self.recovered = recovered
         self.interactive = interactive
+        self.relayed = relayed
+        # Whether a human can be reached at all, where ``interactive`` asks
+        # whether one can be reached *now*. The two came apart on Codex,
+        # whose PreToolUse runs with nobody to ask and whose refusal is the
+        # very thing that raises the permission request putting the question
+        # to somebody. A session with a route it cannot use this instant is
+        # not a session without one.
+        self.reachable = reachable or relayed or interactive
         self.hint = hint
 
     def rewritten(self, decision: KernelDecision) -> "SettlementFacts":
@@ -79,6 +91,8 @@ class SettlementFacts:
             self.recovered,
             self.interactive,
             self.hint,
+            self.relayed,
+            self.reachable,
         )
 
 
@@ -207,10 +221,10 @@ class RestoredBySession(SettlementRule):
     Which makes ``defer`` two things reaching one word, and the rows below
     have to keep them apart: a deferral from :func:`unjudged` means *nobody
     looked*, and this one means *somebody looked and the boundary answers*.
-    So this row settles rather than rewrites. :class:`Unjudged` turns an
-    unexamined deferral into a refusal for want of anybody having looked, and
-    a judged deferral that fell through to it would be refused for the one
-    reason that is not true of it.
+    So this row settles rather than rewrites. :class:`NoJudgment` speaks for
+    the first, and says a boundary is beneath the call without claiming
+    anything was weighed — which is exactly the claim this row is making and
+    the one a judged deferral falling through to it would lose.
 
     A stated reason keeps its question. `# lup: escalate:` is the agent
     asking to be judged, and answering it with a deferral would drop both the
@@ -249,52 +263,105 @@ class UnanswerableQuestion(SettlementRule):
     """A question on a host with nobody to put it to is not a question.
 
     Rewritten to no judgment rather than settled, so what happens next is
-    decided by whether a boundary sits beneath the call — which is the same
-    question anything else nobody judged has to answer.
+    decided the way it is for anything else nobody judged.
+
+    A session that can reach a human is the case this row is *not* about,
+    and the row's own name says so — the premise is that there is nobody,
+    not that nobody is free this instant. Two sessions have a route they
+    cannot use at the moment of judging, and both were falling through it:
+    a reviewed worker holds a question mailbox reaching whoever supervises
+    the run, and Codex's PreToolUse holds the permission request that *this
+    refusal is what raises*. There, the deny is not the end of the question;
+    it is how the question gets asked.
+
+    The distinction used to live in the hint alone, which was enough while
+    every deferral this produced went on to refuse — the wording differed
+    and the verdict did not. Once unjudged work defers outright, falling
+    through costs the question itself: a judged ask would hand a remote
+    deletion to the runtime's own gate while the channel that exists to
+    carry it went unused, and on Codex an approval that is command-bound and
+    single-use would stop being consulted at all.
+
+    So a reachable session refuses, and :class:`JudgedRefusal` names
+    whatever route it has, this row having no business spending a hint it
+    does not own. What is left to defer is a session with no channel of any
+    kind, where the question was never going to reach anybody.
     """
 
     settles = False
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect == "ask" and not facts.interactive:
+        if facts.decision.effect != "ask" or facts.interactive:
+            return None
+        # A stated reason refuses on any host, reachable or not. The marker
+        # is the agent asking to be judged, and the one answer it must never
+        # get is the call proceeding unjudged — that would make the
+        # instrument for summoning a human the instrument for bypassing the
+        # table, and on a host with nobody to summon it would work every
+        # time. The refusal is what a relay carries to somebody who reads it.
+        if facts.reachable or facts.escalation:
             return KernelDecision(
-                "defer", facts.decision.reason, escalated=facts.decision.escalated
+                "deny", facts.decision.reason, escalated=facts.decision.escalated
             )
-        return None
+        return KernelDecision(
+            "defer", facts.decision.reason, escalated=facts.decision.escalated
+        )
 
 
-class ConfinedElsewhere(SettlementRule):
-    """No judgment, and a boundary beneath it: the boundary carries it.
+class NoJudgment(SettlementRule):
+    """No judgment to offer, so the runtime's own gate is what decides.
 
-    The OS confines the call, so the semantic layer says nothing and lets the
-    runtime's own gate decide inside it. This is the whole of what a sandbox
-    buys the deny lattice, and it is why the lattice may be smaller wherever
-    one is running.
+    Two rows stood here, and the pair asked whether a boundary was running
+    before it would decline to interrupt: confined, the boundary carried the
+    call; unconfined, the only thing left was to refuse, naming the
+    escalation recipe on the way out.
+
+    What that cost was paid in a contained session. The launcher declines to
+    export the sandbox flag inside a container *because* the container is
+    already a boundary -- ``boundary = sandboxed or contained``, in its own
+    words -- and the kernel read only the flag. So unjudged work denied
+    behind the strongest boundary the project ships, which is what neither
+    half intended and what nothing downstream could tell from a refusal.
+
+    Deferring unconditionally settles the wiring, and settles it in the one
+    direction that gives nothing away: **a deferral is not a permission**. It
+    says this policy has no judgment to offer and hands the call to the
+    runtime's own gate, which is where an operator's configuration lives. A
+    session run with everything approved runs it; a session at the runtime's
+    defaults is still asked, in the runtime's own words. What a boundary
+    changes is not whether the call defers but what sits beneath it when it
+    runs -- so the reason names which one that is, and says plainly when
+    there is none rather than leaving a reader to assume one.
+
+    A judged deny never arrives here: :class:`JudgedRefusal` reads a ``deny``
+    and this reads a ``defer``. That is what keeps a rule's refusal standing
+    under every boundary alike -- inline code, a generated tree -- and it is
+    the distinction the lattice rests on, unchanged.
     """
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect == "defer" and facts.confined:
+        if facts.decision.effect != "defer":
+            return None
+        # An escalated verdict reaching here is the agent having asked to be
+        # judged on a host with nobody to judge it. The reason it gave is
+        # the message, and naming a boundary after it answers a question
+        # nobody asked while pushing the stated one out of the first line.
+        if facts.decision.escalated:
             return facts.decision
-        return None
 
+        def beneath() -> str:
+            """Which boundary carries the call, named for whoever reads this."""
+            if facts.contained:
+                return "the container is beneath it"
+            if facts.confined:
+                return "the OS boundary is beneath it"
+            return "nothing is beneath it"
 
-class Unjudged(SettlementRule):
-    """No judgment and no boundary: the only thing left is to refuse.
-
-    The refusal names the recipe rather than only the wall — reshape it into
-    the allowed vocabulary, or say why it has to be this shape — because work
-    nobody classified is work somebody has to look at, and an agent told only
-    "no" looks at nothing.
-    """
-
-    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect == "defer":
-            return KernelDecision(
-                "deny",
-                facts.decision.reason + facts.hint,
-                escalated=facts.decision.escalated,
-            )
-        return None
+        return KernelDecision(
+            "defer",
+            f"{facts.decision.reason} — left to the runtime's own gate: {beneath()}",
+            escalated=facts.decision.escalated,
+        )
 
 
 class JudgedRefusal(SettlementRule):
@@ -328,8 +395,7 @@ SETTLEMENT_ORDER: list[SettlementRule] = [
     TrappedPlacement(),
     RestoredBySession(),
     UnanswerableQuestion(),
-    ConfinedElsewhere(),
-    Unjudged(),
+    NoJudgment(),
     JudgedRefusal(),
     Standing(),
 ]

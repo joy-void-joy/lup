@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "128de695d2b393c48b8fec4f10492731a74d4b23c24fa5fa5830cdbc37de24d5",
+      "sha256": "9161371843d14212276b6bd1b1a4b08753cf78197bc35e0c2492f3b3b5199348",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -100,14 +100,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "27a57e85a155d343407106e23f77308736abec12a6bc54f7685b32ea8bd39ad4",
+      "sha256": "74964144957a7a39b736130826a1dbb9b39b6f46a591737fd5938198d352351b",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "23267a39a2331d84d9e17f8dc4acf0c84fdd4e668c28afe041d0c289df71cf34",
+      "sha256": "0eeac1ff7efd217f11e52650857e3e61ffe4fce5c4dc80a194a96dc07d0578d4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -128,14 +128,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
-      "sha256": "d369bd0926af8dc13ca74e04e1b301b664498e6af1967c7f29e88a657bf23644",
+      "sha256": "63c0e90439ceed7acb1696e2e6e10f87019941cbf4e717e690ce6e512e5683fc",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/roles.py",
       "category": "generated",
-      "sha256": "fe7c9f8a8031816620713ea4640daf875930e7d3ca61b5e723803dc62a6917bb",
+      "sha256": "f8e8f272c3c7589257c6d9655b6c07e9875e6e4d3d6f1c45977309acc300d0e7",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -149,14 +149,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/settlement.py",
       "category": "generated",
-      "sha256": "f4e749a96a4de535e675077fea60af70e105e59ba6c3fb681d98434f6796ff6a",
+      "sha256": "9816460e724233c5959403c834f1c2c5cd765dcbd99833605f242899e3dab22c",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "76082dd6000d695b897f1c5968a01fe0a5476b688ba9e76a6c130255a5a91b91",
+      "sha256": "43b343097934b56a198a99a88c33bcfc58e43d87fd9c99fd844797004bb7be93",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -177,14 +177,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "1ed4120fa337df0fd59c5e074776fa3c7d0a3bc123992d8b27b243392375ede0",
+      "sha256": "5c6c663564120d75ffb625b5c6709e75d8c978bcd84b86f37b4dbe4eef111c16",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "7be3e266af82171f6518fbe55061b409ab8eaa8acf864e36e78cfb6eb9428f56",
+      "sha256": "be2e609105a287178c89702eb6b48e6afb3737d66c123310948aedd6e243f318",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

@@ -202,6 +202,7 @@ KERNEL_IMPORT_ALLOWLIST = (
     "pathlib",
     "posixpath",
     "re",
+    "string",
     "tokenize",
     "typing",
     "urllib.parse",
@@ -374,10 +375,36 @@ class KernelDecision:
 
 
 def unjudged(reason: str) -> KernelDecision:
-    """One machinery bail-out: the kernel cannot judge, so it defers.
+    """The lex succeeded and no rule matched, so the runtime's gate decides.
 
-    The shell boundary decides what no-judgment means: a sandboxed
-    execution runs confined by the OS, an unsandboxed one converts to a
-    deny naming the escalation recipe.
+    The narrower of the two bail-outs, and the common one: the command was
+    read, its segments enumerated, its redirections and substitutions found
+    — and the table simply holds no row for what was found. The policy
+    understands what will run and has no opinion about it, which is what a
+    deferral says.
+
+    Use :func:`unresolved` where the lex itself failed. The two shared this
+    constructor while both denied, and nothing turned on telling them apart;
+    a deferral is a claim about having looked, so it does.
     """
     return KernelDecision("defer", reason)
+
+
+def unresolved(reason: str) -> KernelDecision:
+    """The lex failed, so nothing was classified and the call is refused.
+
+    Every other guarantee this kernel offers rests on the lex succeeding.
+    Unterminated quoting, a loop no ``done`` closes, a substitution nested
+    past the depth limit — after any of them the policy cannot say there is
+    no ``rm`` in the command, or that nothing writes a protected path,
+    because it never got far enough to look. "No rule covered this" and "I
+    never read this" are different answers and only the first is a
+    deferral.
+
+    Which makes this the same refusal ``eval`` earns, arrived at by
+    accident rather than by spelling: both run a string nothing inspected.
+    A judged deny is the only verdict a boundary does not rescue, and that
+    is exactly what is wanted here — a command the classifier could not
+    read is how every rule it still refuses would otherwise be reached.
+    """
+    return KernelDecision("deny", reason)

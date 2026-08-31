@@ -359,6 +359,58 @@ def judged_ask_rules(
     ]
 
 
+def classifier_bypass_rules(
+    commands: Sequence[JudgedCommand] = (
+        JudgedCommand(
+            name="eval",
+            reason="eval runs a string nothing classified — run the command itself",
+        ),
+        JudgedCommand(
+            name="exec",
+            reason="exec replaces this shell with a command nothing classified"
+            " — run the command itself",
+        ),
+        JudgedCommand(
+            name="source",
+            reason="sourcing runs a file's commands in this shell without any"
+            " of them being classified — run the ones you want",
+        ),
+        JudgedCommand(
+            name=".",
+            reason="sourcing runs a file's commands in this shell without any"
+            " of them being classified — run the ones you want",
+        ),
+    ),
+) -> list[ShellCommandRule]:
+    """The builtins that run a command this table never gets to see.
+
+    Judged rather than left to fall through, and the difference is why they
+    are written down. Work nobody classified defers, which is the right
+    answer for a command the table has no row for -- and it makes ``eval``
+    the way around every rule that still refuses. A judged deny is the one
+    verdict no boundary rescues, so refusing the wrapper is what keeps the
+    refusals it would wrap meaning what they say.
+
+    ``source`` and its ``.`` spelling belong with them for the same reason
+    read the one step further: the file's commands run in this shell and not
+    one of them is classified on the way through, so the refusal a script
+    would meet is a refusal sourcing that script never meets.
+
+    ``export``, ``declare`` and ``unset`` are deliberately not here, though
+    they sat in one sentence with these two while the fallback denied all
+    five. They decide what a *later* command sees, and that command is
+    classified on its own terms when it runs; the assignment that would
+    redirect which binary it resolves to is already an ask of its own.
+    Denying `export FOO=bar` bought nothing and stopped ordinary work.
+    """
+    return [
+        ShellCommandRule(
+            name=command.name, default_effect="deny", reason=command.reason
+        )
+        for command in commands
+    ]
+
+
 def redirected_rules(
     commands: Sequence[JudgedCommand] = (
         JudgedCommand(name="pip", reason="use uv add / uv remove instead of pip"),
@@ -1375,6 +1427,7 @@ def default_vocabulary() -> list[ShellCommandRule]:
     return [
         *read_only_rules(),
         *judged_ask_rules(),
+        *classifier_bypass_rules(),
         *redirected_rules(),
         *guarded_tool_rules(),
         git_rule(),

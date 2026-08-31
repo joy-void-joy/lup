@@ -115,7 +115,7 @@ def test_router_sends_each_tool_to_the_policy_that_judges_it() -> None:
         == "allow"
     )
     assert router.decide(ShellCommand(command="git status")).effect == "allow"
-    assert router.decide(ShellCommand(command="mycommand --flag")).effect == "deny"
+    assert router.decide(ShellCommand(command="mycommand --flag")).effect == "defer"
 
 
 def test_router_asks_rather_than_allows_what_no_policy_covers() -> None:
@@ -239,8 +239,11 @@ async def test_permitting_an_escape_widens_only_the_calls_that_declare_one() -> 
 
     assert (toolchain.decision, toolchain.sandbox) == ("allow", "outside")
     assert (checker.decision, checker.sandbox) == ("allow", "ambient")
+    # A command no row covers emits no decision at all: the deferral is this
+    # policy declining to interrupt, which is a different thing from either
+    # answer it could give, and the runtime's own gate takes it from here.
     unjudged = await placed("frobnicate --wildly")
-    assert unjudged.decision == "deny"
+    assert unjudged.decision is None
     assert unjudged.sandbox == "ambient"
 
 

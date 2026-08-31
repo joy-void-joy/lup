@@ -15,6 +15,7 @@ from .decision import (
     Recovery,
     SandboxPlacement,
     unjudged,
+    unresolved,
 )
 from .settlement import SettlementFacts, settle
 from .rows import (
@@ -146,13 +147,13 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
                 None,
             )
             if terminator is None:
-                return unjudged("find -exec payload does not terminate")
+                return unresolved("find -exec payload does not terminate")
             payload = [
                 "./x" if piece == "{}" else piece
                 for piece in words[position + 1 : terminator]
             ]
             if not payload:
-                return unjudged("find -exec payload is empty")
+                return unresolved("find -exec payload is empty")
             verdict = decide_shell_segment(payload, context)
             if verdict.effect != "allow":
                 return verdict
@@ -276,7 +277,7 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     while segment and segment[0] == "!":
         segment = segment[1:]
     if not segment:
-        return unjudged("shell segment has no command")
+        return unresolved("shell segment has no command")
     if segment[0] == "[[":
         return KernelDecision("allow", "test expression is read-only")
     effective = effective_command(segment)
@@ -287,13 +288,15 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
             "ask", "a security-sensitive environment assignment requires approval"
         )
     if not words:
-        return unjudged("shell segment has no command")
+        return unresolved("shell segment has no command")
     if SUBSTITUTION_SENTINEL in words[0]:
-        return unjudged("a command substitution in command position is not classified")
+        return unresolved(
+            "a command substitution in command position is not classified"
+        )
     if any(
         SUBSTITUTION_SENTINEL in word for word in words[1:]
     ) and not argument_safe_words(words, context):
-        return unjudged(
+        return unresolved(
             "a command substitution result could become a guarded flag — run"
             " it in its own call and splice the literal output"
         )
@@ -457,9 +460,9 @@ def read_bindings(
         if word == "-r":
             continue
         if word.startswith("-"):
-            return unjudged(f"read option {word!r} is not classified")
+            return unresolved(f"read option {word!r} is not classified")
         if not word.isidentifier():
-            return unjudged("read target is not a plain variable")
+            return unresolved("read target is not a plain variable")
         names.append(word)
     for name in names or ["REPLY"]:
         if dangerous_env_name(name):
@@ -496,7 +499,7 @@ def resolve_segment_bindings(
             continue
         words = command_words(resolved)
         if not words or not argument_safe_words(words, context):
-            return unjudged("an opaquely bound variable could become a guarded flag")
+            return unresolved("an opaquely bound variable could become a guarded flag")
     return resolved
 
 
@@ -523,7 +526,7 @@ def decide_for_body(
             )
         ]
     if len(loop_words) > 16:
-        return [unjudged("loop word list is too long to instantiate")]
+        return [unresolved("loop word list is too long to instantiate")]
 
     def instantiations(values: list[str]) -> list[KernelDecision]:
         return [
@@ -547,7 +550,7 @@ def decide_for_body(
             words = command_words(segment)
             if not words or not argument_safe_words(words, context):
                 return [
-                    unjudged(
+                    unresolved(
                         "loop words are not literal, so a variable argument"
                         " could become a guarded flag"
                     )
@@ -575,24 +578,24 @@ def decide_loop(
     ``read`` in the condition binds for the body without shared mutation.
     """
     if depth >= 2:
-        return unjudged("loops nest too deeply")
+        return unresolved("loops nest too deeply")
     end = find_loop_end(segments, start)
     if end is None:
-        return unjudged("loop construct is never closed by `done`")
+        return unresolved("loop construct is never closed by `done`")
     interior = segments[start + 1 : end]
     do_index = next(
         (position for position, seg in enumerate(interior) if seg[0] == "do"), None
     )
     if do_index is None:
-        return unjudged("loop construct has no `do` introducing its body")
+        return unresolved("loop construct has no `do` introducing its body")
     body = [seg for seg in [interior[do_index][1:], *interior[do_index + 1 :]] if seg]
     if not body:
-        return unjudged("loop body is empty")
+        return unresolved("loop body is empty")
     condition = interior[:do_index]
     match segments[start]:
         case ["for", name, "in", *loop_words] if name.isidentifier():
             if condition:
-                return unjudged("a `for` loop cannot carry a condition")
+                return unresolved("a `for` loop cannot carry a condition")
             return Group(
                 decisions=decide_for_body(
                     name, loop_words, body, context, depth, bindings
@@ -600,16 +603,16 @@ def decide_loop(
                 resume=end + 1,
             )
         case ["for", *_rest]:
-            return unjudged("loop form is not classified")
+            return unresolved("loop form is not classified")
         case [_keyword, *condition_head]:
             conditions = [seg for seg in [condition_head, *condition] if seg]
             if not conditions:
-                return unjudged("loop condition is empty")
+                return unresolved("loop condition is empty")
             decisions = decide_segment_list(
                 [*conditions, *body], context, depth + 1, bindings
             )
             return Group(decisions=decisions, resume=end + 1)
-    return unjudged("loop construct does not parse")
+    return unresolved("loop construct does not parse")
 
 
 # lup: ignore[library-default] — POSIX shell `case` clause terminators
@@ -648,17 +651,17 @@ def decide_conditional(
 ) -> Group | KernelDecision:
     """Classify one ``if`` construct: conditions and branches recursively."""
     if depth >= 2:
-        return unjudged("conditionals nest too deeply")
+        return unresolved("conditionals nest too deeply")
     end = find_conditional_end(segments, start)
     if end is None:
-        return unjudged("conditional construct does not parse")
+        return unresolved("conditional construct does not parse")
     interior: list[list[str]] = []
     for segment in [segments[start][1:], *segments[start + 1 : end]]:
         stripped = strip_structure_keywords(segment)
         if stripped:
             interior.append(stripped)
     if not interior:
-        return unjudged("conditional is empty")
+        return unresolved("conditional is empty")
     return Group(
         decisions=decide_segment_list(interior, context, depth + 1, bindings),
         resume=end + 1,
@@ -674,10 +677,10 @@ def decide_case(
 ) -> Group | KernelDecision:
     """Classify one ``case`` construct: patterns are match data, bodies recurse."""
     if depth >= 2:
-        return unjudged("case constructs nest too deeply")
+        return unresolved("case constructs nest too deeply")
     opener = segments[start]
     if len(opener) < 3 or opener[2] != "in":
-        return unjudged("case construct does not parse")
+        return unresolved("case construct does not parse")
     body: list[list[str]] = []
     collecting = False
     nested = 0
@@ -704,7 +707,7 @@ def decide_case(
         else:
             body.append(segment)
     if end is None:
-        return unjudged("case construct does not parse")
+        return unresolved("case construct does not parse")
     if not body:
         return Group(decisions=[], resume=end + 1)
     return Group(
@@ -737,7 +740,7 @@ def decide_segment_list(
         if len(segment) == 1 and segment[0] in CASE_TERMINATORS:
             return [
                 *decisions,
-                unjudged("case terminator outside a case construct"),
+                unresolved("case terminator outside a case construct"),
             ]
         while segment and segment[0] == "{":
             segment = segment[1:]
@@ -954,6 +957,7 @@ def decide_shell(
     contained: bool = False,
     recovered: bool = False,
     relayed: bool = False,
+    reachable: bool = False,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -986,6 +990,12 @@ def decide_shell(
     to give a toolchain: where the escape is carried out it is unprompted,
     and where nothing can carry it out the refusal names the sandbox instead
     of a bare write error.
+
+    ``reachable`` says a session holds a route to a human it cannot use at
+    the moment of judging — Codex's PreToolUse, whose refusal is what raises
+    the permission request that asks somebody. A judged question is put to
+    that route rather than handed to the runtime's gate, which is the whole
+    of what keeps a command-bound, single-use approval worth recording.
 
     ``relayed`` says a non-interactive session is not therefore *alone*. A
     reviewed worker holds a question mailbox reaching the human supervising
@@ -1029,5 +1039,7 @@ def decide_shell(
             recovered=recovered,
             interactive=interactive,
             hint=hint,
+            relayed=relayed,
+            reachable=reachable,
         )
     )

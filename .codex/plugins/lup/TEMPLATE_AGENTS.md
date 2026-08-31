@@ -583,11 +583,9 @@ The policy classifies every shell command against the vocabulary declared in
 `devtools/harness/content/shell_vocabulary.py`, every URL scope, and every edit
 in a batch. Segments join deny > ask > defer > allow, so a judged deny wins the
 batch and malformed input fails conservatively. Ask is reserved for judged
-risk: an unjudged command denies with a hint naming the
-`# lup: escalate: <why>` marker, and that marker as a command's leading line
-promotes the decision into an approval question carrying your stated reason.
-Under a launcher-verified sandbox (`LUP_SANDBOX_ACTIVE`), unjudged work defers
-to that boundary rather than denying. Native `apply_patch` commands are decoded into complete before/after
+risk: an unjudged command defers to the runtime's own gate wherever it runs,
+and `# lup: escalate: <why>` as a command's leading line promotes a decision
+into an approval question carrying your stated reason. Native `apply_patch` commands are decoded into complete before/after
 batches for the canonical edit policy, and malformed or unsupported patches
 fail closed. Codex's own sandbox and approval policy remain the outer
 filesystem and network boundary. Generation also compiles every prefix-safe

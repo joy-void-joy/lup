@@ -121,10 +121,17 @@ def test_two_rewriting_rows_compose_without_knowing_about_each_other() -> None:
     """The property the order exists for.
 
     A stated reason makes a refusal a question; a host with nobody to ask
-    makes a question no judgment; a boundary carries what nobody judged.
-    Three rows, none of which names another, and the answer is the
+    answers that question by refusing rather than by letting the call
+    through. Two rows, neither naming the other, and the answer is the
     composition — which is what a `match` arm could only express by being in
     the right place.
+
+    The boundary does not enter it, though one is running here. A marker is
+    the agent asking to be judged, and a deferral is the policy declining to
+    judge: resolving one with the other would make the instrument for
+    summoning a human the instrument for bypassing the table, and on a host
+    with nobody to summon it would work every time. What the refusal buys is
+    the stated reason surviving to whoever reads the relay.
     """
     settled = settle(
         facts(
@@ -136,17 +143,31 @@ def test_two_rewriting_rows_compose_without_knowing_about_each_other() -> None:
         )
     )
 
-    assert settled.effect == "defer"
-    assert settled.reason == "escalated (I need it): no"
+    assert settled.effect == "deny"
+    assert settled.reason.startswith("escalated (I need it): no")
 
 
-def test_a_question_nobody_can_answer_without_a_boundary_is_refused() -> None:
-    """The same two rewrites, with nothing beneath them to carry the call."""
+def test_a_question_nobody_can_answer_defers_and_says_what_is_beneath_it() -> None:
+    """The same two rewrites, with nothing beneath them to carry the call.
+
+    This refused once, on the reasoning that a deferral with no boundary
+    under it relaxes into nothing. What that cost was paid by the session
+    the project actually ships: the launcher withholds the sandbox flag
+    inside a container *because* the container is the boundary, the kernel
+    read only the flag, and unjudged work denied behind the strongest
+    boundary there is.
+
+    So the verdict no longer turns on the boundary and the reason names it
+    instead — which is the honest form of the same information, since a
+    deferral was never a permission. It hands the call to the runtime's own
+    gate, and a session at that gate's defaults is still asked.
+    """
     settled = settle(
         facts(KernelDecision("ask", "risky"), interactive=False, sandboxed=False)
     )
 
-    assert (settled.effect, settled.reason) == ("deny", "risky" + HINT)
+    assert settled.effect == "defer"
+    assert "nothing is beneath it" in settled.reason
 
 
 def test_no_stated_reason_places_a_call_the_host_cannot_place() -> None:

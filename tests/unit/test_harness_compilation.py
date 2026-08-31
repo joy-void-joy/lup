@@ -1742,7 +1742,12 @@ def test_generated_codex_permission_request_allows_safe_assignment(
     [
         ("# lup: escalate: required diagnostic\npython -c 1", 0),
         ("PATH=/tmp git status", 0),
-        ("1BAD=constant git status", 2),
+        # A leading digit makes this no assignment at all, so the words read
+        # as a command named `1BAD=constant` — one no row covers, which
+        # defers rather than refusing. Exit 0 no longer separates it from the
+        # sensitive assignment above, both being "not refused at this event";
+        # the test below asks at the event where the two come apart.
+        ("1BAD=constant git status", 0),
     ],
 )
 def test_generated_codex_permission_request_preserves_assignment_guards(
@@ -1762,6 +1767,41 @@ def test_generated_codex_permission_request_preserves_assignment_guards(
     assert isinstance(result, sh.RunningCommand)
     assert result.exit_code == expected_exit
     assert result.stdout == b""
+
+
+@pytest.mark.parametrize(
+    "command,expected_exit",
+    [
+        ("PATH=/tmp git status", 2),
+        ("1BAD=constant git status", 0),
+    ],
+)
+def test_a_sensitive_assignment_is_owed_a_permission_request(
+    command: str, expected_exit: int
+) -> None:
+    """PreToolUse is where a question and a shrug stop looking alike.
+
+    The permission event answers 0 for both — one because the question is
+    being put to a human, the other because nobody judged the command and
+    the runtime's own gate takes it. Here the judged ask refuses instead,
+    which is what raises that permission request, and the unjudged command
+    goes through. A leading digit is the whole difference between them:
+    `PATH=` is an assignment this guards, `1BAD=` is a command name.
+    """
+    script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
+    body = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_use_id": "tool-one",
+        "tool_input": {"command": command},
+    }
+    result = sh.Command(str(script))(
+        _in=json.dumps(body),
+        _ok_code=[0, 2],
+        _return_cmd=True,
+    )
+    assert isinstance(result, sh.RunningCommand)
+    assert result.exit_code == expected_exit
 
 
 def test_generated_codex_pretool_consumes_only_its_correlated_approval(

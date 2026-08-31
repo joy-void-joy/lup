@@ -1036,6 +1036,7 @@ def bash_decision(
     escapable: bool,
     cwd: Path | None,
     relayed: bool = False,
+    reachable: bool = False,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -1096,6 +1097,7 @@ def bash_decision(
         # refusal that named no route sent it to queue a blocking question
         # instead.
         relayed=relayed,
+        reachable=reachable,
         escapable=escapable,
         # Read here rather than passed by each dispatcher, unlike `escapable`
         # above: whether this process sits inside the container is a fact
@@ -1421,6 +1423,14 @@ def dispatch(payload, permission_request=False):
             # therefore alone: the run it belongs to carries a mailbox that
             # reaches whoever is supervising it.
             relayed=autonomous,
+            # Neither is this one, at either event. PreToolUse can put a
+            # question to nobody at the moment it judges, and its refusal is
+            # precisely what raises the permission request that does — so the
+            # route is always here and a judged ask is owed to it rather than
+            # handed to the runtime's own gate. Without this, the approval
+            # recorded above — bound to one command and spent once — would
+            # never be the thing that lets a call through.
+            reachable=True,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this

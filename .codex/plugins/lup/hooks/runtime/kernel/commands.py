@@ -6,7 +6,7 @@ import posixpath
 import re
 from typing import TypedDict
 
-from .decision import KernelDecision, unjudged
+from .decision import KernelDecision, unjudged, unresolved
 from .rows import (
     PathRoleRow,
     PathRuleRow,
@@ -155,7 +155,7 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             None,
         )
         if opaque is not None:
-            return unjudged(
+            return unresolved(
                 f"argument {opaque!r} could expand into a guarded flag — bind"
                 " it to a literal value first"
             )
@@ -478,7 +478,7 @@ def decide_sed_words(
                 continue
             if name in SED_SAFE_LONG_OPTIONS and not separator:
                 continue
-            return unjudged(f"sed option {name!r} is not classified")
+            return unresolved(f"sed option {name!r} is not classified")
         if word.startswith("-") and len(word) > 1:
             flags = word[1:]
             if "i" in flags:
@@ -496,15 +496,20 @@ def decide_sed_words(
                 script_from_options = True
                 flags = flags[:-1]
             if any(flag not in SED_SAFE_SHORT_FLAGS for flag in flags):
-                return unjudged(f"sed option {word!r} is not classified")
+                return unresolved(f"sed option {word!r} is not classified")
             continue
         positional.append(word)
     if script_expected:
-        return unjudged("sed expression flag has no script")
+        return unresolved("sed expression flag has no script")
     if not script_from_options and positional:
         scripts.append(positional.pop(0))
     if not sandbox and not all(safe_sed_script(script) for script in scripts):
-        return unjudged("sed script is not classified as read-only")
+        # The rule answering, as for `awk` below. `sed` is allowed on the
+        # condition that its script reads rather than acts, and `s///e`
+        # executes the substitution as a shell command while `w` writes a
+        # file — the same bypass `eval` is, reached by a script this read
+        # perfectly well and judged.
+        return KernelDecision("deny", "sed script acts rather than reads")
     if not in_place:
         return KernelDecision("allow", "read-only sed script")
     granted = rewrites_only_recoverable_files(
@@ -557,13 +562,17 @@ def decide_awk_words(words: list[str]) -> KernelDecision:
             continue
         if word.startswith(("-F", "-v")) and not word.startswith("--"):
             continue
-        return unjudged(f"awk option {word!r} is not classified")
+        return unresolved(f"awk option {word!r} is not classified")
     if value_expected:
-        return unjudged("awk option flag has no value")
+        return unresolved("awk option flag has no value")
     if not positional:
-        return unjudged("awk has no program")
+        return unresolved("awk has no program")
     if not safe_awk_program(positional[0]):
-        return unjudged("awk program is not classified as read-only")
+        # The rule answering, not a row nobody wrote and not a program this
+        # could not read: `awk` is allowed on the condition that its program
+        # reads, and `system()` or a `print > file` redirection is the
+        # program acting. The classifier read it and the condition failed.
+        return KernelDecision("deny", "awk program acts rather than reads")
     return KernelDecision("allow", "read-only awk program")
 
 
@@ -685,16 +694,16 @@ def decide_curl_words(
         ):
             continue
         if word.startswith("-"):
-            return unjudged(f"curl option {word!r} is not classified")
+            return unresolved(f"curl option {word!r} is not classified")
         urls.append(word)
     if expect_value or expect_method:
-        return unjudged("curl option has no value")
+        return unresolved("curl option has no value")
     if method not in ("GET", "HEAD"):
         return KernelDecision(
             "ask", f"curl {method} can change remote state — requires approval"
         )
     if not urls:
-        return unjudged("curl has no URL")
+        return unresolved("curl has no URL")
     for url in urls:
         verdict = decide_fetch(curl_url(url), allowed_scopes, denied_scopes)
         if verdict.effect != "allow":
@@ -764,13 +773,13 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
         if word.partition("=")[0] in GH_API_VALUE_FLAGS:
             continue
         if word.startswith("-"):
-            return unjudged(f"gh api option {word!r} is not classified")
+            return unresolved(f"gh api option {word!r} is not classified")
         if opaque_argument(word):
             return unjudged(
                 "a gh api endpoint that expands at run time is not classified"
             )
     if expect_value or expect_method:
-        return unjudged("gh api option has no value")
+        return unresolved("gh api option has no value")
     if method.upper() not in GH_API_READ_METHODS:
         return KernelDecision(
             "ask", f"gh api {method} can change remote state — requires approval"
@@ -810,7 +819,7 @@ def uv_package_source(
     wearing the same verb, so it is named back rather than folded into an
     allow.
 
-    An unreadable word answers too. What is being tested is the absence of a
+    An unresolved word answers too. What is being tested is the absence of a
     flag, and a word this cannot read might be one, so the conservative
     direction is to treat it as though it were.
     """
@@ -880,7 +889,7 @@ def decide_uv(
     if subcommand == "run" and len(words) > 2:
         run_words = uv_run_words(words)
         if not run_words:
-            return unjudged("uv run has no command")
+            return unresolved("uv run has no command")
         run_command = posixpath.basename(run_words[0])
         bare_target = "/" not in run_words[0]
         # A script file and an inline program are different questions, and

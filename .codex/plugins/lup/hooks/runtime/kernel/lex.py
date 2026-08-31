@@ -3,17 +3,20 @@
 """Shell lexing: tokens, redirections, heredocs, and segment grouping."""
 
 import posixpath
+from string import Template
 from typing import Literal, TypedDict
 
 from .decision import (
     BACKTICK_REASON,
     KernelDecision,
+    Recovery,
     SUBSTITUTION_REASON,
     SUBSTITUTION_SENTINEL,
     unjudged,
+    unresolved,
 )
 from .archives import archive_write
-from .roles import path_role
+from .roles import path_role, spells_its_path
 from .rows import PathRoleRow, PathRuleRow
 from .words import (
     SCRATCH_VERB_FLAGS,
@@ -210,7 +213,7 @@ def arithmetic_token(command: str, position: int) -> Lexeme | KernelDecision:
         return Lexeme(text=expansion, end=end)
     if command[end : end + 2] == "$(" or command[end : end + 1] == "`":
         return KernelDecision("deny", SUBSTITUTION_REASON)
-    return unjudged("arithmetic expansion does not parse")
+    return unresolved("arithmetic expansion does not parse")
 
 
 def without_leading_tabs(line: str) -> str:
@@ -248,7 +251,7 @@ def read_heredoc_bodies(
             if newline == -1:
                 break
         if not terminated:
-            return unjudged("heredoc does not terminate")
+            return unresolved("heredoc does not terminate")
         if not is_quoted:
             body = "\n".join(lines)
             if "`" in body or "$(" in body:
@@ -293,7 +296,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
         if character == "'":
             closing = command.find("'", position + 1)
             if closing == -1:
-                return unjudged("shell quoting does not parse")
+                return unresolved("shell quoting does not parse")
             word.extend(command[position + 1 : closing])
             started = True
             quoted = True
@@ -325,7 +328,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                     substitution = read_command_substitution(command, position)
                     body = substitution["text"]
                     if body is None:
-                        return unjudged("command substitution does not parse")
+                        return unresolved("command substitution does not parse")
                     tokens.append(ShellToken("cmdsub", body))
                     word.append(SUBSTITUTION_SENTINEL)
                     position = substitution["end"]
@@ -333,7 +336,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                 word.append(inner)
                 position += 1
             if position >= length:
-                return unjudged("shell quoting does not parse")
+                return unresolved("shell quoting does not parse")
             started = True
             position += 1
             continue
@@ -362,7 +365,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             substitution = read_command_substitution(command, position)
             body = substitution["text"]
             if body is None:
-                return unjudged("command substitution does not parse")
+                return unresolved("command substitution does not parse")
             tokens.append(ShellToken("cmdsub", body))
             word.append(SUBSTITUTION_SENTINEL)
             started = True
@@ -374,11 +377,13 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             )
         if character == "<" and position + 1 < length and command[position + 1] == "(":
             if started:
-                return unjudged("process substitution inside a word is not classified")
+                return unresolved(
+                    "process substitution inside a word is not classified"
+                )
             substitution = read_process_substitution(command, position + 2)
             inner = substitution["text"]
             if inner is None:
-                return unjudged("process substitution does not parse")
+                return unresolved("process substitution does not parse")
             tokens.append(ShellToken("procsub", inner))
             position = substitution["end"]
             continue
@@ -421,7 +426,12 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             continue
         if character == "(":
             if started:
-                return unjudged(
+                # A definition names something later commands resolve to,
+                # and this never sees the body when they do: `git() { rm -rf
+                # /; }` leaves the next `git status` classified as git and
+                # running something else entirely. That is the bypass `eval`
+                # is, spelled as a declaration, so it answers the same way.
+                return unresolved(
                     "shell arrays and function definitions are not classified"
                 )
             tokens.append(ShellToken("op", "("))
@@ -437,9 +447,9 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
         position += 1
     flush()
     if heredoc_expected:
-        return unjudged("heredoc has no delimiter")
+        return unresolved("heredoc has no delimiter")
     if pending_heredocs:
-        return unjudged("heredoc does not terminate")
+        return unresolved("heredoc does not terminate")
     return tokens
 
 
@@ -452,16 +462,53 @@ def is_control_operator(text: str) -> bool:
     return text in (";", "&", "&&", "||", "|", "|&", "\n")
 
 
-def literal_target(word: str) -> bool:
-    """Whether a redirection target names exactly the path it spells.
+def target_recovery(written: str) -> Recovery:
+    """What would put a redirection's target back, once it has been resolved.
 
-    Existence is established against the word as written, so a target
-    carrying an unexpanded parameter, a substitution, or a tilde names a
-    different file at run time than the one that was stat'd. Such a target
-    never qualifies for the create-versus-overwrite relaxation, and keeps
-    the strict verdict the operator alone earns.
+    The question every recovery annotation answers, asked of a path rather
+    than of a command. A relative path names a file in this checkout, which
+    the object store holds; anything else can land on the machine, which
+    only a container makes disposable.
+
+    A word still carrying an expansion names neither, and takes the wider
+    answer rather than no answer at all. What it resolves to at run time is
+    somewhere the container makes disposable or somewhere the object store
+    holds, and ``container`` already means *both* -- the row settling it
+    requires a container **and** the snapshot beneath it, because the
+    checkout is bind-mounted and outlives the container. So the one thing an
+    unresolved target could destroy that a readable one could not is a file
+    outside both, which a contained session has no route to.
     """
-    return not any(marker in word for marker in ("$", "~", "`", SUBSTITUTION_SENTINEL))
+    if spells_its_path(written) and not posixpath.isabs(written):
+        if not posixpath.normpath(written).startswith(".."):
+            return "snapshot"
+    return "container"
+
+
+def assigned_literals(
+    tokens: list[ShellToken], before: int
+) -> dict[str, str]:  # lup: ignore[dict-str-payload] — shell names, an open set
+    """Every wholly literal ``NAME=value`` this command set before ``before``.
+
+    A target spelled ``$B`` is opaque to every rule below, and the strict
+    verdict that earns is the right one for a word whose value nothing here
+    can read. It is the wrong one when the command assigned it two words
+    earlier: the value is written in front of the classifier, and asking
+    about it is not caution but a failure to look. Measured, ``cat > $B``
+    asked where the literal path it held was allowed outright.
+
+    Only literal values are collected. Substituting an opaque one would
+    trade an unresolved word for another unresolved word while looking like
+    an answer, and the verdict it earned would be about neither.
+    """
+    assigned: dict[str, str] = {}  # lup: ignore[dict-str-payload] — as above
+    for token in tokens[:before]:
+        # lup: ignore[string-split] — `NAME=value` is the shape, not a format
+        name, separator, value = token.text.partition("=")
+        if token.kind == "word" and separator and name.isidentifier():
+            if spells_its_path(value):
+                assigned[name] = value
+    return assigned
 
 
 def redirection_writes(operator: str) -> bool:
@@ -575,7 +622,7 @@ def resolve_redirection(
         target = index + 1
         if target >= len(tokens) or tokens[target].kind != "word":
             return Redirection(
-                decision=unjudged("heredoc has no delimiter"), resume=index + 1
+                decision=unresolved("heredoc has no delimiter"), resume=index + 1
             )
         return Redirection(decision=None, resume=target + 1)
     if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
@@ -588,30 +635,37 @@ def resolve_redirection(
         )
     if "<" in operator:
         return Redirection(decision=None, resume=target + 1)
-    if posixpath.normpath(tokens[target].text) == "/dev/null":
+    written = Template(tokens[target].text).safe_substitute(
+        assigned_literals(tokens, index)
+    )
+    if posixpath.normpath(written) == "/dev/null":
         return Redirection(decision=None, resume=target + 1)
-    refused = refuses_generated_plugin_target(tokens[target].text)
+    refused = refuses_generated_plugin_target(written)
     if refused is not None:
         return Redirection(decision=refused, resume=target + 1)
     protected = protected_write_target(
-        [tokens[target].text],
+        [written],
         path_rules or [],
-        existing_targets is None or tokens[target].text in existing_targets,
+        existing_targets is None or written in existing_targets,
     )
     if protected is not None:
         return Redirection(decision=protected, resume=target + 1)
-    if path_role(tokens[target].text, path_roles or []) == "scratch":
+    if path_role(written, path_roles or []) == "scratch":
         return Redirection(decision=None, resume=target + 1)
     if (
         existing_targets is not None
-        and literal_target(tokens[target].text)
-        and tokens[target].text not in existing_targets
+        and spells_its_path(written)
+        and written not in existing_targets
     ):
         return Redirection(decision=None, resume=target + 1)
-    if tokens[target].text in (recoverable_targets or []):
+    if written in (recoverable_targets or []):
         return Redirection(decision=None, resume=target + 1)
     return Redirection(
-        decision=KernelDecision("ask", "file redirection is never auto-allowed"),
+        decision=KernelDecision(
+            "ask",
+            "file redirection is never auto-allowed",
+            recovery=target_recovery(written),
+        ),
         resume=target + 1,
     )
 
@@ -640,7 +694,7 @@ def parse_shell_words(
 
     def substituted_segments(text: str) -> list[list[str]] | KernelDecision:
         if depth >= 2:
-            return unjudged("command substitution nests too deeply")
+            return unresolved("command substitution nests too deeply")
         return parse_shell_words(
             text, depth + 1, existing_targets, path_roles, path_rules, recoverable
         )
@@ -684,7 +738,7 @@ def parse_shell_words(
                     segments.extend(folded)
                 fold += 1
             if fold >= len(tokens):
-                return unjudged("test expression does not parse")
+                return unresolved("test expression does not parse")
             current.append("[[")
             index = fold + 1
             continue
@@ -698,7 +752,7 @@ def parse_shell_words(
             and current
             and current[-1] not in ("then", "else", "elif", "do", "if", "in", "!")
         ):
-            return unjudged("shell function definitions are not classified")
+            return unresolved("shell function definitions are not classified")
         if token.kind == "op" and token.text in SENTINEL_OPS:
             close_segment()
             segments.append([token.text])
@@ -706,7 +760,7 @@ def parse_shell_words(
             continue
         if token.kind == "procsub":
             if depth >= 2:
-                return unjudged("process substitution nests too deeply")
+                return unresolved("process substitution nests too deeply")
             inner = parse_shell_words(
                 token.text,
                 depth + 1,
@@ -741,7 +795,7 @@ def parse_shell_words(
             return verdict
     close_segment()
     if not segments:
-        return unjudged("shell command has no executable segment")
+        return unresolved("shell command has no executable segment")
     return segments
 
 

@@ -221,6 +221,14 @@ def dispatch(payload, permission_request=False):
             # therefore alone: the run it belongs to carries a mailbox that
             # reaches whoever is supervising it.
             relayed=autonomous,
+            # Neither is this one, at either event. PreToolUse can put a
+            # question to nobody at the moment it judges, and its refusal is
+            # precisely what raises the permission request that does — so the
+            # route is always here and a judged ask is owed to it rather than
+            # handed to the runtime's own gate. Without this, the approval
+            # recorded above — bound to one command and spent once — would
+            # never be the thing that lets a call through.
+            reachable=True,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this

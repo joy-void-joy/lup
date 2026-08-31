@@ -38,8 +38,10 @@ def test_the_offered_defaults_produce_an_agent_that_can_read() -> None:
     # Generosity for reads is not generosity for losses.
     assert verdict("rm notes.md", rules).effect == "ask"
     assert verdict("sudo apt install x", rules).effect == "ask"
-    # And an empty table is the verdict the library used to ship by default.
-    assert verdict("ls -la", []).effect == "deny"
+    # And an empty table judges nothing, which is a deferral rather than a
+    # refusal: shipping no vocabulary hands every command to the runtime's
+    # own gate instead of standing in front of it saying no.
+    assert verdict("ls -la", []).effect == "defer"
 
 
 def test_git_s_object_store_queries_are_reads() -> None:
@@ -71,7 +73,9 @@ def test_sweeping_the_queries_left_what_loses_work_alone() -> None:
 def test_an_empty_group_replaces_the_offered_words_rather_than_adding_to_them() -> None:
     """The words are a parameter default, so passing any replaces all of them."""
     assert verdict("ls", read_only_rules()).effect == "allow"
-    assert verdict("ls", read_only_rules(["cat"])).effect == "deny"
+    # Replaced rather than added to, so `ls` leaves the table entirely — and
+    # a word no table holds defers, which is what "not covered" now means.
+    assert verdict("ls", read_only_rules(["cat"])).effect == "defer"
     assert verdict("cat f", read_only_rules(["cat"])).effect == "allow"
 
 
