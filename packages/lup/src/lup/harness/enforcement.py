@@ -95,6 +95,7 @@ def semantic_policy_for(
     sandbox_active: bool = False,
     escapable: bool = False,
     recovered: bool = False,
+    contained: bool = False,
     interactive: bool = True,
     autonomous: bool = False,
     trusted_script_roots: list[str] | None = None,
@@ -123,6 +124,7 @@ def semantic_policy_for(
             sandbox_excluded_commands=hooks.excluded_commands(),
             escapable=escapable,
             recovered=recovered,
+            contained=contained,
             trusted_script_roots=trusted_script_roots,
             interactive=interactive,
             # A reviewed worker is the one non-interactive session with a

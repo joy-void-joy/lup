@@ -154,6 +154,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         sandbox_excluded_commands: list[str] | None = None,
         escapable: bool = False,
         recovered: bool = False,
+        contained: bool = False,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
@@ -173,6 +174,13 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         # caller that knows says so, and one that does not gets the strict
         # answer -- the one that relaxes nothing.
         self.recovered = recovered
+        # The same, for the boundary the session runs behind. Absent, every
+        # rule annotated `container` reported the question it would have
+        # asked on a bare host, which is not the answer a contained session
+        # gets -- and `dev policy` is what the guidance sends an agent to
+        # before it spends a turn, so the two disagreeing is the tool being
+        # wrong about the only session anybody asks it about.
+        self.contained = contained
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
@@ -212,6 +220,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 target_tables=self.target_tables,
                 escapable=self.escapable,
                 recovered=self.recovered,
+                contained=self.contained,
                 relayed=self.relayed,
             )
         )

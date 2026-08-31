@@ -26,6 +26,7 @@ from pydantic import AnyHttpUrl
 from lup.devtools.hooks.corpus import read_corpus
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
+from lup.policy.assets.host import contained
 from lup.policy.foreign import foreign_warnings
 from lup.policy.models import Decision, FetchUrl, ShellCommand
 from lup.workspace.paths import project_root
@@ -96,6 +97,13 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         The undo layer is reported as present either way, because it is: a
         session snapshots the tree before every command, and a reader asking
         what they will be asked about should be told what a session is told.
+
+        The boundary is read from this process for the same reason, and was
+        the one session fact this did not carry. Every rule annotated
+        ``container`` reported the question a bare host would ask, which is
+        not what a contained session is told -- and the guidance sends an
+        agent here *before* it spends a turn, so the gap fell entirely on
+        the one reader the command exists for.
         """
         policy = semantic_policy_for(
             declared(),
@@ -103,6 +111,7 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
             interactive=interactive,
             sandbox_active=trapped,
             recovered=True,
+            contained=contained(),
         )
         return policy.decide(ShellCommand(command=command, cwd=project_root()))
 

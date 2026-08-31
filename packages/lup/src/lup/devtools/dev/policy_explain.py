@@ -21,6 +21,7 @@ from pydantic import AnyHttpUrl, BaseModel
 
 from lup.devtools.utils import output_json
 from lup.harness.enforcement import semantic_policy_for
+from lup.policy.assets.host import contained
 from lup.harness.models import HookSet
 from lup.policy.models import EditBatch, EditChange, FetchUrl, ShellCommand
 from lup.policy.shell_rules import ShellCommandRule
@@ -62,8 +63,22 @@ def verdict_for(
     the shape that isolates the path gates from the anti-pattern and size
     ones: the question this command answers is whether a path may be written
     at all, not whether some particular diff passes review.
+
+    The boundary and the undo layer are read from this process, and were the
+    two session facts this composition left out. Without them every rule
+    annotated ``snapshot`` or ``container`` reported the question a bare host
+    would ask, so the one verdict a contained session most often gets --
+    settled by the session rather than asked -- was the one verdict this
+    command could never print. The guidance sends an agent here *before* it
+    spends a turn, which put the whole gap on the reader it exists for.
     """
-    policy = semantic_policy_for(hooks, sandbox_active=sandbox, autonomous=autonomous)
+    policy = semantic_policy_for(
+        hooks,
+        sandbox_active=sandbox,
+        autonomous=autonomous,
+        recovered=True,
+        contained=contained(),
+    )
     match kind:
         case "shell":
             event = ShellCommand(command=subject, cwd=cwd)
