@@ -4,10 +4,12 @@
 says the words themselves are a judgement about one project's toolchain, so
 they arrive from outside. That is true, and it left the library shipping
 nothing — which is not the neutral position it reads as. An empty table
-matches no command, every command is then unjudged, and unjudged resolves to
-a deny: a fresh adopter's agent cannot run ``ls`` until several hundred lines
-of vocabulary exist. Shipping nothing chose a verdict for them just as surely
-as shipping something would have, and chose the least useful one.
+matches no command and every command is then unlisted, which is a question
+put to whoever is there and a refusal where nobody is: a fresh adopter's
+agent prompts for ``ls`` in front of a human and cannot run it in a worker,
+until several hundred lines of vocabulary exist. Shipping nothing chose a
+verdict for them just as surely as shipping something would have, and chose
+the least useful one.
 
 So each group below is a function returning rules, and every word it declares
 is a parameter default rather than a table. An adopter calls the group to
@@ -370,6 +372,76 @@ def redirected_rules(
     A redirect is house style rather than a safety verdict, which is why the
     pairs are a parameter: a project on a different package manager replaces
     them instead of inheriting an argument about uv.
+    """
+    return [
+        ShellCommandRule(
+            name=command.name, default_effect="deny", reason=command.reason
+        )
+        for command in commands
+    ]
+
+
+def reaching_builtin_rules(
+    commands: Sequence[JudgedCommand] = (
+        JudgedCommand(
+            name="eval",
+            reason="eval runs text as code, which no gate reading the command"
+            " can see into — write the command out",
+        ),
+        JudgedCommand(
+            name="source",
+            reason="sourcing a script runs its code in this shell, where no"
+            " gate read it — run the commands it holds",
+        ),
+        JudgedCommand(
+            name=".",
+            reason="sourcing a script runs its code in this shell, where no"
+            " gate read it — run the commands it holds",
+        ),
+        JudgedCommand(
+            name="export",
+            reason="an exported variable decides what later commands see —"
+            " set it on the command that needs it",
+        ),
+        JudgedCommand(
+            name="declare",
+            reason="a declared variable decides what later commands see —"
+            " set it on the command that needs it",
+        ),
+        JudgedCommand(
+            name="unset",
+            reason="unsetting a variable decides what later commands see —"
+            " set it on the command that needs it",
+        ),
+    ),
+) -> list[ShellCommandRule]:
+    """Builtins that run unread code, or decide what a *later* command sees.
+
+    :func:`read_only_rules` carries the control-flow builtins because they
+    change nothing and nothing they do reaches a later command. These fail
+    that second half, and were held out of that list to say so — but an
+    omission is not a judgement anything can read. Left unlisted they refused
+    with "command 'eval' is not classified", which is the one thing that was
+    not true of them: they were classified, by being left out, and the agent
+    was told the opposite.
+
+    Declared so the refusal carries its own reason, and so the row answering
+    for work nobody classified is not also the row enforcing a decision
+    somebody made. The same verdict as before, arrived at on the record.
+
+    Declaring them also settles what a sandbox does about them, and settles
+    it the way the inline-code refusal beside them already answered: a
+    judged deny survives a boundary, because the objection to ``eval`` is
+    that nothing read what it runs, and confining unread code does not read
+    it. Left unlisted they deferred to the boundary instead — so ``python -c
+    'x'`` and ``eval echo x``, which are one objection, were enforced two
+    ways depending on which of them somebody had written down.
+
+    ``exec`` is absent though it was held out of that list too: the lexer
+    already resolves it to the command it wraps, so ``exec rm -rf src`` is
+    judged as ``rm -rf src`` and a row here would never be reached. Which is
+    also the right answer — what ``exec`` runs is the whole of what it does
+    to anything outside the shell it replaces.
     """
     return [
         ShellCommandRule(
@@ -1386,6 +1458,7 @@ def default_vocabulary() -> list[ShellCommandRule]:
         *read_only_rules(),
         *judged_ask_rules(),
         *redirected_rules(),
+        *reaching_builtin_rules(),
         *guarded_tool_rules(),
         git_rule(),
         gh_rule(),

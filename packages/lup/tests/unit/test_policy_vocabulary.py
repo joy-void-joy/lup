@@ -38,8 +38,10 @@ def test_the_offered_defaults_produce_an_agent_that_can_read() -> None:
     # Generosity for reads is not generosity for losses.
     assert verdict("rm notes.md", rules).effect == "ask"
     assert verdict("sudo apt install x", rules).effect == "ask"
-    # And an empty table is the verdict the library used to ship by default.
-    assert verdict("ls -la", []).effect == "deny"
+    # And an empty table is the verdict the library used to ship by default:
+    # a prompt on every command, which is a working agent nobody can stand
+    # rather than one that cannot run.
+    assert verdict("ls -la", []).effect == "ask"
 
 
 def test_git_s_object_store_queries_are_reads() -> None:
@@ -71,7 +73,7 @@ def test_sweeping_the_queries_left_what_loses_work_alone() -> None:
 def test_an_empty_group_replaces_the_offered_words_rather_than_adding_to_them() -> None:
     """The words are a parameter default, so passing any replaces all of them."""
     assert verdict("ls", read_only_rules()).effect == "allow"
-    assert verdict("ls", read_only_rules(["cat"])).effect == "deny"
+    assert verdict("ls", read_only_rules(["cat"])).effect == "ask"
     assert verdict("cat f", read_only_rules(["cat"])).effect == "allow"
 
 

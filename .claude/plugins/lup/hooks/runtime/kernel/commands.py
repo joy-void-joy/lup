@@ -6,7 +6,7 @@ import posixpath
 import re
 from typing import TypedDict
 
-from .decision import KernelDecision, unjudged
+from .decision import KernelDecision, unjudged, unlisted
 from .rows import (
     PathRoleRow,
     PathRuleRow,
@@ -272,7 +272,12 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
     executable = posixpath.basename(words[0])
     matches = [row for row in rows if row["command"] == executable]
     if not matches:
-        return unjudged(f"command {executable!r} is not classified")
+        # Unlisted only where the name itself was legible. `$CMD --flag`
+        # names nothing a reviewer could weigh: they would be approving
+        # whatever the expansion becomes, which is not what they were shown.
+        if opaque_argument(executable):
+            return unjudged(f"command {executable!r} is not classified")
+        return unlisted(f"command {executable!r} is not classified")
     arguments = words[1:]
     if not any(row["subcommand"] for row in matches):
         return apply_command_row(
@@ -287,7 +292,7 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
     subrows = [row for row in matches if subword and row["subcommand"] == subword]
     if not subrows:
         if default is None:
-            return unjudged(f"{executable} {subword} is not classified")
+            return unlisted(f"{executable} {subword} is not classified")
         return apply_command_row(default, arguments)
     if any(row["operation"] for row in subrows):
         opword = next((word for word in remainder if not word.startswith("-")), "")
@@ -297,7 +302,7 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
         subdefault = next((row for row in subrows if not row["operation"]), None)
         if subdefault is not None:
             return apply_command_row(subdefault, remainder)
-        return unjudged(f"{executable} {subword} {opword} is not classified")
+        return unlisted(f"{executable} {subword} {opword} is not classified")
     return apply_command_row(subrows[0], remainder)
 
 

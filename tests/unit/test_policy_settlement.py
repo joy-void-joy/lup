@@ -149,6 +149,49 @@ def test_a_question_nobody_can_answer_without_a_boundary_is_refused() -> None:
     assert (settled.effect, settled.reason) == ("deny", "risky" + HINT)
 
 
+def test_unjudged_work_reaches_a_human_wherever_there_is_one() -> None:
+    """Nobody classified it, so the somebody this session has looks at it.
+
+    Measured before the question existed: `pytest -q` and `ruff check .` were
+    refused ambient while `ssh host rm -rf /` — judged, and judged
+    destructive — reached the human. `# lup: escalate:` already converted
+    this refusal into this question, so the denial bought paperwork rather
+    than a gate.
+    """
+    asked = settle(
+        facts(
+            KernelDecision("defer", "nobody looked", unlisted=True),
+            sandboxed=False,
+        )
+    )
+
+    assert (asked.effect, asked.reason) == ("ask", "nobody looked")
+
+
+def test_unjudged_work_with_nobody_to_ask_is_still_refused() -> None:
+    """The worker path is unchanged: no reviewer is no question."""
+    refused = settle(
+        facts(
+            KernelDecision("defer", "nobody looked", unlisted=True),
+            interactive=False,
+            sandboxed=False,
+        )
+    )
+
+    assert (refused.effect, refused.reason) == ("deny", "nobody looked" + HINT)
+
+
+def test_a_deferral_the_kernel_could_not_read_refuses_even_with_a_reviewer() -> None:
+    """A question about text the policy could not parse is unanswerable.
+
+    `cat x ;& rm -rf ~` would be approved on the strength of the `cat`, so
+    the reviewer's presence buys nothing here and the refusal stands.
+    """
+    refused = settle(facts(KernelDecision("defer", "unreadable"), sandboxed=False))
+
+    assert (refused.effect, refused.reason) == ("deny", "unreadable" + HINT)
+
+
 def test_no_stated_reason_places_a_call_the_host_cannot_place() -> None:
     """Approval does not give a host a channel it does not have.
 

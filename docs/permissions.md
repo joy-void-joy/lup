@@ -55,7 +55,7 @@ The rows, in order, each stating its own claim:
 | `RestoredBySession` | An approval question about a loss this session can already put back. |
 | `UnanswerableQuestion` | A question on a host with nobody to put it to is not a question. |
 | `ConfinedElsewhere` | No judgment, and a boundary beneath it: the boundary carries it. |
-| `Unjudged` | No judgment and no boundary: the only thing left is to refuse. |
+| `Unjudged` | No judgment and no boundary: whoever can answer it, answers it. |
 | `JudgedRefusal` | A rule refused this, and no sandbox rescues a judged deny. |
 | `Standing` | Whatever reached here stands: a permission, or an answerable question. |
 

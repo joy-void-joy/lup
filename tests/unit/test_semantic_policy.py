@@ -187,7 +187,8 @@ FIXTURE_EXCLUDED_COMMANDS = ["quuxify *"]
 
 Unjudged exactly like `frobnicate` beside it, so the pair says the whole
 rule between them: unjudged work defers to a boundary that covers it, and
-denies where the declaration removed the cover."""
+where the declaration removed the cover it reaches whoever can answer for
+it — a reviewer, or a refusal where there is none."""
 
 FIXTURE_REFUSED_TOOLS = [
     RefusedTool(tool="Quuxify", reason="quuxifying leaves the repository"),
@@ -469,10 +470,12 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo $(ls", effect="deny"),
     DecisionCase(input="echo `id`", effect="deny"),
     # Read-side process substitution classifies its inner command recursively;
-    # the write side still asks and a substituting inner command is denied.
+    # the write side still asks. A substituting inner command is resolved to
+    # the name it runs, so `x` is a command the vocabulary lists nowhere and
+    # the reviewer is shown what would run.
     DecisionCase(input="diff <(git status) <(git log)", effect="allow"),
     DecisionCase(input="diff <(sudo id) f", effect="ask"),
-    DecisionCase(input="diff <(cat $(x)) f", effect="deny"),
+    DecisionCase(input="diff <(cat $(x)) f", effect="ask"),
     DecisionCase(input="cat >(tee f)", effect="ask"),
     # Loops classify their condition and body recursively; literal for-words
     # instantiate the body, and opaque word lists gate guarded arguments.
@@ -765,10 +768,12 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="printf . | xargs find . -delete", effect="ask"),
     DecisionCase(input="find . -execdir sh -c id ;", effect="deny"),
     DecisionCase(input="sort f && python -c 'x'", effect="deny"),
-    # The decision lattice: unjudged commands deny and bounce to the agent,
-    # judged-risky rows ask, and a leading escalation marker promotes a deny
-    # or ask to an approval question carrying the agent's stated reason.
-    DecisionCase(input="cargo build", effect="deny"),
+    # The decision lattice: a command the vocabulary lists nowhere reaches
+    # whoever can answer for it, judged-risky rows ask, a command the kernel
+    # could not read denies and bounces to the agent, and a leading
+    # escalation marker promotes a deny to an approval question carrying the
+    # agent's stated reason.
+    DecisionCase(input="cargo build", effect="ask"),
     DecisionCase(input="pip install requests", effect="deny"),
     # Credential-agent family: the pure listing form is the declared
     # read-only exception; every other form is a judged deny.
@@ -905,7 +910,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="nc -z -e /bin/sh host 22", effect="deny"),
     # Sandboxed executions: machinery bail-outs defer to the OS boundary,
     # judged decisions hold, and escalation still promotes to a question.
-    DecisionCase(input="frobnicate --weird", effect="deny"),
+    DecisionCase(input="frobnicate --weird", effect="ask"),
     DecisionCase(input="frobnicate --weird", effect="defer", sandboxed=True),
     DecisionCase(input="sed --frob 's/a/b/' f", effect="defer", sandboxed=True),
     DecisionCase(input="sort $UNBOUND f", effect="defer", sandboxed=True),
@@ -922,10 +927,11 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
     # An excluded command runs with no OS boundary beneath it, so unjudged
-    # work in it has nothing to defer to and returns to the deny lattice —
-    # including when it rides in beside a command the boundary would confine.
-    DecisionCase(input="quuxify --weird", effect="deny", sandboxed=True),
-    DecisionCase(input="frobnicate; quuxify now", effect="deny", sandboxed=True),
+    # work in it has nothing to defer to and returns to the lattice, whose
+    # floor for a command listed nowhere is the reviewer — including when it
+    # rides in beside a command the boundary would confine.
+    DecisionCase(input="quuxify --weird", effect="ask", sandboxed=True),
+    DecisionCase(input="frobnicate; quuxify now", effect="ask", sandboxed=True),
     DecisionCase(input="quuxifyer --weird", effect="defer", sandboxed=True),
     # The toolchain declares its escape, so nothing carries a flag to reach it:
     # unconfined it simply runs, and where a call can be placed it is placed.
@@ -949,7 +955,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="codex plugin marketplace --help", effect="allow"),
     DecisionCase(input="git push --help", effect="allow"),
     DecisionCase(input="frobnicate -h", effect="allow"),
-    DecisionCase(input="mysql -h db.example.com", effect="deny"),
+    DecisionCase(input="mysql -h db.example.com", effect="ask"),
     # A non-interactive host cannot put a question to a human: sandboxed, an
     # ask rides the OS boundary; unsandboxed it fails closed. A judged deny
     # is never rescued, and unjudged work defers exactly as it always did.
@@ -985,17 +991,18 @@ SHELL_POLICY_CASES = [
     DecisionCase(
         input="frobnicate --weird", effect="defer", sandboxed=True, interactive=False
     ),
-    # The classic sourcing bypasses stay outside the vocabulary: deny
-    # unsandboxed, defer to the OS boundary inside it; a deferring segment
-    # among allows keeps the batch deferred.
+    # The classic sourcing bypasses are declared refusals rather than gaps,
+    # so they hold inside a boundary too: confining code nothing read does
+    # not read it, which is the answer `python -c` already gave. A deferring
+    # segment among allows keeps the batch deferred.
     DecisionCase(input="eval echo x", effect="deny"),
     DecisionCase(input="source setup.sh", effect="deny"),
     DecisionCase(input=". ./env.sh", effect="deny"),
-    DecisionCase(input="eval echo x", effect="defer", sandboxed=True),
-    DecisionCase(input="source setup.sh", effect="defer", sandboxed=True),
+    DecisionCase(input="eval echo x", effect="deny", sandboxed=True),
+    DecisionCase(input="source setup.sh", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ls", effect="defer", sandboxed=True),
     DecisionCase(input="echo $(whoami)", effect="allow", sandboxed=True),
-    DecisionCase(input="echo $(frobnicate)", effect="deny"),
+    DecisionCase(input="echo $(frobnicate)", effect="ask"),
     DecisionCase(input="echo $(frobnicate)", effect="defer", sandboxed=True),
     DecisionCase(input="git log $(cat names.txt)", effect="defer", sandboxed=True),
     DecisionCase(input="echo `id`", effect="deny", sandboxed=True),
@@ -2134,7 +2141,7 @@ def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
         ).effect
         == "deny"
     )
-    assert policy.decide(ShellCommand(command="echo $(dangerous)")).effect == "deny"
+    assert policy.decide(ShellCommand(command="echo $(dangerous)")).effect == "ask"
 
 
 def test_shell_policy_allows_control_flow_and_still_refuses_what_outlives_it() -> None:
@@ -2269,15 +2276,27 @@ def test_creating_a_file_passes_where_overwriting_one_still_asks(
     assert policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect == "allow"
 
 
-def test_sandbox_escape_reenters_the_deny_lattice() -> None:
+def test_sandbox_escape_reenters_the_lattice_the_boundary_was_answering() -> None:
+    """Leaving the sandbox puts the call back where nothing carries it.
+
+    Confined, the boundary answers for what nobody classified. Escaped, the
+    lattice returns — and its floor for a command the vocabulary merely does
+    not list is the reviewer, not a refusal. A command the kernel could not
+    *read* still lands on the refusal, which is what the second half pins.
+    """
     policy = ShellPolicy(SHELL_RULES, sandbox_active=True)
     confined = policy.decide(ShellCommand(command="frobnicate --weird"))
     assert confined.effect == "defer"
     escaped = policy.decide(
         ShellCommand(command="frobnicate --weird", unsandboxed=True)
     )
-    assert escaped.effect == "deny"
-    assert "escalate" in escaped.reason
+    assert escaped.effect == "ask"
+
+    unreadable = policy.decide(
+        ShellCommand(command="cat x ;& rm -rf ~", unsandboxed=True)
+    )
+    assert unreadable.effect == "deny"
+    assert "escalate" in unreadable.reason
 
 
 def test_the_toolchain_carries_its_own_escape_and_is_refused_without_one() -> None:

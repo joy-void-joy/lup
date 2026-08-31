@@ -1742,7 +1742,11 @@ def test_generated_codex_permission_request_allows_safe_assignment(
     [
         ("# lup: escalate: required diagnostic\npython -c 1", 0),
         ("PATH=/tmp git status", 0),
-        ("1BAD=constant git status", 2),
+        # An invalid identifier is not an assignment, so the shell would run a
+        # program literally named `1BAD=constant` — which the vocabulary lists
+        # nowhere. Exit 0 with no output declines the decision rather than
+        # granting it, leaving Codex's own flow to put it to the user.
+        ("1BAD=constant git status", 0),
     ],
 )
 def test_generated_codex_permission_request_preserves_assignment_guards(
