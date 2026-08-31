@@ -94,6 +94,32 @@ def test_guard_force_push_moves_only_the_rewriting_push() -> None:
     assert verdict("git push --delete origin old", open_flow).effect == "ask"
 
 
+def test_a_refspec_reaches_the_same_guard_its_flag_spelling_does() -> None:
+    """Push spells both guarded effects twice, and both spellings are guarded.
+
+    Measured before the refspec half existed: `git push origin
+    :refs/heads/main` deletes the same ref `--delete` does and was allowed,
+    while `--delete` asked. A guard listing flag spellings held one half of
+    each effect.
+    """
+    guarded = [git_rule()]
+    open_flow = [git_rule(guard_force_push=False)]
+
+    # Removal is guarded either way, in both spellings.
+    assert verdict("git push origin :refs/heads/main", guarded).effect == "ask"
+    assert verdict("git push origin :refs/heads/main", open_flow).effect == "ask"
+    assert verdict("git push origin :main", open_flow).effect == "ask"
+    # The force half moves with the parameter, exactly as its flag does.
+    assert verdict("git push origin +main:main", guarded).effect == "ask"
+    assert verdict("git push origin +main:main", open_flow).effect == "allow"
+    # An ordinary push carries neither effect, and a scp-style remote names a
+    # non-empty source rather than a removal.
+    assert verdict("git push origin main:main", guarded).effect == "allow"
+    assert verdict("git push git@host:repo.git main", guarded).effect == "allow"
+    # A negative refspec excludes rather than writes.
+    assert verdict("git push origin ^main", guarded).effect == "allow"
+
+
 def test_redirect_checkout_chooses_between_asking_and_naming_the_newer_verbs() -> None:
     """Off, checkout asks because `checkout -- <path>` discards work.
 

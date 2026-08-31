@@ -219,6 +219,16 @@ class ShellRuleRow(TypedDict):
     judges, which makes its stated reason false for most of them -- and a
     question whose reason does not hold is one nobody can answer well.
 
+    ``ask_refspecs`` names the effects a refspec operand may carry that this
+    row asks about — the same downgrade ``ask_flags`` states, about a word
+    whose grammar rather than whose spelling says what it does. A push
+    removes a remote ref by flag (``--delete``) or by empty source
+    (``:refs/heads/main``), and replaces one non-fast-forward by flag
+    (``--force``) or by leading plus (``+main:main``); a row that guarded
+    only the flags held half of each effect. Declared as effects rather than
+    as more spellings because the second list of spellings is what missed
+    these.
+
     ``sandbox`` says where this command has to run, independently of who
     decides it: a verb that reaches a remote is unusable confined however the
     effect reads, and a verb whose blast radius wants the OS boundary keeps it
@@ -246,6 +256,7 @@ class ShellRuleRow(TypedDict):
     sandbox_source: RuleLevel
     recovery: Recovery
     recovery_source: RuleLevel
+    ask_refspecs: list[str]
     ask_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]
@@ -254,6 +265,15 @@ class ShellRuleRow(TypedDict):
     bare_reads: bool
     value_flags: list[str]
     reason: str
+
+
+type RefspecEffect = Literal["delete", "force"]
+"""What a refspec operand can do to the ref it names, beyond writing it.
+
+The two effects a push spells twice — once as a flag and once as grammar.
+Named so a table declares the effect it guards rather than a second list of
+the spellings that reach it.
+"""
 
 
 type EditOperation = Literal["create", "overwrite", "modify", "delete"]

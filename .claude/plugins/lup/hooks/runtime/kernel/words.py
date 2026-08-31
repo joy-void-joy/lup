@@ -704,3 +704,35 @@ def xargs_payload(words: list[str]) -> list[str]:
         else:
             position += 1
     return words[position:]
+
+
+def refspec_effects(word: str) -> list[str]:
+    """What one ``git push`` operand does to the ref it names.
+
+    A refspec spells the same two effects the push flags spell. `--delete`
+    removes a remote ref and `:<dst>` removes the same ref by giving it no
+    source; `--force` replaces one non-fast-forward and `+<src>:<dst>`
+    replaces the same ref by prefixing it. A guard written as a list of flag
+    spellings therefore holds only half of each effect, which is what let
+    `git push origin :refs/heads/main` past a table that asks about
+    `git push --delete origin main`.
+
+    Read structurally rather than matched against a second list of spellings,
+    because a list of spellings is what missed these. The grammar is small
+    and total: `^` opens a negative refspec, which excludes rather than
+    writes; a leading `+` forces; and an empty source — everything before the
+    first colon — deletes, which `startswith(":")` is the whole of after the
+    plus is taken off.
+
+    Every operand is read, the repository among them, because reading only
+    the ones past it would need to know where it stopped, and a repository
+    that looked like a refspec would cost a question rather than miss one.
+    An scp-style remote (`git@host:repo.git`) names a non-empty source and so
+    reads as neither effect.
+    """
+    if word.startswith("^"):
+        return []
+    forced = word.startswith("+")
+    source = word[1:] if forced else word
+    effects = ["force"] if forced else []
+    return [*effects, "delete"] if source.startswith(":") else effects
