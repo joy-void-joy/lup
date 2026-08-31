@@ -112,13 +112,14 @@ def source_cmd(
             typer.echo(line)
         return
 
+    file_path = find_module_path(path)
     try:
-        obj = resolve_object(path).value
+        obj = None if file_path is not None else resolve_object(path).value
     except ValueError as e:
         fail(str(e))
 
-    if inspect.ismodule(obj):
-        file_path = find_module_path(path)
+    if file_path is not None or inspect.ismodule(obj):
+        file_path = file_path or find_module_path(path)
         if file_path is None or not file_path.exists():
             fail(f"No source file for '{path}'")
         typer.echo(f"# {file_path}")
