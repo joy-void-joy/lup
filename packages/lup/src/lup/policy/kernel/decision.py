@@ -282,6 +282,21 @@ class KernelDecision:
     the agent thought the command was worth running.
     """
     recovery: Recovery
+    unlisted: bool
+    """Whether this deferral is only the vocabulary having no row for the call.
+
+    Two very different things reach ``defer``, and a session with no boundary
+    beneath it has to tell them apart. This one is the vocabulary staying
+    silent: the kernel read the command, found it well-formed, and nothing
+    named it. Every other deferral is the kernel declining to read — an
+    unresolved expansion, a substitution it cannot see into, an operator its
+    parser does not carry — or a form some rule deliberately left out.
+
+    Only the silent one is a question a human can answer, because it is the
+    only one where what the human is shown is what will run. Asking about
+    text the policy itself could not parse would show them `cat x` and run
+    `rm -rf ~`, so those keep refusing however many reviewers are present.
+    """
 
     def __init__(
         self,
@@ -290,6 +305,7 @@ class KernelDecision:
         sandbox: SandboxPlacement = "ambient",
         escalated: str = "",
         recovery: Recovery = "nothing",
+        unlisted: bool = False,
     ) -> None:
         if effect not in ("allow", "ask", "deny", "defer"):
             raise ValueError(f"invalid kernel decision effect {effect!r}")
@@ -301,6 +317,7 @@ class KernelDecision:
         self.reason = reason
         self.escalated = escalated
         self.recovery = recovery
+        self.unlisted = unlisted
         # Only a verdict this policy actually reached is placed: a refusal is
         # not softened by where the call would have run, and a deferral hands
         # the whole question over, the session's sandbox status included.
@@ -381,3 +398,14 @@ def unjudged(reason: str) -> KernelDecision:
     deny naming the escalation recipe.
     """
     return KernelDecision("defer", reason)
+
+
+def unlisted(reason: str) -> KernelDecision:
+    """The same deferral, from the vocabulary simply naming nothing here.
+
+    Separate from :func:`unjudged` because only this one is answerable. The
+    command was read and is well-formed; no row speaks about it. A session
+    with a reviewer puts that to them, exactly as `# lup: escalate:` already
+    does, rather than refusing work whose only fault is being new.
+    """
+    return KernelDecision("defer", reason, unlisted=True)

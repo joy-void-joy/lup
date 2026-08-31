@@ -115,7 +115,7 @@ def test_router_sends_each_tool_to_the_policy_that_judges_it() -> None:
         == "allow"
     )
     assert router.decide(ShellCommand(command="git status")).effect == "allow"
-    assert router.decide(ShellCommand(command="mycommand --flag")).effect == "deny"
+    assert router.decide(ShellCommand(command="mycommand --flag")).effect == "ask"
 
 
 def test_router_asks_rather_than_allows_what_no_policy_covers() -> None:

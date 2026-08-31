@@ -279,22 +279,53 @@ class ConfinedElsewhere(SettlementRule):
 
 
 class Unjudged(SettlementRule):
-    """No judgment and no boundary: the only thing left is to refuse.
+    """No judgment and no boundary: whoever can answer it, answers it.
 
-    The refusal names the recipe rather than only the wall — reshape it into
-    the allowed vocabulary, or say why it has to be this shape — because work
-    nobody classified is work somebody has to look at, and an agent told only
-    "no" looks at nothing.
+    Two deferrals arrive here and only one is a question. ``unlisted`` says
+    the kernel read the command, found it well-formed, and no row named it —
+    so what a reviewer would be shown is what would run, and a session with
+    a reviewer asks them. Every other deferral is the kernel declining to
+    *read*: an unresolved expansion, a substitution it cannot see into, an
+    operator its parser does not carry. Those keep refusing however many
+    reviewers are present, because a question about text the policy could
+    not parse is one the human cannot answer either — `cat x ;& rm -rf ~`
+    would be approved on the strength of the `cat`.
+
+    Asking about the listed-nowhere half because the refusal was never the
+    gate it read as. `# lup: escalate:` turns exactly this refusal into
+    exactly this question, so a human was already trusted to answer for
+    unclassified work and the denial only bought a turn of paperwork first.
+    Measured on this repository before the question existed: `pytest -q`,
+    `ruff check .`, `pyright`, `node -v` and `journalctl -n 20` were all
+    refused ambient, while `ssh host rm -rf /` — judged, and judged
+    destructive — reached the human. Refusing hardest where the vocabulary
+    knows least is the wrong way round.
+
+    Either way the refusal names the recipe rather than only the wall —
+    reshape it into the allowed vocabulary, or say why it has to be this
+    shape — because an agent told only "no" looks at nothing.
+
+    The sandboxed session never arrives here: :class:`ConfinedElsewhere`
+    settles ahead of this row and lets the boundary carry what nobody judged,
+    which is the whole of what a sandbox buys the lattice. This row answers
+    for the session that has no boundary underneath it, where the choice is
+    between a human and nothing.
     """
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect == "defer":
+        if facts.decision.effect != "defer":
+            return None
+        if facts.interactive and facts.decision.unlisted:
             return KernelDecision(
-                "deny",
-                facts.decision.reason + facts.hint,
+                "ask",
+                facts.decision.reason,
                 escalated=facts.decision.escalated,
             )
-        return None
+        return KernelDecision(
+            "deny",
+            facts.decision.reason + facts.hint,
+            escalated=facts.decision.escalated,
+        )
 
 
 class JudgedRefusal(SettlementRule):
