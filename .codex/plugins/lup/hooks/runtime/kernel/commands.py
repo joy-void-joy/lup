@@ -21,6 +21,7 @@ from .words import (
     key_matches,
     opaque_argument,
     protected_write_target,
+    refspec_effects,
     rewrites_only_recoverable_files,
     uv_run_words,
 )
@@ -167,6 +168,26 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             return KernelDecision(
                 "ask",
                 row["reason"] or f"{guarded} requires approval",
+                row["sandbox"],
+                recovery=row["recovery"],
+            )
+    if row["effect"] == "allow" and row["ask_refspecs"]:
+        # No opacity test of its own: a row declaring refspec effects declares
+        # flag effects too, so the block above has already bounced every word
+        # this one could not read.
+        carried = next(
+            (
+                (word, effect)
+                for word in arguments
+                for effect in refspec_effects(word)
+                if effect in row["ask_refspecs"]
+            ),
+            None,
+        )
+        if carried is not None:
+            return KernelDecision(
+                "ask",
+                row["reason"] or f"{carried[0]} would {carried[1]} a ref",
                 row["sandbox"],
                 recovery=row["recovery"],
             )

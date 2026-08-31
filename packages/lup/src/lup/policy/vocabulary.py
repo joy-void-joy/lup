@@ -682,6 +682,15 @@ def git_rule(
     What removes a ref outright stays guarded either way: no second push
     restores it.
 
+    Both effects are guarded twice over, because push spells each of them
+    twice: as a flag, and as refspec grammar. ``--delete origin main`` and
+    ``origin :refs/heads/main`` remove the same ref, ``--force`` and
+    ``+main:main`` replace the same one, and a guard written only as flag
+    spellings held the first half of each pair while allowing the second.
+    The parameter therefore moves ``ask_refspecs`` and ``ask_flags``
+    together: an effect this rule asks about is asked about however it was
+    written.
+
     ``redirect_checkout`` decides how ``git checkout`` is met. Off, it asks —
     the branch-switching form is harmless, but ``checkout -- <path>``
     discards work. On, it denies and names ``switch`` and ``restore``
@@ -781,6 +790,7 @@ def git_rule(
         ShellSubcommandRule(
             name="push",
             effect="allow",
+            ask_refspecs=(["delete", "force"] if guard_force_push else ["delete"]),
             ask_flags=(
                 [*push_flags, "-f", "--force", "--force-with-lease"]
                 if guard_force_push

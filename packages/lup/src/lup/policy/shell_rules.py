@@ -54,7 +54,12 @@ from lup.policy.kernel.decision import (
     Recovery,
     SandboxPlacement,
 )
-from lup.policy.kernel.rows import RunnerTargetRow, RuleLevel, ShellRuleRow
+from lup.policy.kernel.rows import (
+    RefspecEffect,
+    RunnerTargetRow,
+    RuleLevel,
+    ShellRuleRow,
+)
 from lup.seams import SelectableRule
 
 type CommandEffect = Literal["allow", "ask", "deny"]
@@ -245,10 +250,14 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     ``guarded_keys`` state the inverse, for a subcommand whose writes are not
     all alike: their *absence* among legible words de-escalates, so the
     effect is kept only for the settings that redirect how commands execute.
+    ``ask_refspecs`` states the ``ask_flags`` downgrade about an operand's
+    grammar instead of a word's spelling, for a subcommand whose refspecs
+    carry the same effects its flags do.
     """
 
     name: str
     effect: CommandEffect = ROOT_EFFECT
+    ask_refspecs: list[RefspecEffect] = []
     ask_flags: list[str] = []
     read_verbs: list[str] = []
     guarded_keys: list[str] = []
@@ -421,6 +430,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 command=command_name,
                 subcommand=subcommand.name,
                 operation=operation.name,
+                ask_refspecs=[],
                 ask_flags=list(operation.ask_flags),
                 allow_flags=[],
                 read_verbs=[],
@@ -437,6 +447,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command_name,
             subcommand=subcommand.name,
             operation="",
+            ask_refspecs=list(subcommand.ask_refspecs),
             ask_flags=list(subcommand.ask_flags),
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
@@ -455,6 +466,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command.name,
             subcommand="",
             operation="",
+            ask_refspecs=[],
             ask_flags=list(command.ask_flags),
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
