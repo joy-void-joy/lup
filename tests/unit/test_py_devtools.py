@@ -20,6 +20,12 @@ def test_source_is_complete_by_default() -> None:
     assert '@app.command("search")' in result.output
 
 
+def test_source_reads_dispatcher_asset_without_importing_it() -> None:
+    result = runner.invoke(app, ["source", "lup.policy.assets.decisions", "-n", "60"])
+    assert result.exit_code == 0
+    assert "from host import" in result.output
+
+
 def test_source_text_search_keeps_complete_matching_lines(tmp_path: Path) -> None:
     source_root = tmp_path / "source"
     source_root.mkdir()
