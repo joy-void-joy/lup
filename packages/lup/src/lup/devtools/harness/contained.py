@@ -1449,6 +1449,7 @@ def contained_argv(
     engine: ContainerEngine | None = None,
     interactive: bool = True,
     banner: Banner | None = None,
+    inherited_environment: list[str] | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1560,4 +1561,5 @@ def contained_argv(
         terminal=terminal.environment,
         interactive=interactive,
         proxy_address=reached_at,
+        inherited_environment=inherited_environment,
     )

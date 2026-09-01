@@ -17,7 +17,15 @@ from mcp.server import Server
 from mcp.types import CallToolResult, TextContent, Tool
 from pydantic import BaseModel, Field
 
-from lup.tools.mcp import LupMcpServerConfig, McpServerEntry
+from lup.tools.mcp import (
+    LupMcpServerConfig,
+    McpServerEntry,
+    relay_recursive_agent_to_mcp,
+)
+from lup.sessions.recursion import (
+    child_recursive_agent_allowance,
+    recursive_agent_scope,
+)
 from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SandboxPosture
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
@@ -797,7 +805,12 @@ class ClaudeSessionOpener:
     async def open_session(
         self, resume: SessionId | None = None
     ) -> AsyncGenerator[SessionHandle]:
-        state = self.create_state(resume)
+        allowance = child_recursive_agent_allowance(self.config.environment)
+        config = self.config.model_copy(
+            update={"environment": allowance.environment(self.config.environment)}
+        )
+        opener = ClaudeSessionOpener(config)
+        state = opener.create_state(resume)
         session = ComposedSession(
             starter=state.start_turn,
             binder=ClaudeTurnToolBinder(state),
@@ -819,13 +832,14 @@ class ClaudeSessionOpener:
         # trip over — which means finding who closes a session without
         # awaiting it to completion. Needs a live parking run to confirm;
         # do not fix it from the shape alone.
-        try:
-            yield SessionHandle(session=session, fork=ClaudeFork(state))
-        finally:
+        with recursive_agent_scope(allowance):
             try:
-                await session.abort_active()
+                yield SessionHandle(session=session, fork=ClaudeFork(state))
             finally:
-                await state.disconnect()
+                try:
+                    await session.abort_active()
+                finally:
+                    await state.disconnect()
 
 
 def create_claude(
@@ -1001,7 +1015,12 @@ def build_claude_options(
         tools=config.tools,
         allowed_tools=list(dict.fromkeys(allowed)),
         disallowed_tools=list(config.disallowed_tools),
-        mcp_servers={name: native_server(server) for name, server in servers.items()},
+        mcp_servers={
+            name: native_server(
+                relay_recursive_agent_to_mcp(server, config.environment)
+            )
+            for name, server in servers.items()
+        },
         agents={
             spec.name: claude_types.AgentDefinition(
                 description=spec.description,

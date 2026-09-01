@@ -68,6 +68,7 @@ def test_a_failed_launch_is_recorded_as_one(project: Path) -> None:
 
 def test_the_launch_starts_a_watcher_that_stops_on_close(project: Path) -> None:
     transcript = started(project)
+    assert transcript.watcher is not None
     assert transcript.watcher.thread is not None
     assert transcript.watcher.thread.is_alive()
 
@@ -76,11 +77,35 @@ def test_the_launch_starts_a_watcher_that_stops_on_close(project: Path) -> None:
     assert not transcript.watcher.thread.is_alive()
 
 
+def test_transcription_can_be_disabled_without_losing_run_boundaries(
+    project: Path,
+) -> None:
+    transcript = launch.start_harness_transcript(
+        "claude",
+        ClaudeTranscripts(project / "config"),
+        model="claude-fable-5",
+        profile=None,
+        arguments=[],
+        transcribe=False,
+    )
+    assert transcript.watcher is None
+    assert transcript.diagnostics is None
+
+    transcript.close(succeeded=True)
+
+    journal = next((project / "notes" / "harness").rglob("observable.jsonl"))
+    assert [event.kind for event in read_observable_events(journal)] == [
+        "run_start",
+        "run_end",
+    ]
+
+
 def test_the_watcher_is_scoped_to_this_project(project: Path) -> None:
     """Unscoped, it would mirror every concurrent project's sessions in here."""
     transcript = started(project)
     transcript.close(succeeded=True)
 
+    assert transcript.watcher is not None
     assert transcript.watcher.scope == project
 
 

@@ -81,3 +81,42 @@ def test_a_mode_naming_no_model_leaves_every_runtime_its_own_default() -> None:
     declared = mode("audit")
     assert declared.native_model("claude") is None
     assert declared.native_model("codex") is None
+
+
+def test_a_mode_can_disable_transcription_for_only_one_runtime() -> None:
+    declared = LaunchMode(
+        name="syra",
+        help="research session",
+        targets=NativeTargets(builders={}),
+        transcribe_session=lambda provider: provider != "claude",
+    )
+
+    assert declared.transcribes("claude") is False
+    assert declared.transcribes("codex") is True
+
+
+def test_a_mode_keeps_transcription_without_an_override() -> None:
+    assert mode("audit").transcribes("claude") is True
+
+
+def test_a_mode_can_supply_a_safer_recursive_default() -> None:
+    declared = mode("syra").model_copy(update={"max_recursive_agent": 0})
+
+    assert declared.recursive_agent_limit(None) == 0
+    assert declared.recursive_agent_limit(-1) == -1
+
+
+def test_a_mode_can_select_a_tree_from_the_effective_allowance() -> None:
+    selected: list[int] = []
+    declared = LaunchMode(
+        name="syra",
+        help="research session",
+        targets=NativeTargets(builders={}),
+        recursive_targets=lambda allowance: (
+            selected.append(allowance) or NativeTargets(builders={})
+        ),
+    )
+
+    declared.targets_at(0)
+
+    assert selected == [0]

@@ -217,6 +217,23 @@ def test_the_credentials_own_variables_come_after_the_ones_the_image_baked(
     assert f"{KEYS.home}:{KEYS.home_inside}:ro" in argv
 
 
+def test_a_launcher_environment_is_inherited_by_name(tmp_path: Path) -> None:
+    argv = Image().session_arguments(
+        tag="lup-agent:test",
+        checkout=tmp_path,
+        uid=1000,
+        gid=1000,
+        writable={},
+        read_only={},
+        state_volume="lup-cfg-test",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        inherited_environment=["LUP_MAX_RECURSIVE_AGENT"],
+    )
+
+    index = argv.index("LUP_MAX_RECURSIVE_AGENT")
+    assert argv[index - 1] == "-e"
+
+
 def test_each_credential_says_which_one_it_is_in_one_line() -> None:
     """The whole of what a healthy launch has to say about the forge.
 

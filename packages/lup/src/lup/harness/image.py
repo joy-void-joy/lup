@@ -1003,6 +1003,7 @@ USER $UID:$GID
         terminal: EnvVars | None = None,
         interactive: bool = True,
         proxy_address: str = "",
+        inherited_environment: list[str] | None = None,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1096,7 +1097,10 @@ USER $UID:$GID
         # that logs the launch.
         inherited = [
             argument
-            for name in self.forge.inherited(granted)
+            for name in [
+                *self.forge.inherited(granted),
+                *(inherited_environment or []),
+            ]
             for argument in ("-e", name)
         ]
         return [
