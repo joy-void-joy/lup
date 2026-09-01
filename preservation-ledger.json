@@ -1,5 +1,5 @@
 {
-  "revision": "13b5457efd623fa4a76574c104875dafcc55e6d3",
+  "revision": "28203f2238ab4d31a3e3d89f36e1654424857998",
   "roots": [
     "lup",
     "lup_template"
@@ -6988,6 +6988,23 @@
       ]
     },
     {
+      "module": "lup.policy.delivery",
+      "declares": [
+        "Guarantee",
+        "Standing",
+        "DeliveryFact",
+        "DeliveryFact.guarantee",
+        "DeliveryFact.provider",
+        "DeliveryFact.mechanism",
+        "DeliveryFact.standing",
+        "DeliveryFact.fallback",
+        "DeliveryFact.carried",
+        "DeliveryFact.line",
+        "delivery_gaps",
+        "unmeasured"
+      ]
+    },
+    {
       "module": "lup.policy.dispatcher",
       "declares": [
         "SHARED_PACKAGE",
@@ -8436,6 +8453,12 @@
       ]
     },
     {
+      "module": "lup.providers.claude.delivery",
+      "declares": [
+        "CLAUDE_DELIVERY"
+      ]
+    },
+    {
       "module": "lup.providers.claude.harness",
       "declares": [
         "CLAUDE_MODEL_ALIASES",
@@ -8925,6 +8948,12 @@
       "module": "lup.providers.codex.confinement",
       "declares": [
         "CODEX_CONFINEMENT"
+      ]
+    },
+    {
+      "module": "lup.providers.codex.delivery",
+      "declares": [
+        "CODEX_DELIVERY"
       ]
     },
     {
