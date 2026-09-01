@@ -370,28 +370,37 @@ class RecoveredLoss(SettlementRule):
 class UnreachableReviewer(SettlementRule):
     """A question in a session no eligible reviewer can be reached from.
 
-    Rewritten to an abstention rather than settled, so what happens next is
-    decided by whether a containment boundary sits beneath the operation —
-    which is the same question anything else nobody judged has to answer. The
-    reason says the question existed and could not be put, because a refusal
-    that reads as a rule's judgement sends the agent to reshape an operation
-    that was never the problem.
+    Refused, and the direction matters more than anything else in this order.
+    Somebody looked at this operation and decided a person should see it; no
+    person can be reached; so it does not happen. Handing it to the boundary
+    instead would say the opposite — that a question nobody could answer is a
+    question that did not need asking — and a boundary that confines an
+    operation does not review it.
 
-    This is the last resort and not the ordinary path. A detached session
-    reaches a person through the durable relay, and a worker reaches its
-    supervisor through the same relay; ``reviewable`` is false only where
-    neither exists.
+    Measured before the refusal existed: in a headless contained session a
+    remote ref deletion came back an unprompted allow, and an escalation
+    marker, whose entire purpose is to summon the person this path decided
+    was unnecessary, granted exactly what the table refused.
+
+    Unjudged work does not reach here and is unaffected. It never becomes an
+    ask in a session that can reach nobody, because the row that would make
+    one reads the same fact — so the boundary still carries what nobody
+    classified, which is the whole of what containment buys the lattice, and
+    what it does not buy is a way past a question somebody meant.
+
+    The last resort and not the ordinary path: a detached session reaches a
+    person through the durable relay, and a worker reaches its supervisor
+    through the same relay. ``reviewable`` is false only where neither exists.
     """
 
-    settles = False
     id = "unreachable-reviewer"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
         if facts.decision.effect == "ask" and not facts.reviewable:
             return facts.decision.revised(
-                effect="defer",
-                reason=facts.decision.reason + NO_REVIEWER,
-                abstention="boundary_settle",
+                effect="deny",
+                reason=facts.decision.reason + NO_REVIEWER + facts.hint,
+                cause="deliberate",
             )
         return None
 

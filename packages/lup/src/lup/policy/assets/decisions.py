@@ -34,6 +34,7 @@ from host import (
     managed_script_roots,
     recoverable_write_targets,
     record_deferral,
+    record_question,
     resolved_refutations,
     undo_snapshot,
     worktree_path,
@@ -151,6 +152,22 @@ def bash_decision(
         contained=contained(),
         recovered=bool(reference),
     )
+    # Parked before anything is rendered, because the relay is the durable
+    # record every final ask is written to and the provider's own prompt is
+    # that record's renderer rather than a second authority. Written here, at
+    # the one call site both runtimes pass through, so neither can reach a
+    # question the queue does not hold.
+    if verdict.effect == "ask":
+        record_question(
+            cwd,
+            command,
+            verdict.reason,
+            verdict.rule,
+            verdict.purpose or "",
+            verdict.reviewer,
+            verdict.escalated,
+            verdict.sandbox,
+        )
     if verdict.effect == "deny":
         return verdict
     # The log half of allow-and-log. A deferral is this policy declining to

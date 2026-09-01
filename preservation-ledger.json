@@ -1,5 +1,5 @@
 {
-  "revision": "94cdf2ecbf300475b07b7e8a9cbece89ea368606",
+  "revision": "296f392c4300f2842bafe18fdde9734c7c80b75b",
   "roots": [
     "lup",
     "lup_template"
@@ -6772,6 +6772,7 @@
         "append_hook_evidence",
         "record_hook_evidence",
         "script_run_nudge",
+        "record_question",
         "record_deferral",
         "managed_script_roots",
         "worktree_path",
@@ -7763,7 +7764,6 @@
         "RecoveredLoss.id",
         "RecoveredLoss.reached",
         "UnreachableReviewer",
-        "UnreachableReviewer.settles",
         "UnreachableReviewer.id",
         "UnreachableReviewer.reached",
         "ContainedEffects",

@@ -2773,6 +2773,17 @@ def test_declared_exclusions_cover_the_commands_the_boundary_cannot_carry() -> N
         "ssh -T git@github.com",
     ):
         assert sandbox_excluded(command, excluded), command
+    # The verbs that drive git rather than read it, for the reason `gh` is
+    # excluded: a child of a confined command is confined too, so leaving
+    # these inside moves the same failure one call deeper — measured in #351,
+    # where `dev worktree create` could not take the lock its config write
+    # needs while the identical `git config --local` succeeded one call away.
+    for driving in (
+        "uv run lup-devtools dev worktree create feat-x",
+        "uv run lup-devtools dev pr push",
+        "uv run lup-devtools harness resolve intake",
+    ):
+        assert sandbox_excluded(driving, excluded), driving
     assert not sandbox_excluded("uv run pytest -q", excluded)
     assert not sandbox_excluded(
         "uv run lup-devtools py info lup.policy.hooks", excluded

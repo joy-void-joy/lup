@@ -11736,6 +11736,11 @@ SANDBOX_EXCLUDED_COMMANDS: list[str] = [
     "git *",
     "gh *",
     "uv run lup-devtools harness *",
+    "uv run lup-devtools dev worktree *",
+    "uv run lup-devtools dev pr *",
+    "uv run lup-devtools dev conflict *",
+    "uv run lup-devtools dev git-hooks *",
+    "uv run lup-devtools dev undo *",
 ]
 
 AUTO_ESCAPE_PREFIXES: list[list[str]] = []

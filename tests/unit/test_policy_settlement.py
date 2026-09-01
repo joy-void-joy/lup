@@ -437,19 +437,19 @@ def test_an_operation_the_classifier_could_not_read_is_refused_either_way() -> N
     assert settle(facts(opaque, unjudged_ambient="defer")).effect == "deny"
 
 
-def test_a_question_no_eligible_reviewer_can_be_reached_from_is_not_one() -> None:
-    """Rewritten to an abstention so the boundary answers what nobody could.
+def test_a_question_no_eligible_reviewer_can_be_reached_from_does_not_run() -> None:
+    """Refused under every posture, because containment is not review.
 
-    The reason says the question existed and could not be put, because a
-    refusal that reads as a rule's judgement sends the agent to reshape an
-    operation that was never the problem.
+    The reason says the question existed and could not be put, rather than
+    naming a rule — a refusal that reads as a rule's judgement sends the agent
+    to reshape an operation that was never the problem.
     """
     contained = settle(
         contained_facts(KernelDecision("ask", "risky"), reviewable=False)
     )
     exposed = settle(facts(KernelDecision("ask", "risky"), reviewable=False))
 
-    assert contained.effect == "allow"
+    assert contained.effect == "deny"
     assert exposed.effect == "deny"
     assert "no eligible reviewer" in exposed.reason
 
@@ -544,3 +544,35 @@ def test_a_session_that_can_reach_nobody_makes_no_question_out_of_a_gap() -> Non
     )
 
     assert settle(facts(unlisted, reviewable=False)).effect == "deny"
+
+
+def test_a_question_nobody_can_answer_is_refused_and_not_carried() -> None:
+    """The contract's own oracle: an ask never executes without an answer.
+
+    Handing it to the boundary instead says the opposite — that a question
+    nobody could answer did not need asking — and a boundary that confines an
+    operation does not review it. Measured before this refusal existed: a
+    remote ref deletion came back an unprompted allow in a headless contained
+    session, and the escalation marker granted exactly what the table refused.
+    """
+    judged = KernelDecision("ask", "removing a remote ref requires approval")
+
+    contained = settle(contained_facts(judged, reviewable=False))
+    escalated = settle(
+        contained_facts(judged, escalation=decision_escalation(), reviewable=False)
+    )
+
+    assert contained.effect == "deny"
+    assert escalated.effect == "deny"
+    assert "no eligible reviewer" in contained.reason
+
+
+def test_what_the_boundary_still_carries_is_only_what_nobody_judged() -> None:
+    """The distinction the refusal above must not have flattened.
+
+    Containment answers for work nobody classified, which is what it buys the
+    lattice. What it does not buy is a way past a question somebody meant.
+    """
+    unjudged = KernelDecision("defer", "nobody looked", abstention="boundary_settle")
+
+    assert settle(contained_facts(unjudged, reviewable=False)).effect == "allow"

@@ -24,6 +24,7 @@ from kernel.decision import KernelDecision, SANDBOX_TRAPPED_REASON
 from kernel.shell import auto_escape_matches
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
+from hashlib import sha256
 from datetime import UTC, datetime
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
@@ -202,6 +203,87 @@ def script_run_nudge(
         " `lup-devtools` command, which lands in the diff and can be run"
         " again by name"
     )
+
+
+def record_question(
+    root: Path | None,
+    command: str,
+    reason: str,
+    rule: str,
+    purpose: str,
+    reviewer: str,
+    escalated: str,
+    placement: str,
+    session: str = "",
+    requester: str = "",
+    relay: str = ".lup/questions.jsonl",
+) -> str:
+    """Park one final ask in the durable relay, before anybody is shown it.
+
+    Every route to a question passes through a verdict, and the boundary that
+    reaches one is what every provider has in common — so a record written
+    here is a record both of them produce, which is what makes the relay one
+    authority rather than a store the in-process seam happens to use.
+
+    Primitives rather than a verdict, because this half may reach nothing but
+    the pinned standard library and a verdict is the kernel's. The caller
+    reads the fields off it.
+
+    Append-only, because the failure this survives is a crash between
+    recording a question and answering it, and a store rewritten in place has
+    a window where the question is neither the old one nor the new one.
+
+    The id is derived from the session and what is being asked, so the same
+    question reached twice folds to one record instead of filling a queue
+    nobody can then read. What it deliberately does not record is *who
+    answered*: on the interactive path that is a receipt inferred from the
+    provider's own behaviour, and inventing one here would be writing down a
+    decision nobody made.
+
+    Silent about its own failure, for the reason every writer in this module
+    is: it runs in front of an operation somebody asked for, and a read-only
+    checkout is an ordinary place to be running. What it must not do is turn
+    a policy question into a crash.
+    """
+    if root is None or not command:
+        return ""
+    identifier = sha256(f"{session}:{command}:{reason}".encode()).hexdigest()[:16]
+    entry = json.dumps(
+        {
+            "id": identifier,
+            "operation": {
+                "id": identifier,
+                "session": session,
+                "requester": requester,
+                "tool": "Bash",
+                "payload": {"command": command},
+                "cwd": str(root),
+                "worktree": str(root),
+                "placement": placement,
+            },
+            "fingerprint": identifier,
+            "reason": reason,
+            "rule": rule,
+            "purpose": purpose or None,
+            "requirement": reviewer,
+            "eligible": [],
+            "escalation": escalated,
+            "state": "pending",
+            "created": datetime.now(UTC).isoformat(),
+        },
+        sort_keys=True,
+    )
+    path = root / relay
+    try:
+        held = path.read_text(encoding="utf-8") if path.exists() else ""
+        if f'"id": "{identifier}"' in held:
+            return identifier
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as sink:
+            sink.write(entry + "\n")
+    except OSError:
+        return ""
+    return identifier
 
 
 def record_deferral(
@@ -1104,6 +1186,22 @@ def bash_decision(
         contained=contained(),
         recovered=bool(reference),
     )
+    # Parked before anything is rendered, because the relay is the durable
+    # record every final ask is written to and the provider's own prompt is
+    # that record's renderer rather than a second authority. Written here, at
+    # the one call site both runtimes pass through, so neither can reach a
+    # question the queue does not hold.
+    if verdict.effect == "ask":
+        record_question(
+            cwd,
+            command,
+            verdict.reason,
+            verdict.rule,
+            verdict.purpose or "",
+            verdict.reviewer,
+            verdict.escalated,
+            verdict.sandbox,
+        )
     if verdict.effect == "deny":
         return verdict
     # The log half of allow-and-log. A deferral is this policy declining to

@@ -984,31 +984,31 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git push --help", effect="allow"),
     DecisionCase(input="frobnicate -h", effect="allow"),
     DecisionCase(input="mysql -h db.example.com", effect="ask"),
-    # A session that can reach no reviewer has no question to put, so the ask
-    # becomes the same abstention every gap reaches: contained it is settled
-    # inside, uncontained it is refused. What it is not is a deferral to the
-    # session's own mode, which would make the outcome of an unanswerable
-    # question depend on how permissively the session happened to be started.
+    # A session that can reach no reviewer does not run what a rule said a
+    # person should see. Containment confines an operation; it does not
+    # review it, so a judged question is refused under every posture —
+    # reported as #86, where a remote deletion came back an unprompted allow
+    # and an escalation marker granted exactly what the table refused.
     DecisionCase(
         input="git push --delete origin feat", effect="deny", interactive=False
     ),
     DecisionCase(
         input="git push --delete origin feat",
-        effect="allow",
+        effect="deny",
         sandboxed=True,
         escapable=True,
         interactive=False,
     ),
     DecisionCase(
         input="git push --delete origin feat",
-        effect="allow",
+        effect="deny",
         sandboxed=True,
         interactive=False,
     ),
     DecisionCase(input="PYTHONPATH=src uv run pytest", effect="ask"),
     DecisionCase(
         input="PYTHONPATH=src uv run pytest",
-        effect="allow",
+        effect="deny",
         sandboxed=True,
         interactive=False,
     ),
