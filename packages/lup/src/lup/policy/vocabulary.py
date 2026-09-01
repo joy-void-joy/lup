@@ -616,15 +616,15 @@ def runner_target_rules(
     toolchain writes outside the tree — a worktree, a plugin cache, and the
     git configuration behind them follow it.
 
-    Which is why the escape is declared here, once, on the toolchain itself,
-    rather than left to each caller to remember. Where a runtime places no
-    single call outside its sandbox, a confined session is stopped with that
-    reason instead — see :func:`~lup.policy.kernel.shell.decide_shell`.
+    That requirement is the *boundary's* to meet rather than a placement to
+    declare. A placement says where an operation runs; what a session-opening
+    toolchain needs is for wherever it already runs to grant a path — which is
+    a statement about the profile, measured at launch, and stated with the rest
+    of the boundary. Declared as a placement instead it was unmeasurable: the
+    profile that grants the path and the profile that does not both read as
+    ``outside``, and the second one only finds out at the first shell call.
     """
-    return [
-        *[RunnerTargetRule(name=name) for name in ambient],
-        *[RunnerTargetRule(name=name, sandbox="outside") for name in session_opening],
-    ]
+    return [RunnerTargetRule(name=name) for name in (*ambient, *session_opening)]
 
 
 # One criterion decides this table, applied across git's surface rather than to
@@ -739,7 +739,7 @@ spelling of the same one, and it runs a program just as readily.
 def git_rule(
     guard_force_push: bool = True,
     redirect_checkout: bool = False,
-    sandbox: SandboxPlacement = "outside",
+    sandbox: SandboxPlacement = "ambient",
     config_executing_keys: tuple[str, ...] = GIT_CONFIG_EXECUTING_KEYS,
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
@@ -772,13 +772,14 @@ def git_rule(
     recoverable.
 
     ``sandbox`` is where git runs, stated once here and inherited by every
-    subcommand. It is the other axis rather than another effect: a fetch
-    confined to a sandbox with no route to the remote fails however freely it
-    was allowed, and a worktree or config write confined away from the
-    repository's own locks fails the same way, so the placement follows the
-    tool rather than a list of its verbs. A project whose sandbox does reach
-    its remotes answers ``escalable`` instead, which keeps the ordinary fetch
-    confined and leaves the way out to the agent that finds it needs one.
+    subcommand. The default is ``ambient``, because what git needs is not the
+    launcher's host but a boundary that grants a route to the remote and the
+    repository's own locks — which is a fact about the profile, declared and
+    measured with the rest of the boundary rather than requested per command.
+    A profile whose boundary cannot grant them says so at launch, where the
+    gap is actionable; a placement could only say it per call, after the
+    failure. ``outside`` remains available for a verb that genuinely has to
+    run on the launcher's host, and is reviewed every time it is used.
 
     ``config_executing_keys`` are the settings whose value is a program, and
     so the only `git config` writes worth a question. A project can add to
@@ -1363,7 +1364,6 @@ def bun_rule() -> ShellCommandRule:
             ShellSubcommandRule(
                 name="install",
                 effect="allow",
-                sandbox="outside",
                 reason="restoring declared dependencies reaches the registry",
             ),
             ShellSubcommandRule(name="run", effect="allow"),
@@ -1372,7 +1372,6 @@ def bun_rule() -> ShellCommandRule:
             ShellSubcommandRule(
                 name="add",
                 effect="ask",
-                sandbox="outside",
                 reason="adding a dependency changes what this project needs",
             ),
             ShellSubcommandRule(
@@ -1383,7 +1382,6 @@ def bun_rule() -> ShellCommandRule:
             ShellSubcommandRule(
                 name="x",
                 effect="ask",
-                sandbox="outside",
                 reason="running a package that is not a declared dependency",
             ),
         ],
@@ -1435,7 +1433,6 @@ def typescript_rule() -> list[ShellCommandRule]:
             name="bunx",
             default_effect="ask",
             subcommands=[checking],
-            sandbox="outside",
             reason="the package runner fetches what is not already a dependency",
         ),
         ShellCommandRule(

@@ -286,6 +286,77 @@ class ShellRuleRow(TypedDict):
     reason: str
 
 
+type ShellRowField = Literal[
+    "rule",
+    "command",
+    "subcommand",
+    "operation",
+    "effect",
+    "effect_source",
+    "sandbox",
+    "sandbox_source",
+    "checkpoint",
+    "checkpoint_source",
+    "reviewer",
+    "effect_class",
+    "ask_refspecs",
+    "ask_flags",
+    "allow_flags",
+    "read_verbs",
+    "write_markers",
+    "guarded_keys",
+    "bare_reads",
+    "value_flags",
+    "reason",
+]
+"""Every field name one erased shell row carries.
+
+Closed and enumerable, which is what lets the mapping below be typed by its
+keys rather than by "some string": a field renamed on the shape and not here
+is a type error, where a bare string key would be a ``KeyError`` raised inside
+a hook — and a permission that never happens looks exactly like one granted.
+"""
+
+
+def shell_row_values(
+    row: ShellRuleRow,
+) -> dict[ShellRowField, str | bool | list[str]]:
+    """Every field of one erased row, as a mapping, in declaration order.
+
+    Declared beside the shape rather than at the renderer that needs it, so a
+    column added above and not mapped here is one screen apart instead of two
+    files — and the test that compares these keys against the shape's own
+    annotations turns "one screen apart" into a failure rather than a habit.
+
+    The generated dispatcher indexes every one of these keys, and it does so
+    inside a hook, where a missing key is a permission that never happens. So
+    the mapping is total by construction and checked as total by that test.
+    """
+    return {
+        "rule": row["rule"],
+        "command": row["command"],
+        "subcommand": row["subcommand"],
+        "operation": row["operation"],
+        "effect": row["effect"],
+        "effect_source": row["effect_source"],
+        "sandbox": row["sandbox"],
+        "sandbox_source": row["sandbox_source"],
+        "checkpoint": row["checkpoint"],
+        "checkpoint_source": row["checkpoint_source"],
+        "reviewer": row["reviewer"],
+        "effect_class": row["effect_class"],
+        "ask_refspecs": row["ask_refspecs"],
+        "ask_flags": row["ask_flags"],
+        "allow_flags": row["allow_flags"],
+        "read_verbs": row["read_verbs"],
+        "write_markers": row["write_markers"],
+        "guarded_keys": row["guarded_keys"],
+        "bare_reads": row["bare_reads"],
+        "value_flags": row["value_flags"],
+        "reason": row["reason"],
+    }
+
+
 type RefspecEffect = Literal["delete", "force"]
 """What a refspec operand can do to the ref it names, beyond writing it.
 

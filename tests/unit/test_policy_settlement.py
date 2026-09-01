@@ -529,3 +529,18 @@ def test_every_row_is_named_so_an_audit_can_say_which_one_answered() -> None:
     """A settled verdict a reader cannot attribute is one nobody can tune."""
     assert all(rule.id for rule in SETTLEMENT_ORDER)
     assert len({rule.id for rule in SETTLEMENT_ORDER}) == len(SETTLEMENT_ORDER)
+
+
+def test_a_session_that_can_reach_nobody_makes_no_question_out_of_a_gap() -> None:
+    """The row that rewrites an unanswerable ask cannot see one made below it.
+
+    Ordering the two around each other would need both directions at once, so
+    the row that manufactures the question reads the same fact instead: a
+    headless session with no relay is refused for want of anybody having
+    looked, exactly as it was before the question existed.
+    """
+    unlisted = KernelDecision(
+        "defer", "nobody looked", unlisted=True, abstention="boundary_settle"
+    )
+
+    assert settle(facts(unlisted, reviewable=False)).effect == "deny"

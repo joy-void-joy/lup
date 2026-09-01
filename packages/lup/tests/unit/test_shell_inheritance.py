@@ -132,25 +132,35 @@ ALLOWED_UNDER_A_RESTRICTIVE_PARENT = (
 
 
 def verdict(command: str, rules: list[ShellCommandRule]) -> KernelDecision:
-    """Classify one command against a composed vocabulary."""
-    return decide_shell(command, erase_shell_rules(rules))
+    """Classify one command against a composed vocabulary.
+
+    Judged against a profile that can carry a declared crossing, because what
+    these cases are about is which level supplied a value and not whether this
+    machine could deliver it: without the channel, every rule declaring
+    ``outside`` is refused for a missing capability before its cascade can be
+    read at all.
+    """
+    return decide_shell(command, erase_shell_rules(rules), escapable=True)
 
 
 def test_a_value_declared_once_reaches_every_level_beneath_it() -> None:
     """`git` says where it runs once, and the verb three levels down inherits it.
 
-    Enumerating only the verbs that open a transport leaves every other one
-    confined, which is where a worktree add meets the repository's own config
-    lock from inside the sandbox — so the placement follows the tool instead.
-    """
-    rules = [git_rule()]
+    Enumerating only the verbs that need a placement leaves every other one
+    somewhere else, which is where a worktree add meets the repository's own
+    config lock from the wrong side — so the placement follows the tool.
 
-    assert verdict("git status", rules).sandbox == "outside"
-    assert verdict("git worktree add ../tree", rules).sandbox == "outside"
-    assert verdict("git config --get user.name", rules).sandbox == "outside"
-    # And the placement a caller passes is the one that cascades.
+    The offered table declares none, because what git needs is a boundary
+    that grants a route to the remote and the repository's locks rather than
+    the launcher's host: that is a fact about the profile, declared and
+    measured with the boundary. What cascades is whatever a caller passes.
+    """
     confined = [git_rule(sandbox="inside")]
+
+    assert verdict("git status", confined).sandbox == "inside"
     assert verdict("git worktree add ../tree", confined).sandbox == "inside"
+    assert verdict("git config --get user.name", confined).sandbox == "inside"
+    assert verdict("git worktree add ../tree", [git_rule()]).sandbox == ("ambient")
 
 
 def test_a_declaration_overrides_what_it_inherited_in_either_direction() -> None:
@@ -237,16 +247,18 @@ def test_stating_the_value_a_level_would_have_inherited_still_counts() -> None:
 
 def test_a_row_says_which_level_supplied_each_half_of_its_verdict() -> None:
     """Provenance a reader can print, and never a second source of the decision."""
-    surveyed = {rule.path: rule for rule in survey_shell_rules([git_rule()])}
+    surveyed = {
+        rule.path: rule for rule in survey_shell_rules([git_rule(sandbox="inside")])
+    }
 
     assert surveyed["git worktree add"].effect_source == "operation"
     assert surveyed["git worktree add"].sandbox_source == "command"
     assert surveyed["git worktree add"].provenance() == (
         "git worktree add: allow (declared here),"
-        " runs outside (inherited from the command)"
+        " runs inside (inherited from the command)"
     )
     assert surveyed["git"].provenance() == (
-        "git: deny (declared here), runs outside (declared here)"
+        "git: deny (declared here), runs inside (declared here)"
     )
 
 
@@ -336,33 +348,34 @@ def test_native_auto_escape_matches_only_one_simple_command() -> None:
     )
 
 
-def test_the_forms_escaping_the_sandbox_are_exactly_the_decided_git_ones() -> None:
-    """A placement declared on one command reaches its verbs and nothing else.
+def test_the_offered_table_places_nothing_and_says_so_uniformly() -> None:
+    """No command in the offered table asks for the launcher's host.
 
-    `git` is the only command in the offered table that states a placement, so
-    the forms running outside are exactly the ones it decides. A refusal is
-    unplaced, held there at construction rather than by this table, so the git
-    forms that deny stay ambient too.
+    A placement is a reviewed crossing of the containment boundary, and
+    nothing a general-purpose toolchain does needs one: what git and the
+    package managers actually require is a boundary that grants a route to
+    the remote and the repository's own locks, which is a declaration a
+    launch can measure rather than a request each command carries.
 
-    `git --version` is one of those decided forms: it de-escalates at the
-    command row and carries that row's placement like any other.
-
-    `git --help` was the one exception and is no longer one. A help probe is
-    answered by the same walk as everything else and only its *effect* is
-    replaced, so it inherits the placement like any other spelling — where it
-    was answered above the walk it came back ambient, and the asymmetry
-    between the two spellings was invisible from the table alone.
+    Uniformity is the assertion. A table where most commands say nothing and
+    a handful say ``outside`` puts a question in front of a person for an
+    ordinary fetch, and the asymmetry between two spellings of the same
+    command — `git --help` answered above the walk, `git --version` through
+    it — was invisible from the table alone.
     """
     forms = classify_forms(default_vocabulary())
-    escaping = [form for form in forms if form.sandbox != "ambient"]
+
+    assert {form.sandbox for form in forms} == {"ambient"}
+
+    # And a caller that does state one has it reach every verb beneath.
+    placed = classify_forms([git_rule(sandbox="inside")])
     reached = [
         form
-        for form in forms
+        for form in placed
         if form.command.startswith("git") and form.effect in ("allow", "ask")
     ]
 
-    assert [form.sandbox for form in escaping] == ["outside"] * len(escaping)
-    assert escaping == reached
-    assert [form.sandbox for form in forms if form.command == "git --help"] == [
-        "outside"
+    assert {form.sandbox for form in reached} == {"inside"}
+    assert [form.sandbox for form in placed if form.command == "git --help"] == [
+        "inside"
     ]

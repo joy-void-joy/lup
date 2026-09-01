@@ -169,9 +169,7 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     # what they are looking for; this one is deciding *on* the absence of
     # words, and a list with nothing in it has nothing to misread.
     if row["effect"] != "allow" and row["bare_reads"] and not arguments:
-        return row_verdict(
-            row, "allow", "this command's argument-less form only reads"
-        )
+        return row_verdict(row, "allow", "this command's argument-less form only reads")
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
             (word for word in arguments if opaque_argument(word)),

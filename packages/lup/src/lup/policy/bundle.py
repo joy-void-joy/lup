@@ -12,7 +12,6 @@ kernel decides.
 
 import json
 import urllib.parse
-from typing import cast
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -33,6 +32,7 @@ from lup.policy.kernel.rows import (
     RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
+    shell_row_values,
 )
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
@@ -337,20 +337,6 @@ def string_matrix_literal(rows: list[list[str]]) -> str:
     return "[\n" + "".join(f"    {json.dumps(row)},\n" for row in rows) + "]"
 
 
-def shell_row_fields(row: ShellRuleRow) -> list[tuple[str, JsonValue]]:
-    """Every field of one erased row, in the shape's own declaration order.
-
-    Read off :class:`~lup.policy.kernel.rows.ShellRuleRow` rather than listed
-    here, because a list of names is exactly where a new column goes missing
-    in silence — the erasure produces it, the renderer keeps emitting the old
-    set, and the generated dispatcher indexes a key that is not in the dict.
-    That failure happens inside a hook, where a failure is a permission that
-    never happens, which is the one place a silent gap is unaffordable.
-    """
-    values = cast(dict[str, JsonValue], row)
-    return [(name, values[name]) for name in ShellRuleRow.__annotations__]
-
-
 def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
     """Render erased shell rules as Ruff-stable dict literals.
 
@@ -364,7 +350,7 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
     lines = ["["]
     for row in rows:
         lines.append("    {")
-        for name, value in shell_row_fields(row):
+        for name, value in shell_row_values(row).items():
             key = json.dumps(name)
             if isinstance(value, list):
                 if value:

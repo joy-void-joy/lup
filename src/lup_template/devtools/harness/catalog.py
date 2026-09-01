@@ -65,6 +65,22 @@ EXCLUDED_COMMANDS = [
     # confined too — so excluding git without it moves the same failure one
     # call deeper.
     "gh *",
+    # The toolchain opens agent sessions, and a runtime keeps per-session
+    # state under its own configuration directory — for Claude Code,
+    # `~/.claude/session-env/<session id>`, following `CLAUDE_CONFIG_DIR`.
+    # That directory is the runtime protecting its own state rather than a
+    # path a grant can widen: a live session lists the repository root under
+    # `allowOnly` and the configuration home below it again under
+    # `denyWithinAllow`, enumerated by the runtime whether or not a project
+    # declares anything. Nor is a private home the remedy — every entry such
+    # a home does not own links back to the shared one — and session state is
+    # only the first thing this toolchain writes outside the tree; a
+    # worktree, a plugin cache, and the git configuration behind them follow.
+    # A session opened inside that boundary dies on its first shell call with
+    # a bare EROFS, which reads to an agent like a broken repository rather
+    # than like a boundary: one planning run finished that way and looked
+    # normal.
+    "uv run lup-devtools harness *",
 ]
 """Commands this project runs with no OS boundary beneath them.
 

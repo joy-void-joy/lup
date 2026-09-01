@@ -1,6 +1,6 @@
 """The verdict vocabulary every kernel module returns."""
 
-from typing import Literal
+from typing import Literal, TypedDict, Unpack
 
 from .semantics import (
     AbstentionPurpose,
@@ -204,6 +204,32 @@ def sandbox_escaped(sandbox: SandboxPlacement) -> bool:
     return sandbox == "outside"
 
 
+class Revision(TypedDict, total=False):
+    """What one settlement row may rewrite, absent where it changes nothing.
+
+    A TypedDict rather than a model because this is the hermetic kernel, which
+    has no pydantic; partial because a row names one or two fields and the
+    point of the shape is that it says nothing about the rest.
+    """
+
+    effect: DecisionEffect
+    reason: str
+    sandbox: SandboxPlacement
+    escalated: str
+    checkpoint: CheckpointRequirement
+    unlisted: bool
+    reviewer: ReviewerRequirement
+    purpose: ReviewPurpose | None
+    visibility: Visibility
+    cause: RefusalCause | None
+    capability: Capability | None
+    abstention: AbstentionPurpose | None
+    hard: bool
+    findings: tuple["KernelDecision", ...]
+    rule: str
+    evaluator: str
+
+
 class KernelDecision:
     """One settled verdict, and every orthogonal fact settled alongside it.
 
@@ -360,34 +386,38 @@ class KernelDecision:
         # hands the whole question over, placement included.
         self.sandbox = sandbox if effect in ("allow", "ask") else "ambient"
 
-    def revised(self, **changes: object) -> "KernelDecision":
+    def revised(self, **changes: Unpack[Revision]) -> "KernelDecision":
         """This verdict with named fields replaced and the rest carried over.
 
         Every settlement row rewrites one or two fields and must not drop the
-        ten it is not about — which is exactly what a constructor call listing
-        the fields a row happens to remember does. Spelled once here so a row
-        says what it changes and nothing says what it preserves.
+        fourteen it is not about — which is exactly what a constructor call
+        listing the fields a row happens to remember does. Spelled once here
+        so a row says what it changes and nothing says what it preserves.
+
+        Each field is read individually rather than merged from a mapping,
+        because ``None`` is a value three of them can take and a merge cannot
+        tell "clear this" from "leave it alone". Verbose, and the verbosity is
+        the whole of what makes a row that clears a purpose distinguishable
+        from one that never mentioned it.
         """
-        fields = {
-            "effect": self.effect,
-            "reason": self.reason,
-            "sandbox": self.sandbox,
-            "escalated": self.escalated,
-            "checkpoint": self.checkpoint,
-            "unlisted": self.unlisted,
-            "reviewer": self.reviewer,
-            "purpose": self.purpose,
-            "visibility": self.visibility,
-            "cause": self.cause,
-            "capability": self.capability,
-            "abstention": self.abstention,
-            "hard": self.hard,
-            "findings": self.findings,
-            "rule": self.rule,
-            "evaluator": self.evaluator,
-        }
-        fields.update(changes)
-        return KernelDecision(**fields)  # pyright: ignore[reportArgumentType]
+        return KernelDecision(
+            changes["effect"] if "effect" in changes else self.effect,
+            changes["reason"] if "reason" in changes else self.reason,
+            changes["sandbox"] if "sandbox" in changes else self.sandbox,
+            changes["escalated"] if "escalated" in changes else self.escalated,
+            changes["checkpoint"] if "checkpoint" in changes else self.checkpoint,
+            changes["unlisted"] if "unlisted" in changes else self.unlisted,
+            changes["reviewer"] if "reviewer" in changes else self.reviewer,
+            changes["purpose"] if "purpose" in changes else self.purpose,
+            changes["visibility"] if "visibility" in changes else self.visibility,
+            changes["cause"] if "cause" in changes else self.cause,
+            changes["capability"] if "capability" in changes else self.capability,
+            changes["abstention"] if "abstention" in changes else self.abstention,
+            changes["hard"] if "hard" in changes else self.hard,
+            changes["findings"] if "findings" in changes else self.findings,
+            changes["rule"] if "rule" in changes else self.rule,
+            changes["evaluator"] if "evaluator" in changes else self.evaluator,
+        )
 
     def placed(self, escapable: bool) -> "KernelDecision":
         """This verdict as the runtime about to render it will carry it out.

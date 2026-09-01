@@ -167,11 +167,13 @@ def test_the_git_family_is_drawn_by_what_a_verb_reaches_not_by_what_it_writes() 
     assert effect("git symbolic-ref HEAD") == "allow"
     assert effect("git symbolic-ref HEAD refs/heads/topic") == "ask"
     assert effect("git symbolic-ref --delete HEAD") == "ask"
-    # Passing the criterion settles the effect, never the placement: a summary
-    # of what a remote would pull is built by asking that remote, so it needs
-    # the route ls-remote needs rather than a confinement it dies inside.
-    outside = verdict("git request-pull main https://x.test/r HEAD", rules)
-    assert (outside.effect, outside.sandbox) == ("allow", "outside")
+    # Passing the criterion settles the effect, and the placement is nobody's
+    # to state here: a summary of what a remote would pull is built by asking
+    # that remote, so what it needs is a boundary with a route out — declared
+    # and measured with the profile — rather than the launcher's host, which
+    # would put a reviewed crossing in front of a read.
+    reaching = verdict("git request-pull main https://x.test/r HEAD", rules)
+    assert (reaching.effect, reaching.sandbox) == ("allow", "ambient")
 
 
 def test_a_config_write_asks_only_where_the_key_names_a_program() -> None:

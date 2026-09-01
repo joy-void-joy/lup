@@ -62,7 +62,8 @@
     "excludedCommands": [
       "ssh *",
       "git *",
-      "gh *"
+      "gh *",
+      "uv run lup-devtools harness *"
     ],
     "filesystem": {
       "allowWrite": [

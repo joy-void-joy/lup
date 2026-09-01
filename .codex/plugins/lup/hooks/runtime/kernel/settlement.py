@@ -33,20 +33,30 @@ from .decision import (
 from .escalation import EscalationRequest
 from .semantics import CheckpointEvidence, UnjudgedAmbient
 
-# lup: ignore[constant-declaration] — settlement's own wording, declared beside
-# the row that returns it; different words would be a different settlement
+# Every sentence below is one settlement row's own wording, declared beside the
+# row that returns it: a caller passing different words would be stating a
+# different settlement, not configuring this one. The kernel is compiled
+# hermetically into a dispatcher that takes no arguments, so there is no caller
+# to reach in any case.
+# lup: ignore[constant-declaration] — a row's own wording
 REDUNDANT_DECISION = " — a reviewer was already going to see this"
+# lup: ignore[constant-declaration] — a row's own wording
 REDUNDANT_SANDBOX = " — this was already placed on the host"
+# lup: ignore[constant-declaration] — a row's own wording
 ESCALATED_PREFIX = "escalated ({reason}): "
+# lup: ignore[constant-declaration] — a row's own wording
 CONTAINED_READ = (
     " — settled inside the containment boundary rather than asked: every"
     " effect it can have is confined there"
 )
+# lup: ignore[constant-declaration] — a row's own wording
 RECOVERED_LOSS = " — settled rather than asked: {held}"
+# lup: ignore[constant-declaration] — a row's own wording
 CHECKPOINT_FAILED = (
     " — the capture that would have settled this failed, so the loss it was"
     " going to cover is unprotected and the question stands"
 )
+# lup: ignore[constant-declaration] — a row's own wording
 NO_REVIEWER = (
     " — no eligible reviewer is reachable from this session, so the question"
     " cannot be put to anybody"
@@ -426,6 +436,11 @@ class UnjudgedAmbientPolicy(SettlementRule):
     only the vocabulary was silent. ``defer`` is a profile deliberately
     handing the long tail to provider-native judgement.
 
+    A session that can reach nobody creates no question here. The row above
+    that rewrites an unanswerable ask is read before this one and so cannot
+    see a question this one makes; reading the same fact here is what keeps
+    the two from needing to be ordered around each other in both directions.
+
     Only the legible half reaches either answer. An operation the classifier
     could not *read* — an unresolved expansion, a substitution it cannot see
     into, an operator its parser does not carry — is refused however many
@@ -443,6 +458,8 @@ class UnjudgedAmbientPolicy(SettlementRule):
             return None
         if facts.unjudged_ambient == "defer":
             return facts.decision.revised(abstention="provider_native")
+        if not facts.reviewable:
+            return None
         return facts.decision.revised(
             effect="ask", purpose="policy_override", abstention=None
         )

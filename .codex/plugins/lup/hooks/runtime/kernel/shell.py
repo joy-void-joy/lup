@@ -880,9 +880,7 @@ def classify_shell(
         return denied.revised(findings=parts)
     asked = next((item for item in decisions if item.effect == "ask"), None)
     if asked is not None:
-        return asked.revised(
-            sandbox=placement, checkpoint=restoration, findings=parts
-        )
+        return asked.revised(sandbox=placement, checkpoint=restoration, findings=parts)
     deferred = next((item for item in decisions if item.effect == "defer"), None)
     if deferred is not None:
         return deferred.revised(findings=parts)

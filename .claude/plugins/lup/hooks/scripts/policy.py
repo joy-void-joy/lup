@@ -42,7 +42,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.words import INTERPRETERS
-from kernel.shell import decide_shell
+from kernel.shell import decide_shell, sandbox_excluded
 from kernel.tools import decide_tool
 from policy_data import (
     ACCEPTANCE_GUARD,
@@ -1126,6 +1126,17 @@ def bash_decision(
         pointed.escalated,
         checkpoint=pointed.checkpoint,
     )
+
+
+def unconfined_by_declaration(command: str) -> bool:
+    """Whether the boundary declaration takes this command out of isolation.
+
+    A command excluded from the boundary runs unconfined because the profile
+    said so, which is a grant a native escape request is spending rather than
+    circumventing. Read here, beside every other reading of the same table, so
+    a runtime cannot answer it differently from the classifier.
+    """
+    return sandbox_excluded(command, SANDBOX_EXCLUDED_COMMANDS)
 
 
 def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:

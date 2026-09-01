@@ -41,7 +41,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.words import INTERPRETERS
-from kernel.shell import decide_shell
+from kernel.shell import decide_shell, sandbox_excluded
 from kernel.tools import decide_tool
 from policy_data import (
     ACCEPTANCE_GUARD,
@@ -1127,6 +1127,17 @@ def bash_decision(
     )
 
 
+def unconfined_by_declaration(command: str) -> bool:
+    """Whether the boundary declaration takes this command out of isolation.
+
+    A command excluded from the boundary runs unconfined because the profile
+    said so, which is a grant a native escape request is spending rather than
+    circumventing. Read here, beside every other reading of the same table, so
+    a runtime cannot answer it differently from the classifier.
+    """
+    return sandbox_excluded(command, SANDBOX_EXCLUDED_COMMANDS)
+
+
 def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
     """Say the tree was snapshotted, on the one verdict that changes for it.
 
@@ -1431,6 +1442,7 @@ def dispatch(payload, permission_request=False):
             requested_escape
             and decision.effect == "allow"
             and decision.sandbox != "outside"
+            and not unconfined_by_declaration(tool_input["command"])
         ):
             return KernelDecision(
                 "deny",
@@ -1519,9 +1531,10 @@ def main():
         # A verdict from here places nothing: this hook answers, and the call
         # runs with the arguments the model wrote, so a placement is degraded
         # to its plain effect rather than carrying an intent no channel here
-        # performs. The agent's own escape is the other question and Codex
-        # does have one, so a permission to escalate survives as reason text.
-        decision = decision.placed(escapable=False, agent_escalates=True)
+        # performs. Asking for the launcher's host is a marker a reviewer
+        # answers, and it reaches the same relay under every runtime, so
+        # nothing about that route depends on this channel existing.
+        decision = decision.placed(escapable=False)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and a traceback exit is not the

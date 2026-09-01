@@ -249,14 +249,14 @@ def test_rewrite_carries_corrected_arguments_without_granting_the_call() -> None
     }
 
 
-def test_an_offered_escalation_keeps_both_the_placement_and_the_offer() -> None:
-    """The one verdict that fills both channels must not lose either.
+def test_a_placed_verdict_that_also_speaks_keeps_both_channels() -> None:
+    """A verdict that fills both channels must not lose either.
 
-    An escalable grant is placed — so it carries a rewrite — and speaks to
-    the agent — so it carries context. Those are separate arms, and an arm
-    ordered on the context alone answers first for a verdict that has both,
-    dropping the rewrite that is the placement's only channel. The offer
-    would then be granted in words and unspendable in arguments.
+    A placed grant carries a rewrite, and one with something for the agent
+    carries context. Those are separate arms, and an arm ordered on the
+    context alone answers first for a verdict that has both, dropping the
+    rewrite that is the placement's only channel — leaving the placement
+    stated in words and absent from the arguments the call actually runs with.
     """
     placed: JsonObject = {
         "command": "toolchain --run",
@@ -265,7 +265,7 @@ def test_an_offered_escalation_keeps_both_the_placement_and_the_offer() -> None:
 
     offered = lup_hook_output_to_claude(
         LupHookOutput(
-            decision="allow", sandbox="escalable", additional_context="may leave"
+            decision="allow", sandbox="outside", additional_context="may leave"
         ),
         event="PreToolUse",
         placed_input=placed,

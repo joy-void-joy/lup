@@ -1099,7 +1099,11 @@ def test_codex_compiles_prefix_safe_shell_allows_to_native_rules() -> None:
     }
     rules = artifacts[Path(".codex/rules/lup.rules")]
 
-    assert 'pattern = ["uv", "run", "lup-devtools"]' in rules
+    assert 'pattern = ["uv", "run", "lup-devtools", "harness"]' in rules
+    # The verbs that only read the tree are not approved for an escape they
+    # never needed: the approval mirrors the boundary's own exclusion rather
+    # than the rule that names the whole toolchain.
+    assert 'pattern = ["uv", "run", "lup-devtools"],' not in rules
     assert 'pattern = ["git", "status"]' in rules
     assert 'pattern = ["gh", "pr", "view"]' in rules
     assert 'pattern = ["uv"]' not in rules
@@ -1678,6 +1682,28 @@ def test_generated_codex_pretool_accepts_a_safe_requested_escape() -> None:
         },
     }
     assert codex_hook_result(body, sandboxed=True).exit_code == 0
+
+
+def test_generated_codex_pretool_refuses_an_escape_no_declaration_covers() -> None:
+    """The agent placing its own call is not a request Lup answers.
+
+    Asking for the launcher's host is a marker a reviewer sees. A native escape
+    on a command the boundary confines and no rule places elsewhere is the
+    agent choosing where its own operation runs, so the hook says which
+    placement policy reached and what to remove.
+    """
+    body: JsonObject = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": "uv run pytest tests/unit",
+            "sandbox_permissions": "require_escalated",
+        },
+    }
+    result = codex_hook_result(body, sandboxed=True)
+
+    assert result.exit_code == 2
+    assert b"remove sandbox_permissions" in result.stderr
 
 
 def test_generated_codex_pretool_accepts_a_safe_automatic_escape() -> None:

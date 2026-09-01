@@ -173,7 +173,9 @@ class ResolvedAxes(BaseModel, frozen=True):
             effect_source=self.effect_source if declared.effect is None else level,
             sandbox=self.sandbox if declared.sandbox is None else declared.sandbox,
             sandbox_source=self.sandbox_source if declared.sandbox is None else level,
-            checkpoint=self.checkpoint if declared.checkpoint is None else declared.checkpoint,
+            checkpoint=self.checkpoint
+            if declared.checkpoint is None
+            else declared.checkpoint,
             checkpoint_source=(
                 self.checkpoint_source if declared.checkpoint is None else level
             ),
@@ -276,9 +278,7 @@ class ShellOperationRule(BaseModel, frozen=True):
             sandbox=self.sandbox if "sandbox" in supplied else None,
             checkpoint=self.checkpoint if "checkpoint" in supplied else None,
             reviewer=self.reviewer if "reviewer" in supplied else None,
-            effect_class=(
-                self.effect_class if "effect_class" in supplied else None
-            ),
+            effect_class=(self.effect_class if "effect_class" in supplied else None),
         )
 
 
@@ -317,9 +317,7 @@ class ShellSubcommandRule(BaseModel, frozen=True):
             sandbox=self.sandbox if "sandbox" in supplied else None,
             checkpoint=self.checkpoint if "checkpoint" in supplied else None,
             reviewer=self.reviewer if "reviewer" in supplied else None,
-            effect_class=(
-                self.effect_class if "effect_class" in supplied else None
-            ),
+            effect_class=(self.effect_class if "effect_class" in supplied else None),
         )
 
 
@@ -416,9 +414,7 @@ class ShellCommandRule(SelectableRule, frozen=True):
             sandbox=self.sandbox if "sandbox" in supplied else None,
             checkpoint=self.checkpoint if "checkpoint" in supplied else None,
             reviewer=self.reviewer if "reviewer" in supplied else None,
-            effect_class=(
-                self.effect_class if "effect_class" in supplied else None
-            ),
+            effect_class=(self.effect_class if "effect_class" in supplied else None),
         )
 
 
@@ -466,7 +462,9 @@ def rule_id(command: str, subcommand: str = "", operation: str = "") -> str:
     step. The ``shell:`` prefix is what keeps it distinguishable from an edit
     or fetch rule in a single audit table.
     """
-    return "shell:" + ".".join(part for part in (command, subcommand, operation) if part)
+    return "shell:" + ".".join(
+        part for part in (command, subcommand, operation) if part
+    )
 
 
 def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:

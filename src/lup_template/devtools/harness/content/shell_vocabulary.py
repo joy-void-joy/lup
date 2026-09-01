@@ -73,11 +73,7 @@ def lup_devtools_rule() -> ShellCommandRule:
             ShellSubcommandRule(
                 name="dev",
                 effect="deny",
-                operations=[
-                    ShellOperationRule(
-                        name="conflict", effect="allow", sandbox="outside"
-                    )
-                ],
+                operations=[ShellOperationRule(name="conflict", effect="allow")],
                 reason=reach_through_uv,
             )
         ],

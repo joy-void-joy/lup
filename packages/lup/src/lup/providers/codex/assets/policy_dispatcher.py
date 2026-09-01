@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from codex_patch import patched_files
 from decisions import (
+    unconfined_by_declaration,
     bash_decision,
     edit_decision,
     fetch_decision,
@@ -231,6 +232,7 @@ def dispatch(payload, permission_request=False):
             requested_escape
             and decision.effect == "allow"
             and decision.sandbox != "outside"
+            and not unconfined_by_declaration(tool_input["command"])
         ):
             return KernelDecision(
                 "deny",
@@ -319,9 +321,10 @@ def main():
         # A verdict from here places nothing: this hook answers, and the call
         # runs with the arguments the model wrote, so a placement is degraded
         # to its plain effect rather than carrying an intent no channel here
-        # performs. The agent's own escape is the other question and Codex
-        # does have one, so a permission to escalate survives as reason text.
-        decision = decision.placed(escapable=False, agent_escalates=True)
+        # performs. Asking for the launcher's host is a marker a reviewer
+        # answers, and it reaches the same relay under every runtime, so
+        # nothing about that route depends on this channel existing.
+        decision = decision.placed(escapable=False)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and a traceback exit is not the

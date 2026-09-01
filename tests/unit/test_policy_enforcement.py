@@ -26,12 +26,7 @@ from lup.policy.enforcement import (
     create_policy_hooks,
     policy_hook_output,
 )
-from lup.policy.kernel.decision import (
-    SANDBOX_ESCALATION_OFFER,
-    SANDBOX_ESCALATION_UNSUPPORTED,
-    SANDBOX_TRAPPED_REASON,
-    DecisionEffect,
-)
+from lup.policy.kernel.decision import SANDBOX_TRAPPED_REASON, DecisionEffect
 from lup.policy.shell_rules import ShellCommandRule
 from lup.policy.vocabulary import runner_target_rules
 from lup.types import JsonObject
@@ -198,16 +193,14 @@ async def test_hook_refuses_a_denied_call_and_leaves_other_events_alone() -> Non
     assert after == LupHookOutput()
 
 
-async def test_permitting_an_escape_widens_only_the_calls_that_declare_one() -> None:
-    """Opening the escape must move exactly the calls that asked for it.
+async def test_a_placement_widens_only_the_operations_that_declare_one() -> None:
+    """Three verdicts from one session, and the third is what makes the rest safe.
 
-    Composed as a worker is: the placement taken from the session's own
-    sandbox declaration, and nothing else taken from it. Three shapes through
-    one session — the toolchain declares ``outside`` and reaches it, an
-    ordinary allow runs where the session runs, and a command no rule
-    classifies is refused rather than carried anywhere. The last is what
-    makes the first safe: a session that may place one call outside must not
-    thereby place the ones it never judged.
+    A profile with a host channel carries an operation that declares the host,
+    runs an ordinary allow where the session already is, and refuses an
+    operation no rule classified rather than carrying it anywhere. A session
+    that may place one operation on the host must not thereby place the ones
+    it never judged.
     """
     posture = ClaudeSandboxConfig(allow_unsandboxed_commands=True).posture()
     assert posture == SandboxPosture(active=True, escapable=True)
@@ -215,7 +208,7 @@ async def test_permitting_an_escape_widens_only_the_calls_that_declare_one() -> 
     hooks = create_policy_hooks(
         SemanticToolPolicy(
             shell=ShellPolicy(
-                SHELL_RULES,
+                [*SHELL_RULES, *placement_rules()],
                 escapable=CLAUDE_SEMANTICS.escapes_from(posture),
                 interactive=False,
                 runner_targets=runner_target_rules(),
@@ -234,14 +227,90 @@ async def test_permitting_an_escape_widens_only_the_calls_that_declare_one() -> 
             )
         )
 
+    remote = await placed("remote --run")
     toolchain = await placed("uv run lup-devtools harness resolve")
-    checker = await placed("uv run pytest tests/unit")
 
-    assert (toolchain.decision, toolchain.sandbox) == ("allow", "outside")
-    assert (checker.decision, checker.sandbox) == ("allow", "ambient")
+    assert (remote.decision, remote.sandbox) == ("allow", "outside")
+    assert (toolchain.decision, toolchain.sandbox) == ("allow", "ambient")
     unjudged = await placed("frobnicate --wildly")
     assert unjudged.decision == "deny"
     assert unjudged.sandbox == "ambient"
+
+
+async def test_a_toolchain_needs_a_boundary_that_grants_paths_not_the_host() -> None:
+    """What the retired ``outside`` on this toolchain was actually asking for.
+
+    A session-opening toolchain needs the place it already runs to grant the
+    runtime's configuration home. That is a statement about the profile, so it
+    is declared and measured with the boundary — where a profile that cannot
+    grant it fails at launch, with the gap actionable. Declared as a placement
+    it was unmeasurable: the profile that grants the path and the profile that
+    does not both read as ``outside``, and the second only found out at its
+    first shell call, on a bare ``EROFS`` that reads like a broken repository.
+    """
+    posture = ClaudeSandboxConfig().posture()
+    assert posture == SandboxPosture(active=True, escapable=False)
+
+    hooks = create_policy_hooks(
+        SemanticToolPolicy(
+            shell=ShellPolicy(
+                SHELL_RULES,
+                sandbox_active=posture.active,
+                escapable=CLAUDE_SEMANTICS.escapes_from(posture),
+                interactive=False,
+                runner_targets=runner_target_rules(),
+            )
+        ),
+        CLAUDE_SEMANTICS,
+        sandbox=posture,
+    )
+    ran = await hooks.pre_tool_use[0].hook(
+        LupHookInput(
+            event="PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "uv run lup-devtools harness resolve"},
+        )
+    )
+
+    assert (ran.decision, ran.sandbox) == ("allow", "ambient")
+
+
+async def test_an_operation_needing_a_channel_this_session_lacks_is_blocked() -> None:
+    """The composition is read from the session, not from the runtime alone.
+
+    Read from the runtime alone, a session whose settings forbid unsandboxed
+    commands was still handed the placement — rendered onto the wire, dropped
+    without a word, and the operation left to die on whatever it touched
+    first. Composed from the session, the pair says no, and the refusal names
+    the missing channel rather than reading as a rule's judgement: no approval
+    builds a channel, so no reviewer is shown the question.
+    """
+    posture = ClaudeSandboxConfig().posture()
+    assert CLAUDE_SEMANTICS.escapable
+    assert not CLAUDE_SEMANTICS.escapes_from(posture)
+
+    hooks = create_policy_hooks(
+        SemanticToolPolicy(
+            shell=ShellPolicy(
+                placement_rules(),
+                sandbox_active=posture.active,
+                escapable=CLAUDE_SEMANTICS.escapes_from(posture),
+                interactive=False,
+                runner_targets=runner_target_rules(),
+            )
+        ),
+        CLAUDE_SEMANTICS,
+        sandbox=posture,
+    )
+    stopped = await hooks.pre_tool_use[0].hook(
+        LupHookInput(
+            event="PreToolUse", tool_name="Bash", tool_input={"command": "remote --run"}
+        )
+    )
+
+    assert stopped.decision == "deny"
+    assert stopped.reason == SANDBOX_TRAPPED_REASON
+    assert stopped.sandbox == "ambient"
 
 
 async def test_a_worker_is_judged_by_the_composition_a_run_actually_builds() -> None:
@@ -250,9 +319,14 @@ async def test_a_worker_is_judged_by_the_composition_a_run_actually_builds() -> 
     Every verdict the kernel reached was already correct; what shipped a
     widening was the composition handing it host facts the session did not
     have. So this builds the worker's judge rather than a policy shaped like
-    it: the toolchain is placed outside and gets there, while a guarded verb
-    stays a refusal, and so does an escalation marker, which in a session
-    with no way to reach a human would otherwise be the way to avoid one.
+    it: the toolchain runs where the session runs, a guarded verb parks a
+    durable question reaching whoever supervises the run, and an escalation
+    marker parks the same question rather than being the way to avoid one.
+
+    A worker is non-interactive and not therefore alone, which is the whole of
+    why those are questions. What stays a refusal is what no reviewer could
+    answer: text the classifier could not read, where the person would be
+    approving the readable half of something else entirely.
     """
     hooks = worker_policy_hooks(
         declared_hook_set(),
@@ -271,235 +345,119 @@ async def test_a_worker_is_judged_by_the_composition_a_run_actually_builds() -> 
         )
 
     toolchain = await judged("uv run lup-devtools harness resolve")
-    assert (toolchain.decision, toolchain.sandbox) == ("allow", "outside")
-    for refused in (
+    assert (toolchain.decision, toolchain.sandbox) == ("allow", "ambient")
+    for parked in (
         "find . -delete",
         "git push --delete origin feat",
         "# lup: escalate: I would rather not be asked\nsudo rm -rf /var/tmp/x",
     ):
+        assert (await judged(parked)).decision == "ask", parked
+    for refused in ('eval "$COMMAND"', "sh -c 'rm -rf /'"):
         assert (await judged(refused)).decision == "deny", refused
 
 
-async def test_a_session_that_forbids_the_escape_is_never_told_it_has_one() -> None:
-    """The runtime's channel is not the session's permission to use it.
-
-    Read from the runtime alone, a session whose settings forbid unsandboxed
-    commands was still handed the placement — rendered onto the wire, dropped
-    without a word, and the call left confined to die on whatever it wrote
-    first. Composed from the session instead, the runtime still reports the
-    channel and the pair still says no, so a host that also declares its
-    confinement stops the call with the sandbox named rather than letting it
-    reach a shell it cannot survive.
-    """
-    posture = ClaudeSandboxConfig().posture()
-    assert posture == SandboxPosture(active=True, escapable=False)
-    assert CLAUDE_SEMANTICS.escapable
-    assert not CLAUDE_SEMANTICS.escapes_from(posture)
-
-    hooks = create_policy_hooks(
-        SemanticToolPolicy(
-            shell=ShellPolicy(
-                SHELL_RULES,
-                sandbox_active=posture.active,
-                escapable=CLAUDE_SEMANTICS.escapes_from(posture),
-                interactive=False,
-                runner_targets=runner_target_rules(),
-            )
-        ),
-        CLAUDE_SEMANTICS,
-        sandbox=posture,
-    )
-    stopped = await hooks.pre_tool_use[0].hook(
-        LupHookInput(
-            event="PreToolUse",
-            tool_name="Bash",
-            tool_input={"command": "uv run lup-devtools harness resolve"},
-        )
-    )
-
-    assert stopped.decision == "deny"
-    assert stopped.reason == SANDBOX_TRAPPED_REASON
-    assert stopped.sandbox == "ambient"
-
-
-def escalation_rules() -> list[ShellCommandRule]:
-    """One command that follows the session, one the caller may take out."""
+def placement_rules() -> list[ShellCommandRule]:
+    """One command that follows the session, one confined, one on the host."""
     return [
         ShellCommandRule(name="checker", default_effect="allow", sandbox="ambient"),
-        ShellCommandRule(name="toolchain", default_effect="allow", sandbox="escalable"),
-    ]
-
-
-def test_an_offered_escalation_is_not_the_session_read_back() -> None:
-    """The case where standing one placement in for the other is invisible.
-
-    ``ambient`` reads the placement off the session, so an unconfined session
-    runs the call outside without anybody choosing that; ``escalable``
-    confines it whatever the session is doing and hands the way out to the
-    agent. Confined, the two agree — which is why this session is not, and
-    why the assertion is on the arguments the call actually runs with rather
-    than on the placement naming itself.
-    """
-    policy = ShellPolicy(escalation_rules(), sandbox_active=False, escapable=True)
-    render = ClaudeDecisionRenderer().render
-
-    deferring = policy.decide(ShellCommand(command="checker --run"))
-    offered = policy.decide(ShellCommand(command="toolchain --run"))
-
-    assert (deferring.effect, offered.effect) == ("allow", "allow")
-    assert (deferring.sandbox, offered.sandbox) == ("ambient", "escalable")
-
-    call: JsonObject = {"command": "toolchain --run"}
-    assert render(deferring, call).updated_input is None
-    assert render(offered, call).updated_input == {
-        **call,
-        "dangerouslyDisableSandbox": False,
-    }
-    assert SANDBOX_ESCALATION_OFFER in render(offered, call).reason
-
-
-def test_the_offer_goes_where_the_agent_reads_and_not_only_where_a_human_does() -> None:
-    """An offer the agent is never shown is one nobody can take.
-
-    The two channels a grant has reach different readers: a permission
-    reason on an allow is shown to the human who was not asked, while what an
-    agent reads mid-turn is context. So the offer travels on both, and only
-    the offer does — an ordinary grant says nothing, because a context line
-    per allowed call is how the channel meant for what matters stops being
-    read.
-    """
-    policy = ShellPolicy(escalation_rules(), sandbox_active=False, escapable=True)
-    render = ClaudeDecisionRenderer().render
-    call: JsonObject = {"command": "toolchain --run"}
-
-    offered = render(policy.decide(ShellCommand(command="toolchain --run")), call)
-    ordinary = render(policy.decide(ShellCommand(command="checker --run")), call)
-
-    assert offered.additional_context == offered.reason
-    assert SANDBOX_ESCALATION_OFFER in offered.additional_context
-    assert ordinary.additional_context == ""
-
-
-async def test_an_approval_question_carries_the_offer_on_the_agent_channel_too() -> (
-    None
-):
-    """The human answering a question is no more the agent than nobody is.
-
-    A grant's reason reaches the record and a question's reaches whoever was
-    asked, so on neither of the effects a placement survives does the
-    permission channel put the offer in front of the agent holding it. Both
-    boundaries that render one are pinned together here, because one field
-    filled from two conditions is one they can fill differently — and an
-    offer delivered on one path and dropped on the other is invisible from
-    either.
-    """
-    guarded = [
-        ShellCommandRule(name="guarded", default_effect="ask", sandbox="escalable")
-    ]
-    posture = SandboxPosture(active=False, escapable=True)
-    policy = ShellPolicy(guarded, sandbox_active=False, escapable=True)
-    call: JsonObject = {"command": "guarded --run"}
-
-    asked = policy.decide(ShellCommand(command="guarded --run"))
-    assert (asked.effect, asked.sandbox) == ("ask", "escalable")
-
-    rendered = ClaudeDecisionRenderer().render(asked, call)
-    hooks = create_policy_hooks(
-        SemanticToolPolicy(shell=policy), CLAUDE_SEMANTICS, sandbox=posture
-    )
-    seam = await hooks.pre_tool_use[0].hook(
-        LupHookInput(event="PreToolUse", tool_name="Bash", tool_input=call)
-    )
-
-    assert rendered.permission_decision == "ask"
-    assert SANDBOX_ESCALATION_OFFER in rendered.additional_context
-    assert (seam.decision, seam.additional_context) == ("ask", seam.reason)
-    assert SANDBOX_ESCALATION_OFFER in seam.additional_context
-
-
-def test_the_agent_spends_the_offer_and_the_whole_call_goes_with_it() -> None:
-    """An offer the agent takes has to survive the hook that made it.
-
-    The rewrite replaces the arguments outright, so it carries the whole
-    input rather than the flag alone — sending the flag by itself would drop
-    the command being judged. The verdict is the same either way, which is
-    what makes the offer safe on a host that forbids unsandboxed commands:
-    such a host ignores a flag it does not honour and is left with the
-    decision it was already given, rather than with a failure.
-    """
-    policy = ShellPolicy(escalation_rules(), sandbox_active=False, escapable=True)
-    render = ClaudeDecisionRenderer().render
-
-    spent: JsonObject = {
-        "command": "toolchain --run",
-        "timeout": 600,
-        "dangerouslyDisableSandbox": True,
-    }
-    taken = render(policy.decide(ShellCommand(command="toolchain --run")), spent)
-
-    assert taken.updated_input == spent
-    assert taken.permission_decision == "allow"
-
-
-async def test_a_session_that_forbids_the_escape_withdraws_the_offer_too() -> None:
-    """An offer needs the session's permission as much as a placement does.
-
-    The runtime hands the agent words and the session decides whether a
-    command may run unsandboxed at all; a host that says no refuses the
-    agent's own attempt, so an offer made there is one nobody can spend. What
-    it is not is a reason to refuse: withdrawing the way out leaves the
-    confined allow the verdict always was, and only the reason changes.
-    """
-    posture = ClaudeSandboxConfig().posture()
-    assert (CLAUDE_SEMANTICS.agent_escalates, posture.escapable) == (True, False)
-    assert not CLAUDE_SEMANTICS.escalates_from(posture)
-
-    hooks = create_policy_hooks(
-        SemanticToolPolicy(
-            shell=ShellPolicy(
-                escalation_rules(),
-                sandbox_active=posture.active,
-                escapable=CLAUDE_SEMANTICS.escapes_from(posture),
-                interactive=False,
-            )
-        ),
-        CLAUDE_SEMANTICS,
-        sandbox=posture,
-    )
-    withdrawn = await hooks.pre_tool_use[0].hook(
-        LupHookInput(
-            event="PreToolUse",
-            tool_name="Bash",
-            tool_input={"command": "toolchain --run"},
-        )
-    )
-
-    assert withdrawn.decision == "allow"
-    assert withdrawn.sandbox == "ambient"
-    assert SANDBOX_ESCALATION_UNSUPPORTED in withdrawn.reason
-
-
-def test_a_line_that_has_to_leave_outranks_one_that_merely_may() -> None:
-    """One command line is one process, so its segments cannot be placed apart.
-
-    A segment that has to stay inside still keeps the whole line inside. An
-    offer yields to a segment that must leave, because leaving is inside what
-    the offer already permits, and outranks a segment that only follows the
-    session, because confinement is the conservative direction.
-    """
-    rules = [
-        *escalation_rules(),
         ShellCommandRule(name="confined", default_effect="allow", sandbox="inside"),
         ShellCommandRule(name="remote", default_effect="allow", sandbox="outside"),
     ]
-    policy = ShellPolicy(rules, sandbox_active=False, escapable=True)
+
+
+def test_a_stated_placement_is_not_the_session_read_back() -> None:
+    """The case where standing one placement in for the other is invisible.
+
+    ``ambient`` reads the placement off the session, so an unconfined session
+    runs the operation on the host without anybody choosing that; ``inside``
+    confines it whatever the session is doing. The two agree only while the
+    session is already confined — which is why this one is not, and why the
+    assertion is on the arguments the call actually runs with rather than on
+    the word in the verdict.
+    """
+    policy = ShellPolicy(placement_rules(), sandbox_active=False, escapable=True)
+    render = ClaudeDecisionRenderer().render
+
+    following = policy.decide(ShellCommand(command="checker --run"))
+    held = policy.decide(ShellCommand(command="confined --run"))
+
+    assert (following.sandbox, held.sandbox) == ("ambient", "inside")
+
+    call: JsonObject = {"command": "confined --run"}
+    assert render(following, call).updated_input is None
+    assert render(held, call).updated_input == {
+        **call,
+        "dangerouslyDisableSandbox": False,
+    }
+
+
+def test_an_inside_placement_survives_a_call_that_asked_to_leave() -> None:
+    """Provider auto-mode and a self-set native flag are both overwritten.
+
+    An operation Lup places inside stays inside. The agent's route to the
+    host is a reviewed marker, and a flag it set on its own call is not that
+    request — honouring it would make the placement advisory exactly where it
+    is load-bearing.
+    """
+    policy = ShellPolicy(placement_rules(), sandbox_active=False, escapable=True)
+    asked_out: JsonObject = {
+        "command": "confined --run",
+        "dangerouslyDisableSandbox": True,
+    }
+
+    rendered = ClaudeDecisionRenderer().render(
+        policy.decide(ShellCommand(command="confined --run")), asked_out
+    )
+
+    assert rendered.updated_input == {**asked_out, "dangerouslyDisableSandbox": False}
+    assert rendered.permission_decision == "allow"
+
+
+def test_asking_for_the_host_produces_a_question_rather_than_a_placement() -> None:
+    """The crossing is reviewed however ordinary the operation reads inside.
+
+    What the reviewer is being shown is not "may this run" but "may this run
+    *there*", and the second question has an answer of its own.
+    """
+    policy = ShellPolicy(placement_rules(), sandbox_active=False, escapable=True)
+
+    asked = policy.decide(
+        ShellCommand(
+            command="# lup: escalate[sandbox]: the host holds it\nchecker --run"
+        )
+    )
+
+    assert (asked.effect, asked.sandbox) == ("ask", "outside")
+
+
+def test_a_runtime_with_no_channel_is_handed_the_plain_effect() -> None:
+    """An intent the runtime will not honour must not be spelled.
+
+    Spelled anyway, the verdict reads as placed while the operation runs
+    wherever the session already was — which is the one substitution the
+    placement axis exists to prevent.
+    """
+    policy = ShellPolicy(placement_rules(), sandbox_active=False, escapable=True)
+    placed = policy.decide(ShellCommand(command="confined --run"))
+
+    assert placed.placed(escapable=False).sandbox == "ambient"
+
+
+def test_a_line_that_has_to_leave_outranks_one_that_merely_follows() -> None:
+    """One command line is one process, so its segments cannot be placed apart.
+
+    A segment that has to stay inside keeps the whole line inside, which is
+    the conservative direction; only a line where something needs the host
+    and nothing needs the boundary leaves.
+    """
+    policy = ShellPolicy(placement_rules(), sandbox_active=False, escapable=True)
 
     def placed(command: str) -> str:
         return policy.decide(ShellCommand(command=command)).sandbox
 
-    assert placed("toolchain --run && checker --run") == "escalable"
-    assert placed("toolchain --run && remote --run") == "outside"
-    assert placed("toolchain --run && confined --run") == "inside"
+    assert placed("checker --run && remote --run") == "outside"
+    assert placed("remote --run && confined --run") == "inside"
+    assert placed("checker --run && checker --run") == "ambient"
 
 
 def test_hook_is_scoped_to_the_tools_the_policy_has_rules_for() -> None:

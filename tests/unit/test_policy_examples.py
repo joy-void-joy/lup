@@ -118,13 +118,14 @@ async def test_shell_example_allows_a_read_only_command() -> None:
     }
 
 
-async def test_shell_example_runs_a_git_read_outside_the_sandbox() -> None:
-    """`git` states its placement once, so every verb beneath it escapes.
+async def test_shell_example_runs_a_git_read_where_the_session_runs() -> None:
+    """`git` states its placement once, and what it states is ambient.
 
-    The declaration sits on the command and this is a subcommand under it,
-    which is what makes the round trip worth driving: the erased row already
-    carries the placement, so the renderer reads one field rather than walking
-    a hierarchy it cannot see.
+    What git needs is a route to the remote and the repository's own locks,
+    which the boundary declares and a launch measures — not the launcher's
+    host, which is what a placement would now be requesting and what a
+    reviewer would then answer for every ordinary read. So the verdict states
+    no placement, and nothing is rewritten onto the call.
     """
     command = "git status"
 
@@ -136,7 +137,6 @@ async def test_shell_example_runs_a_git_read_outside_the_sandbox() -> None:
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
-            "updatedInput": {"command": command, "dangerouslyDisableSandbox": True},
         }
     }
 

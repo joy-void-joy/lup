@@ -20,6 +20,8 @@ to whoever answers it, and a request that says nothing asks them to approve
 a rule id.
 """
 
+# lup: ignore[import-re] — this module's subject is a comment grammar
+# this repository defines; there is no parser for our own marker syntax
 import re
 from typing import Literal
 
@@ -33,9 +35,14 @@ operation to run on the launcher's host, which is a placement rather than a
 permission, and which is therefore always reviewed however the effect reads.
 """
 
+# lup: ignore[library-default] — the vocabulary of the marker grammar
+# itself, fixed by what settlement can act on rather than by any
+# adopter's toolchain: a third kind would be a settlement row, not a
+# word an adopter passes
 ESCALATION_KINDS: tuple[EscalationKind, ...] = ("decision", "sandbox")
 """Every kind a marker may name, in the order the canonical spelling lists them."""
 
+# lup: ignore[re-call] — the marker's own grammar, which nothing else parses
 ESCALATE_RE = re.compile(
     r"^\s*#[ \t]*lup[ \t]*:[ \t]*escalate\b"
     r"(?:[ \t]*\[(?P<kinds>[^\]\n]*)\])?"
@@ -172,18 +179,18 @@ def read_escalation(text: str) -> MarkerReading:
             "",
             remainder,
         )
-    kinds: list[EscalationKind] = []
-    for word in named.split(","):
-        stripped = word.strip().lower()
-        match stripped:
-            case "decision" | "sandbox":
-                kinds.append(stripped)
-            case _:
-                return MarkerReading(
-                    None, UNKNOWN_KIND.format(kind=word.strip()), remainder
-                )
-    if not kinds:
-        return MarkerReading(None, UNKNOWN_KIND.format(kind=""), remainder)
+    # lup: ignore[string-split] — the marker's own comma-separated kind list,
+    # a grammar this repository defines and nothing else parses
+    named_kinds = [word.strip().lower() for word in named.split(",")]
+    unknown = next((word for word in named_kinds if word not in ESCALATION_KINDS), None)
+    if unknown is not None or not any(named_kinds):
+        return MarkerReading(None, UNKNOWN_KIND.format(kind=unknown or ""), remainder)
+    # Read in the canonical order rather than the order they were written, so
+    # two markers naming the same pair produce the same normalized spelling and
+    # an audit comparing them is comparing requests rather than typing.
+    kinds: tuple[EscalationKind, ...] = tuple(
+        kind for kind in ESCALATION_KINDS if kind in named_kinds
+    )
     return MarkerReading(
-        EscalationRequest(tuple(kinds), reason, marker.group(0)), "", remainder
+        EscalationRequest(kinds, reason, marker.group(0)), "", remainder
     )
