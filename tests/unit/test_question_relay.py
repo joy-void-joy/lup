@@ -259,3 +259,87 @@ def test_a_cycle_in_the_chain_climbs_to_the_human_rather_than_hanging(
     assert looped.eligible("a", "supervisor_allowed") == ["b"]
     assert looped.eligible("a", "human_only") == []
     assert alone.eligible("a", "supervisor_allowed") == []
+
+
+def test_a_chain_nobody_resolved_is_not_a_chain_that_found_nobody(
+    tmp_path: Path,
+) -> None:
+    """Two different facts were sharing one empty list.
+
+    A chain resolved to nobody is a question that climbed past its supervisors
+    and found no human, and it must not be answerable by whoever asks. A chain
+    nobody resolved is eligibility this boundary could not compute — the
+    compiled dispatcher is hermetic and reaches a verdict without the session's
+    principals — and reading that as "nobody" made every question the live path
+    parked unanswerable, so the queue could only grow.
+    """
+    relay = QuestionRelay(tmp_path / "questions.jsonl")
+    call = operation()
+    unresolved = relay.record(
+        PersistentQuestion(
+            id="q-1",
+            operation=call,
+            fingerprint=call.fingerprint(),
+            reason="removing a remote ref requires approval",
+            eligible=[],
+            chain_resolved=False,
+        )
+    )
+    resolved = PersistentQuestion(
+        id="q-2",
+        operation=call,
+        fingerprint=call.fingerprint(),
+        reason="removing a remote ref requires approval",
+        eligible=[],
+    )
+
+    assert unresolved.answerable_by("person")
+    assert not resolved.answerable_by("person")
+
+
+def test_an_unresolved_chain_still_excludes_the_requester(tmp_path: Path) -> None:
+    """The invariant that carries the weight holds either way.
+
+    What an unresolved chain gives up is the narrowing — who among others may
+    answer — and never the one rule an approval authority exists for.
+    """
+    relay = QuestionRelay(tmp_path / "questions.jsonl")
+    call = operation(requester="worker")
+    relay.record(
+        PersistentQuestion(
+            id="q-1",
+            operation=call,
+            fingerprint=call.fingerprint(),
+            reason="risky",
+            chain_resolved=False,
+        )
+    )
+
+    with pytest.raises(ValueError, match="may not answer"):
+        relay.answer("q-1", "worker", approved=True)
+
+
+def test_an_answer_given_without_a_chain_records_that_it_was(tmp_path: Path) -> None:
+    """A weaker receipt is recorded as weaker rather than as approved.
+
+    An audit that could not tell an approval given against a chain from one
+    given while nothing could resolve who was entitled to give it would report
+    both the same, which is the distinction worth keeping at the moment it is
+    known.
+    """
+    relay = QuestionRelay(tmp_path / "questions.jsonl")
+    call = operation()
+    relay.record(
+        PersistentQuestion(
+            id="q-1",
+            operation=call,
+            fingerprint=call.fingerprint(),
+            reason="risky",
+            chain_resolved=False,
+        )
+    )
+
+    answered = relay.answer("q-1", "person", approved=True)
+
+    assert answered.answer is not None
+    assert answered.answer.unresolved_chain

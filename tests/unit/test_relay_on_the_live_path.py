@@ -14,7 +14,11 @@ from pathlib import Path
 
 import sh
 
-from lup.devtools.dev.questions import relay
+from typer.testing import CliRunner
+
+from lup.devtools.dev.questions import create_questions_app, relay
+
+RUNNER = CliRunner()
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
 
@@ -81,3 +85,48 @@ def test_a_permitted_operation_parks_nothing(tmp_path: Path) -> None:
     judged("git status", tmp_path)
 
     assert relay(tmp_path).questions() == []
+
+
+def test_a_reviewer_can_answer_what_the_dispatcher_parked(tmp_path: Path) -> None:
+    """The whole point of a durable queue is that somebody can clear it.
+
+    Parked by the hermetic dispatcher, which cannot resolve a supervisor chain,
+    and answered through the surface a reviewer reads — the two ends of the one
+    authority, exercised against each other rather than each against its own
+    fixture.
+    """
+    judged("git push --delete origin feat", tmp_path)
+    app = create_questions_app(tmp_path)
+    parked = relay(tmp_path).questions()[0]
+
+    listed = RUNNER.invoke(app, ["list"])
+    answered = RUNNER.invoke(
+        app, ["answer", parked.id, "--as", "person", "--note", "force-with-lease"]
+    )
+    settled = relay(tmp_path).find(parked.id)
+
+    assert parked.id in listed.stdout
+    assert answered.exit_code == 0
+    assert settled is not None
+    assert settled.state == "approved"
+    assert settled.answer is not None
+    assert settled.answer.note == "force-with-lease"
+
+
+def test_an_answer_the_dispatcher_could_not_scope_says_so(tmp_path: Path) -> None:
+    """A weaker receipt is recorded as weaker.
+
+    The dispatcher reaches a verdict without the session's principals, so the
+    approval it enables stands on no resolved chain — which the record says,
+    rather than reporting an approval that looks checked.
+    """
+    judged("git push --delete origin feat", tmp_path)
+    parked = relay(tmp_path).questions()[0]
+
+    RUNNER.invoke(
+        create_questions_app(tmp_path), ["answer", parked.id, "--as", "person"]
+    )
+    settled = relay(tmp_path).find(parked.id)
+
+    assert settled is not None and settled.answer is not None
+    assert settled.answer.unresolved_chain

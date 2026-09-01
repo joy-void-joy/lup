@@ -1,5 +1,5 @@
 {
-  "revision": "28203f2238ab4d31a3e3d89f36e1654424857998",
+  "revision": "f99e2069b1e35f156236f8993967bddf00ac7f75",
   "roots": [
     "lup",
     "lup_template"
@@ -8123,6 +8123,7 @@
         "Answer.approved",
         "Answer.principal",
         "Answer.receipt",
+        "Answer.unresolved_chain",
         "Answer.note",
         "Answer.at",
         "PersistentQuestion",
@@ -8134,6 +8135,7 @@
         "PersistentQuestion.purpose",
         "PersistentQuestion.requirement",
         "PersistentQuestion.eligible",
+        "PersistentQuestion.chain_resolved",
         "PersistentQuestion.escalation",
         "PersistentQuestion.checkpoint_failure",
         "PersistentQuestion.state",

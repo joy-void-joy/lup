@@ -151,6 +151,15 @@ class Answer(BaseModel, frozen=True):
     approved: bool
     principal: str
     receipt: ReceiptKind = "recorded"
+    unresolved_chain: bool = False
+    """Whether no authenticated chain stood behind this answerer's eligibility.
+
+    Recorded on the answer rather than inferred later, because the question it
+    settles is about the moment of answering: an approval given while nothing
+    could resolve who was entitled to give it is a weaker receipt than one
+    given against a chain, and an audit that could not tell them apart would
+    report both as approved.
+    """
     note: str = ""
     at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -172,6 +181,18 @@ class PersistentQuestion(BaseModel, frozen=True):
     purpose: ReviewPurpose | None = None
     requirement: ReviewerRequirement = "human_only"
     eligible: list[str] = []
+    chain_resolved: bool = True
+    """Whether ``eligible`` was resolved from an authenticated chain here.
+
+    False where the boundary that parked this question could not resolve one —
+    the compiled dispatcher is hermetic and reaches a verdict without the
+    session's principals. It is not the same as resolving to nobody, and
+    collapsing the two made every question the live path parked unanswerable.
+
+    What it relaxes is the narrowing and never the invariant: the requester
+    still cannot answer, and the answer records that no chain stood behind the
+    eligibility, so an audit shows an approval given without one.
+    """
     escalation: str = ""
     checkpoint_failure: str = ""
     state: QuestionState = "pending"
@@ -184,15 +205,19 @@ class PersistentQuestion(BaseModel, frozen=True):
     def answerable_by(self, principal: str) -> bool:
         """Whether this principal may answer, which the requester never may.
 
-        Both halves are checked here rather than at each caller, because a
+        Every half is checked here rather than at each caller, because a
         caller that remembered only the eligibility list is a caller that lets
         a requester answer itself by appearing in its own chain.
+
+        An unresolved chain narrows nothing and excludes nobody but the
+        requester. That is the honest reading: eligibility unknown here is a
+        gap in what this boundary could compute, not a finding that nobody
+        qualifies — and read as the second it made the durable queue
+        unanswerable on the path that produces most of it.
         """
-        return (
-            self.state == "pending"
-            and principal != self.operation.requester
-            and principal in self.eligible
-        )
+        if self.state != "pending" or principal == self.operation.requester:
+            return False
+        return not self.chain_resolved or principal in self.eligible
 
     def stale(self, now: datetime | None = None) -> bool:
         """Whether this question has passed its expiry without being answered."""
@@ -306,6 +331,7 @@ class QuestionRelay:
                         principal=principal,
                         note=note,
                         receipt=receipt,
+                        unresolved_chain=not entry.chain_resolved,
                     ),
                 }
             )

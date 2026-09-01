@@ -267,7 +267,13 @@ def record_question(
             "rule": rule,
             "purpose": purpose or None,
             "requirement": reviewer,
+            # Empty and *said to be unresolved*, which are different facts: this
+            # boundary is hermetic and cannot reach the session's principals, so
+            # it has no chain to resolve rather than a chain that resolved to
+            # nobody. Written as the second, every question parked here would be
+            # answerable by nobody and the queue could only grow.
             "eligible": [],
+            "chain_resolved": False,
             "escalation": escalated,
             "state": "pending",
             "created": datetime.now(UTC).isoformat(),
