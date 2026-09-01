@@ -82,6 +82,11 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev model-config snapshot` | Record the configuration pydantic resolved onto every model. |
 | `dev model-config snapshot-at` | Record the configuration pydantic resolved at a git revision. |
 | `dev model-config compare` | Diff two snapshots; exit non-zero when any model&#x27;s config moved. |
+| `dev questions list` | List the questions this run has parked, and what each is waiting on. |
+| `dev questions show` | Show one question whole, including the operation it would resume. |
+| `dev questions answer` | Approve one question, optionally with a note for the agent. |
+| `dev questions reject` | Refuse one question, optionally saying what to do instead. |
+| `dev questions cancel` | Withdraw a question nobody needs answered any more. |
 | `dev init rename-package` | Rename the lup Python package to a project-specific name. |
 | `dev init drop-examples` | Remove the scaffold&#x27;s demonstrations of itself, which no adopter wants. |
 | `dev library status` | Report where the lup library is resolved from. |

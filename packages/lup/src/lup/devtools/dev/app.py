@@ -30,6 +30,7 @@ import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
+import lup.devtools.dev.questions as questions_mod
 import lup.devtools.dev.preservation as preservation
 import lup.devtools.dev.seams as seams
 import lup.devtools.dev.pr as pr
@@ -107,6 +108,11 @@ def create_dev_app(
         model_config_mod.create_model_config_app(),
         name="model-config",
         help="Pydantic configuration census and equivalence",
+    )
+    app.add_typer(
+        questions_mod.create_questions_app(Path.cwd()),
+        name="questions",
+        help="The parked asks a reviewer answers, and what each is waiting on",
     )
 
     # -- worktree commands --
