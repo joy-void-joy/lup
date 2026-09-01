@@ -272,3 +272,102 @@ def test_allow_authoring_moves_only_the_author_describing_their_own_work() -> No
     assert verdict("gh pr create -R other/victim --fill", authoring).effect == "ask"
     assert verdict("gh pr create -R other/victim --fill", publishing).effect == "ask"
     assert verdict("gh pr view -R other/repo 12", authoring).effect == "allow"
+
+
+def test_compensable_collaboration_allows_and_the_events_do_not() -> None:
+    """The band a read/write split could not draw.
+
+    Opening a pull request, retitling it, commenting, closing and reopening
+    are each restored by a normal follow-up operation, and a review round
+    performs several of them. A merge runs the change into the base branch, an
+    approving review says something in the caller's name, and a release
+    publishes — none of which a later action undoes, whatever it compensates.
+    """
+    rules = [gh_rule()]
+
+    def effect(command: str) -> str:
+        return verdict(command, rules).effect
+
+    for allowed in (
+        "gh pr create --fill",
+        "gh pr edit 12 --title x",
+        "gh pr comment 12 --body x",
+        "gh pr close 12",
+        "gh pr reopen 12",
+        "gh issue create --title x",
+        "gh issue comment 3 --body x",
+        "gh issue close 3",
+        "gh issue reopen 3",
+    ):
+        assert effect(allowed) == "allow", allowed
+
+    for asked in (
+        "gh pr merge 12",
+        "gh release create v1",
+        "gh secret set TOKEN",
+        "gh repo edit --visibility public",
+        "gh workflow run deploy.yml",
+    ):
+        assert effect(asked) == "ask", asked
+
+
+def test_an_attestation_is_not_compensable_even_though_it_can_be_dismissed() -> None:
+    """What a review did was say something in the caller's name.
+
+    Saying something else later is not unsaying it, which is why the two
+    verdict-carrying spellings ask and the one that carries neither allows.
+    Both short forms are guarded beside the long ones, because a guard written
+    as one spelling of an effect holds half of it — the shape a push guard had
+    before refspec grammar was read structurally.
+    """
+    rules = [gh_rule()]
+
+    assert verdict("gh pr review 12 --comment --body x", rules).effect == "allow"
+    assert verdict("gh pr review 12 --approve", rules).effect == "ask"
+    assert verdict("gh pr review 12 -a", rules).effect == "ask"
+    assert verdict("gh pr review 12 --request-changes --body x", rules).effect == "ask"
+    assert verdict("gh pr review 12 -r --body x", rules).effect == "ask"
+
+
+def test_a_deletion_nested_in_an_allowed_operation_survives_it() -> None:
+    """A safe outer verb cannot erase an unsafe inner one.
+
+    Closing restores by reopening; the branch it deletes on the way out does
+    not, and no reopen brings it back. The same shape as a push whose refspec
+    deletes while its flags say nothing.
+    """
+    rules = [gh_rule()]
+
+    assert verdict("gh pr close 12", rules).effect == "allow"
+    assert verdict("gh pr close 12 --delete-branch", rules).effect == "ask"
+    assert verdict("gh pr close 12 -d", rules).effect == "ask"
+
+
+def test_what_reaches_outside_this_repository_is_answered_by_a_person() -> None:
+    """A supervisor reads code; it does not carry a publication.
+
+    Publication, repository security, and spending default to the person who
+    launched the run. A quality checkpoint is the deliberate exception and
+    lives on the edit gates, where what is being reviewed is how code reads.
+    """
+    rules = [gh_rule()]
+
+    for command in (
+        "gh release create v1",
+        "gh secret set TOKEN",
+        "gh repo edit --visibility public",
+    ):
+        assert verdict(command, rules).reviewer == "human_only", command
+
+
+def test_every_gh_question_says_which_rule_reached_it() -> None:
+    """An ask nobody can attribute is one nobody can tune.
+
+    Measured before rule ids existed: 860 asks with no recorded reason at all,
+    and a native tool name that answers `Bash` for every one of them.
+    """
+    asked = verdict("gh pr merge 12", [gh_rule()])
+
+    assert asked.rule == "shell:gh.pr.merge"
+    assert asked.evaluator == "shell-vocabulary"
+    assert asked.purpose == "external_consequence"

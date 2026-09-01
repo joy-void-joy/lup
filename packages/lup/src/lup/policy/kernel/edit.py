@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator, Set as AbstractSet
 from functools import cache
 from typing import NotRequired, TypedDict
 
-from .decision import KernelDecision
+from .decision import KernelDecision, handed_over
 from .roles import (
     FOREIGN_REPOSITORY_REFERRAL,
     GENERATED_PLUGIN_REFUSAL,
@@ -3187,8 +3187,15 @@ def decide_edit(
         hands it here, so an empty table decides exactly what this function
         decided before a table existed — and a project moving one gate has to
         name it, rather than inheriting a shift it never asked for.
+
+        The gate's name is stamped on as the rule id here rather than repeated
+        at each branch, because it is already the one thing every branch
+        supplies. Without it an edit verdict said what it decided and never
+        which gate decided it, and a native tool name — `Edit`, `Write` — is
+        the same answer for all of them.
         """
-        return edit_verdict(rows, gate, suffix, role, operation, default)
+        settled = edit_verdict(rows, gate, suffix, role, operation, default)
+        return settled.revised(rule=f"edit:{gate}", evaluator="edit-gate")
 
     # A compiled plugin tree is a build product, and this is the same refusal
     # the shell path already gives for writing one: the change is reverted by
@@ -3198,7 +3205,14 @@ def decide_edit(
     # that will be overwritten, and an ask puts a question to a human whose
     # only correct answer is "edit the source instead".
     if is_generated_plugin_target(path):
-        return KernelDecision("deny", GENERATED_PLUGIN_REFUSAL)
+        return KernelDecision(
+            "deny",
+            GENERATED_PLUGIN_REFUSAL,
+            cause="deliberate",
+            hard=True,
+            rule="edit:generated-plugin",
+            evaluator="edit-gate",
+        )
 
     # Below the plugin refusal, which is about a universal fact -- a build
     # product is overwritten by the next generation, in anybody's repository
@@ -3213,7 +3227,12 @@ def decide_edit(
     # else entirely. So the honest answer is that this policy has nothing to
     # say about the file, and the human who launched a session here decides.
     if foreign:
-        return KernelDecision("ask", FOREIGN_REPOSITORY_REFERRAL)
+        return judged(
+            "foreign-repository",
+            KernelDecision(
+                "ask", FOREIGN_REPOSITORY_REFERRAL, purpose="policy_override"
+            ),
+        )
 
     # Whether this file may be edited at all is prior to how the edit reads,
     # so the guard answers ahead of every gate below — including pure
@@ -3221,8 +3240,13 @@ def decide_edit(
     # the protected-path rules, whose autonomous release must not survive a
     # refusal aimed at exactly that caller.
     if role == "test" and acceptance_guard is not None:
+        # The person who set the target is the one who may move it, so this
+        # question is not routed past them to a supervisor.
         return judged(
-            "acceptance-guard", acceptance_guard_decision(acceptance_guard, autonomous)
+            "acceptance-guard",
+            acceptance_guard_decision(acceptance_guard, autonomous).revised(
+                purpose="quality_review"
+            ),
         )
     # The conventions describe how production code should read. A test's
     # subject is production's behaviour, and scratch is disposable, so
@@ -3234,7 +3258,14 @@ def decide_edit(
         # A granted suppression answers this gate and no other, so an allow
         # falls through to the rest of the lattice rather than ending it.
         if antipattern is not None and antipattern.effect != "allow":
-            return judged("anti-pattern", antipattern)
+            # A suppression is argued in code, and reading the argument is
+            # reading code — which is what a supervisor does.
+            return judged(
+                "anti-pattern",
+                antipattern.revised(
+                    purpose="quality_review", reviewer="supervisor_allowed"
+                ),
+            )
     protected = next(
         (
             row
@@ -3245,7 +3276,13 @@ def decide_edit(
         None,
     )
     if protected is not None and not (autonomous and protected["allow_autonomous"]):
-        return judged("protected-path", KernelDecision("ask", protected["reason"]))
+        # A protected path says a person owns this file, which is the whole
+        # of the rule: routing it to a supervisor answers past exactly the
+        # person the declaration names.
+        return judged(
+            "protected-path",
+            KernelDecision("ask", protected["reason"], purpose="quality_review"),
+        )
     # Feedback is feedback wherever it is left, so this gate follows the file
     # rather than the conventions: a note on a test still names work somebody
     # owes. Scratch is the exception, and only because nothing there persists
@@ -3253,7 +3290,9 @@ def decide_edit(
     if role != "scratch":
         marker = marker_decision(previous, updated, python_source)
         if marker is not None:
-            return judged(marker["gate"], marker["decision"])
+            return judged(
+                marker["gate"], marker["decision"].revised(purpose="quality_review")
+            )
     # A whole-file write is one the caller named as such, or one that arrived
     # with no preimage at all. Both spellings are kept because they answer
     # different callers: an adapter that knows the native call says so, and
@@ -3274,8 +3313,18 @@ def decide_edit(
                 "package-marker",
                 KernelDecision("allow", "a package marker states nothing to review"),
             )
+        # A quality checkpoint: what is being reviewed is how the code
+        # reads, which is what a supervisor reads. The classification is
+        # semantic and independent of which native call carried the write —
+        # a whole file arriving at once is what makes it a checkpoint.
         return judged(
-            "full-write", KernelDecision("ask", "full-file writes require approval")
+            "full-write",
+            KernelDecision(
+                "ask",
+                "full-file writes require approval",
+                purpose="quality_review",
+                reviewer="supervisor_allowed",
+            ),
         )
     if after is None or after == "":
         return judged("pure-deletion", KernelDecision("allow", "pure deletion"))
@@ -3286,7 +3335,13 @@ def decide_edit(
             return judged(
                 "autonomous-edit", KernelDecision("allow", "reviewed autonomous edit")
             )
+        # A deliberate handoff and not a gap: a large ordinary edit is
+        # exactly what a native auto-accept mode exists for, and this
+        # policy interposing would replace a decision an operator already
+        # made. It reached the same word as a parser gap before, which is
+        # what let a gap inherit provider auto-mode.
         return judged(
-            "size", KernelDecision("defer", "edit exceeds the small-change gate")
+            "size",
+            handed_over("edit exceeds the small-change gate"),
         )
     return judged("small-edit", KernelDecision("allow", "small safe edit"))

@@ -1,5 +1,5 @@
 {
-  "revision": "b3bbe391b2490d5b2d055fd9068ddd5d729d6400",
+  "revision": "5e30009630e9e3f586cbf9ca5e4bc6df1e2793a0",
   "roots": [
     "lup",
     "lup_template"
@@ -8014,6 +8014,9 @@
         "GIT_CONFIG_EXECUTING_KEYS",
         "git_rule",
         "gh_rule",
+        "gh_rule.reads",
+        "gh_rule.compensable",
+        "gh_rule.judged",
         "gh_rule.group",
         "docker_rule",
         "docker_rule.noun",

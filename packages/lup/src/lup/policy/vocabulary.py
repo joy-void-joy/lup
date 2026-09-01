@@ -44,6 +44,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel
 
 from lup.policy.kernel.decision import CheckpointRequirement, SandboxPlacement
+from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
@@ -1153,15 +1154,36 @@ def git_rule(
 
 
 def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
-    """Compile the gh surface: reads allow, judged mutations ask, else deny.
+    """Compile the gh surface by what each operation does beyond this machine.
 
-    ``allow_authoring`` decides whether opening a pull request, retitling it,
-    and marking it ready are the author describing their own work or a
-    publication worth a question. On, they allow — a review flow does all
-    three every round, and the branch is already pushed by then. Off, they
-    join the verbs that reach other people. Commenting, reviewing, merging
-    and closing ask either way: those reach reviewers, or change what the
-    repository is.
+    Three bands rather than the two a read/write split offers.
+
+    **Compensable collaboration allows.** Opening a pull request, retitling
+    it, marking it ready, commenting, closing, reopening, and the same set for
+    issues: every one of them is restored by a normal follow-up operation, and
+    a review flow performs several of them every round. Compensable is a claim
+    about the remote *state*, never about observation — reopening a pull
+    request does not un-send the mail that closing it generated — so it is the
+    right test for whether a person needs to see the moment, and the wrong one
+    for whether the effect was free.
+
+    **Execution, attestation, publication, and repository security ask.** A
+    merge runs something; an approving or request-changes review says
+    something in the caller's name; a release publishes; a secret, a ruleset,
+    or a repository setting is the security posture of the repository itself.
+    A later compensating action may exist for each and does not make them
+    compensable: what happened was an event, and events are what a person is
+    being asked about.
+
+    **A deletion nested inside an allowed operation survives it.** ``gh pr
+    close`` allows and ``gh pr close --delete-branch`` asks, because a safe
+    outer verb cannot erase an unsafe inner one. The same shape as a push
+    whose refspec deletes.
+
+    ``allow_authoring`` decides whether opening and describing a pull request
+    is the author describing their own work or a publication worth a question.
+    On, they allow — the branch is already pushed by then. Off, they join the
+    verbs that ask.
 
     Both halves of that grant are claims about *this* repository — the work is
     the author's own, and the branch is already pushed — and ``--repo`` is what
@@ -1177,43 +1199,54 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
     unlike the flag it stops a redirected read as well. The asymmetry is the
     price of catching the variable gh has not learned yet.
     """
-    authoring = ["create", "edit", "ready"]
     elsewhere = ["-R", "--repo"]
+    authoring = ["create", "edit", "ready"]
+    # The two spellings of each attestation. gh accepts the short forms, and a
+    # guard written as the long ones alone holds half of each — the same shape
+    # a push guard written as flag spellings had before refspec grammar was
+    # read structurally.
+    attesting = ["--approve", "-a", "--request-changes", "-r"]
 
-    def group(
-        name: str,
-        allowed: list[str],
-        asked: list[str] | None = None,
-        authored: list[str] | None = None,
-    ) -> ShellSubcommandRule:
+    def reads(names: list[str]) -> list[ShellOperationRule]:
+        """Operations that report and change nothing."""
+        return [ShellOperationRule(name=name, effect="allow") for name in names]
+
+    def compensable(names: list[str]) -> list[ShellOperationRule]:
+        """Collaboration a normal follow-up operation restores."""
+        return [
+            ShellOperationRule(
+                name=name,
+                effect="allow",
+                effect_class="compensable",
+                ask_flags=elsewhere,
+                reason="this operation against another repository requires approval",
+            )
+            for name in names
+        ]
+
+    def judged(
+        names: list[str],
+        effect_class: EffectClass,
+        reason: str,
+        reviewer: ReviewerRequirement = "human_only",
+    ) -> list[ShellOperationRule]:
+        """Operations whose effect a person is asked about every time."""
+        return [
+            ShellOperationRule(
+                name=name,
+                effect="ask",
+                effect_class=effect_class,
+                reviewer=reviewer,
+                reason=reason,
+            )
+            for name in names
+        ]
+
+    def group(name: str, operations: list[ShellOperationRule]) -> ShellSubcommandRule:
         return ShellSubcommandRule(
             name=name,
             effect="deny",
-            operations=[
-                *[
-                    ShellOperationRule(name=operation, effect="allow")
-                    for operation in allowed
-                ],
-                *[
-                    ShellOperationRule(
-                        name=operation,
-                        effect="allow",
-                        ask_flags=elsewhere,
-                        reason=f"gh {name} {operation} against another"
-                        " repository requires approval",
-                    )
-                    for operation in authored or []
-                ],
-                *[
-                    ShellOperationRule(
-                        name=operation,
-                        effect="ask",
-                        reason=f"gh {name} {operation} changes remote state"
-                        " — requires approval",
-                    )
-                    for operation in asked or []
-                ],
-            ],
+            operations=operations,
             reason=f"this gh {name} operation is not classified",
         )
 
@@ -1223,38 +1256,209 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
         subcommands=[
             group(
                 "pr",
-                ["list", "view", "diff", "status", "checks", "checkout"],
                 [
-                    "comment",
-                    "review",
-                    "merge",
-                    "close",
-                    *([] if allow_authoring else authoring),
+                    *reads(["list", "view", "diff", "status", "checks", "checkout"]),
+                    *compensable(
+                        [
+                            "comment",
+                            "reopen",
+                            *(authoring if allow_authoring else []),
+                        ]
+                    ),
+                    # Closing restores by reopening; deleting the branch does
+                    # not, so the deletion nested inside the allowed verb keeps
+                    # its own question.
+                    ShellOperationRule(
+                        name="close",
+                        effect="allow",
+                        effect_class="compensable",
+                        ask_flags=[*elsewhere, "--delete-branch", "-d"],
+                        reason="deleting the branch alongside the close"
+                        " removes work no reopen restores",
+                    ),
+                    # A review that carries neither verdict is a comment. The
+                    # two that do are claims made in the caller's name, and
+                    # saying something else later is not unsaying them.
+                    ShellOperationRule(
+                        name="review",
+                        effect="allow",
+                        effect_class="compensable",
+                        ask_flags=[*elsewhere, *attesting],
+                        reason="approving or requesting changes attests in your"
+                        " name — requires approval",
+                    ),
+                    *judged(
+                        ["merge"],
+                        "execution",
+                        "merging runs the change into the base branch"
+                        " — requires approval",
+                    ),
+                    *(
+                        []
+                        if allow_authoring
+                        else judged(
+                            authoring,
+                            "publication",
+                            "opening or describing a pull request publishes"
+                            " — requires approval",
+                        )
+                    ),
                 ],
-                authoring if allow_authoring else [],
             ),
             group(
                 "issue",
-                ["list", "view", "status"],
-                ["create", "edit", "comment", "close"],
+                [
+                    *reads(["list", "view", "status"]),
+                    *compensable(
+                        ["create", "edit", "comment", "close", "reopen", "pin", "unpin"]
+                    ),
+                    *judged(
+                        ["delete", "transfer"],
+                        "execution",
+                        "removing an issue from this repository is not"
+                        " restored by a follow-up — requires approval",
+                    ),
+                ],
             ),
-            group("run", ["list", "view", "watch"], ["rerun", "cancel", "download"]),
-            group("repo", ["view", "list"], ["clone", "fork"]),
-            group("release", ["list", "view"], ["create", "upload"]),
-            group("cache", ["list"], ["delete"]),
-            group("workflow", ["list", "view"], ["run", "enable", "disable"]),
-            group("auth", ["status"]),
-            group("search", ["repos", "issues", "prs", "code", "commits"]),
-            group("label", ["list"], ["create", "edit", "delete", "clone"]),
-            group("gist", ["list", "view"], ["create", "edit", "delete", "clone"]),
+            group(
+                "run",
+                [
+                    *reads(["list", "view", "watch"]),
+                    *judged(
+                        ["rerun", "cancel"],
+                        "execution",
+                        "changing what a workflow run is doing requires approval",
+                    ),
+                    *compensable(["download"]),
+                ],
+            ),
+            group(
+                "repo",
+                [
+                    *reads(["view", "list"]),
+                    # Cloning writes here and reaches nobody there.
+                    ShellOperationRule(name="clone", effect="allow"),
+                    *judged(
+                        ["create", "fork", "rename", "archive", "delete", "edit"],
+                        "repository_security",
+                        "changing what this repository is, or creating another,"
+                        " requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "release",
+                [
+                    *reads(["list", "view", "download"]),
+                    *judged(
+                        ["create", "upload", "edit", "delete"],
+                        "publication",
+                        "a release is published where people consume it"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "secret",
+                [
+                    *reads(["list"]),
+                    *judged(
+                        ["set", "delete"],
+                        "repository_security",
+                        "repository secrets decide what automation can reach"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "variable",
+                [
+                    *reads(["list", "get"]),
+                    *judged(
+                        ["set", "delete"],
+                        "repository_security",
+                        "repository variables configure automation — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "ruleset",
+                [
+                    *reads(["list", "view", "check"]),
+                    *judged(
+                        ["create", "edit", "delete"],
+                        "repository_security",
+                        "rulesets are this repository's own protection"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "workflow",
+                [
+                    *reads(["list", "view"]),
+                    *judged(
+                        ["run", "enable", "disable"],
+                        "execution",
+                        "dispatching or gating a workflow runs something"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "cache",
+                [
+                    *reads(["list"]),
+                    *compensable([]),
+                    *judged(
+                        ["delete"],
+                        "execution",
+                        "a deleted cache is not restored by a follow-up"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group("auth", reads(["status"])),
+            group("search", reads(["repos", "issues", "prs", "code", "commits"])),
+            group(
+                "label",
+                [
+                    *reads(["list"]),
+                    *compensable(["create", "edit", "clone"]),
+                    *judged(
+                        ["delete"],
+                        "execution",
+                        "deleting a label removes it from everything carrying it"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "gist",
+                [
+                    *reads(["list", "view", "clone"]),
+                    *judged(
+                        ["create", "edit", "delete"],
+                        "publication",
+                        "a gist is published outside this repository"
+                        " — requires approval",
+                    ),
+                ],
+            ),
             group(
                 "project",
-                ["list", "view", "item-list", "field-list"],
-                ["create", "edit", "close", "delete", "item-add", "item-delete"],
+                [
+                    *reads(["list", "view", "item-list", "field-list"]),
+                    *compensable(["item-add", "edit", "close"]),
+                    *judged(
+                        ["create", "delete", "item-delete"],
+                        "execution",
+                        "creating or removing project state is not restored by"
+                        " a follow-up — requires approval",
+                    ),
+                ],
             ),
-            group("variable", ["list", "get"], ["set", "delete"]),
-            group("ruleset", ["list", "view", "check"]),
-            group("config", ["get", "list"], ["set"]),
+            group("config", [*reads(["get", "list"]), *compensable(["set"])]),
             ShellSubcommandRule(name="status", effect="allow"),
             ShellSubcommandRule(name="browse", effect="allow"),
             ShellSubcommandRule(
@@ -1263,8 +1467,13 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 # attaching a field, reading a body from a file — is guarded,
                 # which leaves the mutation ask exactly where it belongs
                 # instead of on every query that shares the subcommand.
+                #
+                # Opaque rather than classified: this is the one gh surface
+                # that can reach any endpoint, so what a mutation here does is
+                # exactly what the table cannot say.
                 name="api",
                 effect="allow",
+                effect_class="opaque",
                 ask_flags=[
                     "-X",
                     "--method",

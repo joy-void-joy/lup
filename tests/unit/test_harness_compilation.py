@@ -1797,7 +1797,7 @@ def test_generated_codex_permission_request_preserves_assignment_guards(
 def test_generated_codex_pretool_consumes_only_its_correlated_approval(
     tmp_path: Path,
 ) -> None:
-    command = "gh issue close 180"
+    command = "gh pr merge 180"
     common: JsonObject = {
         "session_id": "session-one",
         "turn_id": "turn-one",

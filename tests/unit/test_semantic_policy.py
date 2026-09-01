@@ -327,8 +327,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git push --delete origin feat", effect="ask"),
     DecisionCase(input="gh pr create --fill", effect="allow"),
     DecisionCase(input="gh pr ready 3", effect="allow"),
-    DecisionCase(input="gh pr comment 3 --body hi", effect="ask"),
+    DecisionCase(input="gh pr comment 3 --body hi", effect="allow"),
+    # A merge runs the change into the base branch, which is an event
+    # rather than a state a follow-up restores.
     DecisionCase(input="gh pr merge 3", effect="ask"),
+    # A review carrying neither verdict is a comment; the two that carry
+    # one say something in the caller's name, and saying something else
+    # later is not unsaying it.
+    DecisionCase(input="gh pr review 3 --comment --body hi", effect="allow"),
+    DecisionCase(input="gh pr review 3 --approve", effect="ask"),
+    DecisionCase(input="gh pr review 3 -r --body no", effect="ask"),
     # A default-method gh api call is a query; the flags that make it
     # anything else carry the ask instead of the subcommand carrying it.
     DecisionCase(input="gh api repos/o/r/pulls", effect="allow"),
@@ -703,12 +711,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git checkout main", effect="deny"),
     DecisionCase(input="git filter-branch --tree-filter x", effect="deny"),
     DecisionCase(input="sort --compress-program=/tmp/x f", effect="ask"),
-    # gh: read-only operations allow; mutating forms ask.
+    # gh: reads and compensable collaboration allow; executions,
+    # attestations, publications and repository security ask.
     DecisionCase(input="gh run view 1", effect="allow"),
     DecisionCase(input="gh repo view", effect="allow"),
-    DecisionCase(input="gh pr close 1", effect="ask"),
+    DecisionCase(input="gh pr close 1", effect="allow"),
+    # The deletion nested inside the allowed close survives it: no
+    # reopen restores the branch.
+    DecisionCase(input="gh pr close 1 --delete-branch", effect="ask"),
+    DecisionCase(input="gh pr reopen 1", effect="allow"),
     DecisionCase(input="gh api -X POST /repos", effect="ask"),
-    DecisionCase(input="gh issue create --title x", effect="ask"),
+    DecisionCase(input="gh issue create --title x", effect="allow"),
+    DecisionCase(input="gh issue comment 3 --body hi", effect="allow"),
+    DecisionCase(input="gh issue close 3", effect="allow"),
+    DecisionCase(input="gh release create v1", effect="ask"),
+    DecisionCase(input="gh secret set TOKEN", effect="ask"),
+    DecisionCase(input="gh repo edit --visibility public", effect="ask"),
+    DecisionCase(input="gh workflow run deploy.yml", effect="ask"),
     DecisionCase(input="gh pr checkout 123", effect="allow"),
     # Authoring allows because the work is the author's own and the branch is
     # already pushed — both claims about this repository, and `--repo` is what
@@ -728,7 +747,13 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="env GH_REPO=other/victim gh pr create --fill", effect="ask"),
     DecisionCase(input="GH_HOST=evil.test gh pr create --fill", effect="ask"),
     DecisionCase(input="gh auth status", effect="allow"),
-    DecisionCase(input="gh secret list", effect="deny"),
+    # gh cannot print a secret's value at all, so listing is a read of
+    # names and update times. Writing one is the repository's own security
+    # posture and asks, which is the distinction an unclassified refusal
+    # could not make: it refused the read and the write alike, for the one
+    # reason true of neither.
+    DecisionCase(input="gh secret list", effect="allow"),
+    DecisionCase(input="gh secret set TOKEN", effect="ask"),
     # Adversarial hardening: no auto-allowed code execution or injection.
     DecisionCase(input="sudo cat /etc/shadow", effect="ask"),
     DecisionCase(input="LD_PRELOAD=./x.so ls", effect="ask"),
