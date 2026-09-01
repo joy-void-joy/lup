@@ -226,12 +226,13 @@ class NativeSpellings(SkillInvocationRenderer, ABC):  # lup: ignore[abc-capabili
         honest answer there, which is why this returns a :class:`Spelling`
         rather than a sentence every runtime must invent.
 
-        This is the question the decision seam asks as ``agent_escalates``,
-        and the answers have to agree, because they are one fact: this seam
-        supplies the words and that one lets an ``escalable`` verdict offer
-        them. It is *not* the question ``escapable`` asks, which is whether a
-        verdict can place a call itself — a runtime can hand the agent a way
-        out while giving a hook no channel to take it.
+        What an agent is told to write to *request* the host is Lup's own
+        marker, ``# lup: escalate[sandbox]: <why>``, and it is the same
+        sentence under every runtime because the request is answered by
+        Lup's reviewer rather than by a native flag. These words are the
+        adapter mechanism beneath that answer: how this runtime carries an
+        approved ``outside`` placement out of its own per-call sandbox in a
+        session whose ambient location is already the launcher's host.
         """
 
     @abstractmethod

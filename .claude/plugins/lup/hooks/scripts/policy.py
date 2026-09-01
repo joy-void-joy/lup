@@ -19,7 +19,7 @@ from pathlib import Path
 # distribution. Naming it as a search path is what lets the imports below
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from kernel.decision import KernelDecision, escalation_offer, sandbox_escaped
+from kernel.decision import KernelDecision, sandbox_escaped
 from policy_data import (
     AGENT_IDENTITY_ENV,
     AUTONOMOUS_AGENT_IDENTITIES,
@@ -1112,7 +1112,7 @@ def bash_decision(
     # own gate decides and the reason goes to no human. Written down here or
     # it is not written down anywhere.
     if verdict.effect == "defer":
-        record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
+        record_deferral(cwd, command, verdict.reason, verdict.checkpoint != "nothing")
     pointed = undo_point(verdict, reference)
     if pointed.effect != "allow":
         return pointed
@@ -1124,7 +1124,7 @@ def bash_decision(
         pointed.reason + nudge,
         pointed.sandbox,
         pointed.escalated,
-        recovery=pointed.recovery,
+        checkpoint=pointed.checkpoint,
     )
 
 
@@ -1150,7 +1150,7 @@ def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
         f"`lup-devtools dev undo` lists it as {reference}",
         verdict.sandbox,
         verdict.escalated,
-        recovery=verdict.recovery,
+        checkpoint=verdict.checkpoint,
     )
 
 
@@ -1295,9 +1295,11 @@ def edit_documents(path, old_text, new_text, replace_all):
 def spent_escape(tool_input):
     """Whether the call as written already asked to run outside the sandbox.
 
-    Claude Code's own spelling of the escape, read here rather than compared
-    against in two places: what it means is the kernel's `sandbox_escaped`,
-    which both this boundary and the in-process seam ask.
+    A fact about where this call would land, never a request Lup honours:
+    asking for the launcher's host is `# lup: escalate[sandbox]: <why>`, which
+    is reviewed. What this answers is narrower and only ever tightens — a call
+    carrying the flag is not confined by the native sandbox, so unjudged work
+    in it has no boundary to be carried by and re-enters the stricter lattice.
     """
     return (
         "dangerouslyDisableSandbox" in tool_input
@@ -1448,17 +1450,16 @@ def rendered(decision, payload, placed):
     ``updatedInput`` field: a directive is placed only in an ``Edit`` or
     ``Write``, and the sandbox argument belongs only to ``Bash``.
 
-    Both sandbox questions are answered yes here, from that one field: the
-    rewrite is how a verdict places a call, and the same field on the call the
-    agent writes is how the agent places its own — which is what an
-    ``escalable`` verdict offers it. Both halves of that offer are decided in
-    the kernel rather than spelled here: `escalation_offer` says whether it is
-    extended, and `sandbox_escaped` whether a call that spent it still leaves.
-    The in-process seam asks the same two, because one field two boundaries
-    fill from two conditions is a field they can fill differently — which is
-    how the rewrite once revoked an offer the permission channel had granted.
+    The rewrite is how a verdict places a call, and it is the whole of what
+    this field does: whether a placement leaves the boundary is the kernel's
+    `sandbox_escaped` rather than a condition spelled here, because the
+    in-process seam fills the same field and two conditions written twice are
+    two conditions that can be written differently. A call the agent wrote the
+    field on itself is overwritten rather than read: asking for the host is a
+    reviewed request spelled `# lup: escalate[sandbox]:`, and a native flag the
+    agent set for itself is not that request.
     """
-    settled = decision.placed(escapable=True, agent_escalates=True)
+    settled = decision.placed(escapable=True)
     if settled.effect == "defer":
         return {}
     answer = {
@@ -1466,11 +1467,6 @@ def rendered(decision, payload, placed):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
-    offer = escalation_offer(
-        settled.sandbox, settled.reason, payload["tool_name"] == "Bash"
-    )
-    if offer:
-        answer["additionalContext"] = offer
     if placed is not None and settled.effect != "deny":
         return {"hookSpecificOutput": {**answer, "updatedInput": placed}}
     if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
@@ -1480,9 +1476,7 @@ def rendered(decision, payload, placed):
             **answer,
             "updatedInput": {
                 **payload["tool_input"],
-                "dangerouslyDisableSandbox": sandbox_escaped(
-                    settled.sandbox, spent_escape(payload["tool_input"])
-                ),
+                "dangerouslyDisableSandbox": sandbox_escaped(settled.sandbox),
             },
         }
     }

@@ -2,7 +2,8 @@
 
 from typing import Literal, TypedDict
 
-from .decision import DecisionEffect, Recovery, SandboxPlacement
+from .decision import DecisionEffect, CheckpointRequirement, SandboxPlacement
+from .semantics import ReviewerRequirement
 
 type PathRuleKind = Literal[
     "exact",
@@ -240,13 +241,29 @@ class ShellRuleRow(TypedDict):
     and a session carrying the restorer named here has no such loss to ask
     about.
 
-    All three axes arrive already resolved down the nesting, so matching one
+
+    ``rule`` is this row's stable id, derived from the levels it matches —
+    ``shell:git.push``, ``shell:rm`` — rather than written down, because a
+    derived id cannot drift from the row it names and a written one has to be
+    kept in step with a rename. It is what an audit counts by and what a
+    person answering the same question twice is pointed at; the reason beside
+    it is prose, and a taxonomy built on prose is a taxonomy of phrasings.
+
+    ``reviewer`` is who may answer a question this row produces, and
+    ``effect_class`` what the operation does beyond this machine — ``""``
+    where it does nothing outside it. Both cascade down the nesting like the
+    three axes above, so ``gh pr`` says once that its verbs are compensable
+    and only ``merge``, ``review --approve`` and ``review --request-changes``
+    say otherwise.
+
+    Every axis arrives already resolved down the nesting, so matching one
     row is the whole answer. ``effect_source``, ``sandbox_source`` and
-    ``recovery_source`` say which level supplied each value, which is what a
+    ``checkpoint_source`` say which level supplied each value, which is what a
     reader needs at a verdict they did not expect; none is consulted in
     reaching one.
     """
 
+    rule: str
     command: str
     subcommand: str
     operation: str
@@ -254,8 +271,10 @@ class ShellRuleRow(TypedDict):
     effect_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
-    recovery: Recovery
-    recovery_source: RuleLevel
+    checkpoint: CheckpointRequirement
+    checkpoint_source: RuleLevel
+    reviewer: ReviewerRequirement
+    effect_class: str
     ask_refspecs: list[str]
     ask_flags: list[str]
     allow_flags: list[str]

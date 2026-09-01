@@ -68,7 +68,7 @@ from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.policy.kernel.decision import SandboxPlacement, escalation_offer
+from lup.policy.kernel.decision import SandboxPlacement
 from lup.workspace.paths import path_is_under
 from lup.types import JsonObject, ToolName
 
@@ -204,32 +204,23 @@ def allow_hook(
 ) -> LupHookOutput:
     """Create a generic allow decision, optionally placed and optionally said.
 
-    An ``escalable`` grant says its reason twice, on both channels a grant
-    has, because the two reach different readers and only one of them can act
-    on it — :func:`~lup.policy.kernel.decision.escalation_offer` is where that
-    is decided, for every boundary that delivers it.
+    Nothing is added to the agent's own channel. A permitted operation that
+    says something to the agent on every call is how the channel meant for
+    what matters stops being read, and the one thing an agent needs to hear
+    about placement — that the boundary was insufficient — is a fact about
+    the operation's result rather than about its permission.
     """
-    return LupHookOutput(
-        decision="allow",
-        sandbox=sandbox,
-        reason=reason,
-        additional_context=escalation_offer(sandbox, reason),
-    )
+    return LupHookOutput(decision="allow", sandbox=sandbox, reason=reason)
 
 
 def ask_hook(reason: str, sandbox: SandboxPlacement = "ambient") -> LupHookOutput:
     """Create a decision that defers to whoever is entitled to make it.
 
-    An ``escalable`` approval question says its reason twice for the same
-    reason a grant does: the human answering it is not the agent holding the
-    offer.
+    The reason reaches the person answering. It is not repeated onto the
+    agent's own channel, which would tell the requester what the reviewer
+    was told and leave it nothing to do with the information.
     """
-    return LupHookOutput(
-        decision="ask",
-        reason=reason,
-        sandbox=sandbox,
-        additional_context=escalation_offer(sandbox, reason),
-    )
+    return LupHookOutput(decision="ask", reason=reason, sandbox=sandbox)
 
 
 def deny_hook(reason: str) -> LupHookOutput:

@@ -1111,7 +1111,7 @@ def bash_decision(
     # own gate decides and the reason goes to no human. Written down here or
     # it is not written down anywhere.
     if verdict.effect == "defer":
-        record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
+        record_deferral(cwd, command, verdict.reason, verdict.checkpoint != "nothing")
     pointed = undo_point(verdict, reference)
     if pointed.effect != "allow":
         return pointed
@@ -1123,7 +1123,7 @@ def bash_decision(
         pointed.reason + nudge,
         pointed.sandbox,
         pointed.escalated,
-        recovery=pointed.recovery,
+        checkpoint=pointed.checkpoint,
     )
 
 
@@ -1149,7 +1149,7 @@ def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
         f"`lup-devtools dev undo` lists it as {reference}",
         verdict.sandbox,
         verdict.escalated,
-        recovery=verdict.recovery,
+        checkpoint=verdict.checkpoint,
     )
 
 

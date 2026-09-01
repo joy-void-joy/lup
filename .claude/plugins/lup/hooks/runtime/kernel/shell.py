@@ -12,7 +12,7 @@ from .decision import (
     RELAY_HINT,
     RESHAPE_HINT,
     SUBSTITUTION_SENTINEL,
-    Recovery,
+    CheckpointRequirement,
     SandboxPlacement,
     unjudged,
 )
@@ -38,6 +38,8 @@ from .words import (
     refuses_generated_plugin_write,
     xargs_payload,
 )
+from .escalation import read_escalation
+from .semantics import UnjudgedAmbient
 from .lex import parse_shell_words
 from .commands import (
     declares_command,
@@ -797,7 +799,9 @@ def decide_segment_list(
     return decisions
 
 
-def joined_recovery(decisions: list[KernelDecision]) -> Recovery:
+def joined_checkpoint(
+    decisions: list[KernelDecision],
+) -> CheckpointRequirement:
     """What puts back what a whole command line destroys.
 
     The weakest answer any of its segments gave. One line is one act as far
@@ -805,11 +809,11 @@ def joined_recovery(decisions: list[KernelDecision]) -> Recovery:
     makes the line one nothing restores -- ``ls && git push --delete`` is not
     made recoverable by the half that only read.
     """
-    if any(item.recovery == "nothing" for item in decisions):
-        return "nothing"
-    if any(item.recovery == "container" for item in decisions):
-        return "container"
-    return "snapshot"
+    if any(item.checkpoint == "unrecoverable" for item in decisions):
+        return "unrecoverable"
+    if any(item.checkpoint == "boundary_wide" for item in decisions):
+        return "boundary_wide"
+    return "targeted"
 
 
 def joined_placement(decisions: list[KernelDecision]) -> SandboxPlacement:
@@ -824,8 +828,6 @@ def joined_placement(decisions: list[KernelDecision]) -> SandboxPlacement:
         return "inside"
     if any(item.sandbox == "outside" for item in decisions):
         return "outside"
-    if any(item.sandbox == "escalable" for item in decisions):
-        return "escalable"
     return "ambient"
 
 
@@ -871,21 +873,25 @@ def classify_shell(
     )
     decisions = decide_segment_list(segments, context)
     placement = joined_placement(decisions)
-    restoration = joined_recovery(decisions)
+    restoration = joined_checkpoint(decisions)
+    parts = tuple(decisions)
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
-        return denied
+        return denied.revised(findings=parts)
     asked = next((item for item in decisions if item.effect == "ask"), None)
     if asked is not None:
-        return KernelDecision("ask", asked.reason, placement, recovery=restoration)
+        return asked.revised(
+            sandbox=placement, checkpoint=restoration, findings=parts
+        )
     deferred = next((item for item in decisions if item.effect == "defer"), None)
     if deferred is not None:
-        return deferred
+        return deferred.revised(findings=parts)
     return KernelDecision(
         "allow",
         "every shell segment is declared safe",
         placement,
-        recovery=restoration,
+        checkpoint=restoration,
+        findings=parts,
     )
 
 
@@ -954,6 +960,7 @@ def decide_shell(
     contained: bool = False,
     recovered: bool = False,
     relayed: bool = False,
+    unjudged_ambient: UnjudgedAmbient = "ask",
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -999,14 +1006,15 @@ def decide_shell(
     hint = ESCALATE_HINT if interactive else RELAY_HINT if relayed else RESHAPE_HINT
     confined = sandboxed and not sandbox_excluded(command, excluded_commands or [])
 
-    marker = ESCALATE_RE.match(command)
-    why = marker.group("why").strip() if marker is not None else ""
-    if marker is not None and not why:
-        return KernelDecision("deny", "escalation requires a stated reason" + hint)
+    reading = read_escalation(command)
+    if reading.refusal:
+        return KernelDecision(
+            "deny", reading.refusal + hint, cause="deliberate", hard=True
+        )
     return settle(
         SettlementFacts(
             classify_shell(
-                command[marker.end() :] if marker is not None else command,
+                reading.remainder,
                 rows,
                 allowed_scopes=allowed_scopes,
                 denied_scopes=denied_scopes,
@@ -1021,13 +1029,14 @@ def decide_shell(
                 runner_targets=runner_targets,
                 target_tables=target_tables,
             ),
-            escalation=why,
-            sandboxed=sandboxed,
+            escalation=reading.request,
             contained=contained,
             confined=confined,
-            escapable=escapable,
-            recovered=recovered,
-            interactive=interactive,
+            host_executor=escapable,
+            human_execution=interactive or relayed,
+            reviewable=interactive or relayed,
+            checkpoint="complete" if recovered else "absent",
+            unjudged_ambient=unjudged_ambient,
             hint=hint,
         )
     )

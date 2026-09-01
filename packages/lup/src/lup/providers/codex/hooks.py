@@ -108,7 +108,6 @@ def codex_approval_semantic_tool(event: LupHookInput) -> SemanticTool:
 CODEX_SEMANTICS = NativeSemantics(
     decode=codex_approval_semantic_tool,
     routed_tools=list(APPROVAL_METHODS),
-    agent_escalates=True,
 )
 """What an in-process Codex session hands a semantic policy.
 

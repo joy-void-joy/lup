@@ -66,7 +66,6 @@ CLAUDE_SEMANTICS = NativeSemantics(
     decode=claude_hook_semantic_tool,
     routed_tools=CLAUDE_DISPATCHER.routed_tools,
     escapable=True,
-    agent_escalates=True,
 )
 """What an in-process Claude session hands a semantic policy.
 

@@ -1,30 +1,56 @@
 """The order that settles a classified verdict into the one a session runs.
 
-Classification answers what the vocabulary says about a command. It does not
+Classification answers what the rules say about an operation. It does not
 answer what happens, because one verdict means different things in different
-sessions: a question needs somebody to put it to, work nobody judged needs to
-know whether a boundary sits beneath it, a placement is only worth declaring
-where the host can carry it out, and one the boundary already satisfies is
-not left for anybody to carry at all.
+sessions: a question needs somebody eligible to answer it, work nobody judged
+needs to know whether a containment boundary sits beneath it, a placement is
+only worth declaring where some channel can carry it out, and a loss a proven
+capture puts back is not a loss anybody needs to be asked about.
 
-Those facts were a ``match`` over four arms with guards, where the answer to
-"what does a stated reason do" was the *position* of one arm and the answer to
-"and what about a stated reason over something already permitted" was that no
-arm covered it. Here they are an ordered list read the way `.gitignore` reads
-patterns: every row is offered the running verdict, a row that rewrites hands
-its result to the next, and the first row that settles ends the pass. A rule
-about the order — *a stated reason never leaves a refusal standing*, say — is
-then a row that says so, rather than an arm somebody has to place correctly.
+Those facts are an ordered list read the way `.gitignore` reads patterns:
+every row is offered the running verdict, a row that rewrites hands its
+result to the next, and the first row that settles ends the pass. A rule
+about the order — *a hard prohibition is not moved by asking*, *an approval
+cannot manufacture a capability* — is then a row that says so, rather than an
+arm somebody has to place correctly.
 
-Two rows settle a refusal that no stated reason reaches, because both say the
-call cannot happen rather than that nobody approved it: a marker with no
-reason, which would be authorising itself, and a call declared ``outside`` on
-a host with no channel to put it there, where an approval would only move the
-failure to a bare filesystem error with the boundary misreported as a bug in
-the code. The first is refused before classification and never arrives here.
+The pass runs twice over one operation. **Preliminary** settlement reads what
+is known before anything is captured or locked, and is what parks a question:
+an independent review requirement is put to a reviewer without a mutation
+lease held, because a question waiting on a person must not hold a lock the
+rest of the session needs. **Dynamic** settlement runs after approval and
+after capture, over the same rows with measured evidence in place, and is the
+only pass in which recovery can discharge anything. Both are this one order;
+what differs is the facts it is given, which is why a row never asks which
+pass it is in.
 """
 
-from .decision import SANDBOX_TRAPPED_REASON, KernelDecision
+from .decision import (
+    SANDBOX_TRAPPED_REASON,
+    KernelDecision,
+    recovery_dischargeable,
+)
+from .escalation import EscalationRequest
+from .semantics import CheckpointEvidence, UnjudgedAmbient
+
+# lup: ignore[constant-declaration] — settlement's own wording, declared beside
+# the row that returns it; different words would be a different settlement
+REDUNDANT_DECISION = " — a reviewer was already going to see this"
+REDUNDANT_SANDBOX = " — this was already placed on the host"
+ESCALATED_PREFIX = "escalated ({reason}): "
+CONTAINED_READ = (
+    " — settled inside the containment boundary rather than asked: every"
+    " effect it can have is confined there"
+)
+RECOVERED_LOSS = " — settled rather than asked: {held}"
+CHECKPOINT_FAILED = (
+    " — the capture that would have settled this failed, so the loss it was"
+    " going to cover is unprotected and the question stands"
+)
+NO_REVIEWER = (
+    " — no eligible reviewer is reachable from this session, so the question"
+    " cannot be put to anybody"
+)
 
 
 class SettlementFacts:
@@ -36,48 +62,56 @@ class SettlementFacts:
     """
 
     decision: KernelDecision
-    escalation: str
-    sandboxed: bool
+    escalation: EscalationRequest | None
     contained: bool
     confined: bool
-    escapable: bool
-    recovered: bool
-    interactive: bool
+    host_executor: bool
+    human_execution: bool
+    reviewable: bool
+    checkpoint: CheckpointEvidence
+    unjudged_ambient: UnjudgedAmbient
     hint: str
 
     def __init__(
         self,
         decision: KernelDecision,
-        escalation: str,
-        sandboxed: bool,
-        contained: bool,
-        confined: bool,
-        escapable: bool,
-        recovered: bool,
-        interactive: bool,
-        hint: str,
+        escalation: EscalationRequest | None = None,
+        contained: bool = False,
+        confined: bool = False,
+        host_executor: bool = False,
+        human_execution: bool = False,
+        reviewable: bool = True,
+        checkpoint: CheckpointEvidence = "absent",
+        unjudged_ambient: UnjudgedAmbient = "ask",
+        hint: str = "",
     ) -> None:
         self.decision = decision
         self.escalation = escalation
-        self.sandboxed = sandboxed
         self.contained = contained
         self.confined = confined
-        self.escapable = escapable
-        self.recovered = recovered
-        self.interactive = interactive
+        self.host_executor = host_executor
+        self.human_execution = human_execution
+        self.reviewable = reviewable
+        self.checkpoint = checkpoint
+        self.unjudged_ambient = unjudged_ambient
         self.hint = hint
+
+    def asks(self, kind: str) -> bool:
+        """Whether the operation carried an escalation request of one kind."""
+        return self.escalation is not None and kind in self.escalation.kinds
 
     def rewritten(self, decision: KernelDecision) -> "SettlementFacts":
         """These same facts, with a row's rewrite standing as the verdict."""
         return SettlementFacts(
             decision,
             self.escalation,
-            self.sandboxed,
             self.contained,
             self.confined,
-            self.escapable,
-            self.recovered,
-            self.interactive,
+            self.host_executor,
+            self.human_execution,
+            self.reviewable,
+            self.checkpoint,
+            self.unjudged_ambient,
             self.hint,
         )
 
@@ -87,294 +121,421 @@ class SettlementRule:
 
     ``settles`` is the difference between the two kinds of row. A settling
     row is the answer: nothing after it is read. A rewriting row changes what
-    the rows after it are judging, which is how a stated reason and a missing
-    approval channel compose without either knowing about the other.
+    the rows after it are judging, which is how an escalation request and a
+    missing channel compose without either knowing about the other.
     """
 
     settles: bool = True
+    id: str = ""
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
         """This row's verdict, or ``None`` where it has nothing to say."""
         raise NotImplementedError
 
 
-class StatedReason(SettlementRule):
-    """A marker turns anything not already permitted into a question.
+class HardProhibition(SettlementRule):
+    """A policy invariant, which asking about does not move.
 
-    The agent asked to be judged, so the refusal becomes the question it
-    asked for, carrying the reason it gave — the human sees intent at the
-    moment of judgment rather than a bare rule name. Nothing is done to a
-    verdict that already allows: a stated reason over something permitted
-    would buy a prompt for nothing.
+    First, because every row after it is about who could answer or what could
+    be proven, and the answer here is nobody and nothing. A hard prohibition
+    is not a rule's judgement that a person with more context might overrule
+    — it is the shape of the thing being refused, and an approval does not
+    change a shape.
     """
 
-    settles = False
+    id = "hard-prohibition"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if not facts.escalation or facts.decision.effect == "allow":
-            return None
-        return KernelDecision(
-            "ask",
-            f"escalated ({facts.escalation}): {facts.decision.reason}",
-            facts.decision.sandbox,
-            facts.escalation,
-            facts.decision.recovery,
-        )
-
-
-class ContainedPlacement(SettlementRule):
-    """A container is the place every placement was asking for.
-
-    ``outside`` names the native per-call sandbox and nothing else. It is
-    what a toolchain declares when that sandbox denies the paths it needs --
-    the runtime's own configuration home, the repository's locks, a route to
-    the remote. A container denies none of them: the checkout is mounted
-    writable, the configuration home is the container's own, and the route
-    out is the egress proxy. So the requirement is met by construction, and
-    what is left to carry is nothing.
-
-    Rewritten to ``ambient`` rather than left standing, because a placement
-    nothing can act on is one the runtimes still act on: Claude Code reads
-    the verdict's placement back as an argument of the call, and a request to
-    leave a sandbox that is not running is a request about nothing.
-
-    This is the reachable half of retiring the placement axis under a
-    container, done where the axis is read rather than by deleting the field
-    the uncontained posture still needs. Measured before it existed: a
-    contained session refused `git status`, `git log`, `dev check` and every
-    other `lup-devtools` command, because git and the toolchain are declared
-    ``outside`` across their whole surface and :class:`TrappedPlacement`
-    below answers for a host with no escape channel -- which a container,
-    having no sandbox to escape, looks exactly like.
-    """
-
-    settles = False
-
-    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if not facts.contained or facts.decision.sandbox == "ambient":
-            return None
-        return KernelDecision(
-            facts.decision.effect,
-            facts.decision.reason,
-            escalated=facts.decision.escalated,
-            recovery=facts.decision.recovery,
-        )
-
-
-class TrappedPlacement(SettlementRule):
-    """A call declared ``outside`` on a host that cannot place it there.
-
-    Not advice: confined, it fails on whatever it writes first, and the
-    failure reads as a broken repository rather than as a boundary. Stopped
-    here with the reason that says which it was, and no stated reason moves
-    it, because approval does not give the host a channel it does not have.
-
-    Answers for a native sandbox only. A container reaches
-    :class:`ContainedPlacement` above and never arrives here, because the
-    thing it cannot escape is also the thing the placement was asking for.
-    """
-
-    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.sandboxed and not facts.escapable:
-            if facts.decision.sandbox == "outside":
-                return KernelDecision(
-                    "deny",
-                    SANDBOX_TRAPPED_REASON,
-                    escalated=facts.decision.escalated,
-                )
+        if facts.decision.effect == "deny" and facts.decision.hard:
+            return facts.decision.revised(reason=facts.decision.reason + facts.hint)
         return None
 
 
-class RestoredBySession(SettlementRule):
-    """An approval question about a loss this session can already put back.
+class MissingCapability(SettlementRule):
+    """A guarantee the runtime cannot deliver, which approval cannot create.
 
-    The vocabulary guards *the direction that removes something no second
-    attempt restores*. What a second attempt restores is a fact about the
-    session and not about the command, and every rule states which restorer
-    its question was about — so where that restorer is present, the loss the
-    question was protecting against does not happen and the question has no
-    subject.
-
-    Settled as a **deferral, not a permission**, and the difference is the
-    whole design. Nothing here decides the call may run: it decides that this
-    policy has no reason left to interrupt, and hands the call to the
-    runtime's own gate, which is where an operator's configuration lives. A
-    session run with everything approved runs it; a session at the runtime's
-    defaults is still asked, in the runtime's own words. The policy stops
-    spending a human's attention on a loss it can undo, and buys no authority
-    with it.
-
-    Which makes ``defer`` two things reaching one word, and the rows below
-    have to keep them apart: a deferral from :func:`unjudged` means *nobody
-    looked*, and this one means *somebody looked and the boundary answers*.
-    So this row settles rather than rewrites. :class:`Unjudged` turns an
-    unexamined deferral into a refusal for want of anybody having looked, and
-    a judged deferral that fell through to it would be refused for the one
-    reason that is not true of it.
-
-    A stated reason keeps its question. `# lup: escalate:` is the agent
-    asking to be judged, and answering it with a deferral would drop both the
-    question and the reason given for it.
+    Second for the same reason the first row is first: no reviewer answers
+    it. What separates it from a prohibition is what the agent should do
+    about it — a refusal that reads as policy sends the agent to argue with a
+    rule, when the thing to fix is a channel the profile does not have.
     """
 
-    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect != "ask" or facts.escalation:
-            return None
-        match facts.decision.recovery:
-            case "snapshot" if facts.recovered:
-                held = "the tree is in the object store"
-            # Both, and not the container alone. What a container makes
-            # disposable is the machine; the checkout is bind-mounted from
-            # the host and survives it, so the wider value needs the narrower
-            # one underneath it or it relaxes the half nothing holds.
-            case "container" if facts.contained and facts.recovered:
-                held = "the container is disposable and the tree is held"
-            case _:
-                return None
-        # The recovery travels onto the deferral, and is the whole of how a
-        # reader downstream tells this from a deferral nobody looked at. Both
-        # reach the word `defer`, and they are worth opposite things: an
-        # unjudged one is a gap in the vocabulary, and this one is a rule
-        # having looked. Left off, the only difference would be the wording
-        # of a reason, which is not a distinction anything should read.
-        return KernelDecision(
-            "defer",
-            f"{facts.decision.reason} — settled by this session rather than"
-            f" asked: {held}",
-            recovery=facts.decision.recovery,
-        )
-
-
-class UnanswerableQuestion(SettlementRule):
-    """A question on a host with nobody to put it to is not a question.
-
-    Rewritten to no judgment rather than settled, so what happens next is
-    decided by whether a boundary sits beneath the call — which is the same
-    question anything else nobody judged has to answer.
-    """
-
-    settles = False
+    id = "missing-capability"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect == "ask" and not facts.interactive:
-            return KernelDecision(
-                "defer", facts.decision.reason, escalated=facts.decision.escalated
-            )
-        return None
-
-
-class ConfinedElsewhere(SettlementRule):
-    """No judgment, and a boundary beneath it: the boundary carries it.
-
-    The OS confines the call, so the semantic layer says nothing and lets the
-    runtime's own gate decide inside it. This is the whole of what a sandbox
-    buys the deny lattice, and it is why the lattice may be smaller wherever
-    one is running.
-    """
-
-    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect == "defer" and facts.confined:
+        if facts.decision.cause == "capability":
             return facts.decision
         return None
 
 
-class Unjudged(SettlementRule):
-    """No judgment and no boundary: whoever can answer it, answers it.
+class SandboxEscalation(SettlementRule):
+    """The agent asked for the launcher's host, which is always reviewed.
 
-    Two deferrals arrive here and only one is a question. ``unlisted`` says
-    the kernel read the command, found it well-formed, and no row named it —
-    so what a reviewer would be shown is what would run, and a session with
-    a reviewer asks them. Every other deferral is the kernel declining to
-    *read*: an unresolved expansion, a substitution it cannot see into, an
-    operator its parser does not carry. Those keep refusing however many
-    reviewers are present, because a question about text the policy could
-    not parse is one the human cannot answer either — `cat x ;& rm -rf ~`
-    would be approved on the strength of the `cat`.
+    A placement rather than a permission, and the one crossing that is never
+    unprompted on request: ``allow outside`` exists, but only as a rule's own
+    declaration about an operation nobody had to ask about. An agent asking
+    to leave gets a question, whatever the effect was inside — because what
+    the reviewer is being shown is not "may this run" but "may this run
+    *there*", and the second question has a different answer.
 
-    Asking about the listed-nowhere half because the refusal was never the
-    gate it read as. `# lup: escalate:` turns exactly this refusal into
-    exactly this question, so a human was already trusted to answer for
-    unclassified work and the denial only bought a turn of paperwork first.
-    Measured on this repository before the question existed: `pytest -q`,
-    `ruff check .`, `pyright`, `node -v` and `journalctl -n 20` were all
-    refused ambient, while `ssh host rm -rf /` — judged, and judged
-    destructive — reached the human. Refusing hardest where the vocabulary
-    knows least is the wrong way round.
+    A refusal is not moved by it. Combined with a decision escalation the
+    refusal has already become a question by the time this row is read, so
+    ``escalate[decision,sandbox]`` over an ordinary deny reaches ask outside
+    and ``escalate[sandbox]`` alone over the same deny stays refused.
 
-    Either way the refusal names the recipe rather than only the wall —
-    reshape it into the allowed vocabulary, or say why it has to be this
-    shape — because an agent told only "no" looks at nothing.
-
-    The sandboxed session never arrives here: :class:`ConfinedElsewhere`
-    settles ahead of this row and lets the boundary carry what nobody judged,
-    which is the whole of what a sandbox buys the lattice. This row answers
-    for the session that has no boundary underneath it, where the choice is
-    between a human and nothing.
+    Where no automated channel exists the question is still worth asking, so
+    long as somebody can carry the answer out: an approved operation is
+    rendered for the launcher's owner to run and confirm. Only where neither
+    a channel nor a person is available does this fall through to
+    :class:`TrappedPlacement` below.
     """
 
+    settles = False
+    id = "sandbox-escalation"
+
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect != "defer":
+        if not facts.asks("sandbox"):
             return None
-        if facts.interactive and facts.decision.unlisted:
-            return KernelDecision(
-                "ask",
-                facts.decision.reason,
-                escalated=facts.decision.escalated,
-            )
-        return KernelDecision(
-            "deny",
-            facts.decision.reason + facts.hint,
-            escalated=facts.decision.escalated,
+        decision = facts.decision
+        if decision.effect == "deny":
+            return None
+        if decision.sandbox == "outside" and decision.effect == "ask":
+            return decision.revised(reason=decision.reason + REDUNDANT_SANDBOX)
+        assert facts.escalation is not None
+        prefix = ESCALATED_PREFIX.format(reason=facts.escalation.reason)
+        return decision.revised(
+            effect="ask",
+            reason=prefix + decision.reason + facts.escalation.notice(),
+            sandbox="outside",
+            escalated=facts.escalation.reason,
+            purpose=decision.purpose or "policy_override",
+            abstention=None,
         )
 
 
-class JudgedRefusal(SettlementRule):
-    """A rule refused this, and no sandbox rescues a judged deny.
+class DecisionEscalation(SettlementRule):
+    """A stated reason turns anything not already permitted into a question.
 
-    The distinction the lattice rests on: unjudged work is refused for want
-    of anybody having looked, and a boundary answers that. A judged deny is
-    somebody's answer, and running it confined would still be running it.
+    The agent asked to be judged, so a refusal becomes the question it asked
+    for, carrying the reason it gave — the person sees intent at the moment
+    of judgement rather than a bare rule name. An abstention becomes the same
+    question, at the placement it already had, because an operation nobody
+    judged is exactly what a reviewer is for.
+
+    Nothing is done to a verdict that already permits, beyond saying so: a
+    stated reason over something permitted would buy a prompt for nothing,
+    and an agent that wrote one deserves to learn it was unnecessary rather
+    than to have it silently work.
     """
 
+    settles = False
+    id = "decision-escalation"
+
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect == "deny":
-            return KernelDecision(
-                "deny",
-                facts.decision.reason + facts.hint,
-                escalated=facts.decision.escalated,
+        if not facts.asks("decision"):
+            return None
+        assert facts.escalation is not None
+        decision = facts.decision
+        notice = facts.escalation.notice()
+        if decision.effect == "allow":
+            return decision.revised(
+                reason=decision.reason + REDUNDANT_DECISION + notice,
+                visibility="notice",
+            )
+        prefix = ESCALATED_PREFIX.format(reason=facts.escalation.reason)
+        return decision.revised(
+            effect="ask",
+            reason=prefix + decision.reason + notice,
+            escalated=facts.escalation.reason,
+            purpose=decision.purpose or "policy_override",
+            cause=None,
+            abstention=None,
+        )
+
+
+class TrappedPlacement(SettlementRule):
+    """An operation that has to reach the host where nothing can carry it.
+
+    Not advice: run inside, it fails on whatever it touches first, and the
+    failure reads as a broken repository rather than as a boundary. Refused
+    here as a capability-blocked refusal — no approval builds a channel, and
+    a question whose every answer leaves the operation with nowhere to go is
+    a question nobody should be shown.
+
+    Reached after both escalation rows, so an agent that asked for the host
+    is told the profile has none rather than told its request was denied on
+    the merits.
+    """
+
+    id = "trapped-placement"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.sandbox != "outside":
+            return None
+        if facts.host_executor:
+            return None
+        if facts.decision.effect == "ask" and facts.human_execution:
+            return None
+        return facts.decision.revised(
+            effect="deny",
+            reason=SANDBOX_TRAPPED_REASON,
+            cause="capability",
+            capability="host_executor",
+        )
+
+
+class ProviderNative(SettlementRule):
+    """A rule looked and handed the decision to the provider's own mode.
+
+    The one abstention that survives, and the only verdict under which the
+    session behaves exactly as it would with Lup absent. It settles rather
+    than rewrites so that no row below can turn a deliberate handoff into a
+    refusal for want of anybody having looked — somebody looked, and what
+    they decided was that this is the provider's to answer.
+    """
+
+    id = "provider-native"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.abstention == "provider_native":
+            return facts.decision
+        return None
+
+
+class RecoveredLoss(SettlementRule):
+    """A question about a loss a proven capture already put somewhere safe.
+
+    The rules guard *the direction that removes something no second attempt
+    restores*. What a second attempt restores is a fact about the session and
+    not about the operation, so a rule states the capture its question was
+    about and this row asks whether that capture was actually taken.
+
+    Settled as a **permission**, not a deferral. Nothing about the provider's
+    own mode is involved: this policy has positively established that the
+    loss it was protecting against did not happen, and an operation whose
+    every reason to interrupt has been answered is authorized rather than
+    handed on. Deferring instead would make the outcome depend on which mode
+    the session happened to be in, for a fact that has nothing to do with the
+    session's mode.
+
+    It discharges *only* local loss. An operation that also rewrites a
+    production file, touches a protected path, reads a credential, or reaches
+    a remote keeps its question in full, which is what
+    :func:`~lup.policy.kernel.decision.recovery_dischargeable` reads over the
+    contributing findings rather than over their join.
+
+    A stated reason keeps its question either way: the escalation rows above
+    have already turned it into one, and answering the agent's own request
+    with a permission would drop both the question and the reason given for
+    it. A capture that was attempted and failed keeps the question too, and
+    says which it was, because "nobody captured this" and "the capture did
+    not work" are different things to tell a person.
+    """
+
+    id = "recovered-loss"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.effect != "ask" or facts.escalation is not None:
+            return None
+        if not recovery_dischargeable(facts.decision):
+            return None
+        match facts.checkpoint:
+            case "complete":
+                held = "the affected paths are captured and restorable"
+            case "failed":
+                return facts.decision.revised(
+                    reason=facts.decision.reason + CHECKPOINT_FAILED,
+                    visibility="notice",
+                )
+            case _:
+                return None
+        return facts.decision.revised(
+            effect="allow",
+            reason=facts.decision.reason + RECOVERED_LOSS.format(held=held),
+            purpose=None,
+            visibility="notice",
+        )
+
+
+class UnreachableReviewer(SettlementRule):
+    """A question in a session no eligible reviewer can be reached from.
+
+    Rewritten to an abstention rather than settled, so what happens next is
+    decided by whether a containment boundary sits beneath the operation —
+    which is the same question anything else nobody judged has to answer. The
+    reason says the question existed and could not be put, because a refusal
+    that reads as a rule's judgement sends the agent to reshape an operation
+    that was never the problem.
+
+    This is the last resort and not the ordinary path. A detached session
+    reaches a person through the durable relay, and a worker reaches its
+    supervisor through the same relay; ``reviewable`` is false only where
+    neither exists.
+    """
+
+    settles = False
+    id = "unreachable-reviewer"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.effect == "ask" and not facts.reviewable:
+            return facts.decision.revised(
+                effect="defer",
+                reason=facts.decision.reason + NO_REVIEWER,
+                abstention="boundary_settle",
             )
         return None
 
 
+class ContainedEffects(SettlementRule):
+    """Nobody judged it, and everything it can do is confined: run it inside.
+
+    The practical default for odd local work. Reading ``/etc/passwd``,
+    listing ``/proc``, searching the session's own home, running a broad
+    ``find`` — each is suspicious in the abstract and none of it is worth a
+    person's attention when the environment it observes is the contained one
+    and no independent rule asks or denies. A host path that is not there
+    fails inside with a boundary diagnostic naming the sandbox escalation
+    that would reach it, which is a better answer than a question, because
+    the agent usually did not need the host and finds that out itself.
+
+    Settles to ``allow inside`` rather than deferring, so the placement is
+    Lup's and holds however permissive the session's own mode is. That is the
+    whole difference between containing something and hoping the provider
+    contains it.
+    """
+
+    id = "contained-effects"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.effect != "defer" or not facts.confined:
+            return None
+        return facts.decision.revised(
+            effect="allow",
+            reason=facts.decision.reason + CONTAINED_READ,
+            sandbox="inside",
+            abstention=None,
+        )
+
+
+class UnjudgedAmbientPolicy(SettlementRule):
+    """Nobody judged it and no boundary confines it: the profile answers.
+
+    Two answers, both declared rather than inferred. ``ask`` keeps unjudged
+    work visible, and is the default because what a reviewer is shown is
+    exactly what will run — the operation was read and found well-formed, and
+    only the vocabulary was silent. ``defer`` is a profile deliberately
+    handing the long tail to provider-native judgement.
+
+    Only the legible half reaches either answer. An operation the classifier
+    could not *read* — an unresolved expansion, a substitution it cannot see
+    into, an operator its parser does not carry — is refused however many
+    reviewers are present, because a question about text the policy could not
+    parse is one the person cannot answer either: they would approve
+    ``cat x ;& rm -rf ~`` on the strength of the ``cat``.
+    """
+
+    id = "unjudged-ambient"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.effect != "defer":
+            return None
+        if not facts.decision.unlisted:
+            return None
+        if facts.unjudged_ambient == "defer":
+            return facts.decision.revised(abstention="provider_native")
+        return facts.decision.revised(
+            effect="ask", purpose="policy_override", abstention=None
+        )
+
+
+class Unreadable(SettlementRule):
+    """Nothing judged it, nothing confines it, and nobody can read it.
+
+    The refusal names the recipe rather than only the wall — reshape it into
+    the allowed vocabulary, or say why it has to be this shape — because work
+    nobody classified is work somebody has to look at, and an agent told only
+    "no" looks at nothing.
+    """
+
+    id = "unreadable"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.effect != "defer":
+            return None
+        return facts.decision.revised(
+            effect="deny",
+            reason=facts.decision.reason + facts.hint,
+            cause="unreadable",
+            abstention=None,
+        )
+
+
+class JudgedRefusal(SettlementRule):
+    """A rule refused this, and no boundary rescues a judged deny.
+
+    The distinction the whole order rests on: unjudged work is refused for
+    want of anybody having looked, and a boundary answers that. A judged deny
+    is somebody's answer, and running it confined would still be running it.
+    """
+
+    id = "judged-refusal"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if facts.decision.effect != "deny":
+            return None
+        return facts.decision.revised(
+            reason=facts.decision.reason + facts.hint,
+            cause=facts.decision.cause or "deliberate",
+        )
+
+
 class Standing(SettlementRule):
     """Whatever reached here stands: a permission, or an answerable question."""
+
+    id = "standing"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
         return facts.decision
 
 
 SETTLEMENT_ORDER: list[SettlementRule] = [
-    ContainedPlacement(),
-    StatedReason(),
+    HardProhibition(),
+    MissingCapability(),
+    DecisionEscalation(),
+    SandboxEscalation(),
     TrappedPlacement(),
-    RestoredBySession(),
-    UnanswerableQuestion(),
-    ConfinedElsewhere(),
-    Unjudged(),
+    ProviderNative(),
+    RecoveredLoss(),
+    UnreachableReviewer(),
+    ContainedEffects(),
+    UnjudgedAmbientPolicy(),
+    Unreadable(),
     JudgedRefusal(),
     Standing(),
 ]
 """Every row, in the order they are read.
 
-Precedence is position, so the two rewriting rows come before what reads
-their result and ``Standing`` comes last because it speaks for everything.
+Precedence is position. The two unanswerable rows come first, because nothing
+below them could change their answer. Decision escalation precedes sandbox
+escalation so that a combined request over an overrideable refusal has
+already become a question by the time the placement moves — which is exactly
+the difference between ``escalate[decision,sandbox]`` reaching the host and
+``escalate[sandbox]`` alone staying refused. ``Standing`` is last because it
+speaks for everything.
 """
 
 
 def settle(
     facts: SettlementFacts, order: list[SettlementRule] = SETTLEMENT_ORDER
 ) -> KernelDecision:
-    """Read the order over one classified verdict and return what it settles."""
+    """Read the order over one classified verdict and return what it settles.
+
+    The same pass serves preliminary and dynamic settlement. What differs is
+    the evidence in ``facts`` — a preliminary pass carries ``absent`` capture
+    evidence and reaches its question, a dynamic pass carries what was
+    actually measured — so no row has to know which of the two it is in, and
+    neither pass can apply a rule the other does not.
+    """
     for rule in order:
         reached = rule.reached(facts)
         if reached is None:
@@ -383,3 +544,8 @@ def settle(
             return reached
         facts = facts.rewritten(reached)
     return facts.decision
+
+
+def settlement_rule_ids() -> list[str]:
+    """Every row's stable id, in order, for the reference the docs render."""
+    return [rule.id for rule in SETTLEMENT_ORDER]

@@ -179,7 +179,7 @@ class CodexDecisionRenderer(NativeDecisionRenderer[CodexDecisionOutput]):
     def render(
         self, decision: Decision, tool_input: JsonObject | None = None
     ) -> CodexDecisionOutput:
-        settled = decision.placed(escapable=False, agent_escalates=True)
+        settled = decision.placed(escapable=False)
         match settled.effect:
             case "allow" | "defer":
                 return CodexDecisionOutput(exit_code=0)

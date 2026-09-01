@@ -49,9 +49,10 @@ from typing import Literal, TypedDict
 
 from pydantic import BaseModel
 
+from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.kernel.decision import (
     DecisionEffect,
-    Recovery,
+    CheckpointRequirement,
     SandboxPlacement,
 )
 from lup.policy.kernel.rows import (
@@ -81,7 +82,7 @@ omission is a statement here rather than a gap, and a command is not made to
 repeat it.
 """
 
-ROOT_RECOVERY: Recovery = "nothing"
+ROOT_CHECKPOINT: CheckpointRequirement = "unrecoverable"
 """What puts back a loss nobody named — nothing does, so the question stands.
 
 The restrictive value, for the reason ``ROOT_EFFECT`` is: this axis is read
@@ -89,6 +90,17 @@ to *relax* an approval question, so the value a forgotten declaration falls
 to has to be the one that relaxes nothing. Annotating a rule is what says a
 boundary answers for it, and silence can then only cost a prompt somebody did
 not need, never a loss nobody could put back.
+"""
+
+
+ROOT_REVIEWER: ReviewerRequirement = "human_only"
+"""Who answers a question no rule said anything about — a person.
+
+The restrictive value, and for the reason ``ROOT_EFFECT`` is restrictive: this
+axis is read to *widen* who may answer, so what a forgotten declaration falls
+to has to widen nothing. A rule that means its question to be answerable by a
+supervisor says so, and silence can then only cost a person a question a
+supervisor could have taken, never route a release past them.
 """
 
 
@@ -101,29 +113,40 @@ class DeclaredAxes(BaseModel, frozen=True):
 
     effect: CommandEffect | None = None
     sandbox: SandboxPlacement | None = None
-    recovery: Recovery | None = None
+    checkpoint: CheckpointRequirement | None = None
+    reviewer: ReviewerRequirement | None = None
+    effect_class: EffectClass | None = None
 
 
 class RowAxes(TypedDict):
-    """The six fields one resolved triple contributes to an erased row."""
+    """The fields one resolved level contributes to an erased row.
+
+    Provenance travels beside each value because the question a reader
+    has at a verdict they did not expect is which level said so, and a
+    resolved value alone cannot answer it.
+    """
 
     effect: DecisionEffect
     effect_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
-    recovery: Recovery
-    recovery_source: RuleLevel
+    checkpoint: CheckpointRequirement
+    checkpoint_source: RuleLevel
+    reviewer: ReviewerRequirement
+    effect_class: str
 
 
 class ResolvedAxes(BaseModel, frozen=True):
-    """All three axes as one level resolved them, and where each came from."""
+    """Every axis as one level resolved it, and where each value came from."""
 
     effect: CommandEffect
     effect_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
-    recovery: Recovery
-    recovery_source: RuleLevel
+    checkpoint: CheckpointRequirement
+    checkpoint_source: RuleLevel
+    reviewer: ReviewerRequirement
+    effect_class: EffectClass | None
 
     def row_fields(self) -> RowAxes:
         """This triple as the erased row spells it, provenance included."""
@@ -132,8 +155,10 @@ class ResolvedAxes(BaseModel, frozen=True):
             effect_source=self.effect_source,
             sandbox=self.sandbox,
             sandbox_source=self.sandbox_source,
-            recovery=self.recovery,
-            recovery_source=self.recovery_source,
+            checkpoint=self.checkpoint,
+            checkpoint_source=self.checkpoint_source,
+            reviewer=self.reviewer,
+            effect_class=self.effect_class or "",
         )
 
     def inherit(self, declared: DeclaredAxes, level: RuleLevel) -> "ResolvedAxes":
@@ -148,9 +173,17 @@ class ResolvedAxes(BaseModel, frozen=True):
             effect_source=self.effect_source if declared.effect is None else level,
             sandbox=self.sandbox if declared.sandbox is None else declared.sandbox,
             sandbox_source=self.sandbox_source if declared.sandbox is None else level,
-            recovery=self.recovery if declared.recovery is None else declared.recovery,
-            recovery_source=(
-                self.recovery_source if declared.recovery is None else level
+            checkpoint=self.checkpoint if declared.checkpoint is None else declared.checkpoint,
+            checkpoint_source=(
+                self.checkpoint_source if declared.checkpoint is None else level
+            ),
+            reviewer=(
+                self.reviewer if declared.reviewer is None else declared.reviewer
+            ),
+            effect_class=(
+                self.effect_class
+                if declared.effect_class is None
+                else declared.effect_class
             ),
         )
 
@@ -160,8 +193,10 @@ ROOT_AXES = ResolvedAxes(
     effect_source="root",
     sandbox=ROOT_SANDBOX,
     sandbox_source="root",
-    recovery=ROOT_RECOVERY,
-    recovery_source="root",
+    checkpoint=ROOT_CHECKPOINT,
+    checkpoint_source="root",
+    reviewer=ROOT_REVIEWER,
+    effect_class=None,
 )
 """What the outermost level of every table inherits from."""
 
@@ -228,7 +263,9 @@ class ShellOperationRule(BaseModel, frozen=True):
     effect: CommandEffect = ROOT_EFFECT
     ask_flags: list[str] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
-    recovery: Recovery = ROOT_RECOVERY
+    checkpoint: CheckpointRequirement = ROOT_CHECKPOINT
+    reviewer: ReviewerRequirement = ROOT_REVIEWER
+    effect_class: EffectClass | None = None
     reason: str = ""
 
     def declared(self) -> DeclaredAxes:
@@ -237,7 +274,11 @@ class ShellOperationRule(BaseModel, frozen=True):
         return DeclaredAxes(
             effect=self.effect if "effect" in supplied else None,
             sandbox=self.sandbox if "sandbox" in supplied else None,
-            recovery=self.recovery if "recovery" in supplied else None,
+            checkpoint=self.checkpoint if "checkpoint" in supplied else None,
+            reviewer=self.reviewer if "reviewer" in supplied else None,
+            effect_class=(
+                self.effect_class if "effect_class" in supplied else None
+            ),
         )
 
 
@@ -263,7 +304,9 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     guarded_keys: list[str] = []
     operations: list[ShellOperationRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
-    recovery: Recovery = ROOT_RECOVERY
+    checkpoint: CheckpointRequirement = ROOT_CHECKPOINT
+    reviewer: ReviewerRequirement = ROOT_REVIEWER
+    effect_class: EffectClass | None = None
     reason: str = ""
 
     def declared(self) -> DeclaredAxes:
@@ -272,7 +315,11 @@ class ShellSubcommandRule(BaseModel, frozen=True):
         return DeclaredAxes(
             effect=self.effect if "effect" in supplied else None,
             sandbox=self.sandbox if "sandbox" in supplied else None,
-            recovery=self.recovery if "recovery" in supplied else None,
+            checkpoint=self.checkpoint if "checkpoint" in supplied else None,
+            reviewer=self.reviewer if "reviewer" in supplied else None,
+            effect_class=(
+                self.effect_class if "effect_class" in supplied else None
+            ),
         )
 
 
@@ -353,7 +400,9 @@ class ShellCommandRule(SelectableRule, frozen=True):
     value_flags: list[str] = []
     subcommands: list[ShellSubcommandRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
-    recovery: Recovery = ROOT_RECOVERY
+    checkpoint: CheckpointRequirement = ROOT_CHECKPOINT
+    reviewer: ReviewerRequirement = ROOT_REVIEWER
+    effect_class: EffectClass | None = None
     reason: str = ""
 
     def selection_id(self) -> str:
@@ -365,7 +414,11 @@ class ShellCommandRule(SelectableRule, frozen=True):
         return DeclaredAxes(
             effect=self.default_effect,
             sandbox=self.sandbox if "sandbox" in supplied else None,
-            recovery=self.recovery if "recovery" in supplied else None,
+            checkpoint=self.checkpoint if "checkpoint" in supplied else None,
+            reviewer=self.reviewer if "reviewer" in supplied else None,
+            effect_class=(
+                self.effect_class if "effect_class" in supplied else None
+            ),
         )
 
 
@@ -405,6 +458,17 @@ def runner_target_tables(targets: list[RunnerTargetRule]) -> list[ShellRuleRow]:
     )
 
 
+def rule_id(command: str, subcommand: str = "", operation: str = "") -> str:
+    """The stable id of the row matching these levels.
+
+    Derived from what the row matches rather than declared beside it, so a
+    renamed subcommand renames its id and no second place has to be kept in
+    step. The ``shell:`` prefix is what keeps it distinguishable from an edit
+    or fetch rule in a single audit table.
+    """
+    return "shell:" + ".".join(part for part in (command, subcommand, operation) if part)
+
+
 def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
     """Flatten the nested table into the kernel's primitive command rows.
 
@@ -427,6 +491,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
         axes = above.inherit(subcommand.declared(), "subcommand")
         operations = [
             ShellRuleRow(
+                rule=rule_id(command_name, subcommand.name, operation.name),
                 command=command_name,
                 subcommand=subcommand.name,
                 operation=operation.name,
@@ -444,6 +509,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             for operation in subcommand.operations
         ]
         default = ShellRuleRow(
+            rule=rule_id(command_name, subcommand.name),
             command=command_name,
             subcommand=subcommand.name,
             operation="",
@@ -463,6 +529,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
     def command_rows(command: ShellCommandRule) -> list[ShellRuleRow]:
         axes = ROOT_AXES.inherit(command.declared(), "command")
         default = ShellRuleRow(
+            rule=rule_id(command.name),
             command=command.name,
             subcommand="",
             operation="",

@@ -6,7 +6,7 @@ import posixpath
 import re
 from typing import TypedDict
 
-from .decision import KernelDecision, unjudged, unlisted
+from .decision import DecisionEffect, KernelDecision, unjudged, unlisted
 from .rows import (
     PathRoleRow,
     PathRuleRow,
@@ -49,6 +49,39 @@ SED_SAFE_LONG_OPTIONS = (
 SED_SUBSTITUTE_FLAG_CHARS = "0123456789gpiImM"
 
 
+def row_verdict(
+    row: ShellRuleRow, effect: DecisionEffect, reason: str
+) -> KernelDecision:
+    """One row's verdict, carrying every fact the row states about itself.
+
+    The purpose is derived rather than declared, because for a shell row it
+    is a function of what the row already says: a question about a loss some
+    capture would put back is an unrecovered local mutation, one about an
+    operation with an effect beyond this machine is an external consequence,
+    and one about neither is a question this row has not classified. Deriving
+    it keeps a table of several hundred commands from having to restate what
+    two of its columns already imply.
+    """
+    if effect != "ask":
+        purpose = None
+    elif row["checkpoint"] != "unrecoverable":
+        purpose = "unrecovered_local_mutation"
+    elif row["effect_class"]:
+        purpose = "external_consequence"
+    else:
+        purpose = None
+    return KernelDecision(
+        effect,
+        reason,
+        row["sandbox"],
+        checkpoint=row["checkpoint"],
+        reviewer=row["reviewer"],
+        purpose=purpose,
+        rule=row["rule"],
+        evaluator="shell-vocabulary",
+    )
+
+
 def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision:
     """Return a row's effect, downgrading an allow to ask on a guarded flag.
 
@@ -70,11 +103,8 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     """
     if row["effect"] != "allow" and row["allow_flags"] and arguments:
         if all(word in row["allow_flags"] for word in arguments):
-            return KernelDecision(
-                "allow",
-                "every argument is a declared read-only flag",
-                row["sandbox"],
-                recovery=row["recovery"],
+            return row_verdict(
+                row, "allow", "every argument is a declared read-only flag"
             )
     if row["effect"] != "allow" and row["guarded_keys"] and arguments:
         # Absence is the test, so every word has to be legible on the same
@@ -96,11 +126,10 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
         if readable and not any(
             key_matches(word, row["guarded_keys"]) for word in arguments
         ):
-            return KernelDecision(
+            return row_verdict(
+                row,
                 "allow",
                 "no setting that redirects how commands execute is named",
-                row["sandbox"],
-                recovery=row["recovery"],
             )
     if row["effect"] != "allow" and row["read_verbs"] and arguments:
         clean = not any(
@@ -108,11 +137,8 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             for word in arguments
         )
         if clean and any(word in row["read_verbs"] for word in arguments):
-            return KernelDecision(
-                "allow",
-                "a declared read-only verb pins the query action",
-                row["sandbox"],
-                recovery=row["recovery"],
+            return row_verdict(
+                row, "allow", "a declared read-only verb pins the query action"
             )
     if row["effect"] != "allow" and row["write_markers"] and arguments:
         # Absence is the test, so every word has to be legible: one this
@@ -133,22 +159,18 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             for word in arguments
             for marker in row["write_markers"]
         ):
-            return KernelDecision(
+            return row_verdict(
+                row,
                 "allow",
                 "no declared write marker is present, so this only reads",
-                row["sandbox"],
-                recovery=row["recovery"],
             )
     # No opacity test here, unlike every de-escalation above. Those read the
     # words to decide, so a word they cannot read is a word that might carry
     # what they are looking for; this one is deciding *on* the absence of
     # words, and a list with nothing in it has nothing to misread.
     if row["effect"] != "allow" and row["bare_reads"] and not arguments:
-        return KernelDecision(
-            "allow",
-            "this command's argument-less form only reads",
-            row["sandbox"],
-            recovery=row["recovery"],
+        return row_verdict(
+            row, "allow", "this command's argument-less form only reads"
         )
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
@@ -165,11 +187,8 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             None,
         )
         if guarded is not None:
-            return KernelDecision(
-                "ask",
-                row["reason"] or f"{guarded} requires approval",
-                row["sandbox"],
-                recovery=row["recovery"],
+            return row_verdict(
+                row, "ask", row["reason"] or f"{guarded} requires approval"
             )
     if row["effect"] == "allow" and row["ask_refspecs"]:
         # No opacity test of its own: a row declaring refspec effects declares
@@ -185,15 +204,12 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             None,
         )
         if carried is not None:
-            return KernelDecision(
+            return row_verdict(
+                row,
                 "ask",
                 row["reason"] or f"{carried[0]} would {carried[1]} a ref",
-                row["sandbox"],
-                recovery=row["recovery"],
             )
-    return KernelDecision(
-        row["effect"], row["reason"], row["sandbox"], recovery=row["recovery"]
-    )
+    return row_verdict(row, row["effect"], row["reason"])
 
 
 class Subcommand(TypedDict):
@@ -224,7 +240,7 @@ def split_subcommand(
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
     placement = default["sandbox"] if default else "ambient"
-    restoration = default["recovery"] if default else "nothing"
+    restoration = default["checkpoint"] if default else "unrecoverable"
     position = 0
     while position < len(arguments):
         word = arguments[position]
@@ -240,7 +256,7 @@ def split_subcommand(
                 "ask",
                 f"{executable} global flag {word} requires approval{redirect}",
                 placement,
-                recovery=restoration,
+                checkpoint=restoration,
             )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])

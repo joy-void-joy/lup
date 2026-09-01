@@ -295,11 +295,11 @@ class Decision(BaseModel, frozen=True):
         """
         return KernelDecision(info.data["effect"], sandbox=sandbox).sandbox
 
-    def placed(self, escapable: bool, agent_escalates: bool) -> "Decision":
+    def placed(self, escapable: bool) -> "Decision":
         """This verdict as a runtime that can, or cannot, place a call sees it."""
         kernel = KernelDecision(
             self.effect, self.reason, self.sandbox, self.escalated
-        ).placed(escapable, agent_escalates)
+        ).placed(escapable)
         return Decision(
             effect=kernel.effect,
             reason=kernel.reason,

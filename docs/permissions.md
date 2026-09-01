@@ -49,14 +49,18 @@ The rows, in order, each stating its own claim:
 
 | row | what it says |
 | --- | --- |
-| `ContainedPlacement` | A container is the place every placement was asking for. |
-| `StatedReason` | A marker turns anything not already permitted into a question. |
-| `TrappedPlacement` | A call declared ``outside`` on a host that cannot place it there. |
-| `RestoredBySession` | An approval question about a loss this session can already put back. |
-| `UnanswerableQuestion` | A question on a host with nobody to put it to is not a question. |
-| `ConfinedElsewhere` | No judgment, and a boundary beneath it: the boundary carries it. |
-| `Unjudged` | No judgment and no boundary: whoever can answer it, answers it. |
-| `JudgedRefusal` | A rule refused this, and no sandbox rescues a judged deny. |
+| `HardProhibition` | A policy invariant, which asking about does not move. |
+| `MissingCapability` | A guarantee the runtime cannot deliver, which approval cannot create. |
+| `DecisionEscalation` | A stated reason turns anything not already permitted into a question. |
+| `SandboxEscalation` | The agent asked for the launcher&#x27;s host, which is always reviewed. |
+| `TrappedPlacement` | An operation that has to reach the host where nothing can carry it. |
+| `ProviderNative` | A rule looked and handed the decision to the provider&#x27;s own mode. |
+| `RecoveredLoss` | A question about a loss a proven capture already put somewhere safe. |
+| `UnreachableReviewer` | A question in a session no eligible reviewer can be reached from. |
+| `ContainedEffects` | Nobody judged it, and everything it can do is confined: run it inside. |
+| `UnjudgedAmbientPolicy` | Nobody judged it and no boundary confines it: the profile answers. |
+| `Unreadable` | Nothing judged it, nothing confines it, and nobody can read it. |
+| `JudgedRefusal` | A rule refused this, and no boundary rescues a judged deny. |
 | `Standing` | Whatever reached here stands: a permission, or an answerable question. |
 
 Where a command runs is a second axis beside that verdict, declared per rule

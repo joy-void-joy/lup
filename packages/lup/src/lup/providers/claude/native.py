@@ -26,7 +26,6 @@ from lup.policy.models import (
 )
 from lup.policy.kernel.decision import (
     SandboxPlacement,
-    escalation_offer,
     sandbox_escaped,
 )
 from lup.policy.native import NativeDecisionRenderer, NativeEventDecoder
@@ -207,13 +206,7 @@ def claude_sandbox_input(
     """
     if tool_input is None or sandbox == "ambient":
         return None
-    match tool_input:
-        case {"dangerouslyDisableSandbox": True}:
-            spent = True
-        case _:
-            spent = False
-    escaped = sandbox_escaped(sandbox, spent)
-    return {**tool_input, "dangerouslyDisableSandbox": escaped}
+    return {**tool_input, "dangerouslyDisableSandbox": sandbox_escaped(sandbox)}
 
 
 class ClaudeDecisionOutput(BaseModel, frozen=True, populate_by_name=True):
@@ -253,12 +246,11 @@ class ClaudeDecisionRenderer(NativeDecisionRenderer[ClaudeDecisionOutput]):
     def render(
         self, decision: Decision, tool_input: JsonObject | None = None
     ) -> ClaudeDecisionOutput:
-        settled = decision.placed(escapable=True, agent_escalates=True)
+        settled = decision.placed(escapable=True)
         if settled.effect == "defer":
             return ClaudeDecisionOutput(permissionDecisionReason=settled.reason)
         return ClaudeDecisionOutput(
             permissionDecision=settled.effect,
             permissionDecisionReason=settled.reason,
             updatedInput=claude_sandbox_input(tool_input, settled.sandbox),
-            additionalContext=escalation_offer(settled.sandbox, settled.reason),
         )
