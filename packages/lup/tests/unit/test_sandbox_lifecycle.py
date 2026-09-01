@@ -125,7 +125,7 @@ class FakeContainers:
         command: str | None = None,
         mounts: list[DockerMount] | None = None,
         working_dir: str | None = None,
-        mem_limit: str | None = None,
+        mem_limit: int | str | None = None,
         environment: dict[str, str] | None = None,  # lup: ignore[dict-str-payload]
         # The egress proxy is run with its own hardening arguments, which this
         # accepts without asserting on: what they are is the container's
@@ -140,6 +140,7 @@ class FakeContainers:
             "image": image,
             "mounts": json.dumps(mounts or []),
             "network_mode": network_mode,
+            "mem_limit": str(mem_limit),
         }
         return created
 
@@ -581,6 +582,41 @@ class TestStartAndStop:
 
         assert created.stopped and created.removed
         assert client.closed
+        client.close_peers()
+
+    def test_a_sandbox_naming_no_ceiling_gets_the_default(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        client = self.start_ready_client()
+        monkeypatch.setattr(docker, "from_env", lambda: as_client(client))
+
+        with Sandbox(session_id="default-mem", shared_dir=tmp_path / "shared"):
+            assert client.containers.last_run["mem_limit"] == str(
+                Sandbox.DEFAULT_MEMORY_LIMIT_BYTES
+            )
+
+        client.close_peers()
+
+    def test_a_callers_ceiling_reaches_the_container(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A workload that knows what it needs must be able to say so.
+
+        Asserted at the ``containers.run`` call rather than on the attribute,
+        because a ceiling held on the sandbox and never passed to Docker is
+        exactly the failure this parameter exists to prevent — and it reads
+        as configured right up until a cell dies against the old default.
+        """
+        client = self.start_ready_client()
+        monkeypatch.setattr(docker, "from_env", lambda: as_client(client))
+
+        with Sandbox(
+            session_id="big-mem",
+            shared_dir=tmp_path / "shared",
+            memory_limit_bytes=16 * 1024**3,
+        ):
+            assert client.containers.last_run["mem_limit"] == str(16 * 1024**3)
+
         client.close_peers()
 
     def test_network_none_skips_pre_install(
