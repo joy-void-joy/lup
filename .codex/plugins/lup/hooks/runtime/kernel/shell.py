@@ -301,8 +301,12 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
         )
     decision = decide_segment_words(words, context)
     if is_help_probe(words[1:]):
-        return KernelDecision(
-            "allow", "a help probe only prints usage", decision.sandbox
+        return decision.revised(
+            effect="allow",
+            reason="a help probe only prints usage",
+            purpose=None,
+            cause=None,
+            abstention=None,
         )
     return decision
 
@@ -884,11 +888,14 @@ def classify_shell(
     deferred = next((item for item in decisions if item.effect == "defer"), None)
     if deferred is not None:
         return deferred.revised(findings=parts)
+    reached = dict.fromkeys(item.rule for item in decisions if item.rule)
     return KernelDecision(
         "allow",
         "every shell segment is declared safe",
         placement,
         checkpoint=restoration,
+        rule=next(iter(reached)) if len(reached) == 1 else "",
+        evaluator="shell-vocabulary",
         findings=parts,
     )
 

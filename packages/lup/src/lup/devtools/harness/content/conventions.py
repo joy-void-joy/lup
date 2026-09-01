@@ -72,9 +72,9 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The rule checker.** Anti-pattern, boundary, spelling, and architecture rules run on every edit and in `dev check`. A denial cites its rule id and spells the suppression where the rule admits one; one marked **refused** admits none, its replacement being right every time. `# noqa`, `# type: ignore`, and `# pyright: ignore` are forbidden shapes rather than suppressions.
 
-**The permission policy.** Every shell command, URL scope, and edit in a batch is classified, and a denial names what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on it, and `# lup: escalate: <why>` as a command's leading line promotes a deny or ask into an approval question carrying that reason.
+**The permission policy.** Every shell command, URL scope, and edit in a batch is classified, and a denial names what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on it, and `# lup: escalate[decision]: <why>` as a command's leading line promotes a deny or ask into an approval question carrying that reason.
 
-`# lup: escalate` is one-off. For recurring walls, **widen the protected declaration** so review approves the rule. Regenerate and reopen with `--continue` to load it at startup while keeping the conversation; it remains drift-checked next session.
+An escalation is one-off. For recurring walls, **widen the protected declaration** so review approves the rule. Regenerate and reopen with `--continue` to load it at startup while keeping the conversation; it remains drift-checked next session.
 
 **The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval: propose the exact edit and let the user apply it.
 

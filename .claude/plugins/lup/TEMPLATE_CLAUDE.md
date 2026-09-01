@@ -559,7 +559,7 @@ All development tooling lives in `src/<project>/devtools/` and is exposed as the
 
 If you find yourself running the same command repeatedly, **add a command** to `src/<project>/devtools/`.
 
-`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. For one-off work, in order: run it in the sandbox where the work allows; add a `lup-devtools` command, which is reviewable because `devtools/` lands in the diff; or, as a last resort, `python3 <<<EOF` behind a `# lup: escalate: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
+`tmp/` is scratch: gitignored, so nothing written there reaches a diff, a reviewer, or the human — which is why it does not execute. For one-off work, in order: run it in the sandbox where the work allows; add a `lup-devtools` command, which is reviewable because `devtools/` lands in the diff; or, as a last resort, `python3 <<<EOF` behind a `# lup: escalate[decision]: <why>` marker. The argument is reviewability, not power — an agent may already edit `devtools/` and run it.
 
 **Write scripts in Python using [typer](https://typer.tiangolo.com/)** for CLI interfaces. Use **[sh](https://sh.readthedocs.io/)** for shell commands instead of `subprocess`.
 
@@ -587,7 +587,7 @@ The policy classifies every shell command against the vocabulary declared in
 in a batch. Segments join deny > ask > defer > allow, so a judged deny wins the
 batch and malformed input fails conservatively. Ask is reserved for judged
 risk: an unjudged command denies with a hint naming the
-`# lup: escalate: <why>` marker, and that marker as a command's leading line
+`# lup: escalate[decision]: <why>` marker, and that marker as a command's leading line
 promotes the decision into an approval question carrying your stated reason.
 Under a launcher-verified sandbox (`LUP_SANDBOX_ACTIVE`), unjudged work defers
 to that boundary rather than denying. A `dangerouslyDisableSandbox` escape re-enters the deny lattice, and

@@ -137,7 +137,7 @@ TOOLING: list[models.PromptPart] = [
 
 `lup` itself is the one dependency not added that way: how a project obtains it is a mode `dev library` reads and rewrites, and the mode decides what upgrading means. Ask `dev library status` before assuming lup's source is on disk to edit — in three of the four modes it is not.
 
-When a command genuinely has to run outside the sandbox, put it through the runtime's native per-call escalation on its first attempt rather than replacing the whole session with an unsandboxed one; the policy still judges the escalated call, so an allowed command can be approved at that narrower boundary.
+When an operation genuinely needs the launcher's host, resubmit it with a leading `# lup: escalate[sandbox]: <why>` line rather than starting an unconfined session. The crossing is reviewed and dispatched once; try inside first, since a missing path usually means the host was not needed.
 
 ### lup-devtools
 
@@ -151,7 +151,7 @@ The `codeintel` group answers questions about code by *resolving* it, through a 
 
 `harness generate all` regenerates every native plugin; `harness <runtime>` regenerates one and launches it. Skills and agents render from typed catalogs — one under `packages/lup/` for what is about agent work, one under `src/lup_template/` for what is about being a template, composing both. Change the catalog that owns the subject, then regenerate.
 
-**Every runtime, same change.** State and build each answer to every policy, flag, hook, or artifact; name substitutes for unsupported concepts. One runtime drops `sandbox="outside"` for lack of a per-call escape. Done means `harness generate all` reconciles both; `docs/permissions.md` maps gaps.
+**Every runtime, same change.** State and build each answer to every policy, flag, hook, or artifact; name substitutes for unsupported concepts. One runtime's verdicts place no call, so it renders the plain effect. Done means `harness generate all` reconciles both; `docs/permissions.md` maps gaps.
 
 """
     ),

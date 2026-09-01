@@ -27,9 +27,9 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The rule checker.** Anti-pattern, boundary, spelling, and architecture rules run on every edit and in `dev check`. A denial cites its rule id and spells the suppression where the rule admits one; one marked **refused** admits none, its replacement being right every time. `# noqa`, `# type: ignore`, and `# pyright: ignore` are forbidden shapes rather than suppressions.
 
-**The permission policy.** Every shell command, URL scope, and edit in a batch is classified, and a denial names what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on it, and `# lup: escalate: <why>` as a command's leading line promotes a deny or ask into an approval question carrying that reason.
+**The permission policy.** Every shell command, URL scope, and edit in a batch is classified, and a denial names what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on it, and `# lup: escalate[decision]: <why>` as a command's leading line promotes a deny or ask into an approval question carrying that reason.
 
-`# lup: escalate` is one-off. For recurring walls, **widen the protected declaration** so review approves the rule. Regenerate and reopen with `--continue` to load it at startup while keeping the conversation; it remains drift-checked next session.
+An escalation is one-off. For recurring walls, **widen the protected declaration** so review approves the rule. Regenerate and reopen with `--continue` to load it at startup while keeping the conversation; it remains drift-checked next session.
 
 **The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval: propose the exact edit and let the user apply it.
 
@@ -119,7 +119,7 @@ A rule states the shape it refuses. These carve-outs are ours, and its diagnosti
 
 `lup` itself is the one dependency not added that way: how a project obtains it is a mode `dev library` reads and rewrites, and the mode decides what upgrading means. Ask `dev library status` before assuming lup's source is on disk to edit — in three of the four modes it is not.
 
-When a command genuinely has to run outside the sandbox, put it through the runtime's native per-call escalation on its first attempt rather than replacing the whole session with an unsandboxed one; the policy still judges the escalated call, so an allowed command can be approved at that narrower boundary.
+When an operation genuinely needs the launcher's host, resubmit it with a leading `# lup: escalate[sandbox]: <why>` line rather than starting an unconfined session. The crossing is reviewed and dispatched once; try inside first, since a missing path usually means the host was not needed.
 
 ### lup-devtools
 
@@ -133,7 +133,7 @@ The `codeintel` group answers questions about code by *resolving* it, through a 
 
 `harness generate all` regenerates every native plugin; `harness <runtime>` regenerates one and launches it. Skills and agents render from typed catalogs — one under `packages/lup/` for what is about agent work, one under `src/lup_template/` for what is about being a template, composing both. Change the catalog that owns the subject, then regenerate.
 
-**Every runtime, same change.** State and build each answer to every policy, flag, hook, or artifact; name substitutes for unsupported concepts. One runtime drops `sandbox="outside"` for lack of a per-call escape. Done means `harness generate all` reconciles both; `docs/permissions.md` maps gaps.
+**Every runtime, same change.** State and build each answer to every policy, flag, hook, or artifact; name substitutes for unsupported concepts. One runtime's verdicts place no call, so it renders the plain effect. Done means `harness generate all` reconciles both; `docs/permissions.md` maps gaps.
 
 ---
 

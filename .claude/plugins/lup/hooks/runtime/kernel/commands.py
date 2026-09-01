@@ -237,24 +237,21 @@ def split_subcommand(
     """
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
-    placement = default["sandbox"] if default else "ambient"
-    restoration = default["checkpoint"] if default else "unrecoverable"
     position = 0
     while position < len(arguments):
         word = arguments[position]
         if not word.startswith("-"):
             return Subcommand(word=word, remainder=arguments[position + 1 :])
-        if flag_matches(word, ask_flags):
+        if flag_matches(word, ask_flags) and default is not None:
             redirect = (
                 " — or cd into that tree and run it there"
                 if flag_matches(word, value_flags)
                 else ""
             )
-            return KernelDecision(
+            return row_verdict(
+                default,
                 "ask",
                 f"{executable} global flag {word} requires approval{redirect}",
-                placement,
-                checkpoint=restoration,
             )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])
@@ -796,7 +793,11 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
             continue
         if word in GH_API_BODY_FLAGS or word.partition("=")[0] in GH_API_BODY_FLAGS:
             return KernelDecision(
-                "ask", "gh api sending a request body can change remote state"
+                "ask",
+                "gh api sending a request body can change remote state",
+                purpose="external_consequence",
+                rule="shell:gh.api",
+                evaluator="gh-api-screen",
             )
         if word in GH_API_VALUE_FLAGS:
             expect_value = True
@@ -813,9 +814,18 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
         return unjudged("gh api option has no value")
     if method.upper() not in GH_API_READ_METHODS:
         return KernelDecision(
-            "ask", f"gh api {method} can change remote state — requires approval"
+            "ask",
+            f"gh api {method} can change remote state — requires approval",
+            purpose="external_consequence",
+            rule="shell:gh.api",
+            evaluator="gh-api-screen",
         )
-    return KernelDecision("allow", "read-only gh api call")
+    return KernelDecision(
+        "allow",
+        "read-only gh api call",
+        rule="shell:gh.api",
+        evaluator="gh-api-screen",
+    )
 
 
 UV_FOREIGN_SOURCE_FLAGS = (
