@@ -44,6 +44,7 @@ from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, T
 from pydantic import BaseModel, ValidationError
 
 from lup.types import Decorator, EnvVars, JsonObject
+from lup.sessions.recursion import recursive_agent_allowance
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,29 @@ no method to answer with. Narrowing it separates something we host from a
 foreign payload, and each adapter projects the hosted case into its own native
 config — a conversion that would drag that vendor's spelling back across the
 boundary if the neutral model answered it."""
+
+
+def relay_recursive_agent_to_mcp(
+    server: McpServerEntry, environment: EnvVars
+) -> McpServerEntry:
+    """Forward a session's remaining allowance into a stdio tool process."""
+    match server:
+        case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam arm
+            return server
+        case {"command": str(command)}:
+            relayed = RawStdioServerConfig(
+                command=command,
+                env=recursive_agent_allowance(environment).environment(
+                    dict(server["env"]) if "env" in server else {}
+                ),
+            )
+            if "type" in server:
+                relayed["type"] = server["type"]
+            if "args" in server:
+                relayed["args"] = list(server["args"])
+            return relayed
+        case _:
+            return server
 
 
 def create_mcp_server(

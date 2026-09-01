@@ -60,6 +60,7 @@ from lup.observability.audit import (
     TraceJournal,
 )
 from lup.observability.native import NativeTranscripts, NativeTranscriptWatcher
+from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
 from lup.types import EnvVars, JsonObject, JsonValue
 from lup.workspace.paths import harness_runs_path, project_root
 from lup.providers.codex.home import (
@@ -151,15 +152,17 @@ class HarnessTranscript(BaseModel, arbitrary_types_allowed=True):
     """
 
     journal: TraceJournal
-    watcher: NativeTranscriptWatcher
-    diagnostics: logging.Handler
+    watcher: NativeTranscriptWatcher | None = None
+    diagnostics: logging.Handler | None = None
 
     def close(self, *, succeeded: bool) -> None:
         """Stop ingestion, record the outcome, and release the diagnostics log."""
-        self.watcher.stop()
+        if self.watcher is not None:
+            self.watcher.stop()
         self.journal.emit("run_end", {"succeeded": succeeded})
-        watcher_logger().removeHandler(self.diagnostics)
-        self.diagnostics.close()
+        if self.diagnostics is not None:
+            watcher_logger().removeHandler(self.diagnostics)
+            self.diagnostics.close()
 
 
 def watcher_logger() -> logging.Logger:
@@ -206,7 +209,7 @@ class LaunchSession(Protocol):
     """
 
     def __call__(
-        self, *, provider: str, journal: TraceJournal
+        self, *, provider: str, journal: TraceJournal, transcribe: bool
     ) -> AbstractContextManager[EnvVars]: ...
 
 
@@ -261,6 +264,15 @@ class LaunchMode(BaseModel, frozen=True, arbitrary_types_allowed=True):
     session: LaunchSession | None = None
     """What must be open while a session of this kind runs."""
 
+    max_recursive_agent: int = Field(default=-1, ge=-1)
+    """Mode default when the launcher receives no explicit allowance."""
+
+    recursive_targets: Callable[[int], NativeTargets] | None = None
+    """Targets selected from the effective recursive-agent allowance."""
+
+    transcribe_session: Callable[[str], bool] | None = None
+    """Whether one runtime's native transcript is mirrored for this mode."""
+
     def command_words(self, provider: str) -> list[str]:
         """Words this mode contributes to one runtime's command line, if any."""
         return self.arguments(provider) if self.arguments is not None else []
@@ -273,8 +285,28 @@ class LaunchMode(BaseModel, frozen=True, arbitrary_types_allowed=True):
         """Where this launch keeps its record, resolved now, not at import."""
         return self.record_root() if self.record_root is not None else None
 
+    def transcribes(self, provider: str) -> bool:
+        """Whether this mode mirrors one provider's native session record."""
+        return (
+            self.transcribe_session(provider)
+            if self.transcribe_session is not None
+            else True
+        )
+
+    def recursive_agent_limit(self, explicit: int | None) -> int:
+        """Resolve an explicit allowance over this mode's default."""
+        return self.max_recursive_agent if explicit is None else explicit
+
+    def targets_at(self, allowance: int) -> NativeTargets:
+        """The native trees compiled for this allowance."""
+        return (
+            self.recursive_targets(allowance)
+            if self.recursive_targets is not None
+            else self.targets
+        )
+
     def opened(
-        self, provider: str, journal: TraceJournal
+        self, provider: str, journal: TraceJournal, transcribe: bool
     ) -> AbstractContextManager[EnvVars]:
         """Whatever this mode needs open around the run, or nothing to open.
 
@@ -284,7 +316,11 @@ class LaunchMode(BaseModel, frozen=True, arbitrary_types_allowed=True):
         """
         if self.session is None:
             return nullcontext({})
-        return self.session(provider=provider, journal=journal)
+        return self.session(
+            provider=provider,
+            journal=journal,
+            transcribe=transcribe,
+        )
 
 
 class LaunchSelection(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -342,6 +378,7 @@ def start_harness_transcript(
     arguments: list[str],
     record_root: Path | None = None,
     mode: str | None = None,
+    transcribe: bool = True,
 ) -> HarnessTranscript:
     """Start one canonical transcript around a native interactive CLI.
 
@@ -389,6 +426,8 @@ def start_harness_transcript(
         "arguments": safe_arguments,
     }
     journal.emit("run_start", payload)
+    if not transcribe:
+        return HarnessTranscript(journal=journal)
     watcher = NativeTranscriptWatcher(
         transcripts,
         journal.child(
@@ -489,7 +528,10 @@ def reported(findings: list[Finding]) -> list[Finding]:
 
 
 def verify_inside(
-    manifest: Manifest, opening: list[str], setting_up: bool = True
+    manifest: Manifest,
+    opening: list[str],
+    setting_up: bool = True,
+    environment: EnvVars | None = None,
 ) -> list[Finding]:
     """Exercise the image half behind an argv somebody already assembled.
 
@@ -499,7 +541,10 @@ def verify_inside(
     -- it would print the whole boundary notice again, which reads as the
     launch having done it twice.
     """
-    environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
+    if environment is None:
+        environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
+    else:
+        environ = dict(environment)
     return reported(manifest.check_inside(environ, opening, setting_up))
 
 
@@ -935,6 +980,9 @@ def session_argv(
         config_home,
         credential if credential.exists() else None,
         login,
+        inherited_environment=(
+            [MAX_RECURSIVE_AGENT_ENV] if MAX_RECURSIVE_AGENT_ENV in environment else []
+        ),
         banner=banner,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
@@ -947,7 +995,12 @@ def session_argv(
     # Not the whole image roster -- only the entries marked `always`, which
     # is the handful whose absence means the session can do nothing. A model
     # call and a toolchain version belong to `harness requirements --inside`.
-    verify_inside(harness.requirements, probing(opening), setting_up=False)
+    verify_inside(
+        harness.requirements,
+        probing(opening),
+        setting_up=False,
+        environment=environment,
+    )
     banner.add(
         [
             Notice(
@@ -989,6 +1042,8 @@ def launch_claude(
     relaxed: bool = False,
     unsandboxed: bool = False,
     checkpoint: LaunchCheckpoint | None = None,
+    max_recursive_agent: int = -1,
+    transcribe_session: bool = False,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     contradiction = resume.contradicted()
@@ -1023,6 +1078,7 @@ def launch_claude(
         ]
     )
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
+    environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     apply_sandbox_environment(
         plugin,
         environment,
@@ -1039,6 +1095,7 @@ def launch_claude(
         raise typer.BadParameter(str(error)) from error
     if home is not None:
         environment.update(profiles.login.environment(home))
+    transcribing = transcribe_session or mode is None or mode.transcribes("claude")
     transcript = start_harness_transcript(
         "claude",
         ClaudeTranscripts(home),
@@ -1047,13 +1104,14 @@ def launch_claude(
         arguments=arguments,
         record_root=mode.transcript_root() if mode is not None else None,
         mode=mode.name if mode is not None else None,
+        transcribe=transcribing,
     )
     succeeded = False
     try:
         opening = (
             nullcontext({})
             if mode is None
-            else mode.opened("claude", transcript.journal)
+            else mode.opened("claude", transcript.journal, transcribing)
         )
         with opening as session:
             environment.update(session)
@@ -1097,6 +1155,8 @@ def launch_codex(
     relaxed: bool = False,
     unsandboxed: bool = False,
     checkpoint: LaunchCheckpoint | None = None,
+    max_recursive_agent: int = -1,
+    transcribe_session: bool = False,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     contradiction = resume.contradicted()
@@ -1109,6 +1169,7 @@ def launch_codex(
     if not ready_to_open(composition, generate_only):
         return
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
+    environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     envelope = codex_sandbox_arguments(
         plugin, environment, extra_args, contained=not unsandboxed
     )
@@ -1133,6 +1194,7 @@ def launch_codex(
     arguments.extend(mode.command_words("codex") if mode is not None else [])
     arguments.extend(extra_args)
     environment["CODEX_HOME"] = str(selected_home)
+    transcribing = transcribe_session or mode is None or mode.transcribes("codex")
     transcript = start_harness_transcript(
         "codex",
         CodexTranscripts(selected_home),
@@ -1141,10 +1203,13 @@ def launch_codex(
         arguments=arguments,
         record_root=mode.transcript_root() if mode is not None else None,
         mode=mode.name if mode is not None else None,
+        transcribe=transcribing,
     )
     succeeded = False
     opening = (
-        nullcontext({}) if mode is None else mode.opened("codex", transcript.journal)
+        nullcontext({})
+        if mode is None
+        else mode.opened("codex", transcript.journal, transcribing)
     )
     try:
         cache = installer.ensure(

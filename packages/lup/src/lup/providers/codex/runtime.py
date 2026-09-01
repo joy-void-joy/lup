@@ -48,6 +48,10 @@ from lup.sessions.events import (
     TurnToolBinding,
 )
 from lup.sessions.output import TurnSubmission, bound_submission
+from lup.sessions.recursion import (
+    child_recursive_agent_allowance,
+    recursive_agent_scope,
+)
 from lup.sessions.transcript import fold_transcript
 from lup.types import EnvVars, JsonObject, JsonValue, Usage
 
@@ -623,32 +627,46 @@ class CodexSessionOpener:
         # described. A session that opened without the policy it was meant to
         # run under is indistinguishable from one running under it, so a
         # failure is raised rather than warned past.
-        if CODEX_HOME in self.config.environment:
-            install_declared_policy(Path(self.config.environment[CODEX_HOME]))
+        allowance = child_recursive_agent_allowance(self.config.environment)
+        environment = allowance.environment(self.config.environment)
+        config = self.config.model_copy(
+            update={
+                "environment": environment,
+                "mcp_servers": {
+                    name: server.model_copy(
+                        update={"env": allowance.environment(server.env)}
+                    )
+                    for name, server in self.config.mcp_servers.items()
+                },
+            }
+        )
+        if CODEX_HOME in config.environment:
+            install_declared_policy(Path(config.environment[CODEX_HOME]))
         server = CodexAppServer(
-            self.config.executable,
+            config.executable,
             arguments=(
-                ["--profile", self.config.named_profile]
-                if self.config.named_profile is not None
+                ["--profile", config.named_profile]
+                if config.named_profile is not None
                 else None
             ),
-            environment=self.config.environment,
+            environment=config.environment,
         )
         await server.start()
-        state = CodexConversationState(self.config, server, resume)
+        state = CodexConversationState(config, server, resume)
         session = ComposedSession(
             state.start_turn,
             CodexTurnToolBinder(state),
-            gate_resolver=self.config.submission_gate_resolver,
+            gate_resolver=config.submission_gate_resolver,
             submission_tool=SUBMISSION_TOOL,
         )
-        try:
-            yield SessionHandle(session=session, fork=CodexFork(state))
-        finally:
+        with recursive_agent_scope(allowance):
             try:
-                await session.abort_active()
+                yield SessionHandle(session=session, fork=CodexFork(state))
             finally:
-                await server.close()
+                try:
+                    await session.abort_active()
+                finally:
+                    await server.close()
 
 
 def create_codex(
