@@ -1,5 +1,5 @@
 {
-  "revision": "296f392c4300f2842bafe18fdde9734c7c80b75b",
+  "revision": "13b5457efd623fa4a76574c104875dafcc55e6d3",
   "roots": [
     "lup",
     "lup_template"
@@ -6800,6 +6800,34 @@
         "declared_identity",
         "document_allowances",
         "granted_allowances"
+      ]
+    },
+    {
+      "module": "lup.policy.audit",
+      "declares": [
+        "Outcome",
+        "AuditRecord",
+        "AuditRecord.operation",
+        "AuditRecord.fingerprint",
+        "AuditRecord.decision",
+        "AuditRecord.findings",
+        "AuditRecord.question",
+        "AuditRecord.checkpoint",
+        "AuditRecord.dispatch",
+        "AuditRecord.capabilities",
+        "AuditRecord.provider",
+        "AuditRecord.rendering",
+        "AuditRecord.outcome",
+        "AuditRecord.at",
+        "AuditRecord.interrupted",
+        "AuditRecord.attributable",
+        "AuditRecord.narrative",
+        "AuditLog",
+        "AuditLog.path",
+        "AuditLog.__init__",
+        "AuditLog.record",
+        "AuditLog.records",
+        "AuditLog.taxonomy"
       ]
     },
     {
