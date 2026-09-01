@@ -1,5 +1,5 @@
 {
-  "revision": "7037ddde7930b04cfb593285e515b0a000b64c56",
+  "revision": "731bfe340555aa92acd72c8b8ecd13630354442a",
   "roots": [
     "lup",
     "lup_template"
@@ -6881,6 +6881,48 @@
       ]
     },
     {
+      "module": "lup.policy.checkpoints",
+      "declares": [
+        "capture_required",
+        "PathState",
+        "PathState.path",
+        "PathState.present",
+        "PathState.digest",
+        "PathState.mode",
+        "PathState.directory",
+        "PathState.symlink_target",
+        "PathState.read",
+        "PathState.matches",
+        "Checkpoint",
+        "Checkpoint.operation",
+        "Checkpoint.requirement",
+        "Checkpoint.reference",
+        "Checkpoint.pre_state",
+        "Checkpoint.post_state",
+        "Checkpoint.complete",
+        "Checkpoint.failure",
+        "Checkpoint.taken_at",
+        "Checkpoint.evidence",
+        "Checkpoint.conflicts",
+        "Checkpoint.restorable",
+        "WorktreeLease",
+        "WorktreeLease.path",
+        "WorktreeLease.holder",
+        "WorktreeLease.__init__",
+        "WorktreeLease.held",
+        "WorktreeLease.acquire",
+        "WorktreeLease.release",
+        "WorktreeLease.__enter__",
+        "WorktreeLease.__exit__",
+        "RecoveryCoordinator",
+        "RecoveryCoordinator.store",
+        "RecoveryCoordinator.__init__",
+        "RecoveryCoordinator.capture",
+        "RecoveryCoordinator.reference",
+        "RecoveryCoordinator.settle"
+      ]
+    },
+    {
       "module": "lup.policy.contracts",
       "declares": [
         "DeclaredPolicies",
@@ -6889,6 +6931,31 @@
         "DecisionPolicy.decide",
         "Observer",
         "Observer.observe"
+      ]
+    },
+    {
+      "module": "lup.policy.coordinator",
+      "declares": [
+        "Stage",
+        "CoordinatorResult",
+        "CoordinatorResult.stage",
+        "CoordinatorResult.decision",
+        "CoordinatorResult.question",
+        "CoordinatorResult.checkpoint",
+        "CoordinatorResult.note",
+        "CoordinatorResult.at",
+        "CoordinatorResult.executable",
+        "OperationCoordinator",
+        "OperationCoordinator.relay",
+        "OperationCoordinator.recovery",
+        "OperationCoordinator.preflight",
+        "OperationCoordinator.chain",
+        "OperationCoordinator.__init__",
+        "OperationCoordinator.facts",
+        "OperationCoordinator.preliminary",
+        "OperationCoordinator.park",
+        "OperationCoordinator.prepare",
+        "OperationCoordinator.resume"
       ]
     },
     {
@@ -7084,6 +7151,42 @@
         "create_tool_gate.unlock_hook",
         "create_completion_guard",
         "create_completion_guard.completion_guard_hook"
+      ]
+    },
+    {
+      "module": "lup.policy.hostexec",
+      "declares": [
+        "DispatchOutcome",
+        "HostRequest",
+        "HostRequest.operation",
+        "HostRequest.fingerprint",
+        "HostRequest.session",
+        "HostRequest.question",
+        "HostRequest.approved_by",
+        "HostRequest.correlation",
+        "HostRequest.environment_inheritance",
+        "HostDispatch",
+        "HostDispatch.operation",
+        "HostDispatch.fingerprint",
+        "HostDispatch.question",
+        "HostDispatch.at",
+        "HostDispatch.executor",
+        "HostDispatch.outcome",
+        "HostDispatch.exit_code",
+        "HostDispatch.output",
+        "HostDispatch.settled",
+        "HostExecutor",
+        "HostExecutor.log",
+        "HostExecutor.session",
+        "HostExecutor.available",
+        "HostExecutor.__init__",
+        "HostExecutor.dispatches",
+        "HostExecutor.dispatched",
+        "HostExecutor.verify",
+        "HostExecutor.record",
+        "HostExecutor.complete",
+        "HostExecutor.unsettled",
+        "human_execution_brief"
       ]
     },
     {
@@ -7874,6 +7977,7 @@
         "Decision.escalated",
         "Decision.reached",
         "Decision.placed",
+        "Decision.of",
         "Decision.as_kernel",
         "ObservationFailure",
         "ObservationFailure.observer",

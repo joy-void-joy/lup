@@ -64,27 +64,12 @@ from lup.policy.models import (
 def pydantic_decision(decision: KernelDecision) -> Decision:
     """Restore the validated public decision at the kernel boundary.
 
-    Every settled fact crosses, not the handful a caller remembered. This is
-    the one seam between the two spellings of a verdict, so a field named on
-    one side and absent here is a field the in-process path silently does not
-    have — which is how a capability-blocked refusal arrived indistinguishable
-    from a rule's judgement, and how an ask arrived with no attributable rule.
+    The correspondence itself lives on :meth:`Decision.of`, beside its
+    inverse, so the two spellings of a verdict cannot be related differently
+    in two places. This name stays because it is what the policy classes here
+    read as, at the point where a kernel call returns.
     """
-    return Decision(
-        effect=decision.effect,
-        reason=decision.reason,
-        sandbox=decision.sandbox,
-        checkpoint=decision.checkpoint,
-        reviewer=decision.reviewer,
-        purpose=decision.purpose,
-        visibility=decision.visibility,
-        cause=decision.cause,
-        capability=decision.capability,
-        abstention=decision.abstention,
-        rule=decision.rule,
-        evaluator=decision.evaluator,
-        escalated=decision.escalated,
-    )
+    return Decision.of(decision)
 
 
 class UrlScope(BaseModel, frozen=True):

@@ -338,6 +338,33 @@ class Decision(BaseModel, frozen=True):
             }
         )
 
+    @classmethod
+    def of(cls, decision: KernelDecision) -> "Decision":
+        """The validated verdict one hermetic kernel verdict corresponds to.
+
+        Every settled fact crosses, not the handful a caller remembered. This
+        is the one seam between the two spellings of a verdict, so a field
+        named on one side and absent here is a field the in-process path
+        silently does not have — which is how a capability-blocked refusal
+        arrived indistinguishable from a rule's judgement, and how an ask
+        arrived with no attributable rule.
+        """
+        return cls(
+            effect=decision.effect,
+            reason=decision.reason,
+            sandbox=decision.sandbox,
+            checkpoint=decision.checkpoint,
+            reviewer=decision.reviewer,
+            purpose=decision.purpose,
+            visibility=decision.visibility,
+            cause=decision.cause,
+            capability=decision.capability,
+            abstention=decision.abstention,
+            rule=decision.rule,
+            evaluator=decision.evaluator,
+            escalated=decision.escalated,
+        )
+
     def as_kernel(self) -> KernelDecision:
         """This verdict as the hermetic kernel spells it.
 
