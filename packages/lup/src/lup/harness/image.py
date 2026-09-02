@@ -1003,6 +1003,7 @@ USER $UID:$GID
         terminal: EnvVars | None = None,
         interactive: bool = True,
         proxy_address: str = "",
+        boundary: EnvVars | None = None,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1086,9 +1087,19 @@ USER $UID:$GID
         selected = forge or NoCredential(
             variable=self.forge.token_variable, host=self.forge.host
         )
-        reaching = self.forge.environment(
-            rewrites or [], selected, granted, identity
-        ) | (terminal or {})
+        # The boundary's own values join here rather than being baked, and
+        # that is the whole difference between a placement a launch can check
+        # and one it can only assert. A baked constant answers for every
+        # container this image ever starts; a value minted per launch answers
+        # for this one. It reaches argv with its value visible, unlike the
+        # credential below, because it is not a secret -- it discriminates
+        # launches rather than principals, and what it defeats is a constant
+        # and an inherited variable rather than somebody reading `ps`.
+        reaching = (
+            self.forge.environment(rewrites or [], selected, granted, identity)
+            | (terminal or {})
+            | (boundary or {})
+        )
         # By name, with no value beside it, which is what both engines read as
         # "take this one from my own environment". The value would otherwise
         # be in this argv -- readable out of `ps` by every process on the host

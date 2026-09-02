@@ -654,6 +654,15 @@ placement probe asking "either" is asking nothing at all.
 """
 
 
+SENTINEL_VARIABLE = "LUP_BOUNDARY_SENTINEL"
+"""Where a probe looks for the value its side of the boundary was given.
+
+One variable rather than two, because which value it holds *is* the answer: a
+command reporting the inside value ran inside, one reporting the host value ran
+on the host, and one reporting neither ran somewhere nobody arranged.
+"""
+
+
 class SentinelProbe(BaseModel, frozen=True):
     """Ask a command which side of the boundary it is on, and make it prove it.
 
@@ -683,7 +692,7 @@ class SentinelProbe(BaseModel, frozen=True):
 
     kind: Literal["sentinel_probe"] = "sentinel_probe"
     variable: str = Field(
-        default="LUP_BOUNDARY_SENTINEL",
+        default=SENTINEL_VARIABLE,
         description="The variable a launch injects its minted value into",
     )
     side: SentinelSide = Field(

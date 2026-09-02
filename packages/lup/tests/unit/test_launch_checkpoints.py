@@ -49,7 +49,7 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda _composition, _generate_only: events.append("ready") or True,
+        lambda _composition, _generate_only, _sentinels: events.append("ready") or [],
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
@@ -97,7 +97,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda _composition, _generate_only: events.append("ready") or True,
+        lambda _composition, _generate_only, _sentinels: events.append("ready") or [],
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
@@ -149,7 +149,7 @@ def test_generate_only_never_checkpoints(
     provider: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     events: list[str] = []
-    monkeypatch.setattr(launch, "ready_to_open", lambda *args: False)
+    monkeypatch.setattr(launch, "ready_to_open", lambda *args: None)
     if provider == "claude":
         launch.launch_claude(
             composition(),

@@ -32,6 +32,7 @@ from lup.harness.requirements import (
     Manifest,
     MountProbe,
     Package,
+    SENTINEL_VARIABLE,
     RefusedLaunch,
     Requirement,
     Run,
@@ -921,7 +922,7 @@ def inside_placement_requirement(
     where: Side = "image",
     install: list[Package] = [],
     witness: str = "pyproject.toml",
-    variable: str = "LUP_BOUNDARY_SENTINEL",
+    variable: str = SENTINEL_VARIABLE,
 ) -> Requirement:
     """Whether a command run for this session lands inside this session's boundary.
 
@@ -965,7 +966,7 @@ def inside_placement_requirement(
 def host_placement_requirement(
     where: Side = "host",
     install: list[Package] = [],
-    variable: str = "LUP_BOUNDARY_SENTINEL",
+    variable: str = SENTINEL_VARIABLE,
 ) -> Requirement:
     """Whether a command run on the launcher's host observes the host's own value.
 
