@@ -71,7 +71,11 @@ def uv_requirement(
 
 
 def for_host(
-    manifest: Manifest, engine: ContainerEngine, checkout: Path | None = None
+    manifest: Manifest,
+    engine: ContainerEngine,
+    checkout: Path | None = None,
+    inside_sentinel: str = "",
+    host_sentinel: str = "",
 ) -> Manifest:
     """This manifest with every client-carried exercise pointed at ``engine``.
 
@@ -97,8 +101,19 @@ def for_host(
     of one commit, so every checkout but the one that generated last read its
     own committed tree as stale -- for having been checked out somewhere
     else. What is declared is the shape; this is where a machine answers it.
+
+    The sentinels are the third, and the only one that is a fact about this
+    *launch* rather than about this machine. They arrive here for the same
+    reason and are empty by default, which leaves a placement probe reporting
+    that nothing aimed it -- the honest answer for a caller that resolved a
+    manifest without opening a session.
     """
-    facts = HostFacts(client=engine.binary, checkout=checkout or Path())
+    facts = HostFacts(
+        client=engine.binary,
+        checkout=checkout or Path(),
+        inside_sentinel=inside_sentinel,
+        host_sentinel=host_sentinel,
+    )
     return Manifest(
         requirements=[
             requirement.model_copy(

@@ -518,6 +518,10 @@ class HostFacts(BaseModel, frozen=True):
     measured moving a generated tree's ownership digest between two checkouts
     of the same commit: the container client, because ``DOCKER_HOST`` decides
     it; and the checkout path, because a worktree is where somebody put it.
+
+    The sentinels join them for the same reason and one stronger: they are
+    minted per *launch*, so a declaration carrying one would move the digest
+    every time a session opened rather than merely between machines.
     """
 
     client: str = Field(
@@ -526,6 +530,26 @@ class HostFacts(BaseModel, frozen=True):
     checkout: Path = Field(
         default=Path(),
         description="Where this checkout sits, for a probe aimed at the real tree",
+    )
+    inside_sentinel: str = Field(
+        default="",
+        description=(
+            "What a command run inside this launch's boundary must observe. "
+            "Minted per launch and injected through the opening argv, so "
+            "observing it proves the command ran inside *this* container "
+            "rather than inside any container -- which a constant baked into "
+            "an image cannot distinguish, and which a variable inherited from "
+            "the launching shell asserts for free"
+        ),
+    )
+    host_sentinel: str = Field(
+        default="",
+        description=(
+            "What a command run on the launcher's host must observe. Distinct "
+            "from the inside sentinel rather than derived from it: the whole "
+            "question a placement probe asks is which side answered, and two "
+            "values one can be computed from are one value"
+        ),
     )
 
 
@@ -621,7 +645,127 @@ class MountProbe(BaseModel, frozen=True):
         )
 
 
-type Exercise = Annotated[Run | AnyOf | MountProbe, Discriminator("kind")]
+type SentinelSide = Literal["inside", "host"]
+"""Which of a launch's two minted values a probe has to observe.
+
+Two rather than reusing :data:`Side`, whose third value is ``both``: a
+requirement can be satisfied on either side of the image boundary, and a
+placement probe asking "either" is asking nothing at all.
+"""
+
+
+class SentinelProbe(BaseModel, frozen=True):
+    """Ask a command which side of the boundary it is on, and make it prove it.
+
+    A placement is the one claim a presence test cannot check. ``LUP_CONTAINED``
+    is a constant an image bakes, so it answers "yes" for any container built
+    from that image, for a bare ``run`` that has none of the lease, and -- since
+    a launcher forwards its own environment -- for an uncontained session
+    started from a shell that happened to export it. Each of those is a session
+    reporting a boundary nothing put under it, which is the failure
+    :class:`~lup.policy.boundary.CapabilityEvidence` exists to name.
+
+    A value minted per launch answers instead which *this* launch's boundary
+    is, because nothing but this launch's opening argv carries it. What the
+    probe is aimed with therefore cannot be declared: the ownership digest
+    hashes this model, and a sentinel written here would move it every time a
+    session opened. So this is a shape, and :class:`HostFacts` fills it in --
+    the same arrangement, and for the same reason, as :class:`MountProbe`.
+
+    ``witness`` is the second half, and it is here rather than in a probe of
+    its own because this one already runs behind the argv a session opens
+    with. Reading a file back at its own absolute path is what proves the
+    same-path mount the worktree rail stands on, and the requirement that
+    declares that today is exercised at setup against a container no session
+    opens. Folded in here it is measured at launch, in the session's own
+    container, for no extra container start.
+    """
+
+    kind: Literal["sentinel_probe"] = "sentinel_probe"
+    variable: str = Field(
+        default="LUP_BOUNDARY_SENTINEL",
+        description="The variable a launch injects its minted value into",
+    )
+    side: SentinelSide = Field(
+        default="inside",
+        description="Which of the launch's two minted values this asks for",
+    )
+    witness: str = Field(
+        default="",
+        description=(
+            "A file the checkout is known to hold, read back at its own "
+            "absolute path. Empty asks for the sentinel alone, which is the "
+            "right probe for a side that has no mount to prove"
+        ),
+    )
+
+    def sentinel(self, facts: HostFacts) -> str:
+        """Which minted value this side has to observe."""
+        return facts.host_sentinel if self.side == "host" else facts.inside_sentinel
+
+    def resolved(self, facts: HostFacts) -> Run:
+        """This probe as the command a machine runs, launch facts filled in.
+
+        Printed with a marker around it rather than bare, because a sentinel
+        is hex and ``expect`` asks only for containment: an output that
+        happened to carry the value in some other field would satisfy a bare
+        comparison. The witness is read in the same shell so a mount that is
+        not there fails the exercise instead of being reported beside it.
+        """
+        read = f" && cat {facts.checkout / self.witness}" if self.witness else ""
+        return Run(
+            command=[
+                "sh",
+                "-c",
+                f'printf "sentinel=%s" "${self.variable}"{read}',
+            ],
+            expect=f"sentinel={self.sentinel(facts)}",
+        )
+
+    def programs(self) -> list[str]:
+        """The shell, which is all this runs before a launch aims it."""
+        return ["sh"]
+
+    def pointed_at(self, program: str) -> "SentinelProbe":
+        """Unchanged: what varies here is the minted value, not the program."""
+        return self
+
+    def behind(self, opening: list[str]) -> "SentinelProbe":
+        """Unchanged: this is aimed before it is placed.
+
+        Answered rather than omitted so the union stays uniform, and
+        deliberately a no-op: :meth:`given` turns this into a :class:`Run`,
+        and it is that ``Run`` the opening argv prefixes. Prefixing here would
+        put the container start in front of a command with no sentinel in it
+        yet.
+        """
+        return self
+
+    def given(self, facts: HostFacts) -> Run:
+        """The resolved command, which is what a launch fact turns this into."""
+        return self.resolved(facts)
+
+    def run(self) -> ExerciseOutcome:
+        """Refuse rather than pass, because nothing has minted a value yet.
+
+        The same answer :meth:`MountProbe.run` gives and for the same reason:
+        an unaimed probe has tested nothing, and a silent success here would
+        vouch for the placement every other verdict in the policy is read
+        against.
+        """
+        return ExerciseOutcome(
+            proved=False,
+            exercised=False,
+            detail=(
+                "this sentinel probe was never given a launch to aim at, so it "
+                "tested nothing — exercise it through `for_host`"
+            ),
+        )
+
+
+type Exercise = Annotated[
+    Run | AnyOf | MountProbe | SentinelProbe, Discriminator("kind")
+]
 
 
 type Side = Literal["host", "image", "both"]
@@ -901,7 +1045,11 @@ class Manifest(BaseModel, frozen=True):
         return [item.check(environment) for item in self.on_the_host(setting_up)]
 
     def check_inside(
-        self, environment: EnvVars, opening: list[str], setting_up: bool = True
+        self,
+        environment: EnvVars,
+        opening: list[str],
+        setting_up: bool = True,
+        facts: HostFacts = HostFacts(),
     ) -> list["Finding"]:
         """Exercise every image-side requirement inside what *opening* starts.
 
@@ -910,11 +1058,18 @@ class Manifest(BaseModel, frozen=True):
         needs the launcher's whole world -- the lease, the credential, the
         engine, the network -- and a manifest that reached for those would be
         a manifest only a launcher could hold.
+
+        *facts* is aimed before the exercise is placed, and the order is the
+        whole of it: a placement probe is a shape until a launch mints it a
+        value, and prefixing the opening argv onto an unaimed shape would put
+        a container start in front of a command asking for a variable nothing
+        had set. Every other shape answers ``given`` with itself, so the extra
+        call costs the rest of the roster nothing.
         """
         return [
-            item.model_copy(update={"exercise": item.exercise.behind(opening)}).check(
-                environment
-            )
+            item.model_copy(
+                update={"exercise": item.exercise.given(facts).behind(opening)}
+            ).check(environment)
             for item in self.inside_the_image(setting_up)
         ]
 
