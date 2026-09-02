@@ -213,3 +213,54 @@ class BoundaryPreflight(BaseModel, frozen=True):
                 + ", ".join(blocked)
             )
         return "\n".join(lines)
+
+
+class BoundaryCapability(BaseModel, frozen=True):
+    """One capability a profile depends on, and what measures it.
+
+    Two fields that look like one and are not. ``requirement`` is the policy's
+    vocabulary -- which guarantee, and whether its absence stops a launch --
+    and ``probe`` is the handle of the manifest entry whose exercise answers
+    for it. Joining them by name rather than by holding the requirement itself
+    keeps the manifest hashable into the ownership digest and keeps this free
+    of everything a probe needs to run.
+
+    An empty ``probe`` is a capability nothing measures, and it is deliberately
+    expressible: a guarantee whose mechanism has not been built yet is absent,
+    and saying so is how the operations depending on it are refused with a
+    typed cause instead of being quietly permitted. What it must never be is
+    *omitted* -- a capability left out of a profile is one the profile does not
+    depend on, which is a different claim entirely.
+    """
+
+    requirement: CapabilityRequirement
+    probe: str = Field(
+        default="",
+        description=(
+            "The manifest handle whose finding measures this. Empty means "
+            "nothing measures it, so it is absent -- which is a fact about "
+            "the runtime, not an oversight in the declaration"
+        ),
+    )
+
+    def absent(self) -> str:
+        """Why an unprobed capability is undelivered, in words a reader can act on."""
+        return (
+            f"no mechanism carries {self.requirement.capability} in this build, "
+            "so nothing could measure it"
+        )
+
+
+def depends_on(
+    capability: Capability,
+    probe: str = "",
+    required: bool = True,
+    reason: str = "",
+) -> BoundaryCapability:
+    """One dependency, spelled short enough that a profile reads as a list."""
+    return BoundaryCapability(
+        requirement=CapabilityRequirement(
+            capability=capability, required=required, reason=reason
+        ),
+        probe=probe,
+    )

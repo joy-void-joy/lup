@@ -29,7 +29,9 @@ from lup.harness.image import Image
 from lup.harness.requirements import Manifest
 from lup.formats.markdown import CodeCell, PlainCell, TableCell, escaped
 from lup.tools.mcp import ToolDeclaration
+from lup.policy.boundary import BoundaryCapability
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
+from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
@@ -1104,6 +1106,29 @@ class HookSet(BaseModel, frozen=True):
         ),
     )
     sandbox: HookSandbox | None = None
+    unjudged_ambient: UnjudgedAmbient = Field(
+        default="ask",
+        description=(
+            "What this project does with a legible operation nothing judged, "
+            "with no containment beneath it. `ask` keeps unjudged work visible "
+            "and is the default; `defer` hands the long tail to the runtime's "
+            "own mode for a seamless posture. Read only where a session is "
+            "uncontained, because a contained one settles the same operation a "
+            "row earlier -- its effects are confined, so nothing is left here "
+            "to answer"
+        ),
+    )
+    boundary_capabilities: list[BoundaryCapability] = Field(
+        default=[],
+        description=(
+            "The runtime guarantees this project's sessions depend on, each "
+            "naming the manifest handle that measures it. Declared rather than "
+            "inferred for the reason a capability always is: a profile depends "
+            "on what it says it depends on, and making every capability "
+            "implicitly required would turn adding one to the vocabulary into "
+            "a change that fails every existing project's launch"
+        ),
+    )
 
     @model_validator(mode="after")
     def a_toolchain_is_named_rather_than_located(self) -> "HookSet":

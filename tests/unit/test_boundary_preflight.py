@@ -16,14 +16,16 @@ from lup.harness.requirements import (
     Requirement,
     Run,
 )
-from lup.policy.profiles import compile_boundary, depends_on, measured
+from lup.policy.boundary import BoundaryCapability, depends_on
+from lup.policy.profiles import compile_boundary, measured
 
 
-def declaration() -> HookSet:
+def declaration(capabilities: list[BoundaryCapability] = []) -> HookSet:
     """A hook set spelling one of each thing the boundary reads off it."""
     return HookSet(
         id="hooks.probe",
         policy_ids=[],
+        boundary_capabilities=capabilities,
         path_roles=[
             HookPathRole(root=Path("build"), role="scratch"),
             HookPathRole(root=Path("tests"), role="test"),
@@ -94,9 +96,7 @@ def test_a_capability_nothing_measures_is_absent_rather_than_omitted() -> None:
     missing channel was supposed to carry.
     """
     capabilities = [depends_on("host_executor", required=False, reason="no transport")]
-    boundary = compile_boundary(
-        declaration(), contained=True, capabilities=capabilities
-    )
+    boundary = compile_boundary(declaration(capabilities), contained=True)
 
     preflight = measured(boundary, capabilities, [])
 
@@ -115,9 +115,7 @@ def test_a_declared_probe_no_roster_ran_is_a_failed_measurement() -> None:
     names which handle went unexercised.
     """
     capabilities = [depends_on("question_relay", "question relay")]
-    boundary = compile_boundary(
-        declaration(), contained=True, capabilities=capabilities
-    )
+    boundary = compile_boundary(declaration(capabilities), contained=True)
 
     preflight = measured(boundary, capabilities, [answered("something else", True)])
 
@@ -129,9 +127,7 @@ def test_a_declared_probe_no_roster_ran_is_a_failed_measurement() -> None:
 def test_a_probes_own_words_reach_the_diagnostic() -> None:
     """ "The sandbox is broken" sends somebody to read configuration."""
     capabilities = [depends_on("inside_placement", "inside placement")]
-    boundary = compile_boundary(
-        declaration(), contained=True, capabilities=capabilities
-    )
+    boundary = compile_boundary(declaration(capabilities), contained=True)
 
     preflight = measured(
         boundary,
@@ -157,9 +153,7 @@ def test_a_required_capability_stops_the_launch_and_an_optional_one_does_not() -
         ),
         depends_on("checkpoint_store", "checkpoint store", required=False),
     ]
-    boundary = compile_boundary(
-        declaration(), contained=True, capabilities=capabilities
-    )
+    boundary = compile_boundary(declaration(capabilities), contained=True)
 
     preflight = measured(
         boundary,
@@ -182,9 +176,7 @@ def test_every_declared_capability_gets_a_row_including_the_ones_that_failed() -
         depends_on("question_relay", "question relay"),
         depends_on("host_executor", required=False),
     ]
-    boundary = compile_boundary(
-        declaration(), contained=True, capabilities=capabilities
-    )
+    boundary = compile_boundary(declaration(capabilities), contained=True)
 
     preflight = measured(
         boundary,
@@ -218,9 +210,7 @@ def test_a_requirement_the_refusal_grade_belongs_to_is_the_manifests_not_this() 
         absence=RefusedLaunch(because="the store is what recovery rests on"),
     )
     capabilities = [depends_on("checkpoint_store", "checkpoint store", required=False)]
-    boundary = compile_boundary(
-        declaration(), contained=True, capabilities=capabilities
-    )
+    boundary = compile_boundary(declaration(capabilities), contained=True)
 
     preflight = measured(
         boundary,
