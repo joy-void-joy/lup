@@ -511,6 +511,12 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
     a launch pays for is the handful whose absence means the session can do
     nothing at all, and a model call and a toolchain version are what
     somebody setting a machine up hears once.
+
+    Two entries rather than one, and they are the two kinds of nothing a
+    session can do. Without the endpoint it cannot think; without the
+    placement it cannot be said to be anywhere, and every operation after is
+    placed by a boundary nothing observed. Both ride the argv a session opens
+    with, so neither costs a container start of its own.
     """
     declared = manifest()
     opening = ["podman", "run", "--rm", "lup-agent:abc"]
@@ -522,7 +528,7 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
         item.requirement.capability for item in declared.check_inside({}, opening)
     }
 
-    assert at_launch == {"session reaches the model endpoint"}
+    assert at_launch == {"session reaches the model endpoint", "inside placement"}
     assert "contained agent session" in at_setup - at_launch
 
 

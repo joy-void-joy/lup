@@ -20,14 +20,18 @@ from lup.harness.requirements import Manifest
 from lup.harness.toolchain import (
     agent_session_requirement,
     bun_requirement,
+    checkpoint_store_requirement,
     clipboard_requirement,
     container_requirement,
     endpoint_reachable_requirement,
     git_requirement,
     github_requirement,
+    host_placement_requirement,
+    inside_placement_requirement,
     metadata_refused_requirement,
     proxy_reachable_requirement,
     proxy_tunnels_requirement,
+    question_relay_requirement,
     reaped_orphans_requirement,
     same_path_mount_requirement,
     terminal_handoff_requirement,
@@ -98,7 +102,19 @@ def manifest(boundary: SessionEgress | None = None) -> Manifest:
             same_path_mount_requirement(),
             github_requirement(),
             clipboard_requirement(),
+            # What the placement vocabulary rests on, asked rather than
+            # assumed. The relay and the store are the checkout's, so the host
+            # roster answers for both however the session opens; the mount
+            # they sit behind is `inside placement`'s to prove.
+            question_relay_requirement(),
+            checkpoint_store_requirement(),
+            host_placement_requirement(),
             # The image half, exercised behind the argv a session opens with.
+            # Placement leads it because everything after is a fact about
+            # somewhere, and this is what establishes where: a session whose
+            # boundary did not stand still reaches its proxy and still places
+            # every operation by a wall that is not there.
+            inside_placement_requirement(),
             # Ordered as a session meets them: the proxy has to be reachable
             # before it can tunnel, the tunnel has to stand before a turn can
             # run, and the terminal is what the operator sees either way.
