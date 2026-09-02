@@ -32,6 +32,18 @@ from lup.policy.boundary import (
 )
 
 
+def depended_on(hooks: HookSet, contained: bool) -> list[BoundaryCapability]:
+    """The capabilities a profile of this posture actually depends on.
+
+    One answer, asked in both places that need it, because the compiler and
+    the measurement disagreeing about the roster is a capability with a
+    requirement and no evidence -- or evidence for one nothing required.
+    """
+    return [
+        entry for entry in hooks.boundary_capabilities if entry.depended_on(contained)
+    ]
+
+
 def compile_boundary(
     hooks: HookSet,
     contained: bool,
@@ -86,7 +98,7 @@ def compile_boundary(
             Path(item) for item in (sandbox.credential_paths if sandbox else [])
         ],
         unjudged_ambient=hooks.unjudged_ambient,
-        capabilities=[entry.requirement for entry in hooks.boundary_capabilities],
+        capabilities=[entry.requirement for entry in depended_on(hooks, contained)],
     )
 
 

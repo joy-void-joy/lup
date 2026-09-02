@@ -36,7 +36,7 @@ from lup.providers.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
-from lup.policy.profiles import compile_boundary, measured
+from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.sandbox.rail import lease_for
 from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import (
@@ -974,15 +974,13 @@ def settle_boundary(
     from coming to disagree about what this session may write.
     """
     root = project_root()
-    hooks = plugin.hooks
+    declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
     boundary = compile_boundary(
-        hooks if hooks is not None else HookSet(id="hooks.absent", policy_ids=[]),
+        declared,
         contained=not unsandboxed,
         writable=list(lease_for(root).writable),
     )
-    preflight = measured(
-        boundary, hooks.boundary_capabilities if hooks is not None else [], findings
-    )
+    preflight = measured(boundary, depended_on(declared, not unsandboxed), findings)
     Notice(text=preflight.diagnosis(), urgency="boundary").say()
     if not preflight.launchable():
         raise typer.BadParameter(

@@ -17,7 +17,7 @@ from lup.harness.requirements import (
     Run,
 )
 from lup.policy.boundary import BoundaryCapability, depends_on
-from lup.policy.profiles import compile_boundary, measured
+from lup.policy.profiles import compile_boundary, depended_on, measured
 
 
 def declaration(capabilities: list[BoundaryCapability] = []) -> HookSet:
@@ -103,6 +103,53 @@ def test_a_capability_nothing_measures_is_absent_rather_than_omitted() -> None:
     assert preflight.launchable()
     assert preflight.blocked() == ["host_executor"]
     assert "no mechanism carries host_executor" in preflight.diagnosis()
+
+
+def test_an_uncontained_profile_does_not_depend_on_containment() -> None:
+    """Otherwise the posture a contained launch refuses *into* is unopenable.
+
+    `inside_placement` can only be observed behind a container, so requiring
+    it of a profile that promises none would fail every `--unsandboxed`
+    launch — for lacking a boundary it never claimed. Not a capability that
+    profile is missing; one it never asked for.
+    """
+    capabilities = [
+        depends_on("inside_placement", "inside placement", contained_only=True),
+        depends_on("question_relay", "question relay"),
+    ]
+    hooks = declaration(capabilities)
+
+    ambient = compile_boundary(hooks, contained=False)
+    contained = compile_boundary(hooks, contained=True)
+
+    assert not ambient.declares("inside_placement")
+    assert contained.requires("inside_placement")
+    assert ambient.requires("question_relay")
+
+
+def test_the_compiler_and_the_measurement_read_one_roster() -> None:
+    """Two answers about which capabilities count is a row with no evidence.
+
+    `depended_on` is asked in both places for that reason: a boundary
+    requiring what the preflight never measured cannot start, and a preflight
+    measuring what the boundary does not require reports a failure about
+    nothing.
+    """
+    capabilities = [
+        depends_on("inside_placement", "inside placement", contained_only=True),
+        depends_on("question_relay", "question relay"),
+    ]
+    hooks = declaration(capabilities)
+
+    boundary = compile_boundary(hooks, contained=False)
+    preflight = measured(
+        boundary,
+        depended_on(hooks, contained=False),
+        [answered("question relay", True)],
+    )
+
+    assert [entry.capability for entry in preflight.evidence] == ["question_relay"]
+    assert preflight.launchable()
 
 
 def test_a_declared_probe_no_roster_ran_is_a_failed_measurement() -> None:

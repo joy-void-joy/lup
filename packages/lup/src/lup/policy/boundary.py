@@ -242,6 +242,22 @@ class BoundaryCapability(BaseModel, frozen=True):
             "the runtime, not an oversight in the declaration"
         ),
     )
+    contained_only: bool = Field(
+        default=False,
+        description=(
+            "Whether an uncontained profile depends on this at all. "
+            "``inside_placement`` is the case it exists for: a profile "
+            "promising no containment has no boundary to hold an operation "
+            "inside, so the capability is not one it lacks -- it is one it "
+            "never asked for. Requiring it regardless would leave the "
+            "uncontained posture unopenable, which is the posture the "
+            "contained one refuses *into*"
+        ),
+    )
+
+    def depended_on(self, contained: bool) -> bool:
+        """Whether a profile of this posture depends on this capability."""
+        return contained or not self.contained_only
 
     def absent(self) -> str:
         """Why an unprobed capability is undelivered, in words a reader can act on."""
@@ -255,6 +271,7 @@ def depends_on(
     capability: Capability,
     probe: str = "",
     required: bool = True,
+    contained_only: bool = False,
     reason: str = "",
 ) -> BoundaryCapability:
     """One dependency, spelled short enough that a profile reads as a list."""
@@ -263,4 +280,5 @@ def depends_on(
             capability=capability, required=required, reason=reason
         ),
         probe=probe,
+        contained_only=contained_only,
     )
