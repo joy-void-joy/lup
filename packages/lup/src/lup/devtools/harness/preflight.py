@@ -112,6 +112,21 @@ def record_preflight(
     return written
 
 
+def retire_mount_table(root: Path, ledger: str = ".lup/boundary.json") -> None:
+    """Take away a mount table that describes a boundary this launch is not behind.
+
+    ``record_boundary`` writes the table on every *contained* launch and
+    nothing ever removed it, so an uncontained launch in the same checkout
+    read whatever the last contained one left. What that buys is the reader's
+    worst case: a refusal attributed to a read-only mount that is not there,
+    which teaches an agent to reach for the host when the bug was its own.
+    Its own docstring already names staleness as the hazard and per-launch
+    rewriting as the answer -- this is the half of that answer the posture
+    with no table to write was missing.
+    """
+    (root / ledger).unlink(missing_ok=True)
+
+
 def release_ledger(root: Path, nonce: str) -> None:
     """Take this launch's measurement away when its session ends.
 

@@ -964,9 +964,28 @@ USER $UID:$GID
                 for name, value in (
                     self.environment() | self.egress.environment(proxy_address)
                 ).items()
+                if name not in self.sealed()
                 for argument in ("-e", f"{name}={value}")
             ],
         ]
+
+    def sealed(self) -> list[str]:
+        """Baked variables a run must not restate, whatever value it would give.
+
+        ``environment()`` says ``LUP_CONTAINED`` is baked rather than passed
+        "because it is a fact about where the process is, not a posture a
+        caller chooses: a session that could switch it off from the outside
+        would be telling the policy to relax with nothing underneath." The run
+        then re-emitted the whole baked map as ``-e NAME=VALUE`` pairs, this
+        one included -- so the property held only against a caller who did not
+        also control the argv, which is every caller this defends against.
+
+        Restating a baked value is a no-op at best: the image tag *is* the
+        declaration digest, so an image built from a different declaration is
+        a different image and gets rebuilt. What the restatement bought was a
+        line in `ps` and a claim its own docstring contradicted.
+        """
+        return ["LUP_CONTAINED"]
 
     def ide_bridge(self, config_home: Path) -> list[str]:
         """Mount the host's IDE lockfile directory into the container's config.

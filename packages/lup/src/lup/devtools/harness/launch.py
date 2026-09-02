@@ -79,6 +79,7 @@ from lup.devtools.harness.preflight import (
     LaunchSentinels,
     record_preflight,
     release_ledger,
+    retire_mount_table,
     sweep_ledgers,
 )
 from lup.devtools.dev.worktree import RelocationHint
@@ -991,6 +992,12 @@ def settle_boundary(
             "policy alone, which is the same posture stated rather than assumed."
         )
     record_preflight(preflight, sentinels, root)
+    if unsandboxed:
+        # No mounts, so no mount table -- and the one a contained launch left
+        # behind describes a boundary this session is not behind. Attributing
+        # a refusal to it teaches an agent to reach for the host when the bug
+        # was its own, which outlives the command it was wrong about.
+        retire_mount_table(root)
     environment.update(sentinels.outside() if unsandboxed else sentinels.within())
     return preflight
 
