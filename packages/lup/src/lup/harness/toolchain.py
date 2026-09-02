@@ -35,6 +35,7 @@ from lup.harness.requirements import (
     RefusedLaunch,
     Requirement,
     Run,
+    SentinelProbe,
     Side,
     SupplementaryGroup,
 )
@@ -910,6 +911,170 @@ def reaped_orphans_requirement(
                 "and reports that as whatever work was running being broken. "
                 "`--init` on the run argv is the whole fix, and both engines "
                 "take it"
+            )
+        ),
+        install=install,
+    )
+
+
+def inside_placement_requirement(
+    where: Side = "image",
+    install: list[Package] = [],
+    witness: str = "pyproject.toml",
+    variable: str = "LUP_BOUNDARY_SENTINEL",
+) -> Requirement:
+    """Whether a command run for this session lands inside this session's boundary.
+
+    The claim every placement in the policy is read against, and until this
+    ran, the only claim nothing checked. A profile that asks for containment
+    and a runtime whose containment did not start read identically from the
+    configuration; what separates them is a value only this launch's opening
+    argv carries, observed by a command the launch actually ran.
+
+    ``at_launch`` because this is the one whose failure is invisible from
+    outside. A session that opens without it looks entirely healthy and
+    places every operation by a boundary that is not there -- which is worse
+    than a session that refuses, because the operations run anyway and the
+    placement in the audit record says they did not.
+
+    The witness rides along for the reason
+    :class:`~lup.harness.requirements.SentinelProbe` states: reading a file
+    back at its own absolute path is what proves the same-path mount, and
+    proving it here costs no container start because this probe already pays
+    for one.
+    """
+    return Requirement(
+        capability="inside placement",
+        at_launch=True,
+        purpose="placing an operation inside the boundary this profile promises",
+        where=where,
+        exercise=SentinelProbe(variable=variable, side="inside", witness=witness),
+        absence=RefusedLaunch(
+            because=(
+                "this profile's operations are placed by a boundary the launch "
+                "could not observe, so `inside` would name wherever the session "
+                "happened to land. `--unsandboxed` opens on the host under the "
+                "semantic policy alone, which is the same posture stated rather "
+                "than assumed"
+            )
+        ),
+        install=install,
+    )
+
+
+def host_placement_requirement(
+    where: Side = "host",
+    install: list[Package] = [],
+    variable: str = "LUP_BOUNDARY_SENTINEL",
+) -> Requirement:
+    """Whether a command run on the launcher's host observes the host's own value.
+
+    The other half of the pair, and deliberately the cheap one. One variable
+    carries both values and the side decides which, so a command that reports
+    the inside value ran inside and one that reports the host value ran on the
+    host -- and neither can be forged by a variable inherited from whatever
+    shell started the launcher, because that shell has neither value.
+
+    What this does *not* prove is that anything can put an operation here on
+    purpose. That is the host executor, which is a channel rather than an
+    observation, and it is declared absent until one exists. This is the
+    observation the channel will have to reproduce.
+    """
+    return Requirement(
+        capability="host placement",
+        purpose="telling an operation that reached the host from one that did not",
+        where=where,
+        exercise=SentinelProbe(variable=variable, side="host"),
+        absence=LostCapability(
+            capability="telling host execution apart from contained execution"
+        ),
+        install=install,
+    )
+
+
+def question_relay_requirement(
+    where: Side = "host",
+    install: list[Package] = [],
+    directory: str = ".lup",
+) -> Requirement:
+    """Whether the durable record every final ask is written to accepts a write.
+
+    An ask that cannot be recorded is an ask nobody can answer, and the
+    settlement order refuses one of those rather than running it -- so a relay
+    that cannot be written is a session where every reviewed operation
+    refuses, with a message about the operation rather than about the queue.
+
+    A write and a read-back into the queue's own directory, rather than a
+    synthetic question into the queue itself. The failures that matter are
+    the directory's -- a read-only checkout, a missing parent, a permission
+    the container did not map -- and they are all caught here. Recording a
+    fake question would catch the same failures and leave a question in the
+    queue that somebody then has to answer, which is a worse probe for being
+    a more literal one.
+    """
+    return Requirement(
+        capability="question relay",
+        purpose="parking a final ask where a reviewer can answer it",
+        where=where,
+        exercise=Run(
+            command=[
+                "sh",
+                "-c",
+                f"mkdir -p {directory} && f={directory}/preflight-$$.probe && "
+                'printf relay-ok > "$f" && cat "$f" && rm -f "$f"',
+            ],
+            expect="relay-ok",
+        ),
+        absence=RefusedLaunch(
+            because=(
+                "every operation this policy sends to a reviewer is written "
+                "here first, so a session that cannot write it is one where "
+                "each of those refuses instead — naming the operation, which "
+                "was never the problem"
+            )
+        ),
+        install=install,
+    )
+
+
+def checkpoint_store_requirement(
+    where: Side = "host",
+    install: list[Package] = [],
+    namespace: str = "refs/lup/preflight",
+) -> Requirement:
+    """Whether the store a recovery-backed permission rests on accepts a write.
+
+    A destructive operation is permitted where the loss is captured, so the
+    capture is the permission. A store that cannot be written turns every one
+    of those back into a question, which is the safe direction and a bad
+    surprise: the session was opened expecting the other answer.
+
+    Written to a ref of this probe's own under a namespace beside the undo
+    log rather than into it, and named for the process so two launches at
+    once cannot delete each other's -- a probe that reports the store broken
+    because a sibling launch tidied up first is a probe that fails for being
+    run twice. Each step's failure fails the exercise, including the delete,
+    because a store that accepts a write and refuses a delete is one the
+    retention this feeds cannot work in.
+    """
+    return Requirement(
+        capability="checkpoint store",
+        purpose="proving a loss was captured before permitting it",
+        where=where,
+        exercise=Run(
+            command=[
+                "sh",
+                "-c",
+                f"r={namespace}/$$ && git update-ref $r HEAD && "
+                "git rev-parse --verify --quiet $r > /dev/null && "
+                "git update-ref -d $r && printf store-ok",
+            ],
+            expect="store-ok",
+        ),
+        absence=LostCapability(
+            capability=(
+                "recovery-backed permission — destructive local work asks "
+                "instead of being allowed against a capture"
             )
         ),
         install=install,
