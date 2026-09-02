@@ -33,18 +33,83 @@ def sandbox_active() -> bool:
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
-def contained() -> bool:
-    """Whether this session is running inside the project's container.
+def measured_boundary(
+    root: Path | None, ledger: str = ".lup/preflight"
+) -> dict[str, list[str]]:
+    """What the launch that opened this session measured about its boundary.
+
+    Read back from the ledger that launch wrote, and only from the one it
+    named: ``LUP_BOUNDARY_NONCE`` says which file this session is entitled to
+    believe. That is what the nonce is for. A ledger left by some other launch
+    is a measurement of some other session, and reading it would be the same
+    class of wrong answer as the constant this replaces, arrived at from the
+    other direction.
+
+    Absent, unnamed, or unparseable all come back empty, and every caller
+    reads empty as "no boundary was measured" -- the fail-closed answer and
+    the honest one. A session whose launcher predates this has no ledger, and
+    gets exactly what a session whose boundary failed to stand gets.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    nonce = environ["LUP_BOUNDARY_NONCE"] if "LUP_BOUNDARY_NONCE" in environ else ""
+    if root is None or not nonce:
+        return {}
+    try:
+        raw = (root / ledger / f"{nonce}.json").read_text()
+    except OSError:
+        return {}
+    try:
+        loaded = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {
+        name: [item for item in value if isinstance(item, str)]
+        for name, value in loaded.items()
+        if isinstance(name, str) and isinstance(value, list)
+    }
+
+
+def contained(measured: dict[str, list[str]]) -> bool:
+    """Whether this session runs inside the boundary its profile promised.
 
     A different question from :func:`sandbox_active`, and the two are not
     interchangeable: the native sandbox confines one call at a time and can
     be told to leave some alone, where a container confines the process and
-    was never asked. Read from the image's own baked-in variable rather than
-    from anything a launch passes, so a session cannot be told it is
-    contained by something standing outside the container.
+    was never asked.
+
+    Read from what the launch *measured* rather than from a variable. The
+    variable was ``LUP_CONTAINED``, a constant an image bakes, and a constant
+    answers yes for any container built from that image, for a bare ``run``
+    holding none of the lease, and -- since a launcher forwards its own
+    environment -- for an uncontained session started from a shell that
+    happened to export it. That last one is not hypothetical: it is a session
+    reporting a boundary with no container under it, placing every operation
+    by a wall that is not there.
     """
-    environ = os.environ  # lup: ignore[os-environ]
-    return "LUP_CONTAINED" in environ and environ["LUP_CONTAINED"] == "1"
+    return "yes" in (measured["contained"] if "contained" in measured else [])
+
+
+def delivers(measured: dict[str, list[str]], capability: str) -> bool:
+    """Whether the launch observed one capability this session depends on."""
+    return capability in (measured["delivered"] if "delivered" in measured else [])
+
+
+def defers_unjudged(measured: dict[str, list[str]]) -> bool:
+    """Whether this profile hands legible work nothing judged to the runtime.
+
+    A bool rather than the policy's own word for it, because this half may
+    reach nothing but a pinned standard library and cannot name the literal
+    the kernel takes. The caller spells the vocabulary; what crosses here is
+    the fact.
+
+    False wherever nothing was measured, which is both the declared default
+    and the visible answer. A session that could not read its own profile is
+    not one that should infer a seamless posture from the silence.
+    """
+    declared = measured["unjudged_ambient"] if "unjudged_ambient" in measured else []
+    return bool(declared) and declared[0] == "defer"
 
 
 def append_hook_evidence(path: Path, encoded: str) -> None:

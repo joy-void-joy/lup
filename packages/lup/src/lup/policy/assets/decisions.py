@@ -25,6 +25,9 @@ from pathlib import Path
 
 from host import (
     contained,
+    defers_unjudged,
+    delivers,
+    measured_boundary,
     script_run_nudge,
     directory_write_targets,
     empty_directory_targets,
@@ -109,6 +112,11 @@ def bash_decision(
     argument for the same reason the rest does — a fact one dispatcher stopped
     passing is a rule that silently stopped applying.
     """
+    # Read once and passed to each fact that needs it, rather than re-read per
+    # question: the ledger is one measurement of one launch, and a second read
+    # partway through a verdict could answer from a file the first did not see.
+    boundary = measured_boundary(cwd)
+    inside = contained(boundary)
     acted_on = shell_path_verb_targets(command)
     # Before the verdict rather than after it, because the verdict reads it:
     # an approval question exists where a loss is permanent, and a tree the
@@ -144,12 +152,23 @@ def bash_decision(
         # refusal that named no route sent it to queue a blocking question
         # instead.
         relayed=relayed,
-        escapable=escapable,
+        # What `outside` means is the launcher's host, and a runtime's own
+        # per-call escape only reaches it where there is no container in
+        # between. Uncontained, that escape genuinely is the way out of the
+        # only boundary there is; contained, it lands in the container and a
+        # placement settled on it would send an operation somewhere nothing
+        # can carry it. So the runtime still answers for its escape and the
+        # measurement answers for whether that escape reaches the host.
+        escapable=(escapable and not inside) or delivers(boundary, "host_executor"),
         # Read here rather than passed by each dispatcher, unlike `escapable`
-        # above: whether this process sits inside the container is a fact
-        # about the host with no runtime variation to it, so neither
-        # dispatcher is given the chance to forget it.
-        contained=contained(),
+        # above: whether this process sits inside the boundary its profile
+        # promised is a fact about the host with no runtime variation to it,
+        # so neither dispatcher is given the chance to forget it.
+        contained=inside,
+        # The profile's own answer for the long tail, which only an
+        # uncontained session ever reaches: contained, the row above settles
+        # the same operation first.
+        unjudged_ambient="defer" if defers_unjudged(boundary) else "ask",
         recovered=bool(reference),
     )
     # Parked before anything is rendered, because the relay is the durable
