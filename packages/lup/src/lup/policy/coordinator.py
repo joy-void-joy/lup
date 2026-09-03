@@ -110,8 +110,7 @@ class OperationCoordinator:
             decision,
             escalation=escalation,
             contained=boundary.contained,
-            confined=boundary.contained
-            and self.preflight.delivered("inside_placement"),
+            inside_placement=self.preflight.delivered("inside_placement"),
             host_executor=self.preflight.delivered("host_executor"),
             human_execution=reviewable,
             reviewable=reviewable,

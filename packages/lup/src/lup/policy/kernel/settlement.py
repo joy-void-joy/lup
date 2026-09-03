@@ -74,7 +74,8 @@ class SettlementFacts:
     decision: KernelDecision
     escalation: EscalationRequest | None
     contained: bool
-    confined: bool
+    inside_placement: bool
+    sandbox_confined: bool
     host_executor: bool
     human_execution: bool
     reviewable: bool
@@ -88,7 +89,8 @@ class SettlementFacts:
         decision: KernelDecision,
         escalation: EscalationRequest | None = None,
         contained: bool = False,
-        confined: bool = False,
+        inside_placement: bool = False,
+        sandbox_confined: bool = False,
         host_executor: bool = False,
         human_execution: bool = False,
         reviewable: bool = True,
@@ -100,7 +102,8 @@ class SettlementFacts:
         self.decision = decision
         self.escalation = escalation
         self.contained = contained
-        self.confined = confined
+        self.inside_placement = inside_placement
+        self.sandbox_confined = sandbox_confined
         self.host_executor = host_executor
         self.human_execution = human_execution
         self.reviewable = reviewable
@@ -113,20 +116,41 @@ class SettlementFacts:
         """Whether the operation carried an escalation request of one kind."""
         return self.escalation is not None and kind in self.escalation.kinds
 
+    def bounded(self) -> bool:
+        """Whether anything confines every effect this operation can have.
+
+        The one question the order asks about boundaries, derived rather than
+        supplied, because a caller free to compute it is a caller free to
+        compute it differently — and two of them did. The kernel took
+        ``confined`` as its own argument, the shell path filled it from the
+        native sandbox alone, and a container measured per launch reached the
+        row named for it and settled nothing.
+
+        Two mechanisms, joined here and nowhere else. The native sandbox
+        confines one call at a time and can be told to leave some alone, so
+        its term arrives already net of that exclusion. A container confines
+        the process and was never asked, so no per-command lever reduces it —
+        but the placement it promises is a claim, and a claim no probe
+        confirmed is not evidence, so the launch's measurement of it is what
+        makes containment count.
+        """
+        return self.sandbox_confined or (self.contained and self.inside_placement)
+
     def rewritten(self, decision: KernelDecision) -> "SettlementFacts":
         """These same facts, with a row's rewrite standing as the verdict."""
         return SettlementFacts(
             decision,
-            self.escalation,
-            self.contained,
-            self.confined,
-            self.host_executor,
-            self.human_execution,
-            self.reviewable,
-            self.checkpoint,
-            self.unjudged_ambient,
-            self.unleased,
-            self.hint,
+            escalation=self.escalation,
+            contained=self.contained,
+            inside_placement=self.inside_placement,
+            sandbox_confined=self.sandbox_confined,
+            host_executor=self.host_executor,
+            human_execution=self.human_execution,
+            reviewable=self.reviewable,
+            checkpoint=self.checkpoint,
+            unjudged_ambient=self.unjudged_ambient,
+            unleased=self.unleased,
+            hint=self.hint,
         )
 
 
@@ -474,7 +498,7 @@ class ContainedEffects(SettlementRule):
     id = "contained-effects"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect != "defer" or not facts.confined:
+        if facts.decision.effect != "defer" or not facts.bounded():
             return None
         return facts.decision.revised(
             effect="allow",

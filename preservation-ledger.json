@@ -1,5 +1,5 @@
 {
-  "revision": "f99e2069b1e35f156236f8993967bddf00ac7f75",
+  "revision": "e19b449299238464463e36a33d6cbfacebb7bfa5",
   "roots": [
     "lup",
     "lup_template"
@@ -1880,7 +1880,9 @@
         "RemoteRefusal.credential",
         "RemoteRefusal.diagnoses",
         "parse_remote",
+        "git_ssh_program",
         "ssh_auth_refusal",
+        "ssh_auth_refusal.offered_identity",
         "gh_auth_refusal",
         "remote_auth_refusal",
         "check_remote_auth",
@@ -3036,9 +3038,15 @@
         "LaunchMode.record_root",
         "LaunchMode.arguments",
         "LaunchMode.session",
+        "LaunchMode.max_recursive_agent",
+        "LaunchMode.recursive_targets",
+        "LaunchMode.transcribe_session",
         "LaunchMode.command_words",
         "LaunchMode.native_model",
         "LaunchMode.transcript_root",
+        "LaunchMode.transcribes",
+        "LaunchMode.recursive_agent_limit",
+        "LaunchMode.targets_at",
         "LaunchMode.opened",
         "LaunchSelection",
         "LaunchSelection.mode",
@@ -3062,10 +3070,28 @@
         "claude_sandbox_arguments",
         "companion_plugin_directories",
         "ambient_config_home",
+        "settle_boundary",
         "session_argv",
         "probing",
         "launch_claude",
         "launch_codex"
+      ]
+    },
+    {
+      "module": "lup.devtools.harness.preflight",
+      "declares": [
+        "NONCE_VARIABLE",
+        "LaunchSentinels",
+        "LaunchSentinels.nonce",
+        "LaunchSentinels.inside",
+        "LaunchSentinels.host",
+        "LaunchSentinels.within",
+        "LaunchSentinels.outside",
+        "ledger_path",
+        "record_preflight",
+        "retire_mount_table",
+        "release_ledger",
+        "sweep_ledgers"
       ]
     },
     {
@@ -4892,6 +4918,7 @@
         "Image.environment",
         "Image.dockerfile",
         "Image.run_arguments",
+        "Image.sealed",
         "Image.ide_bridge",
         "Image.session_arguments",
         "Image.seed_configuration"
@@ -5131,6 +5158,8 @@
         "HookSet.anti_patterns",
         "HookSet.recoverable_target_limit",
         "HookSet.sandbox",
+        "HookSet.unjudged_ambient",
+        "HookSet.boundary_capabilities",
         "HookSet.a_toolchain_is_named_rather_than_located",
         "HookSet.excluded_commands",
         "HookSet.resolved_shell_rules",
@@ -5424,6 +5453,8 @@
         "HostFacts",
         "HostFacts.client",
         "HostFacts.checkout",
+        "HostFacts.inside_sentinel",
+        "HostFacts.host_sentinel",
         "MountProbe",
         "MountProbe.kind",
         "MountProbe.image",
@@ -5434,6 +5465,20 @@
         "MountProbe.behind",
         "MountProbe.given",
         "MountProbe.run",
+        "SentinelSide",
+        "SENTINEL_VARIABLE",
+        "SentinelProbe",
+        "SentinelProbe.kind",
+        "SentinelProbe.variable",
+        "SentinelProbe.side",
+        "SentinelProbe.witness",
+        "SentinelProbe.sentinel",
+        "SentinelProbe.resolved",
+        "SentinelProbe.programs",
+        "SentinelProbe.pointed_at",
+        "SentinelProbe.behind",
+        "SentinelProbe.given",
+        "SentinelProbe.run",
         "Exercise",
         "Side",
         "Requirement",
@@ -5545,6 +5590,11 @@
         "metadata_refused_requirement",
         "terminal_handoff_requirement",
         "reaped_orphans_requirement",
+        "codex_envelope_requirement",
+        "inside_placement_requirement",
+        "host_placement_requirement",
+        "question_relay_requirement",
+        "checkpoint_store_requirement",
         "default_manifest"
       ]
     },
@@ -6768,7 +6818,10 @@
       "module": "lup.policy.assets.host",
       "declares": [
         "sandbox_active",
+        "measured_boundary",
         "contained",
+        "delivers",
+        "defers_unjudged",
         "append_hook_evidence",
         "record_hook_evidence",
         "script_run_nudge",
@@ -6794,6 +6847,7 @@
         "undo_namespace",
         "undo_snapshot",
         "recoverable_write_targets",
+        "unleased_write_targets",
         "empty_directory_targets",
         "directory_write_targets",
         "read_document",
@@ -6862,7 +6916,14 @@
         "BoundaryPreflight.missing_required",
         "BoundaryPreflight.blocked",
         "BoundaryPreflight.launchable",
-        "BoundaryPreflight.diagnosis"
+        "BoundaryPreflight.diagnosis",
+        "BoundaryCapability",
+        "BoundaryCapability.requirement",
+        "BoundaryCapability.probe",
+        "BoundaryCapability.contained_only",
+        "BoundaryCapability.depended_on",
+        "BoundaryCapability.absent",
+        "depends_on"
       ]
     },
     {
@@ -7771,15 +7832,18 @@
         "SettlementFacts.decision",
         "SettlementFacts.escalation",
         "SettlementFacts.contained",
-        "SettlementFacts.confined",
+        "SettlementFacts.inside_placement",
+        "SettlementFacts.sandbox_confined",
         "SettlementFacts.host_executor",
         "SettlementFacts.human_execution",
         "SettlementFacts.reviewable",
         "SettlementFacts.checkpoint",
         "SettlementFacts.unjudged_ambient",
+        "SettlementFacts.unleased",
         "SettlementFacts.hint",
         "SettlementFacts.__init__",
         "SettlementFacts.asks",
+        "SettlementFacts.bounded",
         "SettlementFacts.rewritten",
         "SettlementRule",
         "SettlementRule.settles",
@@ -7802,6 +7866,9 @@
         "TrappedPlacement",
         "TrappedPlacement.id",
         "TrappedPlacement.reached",
+        "UnleasedWrite",
+        "UnleasedWrite.id",
+        "UnleasedWrite.reached",
         "ProviderNative",
         "ProviderNative.id",
         "ProviderNative.reached",
@@ -8090,6 +8157,15 @@
         "Operation.fingerprint",
         "Operation.matches",
         "Operation.summary"
+      ]
+    },
+    {
+      "module": "lup.policy.profiles",
+      "declares": [
+        "depended_on",
+        "compile_boundary",
+        "measured",
+        "evidence"
       ]
     },
     {
@@ -10763,6 +10839,7 @@
         "Sandbox",
         "Sandbox.DEFAULT_DOCKER_IMAGE",
         "Sandbox.DEFAULT_EGRESS_PROXY_IMAGE",
+        "Sandbox.DEFAULT_MEMORY_LIMIT_BYTES",
         "Sandbox.SOURCE_ROOT",
         "Sandbox.REPLAY_DETAIL_CHARS",
         "Sandbox.DEFAULT_SHARED_PATH",
@@ -11391,6 +11468,24 @@
       ]
     },
     {
+      "module": "lup.sessions.recursion",
+      "declares": [
+        "MAX_RECURSIVE_AGENT_ENV",
+        "RecursiveAgentSettings",
+        "RecursiveAgentSettings.remaining",
+        "RecursiveAgentAllowance",
+        "RecursiveAgentAllowance.remaining",
+        "RecursiveAgentAllowance.child",
+        "RecursiveAgentAllowance.environment",
+        "RecursiveAgentLimitError",
+        "ACTIVE_RECURSIVE_AGENT_ALLOWANCE",
+        "recursive_agent_allowance",
+        "recursive_agent_allowed",
+        "child_recursive_agent_allowance",
+        "recursive_agent_scope"
+      ]
+    },
+    {
       "module": "lup.sessions.transcript",
       "declares": [
         "fold_transcript",
@@ -11576,6 +11671,7 @@
         "RawHttpServerConfig.headers",
         "RawMcpServerConfig",
         "McpServerEntry",
+        "relay_recursive_agent_to_mcp",
         "create_mcp_server",
         "create_mcp_server.list_tools",
         "create_mcp_server.call_tool",

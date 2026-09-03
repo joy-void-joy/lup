@@ -31,7 +31,8 @@ def facts(
     decision: KernelDecision,
     escalation: EscalationRequest | None = None,
     contained: bool = False,
-    confined: bool = False,
+    inside_placement: bool = False,
+    sandbox_confined: bool = False,
     host_executor: bool = False,
     human_execution: bool = True,
     reviewable: bool = True,
@@ -43,7 +44,8 @@ def facts(
         decision,
         escalation=escalation,
         contained=contained,
-        confined=confined,
+        inside_placement=inside_placement,
+        sandbox_confined=sandbox_confined,
         host_executor=host_executor,
         human_execution=human_execution,
         reviewable=reviewable,
@@ -70,7 +72,7 @@ def contained_facts(
         decision,
         escalation=escalation,
         contained=True,
-        confined=True,
+        inside_placement=True,
         reviewable=reviewable,
         checkpoint=checkpoint,
     )
@@ -316,7 +318,7 @@ def test_a_provider_native_abstention_survives_every_row_below_it() -> None:
             KernelDecision(
                 "defer", "a large ordinary edit", abstention="provider_native"
             ),
-            confined=False,
+            sandbox_confined=False,
         )
     )
 

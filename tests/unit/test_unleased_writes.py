@@ -114,7 +114,7 @@ def test_a_judged_refusal_is_not_reopened_by_an_unleased_target() -> None:
         SettlementFacts(
             KernelDecision("deny", "a rule decided against this", rule="shell:x"),
             contained=True,
-            confined=True,
+            inside_placement=True,
             unleased=["/repo/tree/other/x"],
         )
     )
@@ -135,7 +135,7 @@ def test_an_unleased_write_outranks_a_capture_of_this_session() -> None:
         SettlementFacts(
             KernelDecision("allow", "every shell segment is declared safe"),
             contained=True,
-            confined=True,
+            inside_placement=True,
             checkpoint="complete",
             unleased=["/repo/tree/other/x"],
         )

@@ -394,14 +394,14 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/settlement.py",
       "category": "generated",
-      "sha256": "4d38102541d52aeedcab2ffe42f1bebbcd69cabdb535720e9659ce1cc9a22715",
+      "sha256": "8a5511e6d44f254532b8eb58b70e74e522d55cef1300bc914f1abe1906cb19cf",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "a6e1df7a2f2ffdbfe3b21ba09004ac7ed9bd3011c7ede94bfecf5288a4fea11c",
+      "sha256": "34a970f5f92e19a0df504d5c78c0f26f050b1ffb4fcb1f5f380d9582e827a3d9",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

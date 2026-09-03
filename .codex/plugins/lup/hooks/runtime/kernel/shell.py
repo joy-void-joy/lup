@@ -963,6 +963,7 @@ def decide_shell(
     target_tables: list[ShellRuleRow] | None = None,
     escapable: bool = False,
     contained: bool = False,
+    inside_placement: bool = False,
     recovered: bool = False,
     relayed: bool = False,
     unjudged_ambient: UnjudgedAmbient = "ask",
@@ -991,8 +992,16 @@ def decide_shell(
 
     A command the declaration excludes from the sandbox is an escape without
     saying so — the boundary was told to leave it alone — so it is judged as
-    though no sandbox were running at all, which is what ``confined`` says
-    that ``sandboxed`` does not.
+    though no sandbox were running at all, which is what the sandbox term
+    passed on says that ``sandboxed`` does not. It reduces that term only: a
+    container holds a command the sandbox was told to skip, having never been
+    asked about it in the first place.
+
+    ``contained`` and ``inside_placement`` are the container's half of the
+    same question, and both are the launch's own measurements rather than
+    anything read here. They are passed apart and joined by
+    :meth:`~lup.policy.kernel.settlement.SettlementFacts.bounded`, so no
+    caller decides what confinement means on its own.
 
     ``escapable`` is whether this host can put one call outside its own
     sandbox, and the pair with the declaration is what makes a placement safe
@@ -1010,7 +1019,10 @@ def decide_shell(
     and were sharing one.
     """
     hint = ESCALATE_HINT if interactive else RELAY_HINT if relayed else RESHAPE_HINT
-    confined = sandboxed and not sandbox_excluded(command, excluded_commands or [])
+    # Net of exclusion here, because exclusion is the native sandbox's own
+    # per-command lever and reduces no other boundary. What that leaves is one
+    # of the two terms `SettlementFacts.bounded` joins, never the whole answer.
+    natively = sandboxed and not sandbox_excluded(command, excluded_commands or [])
 
     reading = read_escalation(command)
     if reading.refusal:
@@ -1037,7 +1049,8 @@ def decide_shell(
             ),
             escalation=reading.request,
             contained=contained,
-            confined=confined,
+            inside_placement=inside_placement,
+            sandbox_confined=natively,
             host_executor=escapable,
             human_execution=interactive or relayed,
             reviewable=interactive or relayed,
