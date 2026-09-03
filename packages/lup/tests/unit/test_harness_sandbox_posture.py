@@ -370,3 +370,16 @@ def test_a_relay_is_carried_without_reviving_the_sandbox_that_cannot_start() -> 
     """
     assert "socat" in Image().baseline
     assert Image().inner_sandbox == []
+
+
+def test_the_image_carries_the_manager_its_own_runtimes_install_through() -> None:
+    """A layer every image renders may not stand on a package one declares.
+
+    `agent_clis` installs through `bun` whatever the manifest says, so a
+    project with no JavaScript of its own -- and so no reason to declare that
+    requirement -- built as far as the layer carrying the runtimes its
+    sessions exist to run, and died there at `bun: command not found`.
+    """
+    image = Image()
+
+    assert {item.manager for item in image.agent_clis} <= set(image.baseline)

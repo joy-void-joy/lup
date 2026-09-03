@@ -334,14 +334,20 @@ class Image(BaseModel, frozen=True):
             "python",
             "uv",
             "nodejs",
+            "bun",
         ],
         description=(
             "Packages every image gets regardless of the manifest -- what a "
             "shell session needs to be usable at all, as against what this "
-            "particular project's work needs. ``uv`` and ``nodejs`` are here "
-            "because the registry managers stand on them: a package declared "
-            "for ``uv`` or ``bun`` cannot install if the tool that installs "
-            "it was itself left to a shell script. ``python`` is here for the "
+            "particular project's work needs. ``uv``, ``nodejs`` and ``bun`` "
+            "are here because the registry managers stand on them: a package "
+            "declared for ``uv`` or ``bun`` cannot install if the tool that "
+            "installs it was itself left to a shell script. ``bun`` is here "
+            "rather than left to the manifest because ``agent_clis`` installs "
+            "through it in every image, and a project with no JavaScript of "
+            "its own has no reason to declare it: such a build reached the "
+            "layer carrying the runtimes the session exists to run and died "
+            "at ``bun: command not found``. ``python`` is here for the "
             "permission dispatcher, which a native CLI starts as a bare "
             "``python3`` deliberately outside any virtual environment, so the "
             "interpreter ``uv`` manages is the one interpreter it may not "
