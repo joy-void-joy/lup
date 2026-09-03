@@ -568,6 +568,7 @@ def report_inside_requirements(
     plugin: Plugin,
     config_home: Path,
     login: ProviderLogin,
+    sentinels: LaunchSentinels = LaunchSentinels(),
 ) -> list[Finding]:
     """Exercise the image-side requirements inside the container a session opens.
 
@@ -601,8 +602,14 @@ def report_inside_requirements(
         credential if credential.exists() else None,
         login,
         interactive=False,
+        sentinels=sentinels,
     )
-    return verify_inside(harness.requirements, opening)
+    # The same values on both sides of one call, which is the whole of what a
+    # placement probe asks. Injected into the argv above and handed to the
+    # roster below: aimed with one and opened with the other, the probe would
+    # look for a value nothing had set and report the boundary broken on a
+    # machine whose boundary was fine.
+    return verify_inside(harness.requirements, opening, sentinels=sentinels)
 
 
 def codex_login_preflight(home: Path, environment: EnvVars) -> None:
@@ -656,9 +663,9 @@ def apply_sandbox_environment(
     message says which of the two was found rather than only that one was.
 
     Asked only of an uncontained launch. A contained one has a boundary
-    already, and the kernel reads it from the image's own ``LUP_CONTAINED``
-    rather than from anything a launcher passes -- ``boundary = sandboxed or
-    contained``, so the flag would change no verdict. Probing anyway printed
+    already, and the kernel reads it from what the launch measured rather than
+    from anything a launcher asserts -- ``boundary = sandboxed or contained``,
+    so the flag would change no verdict. Probing anyway printed
     a sandbox verdict about a session that was not going to rely on it, and
     on a failed probe printed ``deny lattice stays active`` for a session
     whose lattice was about to stand down behind the container. Saying
@@ -750,9 +757,9 @@ def codex_sandbox_arguments(
     means for a posture: one concept, each runtime's own word for it.
 
     LUP_SANDBOX_ACTIVE stays unset either way here, because a contained
-    session does not need it -- the kernel reads the container from the
-    image's own ``LUP_CONTAINED``, and a boundary is a boundary whether the
-    launcher vouched for it or not.
+    session does not need it -- the kernel reads the containment out of what
+    the launch measured, and a boundary that was observed is a boundary
+    whether this flag vouched for it or not.
     """
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:

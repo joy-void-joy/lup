@@ -624,11 +624,14 @@ class Image(BaseModel, frozen=True):
         nothing was measuring. Baked, so anything that starts this image gets
         it: a probe and a one-off ``run`` are as unattended as a session.
 
-        ``LUP_CONTAINED`` is how the policy inside learns there is a boundary
-        under it. Baked into the image rather than passed at run time because
-        it is a fact about where the process is, not a posture a caller
-        chooses: a session that could switch it off from the outside would be
-        telling the policy to relax with nothing underneath.
+        ``LUP_CONTAINED`` says a process is inside an image this harness
+        built, for anything in there that wants to know. It is not what the
+        policy reads: a constant answers the same for any container built from
+        this image, for a bare ``run`` holding none of the lease, and for a
+        session whose launcher forwarded the variable from its own shell —
+        so the placement is settled against a value minted per launch, and
+        this stays a description rather than an authority. :meth:`sealed`
+        keeps a run from restating it.
 
         ``LANG`` is baked at the handoff's fallback and overwritten at run
         time by whatever the operator's terminal answered. Both, because the
