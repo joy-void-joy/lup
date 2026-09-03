@@ -49,6 +49,7 @@ from lup.harness.requirements import (
 from lup.harness.process import LocalProcessLauncher
 from lup.harness.toolchain import (
     bubblewrap_requirement,
+    codex_envelope_requirement,
     container_client,
     for_host,
     socat_requirement,
@@ -638,7 +639,8 @@ def apply_sandbox_environment(
     label: str,
     required_tools: list[Requirement],
     contained: bool = False,
-) -> None:
+    announce: bool = True,
+) -> bool:
     """Export LUP_SANDBOX_ACTIVE when the declared sandbox can actually run.
 
     The dispatchers defer unjudged shell only under this flag, so it is set
@@ -668,10 +670,22 @@ def apply_sandbox_environment(
     one flag this spelled for every tool was ``--version``, socat has no
     such option and exits 1 on it, and the OS boundary was therefore
     reported unavailable on every host in the world.
+
+    Both runtimes vouch through here, which is the point of it taking the
+    tools rather than naming them: Claude's confinement is a pair of programs
+    and Codex's is its own envelope, and the asymmetry that mattered was not
+    which tools but that one path exercised something and the other asserted
+    the flag outright. *announce* is off where the caller has a better
+    sentence for the success case -- a posture whose name is worth printing --
+    and the failures are said either way, because that is the half a reader
+    has to act on.
+
+    Answers whether it vouched, so a caller can say so without re-deriving it
+    from the environment it just passed in.
     """
     hooks = plugin.hooks
     if contained or hooks is None or hooks.sandbox is None:
-        return
+        return False
     findings = [tool.check(environment) for tool in required_tools]
     unusable = [finding for finding in findings if not finding.working]
     if unusable:
@@ -686,12 +700,14 @@ def apply_sandbox_environment(
         Notice(
             text=f"{label} sandbox: deny lattice stays active", urgency="warning"
         ).say()
-        return
+        return False
     environment["LUP_SANDBOX_ACTIVE"] = "1"
-    Notice(
-        text=f"{label} sandbox: active — unjudged shell defers to the OS boundary",
-        urgency="boundary",
-    ).say()
+    if announce:
+        Notice(
+            text=f"{label} sandbox: active — unjudged shell defers to the OS boundary",
+            urgency="boundary",
+        ).say()
+    return True
 
 
 # lup: ignore[library-default] — each entry is literally a Codex CLI flag
@@ -764,14 +780,29 @@ def codex_sandbox_arguments(
             urgency="boundary",
         ).say()
         return list(CODEX_CONFINEMENT.off)
-    environment["LUP_SANDBOX_ACTIVE"] = "1"
-    Notice(
-        text=(
-            "codex sandbox: workspace-write envelope — "
-            "unjudged shell defers to the OS boundary"
-        ),
-        urgency="boundary",
-    ).say()
+    # Exercised before it is vouched for, the way the Claude path exercises
+    # its confinement tools. Asserting the flag outright was the asymmetry:
+    # `codex sandbox` runs a command under this exact envelope and no model
+    # turn, so there was never a reason not to ask.
+    vouched = apply_sandbox_environment(
+        plugin,
+        environment,
+        "codex",
+        [codex_envelope_requirement()],
+        contained=contained,
+        announce=False,
+    )
+    if vouched:
+        Notice(
+            text=(
+                "codex sandbox: workspace-write envelope — "
+                "unjudged shell defers to the OS boundary"
+            ),
+            urgency="boundary",
+        ).say()
+    # The envelope goes on either way. What a failed probe withdraws is the
+    # claim, not the confinement: leaving the sandbox off because it could not
+    # be verified would answer a boundary nobody could measure by removing it.
     return ["--sandbox", "workspace-write", *writable_root_arguments()]
 
 

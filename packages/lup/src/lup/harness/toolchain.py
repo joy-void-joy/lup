@@ -918,6 +918,67 @@ def reaped_orphans_requirement(
     )
 
 
+def codex_envelope_requirement(
+    where: Side = "host",
+    install: list[Package] = [],
+    runtime: str = "codex",
+) -> Requirement:
+    """Whether the workspace-write envelope actually refuses a write outside it.
+
+    The counterpart to exercising ``bwrap`` before vouching for it, and it was
+    missing: the Claude path probes its confinement tools and the Codex path
+    asserted the same flag with nothing run at all. A flag set on an envelope
+    nobody tested tells every dispatcher downstream to relax into a boundary
+    that may not be there.
+
+    ``codex sandbox`` runs a command under that envelope and no model turn, so
+    the boundary a session gets is the boundary this asks about -- the same
+    discipline as exercising an image requirement behind the argv a session
+    opens with, rather than behind one assembled for the probe.
+
+    Two witnesses, because one cannot tell a boundary from a broken command.
+    The outer one is created and removed on the host first, so its absence
+    afterwards means the envelope refused rather than that the account could
+    never write there. The inner one is written inside the workspace, where
+    the envelope permits it, and its presence is what proves the command ran
+    at all -- without it a missing runtime, a changed subcommand, or any other
+    failure produces no file outside and reads exactly like a boundary
+    holding. Measured: spelled with the outer witness alone, this reported a
+    working envelope for a runtime that does not exist on this machine.
+
+    Both are computed from the working directory rather than declared, because
+    a path in here would sit in what the ownership digest hashes. The outer
+    one is the checkout's parent: outside the workspace the envelope roots at,
+    and demonstrably writable, since this project cuts its worktrees there.
+    """
+    return Requirement(
+        capability="codex sandbox envelope",
+        purpose="confining unjudged shell when the launcher vouches for it",
+        where=where,
+        exercise=Run(
+            command=[
+                "sh",
+                "-c",
+                'i="$PWD/.lup-envelope-ran.$$"; o="$(dirname "$PWD")'
+                '/.lup-envelope-probe.$$"; touch "$o" || exit 1; rm -f "$o"; '
+                f"{runtime} sandbox -c sandbox_mode='\"workspace-write\"' -- "
+                'sh -c "touch $i; touch $o" >/dev/null 2>&1; '
+                'if [ ! -e "$i" ]; then printf never-ran; '
+                'elif [ -e "$o" ]; then printf breached; '
+                'else printf envelope-holds; fi; rm -f "$i" "$o"',
+            ],
+            expect="envelope-holds",
+        ),
+        absence=LostCapability(
+            capability=(
+                "vouching for the Codex envelope — unjudged shell keeps the "
+                "deny lattice instead of deferring to an OS boundary"
+            )
+        ),
+        install=install,
+    )
+
+
 def inside_placement_requirement(
     where: Side = "image",
     install: list[Package] = [],

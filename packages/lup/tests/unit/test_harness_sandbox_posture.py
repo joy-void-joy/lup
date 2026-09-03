@@ -16,6 +16,9 @@ claim lives before anything has run.
 
 from pathlib import Path
 
+import pytest
+
+from lup.devtools.harness import launch
 from lup.devtools.harness.launch import (
     apply_sandbox_environment,
     claude_sandbox_arguments,
@@ -27,6 +30,7 @@ from lup.harness.requirements import LostCapability, Requirement, Run
 from lup.harness.toolchain import (
     agent_session_requirement,
     bubblewrap_requirement,
+    codex_envelope_requirement,
     socat_requirement,
 )
 from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
@@ -156,6 +160,75 @@ def test_a_contained_codex_session_keeps_the_route_to_its_proxy() -> None:
 
     assert arguments == ["--sandbox", "danger-full-access"]
     assert "LUP_SANDBOX_ACTIVE" not in environment
+
+
+def test_neither_runtime_vouches_for_a_boundary_it_did_not_exercise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The asymmetry this closes: one path probed and the other asserted.
+
+    Claude exercised `bwrap` and `socat` before exporting the flag; Codex set
+    it outright, so a machine whose envelope did not hold told every
+    dispatcher downstream to relax into a boundary that was not there. Both
+    vouch through one function now, and what differs is which tools it takes.
+    """
+    environment: EnvVars = {}
+    monkeypatch.setattr(
+        launch,
+        "codex_envelope_requirement",
+        lambda: Requirement(
+            capability="codex sandbox envelope",
+            purpose="a probe that cannot pass",
+            exercise=Run(command=["definitely-not-a-program-on-this-host"]),
+            absence=LostCapability(capability="vouching for the Codex envelope"),
+        ),
+    )
+
+    arguments = codex_sandbox_arguments(
+        confining_plugin(), environment, [], contained=False
+    )
+
+    assert "LUP_SANDBOX_ACTIVE" not in environment
+    # The confinement stays on: a probe that could not verify the envelope
+    # withdraws the claim, never the wall.
+    assert arguments[:2] == ["--sandbox", "workspace-write"]
+
+
+def test_an_envelope_that_answers_is_vouched_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The positive case, which is the one a broken probe silently loses."""
+    environment: EnvVars = {}
+    monkeypatch.setattr(
+        launch,
+        "codex_envelope_requirement",
+        lambda: Requirement(
+            capability="codex sandbox envelope",
+            purpose="a probe that passes anywhere",
+            exercise=Run(command=["echo", "envelope-holds"], expect="envelope-holds"),
+            absence=LostCapability(capability="vouching for the Codex envelope"),
+        ),
+    )
+
+    codex_sandbox_arguments(confining_plugin(), environment, [], contained=False)
+
+    assert environment["LUP_SANDBOX_ACTIVE"] == "1"
+
+
+def test_the_envelope_probe_tells_a_boundary_from_a_command_that_never_ran() -> None:
+    """One witness cannot: a failed command writes nothing outside either.
+
+    Measured with the outer witness alone, the probe reported a working
+    envelope for a runtime that does not exist on this machine — the exact
+    unmeasured claim this layer refuses. The inner witness is written where
+    the envelope permits, so its absence says the command never ran rather
+    than that the wall held.
+    """
+    absent = codex_envelope_requirement(runtime="definitely-not-a-runtime")
+
+    finding = absent.check({})
+
+    assert not finding.working
 
 
 def test_a_client_that_cannot_drive_its_server_is_passed_over() -> None:
