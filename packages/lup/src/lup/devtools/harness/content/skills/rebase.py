@@ -30,6 +30,19 @@ SKILL = models.Skill(
 
 Clean up the commit history on the current feature branch, push it, and open (or update) a PR.
 
+## Determine Where This Runs
+
+Everything below reads the current worktree, so settle which one that is before deciding anything else.
+
+```bash
+git worktree list
+git branch --show-current
+```
+
+The feature branch is the branch you are standing on -- never something passed in. On an integration branch (`main`, `dev`, `master`) there is nothing to rebase: name the feature worktree, `cd` there, and start again from here.
+
+That is also the answer when you were about to put a branch name in the argument. The argument is a PR *target*, which is a rare thing to need; wanting to say *which branch to work on* means you are in the wrong directory, and moving is the fix rather than naming it.
+
 ## Determine Branches
 
 ### Base branch (`<base>`)
@@ -44,7 +57,7 @@ Confirm against the divergence, not the name that sounds right. `git log --oneli
 
 ### PR target (`<target>`)
 
-If a target branch was provided as an argument (`"""
+Rarely needed: a stacked PR aimed at another feature branch. If a target branch was provided as an argument (`"""
             ),
             models.ArgumentsRef(),
             models.TextPart(
@@ -73,6 +86,27 @@ A `guessed` base exits non-zero having merged nothing -- settle the base as abov
                 text=r"""` (no argument) first.
 
 Merging the base commonly leaves a generated tree behind its source -- most often the ownership manifest, which the next `dev check` reports as `harness drift: FAIL` with a stale proof. That is the merge working, not a conflict: run `lup-devtools harness generate all` until it reports `ownership=present`, and commit what it writes.
+
+### 2b. Confirm the base matches its remote
+
+`sync-base` merges the *local* base. The PR is read against the remote one, so anything the local base holds that the remote does not becomes part of your diff.
+
+```bash
+git fetch origin
+git rev-list --left-right --count origin/<base>...<base>
+```
+
+A base ahead of its remote carries those commits into the PR, and on a repository that commits session data to its base branch that is the difference between a five-commit PR and a hundred-commit one nobody can read. Behind is ordinary -- the merge in step 2 has already brought the remote's work in.
+
+When it is ahead, this is the user's call, not yours, because one of the answers publishes their unpushed work. """
+            ),
+            models.AskUser(
+                question="push the base, or rebuild this branch onto the remote base"
+            ),
+            models.TextPart(
+                text=r""". Rebuilding means cherry-picking this branch's own commits onto `origin/<base>`, which touches nothing of theirs; verify it as step 8 does before going on.
+
+Whichever they choose, check that the base's own commits do not overlap your files -- `git diff --stat <base>...origin/<base> -- src/ tests/`. Where they do, your work has to be reconciled with theirs whatever the PR ends up looking like.
 
 ### 3. Fold local grants into the canonical policy
 
