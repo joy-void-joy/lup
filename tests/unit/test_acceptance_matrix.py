@@ -16,11 +16,14 @@ from pathlib import Path
 
 import pytest
 
+from lup.harness.models import HookSet
+from lup.policy.boundary import depends_on
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import PathRoleRow, ShellRuleRow
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.kernel.shell import decide_shell
+from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.policy.shell_rules import erase_shell_rules
 from lup.policy.vocabulary import default_vocabulary, gh_rule, git_rule
 
@@ -258,3 +261,86 @@ def test_recovery_never_discharges_a_question_it_has_nothing_to_do_with() -> Non
     )
 
     assert remote.effect == "ask"
+
+
+def test_a_missing_required_capability_stops_the_launch() -> None:
+    """Matrix row: a session that cannot deliver its own boundary does not open.
+
+    Blocked on this package until a launch measured anything. The profile
+    promising containment and the runtime whose containment failed to start
+    read identically from configuration, so what separates them is evidence —
+    and without it every placement below was a claim.
+    """
+    hooks = HookSet(
+        id="hooks.matrix",
+        policy_ids=[],
+        boundary_capabilities=[
+            depends_on("inside_placement", "inside placement", contained_only=True)
+        ],
+    )
+    boundary = compile_boundary(hooks, contained=True)
+
+    absent = measured(boundary, depended_on(hooks, contained=True), [])
+
+    assert not absent.launchable()
+    assert "inside_placement" in absent.diagnosis()
+
+
+def test_a_missing_optional_capability_blocks_only_its_dependants() -> None:
+    """Matrix row: the launch opens and the operations needing it are refused.
+
+    No reviewer approves a channel into existence, so an operation that needs
+    one is capability-blocked rather than asked about — which sends the agent
+    to the missing channel instead of to argue with a rule.
+    """
+    hooks = HookSet(
+        id="hooks.matrix",
+        policy_ids=[],
+        boundary_capabilities=[depends_on("host_executor", required=False)],
+    )
+    boundary = compile_boundary(hooks, contained=True)
+
+    preflight = measured(boundary, depended_on(hooks, contained=True), [])
+
+    assert preflight.launchable()
+    assert preflight.blocked() == ["host_executor"]
+
+
+def test_a_crossing_with_no_channel_rests_on_a_person_or_is_refused() -> None:
+    """Matrix row, in the half this package settles: what carries `outside`.
+
+    Two answers, and which one applies is a fact about the session rather than
+    about the operation. A person at a keyboard can be shown the exact command
+    and run it themselves, so the crossing is a question. A headless session
+    has neither a channel nor a person, and a question whose every answer
+    leaves the operation with nowhere to go is one nobody should be shown — so
+    it is capability-blocked with a typed cause, naming the missing channel
+    rather than a rule the agent would go and reshape.
+
+    Both rest on the same measurement: `host_executor` is declared with no
+    probe while nothing carries a request, so `escapable` is false here
+    however permissive the runtime's own per-call escape is. Package C is what
+    turns the first answer into an unprompted allow.
+    """
+    asked = decide_shell(
+        "# lup: escalate[sandbox]: the host toolchain\nuv run lup-devtools dev check",
+        rows(),
+        sandboxed=True,
+        contained=True,
+        escapable=False,
+        interactive=True,
+    )
+    trapped = decide_shell(
+        "# lup: escalate[sandbox]: the host toolchain\nuv run lup-devtools dev check",
+        rows(),
+        sandboxed=True,
+        contained=True,
+        escapable=False,
+        interactive=False,
+    )
+
+    assert asked.effect == "ask"
+    assert asked.sandbox == "outside"
+    assert trapped.effect == "deny"
+    assert trapped.cause == "capability"
+    assert trapped.capability == "host_executor"
