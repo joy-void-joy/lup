@@ -78,6 +78,7 @@ DISPATCHER_STDLIB = (
     "pathlib",
     "subprocess",
     "datetime",
+    "hashlib",
 )
 """The standard library a compiled dispatcher may reach.
 
@@ -91,6 +92,13 @@ recoverable is a question only a process can answer, and every alternative
 spelling of it — ``sh``, a devtools helper — is exactly the unresolvable
 import this pin exists to reject. Being genuine standard library, it cannot
 produce that failure. Each further entry deserves the same argument.
+
+``hashlib`` earns its place the same way. A parked question needs an id
+derived from what it asks, so the same question reached twice folds to one
+record rather than filling a queue nobody can read — and nothing already
+pinned here produces a digest. A counter would need state the dispatcher
+does not carry between calls, and a timestamp differs every time, which is
+the opposite of what folding needs.
 
 ``datetime`` earns its place the same way. The undo snapshot names each ref
 with a microsecond stamp, and the precision is load-bearing rather than

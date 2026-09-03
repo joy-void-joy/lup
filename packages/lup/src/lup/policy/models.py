@@ -21,9 +21,18 @@ from pydantic import (
 
 from lup.policy.kernel.rows import EditOperation
 from lup.policy.kernel.decision import (
+    CheckpointRequirement,
     DecisionEffect,
     KernelDecision,
     SandboxPlacement,
+)
+from lup.policy.kernel.semantics import (
+    AbstentionPurpose,
+    Capability,
+    RefusalCause,
+    ReviewPurpose,
+    ReviewerRequirement,
+    Visibility,
 )
 from lup.types import JsonObject, JsonValue
 
@@ -274,6 +283,29 @@ class Decision(BaseModel, frozen=True):
     effect: DecisionEffect
     reason: str = ""
     sandbox: SandboxPlacement = "ambient"
+    checkpoint: CheckpointRequirement = "unrecoverable"
+    """What capture would put back what this operation destroys locally."""
+    reviewer: ReviewerRequirement = "human_only"
+    """Who may answer, on the one effect that asks anybody."""
+    purpose: ReviewPurpose | None = None
+    """Which kind of decision a question is, or ``None`` where it asks nobody."""
+    visibility: Visibility = "quiet"
+    """Whether an operation that did not interrupt should still be surfaced."""
+    cause: RefusalCause | None = None
+    """Why a refusal was reached, or ``None`` where nothing was refused.
+
+    Carried rather than left readable in the reason, because a
+    capability-blocked refusal and a rule's judgement need different responses
+    from the agent and reached the seam indistinguishable without it.
+    """
+    capability: Capability | None = None
+    """Which runtime guarantee was missing, on a capability-blocked refusal."""
+    abstention: AbstentionPurpose | None = None
+    """Why a ``defer`` declined to finalize, or ``None`` on any other effect."""
+    rule: str = ""
+    """The stable id of the rule that reached this verdict, or ``""``."""
+    evaluator: str = ""
+    """The stable id of the evaluator that produced it, or ``""``."""
     escalated: str = ""
     """Why the agent said this call was worth a human, where it said so.
 
@@ -295,16 +327,66 @@ class Decision(BaseModel, frozen=True):
         """
         return KernelDecision(info.data["effect"], sandbox=sandbox).sandbox
 
-    def placed(self, escapable: bool, agent_escalates: bool) -> "Decision":
+    def placed(self, escapable: bool) -> "Decision":
         """This verdict as a runtime that can, or cannot, place a call sees it."""
-        kernel = KernelDecision(
-            self.effect, self.reason, self.sandbox, self.escalated
-        ).placed(escapable, agent_escalates)
-        return Decision(
-            effect=kernel.effect,
-            reason=kernel.reason,
-            sandbox=kernel.sandbox,
-            escalated=kernel.escalated,
+        kernel = self.as_kernel().placed(escapable)
+        return self.model_copy(
+            update={
+                "effect": kernel.effect,
+                "reason": kernel.reason,
+                "sandbox": kernel.sandbox,
+            }
+        )
+
+    @classmethod
+    def of(cls, decision: KernelDecision) -> "Decision":
+        """The validated verdict one hermetic kernel verdict corresponds to.
+
+        Every settled fact crosses, not the handful a caller remembered. This
+        is the one seam between the two spellings of a verdict, so a field
+        named on one side and absent here is a field the in-process path
+        silently does not have — which is how a capability-blocked refusal
+        arrived indistinguishable from a rule's judgement, and how an ask
+        arrived with no attributable rule.
+        """
+        return cls(
+            effect=decision.effect,
+            reason=decision.reason,
+            sandbox=decision.sandbox,
+            checkpoint=decision.checkpoint,
+            reviewer=decision.reviewer,
+            purpose=decision.purpose,
+            visibility=decision.visibility,
+            cause=decision.cause,
+            capability=decision.capability,
+            abstention=decision.abstention,
+            rule=decision.rule,
+            evaluator=decision.evaluator,
+            escalated=decision.escalated,
+        )
+
+    def as_kernel(self) -> KernelDecision:
+        """This verdict as the hermetic kernel spells it.
+
+        One conversion rather than a constructor call per caller, because a
+        call site listing the fields it happens to remember is how the two
+        spellings drift — and what drifts out is whatever was added last,
+        which is always the fact nobody has a test for yet.
+        """
+        return KernelDecision(
+            self.effect,
+            self.reason,
+            self.sandbox,
+            self.escalated,
+            checkpoint=self.checkpoint,
+            reviewer=self.reviewer,
+            purpose=self.purpose,
+            visibility=self.visibility,
+            cause=self.cause,
+            capability=self.capability,
+            abstention=self.abstention,
+            rule=self.rule,
+            evaluator=self.evaluator,
         )
 
 

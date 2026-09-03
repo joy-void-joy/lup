@@ -2,7 +2,8 @@
 
 from typing import Literal, TypedDict
 
-from .decision import DecisionEffect, Recovery, SandboxPlacement
+from .decision import DecisionEffect, CheckpointRequirement, SandboxPlacement
+from .semantics import ReviewerRequirement
 
 type PathRuleKind = Literal[
     "exact",
@@ -219,6 +220,16 @@ class ShellRuleRow(TypedDict):
     judges, which makes its stated reason false for most of them -- and a
     question whose reason does not hold is one nobody can answer well.
 
+    ``ask_refspecs`` names the effects a refspec operand may carry that this
+    row asks about — the same downgrade ``ask_flags`` states, about a word
+    whose grammar rather than whose spelling says what it does. A push
+    removes a remote ref by flag (``--delete``) or by empty source
+    (``:refs/heads/main``), and replaces one non-fast-forward by flag
+    (``--force``) or by leading plus (``+main:main``); a row that guarded
+    only the flags held half of each effect. Declared as effects rather than
+    as more spellings because the second list of spellings is what missed
+    these.
+
     ``sandbox`` says where this command has to run, independently of who
     decides it: a verb that reaches a remote is unusable confined however the
     effect reads, and a verb whose blast radius wants the OS boundary keeps it
@@ -230,13 +241,29 @@ class ShellRuleRow(TypedDict):
     and a session carrying the restorer named here has no such loss to ask
     about.
 
-    All three axes arrive already resolved down the nesting, so matching one
+
+    ``rule`` is this row's stable id, derived from the levels it matches —
+    ``shell:git.push``, ``shell:rm`` — rather than written down, because a
+    derived id cannot drift from the row it names and a written one has to be
+    kept in step with a rename. It is what an audit counts by and what a
+    person answering the same question twice is pointed at; the reason beside
+    it is prose, and a taxonomy built on prose is a taxonomy of phrasings.
+
+    ``reviewer`` is who may answer a question this row produces, and
+    ``effect_class`` what the operation does beyond this machine — ``""``
+    where it does nothing outside it. Both cascade down the nesting like the
+    three axes above, so ``gh pr`` says once that its verbs are compensable
+    and only ``merge``, ``review --approve`` and ``review --request-changes``
+    say otherwise.
+
+    Every axis arrives already resolved down the nesting, so matching one
     row is the whole answer. ``effect_source``, ``sandbox_source`` and
-    ``recovery_source`` say which level supplied each value, which is what a
+    ``checkpoint_source`` say which level supplied each value, which is what a
     reader needs at a verdict they did not expect; none is consulted in
     reaching one.
     """
 
+    rule: str
     command: str
     subcommand: str
     operation: str
@@ -244,8 +271,11 @@ class ShellRuleRow(TypedDict):
     effect_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
-    recovery: Recovery
-    recovery_source: RuleLevel
+    checkpoint: CheckpointRequirement
+    checkpoint_source: RuleLevel
+    reviewer: ReviewerRequirement
+    effect_class: str
+    ask_refspecs: list[str]
     ask_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]
@@ -254,6 +284,86 @@ class ShellRuleRow(TypedDict):
     bare_reads: bool
     value_flags: list[str]
     reason: str
+
+
+type ShellRowField = Literal[
+    "rule",
+    "command",
+    "subcommand",
+    "operation",
+    "effect",
+    "effect_source",
+    "sandbox",
+    "sandbox_source",
+    "checkpoint",
+    "checkpoint_source",
+    "reviewer",
+    "effect_class",
+    "ask_refspecs",
+    "ask_flags",
+    "allow_flags",
+    "read_verbs",
+    "write_markers",
+    "guarded_keys",
+    "bare_reads",
+    "value_flags",
+    "reason",
+]
+"""Every field name one erased shell row carries.
+
+Closed and enumerable, which is what lets the mapping below be typed by its
+keys rather than by "some string": a field renamed on the shape and not here
+is a type error, where a bare string key would be a ``KeyError`` raised inside
+a hook — and a permission that never happens looks exactly like one granted.
+"""
+
+
+def shell_row_values(
+    row: ShellRuleRow,
+) -> dict[ShellRowField, str | bool | list[str]]:
+    """Every field of one erased row, as a mapping, in declaration order.
+
+    Declared beside the shape rather than at the renderer that needs it, so a
+    column added above and not mapped here is one screen apart instead of two
+    files — and the test that compares these keys against the shape's own
+    annotations turns "one screen apart" into a failure rather than a habit.
+
+    The generated dispatcher indexes every one of these keys, and it does so
+    inside a hook, where a missing key is a permission that never happens. So
+    the mapping is total by construction and checked as total by that test.
+    """
+    return {
+        "rule": row["rule"],
+        "command": row["command"],
+        "subcommand": row["subcommand"],
+        "operation": row["operation"],
+        "effect": row["effect"],
+        "effect_source": row["effect_source"],
+        "sandbox": row["sandbox"],
+        "sandbox_source": row["sandbox_source"],
+        "checkpoint": row["checkpoint"],
+        "checkpoint_source": row["checkpoint_source"],
+        "reviewer": row["reviewer"],
+        "effect_class": row["effect_class"],
+        "ask_refspecs": row["ask_refspecs"],
+        "ask_flags": row["ask_flags"],
+        "allow_flags": row["allow_flags"],
+        "read_verbs": row["read_verbs"],
+        "write_markers": row["write_markers"],
+        "guarded_keys": row["guarded_keys"],
+        "bare_reads": row["bare_reads"],
+        "value_flags": row["value_flags"],
+        "reason": row["reason"],
+    }
+
+
+type RefspecEffect = Literal["delete", "force"]
+"""What a refspec operand can do to the ref it names, beyond writing it.
+
+The two effects a push spells twice — once as a flag and once as grammar.
+Named so a table declares the effect it guards rather than a second list of
+the spellings that reach it.
+"""
 
 
 type EditOperation = Literal["create", "overwrite", "modify", "delete"]

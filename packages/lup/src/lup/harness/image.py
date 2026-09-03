@@ -624,11 +624,14 @@ class Image(BaseModel, frozen=True):
         nothing was measuring. Baked, so anything that starts this image gets
         it: a probe and a one-off ``run`` are as unattended as a session.
 
-        ``LUP_CONTAINED`` is how the policy inside learns there is a boundary
-        under it. Baked into the image rather than passed at run time because
-        it is a fact about where the process is, not a posture a caller
-        chooses: a session that could switch it off from the outside would be
-        telling the policy to relax with nothing underneath.
+        ``LUP_CONTAINED`` says a process is inside an image this harness
+        built, for anything in there that wants to know. It is not what the
+        policy reads: a constant answers the same for any container built from
+        this image, for a bare ``run`` holding none of the lease, and for a
+        session whose launcher forwarded the variable from its own shell —
+        so the placement is settled against a value minted per launch, and
+        this stays a description rather than an authority. :meth:`sealed`
+        keeps a run from restating it.
 
         ``LANG`` is baked at the handoff's fallback and overwritten at run
         time by whatever the operator's terminal answered. Both, because the
@@ -964,9 +967,28 @@ USER $UID:$GID
                 for name, value in (
                     self.environment() | self.egress.environment(proxy_address)
                 ).items()
+                if name not in self.sealed()
                 for argument in ("-e", f"{name}={value}")
             ],
         ]
+
+    def sealed(self) -> list[str]:
+        """Baked variables a run must not restate, whatever value it would give.
+
+        ``environment()`` says ``LUP_CONTAINED`` is baked rather than passed
+        "because it is a fact about where the process is, not a posture a
+        caller chooses: a session that could switch it off from the outside
+        would be telling the policy to relax with nothing underneath." The run
+        then re-emitted the whole baked map as ``-e NAME=VALUE`` pairs, this
+        one included -- so the property held only against a caller who did not
+        also control the argv, which is every caller this defends against.
+
+        Restating a baked value is a no-op at best: the image tag *is* the
+        declaration digest, so an image built from a different declaration is
+        a different image and gets rebuilt. What the restatement bought was a
+        line in `ps` and a claim its own docstring contradicted.
+        """
+        return ["LUP_CONTAINED"]
 
     def ide_bridge(self, config_home: Path) -> list[str]:
         """Mount the host's IDE lockfile directory into the container's config.
@@ -1003,6 +1025,7 @@ USER $UID:$GID
         terminal: EnvVars | None = None,
         interactive: bool = True,
         proxy_address: str = "",
+        boundary: EnvVars | None = None,
         inherited_environment: list[str] | None = None,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
@@ -1087,9 +1110,19 @@ USER $UID:$GID
         selected = forge or NoCredential(
             variable=self.forge.token_variable, host=self.forge.host
         )
-        reaching = self.forge.environment(
-            rewrites or [], selected, granted, identity
-        ) | (terminal or {})
+        # The boundary's own values join here rather than being baked, and
+        # that is the whole difference between a placement a launch can check
+        # and one it can only assert. A baked constant answers for every
+        # container this image ever starts; a value minted per launch answers
+        # for this one. It reaches argv with its value visible, unlike the
+        # credential below, because it is not a secret -- it discriminates
+        # launches rather than principals, and what it defeats is a constant
+        # and an inherited variable rather than somebody reading `ps`.
+        reaching = (
+            self.forge.environment(rewrites or [], selected, granted, identity)
+            | (terminal or {})
+            | (boundary or {})
+        )
         # By name, with no value beside it, which is what both engines read as
         # "take this one from my own environment". The value would otherwise
         # be in this argv -- readable out of `ps` by every process on the host

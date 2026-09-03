@@ -61,7 +61,7 @@ from lup.policy.dispatcher import (
 )
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.kernel.rows import PathRoleRow
-from lup.policy.kernel.shell import sandbox_excluded
+from lup.policy.kernel.shell import excluded_prefix, sandbox_excluded
 from lup.policy.refused_tools import routed_for
 from lup.policy.kernel.words import (
     INTERPRETERS,
@@ -578,13 +578,15 @@ def codex_allow_prefixes(
     and the canonical policy take.
 
     The prefix is the approval half of an escape the caller requests with
-    ``sandbox_permissions=require_escalated``. A runner target declared
-    ``outside`` receives that approval; an ambient target does not. The escape
-    itself is chosen on the model's own call rather than compiled
-    in advance — :meth:`CodexSpellings.escape_sandbox` carries it. The forms
-    this cannot widen — a target behind a global flag, or one joined into a
-    compound command — reach the hook, where a confined session is stopped
-    with the reason rather than left to fail on the first write.
+    ``sandbox_permissions=require_escalated``. A command the boundary
+    declaration excludes from isolation receives that approval, as does one
+    a rule places on the launcher's host; an ambient command does not,
+    because for it the escape would be the agent placing its own call
+    somewhere no rule and no reviewer put it. The escape itself is chosen on
+    the model's own call rather than compiled in advance —
+    :meth:`CodexSpellings.escape_sandbox` carries it. The forms this cannot
+    widen — a target behind a global flag, or one joined into a compound
+    command — reach the hook, which judges the request there.
     """
 
     excluded = list(excluded_commands)
@@ -600,6 +602,9 @@ def codex_allow_prefixes(
     operational = dict.fromkeys(
         f"{row['command']} {row['subcommand']}" for row in rows if row["operation"]
     )
+    # lup: ignore[empty-collection] — a fold over four sources with a
+    # de-duplicating membership test between them, which no comprehension
+    # expresses: each `add` reads the prefixes the ones before it produced
     prefixes: list[list[str]] = []
     for row in rows:
         if row["effect"] != "allow" or row["ask_flags"] or row["sandbox"] == "inside":
@@ -613,6 +618,16 @@ def codex_allow_prefixes(
             add([row["command"], row["subcommand"]], row["sandbox"])
     for target in runner_targets:
         add(["uv", "run", target.name], target.sandbox)
+    # Seeded from the declaration rather than derived from a rule that happens
+    # to overlap it. An exclusion may be narrower than any rule name — three
+    # verbs of a toolchain the rules name whole — and a prefix taken from the
+    # rule would approve the other thirty. Read down to its literal head, which
+    # is the conservative half of a pattern's meaning: whatever a wildcard goes
+    # on to match, the boundary drops at least everything the head covers.
+    for pattern in excluded_commands:
+        head = excluded_prefix(pattern)
+        if head and head not in prefixes:
+            prefixes.append(head)
     return sorted(prefixes)
 
 

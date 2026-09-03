@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 79 artifacts
+## `claude` — 81 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -61,10 +61,12 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.claude/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.claude/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |
+| `.claude/plugins/lup/hooks/runtime/kernel/escalation.py` | lup.policy.kernel.escalation |
 | `.claude/plugins/lup/hooks/runtime/kernel/fetch.py` | lup.policy.kernel.fetch |
 | `.claude/plugins/lup/hooks/runtime/kernel/lex.py` | lup.policy.kernel.lex |
 | `.claude/plugins/lup/hooks/runtime/kernel/roles.py` | lup.policy.kernel.roles |
 | `.claude/plugins/lup/hooks/runtime/kernel/rows.py` | lup.policy.kernel.rows |
+| `.claude/plugins/lup/hooks/runtime/kernel/semantics.py` | lup.policy.kernel.semantics |
 | `.claude/plugins/lup/hooks/runtime/kernel/settlement.py` | lup.policy.kernel.settlement |
 | `.claude/plugins/lup/hooks/runtime/kernel/shell.py` | lup.policy.kernel.shell |
 | `.claude/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
@@ -92,7 +94,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.devtools.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.devtools.harness.content.docs.upstream_reports |
 
-## `codex` — 61 artifacts
+## `codex` — 63 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -112,10 +114,12 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.codex/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.codex/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |
+| `.codex/plugins/lup/hooks/runtime/kernel/escalation.py` | lup.policy.kernel.escalation |
 | `.codex/plugins/lup/hooks/runtime/kernel/fetch.py` | lup.policy.kernel.fetch |
 | `.codex/plugins/lup/hooks/runtime/kernel/lex.py` | lup.policy.kernel.lex |
 | `.codex/plugins/lup/hooks/runtime/kernel/roles.py` | lup.policy.kernel.roles |
 | `.codex/plugins/lup/hooks/runtime/kernel/rows.py` | lup.policy.kernel.rows |
+| `.codex/plugins/lup/hooks/runtime/kernel/semantics.py` | lup.policy.kernel.semantics |
 | `.codex/plugins/lup/hooks/runtime/kernel/settlement.py` | lup.policy.kernel.settlement |
 | `.codex/plugins/lup/hooks/runtime/kernel/shell.py` | lup.policy.kernel.shell |
 | `.codex/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |

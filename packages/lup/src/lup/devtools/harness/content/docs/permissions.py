@@ -113,51 +113,63 @@ The rows, in order, each stating its own claim:
         settlement_table(),
         models.TextPart(
             text=r"""
-Where a command runs is a second axis beside that verdict, declared per rule
-rather than inferred: `git` states its placement once and every verb beneath
-it runs outside the sandbox, because one confined away from its transport or
-from the repository's own locks fails however freely it was allowed. An
-allow placed outside runs there unprompted; an ask placed outside says so in
-the question it asks; a deny short-circuits the axis entirely, and so does a
-defer, which hands the sandbox status over with the rest of the decision.
-Confinement wins a join, so one segment that must stay inside keeps the whole
-line inside. A runtime with no per-call sandbox renders the plain effect. A
-container answers the axis rather than trapping on it: `outside` names the
-native per-call sandbox, a container runs none, and the paths that placement
-was about — the runtime's configuration home, the repository's locks, a route
-to a remote — are all the container's own.
+**Placement** is the second axis, and the boundary it names is the profile's
+own — whatever delivers containment — never a provider's per-call sandbox,
+which is one adapter's mechanism for spelling `inside`. Three values:
+`inside` runs within the containment boundary whatever mode the session is
+in, `ambient` runs wherever the session already lives, and `outside` runs on
+the launcher's host through the trusted host executor. An allow placed
+outside runs there unprompted; an ask placed outside says so in the question
+it asks; a deny short-circuits the axis, and so does a defer, which hands the
+whole decision over rather than half of it. Confinement wins a join, so one
+segment that must stay inside keeps the whole line inside, and a runtime with
+no channel renders the plain effect rather than an intent it would drop.
 
-**Recovery** is the third axis, and the one that makes the effect a function
-of the session rather than of the command. The vocabulary guards *the
-direction that removes something no second attempt restores*, and what a
-second attempt restores depends on what is running beneath it — so each rule
-names the restorer its question was about:
+The offered table declares no placement at all. What `git`, `gh` and a
+session-opening toolchain need is a boundary that grants a route to the
+remote, the repository's own locks, and the runtime's configuration home —
+which is a fact about the profile, declared with the boundary and *measured*
+at launch, where a profile that cannot meet it says so once. Declared as a
+placement it was unmeasurable: the profile that grants those and the profile
+that does not both read as `outside`, and the second finds out at its first
+shell call, on an error that reads like a broken repository.
 
-| value | what puts the loss back | what carries it |
+**Checkpoint** is the third axis, and the one that makes the effect a
+function of the session rather than of the command. The vocabulary guards
+*the direction that removes something no second attempt restores*, so each
+rule names the capture that would cover its loss:
+
+| value | what the capture holds | when a rule declares it |
 |---|---|---|
-| `snapshot` | the whole loss is working-tree content in this checkout | the undo layer, container or not — `git reset --hard`, `git restore`, `git rm` |
-| `container` | the loss can also land on this machine | a container *and* the snapshot beneath it, because the bind-mounted checkout survives the container — `rm`, `tar`, `apt install`, `systemctl` |
-| `nothing` | neither reaches it | nothing, so the question stands — a remote ref, a published artifact, a command whose argument is another command, and the parts of this checkout no snapshot holds |
+| `targeted` | exactly the paths the operation names | every path resolves statically — `rm build/out`, `git restore`, a redirect into a named file |
+| `boundary_wide` | every precious writable root | a variable, a glob, a substitution or a directory walk prevents an exact footprint, so the wider capture is what the opacity costs |
+| `unrecoverable` | nothing reaches it | a remote ref, a published artifact, an issue somebody read, a command whose argument is another command |
 
-`nothing` is the default and the whole safety of the axis: a rule nobody
-annotated keeps asking. `git clean -fdx` carries it deliberately rather than
-by omission — it destroys ignored files, which is exactly what the snapshot
-leaves out.
+`unrecoverable` is the default and the whole safety of the axis: a rule
+nobody annotated keeps asking. `git clean -fdx` carries it deliberately
+rather than by omission — it destroys ignored files, which is exactly what a
+capture leaves out.
 
-Where the named restorer is present, `RestoredBySession` settles the question
-as a **deferral, not a permission**. Nothing decides the call may run: the
-policy decides it has no reason left to interrupt, and the call goes to the
-runtime's own gate, where an operator's configuration lives. A session run
-with everything approved runs it; one at the runtime's defaults is still
-asked, in the runtime's own words. A `# lup: escalate:` marker keeps its
-question either way — it is the agent asking to be judged, and a boundary
-does not overrule it.
+Where the capture was actually *taken*, `RecoveredLoss` settles the question
+as a **permission**. Not a deferral: deferring would make the outcome depend
+on which mode the session happened to be started in, for a fact that has
+nothing to do with the session's mode. This policy has positively established
+that the loss it was protecting against did not happen, so it authorizes.
 
-That makes `defer` two things reaching one word, which the rows below it have
-to keep apart: an unjudged deferral means *nobody looked*, and this one means
-*somebody looked and the boundary answers*. `Unjudged` refuses the first for
-want of anybody having looked, so the second settles rather than rewrites and
-never reaches it.
+Taken, and not merely requested. A snapshot reference is not recovery —
+coverage, restoration, metadata, completion and post-state are the guarantee
+— so the row reads *measured* evidence and distinguishes three answers:
+nothing required, capture proven, and capture attempted and short. The third
+keeps the question and says which it was, because "nobody captured this" and
+"the capture did not work" are different things to tell somebody.
+
+It discharges local loss and nothing travelling beside it. An operation that
+also rewrites a production file, touches a protected path, reads a credential
+or reaches a remote keeps its question in full, which the row reads over the
+findings that composed the verdict rather than over their join — a join
+reports the strongest effect and says nothing about how many reasons reached
+it. And a `# lup: escalate[decision]:` marker keeps its question either way:
+the agent asked to be judged, and evidence does not overrule the request.
 
 **And it is written down**, which is what makes the relaxation honest rather
 than merely quieter. The lattice asked about everything unjudged for an
@@ -383,16 +395,31 @@ inside a shell tool call never reaches the dispatcher that judges it.
 
 The guidance spells both; this is what each one does.
 
-- The escalation marker, `lup: escalate: <why>` as the leading comment line
-  of a shell command, promotes anything not already permitted into an approval
-  question carrying that reason. It is the recovery path when work is denied
-  as unjudged: reshape the command into the allowed vocabulary, or escalate
-  with a reason. It is an **effect**-axis marker and says nothing about
-  placement — it asks whether the call may happen, not where. Two refusals it
-  does not reach, both being statements that the call cannot happen rather
-  than that nobody approved it: a marker stating no reason, which would be
-  authorising itself, and a call declared `outside` on a host with no channel
-  to put it there.
+- The escalation marker, as the leading comment line of a shell command,
+  names which axis it asks to move — `lup: escalate[decision]: <why>` for a
+  reviewer over a verdict a rule reached alone, `lup: escalate[sandbox]:
+  <why>` for the launcher's host, and `lup: escalate[decision,sandbox]:
+  <why>` for both. Two different requests were sharing one spelling, and they
+  promote a verdict differently: decision escalation turns an overrideable
+  refusal or an abstention into a question at the placement it already had,
+  while sandbox escalation moves the placement and is *always* reviewed —
+  what the person is being asked is not "may this run" but "may this run
+  *there*", which has an answer of its own. Composed, the combined form is
+  the only route from an overrideable refusal to the host, because the
+  decision half has already made it a question by the time the placement
+  moves.
+
+  The bare `lup: escalate: <why>` keeps working as decision escalation and
+  says it is an alias, because a migration that breaks every marker at once
+  is one nobody can act on mid-run.
+
+  A reason is mandatory in every spelling: the whole content of the request
+  is what it says to whoever answers, and a request that says nothing asks
+  them to approve a rule id. Three refusals it does not reach, each being a
+  statement that the operation cannot happen rather than that nobody
+  approved it: a marker stating no reason, a policy invariant, and an
+  operation whose placement no channel can carry — where no approval creates
+  the channel, so no reviewer is shown the question.
 - The typed suppression marker, `lup: ignore[<rule-id>]` as a comment on the
   offending line, silences exactly the anti-pattern it names and no other, so
   the site still trips every rule it left unnamed. [contributing.md](contributing.md)

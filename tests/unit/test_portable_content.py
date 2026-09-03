@@ -7,12 +7,11 @@ tests check the derivation itself as much as the declarations it judges.
 import pytest
 
 from lup.providers.claude.harness import ClaudeSpellings, claude_granted_tools
-from lup.providers.claude.hooks import CLAUDE_SEMANTICS
 from lup.providers.codex.harness import CodexSpellings
-from lup.providers.codex.hooks import CODEX_SEMANTICS
 from lup.providers.harness import compile_codex
 from lup.harness.codescan.portable import native_vocabulary, prose_breaches
 from lup.harness.contracts import NativeSpellings
+from lup.policy.kernel.decision import SANDBOX_ESCALATION_RECIPE
 from lup.harness.models import PromptDocument, TextPart
 from lup.harness.prompts import SPAWNED_SESSION_LOSES_SHELL
 from lup_template.devtools.harness.catalog import portable_harness
@@ -95,25 +94,22 @@ def test_the_resolver_entry_asks_its_own_vocabulary_about_the_sandbox() -> None:
         )
 
 
-def test_the_prose_seam_and_the_decision_seam_agree_about_the_agent_escape() -> None:
-    """One fact reaches two seams, so a runtime cannot answer it both ways.
+def test_every_runtime_teaches_the_same_request_for_the_launcher_host() -> None:
+    """The agent's route out is Lup's marker, so it is one sentence everywhere.
 
-    ``agent_escalates`` decides whether an ``escalable`` verdict offers the
-    way out and ``escape_sandbox`` supplies the words for taking it. Split,
-    they drift: a runtime that spells an escape its verdicts will not offer
-    keeps words nobody is told they may use, and one that offers an escape it
-    will not spell sends an agent looking for words that are not there.
+    A native flag is not that request: it says where a call runs and nobody
+    answers it. Asking for the launcher's host is a reviewed request, so the
+    words are Lup's and identical under every runtime — which is what keeps
+    an agent from having to know which provider it is under before it can ask.
 
-    ``escapable`` is deliberately not what this compares against. That asks
-    whether a verdict can place a call itself, which Codex answers no while
-    answering yes here — the divergence that makes the two fields two.
+    What a runtime still spells for itself is the mechanism beneath an
+    approved crossing, and that is what ``escape_sandbox`` answers.
     """
-    seams = [(ClaudeSpellings(), CLAUDE_SEMANTICS), (CodexSpellings(), CODEX_SEMANTICS)]
-
-    for runtime, semantics in seams:
-        spelled = bool(runtime.escape_sandbox(MARK).in_prose())
-        assert spelled == semantics.agent_escalates, (
-            f"{runtime.runtime_name} spells an escape its decisions disagree with"
+    for runtime in RUNTIMES:
+        assert "escalate[sandbox]" in SANDBOX_ESCALATION_RECIPE
+        spelling = runtime.escape_sandbox(MARK)
+        assert spelling.audited(), (
+            f"{runtime.runtime_name} answers the mechanism seam with nothing"
         )
 
 

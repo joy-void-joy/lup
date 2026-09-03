@@ -4,10 +4,12 @@
 says the words themselves are a judgement about one project's toolchain, so
 they arrive from outside. That is true, and it left the library shipping
 nothing — which is not the neutral position it reads as. An empty table
-matches no command, every command is then unjudged, and unjudged resolves to
-a deny: a fresh adopter's agent cannot run ``ls`` until several hundred lines
-of vocabulary exist. Shipping nothing chose a verdict for them just as surely
-as shipping something would have, and chose the least useful one.
+matches no command and every command is then unlisted, which is a question
+put to whoever is there and a refusal where nobody is: a fresh adopter's
+agent prompts for ``ls`` in front of a human and cannot run it in a worker,
+until several hundred lines of vocabulary exist. Shipping nothing chose a
+verdict for them just as surely as shipping something would have, and chose
+the least useful one.
 
 So each group below is a function returning rules, and every word it declares
 is a parameter default rather than a table. An adopter calls the group to
@@ -41,7 +43,8 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel
 
-from lup.policy.kernel.decision import Recovery, SandboxPlacement
+from lup.policy.kernel.decision import CheckpointRequirement, SandboxPlacement
+from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
@@ -55,12 +58,12 @@ class JudgedCommand(BaseModel, frozen=True):
 
     name: str
     reason: str
-    recovery: Recovery = "nothing"
-    """What would put back what this command destroys, if anything here does.
+    checkpoint: CheckpointRequirement = "unrecoverable"
+    """What capture would put back what this command destroys, if any would.
 
     The question this row asks exists because a loss is permanent, so naming
-    the restorer that makes it impermanent is naming when the question stops
-    being worth a human's attention. Silence keeps the question."""
+    the capture that makes it impermanent is naming when the question stops
+    being worth a person's attention. Silence keeps the question."""
     read_verbs: list[str] = []
     """This command's own spellings of its query action, which de-escalate it.
 
@@ -177,34 +180,34 @@ def judged_ask_rules(
         JudgedCommand(
             name="rm",
             reason="deleting files requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="rmdir",
             reason="deleting directories requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="mv",
             reason="moving files requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="cp",
             reason="copying over files requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(name="chmod", reason="changing permissions requires approval"),
         JudgedCommand(name="chown", reason="changing ownership requires approval"),
         JudgedCommand(
             name="ln",
             reason="creating links requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="tee",
             reason="writing files requires approval — prefer the Write tool",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="dd",
@@ -214,7 +217,7 @@ def judged_ask_rules(
             # `dd if=x` stopped for approval as a write.
             write_markers=["of="],
             reason="raw device or file writes require approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="mount",
@@ -229,17 +232,17 @@ def judged_ask_rules(
         JudgedCommand(
             name="truncate",
             reason="truncating files requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="kill",
             reason="terminating processes requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="pkill",
             reason="terminating processes requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="command",
@@ -254,31 +257,31 @@ def judged_ask_rules(
             # `-xzf` also contains: these are tar's own list-mode spellings.
             read_verbs=["-t", "--list", "-tf", "-tvf", "-tzf", "-tzvf", "-tjf", "-tJf"],
             reason="archive operations write files — requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="unzip",
             read_verbs=["-l", "-t", "-v", "-z"],
             reason="archive extraction writes files — requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="zip",
             read_verbs=["-sf", "--show-files"],
             reason="archive creation writes files — requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="gzip",
             read_verbs=["-l", "--list", "-t", "--test"],
             reason="compression rewrites files — requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="gunzip",
             read_verbs=["-l", "--list", "-t", "--test"],
             reason="decompression rewrites files — requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(name="sudo", reason="privilege escalation requires approval"),
         JudgedCommand(name="doas", reason="privilege escalation requires approval"),
@@ -310,32 +313,32 @@ def judged_ask_rules(
         JudgedCommand(
             name="apt",
             reason="system package changes require approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="apt-get",
             reason="system package changes require approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="pacman",
             reason="system package changes require approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="brew",
             reason="system package changes require approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="systemctl",
             reason="service management requires approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="crontab",
             reason="schedule changes require approval",
-            recovery="container",
+            checkpoint="boundary_wide",
         ),
     ),
 ) -> list[ShellCommandRule]:
@@ -352,7 +355,7 @@ def judged_ask_rules(
             read_verbs=command.read_verbs,
             write_markers=command.write_markers,
             bare_reads=command.bare_reads,
-            recovery=command.recovery,
+            checkpoint=command.checkpoint,
             reason=command.reason,
         )
         for command in commands
@@ -370,6 +373,76 @@ def redirected_rules(
     A redirect is house style rather than a safety verdict, which is why the
     pairs are a parameter: a project on a different package manager replaces
     them instead of inheriting an argument about uv.
+    """
+    return [
+        ShellCommandRule(
+            name=command.name, default_effect="deny", reason=command.reason
+        )
+        for command in commands
+    ]
+
+
+def reaching_builtin_rules(
+    commands: Sequence[JudgedCommand] = (
+        JudgedCommand(
+            name="eval",
+            reason="eval runs text as code, which no gate reading the command"
+            " can see into — write the command out",
+        ),
+        JudgedCommand(
+            name="source",
+            reason="sourcing a script runs its code in this shell, where no"
+            " gate read it — run the commands it holds",
+        ),
+        JudgedCommand(
+            name=".",
+            reason="sourcing a script runs its code in this shell, where no"
+            " gate read it — run the commands it holds",
+        ),
+        JudgedCommand(
+            name="export",
+            reason="an exported variable decides what later commands see —"
+            " set it on the command that needs it",
+        ),
+        JudgedCommand(
+            name="declare",
+            reason="a declared variable decides what later commands see —"
+            " set it on the command that needs it",
+        ),
+        JudgedCommand(
+            name="unset",
+            reason="unsetting a variable decides what later commands see —"
+            " set it on the command that needs it",
+        ),
+    ),
+) -> list[ShellCommandRule]:
+    """Builtins that run unread code, or decide what a *later* command sees.
+
+    :func:`read_only_rules` carries the control-flow builtins because they
+    change nothing and nothing they do reaches a later command. These fail
+    that second half, and were held out of that list to say so — but an
+    omission is not a judgement anything can read. Left unlisted they refused
+    with "command 'eval' is not classified", which is the one thing that was
+    not true of them: they were classified, by being left out, and the agent
+    was told the opposite.
+
+    Declared so the refusal carries its own reason, and so the row answering
+    for work nobody classified is not also the row enforcing a decision
+    somebody made. The same verdict as before, arrived at on the record.
+
+    Declaring them also settles what a sandbox does about them, and settles
+    it the way the inline-code refusal beside them already answered: a
+    judged deny survives a boundary, because the objection to ``eval`` is
+    that nothing read what it runs, and confining unread code does not read
+    it. Left unlisted they deferred to the boundary instead — so ``python -c
+    'x'`` and ``eval echo x``, which are one objection, were enforced two
+    ways depending on which of them somebody had written down.
+
+    ``exec`` is absent though it was held out of that list too: the lexer
+    already resolves it to the command it wraps, so ``exec rm -rf src`` is
+    judged as ``rm -rf src`` and a row here would never be reached. Which is
+    also the right answer — what ``exec`` runs is the whole of what it does
+    to anything outside the shell it replaces.
     """
     return [
         ShellCommandRule(
@@ -434,7 +507,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="tree",
             default_effect="allow",
             ask_flags=["-o"],
-            recovery="container",
+            checkpoint="boundary_wide",
             reason="a tree flag that writes a file requires approval",
         ),
         ShellCommandRule(
@@ -452,14 +525,14 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="base64",
             default_effect="allow",
             ask_flags=["-o", "--output"],
-            recovery="container",
+            checkpoint="boundary_wide",
             reason="a base64 flag that writes a file requires approval",
         ),
         ShellCommandRule(
             name="yq",
             default_effect="allow",
             ask_flags=["-i", "--inplace", "--in-place", "-s", "--split-exp"],
-            recovery="container",
+            checkpoint="boundary_wide",
             reason=(
                 "a yq flag that edits files in place or splits into files"
                 " requires approval"
@@ -484,7 +557,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="find",
             default_effect="allow",
             ask_flags=["-delete", "-fprint", "-fprint0", "-fprintf", "-fls"],
-            recovery="container",
+            checkpoint="boundary_wide",
             reason="a mutating find action requires approval",
         ),
         ShellCommandRule(
@@ -492,7 +565,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="ss",
             default_effect="allow",
             ask_flags=["-K", "--kill"],
-            recovery="container",
+            checkpoint="boundary_wide",
             reason="killing sockets requires approval",
         ),
         ShellCommandRule(
@@ -544,15 +617,15 @@ def runner_target_rules(
     toolchain writes outside the tree — a worktree, a plugin cache, and the
     git configuration behind them follow it.
 
-    Which is why the escape is declared here, once, on the toolchain itself,
-    rather than left to each caller to remember. Where a runtime places no
-    single call outside its sandbox, a confined session is stopped with that
-    reason instead — see :func:`~lup.policy.kernel.shell.decide_shell`.
+    That requirement is the *boundary's* to meet rather than a placement to
+    declare. A placement says where an operation runs; what a session-opening
+    toolchain needs is for wherever it already runs to grant a path — which is
+    a statement about the profile, measured at launch, and stated with the rest
+    of the boundary. Declared as a placement instead it was unmeasurable: the
+    profile that grants the path and the profile that does not both read as
+    ``outside``, and the second one only finds out at the first shell call.
     """
-    return [
-        *[RunnerTargetRule(name=name) for name in ambient],
-        *[RunnerTargetRule(name=name, sandbox="outside") for name in session_opening],
-    ]
+    return [RunnerTargetRule(name=name) for name in (*ambient, *session_opening)]
 
 
 # One criterion decides this table, applied across git's surface rather than to
@@ -667,7 +740,7 @@ spelling of the same one, and it runs a program just as readily.
 def git_rule(
     guard_force_push: bool = True,
     redirect_checkout: bool = False,
-    sandbox: SandboxPlacement = "outside",
+    sandbox: SandboxPlacement = "ambient",
     config_executing_keys: tuple[str, ...] = GIT_CONFIG_EXECUTING_KEYS,
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
@@ -682,6 +755,15 @@ def git_rule(
     What removes a ref outright stays guarded either way: no second push
     restores it.
 
+    Both effects are guarded twice over, because push spells each of them
+    twice: as a flag, and as refspec grammar. ``--delete origin main`` and
+    ``origin :refs/heads/main`` remove the same ref, ``--force`` and
+    ``+main:main`` replace the same one, and a guard written only as flag
+    spellings held the first half of each pair while allowing the second.
+    The parameter therefore moves ``ask_refspecs`` and ``ask_flags``
+    together: an effect this rule asks about is asked about however it was
+    written.
+
     ``redirect_checkout`` decides how ``git checkout`` is met. Off, it asks —
     the branch-switching form is harmless, but ``checkout -- <path>``
     discards work. On, it denies and names ``switch`` and ``restore``
@@ -691,13 +773,14 @@ def git_rule(
     recoverable.
 
     ``sandbox`` is where git runs, stated once here and inherited by every
-    subcommand. It is the other axis rather than another effect: a fetch
-    confined to a sandbox with no route to the remote fails however freely it
-    was allowed, and a worktree or config write confined away from the
-    repository's own locks fails the same way, so the placement follows the
-    tool rather than a list of its verbs. A project whose sandbox does reach
-    its remotes answers ``escalable`` instead, which keeps the ordinary fetch
-    confined and leaves the way out to the agent that finds it needs one.
+    subcommand. The default is ``ambient``, because what git needs is not the
+    launcher's host but a boundary that grants a route to the remote and the
+    repository's own locks — which is a fact about the profile, declared and
+    measured with the rest of the boundary rather than requested per command.
+    A profile whose boundary cannot grant them says so at launch, where the
+    gap is actionable; a placement could only say it per call, after the
+    failure. ``outside`` remains available for a verb that genuinely has to
+    run on the launcher's host, and is reviewed every time it is used.
 
     ``config_executing_keys`` are the settings whose value is a program, and
     so the only `git config` writes worth a question. A project can add to
@@ -718,7 +801,7 @@ def git_rule(
                 name=name,
                 effect="allow",
                 ask_flags=["--output"],
-                recovery="container",
+                checkpoint="boundary_wide",
                 reason="writing command output to a file requires approval",
             )
             # `--output` names a path on the command line and lands a file
@@ -781,6 +864,7 @@ def git_rule(
         ShellSubcommandRule(
             name="push",
             effect="allow",
+            ask_refspecs=(["delete", "force"] if guard_force_push else ["delete"]),
             ask_flags=(
                 [*push_flags, "-f", "--force", "--force-with-lease"]
                 if guard_force_push
@@ -801,19 +885,19 @@ def git_rule(
             name="apply",
             effect="allow",
             ask_flags=["--unsafe-paths", "--build-fake-ancestor"],
-            recovery="container",
+            checkpoint="boundary_wide",
             reason="a patch that writes outside the working area requires approval",
         ),
         ShellSubcommandRule(
             name="restore",
             effect="ask",
-            recovery="snapshot",
+            checkpoint="targeted",
             reason="restoring files discards working-tree changes",
         ),
         ShellSubcommandRule(
             name="rm",
             effect="ask",
-            recovery="snapshot",
+            checkpoint="targeted",
             reason="removing tracked files requires approval",
         ),
         ShellSubcommandRule(
@@ -854,7 +938,7 @@ def git_rule(
         ShellSubcommandRule(
             name="checkout",
             effect="deny" if redirect_checkout else "ask",
-            recovery="snapshot",
+            checkpoint="targeted",
             reason=(
                 "use git switch for branches or git restore for files"
                 if redirect_checkout
@@ -894,11 +978,11 @@ def git_rule(
                     name="view",
                     effect="allow",
                     ask_flags=["--output"],
-                    recovery="container",
+                    checkpoint="boundary_wide",
                     reason="writing command output to a file requires approval",
                 ),
             ],
-            recovery="snapshot",
+            checkpoint="targeted",
             reason="a bisect step moves HEAD across commits",
         ),
         ShellSubcommandRule(
@@ -928,14 +1012,14 @@ def git_rule(
             name="reset",
             effect="allow",
             ask_flags=["--hard", "--merge", "--keep"],
-            recovery="snapshot",
+            checkpoint="targeted",
             reason="a working-tree-destroying reset requires approval",
         ),
         ShellSubcommandRule(
             name="switch",
             effect="allow",
             ask_flags=["-f", "--force", "--discard-changes"],
-            recovery="snapshot",
+            checkpoint="targeted",
             reason="a force switch can discard working-tree changes",
         ),
         ShellSubcommandRule(
@@ -968,7 +1052,7 @@ def git_rule(
                     name="list",
                     effect="allow",
                     ask_flags=["--output"],
-                    recovery="container",
+                    checkpoint="boundary_wide",
                     reason="writing command output to a file requires approval",
                 ),
                 ShellOperationRule(
@@ -976,7 +1060,7 @@ def git_rule(
                     name="show",
                     effect="allow",
                     ask_flags=["--output"],
-                    recovery="container",
+                    checkpoint="boundary_wide",
                     reason="writing command output to a file requires approval",
                 ),
                 ShellOperationRule(name="push", effect="allow"),
@@ -1070,15 +1154,36 @@ def git_rule(
 
 
 def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
-    """Compile the gh surface: reads allow, judged mutations ask, else deny.
+    """Compile the gh surface by what each operation does beyond this machine.
 
-    ``allow_authoring`` decides whether opening a pull request, retitling it,
-    and marking it ready are the author describing their own work or a
-    publication worth a question. On, they allow — a review flow does all
-    three every round, and the branch is already pushed by then. Off, they
-    join the verbs that reach other people. Commenting, reviewing, merging
-    and closing ask either way: those reach reviewers, or change what the
-    repository is.
+    Three bands rather than the two a read/write split offers.
+
+    **Compensable collaboration allows.** Opening a pull request, retitling
+    it, marking it ready, commenting, closing, reopening, and the same set for
+    issues: every one of them is restored by a normal follow-up operation, and
+    a review flow performs several of them every round. Compensable is a claim
+    about the remote *state*, never about observation — reopening a pull
+    request does not un-send the mail that closing it generated — so it is the
+    right test for whether a person needs to see the moment, and the wrong one
+    for whether the effect was free.
+
+    **Execution, attestation, publication, and repository security ask.** A
+    merge runs something; an approving or request-changes review says
+    something in the caller's name; a release publishes; a secret, a ruleset,
+    or a repository setting is the security posture of the repository itself.
+    A later compensating action may exist for each and does not make them
+    compensable: what happened was an event, and events are what a person is
+    being asked about.
+
+    **A deletion nested inside an allowed operation survives it.** ``gh pr
+    close`` allows and ``gh pr close --delete-branch`` asks, because a safe
+    outer verb cannot erase an unsafe inner one. The same shape as a push
+    whose refspec deletes.
+
+    ``allow_authoring`` decides whether opening and describing a pull request
+    is the author describing their own work or a publication worth a question.
+    On, they allow — the branch is already pushed by then. Off, they join the
+    verbs that ask.
 
     Both halves of that grant are claims about *this* repository — the work is
     the author's own, and the branch is already pushed — and ``--repo`` is what
@@ -1094,43 +1199,54 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
     unlike the flag it stops a redirected read as well. The asymmetry is the
     price of catching the variable gh has not learned yet.
     """
-    authoring = ["create", "edit", "ready"]
     elsewhere = ["-R", "--repo"]
+    authoring = ["create", "edit", "ready"]
+    # The two spellings of each attestation. gh accepts the short forms, and a
+    # guard written as the long ones alone holds half of each — the same shape
+    # a push guard written as flag spellings had before refspec grammar was
+    # read structurally.
+    attesting = ["--approve", "-a", "--request-changes", "-r"]
 
-    def group(
-        name: str,
-        allowed: list[str],
-        asked: list[str] | None = None,
-        authored: list[str] | None = None,
-    ) -> ShellSubcommandRule:
+    def reads(names: list[str]) -> list[ShellOperationRule]:
+        """Operations that report and change nothing."""
+        return [ShellOperationRule(name=name, effect="allow") for name in names]
+
+    def compensable(names: list[str]) -> list[ShellOperationRule]:
+        """Collaboration a normal follow-up operation restores."""
+        return [
+            ShellOperationRule(
+                name=name,
+                effect="allow",
+                effect_class="compensable",
+                ask_flags=elsewhere,
+                reason="this operation against another repository requires approval",
+            )
+            for name in names
+        ]
+
+    def judged(
+        names: list[str],
+        effect_class: EffectClass,
+        reason: str,
+        reviewer: ReviewerRequirement = "human_only",
+    ) -> list[ShellOperationRule]:
+        """Operations whose effect a person is asked about every time."""
+        return [
+            ShellOperationRule(
+                name=name,
+                effect="ask",
+                effect_class=effect_class,
+                reviewer=reviewer,
+                reason=reason,
+            )
+            for name in names
+        ]
+
+    def group(name: str, operations: list[ShellOperationRule]) -> ShellSubcommandRule:
         return ShellSubcommandRule(
             name=name,
             effect="deny",
-            operations=[
-                *[
-                    ShellOperationRule(name=operation, effect="allow")
-                    for operation in allowed
-                ],
-                *[
-                    ShellOperationRule(
-                        name=operation,
-                        effect="allow",
-                        ask_flags=elsewhere,
-                        reason=f"gh {name} {operation} against another"
-                        " repository requires approval",
-                    )
-                    for operation in authored or []
-                ],
-                *[
-                    ShellOperationRule(
-                        name=operation,
-                        effect="ask",
-                        reason=f"gh {name} {operation} changes remote state"
-                        " — requires approval",
-                    )
-                    for operation in asked or []
-                ],
-            ],
+            operations=operations,
             reason=f"this gh {name} operation is not classified",
         )
 
@@ -1140,38 +1256,209 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
         subcommands=[
             group(
                 "pr",
-                ["list", "view", "diff", "status", "checks", "checkout"],
                 [
-                    "comment",
-                    "review",
-                    "merge",
-                    "close",
-                    *([] if allow_authoring else authoring),
+                    *reads(["list", "view", "diff", "status", "checks", "checkout"]),
+                    *compensable(
+                        [
+                            "comment",
+                            "reopen",
+                            *(authoring if allow_authoring else []),
+                        ]
+                    ),
+                    # Closing restores by reopening; deleting the branch does
+                    # not, so the deletion nested inside the allowed verb keeps
+                    # its own question.
+                    ShellOperationRule(
+                        name="close",
+                        effect="allow",
+                        effect_class="compensable",
+                        ask_flags=[*elsewhere, "--delete-branch", "-d"],
+                        reason="deleting the branch alongside the close"
+                        " removes work no reopen restores",
+                    ),
+                    # A review that carries neither verdict is a comment. The
+                    # two that do are claims made in the caller's name, and
+                    # saying something else later is not unsaying them.
+                    ShellOperationRule(
+                        name="review",
+                        effect="allow",
+                        effect_class="compensable",
+                        ask_flags=[*elsewhere, *attesting],
+                        reason="approving or requesting changes attests in your"
+                        " name — requires approval",
+                    ),
+                    *judged(
+                        ["merge"],
+                        "execution",
+                        "merging runs the change into the base branch"
+                        " — requires approval",
+                    ),
+                    *(
+                        []
+                        if allow_authoring
+                        else judged(
+                            authoring,
+                            "publication",
+                            "opening or describing a pull request publishes"
+                            " — requires approval",
+                        )
+                    ),
                 ],
-                authoring if allow_authoring else [],
             ),
             group(
                 "issue",
-                ["list", "view", "status"],
-                ["create", "edit", "comment", "close"],
+                [
+                    *reads(["list", "view", "status"]),
+                    *compensable(
+                        ["create", "edit", "comment", "close", "reopen", "pin", "unpin"]
+                    ),
+                    *judged(
+                        ["delete", "transfer"],
+                        "execution",
+                        "removing an issue from this repository is not"
+                        " restored by a follow-up — requires approval",
+                    ),
+                ],
             ),
-            group("run", ["list", "view", "watch"], ["rerun", "cancel", "download"]),
-            group("repo", ["view", "list"], ["clone", "fork"]),
-            group("release", ["list", "view"], ["create", "upload"]),
-            group("cache", ["list"], ["delete"]),
-            group("workflow", ["list", "view"], ["run", "enable", "disable"]),
-            group("auth", ["status"]),
-            group("search", ["repos", "issues", "prs", "code", "commits"]),
-            group("label", ["list"], ["create", "edit", "delete", "clone"]),
-            group("gist", ["list", "view"], ["create", "edit", "delete", "clone"]),
+            group(
+                "run",
+                [
+                    *reads(["list", "view", "watch"]),
+                    *judged(
+                        ["rerun", "cancel"],
+                        "execution",
+                        "changing what a workflow run is doing requires approval",
+                    ),
+                    *compensable(["download"]),
+                ],
+            ),
+            group(
+                "repo",
+                [
+                    *reads(["view", "list"]),
+                    # Cloning writes here and reaches nobody there.
+                    ShellOperationRule(name="clone", effect="allow"),
+                    *judged(
+                        ["create", "fork", "rename", "archive", "delete", "edit"],
+                        "repository_security",
+                        "changing what this repository is, or creating another,"
+                        " requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "release",
+                [
+                    *reads(["list", "view", "download"]),
+                    *judged(
+                        ["create", "upload", "edit", "delete"],
+                        "publication",
+                        "a release is published where people consume it"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "secret",
+                [
+                    *reads(["list"]),
+                    *judged(
+                        ["set", "delete"],
+                        "repository_security",
+                        "repository secrets decide what automation can reach"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "variable",
+                [
+                    *reads(["list", "get"]),
+                    *judged(
+                        ["set", "delete"],
+                        "repository_security",
+                        "repository variables configure automation — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "ruleset",
+                [
+                    *reads(["list", "view", "check"]),
+                    *judged(
+                        ["create", "edit", "delete"],
+                        "repository_security",
+                        "rulesets are this repository's own protection"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "workflow",
+                [
+                    *reads(["list", "view"]),
+                    *judged(
+                        ["run", "enable", "disable"],
+                        "execution",
+                        "dispatching or gating a workflow runs something"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "cache",
+                [
+                    *reads(["list"]),
+                    *compensable([]),
+                    *judged(
+                        ["delete"],
+                        "execution",
+                        "a deleted cache is not restored by a follow-up"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group("auth", reads(["status"])),
+            group("search", reads(["repos", "issues", "prs", "code", "commits"])),
+            group(
+                "label",
+                [
+                    *reads(["list"]),
+                    *compensable(["create", "edit", "clone"]),
+                    *judged(
+                        ["delete"],
+                        "execution",
+                        "deleting a label removes it from everything carrying it"
+                        " — requires approval",
+                    ),
+                ],
+            ),
+            group(
+                "gist",
+                [
+                    *reads(["list", "view", "clone"]),
+                    *judged(
+                        ["create", "edit", "delete"],
+                        "publication",
+                        "a gist is published outside this repository"
+                        " — requires approval",
+                    ),
+                ],
+            ),
             group(
                 "project",
-                ["list", "view", "item-list", "field-list"],
-                ["create", "edit", "close", "delete", "item-add", "item-delete"],
+                [
+                    *reads(["list", "view", "item-list", "field-list"]),
+                    *compensable(["item-add", "edit", "close"]),
+                    *judged(
+                        ["create", "delete", "item-delete"],
+                        "execution",
+                        "creating or removing project state is not restored by"
+                        " a follow-up — requires approval",
+                    ),
+                ],
             ),
-            group("variable", ["list", "get"], ["set", "delete"]),
-            group("ruleset", ["list", "view", "check"]),
-            group("config", ["get", "list"], ["set"]),
+            group("config", [*reads(["get", "list"]), *compensable(["set"])]),
             ShellSubcommandRule(name="status", effect="allow"),
             ShellSubcommandRule(name="browse", effect="allow"),
             ShellSubcommandRule(
@@ -1180,8 +1467,13 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 # attaching a field, reading a body from a file — is guarded,
                 # which leaves the mutation ask exactly where it belongs
                 # instead of on every query that shares the subcommand.
+                #
+                # Opaque rather than classified: this is the one gh surface
+                # that can reach any endpoint, so what a mutation here does is
+                # exactly what the table cannot say.
                 name="api",
                 effect="allow",
+                effect_class="opaque",
                 ask_flags=[
                     "-X",
                     "--method",
@@ -1281,7 +1573,6 @@ def bun_rule() -> ShellCommandRule:
             ShellSubcommandRule(
                 name="install",
                 effect="allow",
-                sandbox="outside",
                 reason="restoring declared dependencies reaches the registry",
             ),
             ShellSubcommandRule(name="run", effect="allow"),
@@ -1290,7 +1581,6 @@ def bun_rule() -> ShellCommandRule:
             ShellSubcommandRule(
                 name="add",
                 effect="ask",
-                sandbox="outside",
                 reason="adding a dependency changes what this project needs",
             ),
             ShellSubcommandRule(
@@ -1301,7 +1591,6 @@ def bun_rule() -> ShellCommandRule:
             ShellSubcommandRule(
                 name="x",
                 effect="ask",
-                sandbox="outside",
                 reason="running a package that is not a declared dependency",
             ),
         ],
@@ -1353,7 +1642,6 @@ def typescript_rule() -> list[ShellCommandRule]:
             name="bunx",
             default_effect="ask",
             subcommands=[checking],
-            sandbox="outside",
             reason="the package runner fetches what is not already a dependency",
         ),
         ShellCommandRule(
@@ -1376,6 +1664,7 @@ def default_vocabulary() -> list[ShellCommandRule]:
         *read_only_rules(),
         *judged_ask_rules(),
         *redirected_rules(),
+        *reaching_builtin_rules(),
         *guarded_tool_rules(),
         git_rule(),
         gh_rule(),

@@ -13,7 +13,7 @@ project has no business softening but is nonetheless able to reach.
 
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.kernel.edit import decide_edit
-from lup.policy.kernel.rows import EditRuleRow, PathRoleRow
+from lup.policy.kernel.rows import EditRuleRow, PathRoleRow, PathRuleRow
 
 ROLES: list[PathRoleRow] = [{"root": "src", "role": "production"}]
 
@@ -256,3 +256,77 @@ def test_stripping_the_note_off_standing_code_is_still_denied() -> None:
     before = NOTED + "first = 1\nsecond = 2\n"
 
     assert verdict("src/a.py", before, "first = 1\nsecond = 2\n") == "deny"
+
+
+def test_a_production_full_write_is_a_quality_review_a_supervisor_may_answer() -> None:
+    """What is being reviewed is how the code reads, and a supervisor reads code.
+
+    The classification is semantic and independent of which native tool
+    produced it — Edit, Write, apply_patch, a shell redirection — because what
+    makes it a checkpoint is that a whole file arrives at once, not the name
+    of the call that carried it.
+    """
+    decided = decide_edit(
+        "src/app/service.py",
+        None,
+        "value = 1\n",
+        path_exists=False,
+        path_rules=[],
+        antipattern_rows=[],
+        path_roles=[PathRoleRow(root="src", role="production")],
+        operation="create",
+    )
+
+    assert decided.effect == "ask"
+    assert decided.reviewer == "supervisor_allowed"
+    assert decided.purpose == "quality_review"
+    assert decided.rule == "edit:full-write"
+
+
+def test_an_edit_that_is_merely_large_is_handed_to_the_provider_deliberately() -> None:
+    """The one abstention that survives, and it says so in a field.
+
+    A large ordinary edit is exactly what a native auto-accept mode exists
+    for, so interposing would replace a decision an operator already made.
+    It reached the same word as a parser gap before, which is what let a gap
+    inherit provider auto-mode.
+    """
+    decided = decide_edit(
+        "src/app/service.py",
+        "a = 1\n",
+        "a = 1\nb = 2\nc = 3\nd = 4\ne = 5\nf = 6\n",
+        path_exists=True,
+        path_rules=[],
+        antipattern_rows=[],
+        path_roles=[PathRoleRow(root="src", role="production")],
+    )
+
+    assert decided.effect == "defer"
+    assert decided.abstention == "provider_native"
+    assert decided.rule == "edit:size"
+
+
+def test_a_protected_path_is_the_owner_s_question_and_not_a_supervisor_s() -> None:
+    """A protected path says a person owns this file, which is the whole rule.
+
+    Routing it to a supervisor would answer past exactly the person the
+    declaration names.
+    """
+    decided = decide_edit(
+        "docs/owned.md",
+        "a\n",
+        "b\n",
+        path_exists=True,
+        path_rules=[
+            PathRuleRow(
+                kind="exact",
+                value="docs/owned.md",
+                reason="human-owned",
+                allow_autonomous=False,
+            )
+        ],
+        antipattern_rows=[],
+    )
+
+    assert (decided.effect, decided.reviewer) == ("ask", "human_only")
+    assert decided.rule == "edit:protected-path"

@@ -32,9 +32,11 @@ from lup.harness.requirements import (
     Manifest,
     MountProbe,
     Package,
+    SENTINEL_VARIABLE,
     RefusedLaunch,
     Requirement,
     Run,
+    SentinelProbe,
     Side,
     SupplementaryGroup,
 )
@@ -71,7 +73,11 @@ def uv_requirement(
 
 
 def for_host(
-    manifest: Manifest, engine: ContainerEngine, checkout: Path | None = None
+    manifest: Manifest,
+    engine: ContainerEngine,
+    checkout: Path | None = None,
+    inside_sentinel: str = "",
+    host_sentinel: str = "",
 ) -> Manifest:
     """This manifest with every client-carried exercise pointed at ``engine``.
 
@@ -97,8 +103,19 @@ def for_host(
     of one commit, so every checkout but the one that generated last read its
     own committed tree as stale -- for having been checked out somewhere
     else. What is declared is the shape; this is where a machine answers it.
+
+    The sentinels are the third, and the only one that is a fact about this
+    *launch* rather than about this machine. They arrive here for the same
+    reason and are empty by default, which leaves a placement probe reporting
+    that nothing aimed it -- the honest answer for a caller that resolved a
+    manifest without opening a session.
     """
-    facts = HostFacts(client=engine.binary, checkout=checkout or Path())
+    facts = HostFacts(
+        client=engine.binary,
+        checkout=checkout or Path(),
+        inside_sentinel=inside_sentinel,
+        host_sentinel=host_sentinel,
+    )
     return Manifest(
         requirements=[
             requirement.model_copy(
@@ -895,6 +912,231 @@ def reaped_orphans_requirement(
                 "and reports that as whatever work was running being broken. "
                 "`--init` on the run argv is the whole fix, and both engines "
                 "take it"
+            )
+        ),
+        install=install,
+    )
+
+
+def codex_envelope_requirement(
+    where: Side = "host",
+    install: list[Package] = [],
+    runtime: str = "codex",
+) -> Requirement:
+    """Whether the workspace-write envelope actually refuses a write outside it.
+
+    The counterpart to exercising ``bwrap`` before vouching for it, and it was
+    missing: the Claude path probes its confinement tools and the Codex path
+    asserted the same flag with nothing run at all. A flag set on an envelope
+    nobody tested tells every dispatcher downstream to relax into a boundary
+    that may not be there.
+
+    ``codex sandbox`` runs a command under that envelope and no model turn, so
+    the boundary a session gets is the boundary this asks about -- the same
+    discipline as exercising an image requirement behind the argv a session
+    opens with, rather than behind one assembled for the probe.
+
+    Two witnesses, because one cannot tell a boundary from a broken command.
+    The outer one is created and removed on the host first, so its absence
+    afterwards means the envelope refused rather than that the account could
+    never write there. The inner one is written inside the workspace, where
+    the envelope permits it, and its presence is what proves the command ran
+    at all -- without it a missing runtime, a changed subcommand, or any other
+    failure produces no file outside and reads exactly like a boundary
+    holding. Measured: spelled with the outer witness alone, this reported a
+    working envelope for a runtime that does not exist on this machine.
+
+    Both are computed from the working directory rather than declared, because
+    a path in here would sit in what the ownership digest hashes. The outer
+    one is the checkout's parent: outside the workspace the envelope roots at,
+    and demonstrably writable, since this project cuts its worktrees there.
+    """
+    return Requirement(
+        capability="codex sandbox envelope",
+        purpose="confining unjudged shell when the launcher vouches for it",
+        where=where,
+        exercise=Run(
+            command=[
+                "sh",
+                "-c",
+                'i="$PWD/.lup-envelope-ran.$$"; o="$(dirname "$PWD")'
+                '/.lup-envelope-probe.$$"; touch "$o" || exit 1; rm -f "$o"; '
+                f"{runtime} sandbox -c sandbox_mode='\"workspace-write\"' -- "
+                'sh -c "touch $i; touch $o" >/dev/null 2>&1; '
+                'if [ ! -e "$i" ]; then printf never-ran; '
+                'elif [ -e "$o" ]; then printf breached; '
+                'else printf envelope-holds; fi; rm -f "$i" "$o"',
+            ],
+            expect="envelope-holds",
+        ),
+        absence=LostCapability(
+            capability=(
+                "vouching for the Codex envelope — unjudged shell keeps the "
+                "deny lattice instead of deferring to an OS boundary"
+            )
+        ),
+        install=install,
+    )
+
+
+def inside_placement_requirement(
+    where: Side = "image",
+    install: list[Package] = [],
+    witness: str = "pyproject.toml",
+    variable: str = SENTINEL_VARIABLE,
+) -> Requirement:
+    """Whether a command run for this session lands inside this session's boundary.
+
+    The claim every placement in the policy is read against, and until this
+    ran, the only claim nothing checked. A profile that asks for containment
+    and a runtime whose containment did not start read identically from the
+    configuration; what separates them is a value only this launch's opening
+    argv carries, observed by a command the launch actually ran.
+
+    ``at_launch`` because this is the one whose failure is invisible from
+    outside. A session that opens without it looks entirely healthy and
+    places every operation by a boundary that is not there -- which is worse
+    than a session that refuses, because the operations run anyway and the
+    placement in the audit record says they did not.
+
+    The witness rides along for the reason
+    :class:`~lup.harness.requirements.SentinelProbe` states: reading a file
+    back at its own absolute path is what proves the same-path mount, and
+    proving it here costs no container start because this probe already pays
+    for one.
+    """
+    return Requirement(
+        capability="inside placement",
+        at_launch=True,
+        purpose="placing an operation inside the boundary this profile promises",
+        where=where,
+        exercise=SentinelProbe(variable=variable, side="inside", witness=witness),
+        absence=RefusedLaunch(
+            because=(
+                "this profile's operations are placed by a boundary the launch "
+                "could not observe, so `inside` would name wherever the session "
+                "happened to land. `--unsandboxed` opens on the host under the "
+                "semantic policy alone, which is the same posture stated rather "
+                "than assumed"
+            )
+        ),
+        install=install,
+    )
+
+
+def host_placement_requirement(
+    where: Side = "host",
+    install: list[Package] = [],
+    variable: str = SENTINEL_VARIABLE,
+) -> Requirement:
+    """Whether a command run on the launcher's host observes the host's own value.
+
+    The other half of the pair, and deliberately the cheap one. One variable
+    carries both values and the side decides which, so a command that reports
+    the inside value ran inside and one that reports the host value ran on the
+    host -- and neither can be forged by a variable inherited from whatever
+    shell started the launcher, because that shell has neither value.
+
+    What this does *not* prove is that anything can put an operation here on
+    purpose. That is the host executor, which is a channel rather than an
+    observation, and it is declared absent until one exists. This is the
+    observation the channel will have to reproduce.
+    """
+    return Requirement(
+        capability="host placement",
+        purpose="telling an operation that reached the host from one that did not",
+        where=where,
+        exercise=SentinelProbe(variable=variable, side="host"),
+        absence=LostCapability(
+            capability="telling host execution apart from contained execution"
+        ),
+        install=install,
+    )
+
+
+def question_relay_requirement(
+    where: Side = "host",
+    install: list[Package] = [],
+    directory: str = ".lup",
+) -> Requirement:
+    """Whether the durable record every final ask is written to accepts a write.
+
+    An ask that cannot be recorded is an ask nobody can answer, and the
+    settlement order refuses one of those rather than running it -- so a relay
+    that cannot be written is a session where every reviewed operation
+    refuses, with a message about the operation rather than about the queue.
+
+    A write and a read-back into the queue's own directory, rather than a
+    synthetic question into the queue itself. The failures that matter are
+    the directory's -- a read-only checkout, a missing parent, a permission
+    the container did not map -- and they are all caught here. Recording a
+    fake question would catch the same failures and leave a question in the
+    queue that somebody then has to answer, which is a worse probe for being
+    a more literal one.
+    """
+    return Requirement(
+        capability="question relay",
+        purpose="parking a final ask where a reviewer can answer it",
+        where=where,
+        exercise=Run(
+            command=[
+                "sh",
+                "-c",
+                f"mkdir -p {directory} && f={directory}/preflight-$$.probe && "
+                'printf relay-ok > "$f" && cat "$f" && rm -f "$f"',
+            ],
+            expect="relay-ok",
+        ),
+        absence=RefusedLaunch(
+            because=(
+                "every operation this policy sends to a reviewer is written "
+                "here first, so a session that cannot write it is one where "
+                "each of those refuses instead — naming the operation, which "
+                "was never the problem"
+            )
+        ),
+        install=install,
+    )
+
+
+def checkpoint_store_requirement(
+    where: Side = "host",
+    install: list[Package] = [],
+    namespace: str = "refs/lup/preflight",
+) -> Requirement:
+    """Whether the store a recovery-backed permission rests on accepts a write.
+
+    A destructive operation is permitted where the loss is captured, so the
+    capture is the permission. A store that cannot be written turns every one
+    of those back into a question, which is the safe direction and a bad
+    surprise: the session was opened expecting the other answer.
+
+    Written to a ref of this probe's own under a namespace beside the undo
+    log rather than into it, and named for the process so two launches at
+    once cannot delete each other's -- a probe that reports the store broken
+    because a sibling launch tidied up first is a probe that fails for being
+    run twice. Each step's failure fails the exercise, including the delete,
+    because a store that accepts a write and refuses a delete is one the
+    retention this feeds cannot work in.
+    """
+    return Requirement(
+        capability="checkpoint store",
+        purpose="proving a loss was captured before permitting it",
+        where=where,
+        exercise=Run(
+            command=[
+                "sh",
+                "-c",
+                f"r={namespace}/$$ && git update-ref $r HEAD && "
+                "git rev-parse --verify --quiet $r > /dev/null && "
+                "git update-ref -d $r && printf store-ok",
+            ],
+            expect="store-ok",
+        ),
+        absence=LostCapability(
+            capability=(
+                "recovery-backed permission — destructive local work asks "
+                "instead of being allowed against a capture"
             )
         ),
         install=install,

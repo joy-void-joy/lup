@@ -63,7 +63,6 @@ RELAYED_NOTICE = (
 def policy_hook_output(
     decision: Decision,
     escapable: bool = False,
-    agent_escalates: bool = False,
     relay: EscalationRelay | None = None,
 ) -> LupHookOutput:
     """Render one policy verdict as the portable hook decision.
@@ -73,14 +72,13 @@ def policy_hook_output(
     granting what nothing approved.
 
     ``escapable`` is whether the runtime this reaches can put a single call
-    outside its sandbox, and ``agent_escalates`` whether the agent making the
-    call can put its own call outside. The composition happens here rather
-    than at each adapter, so what a converter receives is already the
-    placement its own runtime will honour — and a runtime missing either
-    channel is handed the plain effect instead of an intent it would silently
-    drop.
+    outside the containment boundary at all. The composition happens here
+    rather than at each adapter, so what a converter receives is already the
+    placement its own runtime will honour — and a runtime with no such
+    channel is handed the plain effect instead of an intent it would
+    silently drop.
     """
-    decision = decision.placed(escapable, agent_escalates)
+    decision = decision.placed(escapable)
     match decision.effect:
         case "allow":
             return allow_hook(decision.sandbox, decision.reason)
@@ -200,15 +198,6 @@ class NativeSemantics(BaseModel, frozen=True):
     conservative direction, and the right one for a seam that answers with a
     verdict alone and never rewrites the call it judges."""
 
-    agent_escalates: bool = False
-    """Whether the agent making a call can take that call out of the sandbox.
-
-    The other question, and a runtime can answer the two differently: one is
-    about the channel this seam writes into, the other about words the agent
-    already has. It is the fact an ``escalable`` placement turns on, and the
-    same fact :meth:`~lup.harness.contracts.NativeSpellings.escape_sandbox`
-    answers for prose."""
-
     def also_refusing(self, refused: list[RefusedTool]) -> "NativeSemantics":
         """The same decoder, registered for the refused tools as well.
 
@@ -233,15 +222,6 @@ class NativeSemantics(BaseModel, frozen=True):
         session that would drop it.
         """
         return self.escapable and sandbox.escapable
-
-    def escalates_from(self, sandbox: SandboxPosture) -> bool:
-        """Whether the agent in this session can take one of its calls outside.
-
-        The session is the same second half it is for a placement: a host
-        that refuses an unsandboxed command refuses the agent's own attempt
-        too, so an offer made there is one nobody can spend.
-        """
-        return self.agent_escalates and sandbox.escapable
 
 
 # A composition root over policy and semantics together; on either one it would
@@ -300,7 +280,6 @@ def create_policy_hooks(
         return policy_hook_output(
             policy.decide(semantics.decode(event).as_documents()),
             semantics.escapes_from(sandbox),
-            semantics.escalates_from(sandbox),
             relay,
         )
 

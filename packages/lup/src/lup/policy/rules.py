@@ -62,13 +62,14 @@ from lup.policy.models import (
 
 
 def pydantic_decision(decision: KernelDecision) -> Decision:
-    """Restore the validated public decision at the kernel boundary."""
-    return Decision(
-        effect=decision.effect,
-        reason=decision.reason,
-        sandbox=decision.sandbox,
-        escalated=decision.escalated,
-    )
+    """Restore the validated public decision at the kernel boundary.
+
+    The correspondence itself lives on :meth:`Decision.of`, beside its
+    inverse, so the two spellings of a verdict cannot be related differently
+    in two places. This name stays because it is what the policy classes here
+    read as, at the point where a kernel call returns.
+    """
+    return Decision.of(decision)
 
 
 class UrlScope(BaseModel, frozen=True):

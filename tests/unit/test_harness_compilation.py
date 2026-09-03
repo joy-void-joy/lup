@@ -1099,7 +1099,11 @@ def test_codex_compiles_prefix_safe_shell_allows_to_native_rules() -> None:
     }
     rules = artifacts[Path(".codex/rules/lup.rules")]
 
-    assert 'pattern = ["uv", "run", "lup-devtools"]' in rules
+    assert 'pattern = ["uv", "run", "lup-devtools", "harness"]' in rules
+    # The verbs that only read the tree are not approved for an escape they
+    # never needed: the approval mirrors the boundary's own exclusion rather
+    # than the rule that names the whole toolchain.
+    assert 'pattern = ["uv", "run", "lup-devtools"],' not in rules
     assert 'pattern = ["git", "status"]' in rules
     assert 'pattern = ["gh", "pr", "view"]' in rules
     assert 'pattern = ["uv"]' not in rules
@@ -1680,6 +1684,28 @@ def test_generated_codex_pretool_accepts_a_safe_requested_escape() -> None:
     assert codex_hook_result(body, sandboxed=True).exit_code == 0
 
 
+def test_generated_codex_pretool_refuses_an_escape_no_declaration_covers() -> None:
+    """The agent placing its own call is not a request Lup answers.
+
+    Asking for the launcher's host is a marker a reviewer sees. A native escape
+    on a command the boundary confines and no rule places elsewhere is the
+    agent choosing where its own operation runs, so the hook says which
+    placement policy reached and what to remove.
+    """
+    body: JsonObject = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": "uv run pytest tests/unit",
+            "sandbox_permissions": "require_escalated",
+        },
+    }
+    result = codex_hook_result(body, sandboxed=True)
+
+    assert result.exit_code == 2
+    assert b"remove sandbox_permissions" in result.stderr
+
+
 def test_generated_codex_pretool_accepts_a_safe_automatic_escape() -> None:
     body: JsonObject = {
         "hook_event_name": "PreToolUse",
@@ -1742,7 +1768,11 @@ def test_generated_codex_permission_request_allows_safe_assignment(
     [
         ("# lup: escalate: required diagnostic\npython -c 1", 0),
         ("PATH=/tmp git status", 0),
-        ("1BAD=constant git status", 2),
+        # An invalid identifier is not an assignment, so the shell would run a
+        # program literally named `1BAD=constant` — which the vocabulary lists
+        # nowhere. Exit 0 with no output declines the decision rather than
+        # granting it, leaving Codex's own flow to put it to the user.
+        ("1BAD=constant git status", 0),
     ],
 )
 def test_generated_codex_permission_request_preserves_assignment_guards(
@@ -1767,7 +1797,7 @@ def test_generated_codex_permission_request_preserves_assignment_guards(
 def test_generated_codex_pretool_consumes_only_its_correlated_approval(
     tmp_path: Path,
 ) -> None:
-    command = "gh issue close 180"
+    command = "gh pr merge 180"
     common: JsonObject = {
         "session_id": "session-one",
         "turn_id": "turn-one",
@@ -2743,6 +2773,17 @@ def test_declared_exclusions_cover_the_commands_the_boundary_cannot_carry() -> N
         "ssh -T git@github.com",
     ):
         assert sandbox_excluded(command, excluded), command
+    # The verbs that drive git rather than read it, for the reason `gh` is
+    # excluded: a child of a confined command is confined too, so leaving
+    # these inside moves the same failure one call deeper — measured in #351,
+    # where `dev worktree create` could not take the lock its config write
+    # needs while the identical `git config --local` succeeded one call away.
+    for driving in (
+        "uv run lup-devtools dev worktree create feat-x",
+        "uv run lup-devtools dev pr push",
+        "uv run lup-devtools harness resolve intake",
+    ):
+        assert sandbox_excluded(driving, excluded), driving
     assert not sandbox_excluded("uv run pytest -q", excluded)
     assert not sandbox_excluded(
         "uv run lup-devtools py info lup.policy.hooks", excluded

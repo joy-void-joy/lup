@@ -19,12 +19,13 @@ from pathlib import Path
 # distribution. Naming it as a search path is what lets the imports below
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from kernel.decision import KernelDecision, escalation_offer, sandbox_escaped
+from kernel.decision import KernelDecision, sandbox_escaped
 from policy_data import (
     AGENT_IDENTITY_ENV,
     AUTONOMOUS_AGENT_IDENTITIES,
     DIAGNOSTICS_COMMAND,
 )
+from hashlib import sha256
 from datetime import UTC, datetime
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
@@ -42,7 +43,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.words import INTERPRETERS
-from kernel.shell import decide_shell
+from kernel.shell import decide_shell, sandbox_excluded
 from kernel.tools import decide_tool
 from policy_data import (
     ACCEPTANCE_GUARD,
@@ -71,18 +72,83 @@ def sandbox_active() -> bool:
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
 
 
-def contained() -> bool:
-    """Whether this session is running inside the project's container.
+def measured_boundary(
+    root: Path | None, ledger: str = ".lup/preflight"
+) -> dict[str, list[str]]:
+    """What the launch that opened this session measured about its boundary.
+
+    Read back from the ledger that launch wrote, and only from the one it
+    named: ``LUP_BOUNDARY_NONCE`` says which file this session is entitled to
+    believe. That is what the nonce is for. A ledger left by some other launch
+    is a measurement of some other session, and reading it would be the same
+    class of wrong answer as the constant this replaces, arrived at from the
+    other direction.
+
+    Absent, unnamed, or unparseable all come back empty, and every caller
+    reads empty as "no boundary was measured" -- the fail-closed answer and
+    the honest one. A session whose launcher predates this has no ledger, and
+    gets exactly what a session whose boundary failed to stand gets.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    nonce = environ["LUP_BOUNDARY_NONCE"] if "LUP_BOUNDARY_NONCE" in environ else ""
+    if root is None or not nonce:
+        return {}
+    try:
+        raw = (root / ledger / f"{nonce}.json").read_text()
+    except OSError:
+        return {}
+    try:
+        loaded = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {
+        name: [item for item in value if isinstance(item, str)]
+        for name, value in loaded.items()
+        if isinstance(name, str) and isinstance(value, list)
+    }
+
+
+def contained(measured: dict[str, list[str]]) -> bool:
+    """Whether this session runs inside the boundary its profile promised.
 
     A different question from :func:`sandbox_active`, and the two are not
     interchangeable: the native sandbox confines one call at a time and can
     be told to leave some alone, where a container confines the process and
-    was never asked. Read from the image's own baked-in variable rather than
-    from anything a launch passes, so a session cannot be told it is
-    contained by something standing outside the container.
+    was never asked.
+
+    Read from what the launch *measured* rather than from a variable. The
+    variable was ``LUP_CONTAINED``, a constant an image bakes, and a constant
+    answers yes for any container built from that image, for a bare ``run``
+    holding none of the lease, and -- since a launcher forwards its own
+    environment -- for an uncontained session started from a shell that
+    happened to export it. That last one is not hypothetical: it is a session
+    reporting a boundary with no container under it, placing every operation
+    by a wall that is not there.
     """
-    environ = os.environ  # lup: ignore[os-environ]
-    return "LUP_CONTAINED" in environ and environ["LUP_CONTAINED"] == "1"
+    return "yes" in (measured["contained"] if "contained" in measured else [])
+
+
+def delivers(measured: dict[str, list[str]], capability: str) -> bool:
+    """Whether the launch observed one capability this session depends on."""
+    return capability in (measured["delivered"] if "delivered" in measured else [])
+
+
+def defers_unjudged(measured: dict[str, list[str]]) -> bool:
+    """Whether this profile hands legible work nothing judged to the runtime.
+
+    A bool rather than the policy's own word for it, because this half may
+    reach nothing but a pinned standard library and cannot name the literal
+    the kernel takes. The caller spells the vocabulary; what crosses here is
+    the fact.
+
+    False wherever nothing was measured, which is both the declared default
+    and the visible answer. A session that could not read its own profile is
+    not one that should infer a seamless posture from the silence.
+    """
+    declared = measured["unjudged_ambient"] if "unjudged_ambient" in measured else []
+    return bool(declared) and declared[0] == "defer"
 
 
 def append_hook_evidence(path: Path, encoded: str) -> None:
@@ -203,6 +269,93 @@ def script_run_nudge(
         " `lup-devtools` command, which lands in the diff and can be run"
         " again by name"
     )
+
+
+def record_question(
+    root: Path | None,
+    command: str,
+    reason: str,
+    rule: str,
+    purpose: str,
+    reviewer: str,
+    escalated: str,
+    placement: str,
+    session: str = "",
+    requester: str = "",
+    relay: str = ".lup/questions.jsonl",
+) -> str:
+    """Park one final ask in the durable relay, before anybody is shown it.
+
+    Every route to a question passes through a verdict, and the boundary that
+    reaches one is what every provider has in common — so a record written
+    here is a record both of them produce, which is what makes the relay one
+    authority rather than a store the in-process seam happens to use.
+
+    Primitives rather than a verdict, because this half may reach nothing but
+    the pinned standard library and a verdict is the kernel's. The caller
+    reads the fields off it.
+
+    Append-only, because the failure this survives is a crash between
+    recording a question and answering it, and a store rewritten in place has
+    a window where the question is neither the old one nor the new one.
+
+    The id is derived from the session and what is being asked, so the same
+    question reached twice folds to one record instead of filling a queue
+    nobody can then read. What it deliberately does not record is *who
+    answered*: on the interactive path that is a receipt inferred from the
+    provider's own behaviour, and inventing one here would be writing down a
+    decision nobody made.
+
+    Silent about its own failure, for the reason every writer in this module
+    is: it runs in front of an operation somebody asked for, and a read-only
+    checkout is an ordinary place to be running. What it must not do is turn
+    a policy question into a crash.
+    """
+    if root is None or not command:
+        return ""
+    identifier = sha256(f"{session}:{command}:{reason}".encode()).hexdigest()[:16]
+    entry = json.dumps(
+        {
+            "id": identifier,
+            "operation": {
+                "id": identifier,
+                "session": session,
+                "requester": requester,
+                "tool": "Bash",
+                "payload": {"command": command},
+                "cwd": str(root),
+                "worktree": str(root),
+                "placement": placement,
+            },
+            "fingerprint": identifier,
+            "reason": reason,
+            "rule": rule,
+            "purpose": purpose or None,
+            "requirement": reviewer,
+            # Empty and *said to be unresolved*, which are different facts: this
+            # boundary is hermetic and cannot reach the session's principals, so
+            # it has no chain to resolve rather than a chain that resolved to
+            # nobody. Written as the second, every question parked here would be
+            # answerable by nobody and the queue could only grow.
+            "eligible": [],
+            "chain_resolved": False,
+            "escalation": escalated,
+            "state": "pending",
+            "created": datetime.now(UTC).isoformat(),
+        },
+        sort_keys=True,
+    )
+    path = root / relay
+    try:
+        held = path.read_text(encoding="utf-8") if path.exists() else ""
+        if f'"id": "{identifier}"' in held:
+            return identifier
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as sink:
+            sink.write(entry + "\n")
+    except OSError:
+        return ""
+    return identifier
 
 
 def record_deferral(
@@ -936,6 +1089,38 @@ def recoverable_write_targets(
     ]
 
 
+def unleased_write_targets(
+    targets: list[str], measured: dict[str, list[str]], root: Path | None = None
+) -> list[str]:
+    """Report which targets fall outside what this launch mounted writable.
+
+    The lease is a snapshot. A contained launch enumerates its siblings when
+    the container starts and punches a read-only overlay over each; a worktree
+    cut afterwards gets the writable base with no overlay, and the mount
+    namespace is fixed by then, so nothing can be remounted to cover it. The
+    judgement is what is left, which is the arrangement the lease already
+    relies on elsewhere.
+
+    Nothing is reported where no boundary was measured. A session that could
+    not read its own lease knows of no writable roots at all, and reporting
+    every target as unleased would put a question in front of every write in
+    the checkout -- which teaches nobody anything and buries the real ones.
+    """
+    leased = measured["writable_roots"] if "writable_roots" in measured else []
+    if not leased:
+        return []
+    where = Path.cwd() if root is None else root
+    return [
+        target
+        for target in targets
+        for resolved in [str((where / target).resolve())]
+        if not any(
+            resolved == root_path or resolved.startswith(root_path + "/")
+            for root_path in leased
+        )
+    ]
+
+
 def empty_directory_targets(targets: list[str], root: Path | None = None) -> list[str]:
     """Report which targets are directories with nothing in them.
 
@@ -1062,6 +1247,11 @@ def bash_decision(
     argument for the same reason the rest does — a fact one dispatcher stopped
     passing is a rule that silently stopped applying.
     """
+    # Read once and passed to each fact that needs it, rather than re-read per
+    # question: the ledger is one measurement of one launch, and a second read
+    # partway through a verdict could answer from a file the first did not see.
+    boundary = measured_boundary(cwd)
+    inside = contained(boundary)
     acted_on = shell_path_verb_targets(command)
     # Before the verdict rather than after it, because the verdict reads it:
     # an approval question exists where a loss is permanent, and a tree the
@@ -1097,14 +1287,47 @@ def bash_decision(
         # refusal that named no route sent it to queue a blocking question
         # instead.
         relayed=relayed,
-        escapable=escapable,
+        # What `outside` means is the launcher's host, and a runtime's own
+        # per-call escape only reaches it where there is no container in
+        # between. Uncontained, that escape genuinely is the way out of the
+        # only boundary there is; contained, it lands in the container and a
+        # placement settled on it would send an operation somewhere nothing
+        # can carry it. So the runtime still answers for its escape and the
+        # measurement answers for whether that escape reaches the host.
+        escapable=(escapable and not inside) or delivers(boundary, "host_executor"),
         # Read here rather than passed by each dispatcher, unlike `escapable`
-        # above: whether this process sits inside the container is a fact
-        # about the host with no runtime variation to it, so neither
-        # dispatcher is given the chance to forget it.
-        contained=contained(),
+        # above: whether this process sits inside the boundary its profile
+        # promised is a fact about the host with no runtime variation to it,
+        # so neither dispatcher is given the chance to forget it.
+        contained=inside,
+        # The profile's own answer for the long tail, which only an
+        # uncontained session ever reaches: contained, the row above settles
+        # the same operation first.
+        unjudged_ambient="defer" if defers_unjudged(boundary) else "ask",
+        # Resolved against what this launch mounted writable, so a write into a
+        # worktree cut after the container started reaches a reviewer instead of
+        # the writable base no overlay covers.
+        unleased_targets=unleased_write_targets(
+            [*shell_write_targets(command), *acted_on], boundary, cwd
+        ),
         recovered=bool(reference),
     )
+    # Parked before anything is rendered, because the relay is the durable
+    # record every final ask is written to and the provider's own prompt is
+    # that record's renderer rather than a second authority. Written here, at
+    # the one call site both runtimes pass through, so neither can reach a
+    # question the queue does not hold.
+    if verdict.effect == "ask":
+        record_question(
+            cwd,
+            command,
+            verdict.reason,
+            verdict.rule,
+            verdict.purpose or "",
+            verdict.reviewer,
+            verdict.escalated,
+            verdict.sandbox,
+        )
     if verdict.effect == "deny":
         return verdict
     # The log half of allow-and-log. A deferral is this policy declining to
@@ -1112,7 +1335,7 @@ def bash_decision(
     # own gate decides and the reason goes to no human. Written down here or
     # it is not written down anywhere.
     if verdict.effect == "defer":
-        record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
+        record_deferral(cwd, command, verdict.reason, verdict.checkpoint != "nothing")
     pointed = undo_point(verdict, reference)
     if pointed.effect != "allow":
         return pointed
@@ -1124,8 +1347,19 @@ def bash_decision(
         pointed.reason + nudge,
         pointed.sandbox,
         pointed.escalated,
-        recovery=pointed.recovery,
+        checkpoint=pointed.checkpoint,
     )
+
+
+def unconfined_by_declaration(command: str) -> bool:
+    """Whether the boundary declaration takes this command out of isolation.
+
+    A command excluded from the boundary runs unconfined because the profile
+    said so, which is a grant a native escape request is spending rather than
+    circumventing. Read here, beside every other reading of the same table, so
+    a runtime cannot answer it differently from the classifier.
+    """
+    return sandbox_excluded(command, SANDBOX_EXCLUDED_COMMANDS)
 
 
 def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
@@ -1150,7 +1384,7 @@ def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
         f"`lup-devtools dev undo` lists it as {reference}",
         verdict.sandbox,
         verdict.escalated,
-        recovery=verdict.recovery,
+        checkpoint=verdict.checkpoint,
     )
 
 
@@ -1295,9 +1529,11 @@ def edit_documents(path, old_text, new_text, replace_all):
 def spent_escape(tool_input):
     """Whether the call as written already asked to run outside the sandbox.
 
-    Claude Code's own spelling of the escape, read here rather than compared
-    against in two places: what it means is the kernel's `sandbox_escaped`,
-    which both this boundary and the in-process seam ask.
+    A fact about where this call would land, never a request Lup honours:
+    asking for the launcher's host is `# lup: escalate[sandbox]: <why>`, which
+    is reviewed. What this answers is narrower and only ever tightens — a call
+    carrying the flag is not confined by the native sandbox, so unjudged work
+    in it has no boundary to be carried by and re-enters the stricter lattice.
     """
     return (
         "dangerouslyDisableSandbox" in tool_input
@@ -1448,17 +1684,16 @@ def rendered(decision, payload, placed):
     ``updatedInput`` field: a directive is placed only in an ``Edit`` or
     ``Write``, and the sandbox argument belongs only to ``Bash``.
 
-    Both sandbox questions are answered yes here, from that one field: the
-    rewrite is how a verdict places a call, and the same field on the call the
-    agent writes is how the agent places its own — which is what an
-    ``escalable`` verdict offers it. Both halves of that offer are decided in
-    the kernel rather than spelled here: `escalation_offer` says whether it is
-    extended, and `sandbox_escaped` whether a call that spent it still leaves.
-    The in-process seam asks the same two, because one field two boundaries
-    fill from two conditions is a field they can fill differently — which is
-    how the rewrite once revoked an offer the permission channel had granted.
+    The rewrite is how a verdict places a call, and it is the whole of what
+    this field does: whether a placement leaves the boundary is the kernel's
+    `sandbox_escaped` rather than a condition spelled here, because the
+    in-process seam fills the same field and two conditions written twice are
+    two conditions that can be written differently. A call the agent wrote the
+    field on itself is overwritten rather than read: asking for the host is a
+    reviewed request spelled `# lup: escalate[sandbox]:`, and a native flag the
+    agent set for itself is not that request.
     """
-    settled = decision.placed(escapable=True, agent_escalates=True)
+    settled = decision.placed(escapable=True)
     if settled.effect == "defer":
         return {}
     answer = {
@@ -1466,11 +1701,6 @@ def rendered(decision, payload, placed):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
-    offer = escalation_offer(
-        settled.sandbox, settled.reason, payload["tool_name"] == "Bash"
-    )
-    if offer:
-        answer["additionalContext"] = offer
     if placed is not None and settled.effect != "deny":
         return {"hookSpecificOutput": {**answer, "updatedInput": placed}}
     if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
@@ -1480,9 +1710,7 @@ def rendered(decision, payload, placed):
             **answer,
             "updatedInput": {
                 **payload["tool_input"],
-                "dangerouslyDisableSandbox": sandbox_escaped(
-                    settled.sandbox, spent_escape(payload["tool_input"])
-                ),
+                "dangerouslyDisableSandbox": sandbox_escaped(settled.sandbox),
             },
         }
     }

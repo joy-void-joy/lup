@@ -1,194 +1,131 @@
 """The verdict vocabulary every kernel module returns."""
 
-from typing import Literal
+from typing import Literal, TypedDict, Unpack
+
+from .semantics import (
+    AbstentionPurpose,
+    Capability,
+    RefusalCause,
+    ReviewPurpose,
+    ReviewerRequirement,
+    Visibility,
+)
 
 
 type DecisionEffect = Literal["allow", "ask", "deny", "defer"]
+"""What the provider is told, and the whole of what it may be told.
 
-type Recovery = Literal["snapshot", "container", "nothing"]
-"""What puts back what a command destroys, which decides who has to be asked.
+Four values, and the boundary between them is where native autonomy begins:
 
-The vocabulary's own criterion, stated in :mod:`lup.policy.vocabulary`, is
-that what stays guarded is *the direction that removes something no second
-attempt restores*. That is not a fact about the command alone -- it is a fact
-about the command and the session beneath it, and a session with a boundary
-restores more than one without. So the rule declares which restorer its
-question was about, and the settlement order asks whether that restorer is
-present.
+* ``allow`` is positive authority. Lup authorizes this exact operation, so no
+  further permission decision is needed and the provider's auto-mode has
+  nothing to add. It is not a request for the provider to approve.
+* ``ask`` is a Lup-owned review requirement. Provider auto-mode cannot
+  satisfy it, because the point of the question is that a person sees this
+  moment while it is still happening.
+* ``deny`` is a prohibition.
+* ``defer`` is the only value that hands the decision over, and the only one
+  under which the session behaves exactly as it would with Lup absent.
 
-The three name *how much* has to be present, so they read as a lattice rather
-than as a menu:
-
-* ``snapshot`` -- the whole loss is working-tree content in this checkout, so
-  the undo layer alone answers it, container or not. ``git reset --hard``,
-  ``git restore``, ``git rm``: verbs that act on the repository they are run
-  in and reach nothing else.
-* ``container`` -- the loss can also land on the machine, so a container is
-  needed *as well as* the snapshot: the container makes the machine
-  disposable, and the one part of it the container does not protect is the
-  bind-mounted checkout, which is what the snapshot holds. ``rm``, ``mv``,
-  ``tar``, ``apt install``, ``systemctl``.
-* ``nothing`` -- neither reaches it. A remote ref, a published artifact, an
-  issue somebody reads, another machine; a command whose argument is another
-  command, which is unbounded by construction; and the parts of this checkout
-  no snapshot holds, which is where ``git clean -fdx`` and ``git stash drop``
-  belong -- ignored files and stashes are outside what it captures.
-
-``nothing`` is the default, and the default is the whole safety of this axis:
-a rule nobody annotated keeps asking, and an annotation is what relaxes it.
-The other direction -- default recoverable, annotate the dangerous -- makes
-every rule anybody forgets a grant.
-
-A row whose guarded flags do not agree takes the weakest of them. ``sort``
-guards ``-o``, which writes a file, beside ``--compress-program``, which runs
-one; the row says ``nothing``, because a reader of the verdict cannot tell
-which flag brought it.
+Nothing else joins them. Everything Lup knows *about* one of these four —
+who may review, where it runs, what would restore it, why it was refused —
+is a separate fact in :mod:`lup.policy.kernel.semantics`, because folding
+another value in here is how a runtime ends up being told something it has no
+way to act on.
 """
 
-type SandboxPlacement = Literal["inside", "ambient", "escalable", "outside"]
-"""Where a call runs, which is a different question from who decides it.
+type CheckpointRequirement = Literal["targeted", "boundary_wide", "unrecoverable"]
+"""What capture would put back what an operation destroys locally.
 
-The four effects answer *who decides*; this answers *where it runs*. They are
-two fields rather than one widened vocabulary because folding them together
-forces an ask-plus-escape member next, and then a deny-plus-escape. Composed,
-the pairs that carry meaning read:
+An approval question over local loss exists because the loss is permanent.
+Naming the capture that makes it impermanent is naming the condition under
+which the question stops being worth a person's attention — and, proven,
+settles the operation to ``allow`` rather than merely to the provider's own
+gate. Proof is the whole of it: a snapshot reference is not evidence, and
+:class:`~lup.policy.kernel.findings.CheckpointEvidence` is what a rule's
+requirement is discharged against.
 
-* ``ask`` + ``outside`` — ask, warning the call will run out of the sandbox
-* ``ask`` + ``escalable`` — ask, and once granted the caller may take it out
-* ``deny`` — deny, whatever the placement says
-* ``allow`` + ``inside`` — run confined, whatever the session's own mode is
-* ``allow`` + ``ambient`` — run, deferring to the session's sandbox status
-* ``allow`` + ``escalable`` — run confined, and the caller may take it out
-* ``allow`` + ``outside`` — run out of the sandbox, unprompted
+* ``targeted`` — every path this operation can affect resolves statically, so
+  a capture of exactly those paths covers the whole loss. ``rm build/out``,
+  ``git restore``, a redirection into a named file.
+* ``boundary_wide`` — variables, globs, substitutions, or a directory walk
+  prevent an exact footprint, so only a capture of every precious writable
+  root covers it. The wider capture is what the opacity costs, not a reason
+  to refuse the operation.
+* ``unrecoverable`` — no capture reaches it. A remote ref, a published
+  artifact, an issue somebody read, a command whose argument is another
+  command. Recovery has nothing to say and the question stands.
 
-``escalable`` is not ``ambient`` said differently, and standing one in for the
-other is invisible exactly where it matters. ``ambient`` reads the placement
-off the session, so an unconfined session runs the call outside; ``escalable``
-confines it whatever the session is doing and hands the choice to the agent
-making the call. The two agree only while the session is already confined.
+``unrecoverable`` is the default, and the default is the safety of the axis:
+a rule nobody annotated keeps asking, and an annotation is what relaxes it.
+The other direction would make every rule anybody forgot into a grant.
 
-``ambient`` is the default because saying nothing about placement is what
-almost every verdict means, and a runtime that cannot place a single call
-renders the plain effect instead — see :meth:`KernelDecision.placed`.
+A row whose guarded forms do not agree takes the weakest of them. ``sort``
+guards ``-o``, which writes a file, beside ``--compress-program``, which runs
+one; the row says ``unrecoverable``, because a reader of the verdict cannot
+tell which flag brought it.
+"""
+
+type SandboxPlacement = Literal["inside", "ambient", "outside"]
+"""Where an operation runs, which is a different question from who decides it.
+
+The boundary these name is the *outer containment boundary* — the profile's
+own, whatever delivers it — and never merely a provider's per-call sandbox.
+That native sandbox is one adapter mechanism for spelling ``inside``; a
+generated artifact may also spell it through a provider-native permission
+field. Neither is a second semantic placement, and ``outside`` never means
+"out of the native sandbox but still in the container".
+
+* ``inside`` — execute inside the containment boundary, whatever mode the
+  session is in. Provider auto-mode does not move it.
+* ``ambient`` — execute wherever the session already lives. The default,
+  because saying nothing about placement is what almost every verdict means.
+* ``outside`` — execute on the launcher's host, through the trusted host
+  executor. Unprompted under ``allow``; under ``ask``, only after exact
+  approval.
+
+Only ``allow`` and ``ask`` carry authoritative placement. ``deny`` never
+executes, so placement is moot, and ``defer`` supplies no Lup placement at
+all — supplying one would be Lup deciding half of a decision it just handed
+over.
 """
 
 # lup: ignore[constant-declaration] — the words this gate says, in a kernel
 # compiled hermetically into a bare dispatcher that takes no arguments
-SANDBOX_ESCAPE_NOTICE = " — this will run outside the sandbox"
-"""What an approval question adds when the call it approves also escapes."""
+SANDBOX_ESCAPE_NOTICE = " — this will run on the host, outside the boundary"
+"""What an approval question adds when the call it approves also leaves."""
 
-# lup: ignore[constant-declaration] — the offer's own wording, which every
-# runtime carries unchanged because the reason text is the one channel they
-# share; a caller replacing it would be replacing the offer, not configuring it
-SANDBOX_ESCALATION_OFFER = (
-    " — you may re-issue this outside the sandbox if it needs to be there"
+# lup: ignore[constant-declaration] — the recipe a diagnostic hands the agent;
+# its whole value is being the same words every time
+SANDBOX_ESCALATION_RECIPE = (
+    " — this ran inside the containment boundary; if it genuinely needs the"
+    " launcher's host, resubmit with a leading"
+    " '# lup: escalate[sandbox]: <why>' line"
 )
-"""How a permission to escalate reaches the agent that holds it.
+"""How an operation that found the boundary insufficient asks to leave it.
 
-The reason is the channel because every runtime carries reason text unchanged,
-where a surfaced native option exists only where a runtime has one. It says
-that the call may leave, not the words for leaving: those are one runtime's own
-spelling, and prose reaches the agent with them from the spellings seam.
-
-It also says nothing about where the call runs without leaving. That is the
-placement's answer and not this text's, and stating it here would be the same
-substitution the placement exists to prevent: on a runtime that renders no
-placement the call follows the session, so prose promising confinement would
-be false in exactly the unconfined session that matters.
+Carried on the diagnostic rather than appended to every permitted call. A
+context line per allowed operation is how a channel meant for what matters
+stops being read, and the moment the agent needs this is the moment something
+inside actually failed for want of the host.
 """
 
-# lup: ignore[constant-declaration] — what that same offer degrades to, which
-# has to say the outcome rather than the cause because two different absences
-# reach it and the agent can act on neither
-SANDBOX_ESCALATION_UNSUPPORTED = (
-    " — the escalation offered here is not available, because nothing in this"
-    " session takes a single call out of the sandbox"
-)
-"""What a permission to escalate degrades to where the agent cannot spend it.
-
-The offer withdrawn and the gap stated. Three different absences reach it — a
-runtime that gives the agent no words for leaving, a session whose host
-refuses an unsandboxed command however it is asked for, and a *tool* with no
-field to carry the escape, since every runtime that offers one offers it on
-the shell tool alone. The agent can act on none of them, so the wording names
-the outcome rather than the cause. Dropped in silence it would read as an
-offer, and an agent that spends a turn finding out otherwise learns nothing it
-can act on.
-"""
-
-# lup: ignore[constant-declaration] — the refusal a trapped call is stopped
-# with, naming the bare filesystem error it would otherwise die on; the whole
-# value of the words is that they are the same ones every time
+# lup: ignore[constant-declaration] — the refusal a call with nowhere to run is
+# stopped with, naming the missing capability rather than the wall
 SANDBOX_TRAPPED_REASON = (
-    "this has to run outside the sandbox, but this call has no active per-call"
-    " escape — resubmit through the runtime's native sandbox escalation when"
-    " available; only a runtime without that channel needs a session that is"
-    " not sandboxed. Running this call confined would fail with a bare"
-    " read-only-filesystem error and misreport the boundary as repository failure"
+    "this has to run on the launcher's host, and this profile declares no host"
+    " executor — no approval can create the channel, so the operation is"
+    " refused rather than run somewhere it was not authorized to run"
 )
-"""Why a call that has to escape is refused where nothing can carry it out.
+"""Why an operation needing the host is refused where no channel reaches it.
 
-An intent no runtime will honour is worse than a refusal: the call runs,
-fails on whatever it happened to write first, and the agent cannot tell that
-from a repository in a bad state, so it retries, works around it, or reports
-success from a session that never ran a command.
+A capability-blocked refusal, not a question. Offering the question would
+spend a person's attention on a decision that changes nothing: approving it
+would still leave the operation with nowhere to go, and running it inside
+would run something the placement said must not run there — failing on
+whatever it touched first, and misreporting the boundary as a broken
+repository.
 """
-
-
-def escalation_offer(
-    sandbox: SandboxPlacement, reason: str, spendable: bool = True
-) -> str:
-    """What a verdict says to the agent rather than about it, if anything.
-
-    A permission channel's reason reaches whoever was asked, and that is never
-    the agent: on a grant nobody was asked and it reaches the record, and on
-    an approval question a human reads it. So an offer addressed to the agent
-    making the call has to say itself again on the channel an agent reads, and
-    the escalable placement carries the only such offer — everything else a
-    verdict says about a call it permits is bookkeeping, and a context line
-    per permitted call is how a channel meant for what matters stops being
-    read.
-
-    The effect is not part of the question, because neither of the effects a
-    placement survives puts this reason in front of the agent: it reaches the
-    record on one and a human on the other. One function because four
-    boundaries deliver it — both hook factories, the in-process renderer, and
-    the compiled dispatcher — and a condition spelled out at each is one that
-    can be spelled differently at each.
-
-    ``spendable`` is whether *this* call has somewhere to put the escape.
-    Every runtime that offers one offers it as a field of the shell tool's
-    own input, so an edit or a fetch carrying an escalable placement would be
-    handed a permission with nothing to spend it on — granted on the reason
-    channel and unspendable on the rewrite channel, which is the exact
-    mismatch :func:`sandbox_escaped` exists to prevent, in the direction
-    nobody was checking. Nothing declares such a placement today; the default
-    is permissive so that stays true of every caller that has not needed to
-    think about it, and the callers that judge more than one tool say which
-    they are holding.
-    """
-    return reason if spendable and sandbox == "escalable" else ""
-
-
-def sandbox_escaped(sandbox: SandboxPlacement, agent_escaped: bool) -> bool:
-    """Whether a placed call runs outside, given what the call already asked.
-
-    ``outside`` leaves because the verdict says so and ``inside`` stays
-    whatever the call said, so only ``escalable`` reads the second argument:
-    the permission is the agent's to spend, so a call that spent it goes out
-    and one that did not stays confined. Answering a plain ``False`` there
-    would answer for the agent and make the offer a verdict it has no way to
-    accept — granted on the permission channel and revoked on the rewrite.
-
-    Which field of a call carries the escape is one runtime's own spelling,
-    so this takes the answer rather than the call and stays as neutral as the
-    kernel around it. One function because two boundaries render the rewrite —
-    the in-process seam and the compiled dispatcher — and a condition spelled
-    out at each is one that can be spelled differently at each, which is how
-    the offer came to be honoured on one path and stripped on the other.
-    """
-    return sandbox == "outside" or (sandbox == "escalable" and agent_escaped)
-
 
 # lup: ignore[library-default] — the stdlib the kernel actually imports; the hermetic guarantee it exists to hold
 KERNEL_IMPORT_ALLOWLIST = (
@@ -212,7 +149,7 @@ KERNEL_IMPORT_ALLOWLIST = (
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 ESCALATE_HINT = (
     " — reshape the command into the allowed vocabulary, or resubmit with a"
-    " leading '# lup: escalate: <why>' line to request approval"
+    " leading '# lup: escalate[decision]: <why>' line to request approval"
 )
 # lup: ignore[constant-declaration] — refusal wording
 RESHAPE_HINT = " — reshape the command into the allowed vocabulary"
@@ -255,33 +192,154 @@ word read as opaque — the conservative direction.
 """
 
 
-class KernelDecision:
-    """Dependency-free allow, ask, deny, or defer result, and where it runs.
+def sandbox_escaped(sandbox: SandboxPlacement) -> bool:
+    """Whether a placed operation runs on the launcher's host.
 
-    ``recovery`` is the third axis and the only one that says nothing about
-    this call: it says what would put back what the call destroys, so a
-    session that carries that restorer can settle the question differently
-    from one that does not. It survives every effect, because it is a
-    property of the command rather than of the verdict reached about it.
+    One function rather than a comparison spelled at each of the boundaries
+    that render the crossing — both hook factories, the in-process renderer,
+    and each compiled dispatcher — because a condition spelled out at four
+    sites is one that can be spelled differently at four sites, which is how
+    a placement came to be honoured on one path and stripped on the other.
+    """
+    return sandbox == "outside"
+
+
+class Revision(TypedDict, total=False):
+    """What one settlement row may rewrite, absent where it changes nothing.
+
+    A TypedDict rather than a model because this is the hermetic kernel, which
+    has no pydantic; partial because a row names one or two fields and the
+    point of the shape is that it says nothing about the rest.
     """
 
     effect: DecisionEffect
     reason: str
     sandbox: SandboxPlacement
     escalated: str
-    """Why the agent said this call was worth putting to a human, if it did.
+    checkpoint: CheckpointRequirement
+    unlisted: bool
+    reviewer: ReviewerRequirement
+    purpose: ReviewPurpose | None
+    visibility: Visibility
+    cause: RefusalCause | None
+    capability: Capability | None
+    abstention: AbstentionPurpose | None
+    hard: bool
+    findings: tuple["KernelDecision", ...]
+    rule: str
+    evaluator: str
+
+
+class KernelDecision:
+    """One settled verdict, and every orthogonal fact settled alongside it.
+
+    The first four fields are what a provider is told. The rest are what Lup
+    knows about that answer, and each is a separate axis because each has a
+    different answerer: a checkpoint does not consent to a release, an
+    approval does not build a host channel, and a rule id is not a review
+    purpose. Composing them into one enum is what made a verdict unreadable
+    at exactly the moment somebody needed to know why it happened.
+    """
+
+    effect: DecisionEffect
+    reason: str
+    sandbox: SandboxPlacement
+    escalated: str
+    """Why the agent said this operation was worth putting to a reviewer.
 
     Carried as its own field rather than left readable in the reason, because
-    a host with no human to ask has somewhere else to send it and needs to
-    know that this particular refusal is one somebody asked for. Sniffing the
+    a host with no reviewer has somewhere else to send it and needs to know
+    that this particular refusal is one somebody asked for. Sniffing the
     reason text for a prefix would make every caller re-derive what the
     marker already stated.
 
     It survives the collapse to ``deny``: the whole point is that the agent's
     stated intent outlives the refusal, so whoever reads the relay sees why
-    the agent thought the command was worth running.
+    the agent thought the operation was worth running.
     """
-    recovery: Recovery
+    checkpoint: CheckpointRequirement
+    """What capture would put back what this operation destroys locally.
+
+    The one axis that says nothing about this verdict: it says what a session
+    carrying that capture could settle differently. It survives every effect,
+    because it is a property of the operation rather than of the verdict
+    reached about it.
+    """
+    unlisted: bool
+    """Whether this deferral is only the vocabulary having no row for the call.
+
+    Two very different things reach ``defer``, and a session with no boundary
+    beneath it has to tell them apart. This one is the vocabulary staying
+    silent: the kernel read the command, found it well-formed, and nothing
+    named it. Every other deferral is the kernel declining to read — an
+    unresolved expansion, a substitution it cannot see into, an operator its
+    parser does not carry — or a form some rule deliberately left out.
+
+    Only the silent one is a question a human can answer, because it is the
+    only one where what the human is shown is what will run. Asking about
+    text the policy itself could not parse would show them `cat x` and run
+    `rm -rf ~`, so those keep refusing however many reviewers are present.
+    """
+    reviewer: ReviewerRequirement
+    """Who may answer, on the one effect that asks anybody. ``human_only``
+    unless a rule deliberately opted its question into the supervisor chain."""
+    purpose: ReviewPurpose | None
+    """Which kind of decision a question is, or ``None`` where it asks nobody."""
+    visibility: Visibility
+    """Whether an operation that did not interrupt should still be surfaced."""
+    cause: RefusalCause | None
+    """Why a refusal was reached, or ``None`` where nothing was refused."""
+    capability: Capability | None
+    """Which runtime guarantee was missing, on a capability-blocked refusal.
+
+    Set only alongside ``cause="capability"``, and the pair is what says the
+    refusal is unanswerable: a reviewer cannot approve a channel into being,
+    so the operation is refused rather than parked on a question whose answer
+    changes nothing.
+    """
+    abstention: AbstentionPurpose | None
+    """Why a ``defer`` declined to finalize, or ``None`` on any other effect.
+
+    ``provider_native`` is the deliberate handoff and the only abstention that
+    survives to the provider. ``boundary_settle`` is the classifier lacking a
+    judgement the boundary still has facts about, and settlement resolves it
+    rather than passing it on — which is the distinction that stopped a parser
+    gap from silently inheriting provider auto-mode.
+    """
+    rule: str
+    """The stable id of the rule that reached this verdict, or ``""``.
+
+    Stable across rewordings, because it is what an audit counts by and what a
+    person answering a repeated question is pointed at. A reason is prose and
+    a rule id is an identifier; a taxonomy built on the first is a taxonomy of
+    how sentences were phrased.
+    """
+    hard: bool
+    """Whether this prohibition is one no reviewer may override.
+
+    Almost none are. An ordinary refusal is a rule's judgement, and a rule's
+    judgement is exactly what a person with more context may overrule — which
+    is what decision escalation exists for. A hard prohibition is a policy
+    invariant instead: escalating one produces the same refusal, because the
+    thing being asked for is not the kind of thing an approval creates.
+    """
+    findings: tuple["KernelDecision", ...]
+    """The rule verdicts that composed into this one, empty where this is one.
+
+    A composed verdict has to answer questions its own fields cannot: whether
+    *every* surviving reason to ask is one a proven capture retires, which is
+    the difference between recovery settling an operation to allow and
+    recovery quietly discharging a code review that happened to travel beside
+    it. Keeping the parts is how that stays answerable, and it is what an
+    audit reconstructs a decision from.
+    """
+    evaluator: str
+    """The stable id of the evaluator that produced it, or ``""``.
+
+    Which classifier looked, as against which rule it applied — the shell
+    vocabulary, the edit gate, the fetch scopes, the effect grammar. Two rules
+    may share an evaluator and one rule never spans two.
+    """
 
     def __init__(
         self,
@@ -289,95 +347,187 @@ class KernelDecision:
         reason: str = "",
         sandbox: SandboxPlacement = "ambient",
         escalated: str = "",
-        recovery: Recovery = "nothing",
+        checkpoint: CheckpointRequirement = "unrecoverable",
+        unlisted: bool = False,
+        reviewer: ReviewerRequirement = "human_only",
+        purpose: ReviewPurpose | None = None,
+        visibility: Visibility = "quiet",
+        cause: RefusalCause | None = None,
+        capability: Capability | None = None,
+        abstention: AbstentionPurpose | None = None,
+        hard: bool = False,
+        findings: tuple["KernelDecision", ...] = (),
+        rule: str = "",
+        evaluator: str = "",
     ) -> None:
         if effect not in ("allow", "ask", "deny", "defer"):
             raise ValueError(f"invalid kernel decision effect {effect!r}")
-        if sandbox not in ("inside", "ambient", "escalable", "outside"):
+        if sandbox not in ("inside", "ambient", "outside"):
             raise ValueError(f"invalid kernel decision placement {sandbox!r}")
-        if recovery not in ("snapshot", "container", "nothing"):
-            raise ValueError(f"invalid kernel decision recovery {recovery!r}")
+        if checkpoint not in ("targeted", "boundary_wide", "unrecoverable"):
+            raise ValueError(f"invalid kernel decision checkpoint {checkpoint!r}")
         self.effect = effect
         self.reason = reason
         self.escalated = escalated
-        self.recovery = recovery
+        self.checkpoint = checkpoint
+        self.unlisted = unlisted
+        self.reviewer = reviewer
+        self.purpose = purpose
+        self.visibility = visibility
+        self.cause = cause
+        self.capability = capability
+        self.abstention = abstention
+        self.hard = hard
+        self.findings = findings
+        self.rule = rule
+        self.evaluator = evaluator
         # Only a verdict this policy actually reached is placed: a refusal is
-        # not softened by where the call would have run, and a deferral hands
-        # the whole question over, the session's sandbox status included.
+        # not softened by where the operation would have run, and a deferral
+        # hands the whole question over, placement included.
         self.sandbox = sandbox if effect in ("allow", "ask") else "ambient"
 
-    def placed(self, escapable: bool, agent_escalates: bool) -> "KernelDecision":
+    def revised(self, **changes: Unpack[Revision]) -> "KernelDecision":
+        """This verdict with named fields replaced and the rest carried over.
+
+        Every settlement row rewrites one or two fields and must not drop the
+        fourteen it is not about — which is exactly what a constructor call
+        listing the fields a row happens to remember does. Spelled once here
+        so a row says what it changes and nothing says what it preserves.
+
+        Each field is read individually rather than merged from a mapping,
+        because ``None`` is a value three of them can take and a merge cannot
+        tell "clear this" from "leave it alone". Verbose, and the verbosity is
+        the whole of what makes a row that clears a purpose distinguishable
+        from one that never mentioned it.
+        """
+        return KernelDecision(
+            changes["effect"] if "effect" in changes else self.effect,
+            changes["reason"] if "reason" in changes else self.reason,
+            changes["sandbox"] if "sandbox" in changes else self.sandbox,
+            changes["escalated"] if "escalated" in changes else self.escalated,
+            changes["checkpoint"] if "checkpoint" in changes else self.checkpoint,
+            changes["unlisted"] if "unlisted" in changes else self.unlisted,
+            changes["reviewer"] if "reviewer" in changes else self.reviewer,
+            changes["purpose"] if "purpose" in changes else self.purpose,
+            changes["visibility"] if "visibility" in changes else self.visibility,
+            changes["cause"] if "cause" in changes else self.cause,
+            changes["capability"] if "capability" in changes else self.capability,
+            changes["abstention"] if "abstention" in changes else self.abstention,
+            changes["hard"] if "hard" in changes else self.hard,
+            changes["findings"] if "findings" in changes else self.findings,
+            changes["rule"] if "rule" in changes else self.rule,
+            changes["evaluator"] if "evaluator" in changes else self.evaluator,
+        )
+
+    def placed(self, escapable: bool) -> "KernelDecision":
         """This verdict as the runtime about to render it will carry it out.
 
-        The two facts are two questions, and a runtime may answer them
-        differently. ``escapable`` is whether *this verdict* can put the call
-        outside — the channel a rendered placement needs, and what ``outside``
-        is asking for. ``agent_escalates`` is whether *the agent making the
-        call* can put its own call outside, which is what ``escalable`` offers
-        and which needs no channel here at all, since the offer travels as
-        reason text. Answering both from one flag is what makes a runtime with
-        one and not the other unrepresentable.
+        ``escapable`` is whether this runtime can put an operation outside the
+        containment boundary at all. Where it cannot, a placement it will not
+        honour must not be spelled, or the verdict reads as escaped while the
+        operation runs contained — so the plain effect is rendered instead and
+        :class:`~lup.policy.kernel.settlement.TrappedPlacement` is what refuses
+        the one case where that substitution would be wrong.
 
-        Where a verdict cannot be placed it renders the plain effect: an
-        intent the runtime will not honour must not be spelled, or the verdict
-        reads as escaped while the call runs confined.
-
-        Two pairs say something the effect does not say by itself. An approval
-        question over a call that also escapes asks the human two things, so
-        the reason says both. And a permission to escalate stands or falls on
-        whether the agent can spend it: withdrawn, it becomes the plain
-        confined behaviour and says ``inside``, which is that behaviour spelled
-        rather than ``ambient``, which would hand the placement back to the
-        session the offer was never reading. Either way the reason states which
-        it got, and either placement reaches the wire only where the runtime
-        has the channel — where it has none the call follows the session, which
-        is why neither reason claims confinement in words.
-
-        Neither reaches a refusal: a deny or a defer arrives here with its
-        placement already collapsed, so no reason gains an offer that the
-        verdict does not extend.
+        An approval question over an operation that also leaves asks the
+        person two things, so the reason says both. Neither reaches a refusal
+        or a deferral: those arrive with the placement already collapsed.
         """
-        if self.sandbox == "escalable" and not agent_escalates:
-            reason = self.reason + SANDBOX_ESCALATION_UNSUPPORTED
-            return KernelDecision(
-                self.effect,
-                reason,
-                "inside" if escapable else "ambient",
-                self.escalated,
-                self.recovery,
-            )
-        if self.sandbox == "escalable":
-            reason = self.reason + SANDBOX_ESCALATION_OFFER
-            return KernelDecision(
-                self.effect,
-                reason,
-                "escalable" if escapable else "ambient",
-                self.escalated,
-                self.recovery,
-            )
         if not escapable:
-            return KernelDecision(
-                self.effect,
-                self.reason,
-                escalated=self.escalated,
-                recovery=self.recovery,
-            )
+            return self.revised(sandbox="ambient")
         if self.effect == "ask" and self.sandbox == "outside":
-            return KernelDecision(
-                "ask",
-                self.reason + SANDBOX_ESCAPE_NOTICE,
-                "outside",
-                self.escalated,
-                self.recovery,
-            )
+            return self.revised(reason=self.reason + SANDBOX_ESCAPE_NOTICE)
         return self
 
 
 def unjudged(reason: str) -> KernelDecision:
-    """One machinery bail-out: the kernel cannot judge, so it defers.
+    """One machinery bail-out: the kernel could not read this, so it abstains.
 
-    The shell boundary decides what no-judgment means: a sandboxed
-    execution runs confined by the OS, an unsandboxed one converts to a
-    deny naming the escalation recipe.
+    A ``boundary_settle`` abstention, never a handoff. The classifier has no
+    final judgement and the boundary still has facts about the operation, so
+    settlement resolves it from those facts rather than passing it to the
+    provider's own mode — which is what a gap in the parser must never buy.
     """
-    return KernelDecision("defer", reason)
+    return KernelDecision("defer", reason, abstention="boundary_settle")
+
+
+def unlisted(reason: str) -> KernelDecision:
+    """The same abstention, from the vocabulary simply naming nothing here.
+
+    Separate from :func:`unjudged` because only this one is answerable. The
+    command was read and is well-formed; no row speaks about it. A session
+    with a reviewer puts that to them, exactly as a decision escalation
+    already does, rather than refusing work whose only fault is being new.
+    """
+    return KernelDecision("defer", reason, unlisted=True, abstention="boundary_settle")
+
+
+def handed_over(reason: str, rule: str = "", evaluator: str = "") -> KernelDecision:
+    """A rule looked, and decided the provider's own mode should answer.
+
+    The one abstention that survives to the provider. Edit size is the shape:
+    a large ordinary edit is exactly what a native auto-accept mode exists
+    for, and interposing here would replace a decision an operator already
+    made. Distinct from :func:`unjudged` in the field rather than the wording,
+    because settlement reads the field and a reader of two similar sentences
+    reads neither.
+    """
+    return KernelDecision(
+        "defer", reason, abstention="provider_native", rule=rule, evaluator=evaluator
+    )
+
+
+def capability_blocked(
+    reason: str, capability: Capability, rule: str = "", evaluator: str = ""
+) -> KernelDecision:
+    """The runtime cannot deliver a guarantee this operation requires.
+
+    Rendered as ``deny`` because a refusal is what a provider can act on, and
+    carrying the typed cause because a refusal that reads as a policy
+    judgement sends the agent to argue with a rule instead of to the missing
+    channel. Approval and decision escalation cannot manufacture a capability,
+    so neither reaches it.
+    """
+    return KernelDecision(
+        "deny",
+        reason,
+        cause="capability",
+        capability=capability,
+        rule=rule,
+        evaluator=evaluator,
+    )
+
+
+def contributions(decision: KernelDecision) -> tuple[KernelDecision, ...]:
+    """The rule verdicts behind one settled verdict, which may be itself.
+
+    A composed verdict keeps its parts and a single rule's verdict is its own
+    only part. Spelled once so a settlement row asking "what are all the
+    reasons this asks" cannot accidentally ask it of a composed verdict's
+    summary fields, which carry the join rather than the reasons.
+    """
+    return decision.findings or (decision,)
+
+
+def recovery_dischargeable(decision: KernelDecision) -> bool:
+    """Whether a proven capture retires every surviving reason this asks.
+
+    The question recovery is allowed to answer, and the whole of it. Local
+    loss a capture puts back is not worth a person's attention; a code
+    review, a protected path, an external effect, or a credential read
+    travelling in the same operation is worth exactly as much attention as it
+    was before, and an operation carrying both keeps its question.
+
+    Read over the contributions rather than the join, because the join
+    reports the strongest effect and says nothing about how many reasons
+    reached it — which is how a recoverable deletion beside a full-file
+    rewrite would have discharged the rewrite.
+    """
+    asking = [part for part in contributions(decision) if part.effect == "ask"]
+    if not asking:
+        return False
+    return all(
+        part.purpose == "unrecovered_local_mutation"
+        and part.checkpoint != "unrecoverable"
+        for part in asking
+    )

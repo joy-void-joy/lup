@@ -395,25 +395,30 @@ def test_a_command_that_could_destroy_work_is_snapshotted_first(
     Nothing else stands in front of a command, so this only passes when the
     emitted script wrote the snapshot itself -- a devtools subprocess would
     cost an interpreter start on every mutating command and be the first thing
-    somebody turned off.
+    somebody turned off. The capture is taken before the verdict reads it,
+    which is what lets the verdict be a permission: the loss the question was
+    protecting against has already been established not to happen.
     """
-    effect, _reason = snapshotting_effect("rm untracked.py", delete_repo)
+    effect, reason = snapshotting_effect("rm untracked.py", delete_repo)
 
-    assert effect == "ask"
+    assert effect == "allow"
+    assert "captured and restorable" in reason
     assert undo_refs(delete_repo) == ["lup undo: rm untracked.py"]
 
 
-def test_the_approval_question_says_the_tree_was_snapshotted(
+def test_a_question_a_capture_cannot_settle_still_says_it_was_taken(
     delete_repo: Path,
 ) -> None:
     """The one moment the information changes an answer.
 
-    A human deciding whether to permit something destructive is weighing
-    exactly whether it can be undone, so the question carries the ref. An
-    allowed command stays silent, because a line appended to every mutating
-    command is one nobody reads by the third time.
+    A person deciding whether to permit something destructive is weighing
+    exactly whether it can be undone, so a question that survives the
+    capture carries the ref. A permitted command stays silent, because a
+    line appended to every mutating command is one nobody reads by the
+    third time — and where the capture settled the question there is no
+    longer anybody being asked.
     """
-    _effect, reason = snapshotting_effect("rm untracked.py", delete_repo)
+    _effect, reason = snapshotting_effect("git clean -fdx", delete_repo)
 
     assert "snapshotted" in reason and "refs/lup/undo/" in reason
 
@@ -588,44 +593,39 @@ def test_an_unreadable_target_asks_instead_of_letting_the_edit_through() -> None
     assert specific["permissionDecision"] == "ask"
 
 
-def test_a_call_placed_outside_the_sandbox_is_allowed_and_rewritten() -> None:
-    """The unprompted placement, emitted by the script a session really runs.
+def test_a_remote_read_runs_where_the_boundary_already_grants_it() -> None:
+    """What the retired placement on this command was actually asking for.
 
-    A remote read is unusable confined, so the vocabulary places it outside;
-    the verdict stays an allow and the placement rides the rewrite channel.
-    The rewrite has to carry the whole input rather than the flag alone,
-    because it replaces the arguments instead of merging into them.
+    A remote read needs a route to the remote, which the boundary declares
+    and a launch measures — not the launcher's host, which is what a
+    placement would now be requesting and what a reviewer would then have
+    to answer for every ordinary fetch. So the verdict is an ordinary
+    ambient allow and nothing is rewritten.
     """
     decision = decide(bash_payload("git ls-remote origin HEAD"))
 
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     assert specific["permissionDecision"] == "allow"
-    assert specific["updatedInput"] == {
-        "command": "git ls-remote origin HEAD",
-        "dangerouslyDisableSandbox": True,
-    }
+    assert "updatedInput" not in specific
 
 
-def test_the_toolchain_reaches_the_outside_with_no_flag_from_its_caller() -> None:
-    """The declaration carries the escape, so no call site has to remember it.
+def test_the_toolchain_runs_where_the_boundary_declaration_leaves_it() -> None:
+    """The declaration carries the requirement, so no call site remembers it.
 
-    Every `lup-devtools` command that opens an agent session is unusable
-    confined: the runtime creates per-session state under its configuration
-    directory, and a session spawned inside a sandbox that does not grant that
-    path loses its shell entirely. An instruction asking an agent for the flag
-    reaches one skill on one runtime; the declaration reaches every invocation
-    of the toolchain, whichever entry point started it.
+    Every `lup-devtools harness` command opens an agent session, and a
+    runtime creates per-session state under its own configuration directory
+    — a path the runtime protects rather than one a grant can widen. The
+    boundary declaration excludes those verbs from isolation, which is the
+    same requirement stated where a launch can measure it; the verdict
+    itself is an ordinary ambient allow and rewrites nothing.
     """
     decision = decide(bash_payload("uv run lup-devtools harness resolve"))
 
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     assert specific["permissionDecision"] == "allow"
-    assert specific["updatedInput"] == {
-        "command": "uv run lup-devtools harness resolve",
-        "dangerouslyDisableSandbox": True,
-    }
+    assert "updatedInput" not in specific
 
 
 def test_a_checker_target_is_left_where_the_session_already_runs() -> None:
@@ -795,8 +795,16 @@ def bundled_dispatcher() -> ModuleType:
     return module
 
 
-def dispatcher_rewrite(placement: SandboxPlacement, call: JsonObject) -> JsonObject:
-    """What the emitted dispatcher rewrites one placed Bash call to."""
+def dispatcher_rewrite(
+    placement: SandboxPlacement, call: JsonObject
+) -> JsonObject | None:
+    """What the emitted dispatcher rewrites one placed Bash call to, if anything.
+
+    ``None`` where the verdict states no placement, which is a real answer
+    rather than a missing one: an ambient verdict hands the question to the
+    session, and rewriting the field to say so would be stating a placement it
+    deliberately did not reach.
+    """
     dispatcher = bundled_dispatcher()
     answer = dispatcher.rendered(
         dispatcher.KernelDecision("allow", "placed", placement),
@@ -805,8 +813,8 @@ def dispatcher_rewrite(placement: SandboxPlacement, call: JsonObject) -> JsonObj
     )
     specific = answer["hookSpecificOutput"]
     assert isinstance(specific, dict)
-    rewritten = specific["updatedInput"]
-    assert isinstance(rewritten, dict)
+    rewritten = specific["updatedInput"] if "updatedInput" in specific else None
+    assert rewritten is None or isinstance(rewritten, dict)
     return rewritten
 
 
@@ -818,24 +826,25 @@ def spent_call(spent: bool) -> JsonObject:
     return call
 
 
-def test_the_dispatcher_lets_the_agent_spend_the_escalation_it_was_offered() -> None:
-    """An offer the same hook revokes on the rewrite is one nobody can take.
+def test_the_dispatcher_overwrites_an_escape_the_call_asked_for_itself() -> None:
+    """A placement Lup states is not the call negotiating with it.
 
-    The permission channel grants the escape and the rewrite replaces the
-    call's arguments outright, so a rewrite answering a plain `False` hands
-    back what the reason just offered — and the agent cannot tell, because
-    the grant it read still says it may leave. Unspent, the same placement
-    confines the call: that half is what makes this a permission rather than
-    a placement, and one predicate answers both so neither can drift.
+    The rewrite replaces the call's arguments outright, so a call carrying
+    the native flag has it answered by the placement rather than honoured:
+    ``inside`` holds however the call was written, which is the whole of
+    what makes containment independent of the session's own mode.
+
+    Asking for the launcher's host is the other route and does not come
+    through this field at all — it is a marker a reviewer answers.
     """
-    spent = dispatcher_rewrite("escalable", spent_call(True))
-    unspent = dispatcher_rewrite("escalable", spent_call(False))
+    spent = dispatcher_rewrite("inside", spent_call(True))
+    unspent = dispatcher_rewrite("inside", spent_call(False))
 
-    assert spent == {**spent_call(True), "dangerouslyDisableSandbox": True}
+    assert spent == {**spent_call(True), "dangerouslyDisableSandbox": False}
     assert unspent == {**spent_call(False), "dangerouslyDisableSandbox": False}
 
 
-@pytest.mark.parametrize("placement", ["inside", "escalable", "outside"])
+@pytest.mark.parametrize("placement", ["inside", "ambient", "outside"])
 @pytest.mark.parametrize("spent", [True, False])
 def test_both_boundaries_place_one_call_the_same_way(
     placement: SandboxPlacement, spent: bool
@@ -860,24 +869,28 @@ def test_both_boundaries_place_one_call_the_same_way(
     )
 
 
-def test_a_loss_the_snapshot_holds_is_handed_to_the_runtime(delete_repo: Path) -> None:
+def test_a_loss_the_capture_holds_is_permitted_by_this_policy(
+    delete_repo: Path,
+) -> None:
     """The relaxation, through the only thing a session runs.
 
     `git reset --hard` destroys working-tree content and nothing else, and
     the tree is in the object store before the command is judged — so the
-    policy has no permanent loss left to interrupt about. It answers with no
-    verdict at all rather than with a permission: the call goes to the
-    runtime's own gate, which is where an operator's configuration lives, and
-    a session at the runtime's defaults is still asked in the runtime's own
-    words.
+    loss the question was protecting against has been established not to
+    happen, and the operation is authorized rather than handed on.
 
-    The empty object is that answer on this runtime's wire. The ref is the
-    evidence the snapshot the relaxation rests on was actually taken, and
-    taken *before* the verdict read it.
+    A permission and not a deferral: handing it to the session's own gate
+    would make the outcome depend on which mode the session happened to be
+    started in, for a fact that has nothing to do with the session's mode.
+    The ref is the evidence the capture the permission rests on was actually
+    taken, and taken *before* the verdict read it.
     """
     payload = {**bash_payload("git reset --hard"), "cwd": str(delete_repo)}
 
-    assert decide_from(payload, delete_repo) == {}
+    specific = decide_from(payload, delete_repo)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
+    assert "captured and restorable" in str(specific["permissionDecisionReason"])
     assert undo_refs(delete_repo) == ["lup undo: git reset --hard"]
 
 

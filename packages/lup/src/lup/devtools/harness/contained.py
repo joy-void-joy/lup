@@ -34,6 +34,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
+from lup.devtools.harness.preflight import LaunchSentinels
 from lup.harness.credential import committer, remote_rewrites
 from lup.harness.egress import PROXY_LABEL, SessionEgress
 from lup.harness.image import ContainerEngine, Image, detected_client
@@ -1449,6 +1450,7 @@ def contained_argv(
     engine: ContainerEngine | None = None,
     interactive: bool = True,
     banner: Banner | None = None,
+    sentinels: LaunchSentinels = LaunchSentinels(),
     inherited_environment: list[str] | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
@@ -1561,5 +1563,6 @@ def contained_argv(
         terminal=terminal.environment,
         interactive=interactive,
         proxy_address=reached_at,
+        boundary=sentinels.within(),
         inherited_environment=inherited_environment,
     )

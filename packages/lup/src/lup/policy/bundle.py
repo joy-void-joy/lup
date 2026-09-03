@@ -32,6 +32,7 @@ from lup.policy.kernel.rows import (
     RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
+    shell_row_values,
 )
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
@@ -337,39 +338,33 @@ def string_matrix_literal(rows: list[list[str]]) -> str:
 
 
 def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
-    """Render erased shell rules as Ruff-stable dict literals."""
+    """Render erased shell rules as Ruff-stable dict literals.
+
+    A list value is broken across lines and a scalar is not, which is what
+    Ruff's own formatter does with these lengths — so the generated file is
+    already formatted when it is written and the format check has nothing to
+    report on a file nobody edited.
+    """
     if not rows:
         return "[]"
     lines = ["["]
     for row in rows:
         lines.append("    {")
-        lines.append(f'        "command": {json.dumps(row["command"])},')
-        lines.append(f'        "subcommand": {json.dumps(row["subcommand"])},')
-        lines.append(f'        "operation": {json.dumps(row["operation"])},')
-        lines.append(f'        "effect": {json.dumps(row["effect"])},')
-        lines.append(f'        "effect_source": {json.dumps(row["effect_source"])},')
-        for name, flags in (
-            ("ask_flags", row["ask_flags"]),
-            ("allow_flags", row["allow_flags"]),
-            ("read_verbs", row["read_verbs"]),
-            ("write_markers", row["write_markers"]),
-            ("guarded_keys", row["guarded_keys"]),
-            ("value_flags", row["value_flags"]),
-        ):
-            if flags:
-                lines.append(f'        "{name}": [')
-                lines.extend(f"            {json.dumps(flag)}," for flag in flags)
-                lines.append("        ],")
+        for name, value in shell_row_values(row).items():
+            key = json.dumps(name)
+            if isinstance(value, list):
+                if value:
+                    lines.append(f"        {key}: [")
+                    lines.extend(
+                        f"            {python_literal(item)},"
+                        for item in value
+                        if isinstance(item, str)
+                    )
+                    lines.append("        ],")
+                else:
+                    lines.append(f"        {key}: [],")
             else:
-                lines.append(f'        "{name}": [],')
-        lines.append(f'        "bare_reads": {python_literal(row["bare_reads"])},')
-        lines.append(f'        "sandbox": {json.dumps(row["sandbox"])},')
-        lines.append(f'        "sandbox_source": {json.dumps(row["sandbox_source"])},')
-        lines.append(f'        "recovery": {json.dumps(row["recovery"])},')
-        lines.append(
-            f'        "recovery_source": {json.dumps(row["recovery_source"])},'
-        )
-        lines.append(f'        "reason": {json.dumps(row["reason"])},')
+                lines.append(f"        {key}: {python_literal(value)},")
         lines.append("    },")
     lines.append("]")
     return "\n".join(lines)

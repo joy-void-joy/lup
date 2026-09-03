@@ -34,10 +34,14 @@ from lup.providers.codex.harness_runtime import (
 )
 from lup.providers.codex.transcripts import CodexTranscripts
 from lup.harness.environment import non_interactive_environment
-from lup.harness.models import NativeName, Plugin, Resumption
+from lup.harness.models import HookSet, NativeName, Plugin, Resumption
+from lup.policy.boundary import BoundaryPreflight
+from lup.policy.profiles import compile_boundary, depended_on, measured
+from lup.sandbox.rail import lease_for
 from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import (
     Finding,
+    HostFacts,
     Manifest,
     Requirement,
     refused,
@@ -45,6 +49,7 @@ from lup.harness.requirements import (
 from lup.harness.process import LocalProcessLauncher
 from lup.harness.toolchain import (
     bubblewrap_requirement,
+    codex_envelope_requirement,
     container_client,
     for_host,
     socat_requirement,
@@ -72,6 +77,13 @@ from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.dev.branches import settle_base_freshness
 from lup.devtools.harness.drift import generate_with_report
 from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.devtools.harness.preflight import (
+    LaunchSentinels,
+    record_preflight,
+    release_ledger,
+    retire_mount_table,
+    sweep_ledgers,
+)
 from lup.devtools.dev.worktree import RelocationHint
 from lup.devtools.layout import get_tree_dir
 
@@ -113,7 +125,11 @@ def relocation_hint(worktree_path: Path) -> RelocationHint:
     return RelocationHint(agent="", shell=move)
 
 
-def ready_to_open(composition: NativeHarnessComposition, generate_only: bool) -> bool:
+def ready_to_open(
+    composition: NativeHarnessComposition,
+    generate_only: bool,
+    sentinels: LaunchSentinels,
+) -> list[Finding] | None:
     """Generate this target's artifacts and clear every gate standing before a session.
 
     Both launchers reach a session through here, so a gate added once is a
@@ -121,6 +137,13 @@ def ready_to_open(composition: NativeHarnessComposition, generate_only: bool) ->
     open a session without first generating the artifacts it opens against.
     Answers whether to go on: a generate-only invocation has already done
     everything it was asked for.
+
+    ``None`` is that answer, and the host roster's findings are the other one —
+    including an empty roster, which is why this is not a list and a truth
+    test. What those findings are *for* is the boundary preflight, which needs
+    both halves of one measurement and can only be assembled where the second
+    half is taken; carrying them out of here is what saves the launch from
+    exercising the same probes twice and reporting each of them twice.
 
     Settling the base is one of those steps rather than a workflow's own. A
     tree whose base has moved is self-consistent and says nothing about it, so
@@ -134,10 +157,15 @@ def ready_to_open(composition: NativeHarnessComposition, generate_only: bool) ->
     """
     generate_with_report(composition)
     if generate_only:
-        return False
-    runtime_preflight(composition)
+        return None
+    # Before anything writes one, so a launch that was killed last week does
+    # not leave its measurement standing for somebody to find. On the way in
+    # rather than only on the way out, because the launch that crashed is
+    # exactly the one that did not get to tidy up after itself.
+    sweep_ledgers(project_root())
+    findings = runtime_preflight(composition, sentinels)
     settle_base_freshness(LocalProcessLauncher(), project_root())
-    return True
+    return findings
 
 
 class HarnessTranscript(BaseModel, arbitrary_types_allowed=True):
@@ -449,7 +477,9 @@ def start_harness_transcript(
     return HarnessTranscript(journal=journal, watcher=watcher, diagnostics=diagnostics)
 
 
-def runtime_preflight(composition: NativeHarnessComposition) -> None:
+def runtime_preflight(
+    composition: NativeHarnessComposition, sentinels: LaunchSentinels
+) -> list[Finding]:
     """Verify each claimed native requirement immediately before launch.
 
     Two rosters, asked in the order their failures matter. The native probes
@@ -470,10 +500,16 @@ def runtime_preflight(composition: NativeHarnessComposition) -> None:
         ).say()
     if any(not item.supported for item in evidence):
         raise typer.BadParameter(f"{target} runtime preflight failed")
-    report_requirements(composition.recipe.source.requirements)
+    return report_requirements(
+        composition.recipe.source.requirements, sentinels=sentinels
+    )
 
 
-def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Finding]:
+def report_requirements(
+    manifest: Manifest,
+    setting_up: bool = False,
+    sentinels: LaunchSentinels = LaunchSentinels(),
+) -> list[Finding]:
     """Exercise the host-side requirements, printing what each one found.
 
     Printed on the way past rather than only when something is wrong: a
@@ -488,14 +524,24 @@ def report_requirements(manifest: Manifest, setting_up: bool = False) -> list[Fi
     starts a container is a cost no session should pay to be told something
     that was equally true yesterday.
     """
+    # The host sentinel reaches a probe through this process's own environment
+    # rather than through an argument, because an exercise runs as a
+    # subprocess of this one and inherits it. Set here, at the one place the
+    # host roster runs, so a probe asking which side it is on has an answer
+    # before it is asked -- and so nothing else has to carry the value.
+    os.environ.update(sentinels.outside())  # lup: ignore[os-environ]
     environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
     # Pointed at this host's client here rather than declared as one, because
     # the declaration is hashed into the ownership digest and a container
     # client is a fact about the machine. This is the only place the
     # exercises actually run, so it is the only place that has to know.
-    findings = for_host(manifest, container_client(), project_root()).check(
-        environ, setting_up=setting_up
-    )
+    findings = for_host(
+        manifest,
+        container_client(),
+        project_root(),
+        inside_sentinel=sentinels.inside,
+        host_sentinel=sentinels.host,
+    ).check(environ, setting_up=setting_up)
     return reported(findings)
 
 
@@ -531,6 +577,7 @@ def verify_inside(
     manifest: Manifest,
     opening: list[str],
     setting_up: bool = True,
+    sentinels: LaunchSentinels = LaunchSentinels(),
     environment: EnvVars | None = None,
 ) -> list[Finding]:
     """Exercise the image half behind an argv somebody already assembled.
@@ -545,7 +592,18 @@ def verify_inside(
         environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
     else:
         environ = dict(environment)
-    return reported(manifest.check_inside(environ, opening, setting_up))
+    return reported(
+        manifest.check_inside(
+            environ,
+            opening,
+            setting_up,
+            HostFacts(
+                checkout=project_root(),
+                inside_sentinel=sentinels.inside,
+                host_sentinel=sentinels.host,
+            ),
+        )
+    )
 
 
 def report_inside_requirements(
@@ -553,6 +611,7 @@ def report_inside_requirements(
     plugin: Plugin,
     config_home: Path,
     login: ProviderLogin,
+    sentinels: LaunchSentinels = LaunchSentinels(),
 ) -> list[Finding]:
     """Exercise the image-side requirements inside the container a session opens.
 
@@ -586,8 +645,14 @@ def report_inside_requirements(
         credential if credential.exists() else None,
         login,
         interactive=False,
+        sentinels=sentinels,
     )
-    return verify_inside(harness.requirements, opening)
+    # The same values on both sides of one call, which is the whole of what a
+    # placement probe asks. Injected into the argv above and handed to the
+    # roster below: aimed with one and opened with the other, the probe would
+    # look for a value nothing had set and report the boundary broken on a
+    # machine whose boundary was fine.
+    return verify_inside(harness.requirements, opening, sentinels=sentinels)
 
 
 def codex_login_preflight(home: Path, environment: EnvVars) -> None:
@@ -624,7 +689,8 @@ def apply_sandbox_environment(
     label: str,
     required_tools: list[Requirement],
     contained: bool = False,
-) -> None:
+    announce: bool = True,
+) -> bool:
     """Export LUP_SANDBOX_ACTIVE when the declared sandbox can actually run.
 
     The dispatchers defer unjudged shell only under this flag, so it is set
@@ -640,9 +706,9 @@ def apply_sandbox_environment(
     message says which of the two was found rather than only that one was.
 
     Asked only of an uncontained launch. A contained one has a boundary
-    already, and the kernel reads it from the image's own ``LUP_CONTAINED``
-    rather than from anything a launcher passes -- ``boundary = sandboxed or
-    contained``, so the flag would change no verdict. Probing anyway printed
+    already, and the kernel reads it from what the launch measured rather than
+    from anything a launcher asserts -- ``boundary = sandboxed or contained``,
+    so the flag would change no verdict. Probing anyway printed
     a sandbox verdict about a session that was not going to rely on it, and
     on a failed probe printed ``deny lattice stays active`` for a session
     whose lattice was about to stand down behind the container. Saying
@@ -654,10 +720,22 @@ def apply_sandbox_environment(
     one flag this spelled for every tool was ``--version``, socat has no
     such option and exits 1 on it, and the OS boundary was therefore
     reported unavailable on every host in the world.
+
+    Both runtimes vouch through here, which is the point of it taking the
+    tools rather than naming them: Claude's confinement is a pair of programs
+    and Codex's is its own envelope, and the asymmetry that mattered was not
+    which tools but that one path exercised something and the other asserted
+    the flag outright. *announce* is off where the caller has a better
+    sentence for the success case -- a posture whose name is worth printing --
+    and the failures are said either way, because that is the half a reader
+    has to act on.
+
+    Answers whether it vouched, so a caller can say so without re-deriving it
+    from the environment it just passed in.
     """
     hooks = plugin.hooks
     if contained or hooks is None or hooks.sandbox is None:
-        return
+        return False
     findings = [tool.check(environment) for tool in required_tools]
     unusable = [finding for finding in findings if not finding.working]
     if unusable:
@@ -672,12 +750,14 @@ def apply_sandbox_environment(
         Notice(
             text=f"{label} sandbox: deny lattice stays active", urgency="warning"
         ).say()
-        return
+        return False
     environment["LUP_SANDBOX_ACTIVE"] = "1"
-    Notice(
-        text=f"{label} sandbox: active — unjudged shell defers to the OS boundary",
-        urgency="boundary",
-    ).say()
+    if announce:
+        Notice(
+            text=f"{label} sandbox: active — unjudged shell defers to the OS boundary",
+            urgency="boundary",
+        ).say()
+    return True
 
 
 # lup: ignore[library-default] — each entry is literally a Codex CLI flag
@@ -720,9 +800,9 @@ def codex_sandbox_arguments(
     means for a posture: one concept, each runtime's own word for it.
 
     LUP_SANDBOX_ACTIVE stays unset either way here, because a contained
-    session does not need it -- the kernel reads the container from the
-    image's own ``LUP_CONTAINED``, and a boundary is a boundary whether the
-    launcher vouched for it or not.
+    session does not need it -- the kernel reads the containment out of what
+    the launch measured, and a boundary that was observed is a boundary
+    whether this flag vouched for it or not.
     """
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
@@ -750,14 +830,29 @@ def codex_sandbox_arguments(
             urgency="boundary",
         ).say()
         return list(CODEX_CONFINEMENT.off)
-    environment["LUP_SANDBOX_ACTIVE"] = "1"
-    Notice(
-        text=(
-            "codex sandbox: workspace-write envelope — "
-            "unjudged shell defers to the OS boundary"
-        ),
-        urgency="boundary",
-    ).say()
+    # Exercised before it is vouched for, the way the Claude path exercises
+    # its confinement tools. Asserting the flag outright was the asymmetry:
+    # `codex sandbox` runs a command under this exact envelope and no model
+    # turn, so there was never a reason not to ask.
+    vouched = apply_sandbox_environment(
+        plugin,
+        environment,
+        "codex",
+        [codex_envelope_requirement()],
+        contained=contained,
+        announce=False,
+    )
+    if vouched:
+        Notice(
+            text=(
+                "codex sandbox: workspace-write envelope — "
+                "unjudged shell defers to the OS boundary"
+            ),
+            urgency="boundary",
+        ).say()
+    # The envelope goes on either way. What a failed probe withdraws is the
+    # claim, not the confinement: leaving the sandbox off because it could not
+    # be verified would answer a boundary nobody could measure by removing it.
     return ["--sandbox", "workspace-write", *writable_root_arguments()]
 
 
@@ -934,6 +1029,60 @@ def ambient_config_home(login: ProviderLogin, fallback: Path) -> Path:
     return Path(named) if named else fallback
 
 
+def settle_boundary(
+    plugin: Plugin,
+    unsandboxed: bool,
+    findings: list[Finding],
+    sentinels: LaunchSentinels,
+    environment: EnvVars,
+) -> BoundaryPreflight:
+    """Compile what this launch promised, measure it, and refuse if it fell short.
+
+    The gate, and the reason every other part of this exists. A profile
+    requiring a capability nothing delivered does not open, and the diagnostic
+    names the capability and what was tried -- because "the sandbox is broken"
+    sends somebody to read configuration, where the exercise's own words send
+    them to the thing that failed.
+
+    An optional capability that came back absent is not a refusal and not a
+    question. The operations that need it are capability-blocked, which is
+    what sends an agent to the missing channel rather than to argue with a
+    rule, and the ledger is how the dispatcher learns which those are.
+
+    The lease is read here rather than carried from the argv builder because
+    an uncontained launch never builds one and still has a boundary to
+    describe: the same worktree, the same siblings, and no container under
+    them. One call answers for both postures, which is what stops the two
+    from coming to disagree about what this session may write.
+    """
+    root = project_root()
+    declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
+    boundary = compile_boundary(
+        declared,
+        contained=not unsandboxed,
+        writable=list(lease_for(root).writable),
+    )
+    preflight = measured(boundary, depended_on(declared, not unsandboxed), findings)
+    Notice(text=preflight.diagnosis(), urgency="boundary").say()
+    if not preflight.launchable():
+        raise typer.BadParameter(
+            f"{boundary.name}: "
+            + ", ".join(entry.capability for entry in preflight.missing_required())
+            + " required and not delivered. Each is reported above with what "
+            "was tried; `--unsandboxed` opens on the host under the semantic "
+            "policy alone, which is the same posture stated rather than assumed."
+        )
+    record_preflight(preflight, sentinels, root)
+    if unsandboxed:
+        # No mounts, so no mount table -- and the one a contained launch left
+        # behind describes a boundary this session is not behind. Attributing
+        # a refusal to it teaches an agent to reach for the host when the bug
+        # was its own, which outlives the command it was wrong about.
+        retire_mount_table(root)
+    environment.update(sentinels.outside() if unsandboxed else sentinels.within())
+    return preflight
+
+
 def session_argv(
     cli: str,
     arguments: list[str],
@@ -944,6 +1093,8 @@ def session_argv(
     unsandboxed: bool,
     environment: EnvVars,
     transcript: Path | None = None,
+    sentinels: LaunchSentinels = LaunchSentinels(),
+    host_findings: list[Finding] = [],
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -958,8 +1109,17 @@ def session_argv(
     than before it -- a launch cannot report itself ready while the thing
     that would refute it has not run yet, and thirty lines printed ahead of
     the answer is how the refutation ends up below the fold.
+
+    And it is where the boundary is settled, for the same reason: this is the
+    one place that knows which posture the launch took, so it is the only
+    place a boundary can be compiled that answers for the session actually
+    about to open. Both postures write a ledger. The uncontained one used to
+    write nothing at all, which left whatever a contained launch had written
+    last standing as this session's answer -- a boundary belonging to a
+    session that had already ended.
     """
     if unsandboxed:
+        settle_boundary(plugin, unsandboxed, host_findings, sentinels, environment)
         return [cli, *arguments]
     harness = composition.recipe.source
     # A token crosses by name, so its value has to be in the environment of the
@@ -984,6 +1144,7 @@ def session_argv(
             [MAX_RECURSIVE_AGENT_ENV] if MAX_RECURSIVE_AGENT_ENV in environment else []
         ),
         banner=banner,
+        sentinels=sentinels,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -995,11 +1156,20 @@ def session_argv(
     # Not the whole image roster -- only the entries marked `always`, which
     # is the handful whose absence means the session can do nothing. A model
     # call and a toolchain version belong to `harness requirements --inside`.
-    verify_inside(
+    inside = verify_inside(
         harness.requirements,
         probing(opening),
         setting_up=False,
+        sentinels=sentinels,
         environment=environment,
+    )
+    # Both halves of one measurement, joined here because this is where the
+    # second is taken. The host roster answered for the relay and the store
+    # before the container existed; the inside roster answered for the
+    # placement behind the argv this session opens with. A preflight built
+    # from either alone would report a capability nothing asked about.
+    settle_boundary(
+        plugin, unsandboxed, [*host_findings, *inside], sentinels, environment
     )
     banner.add(
         [
@@ -1053,7 +1223,9 @@ def launch_claude(
         checkpoint(provider="claude")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
-    if not ready_to_open(composition, generate_only):
+    sentinels = LaunchSentinels()
+    host_findings = ready_to_open(composition, generate_only, sentinels)
+    if host_findings is None:
         return
     arguments: list[str] = claude_resume_arguments(resume)
     # A mode's model is a default rather than a fixture: it says what this kind
@@ -1127,6 +1299,8 @@ def launch_claude(
                 unsandboxed,
                 environment,
                 transcript.journal.path,
+                sentinels,
+                host_findings,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -1135,6 +1309,11 @@ def launch_claude(
     except sh.ErrorReturnCode as error:
         raise typer.Exit(error.exit_code) from error
     finally:
+        # Taken away here rather than swept by the next launch, because a
+        # launch that swept every ledger but its own would be correct exactly
+        # once: with a second session open it removes a measurement that
+        # session's dispatcher is still reading.
+        release_ledger(project_root(), sentinels.nonce)
         transcript.close(succeeded=succeeded)
         if checkpoint is not None:
             checkpoint(provider="claude")
@@ -1166,7 +1345,9 @@ def launch_codex(
         checkpoint(provider="codex")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
-    if not ready_to_open(composition, generate_only):
+    sentinels = LaunchSentinels()
+    host_findings = ready_to_open(composition, generate_only, sentinels)
+    if host_findings is None:
         return
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
@@ -1230,6 +1411,8 @@ def launch_codex(
                 unsandboxed,
                 environment,
                 transcript.journal.path,
+                sentinels,
+                host_findings,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -1238,6 +1421,7 @@ def launch_codex(
     except sh.ErrorReturnCode as error:
         raise typer.Exit(error.exit_code) from error
     finally:
+        release_ledger(project_root(), sentinels.nonce)
         transcript.close(succeeded=succeeded)
         if home.isolated and store.publish(project_root()):
             typer.echo("Returned the refreshed Codex login to the account home")

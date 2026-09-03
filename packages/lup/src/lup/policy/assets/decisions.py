@@ -25,6 +25,10 @@ from pathlib import Path
 
 from host import (
     contained,
+    defers_unjudged,
+    delivers,
+    measured_boundary,
+    unleased_write_targets,
     script_run_nudge,
     directory_write_targets,
     empty_directory_targets,
@@ -34,6 +38,7 @@ from host import (
     managed_script_roots,
     recoverable_write_targets,
     record_deferral,
+    record_question,
     resolved_refutations,
     undo_snapshot,
     worktree_path,
@@ -52,7 +57,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.words import INTERPRETERS
-from kernel.shell import decide_shell
+from kernel.shell import decide_shell, sandbox_excluded
 from kernel.tools import decide_tool
 from policy_data import (
     ACCEPTANCE_GUARD,
@@ -108,6 +113,11 @@ def bash_decision(
     argument for the same reason the rest does — a fact one dispatcher stopped
     passing is a rule that silently stopped applying.
     """
+    # Read once and passed to each fact that needs it, rather than re-read per
+    # question: the ledger is one measurement of one launch, and a second read
+    # partway through a verdict could answer from a file the first did not see.
+    boundary = measured_boundary(cwd)
+    inside = contained(boundary)
     acted_on = shell_path_verb_targets(command)
     # Before the verdict rather than after it, because the verdict reads it:
     # an approval question exists where a loss is permanent, and a tree the
@@ -143,14 +153,47 @@ def bash_decision(
         # refusal that named no route sent it to queue a blocking question
         # instead.
         relayed=relayed,
-        escapable=escapable,
+        # What `outside` means is the launcher's host, and a runtime's own
+        # per-call escape only reaches it where there is no container in
+        # between. Uncontained, that escape genuinely is the way out of the
+        # only boundary there is; contained, it lands in the container and a
+        # placement settled on it would send an operation somewhere nothing
+        # can carry it. So the runtime still answers for its escape and the
+        # measurement answers for whether that escape reaches the host.
+        escapable=(escapable and not inside) or delivers(boundary, "host_executor"),
         # Read here rather than passed by each dispatcher, unlike `escapable`
-        # above: whether this process sits inside the container is a fact
-        # about the host with no runtime variation to it, so neither
-        # dispatcher is given the chance to forget it.
-        contained=contained(),
+        # above: whether this process sits inside the boundary its profile
+        # promised is a fact about the host with no runtime variation to it,
+        # so neither dispatcher is given the chance to forget it.
+        contained=inside,
+        # The profile's own answer for the long tail, which only an
+        # uncontained session ever reaches: contained, the row above settles
+        # the same operation first.
+        unjudged_ambient="defer" if defers_unjudged(boundary) else "ask",
+        # Resolved against what this launch mounted writable, so a write into a
+        # worktree cut after the container started reaches a reviewer instead of
+        # the writable base no overlay covers.
+        unleased_targets=unleased_write_targets(
+            [*shell_write_targets(command), *acted_on], boundary, cwd
+        ),
         recovered=bool(reference),
     )
+    # Parked before anything is rendered, because the relay is the durable
+    # record every final ask is written to and the provider's own prompt is
+    # that record's renderer rather than a second authority. Written here, at
+    # the one call site both runtimes pass through, so neither can reach a
+    # question the queue does not hold.
+    if verdict.effect == "ask":
+        record_question(
+            cwd,
+            command,
+            verdict.reason,
+            verdict.rule,
+            verdict.purpose or "",
+            verdict.reviewer,
+            verdict.escalated,
+            verdict.sandbox,
+        )
     if verdict.effect == "deny":
         return verdict
     # The log half of allow-and-log. A deferral is this policy declining to
@@ -158,7 +201,7 @@ def bash_decision(
     # own gate decides and the reason goes to no human. Written down here or
     # it is not written down anywhere.
     if verdict.effect == "defer":
-        record_deferral(cwd, command, verdict.reason, verdict.recovery != "nothing")
+        record_deferral(cwd, command, verdict.reason, verdict.checkpoint != "nothing")
     pointed = undo_point(verdict, reference)
     if pointed.effect != "allow":
         return pointed
@@ -170,8 +213,19 @@ def bash_decision(
         pointed.reason + nudge,
         pointed.sandbox,
         pointed.escalated,
-        recovery=pointed.recovery,
+        checkpoint=pointed.checkpoint,
     )
+
+
+def unconfined_by_declaration(command: str) -> bool:
+    """Whether the boundary declaration takes this command out of isolation.
+
+    A command excluded from the boundary runs unconfined because the profile
+    said so, which is a grant a native escape request is spending rather than
+    circumventing. Read here, beside every other reading of the same table, so
+    a runtime cannot answer it differently from the classifier.
+    """
+    return sandbox_excluded(command, SANDBOX_EXCLUDED_COMMANDS)
 
 
 def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
@@ -196,7 +250,7 @@ def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
         f"`lup-devtools dev undo` lists it as {reference}",
         verdict.sandbox,
         verdict.escalated,
-        recovery=verdict.recovery,
+        checkpoint=verdict.checkpoint,
     )
 
 

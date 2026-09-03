@@ -39,6 +39,7 @@ from lup.devtools.dev.workflow import WorkflowSpec
 from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
+from lup.policy.boundary import depends_on
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
@@ -65,6 +66,34 @@ EXCLUDED_COMMANDS = [
     # confined too — so excluding git without it moves the same failure one
     # call deeper.
     "gh *",
+    # The toolchain opens agent sessions, and a runtime keeps per-session
+    # state under its own configuration directory — for Claude Code,
+    # `~/.claude/session-env/<session id>`, following `CLAUDE_CONFIG_DIR`.
+    # That directory is the runtime protecting its own state rather than a
+    # path a grant can widen: a live session lists the repository root under
+    # `allowOnly` and the configuration home below it again under
+    # `denyWithinAllow`, enumerated by the runtime whether or not a project
+    # declares anything. Nor is a private home the remedy — every entry such
+    # a home does not own links back to the shared one — and session state is
+    # only the first thing this toolchain writes outside the tree; a
+    # worktree, a plugin cache, and the git configuration behind them follow.
+    # A session opened inside that boundary dies on its first shell call with
+    # a bare EROFS, which reads to an agent like a broken repository rather
+    # than like a boundary: one planning run finished that way and looked
+    # normal.
+    "uv run lup-devtools harness *",
+    # The verbs that drive git rather than read it. `git *` is excluded above
+    # and a child of a confined command is confined too, so leaving these
+    # inside moves the same failure one call deeper: measured, `dev worktree
+    # create` cannot take the lock its config write needs while the identical
+    # `git config --local` succeeds one call away. Named verb by verb because
+    # most of the toolchain reads a repository, and confining that costs
+    # nothing at all.
+    "uv run lup-devtools dev worktree *",
+    "uv run lup-devtools dev pr *",
+    "uv run lup-devtools dev conflict *",
+    "uv run lup-devtools dev git-hooks *",
+    "uv run lup-devtools dev undo *",
 ]
 """Commands this project runs with no OS boundary beneath them.
 
@@ -424,6 +453,49 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # every command of it that opens an agent session is unusable
             # confined.
             runner_targets=RUNNER_TARGETS,
+            # lup: template: what this domain's sessions cannot run without,
+            # and what they merely lose. Each names the manifest handle that
+            # measures it, so a capability declared here without a probe there
+            # is reported absent rather than assumed present.
+            boundary_capabilities=[
+                # Containment is what this project's placements mean. A
+                # session that could not observe it would still say `inside`
+                # about every operation, and be wrong for all of them.
+                depends_on(
+                    "inside_placement",
+                    "inside placement",
+                    contained_only=True,
+                    reason="every placement this policy states is read against it",
+                ),
+                # The order refuses an ask nobody can record, so an unwritable
+                # queue is a session where each reviewed operation fails
+                # naming the operation — which was never the problem.
+                depends_on(
+                    "question_relay",
+                    "question relay",
+                    reason="every final ask is written here before anybody sees it",
+                ),
+                # Costly rather than fatal: without it, destructive local work
+                # asks instead of being allowed against a capture. That is the
+                # safe direction and worth opening for.
+                depends_on(
+                    "checkpoint_store",
+                    "checkpoint store",
+                    required=False,
+                    reason="recovery-backed permission rests on a proven capture",
+                ),
+                # Declared with no probe on purpose. `hostexec` holds the
+                # contract and no transport carries a request yet, so `outside`
+                # is capability-blocked in every profile — the correct
+                # fail-closed answer, and not a working feature. Omitting it
+                # would say this project does not depend on it, which is what
+                # would quietly permit the operations no channel can carry.
+                depends_on(
+                    "host_executor",
+                    required=False,
+                    reason="no transport carries a request to the host yet",
+                ),
+            ],
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
                 # A read deny inside the boundary, which is where it belongs:

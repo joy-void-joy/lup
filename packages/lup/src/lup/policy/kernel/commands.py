@@ -6,7 +6,7 @@ import posixpath
 import re
 from typing import TypedDict
 
-from .decision import KernelDecision, unjudged
+from .decision import DecisionEffect, KernelDecision, unjudged, unlisted
 from .rows import (
     PathRoleRow,
     PathRuleRow,
@@ -21,6 +21,7 @@ from .words import (
     key_matches,
     opaque_argument,
     protected_write_target,
+    refspec_effects,
     rewrites_only_recoverable_files,
     uv_run_words,
 )
@@ -48,6 +49,39 @@ SED_SAFE_LONG_OPTIONS = (
 SED_SUBSTITUTE_FLAG_CHARS = "0123456789gpiImM"
 
 
+def row_verdict(
+    row: ShellRuleRow, effect: DecisionEffect, reason: str
+) -> KernelDecision:
+    """One row's verdict, carrying every fact the row states about itself.
+
+    The purpose is derived rather than declared, because for a shell row it
+    is a function of what the row already says: a question about a loss some
+    capture would put back is an unrecovered local mutation, one about an
+    operation with an effect beyond this machine is an external consequence,
+    and one about neither is a question this row has not classified. Deriving
+    it keeps a table of several hundred commands from having to restate what
+    two of its columns already imply.
+    """
+    if effect != "ask":
+        purpose = None
+    elif row["checkpoint"] != "unrecoverable":
+        purpose = "unrecovered_local_mutation"
+    elif row["effect_class"]:
+        purpose = "external_consequence"
+    else:
+        purpose = None
+    return KernelDecision(
+        effect,
+        reason,
+        row["sandbox"],
+        checkpoint=row["checkpoint"],
+        reviewer=row["reviewer"],
+        purpose=purpose,
+        rule=row["rule"],
+        evaluator="shell-vocabulary",
+    )
+
+
 def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision:
     """Return a row's effect, downgrading an allow to ask on a guarded flag.
 
@@ -69,11 +103,8 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
     """
     if row["effect"] != "allow" and row["allow_flags"] and arguments:
         if all(word in row["allow_flags"] for word in arguments):
-            return KernelDecision(
-                "allow",
-                "every argument is a declared read-only flag",
-                row["sandbox"],
-                recovery=row["recovery"],
+            return row_verdict(
+                row, "allow", "every argument is a declared read-only flag"
             )
     if row["effect"] != "allow" and row["guarded_keys"] and arguments:
         # Absence is the test, so every word has to be legible on the same
@@ -95,11 +126,10 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
         if readable and not any(
             key_matches(word, row["guarded_keys"]) for word in arguments
         ):
-            return KernelDecision(
+            return row_verdict(
+                row,
                 "allow",
                 "no setting that redirects how commands execute is named",
-                row["sandbox"],
-                recovery=row["recovery"],
             )
     if row["effect"] != "allow" and row["read_verbs"] and arguments:
         clean = not any(
@@ -107,11 +137,8 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             for word in arguments
         )
         if clean and any(word in row["read_verbs"] for word in arguments):
-            return KernelDecision(
-                "allow",
-                "a declared read-only verb pins the query action",
-                row["sandbox"],
-                recovery=row["recovery"],
+            return row_verdict(
+                row, "allow", "a declared read-only verb pins the query action"
             )
     if row["effect"] != "allow" and row["write_markers"] and arguments:
         # Absence is the test, so every word has to be legible: one this
@@ -132,23 +159,17 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             for word in arguments
             for marker in row["write_markers"]
         ):
-            return KernelDecision(
+            return row_verdict(
+                row,
                 "allow",
                 "no declared write marker is present, so this only reads",
-                row["sandbox"],
-                recovery=row["recovery"],
             )
     # No opacity test here, unlike every de-escalation above. Those read the
     # words to decide, so a word they cannot read is a word that might carry
     # what they are looking for; this one is deciding *on* the absence of
     # words, and a list with nothing in it has nothing to misread.
     if row["effect"] != "allow" and row["bare_reads"] and not arguments:
-        return KernelDecision(
-            "allow",
-            "this command's argument-less form only reads",
-            row["sandbox"],
-            recovery=row["recovery"],
-        )
+        return row_verdict(row, "allow", "this command's argument-less form only reads")
     if row["effect"] == "allow" and row["ask_flags"]:
         opaque = next(
             (word for word in arguments if opaque_argument(word)),
@@ -164,15 +185,29 @@ def apply_command_row(row: ShellRuleRow, arguments: list[str]) -> KernelDecision
             None,
         )
         if guarded is not None:
-            return KernelDecision(
-                "ask",
-                row["reason"] or f"{guarded} requires approval",
-                row["sandbox"],
-                recovery=row["recovery"],
+            return row_verdict(
+                row, "ask", row["reason"] or f"{guarded} requires approval"
             )
-    return KernelDecision(
-        row["effect"], row["reason"], row["sandbox"], recovery=row["recovery"]
-    )
+    if row["effect"] == "allow" and row["ask_refspecs"]:
+        # No opacity test of its own: a row declaring refspec effects declares
+        # flag effects too, so the block above has already bounced every word
+        # this one could not read.
+        carried = next(
+            (
+                (word, effect)
+                for word in arguments
+                for effect in refspec_effects(word)
+                if effect in row["ask_refspecs"]
+            ),
+            None,
+        )
+        if carried is not None:
+            return row_verdict(
+                row,
+                "ask",
+                row["reason"] or f"{carried[0]} would {carried[1]} a ref",
+            )
+    return row_verdict(row, row["effect"], row["reason"])
 
 
 class Subcommand(TypedDict):
@@ -202,24 +237,21 @@ def split_subcommand(
     """
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
-    placement = default["sandbox"] if default else "ambient"
-    restoration = default["recovery"] if default else "nothing"
     position = 0
     while position < len(arguments):
         word = arguments[position]
         if not word.startswith("-"):
             return Subcommand(word=word, remainder=arguments[position + 1 :])
-        if flag_matches(word, ask_flags):
+        if flag_matches(word, ask_flags) and default is not None:
             redirect = (
                 " — or cd into that tree and run it there"
                 if flag_matches(word, value_flags)
                 else ""
             )
-            return KernelDecision(
+            return row_verdict(
+                default,
                 "ask",
                 f"{executable} global flag {word} requires approval{redirect}",
-                placement,
-                recovery=restoration,
             )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])
@@ -251,7 +283,12 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
     executable = posixpath.basename(words[0])
     matches = [row for row in rows if row["command"] == executable]
     if not matches:
-        return unjudged(f"command {executable!r} is not classified")
+        # Unlisted only where the name itself was legible. `$CMD --flag`
+        # names nothing a reviewer could weigh: they would be approving
+        # whatever the expansion becomes, which is not what they were shown.
+        if opaque_argument(executable):
+            return unjudged(f"command {executable!r} is not classified")
+        return unlisted(f"command {executable!r} is not classified")
     arguments = words[1:]
     if not any(row["subcommand"] for row in matches):
         return apply_command_row(
@@ -266,7 +303,7 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
     subrows = [row for row in matches if subword and row["subcommand"] == subword]
     if not subrows:
         if default is None:
-            return unjudged(f"{executable} {subword} is not classified")
+            return unlisted(f"{executable} {subword} is not classified")
         return apply_command_row(default, arguments)
     if any(row["operation"] for row in subrows):
         opword = next((word for word in remainder if not word.startswith("-")), "")
@@ -276,7 +313,7 @@ def decide_command_rows(words: list[str], rows: list[ShellRuleRow]) -> KernelDec
         subdefault = next((row for row in subrows if not row["operation"]), None)
         if subdefault is not None:
             return apply_command_row(subdefault, remainder)
-        return unjudged(f"{executable} {subword} {opword} is not classified")
+        return unlisted(f"{executable} {subword} {opword} is not classified")
     return apply_command_row(subrows[0], remainder)
 
 
@@ -756,7 +793,11 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
             continue
         if word in GH_API_BODY_FLAGS or word.partition("=")[0] in GH_API_BODY_FLAGS:
             return KernelDecision(
-                "ask", "gh api sending a request body can change remote state"
+                "ask",
+                "gh api sending a request body can change remote state",
+                purpose="external_consequence",
+                rule="shell:gh.api",
+                evaluator="gh-api-screen",
             )
         if word in GH_API_VALUE_FLAGS:
             expect_value = True
@@ -773,9 +814,18 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
         return unjudged("gh api option has no value")
     if method.upper() not in GH_API_READ_METHODS:
         return KernelDecision(
-            "ask", f"gh api {method} can change remote state — requires approval"
+            "ask",
+            f"gh api {method} can change remote state — requires approval",
+            purpose="external_consequence",
+            rule="shell:gh.api",
+            evaluator="gh-api-screen",
         )
-    return KernelDecision("allow", "read-only gh api call")
+    return KernelDecision(
+        "allow",
+        "read-only gh api call",
+        rule="shell:gh.api",
+        evaluator="gh-api-screen",
+    )
 
 
 UV_FOREIGN_SOURCE_FLAGS = (
