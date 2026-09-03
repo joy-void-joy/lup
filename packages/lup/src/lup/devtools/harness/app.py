@@ -606,6 +606,28 @@ def create_harness_app(
             raise typer.BadParameter(f"{named}declares no {runtime} tree")
         return build(project_root(), every_rule_retired() if relaxed else None)
 
+    def companion_targets(
+        mode: launch.LaunchMode | None, runtime: str, allowance: int
+    ) -> list[NativeHarnessComposition]:
+        """The trees a launch regenerates without opening, which is all the others.
+
+        What makes launching one runtime mean what `generate all` means. A
+        shared source moves both trees, so a launcher that generated only its
+        own left the other stale until somebody ran the selector by hand --
+        and what surfaced it was `dev check` failing on drift the session had
+        not introduced.
+
+        Never relaxed. Relaxation is a statement about the session being
+        opened, and projecting it into a tree nobody is opening would leave
+        that runtime on disk judged by rules its source never declared.
+        """
+        source = mode.targets_at(allowance) if mode is not None else targets
+        return [
+            composition
+            for composition in source.resolve(source.every, project_root())
+            if composition.recipe.label != runtime
+        ]
+
     def launch_help(subject: str) -> str:
         """One launcher's help, with whatever modes this project declares."""
         flags = "".join(f"  --{mode.name}: {mode.help}" for mode in modes)
@@ -704,6 +726,8 @@ def create_harness_app(
                 checkpoint=checkpoint,
                 max_recursive_agent=allowance,
                 transcribe_session=transcribe_session,
+                companions=companion_targets(selection.mode, "claude", allowance),
+                repository_writers=repository_writers,
             )
 
     codex_target = targets.builder("codex")
@@ -812,6 +836,8 @@ def create_harness_app(
                 checkpoint=checkpoint,
                 max_recursive_agent=allowance,
                 transcribe_session=transcribe_session,
+                companions=companion_targets(selection.mode, "codex", allowance),
+                repository_writers=repository_writers,
             )
 
     return app

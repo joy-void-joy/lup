@@ -472,8 +472,8 @@ evaporates. With it the durable path is also the cheap one:
 1. The agent proposes the declaration edit. The policy source is a protected
    path, so the edit surfaces as an approval with the diff in it.
 2. Approve it — what is approved is the rule, not one command.
-3. `harness generate all`, or just relaunch: `ready_to_open` regenerates on
-   the way in.
+3. `harness generate all`, or just relaunch — the same thing: a launcher
+   regenerates every declared tree on the way in, not only the one it opens.
 4. `harness claude --continue` / `harness codex --continue`. The reopened
    session is already running against the tree the approval produced.
 
