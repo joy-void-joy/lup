@@ -47,12 +47,16 @@ def requirement(name: str, exercise: Run | AnyOf, **rest: object) -> Requirement
     )
 
 
-def test_a_clean_exit_proves_a_requirement() -> None:
+def test_a_clean_exit_proves_a_requirement_and_says_nothing_about_it() -> None:
+    """A capability that works is counted, never named.
+
+    One line per healthy requirement is a block that grows with the roster
+    and carries no information in any of it -- and it is what the absences
+    beside it have to stand out from.
+    """
     found = requirement("echo", WORKING).check({})
     assert found.working
-    assert [(item.text, item.urgency) for item in found.notices()] == [
-        ("echo: working", "ready")
-    ]
+    assert found.notices() == []
 
 
 def test_a_missing_program_is_named_as_missing_rather_than_as_a_failure() -> None:
@@ -458,7 +462,7 @@ def test_a_mount_probe_is_aimed_at_the_checkout_a_machine_names() -> None:
     assert isinstance(probe, Run)
     assert probe.command[0] == "podman"
     assert f"{here}:{here}:ro" in probe.command
-    assert str(here / "pyproject.toml") in probe.command
+    assert probe.command[-1] == f"cat {here / 'pyproject.toml'} >/dev/null"
 
 
 def test_nothing_in_a_declared_manifest_names_a_path_or_a_client() -> None:

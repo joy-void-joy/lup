@@ -110,6 +110,51 @@ def test_a_missing_optional_capability_blocks_only_what_depends_on_it() -> None:
     assert preflight.launchable()
     assert preflight.blocked() == ["host_executor"]
     assert "dependent operations are refused" in preflight.diagnosis()
+    assert preflight.opening() == preflight.blocked_line()
+
+
+def test_a_boundary_that_delivered_what_it_promised_says_nothing() -> None:
+    """The expected case is the uninformative one.
+
+    A capability per line, each reporting that a measurement came out the way
+    the profile said it would, is a block saying "as declared" in as many
+    lines as there are capabilities -- printed before every session, above
+    the one line that is different today.
+    """
+    delivered = BoundaryPreflight(
+        boundary=contained_profile(),
+        evidence=[
+            CapabilityEvidence(capability="inside_placement", delivered=True),
+            CapabilityEvidence(capability="question_relay", delivered=True),
+            CapabilityEvidence(capability="host_executor", delivered=True),
+        ],
+    )
+
+    assert delivered.opening() == ""
+    assert "inside_placement" in delivered.diagnosis()
+
+
+def test_a_launch_that_cannot_start_says_the_whole_measurement() -> None:
+    """Then every line of it is evidence for a refusal, and none of it waits.
+
+    The opening block is printed after the last measurement and a refusing
+    launch never reaches it, so the one report a reader cannot afford to lose
+    is the one that cannot be held.
+    """
+    refused = BoundaryPreflight(
+        boundary=contained_profile(),
+        evidence=[
+            CapabilityEvidence(
+                capability="inside_placement",
+                delivered=False,
+                detail="the container reported no sentinel",
+            ),
+        ],
+    )
+
+    assert not refused.launchable()
+    assert refused.opening() == refused.diagnosis()
+    assert "the container reported no sentinel" in refused.opening()
 
 
 def test_configuration_intent_is_not_capability_evidence() -> None:

@@ -42,7 +42,7 @@ from lup.workspace.paths import is_template_scaffold
 from lup.harness.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.generated_paths import GENERATED_PATHS
-from lup.devtools.harness.drift import roster_gaps
+from lup.devtools.harness.drift import generate_with_report, roster_gaps
 from lup.devtools.harness.settings import served_tool_grants
 from lup.formats.banner import (
     ARTIFACT_COMMENT_ROUTER,
@@ -3191,3 +3191,29 @@ def test_a_target_that_renders_one_declaration_short_is_named_with_it(
 
     assert [gap.declaration for gap in gaps] == [dropped]
     assert gaps[0].describe() == f"claude renders nothing for {dropped}"
+
+
+def test_a_tree_generated_on_the_way_to_something_else_says_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A launch regenerates before it opens, and is not what anybody typed.
+
+    `0 writes, 0 deletes, 0 conflicts` over `0 changed, 0 removed` reports
+    that the command did what it always does, at the top of the block where a
+    reader is looking for the line that is different today.
+    """
+    generate(third_recipe(tmp_path, None))
+    settled = manifest_of(third_recipe(tmp_path, None))
+    composed = NativeHarnessComposition(
+        recipe=third_recipe(tmp_path, settled),
+        readiness=lambda: [],
+        invocation_renderer=ClaudeSpellings(),
+    )
+
+    generate_with_report(composed, in_passing=True)
+    assert capsys.readouterr().out == ""
+
+    generate_with_report(composed)
+    asked_for = capsys.readouterr().out
+    assert "0 writes, 0 deletes, 0 conflicts" in asked_for
+    assert "0 changed, 0 removed" in asked_for

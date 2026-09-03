@@ -206,13 +206,32 @@ class BoundaryPreflight(BaseModel, frozen=True):
             )
         ]
         lines.extend(f"  {entry.diagnosis()}" for entry in self.evidence)
-        blocked = self.blocked()
-        if blocked:
-            lines.append(
-                "  optional and absent, so dependent operations are refused: "
-                + ", ".join(blocked)
-            )
+        if self.blocked():
+            lines.append(f"  {self.blocked_line()}")
         return "\n".join(lines)
+
+    def blocked_line(self) -> str:
+        """What this launch cannot do, as the one sentence naming all of it."""
+        return "optional and absent, so dependent operations are refused: " + ", ".join(
+            self.blocked()
+        )
+
+    def opening(self) -> str:
+        """What a launch says about this boundary, which is usually nothing.
+
+        A boundary that delivered everything it promised is the expected case
+        and the uninformative one: a capability per line, each reporting that
+        a measurement came out the way the profile said it would, is a block
+        that says only "as declared" in as many lines as there are
+        capabilities. What survives is the half a reader acts on -- an
+        optional channel that is absent, because the operations needing it
+        are refused and nothing else will say so, and the whole measurement
+        when the launch cannot start, because then every line of it is
+        evidence for a refusal.
+        """
+        if not self.launchable():
+            return self.diagnosis()
+        return self.blocked_line() if self.blocked() else ""
 
 
 class BoundaryCapability(BaseModel, frozen=True):

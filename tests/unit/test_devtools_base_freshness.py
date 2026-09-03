@@ -105,6 +105,7 @@ def test_the_count_a_checkout_is_behind_its_own_remote_carries_the_pull(
     assert freshness.report() == (
         "branch is 2 commit(s) behind origin/main: update with `git pull --ff-only`"
     )
+    assert freshness.notice() == freshness.report()
 
 
 def test_a_checkout_holding_everything_the_remote_holds_is_current(
@@ -116,6 +117,11 @@ def test_a_checkout_holding_everything_the_remote_holds_is_current(
 
     assert not freshness.stale()
     assert freshness.report() == "branch is current with origin/main"
+    # A command that asked how this checkout stands is answered either way.
+    # A launch passing through is not asking, and `branch is current` before
+    # every session can only ever mean that the next line is the first one
+    # worth reading.
+    assert freshness.notice() == ""
 
 
 def test_a_moved_base_carries_the_merge_that_takes_it_not_a_pull(
@@ -186,6 +192,9 @@ def test_an_unreachable_remote_is_stated_rather_than_counted(
     assert not freshness.stale()
     assert freshness.unanswered()
     assert freshness.report().startswith("base freshness unknown:")
+    # Not knowing is the finding here, and it is the one this whole reading
+    # exists to put in front of somebody before a session opens on it.
+    assert freshness.notice() == freshness.report()
 
 
 def test_a_session_with_nobody_in_front_of_it_opens_on_an_unread_base(

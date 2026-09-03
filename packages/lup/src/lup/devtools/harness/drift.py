@@ -71,11 +71,33 @@ def report_drift(report: DriftReport, *, paths: bool = False) -> None:
             typer.echo(f"  - {delete.path}")
 
 
-def generate_with_report(composition: NativeHarnessComposition) -> None:
-    """Generate one composition's owned artifacts, reporting drift and results."""
+def settled(report: DriftReport) -> bool:
+    """Whether this tree is already what its source compiles to, proof included."""
+    proposal = report.proposal
+    return (
+        not (proposal.writes or proposal.deletes or proposal.conflicts)
+        and ownership_state(report) == "present"
+    )
+
+
+def generate_with_report(
+    composition: NativeHarnessComposition, in_passing: bool = False
+) -> None:
+    """Generate one composition's owned artifacts, reporting drift and results.
+
+    ``in_passing`` is generation reached on the way to something else -- a
+    launch, which regenerates before it opens a session and is not the thing
+    anybody typed. Then a tree that was already current says nothing, because
+    `0 writes, 0 deletes, 0 conflicts` followed by `0 changed, 0 removed` is
+    two lines reporting that the command did what it always does, at the top
+    of the block where a reader is looking for the line that is different
+    today. A tree that moved still says so under either.
+    """
     recipe = composition.recipe
     report = inspect_generation(recipe)
-    report_drift(report, paths=True)
+    quiet = in_passing and settled(report)
+    if not quiet:
+        report_drift(report, paths=True)
     try:
         materialized = generate_target(recipe)
     except HarnessGenerationConflict as error:
@@ -86,7 +108,8 @@ def generate_with_report(composition: NativeHarnessComposition) -> None:
             err=True,
         )
         raise typer.Exit(1) from error
-    report_generation(recipe.label, materialized.changed, materialized.removed)
+    if not (quiet and not materialized.changed and not materialized.removed):
+        report_generation(recipe.label, materialized.changed, materialized.removed)
 
 
 def repository_staleness(write: RepositoryWriter) -> list[str]:
@@ -161,12 +184,22 @@ class DriftVerdict(BaseModel, frozen=True):
 def generate_targets(
     compositions: list[NativeHarnessComposition],
     repository_writers: list[RepositoryWriter],
+    in_passing: bool = False,
 ) -> None:
-    """Generate owned artifacts for every composition the selector names."""
+    """Generate owned artifacts for every composition the selector names.
+
+    ``in_passing`` carries the launch's quiet through both halves: a
+    repository artifact is announced when it was behind its source, and a
+    rewrite of a file that was already current is the same non-event as a
+    native tree that had nothing to write.
+    """
     for composition in compositions:
-        generate_with_report(composition)
+        generate_with_report(composition, in_passing)
     for write in repository_writers:
-        typer.echo(f"repository artifact ready: {write()}")
+        behind = repository_staleness(write) if in_passing else ["asked for"]
+        written = write()
+        if behind:
+            typer.echo(f"repository artifact ready: {written}")
 
 
 def inspect_drift(

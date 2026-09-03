@@ -1063,6 +1063,17 @@ class RemoteMeasure(BaseModel, ABC, frozen=True):
             f"update with `{self.update_command()}`"
         )
 
+    def notice(self) -> str:
+        """The same reading where somebody has to hear it, empty when current.
+
+        A command asked how this checkout stands answers either way, which is
+        what :meth:`report` is for. A launch passing through has not been
+        asked, and `branch is current` is a line that appears before every
+        session and can never mean anything but that the next line is the
+        first one worth reading.
+        """
+        return "" if not self.behind else self.report()
+
 
 class UpstreamMeasure(RemoteMeasure, frozen=True):
     """The branch's own remote, whose commits arrive by fast-forward."""
@@ -1143,6 +1154,19 @@ class BaseFreshness(BaseModel, frozen=True):
             return f"base freshness unknown: {self.unreachable}"
         return "\n".join(reading.report() for reading in self.measures()) or (
             "base freshness unknown: this checkout answers to no remote branch"
+        )
+
+    def notice(self) -> str:
+        """Only the readings somebody has to hear, which is often none at all.
+
+        An unreadable remote is one of them and stays: not knowing is the
+        finding there, and it is the one this whole reading exists to put in
+        front of somebody before a session opens on it.
+        """
+        if self.unreachable:
+            return self.report()
+        return "\n".join(
+            said for reading in self.measures() if (said := reading.notice())
         )
 
 
@@ -1398,7 +1422,9 @@ def settle_base_freshness(
         # A pull moves HEAD, which is what the base is measured from, so the
         # counts are re-read — off the refs the probe has already fetched.
         freshness = tracked_remotes(launcher, root).counted(launcher, root)
-    typer.echo(freshness.report())
+    said = freshness.notice()
+    if said:
+        typer.echo(said)
     if freshness.unanswered():
         admit_an_unread_base()
 

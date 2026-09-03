@@ -588,7 +588,14 @@ class MountProbe(BaseModel, frozen=True):
     )
 
     def resolved(self, facts: HostFacts) -> Run:
-        """This probe as the command a machine runs, host facts filled in."""
+        """This probe as the command a machine runs, host facts filled in.
+
+        The read is discarded rather than returned. What proves the mount is
+        that the read *succeeded*, and the bytes are a whole file: they end
+        up as the finding's detail, which is what every report of this
+        capability then carries and what one of them printed -- a launch
+        opening under an entire copy of ``pyproject.toml``.
+        """
         mount = f"{facts.checkout}:{facts.checkout}:ro"
         return Run(
             command=[
@@ -598,8 +605,9 @@ class MountProbe(BaseModel, frozen=True):
                 "-v",
                 mount,
                 self.image,
-                "cat",
-                str(facts.checkout / self.witness),
+                "sh",
+                "-c",
+                f"cat {facts.checkout / self.witness} >/dev/null",
             ]
         )
 
@@ -719,9 +727,17 @@ class SentinelProbe(BaseModel, frozen=True):
         is hex and ``expect`` asks only for containment: an output that
         happened to carry the value in some other field would satisfy a bare
         comparison. The witness is read in the same shell so a mount that is
-        not there fails the exercise instead of being reported beside it.
+        not there fails the exercise instead of being reported beside it, and
+        discarded once read: what proves the mount is the exit status, where
+        the bytes are a whole file that becomes this finding's detail. Every
+        contained launch printed its ``pyproject.toml`` into the opening
+        block that way, under the sentinel it was there to report.
         """
-        read = f" && cat {facts.checkout / self.witness}" if self.witness else ""
+        read = (
+            f" && cat {facts.checkout / self.witness} >/dev/null"
+            if self.witness
+            else ""
+        )
         return Run(
             command=[
                 "sh",
@@ -924,11 +940,19 @@ class Finding(BaseModel, frozen=True):
         lost. What that cost, measured, was a container refused for a missing
         bind source announced as an unreachable proxy and an untunnelled
         egress, under advice to tear down a network that was working.
+
+        A working requirement says nothing at all, which is the whole of what
+        makes the rest of this legible. One line per healthy capability is a
+        block that grows with the roster and carries no information in any of
+        it -- and the argument this module already makes about a convenience
+        repeated before every session applies with more force to a whole
+        roster: a reader who has learned the opening is a wall of `working`
+        has been trained out of the lines between them. What the launch says
+        instead is how many passed, in one line, beside the ones that did
+        not.
         """
         if self.working:
-            return [
-                Notice(text=f"{self.requirement.capability}: working", urgency="ready")
-            ]
+            return []
         urgency: Urgency = "refusal" if self.refuses() else "warning"
         if not self.exercised:
             return [

@@ -75,7 +75,11 @@ from lup.providers.codex.home import (
 )
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.dev.branches import settle_base_freshness
-from lup.devtools.harness.drift import generate_with_report
+from lup.devtools.harness.drift import (
+    RepositoryWriter,
+    generate_targets,
+    generate_with_report,
+)
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
@@ -125,11 +129,35 @@ def relocation_hint(worktree_path: Path) -> RelocationHint:
     return RelocationHint(agent="", shell=move)
 
 
+class LaunchOpening(BaseModel):
+    """What clearing the gates before a session left for the opening to say.
+
+    The banner travels with the findings because the two are halves of one
+    answer and are produced at opposite ends of the launch: the runtime is
+    established here, the boundary is measured after the container starts,
+    and the reader wants them in one block ordered by what they might have to
+    do about it. A component that printed as it went would put the version
+    above the roster above the boundary, which is the order the launcher
+    happens to work in and no order at all to anybody reading it.
+    """
+
+    findings: list[Finding] = []
+    """The host roster, carried to the boundary preflight that needs it."""
+
+    banner: Banner = Banner()
+    """Every line held so far, said once the last measurement is in."""
+
+    runtime: str = ""
+    """The runtime this opens, and the version of it that answered."""
+
+
 def ready_to_open(
     composition: NativeHarnessComposition,
     generate_only: bool,
     sentinels: LaunchSentinels,
-) -> list[Finding] | None:
+    companions: list[NativeHarnessComposition] = [],
+    repository_writers: list[RepositoryWriter] = [],
+) -> LaunchOpening | None:
     """Generate this target's artifacts and clear every gate standing before a session.
 
     Both launchers reach a session through here, so a gate added once is a
@@ -138,10 +166,18 @@ def ready_to_open(
     Answers whether to go on: a generate-only invocation has already done
     everything it was asked for.
 
-    ``None`` is that answer, and the host roster's findings are the other one —
-    including an empty roster, which is why this is not a list and a truth
-    test. What those findings are *for* is the boundary preflight, which needs
-    both halves of one measurement and can only be assembled where the second
+    ``companions`` are the trees this launch does not open and regenerates
+    anyway, which is what makes launching a runtime mean what `harness
+    generate all` means. One runtime's launcher used to leave the other's
+    tree behind whenever a shared source moved, so the next `dev check`
+    failed on drift nobody had introduced -- reported against a session that
+    had done nothing but open. They are generated in passing, so a tree that
+    was already current says nothing.
+
+    ``None`` is that answer, and the opening is the other one — including an
+    empty roster, which is why this is not a list and a truth test. What
+    those findings are *for* is the boundary preflight, which needs both
+    halves of one measurement and can only be assembled where the second
     half is taken; carrying them out of here is what saves the launch from
     exercising the same probes twice and reporting each of them twice.
 
@@ -155,7 +191,8 @@ def ready_to_open(
     checkout is brought level with its own remote, and a base that has moved
     is named on the way in.
     """
-    generate_with_report(composition)
+    generate_with_report(composition, in_passing=not generate_only)
+    generate_targets(companions, repository_writers, in_passing=not generate_only)
     if generate_only:
         return None
     # Before anything writes one, so a launch that was killed last week does
@@ -163,9 +200,10 @@ def ready_to_open(
     # rather than only on the way out, because the launch that crashed is
     # exactly the one that did not get to tidy up after itself.
     sweep_ledgers(project_root())
-    findings = runtime_preflight(composition, sentinels)
+    opening = LaunchOpening()
+    opening.findings = runtime_preflight(composition, sentinels, opening)
     settle_base_freshness(LocalProcessLauncher(), project_root())
-    return findings
+    return opening
 
 
 class HarnessTranscript(BaseModel, arbitrary_types_allowed=True):
@@ -470,15 +508,16 @@ def start_harness_transcript(
     )
     diagnostics = capture_watcher_diagnostics(trace_path.parent)
     watcher.start()
-    Notice(
-        text=f"{provider} observable transcript: {trace_path}",
-        urgency="artifact",
-    ).say()
+    # Said by the banner rather than here, where it was printed a second time
+    # under `Artifacts` a few lines later: one path, twice, in two different
+    # spellings of the same sentence.
     return HarnessTranscript(journal=journal, watcher=watcher, diagnostics=diagnostics)
 
 
 def runtime_preflight(
-    composition: NativeHarnessComposition, sentinels: LaunchSentinels
+    composition: NativeHarnessComposition,
+    sentinels: LaunchSentinels,
+    opening: LaunchOpening,
 ) -> list[Finding]:
     """Verify each claimed native requirement immediately before launch.
 
@@ -489,17 +528,26 @@ def runtime_preflight(
     than the session -- so those are named and the launch continues, which is
     the only posture that works on a machine without a display, a container,
     or an editor attached.
+
+    A supported probe is not a line. Three of them answering with one version
+    between them is one fact stated three times, and the fact is which
+    runtime this opens -- so that is what the opening carries, and each
+    capability is heard from only where it is missing, which is the answer
+    the launch stops on.
     """
     target = composition.recipe.label
     evidence = composition.readiness()
     for item in evidence:
-        state = "ready" if item.supported else "missing"
+        if item.supported:
+            continue
         Notice(
-            text=f"{target} {item.capability}: {state} ({item.version})",
-            urgency="ready" if item.supported else "refusal",
+            text=f"{target} {item.capability}: missing ({item.version})",
+            urgency="refusal",
         ).say()
     if any(not item.supported for item in evidence):
         raise typer.BadParameter(f"{target} runtime preflight failed")
+    versions = ", ".join(sorted({item.version for item in evidence}))
+    opening.runtime = f"{target} {versions}" if versions else target
     return report_requirements(
         composition.recipe.source.requirements, sentinels=sentinels
     )
@@ -510,12 +558,13 @@ def report_requirements(
     setting_up: bool = False,
     sentinels: LaunchSentinels = LaunchSentinels(),
 ) -> list[Finding]:
-    """Exercise the host-side requirements, printing what each one found.
+    """Exercise the host-side requirements, printing whatever is not working.
 
-    Printed on the way past rather than only when something is wrong: a
-    capability that is *absent* is exactly the fact a session needs at the
-    top of its scrollback, because it is the one the agent inside cannot
-    discover except by failing at it.
+    An absence is exactly the fact a session needs at the top of its
+    scrollback, because it is the one the agent inside cannot discover except
+    by failing at it. A capability that works is the opposite of that fact
+    and is counted rather than named: the roster grows, the block of
+    `working` grows with it, and none of it has ever told anybody anything.
 
     *setting_up* widens this to everything checked only at setup, and is off
     for a launch. Two different things live there and both would be wrong to
@@ -1035,6 +1084,7 @@ def settle_boundary(
     findings: list[Finding],
     sentinels: LaunchSentinels,
     environment: EnvVars,
+    banner: Banner,
 ) -> BoundaryPreflight:
     """Compile what this launch promised, measure it, and refuse if it fell short.
 
@@ -1054,6 +1104,11 @@ def settle_boundary(
     describe: the same worktree, the same siblings, and no container under
     them. One call answers for both postures, which is what stops the two
     from coming to disagree about what this session may write.
+
+    A refusal is said here and everything else is held. The banner is printed
+    after the last measurement, and a launch that raises never reaches it --
+    so the one report a reader cannot afford to lose is the one that cannot
+    wait for it.
     """
     root = project_root()
     declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
@@ -1063,8 +1118,9 @@ def settle_boundary(
         writable=list(lease_for(root).writable),
     )
     preflight = measured(boundary, depended_on(declared, not unsandboxed), findings)
-    Notice(text=preflight.diagnosis(), urgency="boundary").say()
+    said = preflight.opening()
     if not preflight.launchable():
+        Notice(text=said, urgency="boundary").say()
         raise typer.BadParameter(
             f"{boundary.name}: "
             + ", ".join(entry.capability for entry in preflight.missing_required())
@@ -1072,6 +1128,8 @@ def settle_boundary(
             "was tried; `--unsandboxed` opens on the host under the semantic "
             "policy alone, which is the same posture stated rather than assumed."
         )
+    if said:
+        banner.add([Notice(text=said, urgency="boundary")])
     record_preflight(preflight, sentinels, root)
     if unsandboxed:
         # No mounts, so no mount table -- and the one a contained launch left
@@ -1094,7 +1152,7 @@ def session_argv(
     environment: EnvVars,
     transcript: Path | None = None,
     sentinels: LaunchSentinels = LaunchSentinels(),
-    host_findings: list[Finding] = [],
+    cleared: LaunchOpening = LaunchOpening(),
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1105,10 +1163,12 @@ def session_argv(
 
     It is also the one place that knows the whole opening: what the container
     had to say about itself, and whether the checks behind it passed. So the
-    banner is assembled here and said once, after the verification rather
-    than before it -- a launch cannot report itself ready while the thing
-    that would refute it has not run yet, and thirty lines printed ahead of
-    the answer is how the refutation ends up below the fold.
+    banner is said here, after the verification rather than before it -- a
+    launch cannot report itself ready while the thing that would refute it
+    has not run yet, and thirty lines printed ahead of the answer is how the
+    refutation ends up below the fold. Both postures say it. The uncontained
+    one said nothing at all, and what stood in for it was a transcript path
+    printed on the way past by whatever had opened the file.
 
     And it is where the boundary is settled, for the same reason: this is the
     one place that knows which posture the launch took, so it is the only
@@ -1118,8 +1178,12 @@ def session_argv(
     last standing as this session's answer -- a boundary belonging to a
     session that had already ended.
     """
+    banner = cleared.banner
     if unsandboxed:
-        settle_boundary(plugin, unsandboxed, host_findings, sentinels, environment)
+        settle_boundary(
+            plugin, unsandboxed, cleared.findings, sentinels, environment, banner
+        )
+        say_opening(cleared, cleared.findings, transcript)
         return [cli, *arguments]
     harness = composition.recipe.source
     # A token crosses by name, so its value has to be in the environment of the
@@ -1131,7 +1195,6 @@ def session_argv(
     if carried:
         environment[harness.image.forge.token_variable] = carried
     credential = login.credentials_path(config_home)
-    banner = Banner()
     opening = contained_argv(
         harness.image,
         harness.requirements,
@@ -1168,13 +1231,29 @@ def session_argv(
     # before the container existed; the inside roster answered for the
     # placement behind the argv this session opens with. A preflight built
     # from either alone would report a capability nothing asked about.
-    settle_boundary(
-        plugin, unsandboxed, [*host_findings, *inside], sentinels, environment
-    )
-    banner.add(
+    measured_here = [*cleared.findings, *inside]
+    settle_boundary(plugin, unsandboxed, measured_here, sentinels, environment, banner)
+    say_opening(cleared, measured_here, transcript)
+    return [*opening, cli, *arguments]
+
+
+def say_opening(
+    cleared: LaunchOpening, findings: list[Finding], transcript: Path | None
+) -> None:
+    """Say everything this launch held, once, in the order a reader wants it.
+
+    The count is what replaces the roster. A reader who wants to know *which*
+    checks passed is asking a question `harness requirements` answers on
+    demand and a launch cannot answer usefully anyway -- the list is the same
+    list as yesterday, every session, and the one time it differs is the one
+    time a line is printed for it.
+    """
+    passed = sum(1 for finding in findings if finding.working)
+    named = f"{cleared.runtime}: " if cleared.runtime else ""
+    cleared.banner.add(
         [
             Notice(
-                text="generated artifacts current; runtime checks passed.",
+                text=f"{named}artifacts current, {passed} checks passed",
                 urgency="ready",
             ),
             *(
@@ -1184,8 +1263,7 @@ def session_argv(
             ),
         ]
     )
-    banner.say()
-    return [*opening, cli, *arguments]
+    cleared.banner.say()
 
 
 def probing(opening: list[str]) -> list[str]:
@@ -1214,6 +1292,8 @@ def launch_claude(
     checkpoint: LaunchCheckpoint | None = None,
     max_recursive_agent: int = -1,
     transcribe_session: bool = False,
+    companions: list[NativeHarnessComposition] = [],
+    repository_writers: list[RepositoryWriter] = [],
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     contradiction = resume.contradicted()
@@ -1224,8 +1304,10 @@ def launch_claude(
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
     sentinels = LaunchSentinels()
-    host_findings = ready_to_open(composition, generate_only, sentinels)
-    if host_findings is None:
+    cleared = ready_to_open(
+        composition, generate_only, sentinels, companions, repository_writers
+    )
+    if cleared is None:
         return
     arguments: list[str] = claude_resume_arguments(resume)
     # A mode's model is a default rather than a fixture: it says what this kind
@@ -1300,7 +1382,7 @@ def launch_claude(
                 environment,
                 transcript.journal.path,
                 sentinels,
-                host_findings,
+                cleared,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -1336,6 +1418,8 @@ def launch_codex(
     checkpoint: LaunchCheckpoint | None = None,
     max_recursive_agent: int = -1,
     transcribe_session: bool = False,
+    companions: list[NativeHarnessComposition] = [],
+    repository_writers: list[RepositoryWriter] = [],
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     contradiction = resume.contradicted()
@@ -1346,8 +1430,10 @@ def launch_codex(
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
     sentinels = LaunchSentinels()
-    host_findings = ready_to_open(composition, generate_only, sentinels)
-    if host_findings is None:
+    cleared = ready_to_open(
+        composition, generate_only, sentinels, companions, repository_writers
+    )
+    if cleared is None:
         return
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
@@ -1412,7 +1498,7 @@ def launch_codex(
                 environment,
                 transcript.journal.path,
                 sentinels,
-                host_findings,
+                cleared,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

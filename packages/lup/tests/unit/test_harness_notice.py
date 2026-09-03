@@ -52,16 +52,28 @@ def test_a_refusal_and_a_cost_do_not_read_alike() -> None:
     assert costing.urgency == "warning"
 
 
-def test_a_working_requirement_is_the_thing_the_others_stand_out_from() -> None:
-    """Colouring only the alarms leaves them nothing to be an exception to."""
+def test_what_an_alarm_stands_out_from_is_the_band_and_not_a_roster() -> None:
+    """Colouring only the alarms leaves them nothing to be an exception to.
+
+    That argument is what the non-alarming urgencies exist for, and it buys a
+    heading per band -- not a line per healthy capability. A roster of greens
+    is not an anchor: it is the wall the one orange line was lost in, and it
+    grows every time somebody declares another requirement.
+    """
     working = Requirement(
         capability="probe",
         purpose="something worth having",
         exercise=Run(command=["echo", "ok"]),
         absence=LostCapability(capability="one convenience"),
     )
+    block = [
+        notice
+        for finding in (working.check({}), probe(refuses=False).check({}))
+        for notice in finding.notices()
+    ]
 
-    assert working.check({}).notices()[0].urgency == "ready"
+    assert not [notice for notice in block if notice.urgency == "ready"]
+    assert [notice.urgency for notice in block[:1]] == ["warning"]
 
 
 def test_a_cause_stays_subordinate_to_the_verdict_it_explains() -> None:

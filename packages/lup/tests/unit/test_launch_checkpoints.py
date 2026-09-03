@@ -8,6 +8,7 @@ import pytest
 import sh
 
 import lup.devtools.harness.launch as launch
+from lup.devtools.harness.preflight import LaunchSentinels
 
 
 class Transcript:
@@ -49,7 +50,7 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda _composition, _generate_only, _sentinels: events.append("ready") or [],
+        lambda *_args: events.append("ready") or launch.LaunchOpening(),
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
@@ -97,7 +98,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda _composition, _generate_only, _sentinels: events.append("ready") or [],
+        lambda *_args: events.append("ready") or launch.LaunchOpening(),
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
@@ -173,3 +174,35 @@ def test_generate_only_never_checkpoints(
         )
 
     assert events == []
+
+
+def test_opening_one_runtime_generates_every_declared_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What makes launching a runtime mean what `harness generate all` means.
+
+    A shared source moves both trees, so a launcher that generated only its
+    own left the other stale until somebody ran the selector by hand -- and
+    what surfaced it was `dev check` failing on drift the session had not
+    introduced.
+    """
+    generated: list[object] = []
+    monkeypatch.setattr(
+        launch,
+        "generate_with_report",
+        lambda composition, in_passing=False: generated.append(composition),
+    )
+    monkeypatch.setattr(
+        launch,
+        "generate_targets",
+        lambda compositions, writers, in_passing=False: generated.extend(
+            [*compositions, *writers]
+        ),
+    )
+    opened, sibling, writer = composition(), composition(), Mock()
+
+    assert (
+        launch.ready_to_open(opened, True, LaunchSentinels(), [sibling], [writer])
+        is None
+    )
+    assert generated == [opened, sibling, writer]
