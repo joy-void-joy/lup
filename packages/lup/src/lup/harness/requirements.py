@@ -941,18 +941,13 @@ class Finding(BaseModel, frozen=True):
         bind source announced as an unreachable proxy and an untunnelled
         egress, under advice to tear down a network that was working.
 
-        A working requirement says nothing at all, which is the whole of what
-        makes the rest of this legible. One line per healthy capability is a
-        block that grows with the roster and carries no information in any of
-        it -- and the argument this module already makes about a convenience
-        repeated before every session applies with more force to a whole
-        roster: a reader who has learned the opening is a wall of `working`
-        has been trained out of the lines between them. What the launch says
-        instead is how many passed, in one line, beside the ones that did
-        not.
+        A working requirement is a line here because somebody asked. The
+        launch, which asked nobody, reads :meth:`alarms` instead.
         """
         if self.working:
-            return []
+            return [
+                Notice(text=f"{self.requirement.capability}: working", urgency="ready")
+            ]
         urgency: Urgency = "refusal" if self.refuses() else "warning"
         if not self.exercised:
             return [
@@ -985,6 +980,22 @@ class Finding(BaseModel, frozen=True):
                 indent=1,
             ),
         ]
+
+    def alarms(self) -> list[Notice]:
+        """Only what a reader has to act on, which is nothing when it works.
+
+        What a roster exercised on the way to somewhere else says. A launch
+        asked nobody, so a line per healthy capability is a block that grows
+        with the roster, is identical every session, and is what the one
+        absence beside it has to be picked out of -- the module's own
+        argument about a convenience repeated before every session, applied
+        to the whole roster rather than to one entry of it.
+
+        An absence still speaks in full. It is the fact the agent inside
+        cannot discover except by failing at it, and the count that replaces
+        the rest is no substitute for it.
+        """
+        return [] if self.working else self.notices()
 
 
 class Manifest(BaseModel, frozen=True):

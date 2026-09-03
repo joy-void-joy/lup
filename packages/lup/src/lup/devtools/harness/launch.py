@@ -549,7 +549,7 @@ def runtime_preflight(
     versions = ", ".join(sorted({item.version for item in evidence}))
     opening.runtime = f"{target} {versions}" if versions else target
     return report_requirements(
-        composition.recipe.source.requirements, sentinels=sentinels
+        composition.recipe.source.requirements, sentinels=sentinels, in_passing=True
     )
 
 
@@ -557,14 +557,20 @@ def report_requirements(
     manifest: Manifest,
     setting_up: bool = False,
     sentinels: LaunchSentinels = LaunchSentinels(),
+    in_passing: bool = False,
 ) -> list[Finding]:
-    """Exercise the host-side requirements, printing whatever is not working.
+    """Exercise the host-side requirements, printing what each one found.
 
     An absence is exactly the fact a session needs at the top of its
     scrollback, because it is the one the agent inside cannot discover except
-    by failing at it. A capability that works is the opposite of that fact
-    and is counted rather than named: the roster grows, the block of
-    `working` grows with it, and none of it has ever told anybody anything.
+    by failing at it.
+
+    *in_passing* is a roster exercised on the way to something else, and
+    there a capability that works is counted rather than named: the roster
+    grows, the block of `working` grows with it, and the launch reports the
+    same block every session. A caller that asked -- `harness requirements`,
+    whose whole job is this answer -- hears every entry, because a command
+    that prints nothing on a healthy machine has not answered the question.
 
     *setting_up* widens this to everything checked only at setup, and is off
     for a launch. Two different things live there and both would be wrong to
@@ -591,10 +597,10 @@ def report_requirements(
         inside_sentinel=sentinels.inside,
         host_sentinel=sentinels.host,
     ).check(environ, setting_up=setting_up)
-    return reported(findings)
+    return reported(findings, in_passing)
 
 
-def reported(findings: list[Finding]) -> list[Finding]:
+def reported(findings: list[Finding], in_passing: bool = False) -> list[Finding]:
     """Say what each finding found, and stop where absence refuses.
 
     One place for both halves so the two rosters cannot come to differ about
@@ -608,9 +614,13 @@ def reported(findings: list[Finding]) -> list[Finding]:
     an error box, restating word for word what had just been printed above it
     with the causes, the recoveries and the blank lines all flattened out. The
     lines above are the report; this is the exit code and what it was about.
+
+    *in_passing* decides which half of a finding is read: everything it
+    found, for a caller that asked, and only what a reader has to act on for
+    a launch on its way to opening a session.
     """
     for finding in findings:
-        for notice in finding.notices():
+        for notice in finding.alarms() if in_passing else finding.notices():
             notice.say()
     stopping = refused(findings)
     if stopping:
@@ -628,6 +638,7 @@ def verify_inside(
     setting_up: bool = True,
     sentinels: LaunchSentinels = LaunchSentinels(),
     environment: EnvVars | None = None,
+    in_passing: bool = False,
 ) -> list[Finding]:
     """Exercise the image half behind an argv somebody already assembled.
 
@@ -651,7 +662,8 @@ def verify_inside(
                 inside_sentinel=sentinels.inside,
                 host_sentinel=sentinels.host,
             ),
-        )
+        ),
+        in_passing,
     )
 
 
@@ -1225,6 +1237,7 @@ def session_argv(
         setting_up=False,
         sentinels=sentinels,
         environment=environment,
+        in_passing=True,
     )
     # Both halves of one measurement, joined here because this is where the
     # second is taken. The host roster answered for the relay and the store

@@ -47,16 +47,27 @@ def requirement(name: str, exercise: Run | AnyOf, **rest: object) -> Requirement
     )
 
 
-def test_a_clean_exit_proves_a_requirement_and_says_nothing_about_it() -> None:
-    """A capability that works is counted, never named.
-
-    One line per healthy requirement is a block that grows with the roster
-    and carries no information in any of it -- and it is what the absences
-    beside it have to stand out from.
-    """
+def test_a_clean_exit_proves_a_requirement() -> None:
     found = requirement("echo", WORKING).check({})
     assert found.working
-    assert found.notices() == []
+    assert [(item.text, item.urgency) for item in found.notices()] == [
+        ("echo: working", "ready")
+    ]
+
+
+def test_a_roster_exercised_on_the_way_past_names_only_what_failed() -> None:
+    """A launch asked nobody, and a command whose job is this answer did.
+
+    One line per healthy requirement is identical every session and is what
+    the one absence beside it has to be picked out of. Silence is the wrong
+    answer to `harness requirements`, though, so which half is read belongs
+    to the caller rather than to the finding.
+    """
+    working = requirement("echo", WORKING).check({})
+    lost = requirement("absent", Run(command=["lup-no-such-program"])).check({})
+
+    assert working.alarms() == []
+    assert lost.alarms() == lost.notices()
 
 
 def test_a_missing_program_is_named_as_missing_rather_than_as_a_failure() -> None:
