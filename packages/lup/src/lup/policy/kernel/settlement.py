@@ -80,6 +80,7 @@ class SettlementFacts:
     reviewable: bool
     checkpoint: CheckpointEvidence
     unjudged_ambient: UnjudgedAmbient
+    unleased: list[str]
     hint: str
 
     def __init__(
@@ -93,6 +94,7 @@ class SettlementFacts:
         reviewable: bool = True,
         checkpoint: CheckpointEvidence = "absent",
         unjudged_ambient: UnjudgedAmbient = "ask",
+        unleased: list[str] | None = None,
         hint: str = "",
     ) -> None:
         self.decision = decision
@@ -104,6 +106,7 @@ class SettlementFacts:
         self.reviewable = reviewable
         self.checkpoint = checkpoint
         self.unjudged_ambient = unjudged_ambient
+        self.unleased = unleased or []
         self.hint = hint
 
     def asks(self, kind: str) -> bool:
@@ -122,6 +125,7 @@ class SettlementFacts:
             self.reviewable,
             self.checkpoint,
             self.unjudged_ambient,
+            self.unleased,
             self.hint,
         )
 
@@ -291,6 +295,50 @@ class TrappedPlacement(SettlementRule):
             reason=SANDBOX_TRAPPED_REASON,
             cause="capability",
             capability="host_executor",
+        )
+
+
+class UnleasedWrite(SettlementRule):
+    """A write the measured boundary does not cover, wherever the session sits.
+
+    The lease is what a launch actually mounted writable, and it is a snapshot:
+    the read-only overlays a contained launch punches over its siblings are
+    enumerated when the container starts, and a container's mount namespace is
+    fixed from then on. So a worktree cut *after* that gets the writable base
+    with no overlay over it, and a mount table cannot close that -- there is no
+    remount to make.
+
+    Which is why the judgement does. The mount table was never the barrier
+    here: the shared administrative directory is mounted writable on purpose,
+    because no session could cut a worktree otherwise, and what guards the keys
+    inside it is a rule holding an approval question against them by name. This
+    is the same arrangement applied to the same gap.
+
+    Read against ``allow`` and ``defer`` only. A judged refusal is somebody's
+    answer and asking about it would be offering to overturn it, and an ask
+    already reaches a reviewer -- who is shown the operation, and can see for
+    themselves where it points.
+    """
+
+    id = "unleased-write"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if not facts.unleased or facts.decision.effect not in ("allow", "defer"):
+            return None
+        return facts.decision.revised(
+            effect="ask",
+            reason=(
+                f"{facts.decision.reason}. This writes to "
+                f"{', '.join(facts.unleased)}, which the boundary this launch "
+                "measured does not cover — so nothing here confines the write "
+                "and no capture of this session holds what it replaces"
+            ),
+            purpose="unrecovered_local_mutation",
+            # Named, because the verdict this replaces was reached by the
+            # vocabulary finding nothing to say and carries no id of its own.
+            # An ask that names no rule is one nobody can write a case for.
+            rule=self.id,
+            abstention=None,
         )
 
 
@@ -530,6 +578,7 @@ SETTLEMENT_ORDER: list[SettlementRule] = [
     DecisionEscalation(),
     SandboxEscalation(),
     TrappedPlacement(),
+    UnleasedWrite(),
     ProviderNative(),
     RecoveredLoss(),
     UnreachableReviewer(),
@@ -546,8 +595,14 @@ below them could change their answer. Decision escalation precedes sandbox
 escalation so that a combined request over an overrideable refusal has
 already become a question by the time the placement moves — which is exactly
 the difference between ``escalate[decision,sandbox]`` reaching the host and
-``escalate[sandbox]`` alone staying refused. ``Standing`` is last because it
-speaks for everything.
+``escalate[sandbox]`` alone staying refused.
+
+``UnleasedWrite`` sits above ``RecoveredLoss`` for the reason that row exists:
+a proven capture settles a loss to a permission, and a capture of *this*
+session does not hold what lies outside the boundary it measured. Read the
+other way round, an undo reference covering the checkout would discharge a
+question about a tree it never held. ``Standing`` is last because it speaks
+for everything.
 """
 
 

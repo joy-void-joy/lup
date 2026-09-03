@@ -966,6 +966,7 @@ def decide_shell(
     recovered: bool = False,
     relayed: bool = False,
     unjudged_ambient: UnjudgedAmbient = "ask",
+    unleased_targets: list[str] | None = None,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -1042,6 +1043,7 @@ def decide_shell(
             reviewable=interactive or relayed,
             checkpoint="complete" if recovered else "absent",
             unjudged_ambient=unjudged_ambient,
+            unleased=unleased_targets,
             hint=hint,
         )
     )

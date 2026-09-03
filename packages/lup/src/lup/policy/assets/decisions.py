@@ -28,6 +28,7 @@ from host import (
     defers_unjudged,
     delivers,
     measured_boundary,
+    unleased_write_targets,
     script_run_nudge,
     directory_write_targets,
     empty_directory_targets,
@@ -169,6 +170,12 @@ def bash_decision(
         # uncontained session ever reaches: contained, the row above settles
         # the same operation first.
         unjudged_ambient="defer" if defers_unjudged(boundary) else "ask",
+        # Resolved against what this launch mounted writable, so a write into a
+        # worktree cut after the container started reaches a reviewer instead of
+        # the writable base no overlay covers.
+        unleased_targets=unleased_write_targets(
+            [*shell_write_targets(command), *acted_on], boundary, cwd
+        ),
         recovered=bool(reference),
     )
     # Parked before anything is rendered, because the relay is the durable

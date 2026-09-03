@@ -1050,6 +1050,38 @@ def recoverable_write_targets(
     ]
 
 
+def unleased_write_targets(
+    targets: list[str], measured: dict[str, list[str]], root: Path | None = None
+) -> list[str]:
+    """Report which targets fall outside what this launch mounted writable.
+
+    The lease is a snapshot. A contained launch enumerates its siblings when
+    the container starts and punches a read-only overlay over each; a worktree
+    cut afterwards gets the writable base with no overlay, and the mount
+    namespace is fixed by then, so nothing can be remounted to cover it. The
+    judgement is what is left, which is the arrangement the lease already
+    relies on elsewhere.
+
+    Nothing is reported where no boundary was measured. A session that could
+    not read its own lease knows of no writable roots at all, and reporting
+    every target as unleased would put a question in front of every write in
+    the checkout -- which teaches nobody anything and buries the real ones.
+    """
+    leased = measured["writable_roots"] if "writable_roots" in measured else []
+    if not leased:
+        return []
+    where = Path.cwd() if root is None else root
+    return [
+        target
+        for target in targets
+        for resolved in [str((where / target).resolve())]
+        if not any(
+            resolved == root_path or resolved.startswith(root_path + "/")
+            for root_path in leased
+        )
+    ]
+
+
 def empty_directory_targets(targets: list[str], root: Path | None = None) -> list[str]:
     """Report which targets are directories with nothing in them.
 

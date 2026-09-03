@@ -54,6 +54,7 @@ The rows, in order, each stating its own claim:
 | `DecisionEscalation` | A stated reason turns anything not already permitted into a question. |
 | `SandboxEscalation` | The agent asked for the launcher&#x27;s host, which is always reviewed. |
 | `TrappedPlacement` | An operation that has to reach the host where nothing can carry it. |
+| `UnleasedWrite` | A write the measured boundary does not cover, wherever the session sits. |
 | `ProviderNative` | A rule looked and handed the decision to the provider&#x27;s own mode. |
 | `RecoveredLoss` | A question about a loss a proven capture already put somewhere safe. |
 | `UnreachableReviewer` | A question in a session no eligible reviewer can be reached from. |
