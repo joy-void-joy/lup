@@ -1,16 +1,16 @@
 """Remote-auth probing: what can this session actually do at the origin remote?
 
 **Two questions, and they have different answers.** Whether git can reach the
-remote is :func:`check_remote_auth`: ssh-style remotes are probed with
-``ssh -T`` (GitHub answers with exit 1, GitLab with 0), https remotes via
-``gh auth status``, and local or unrecognized remotes pass. Whether the forge
+remote is :func:`check_remote_auth`: ssh-style remotes are probed by having
+git reach them, https remotes via ``gh auth status``, and local or
+unrecognized remotes pass. Whether the forge
 client can authenticate is :func:`check_forge_api`, which asks ``gh`` however
 the remote happens to be spelled.
 
 Conflating them is how a pull request fails in the client's own words with
 nothing saying which credential was missing. On an ssh remote the transport
 probe answers for a key and never asks about the API -- and a forwarded agent
-answers ``ssh -T`` perfectly while holding no token at all, because a token is
+carries a fetch perfectly while holding no token at all, because a token is
 a separate credential that travels separately. So a session can push all day
 and be unable to open the request describing what it pushed. Anything reading
 or writing pull requests, issues or checks gates on :func:`check_forge_api`;
@@ -26,6 +26,8 @@ one to load, but a probe that cannot reach the host has learned nothing git
 did not already say better.
 """
 
+import os
+import shlex
 from urllib.parse import urlparse
 
 import sh
@@ -105,12 +107,46 @@ def parse_remote(remote_url: str) -> RemoteRef | None:
     return None
 
 
+def git_ssh_program() -> str:
+    """The ssh command line git runs for a remote, with non-interactivity added.
+
+    Git speaks ssh through ``GIT_SSH_COMMAND``, falling back to
+    ``core.sshCommand`` and then to whatever ``ssh`` the path holds. A
+    sandbox that supplies its own ``known_hosts`` sets one of them, so a
+    probe spelling ``ssh`` on its own reads a configuration git never reads
+    and fails host key verification against a remote git reaches perfectly.
+    That is a false negative on the only question the probe was asked, and
+    the readers downstream spend it as a fact: the sweep gates its pull
+    request lookup and its remote branch listing on this answer, so a probe
+    that cannot reach the host reports every branch as carrying no request
+    and the remote as carrying no branches -- two claims nothing checked.
+
+    Batch mode and a connect timeout are appended to the configured command
+    rather than put in place of it, so the probe cannot stop on a prompt
+    while keeping the options that let it connect at all.
+    """
+    # lup: ignore[os-environ, dict-get] — git's transport setting, read where git
+    # reads it, out of an environment whose keys are the machine's and not a schema
+    configured = os.environ.get("GIT_SSH_COMMAND", "") or git.out(
+        "config", "--get", "core.sshCommand", _ok_code=[0, 1]
+    )
+    return f"{configured or 'ssh'} -o BatchMode=yes -o ConnectTimeout=5"
+
+
 def ssh_auth_refusal(destination: str, remote_url: str) -> RemoteRefusal:
-    """Probe SSH auth with ``ssh -T``. GitHub answers with exit 1, GitLab with 0.
+    """Probe the transport by having git reach the remote, the way git reaches it.
+
+    Asked through ``git ls-remote`` rather than through a hand-built ``ssh``,
+    because git is what the question is about. It applies the ``insteadOf``
+    rewrites, reads the ssh configuration this session was actually given,
+    and refuses exactly where a fetch would refuse; a probe spelling its own
+    ``ssh`` answers for a session nobody is running.
 
     A key the host would not accept is reported with the identity ssh itself
     says it would offer this destination, so the reply names the key to load
-    rather than leaving that to whoever reads it.
+    rather than leaving that to whoever reads it -- asked with the same
+    configuration git just used, since a different one offers a different
+    key and a confident answer naming the wrong one is worse than none.
 
     Anything else is a complaint that does not claim to be about a
     credential. A host that was never reached has no key to load, and a
@@ -119,28 +155,37 @@ def ssh_auth_refusal(destination: str, remote_url: str) -> RemoteRefusal:
     ssh's refusal wording, which is the only place either of them says which
     one happened.
     """
+    program = git_ssh_program()
+    # lup: ignore[os-environ] — the process boundary, carrying one added setting
+    reaching = {**os.environ, "GIT_SSH_COMMAND": program}
     try:
-        ssh = sh.Command("ssh").bake(_tty_out=False)
-    except sh.CommandNotFound:
-        return RemoteRefusal(complaint="ssh binary not found; skipping remote checks")
-    probe = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-T", destination]
-    try:
-        ssh(*probe, _ok_code=[0, 1])
+        git("ls-remote", "--quiet", remote_url, "HEAD", _ok_code=[0], _env=reaching)
         return RemoteRefusal()
     except sh.ErrorReturnCode as refusal:
         said = decode_stderr(refusal)
         # OpenSSH's wording for every credential it declines, whatever the
         # method named in the parenthesis after it. No structured form of
         # this exists to read instead: the exit status is 255 for a declined
-        # key and 255 for a host that never answered.
+        # key and 255 for a host that never answered, and git hands both
+        # back with ssh's own stderr intact.
         if "Permission denied" not in said:
             return RemoteRefusal(complaint=said)
-        identity = ""
-        lines = str(ssh("-G", destination, _ok_code=[0])).splitlines()
-        for line in lines:
-            if line.startswith("identityfile "):
-                identity = line.removeprefix("identityfile ")
-                break
+
+        def offered_identity() -> str:
+            """The key ssh says it would offer here, empty where it will not say."""
+            words = shlex.split(program)  # lup: ignore[string-split] — shell lexer
+            try:
+                asked = sh.Command(words[0])(
+                    *words[1:], "-G", destination, _ok_code=[0], _tty_out=False
+                )
+            except (sh.CommandNotFound, sh.ErrorReturnCode):
+                return ""
+            for line in str(asked).splitlines():
+                if line.startswith("identityfile "):
+                    return line.removeprefix("identityfile ")
+            return ""
+
+        identity = offered_identity()
         complaint = f"SSH authentication failed for remote '{remote_url}'."
         if identity:
             complaint += f"\nLoad the key with:  ssh-add {identity}"
@@ -202,8 +247,8 @@ def remote_auth_refusal(remote_url: str) -> RemoteRefusal:
 def check_remote_auth() -> bool:
     """Verify auth for the origin remote. Returns True if remote ops can proceed.
 
-    ssh-style remotes are probed with ``ssh -T``; https remotes are verified
-    via ``gh auth status``. Local and unrecognized remotes pass.
+    ssh-style remotes are probed by having git reach them; https remotes are
+    verified via ``gh auth status``. Local and unrecognized remotes pass.
 
     Every complaint counts here, not only a declined credential: this asks
     whether an operation needing the remote can go ahead, and one that never

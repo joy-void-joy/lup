@@ -21,8 +21,13 @@ class StubGit:
     def __init__(self, remote: str) -> None:
         self.remote = remote
 
-    def out(self, *arguments: str) -> str:
-        """What `git remote get-url origin` prints."""
+    def out(self, *arguments: str, **keywords: object) -> str:
+        """What `git remote get-url origin` prints.
+
+        Keywords are accepted and dropped because the real command takes
+        sh's, and a caller passing `_ok_code` for a query allowed to come
+        back empty is asking git a question this can answer.
+        """
         return self.remote
 
 
@@ -80,6 +85,41 @@ def test_the_transport_probe_still_declines_to_ask_the_client(
 
     assert remote_auth.check_remote_auth() is True
     assert client.asked == []
+
+
+def test_the_probe_speaks_the_ssh_command_git_was_handed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The false negative that blanked a sweep: a config git reads and no probe did.
+
+    A sandbox hands git its own ``known_hosts`` through ``GIT_SSH_COMMAND``.
+    A probe spelling ``ssh`` itself read a different configuration, failed
+    host key verification against a remote git was reaching perfectly, and
+    every reader gated on that answer spent the failure as a fact -- the
+    sweep reported no branch carrying a pull request and no remote carrying
+    branches, neither of which anything had looked at.
+    """
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -F /run/lup/ssh/config")
+
+    program = remote_auth.git_ssh_program()
+
+    assert program.startswith("ssh -F /run/lup/ssh/config")
+    assert "BatchMode=yes" in program
+
+
+def test_a_session_handed_no_ssh_command_still_probes_without_prompting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-interactivity is the probe's own, not something it inherits.
+
+    Appending it to a configured command covers the sandbox; supplying it
+    where nothing is configured covers the host, whose ssh would otherwise
+    be free to stop on a passphrase prompt nobody is there to answer.
+    """
+    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+    monkeypatch.setattr(remote_auth, "git", StubGit(""))
+
+    assert remote_auth.git_ssh_program() == "ssh -o BatchMode=yes -o ConnectTimeout=5"
 
 
 def test_the_refusal_names_both_places_a_credential_comes_from(
