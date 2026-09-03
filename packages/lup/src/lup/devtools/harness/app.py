@@ -581,7 +581,10 @@ def create_harness_app(
         )
 
     def selected_target(
-        mode: launch.LaunchMode | None, runtime: str, relaxed: bool = False
+        mode: launch.LaunchMode | None,
+        runtime: str,
+        allowance: int,
+        relaxed: bool = False,
     ) -> NativeHarnessComposition:
         """The composition to generate and open, under whichever mode is in force.
 
@@ -596,7 +599,7 @@ def create_harness_app(
         judged by the tree it opened against rather than by what was asked
         for.
         """
-        source = mode.targets if mode is not None else targets
+        source = mode.targets_at(allowance) if mode is not None else targets
         build = source.builder(runtime)
         if build is None:
             named = f"--{mode.name} " if mode is not None else ""
@@ -661,10 +664,34 @@ def create_harness_app(
                     help="Open the session on the host instead of in the container",
                 ),
             ] = False,
+            max_recursive_agent: Annotated[
+                int | None,
+                typer.Option(
+                    "--max-recursive-agent",
+                    min=-1,
+                    help="Maximum child-agent depth; -1 allows unlimited recursion",
+                ),
+            ] = None,
+            transcribe_session: Annotated[
+                bool,
+                typer.Option(
+                    "--transcribe-session",
+                    help="Mirror the native CLI transcript when this mode disables it",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
+            allowance = (
+                selection.mode.recursive_agent_limit(max_recursive_agent)
+                if selection.mode is not None
+                else -1
+                if max_recursive_agent is None
+                else max_recursive_agent
+            )
             launch.launch_claude(
-                selected_target(selection.mode, "claude", ignore_antipatterns),
+                selected_target(
+                    selection.mode, "claude", allowance, ignore_antipatterns
+                ),
                 selection.arguments,
                 directory,
                 profile,
@@ -674,7 +701,9 @@ def create_harness_app(
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
                 unsandboxed,
-                checkpoint,
+                checkpoint=checkpoint,
+                max_recursive_agent=allowance,
+                transcribe_session=transcribe_session,
             )
 
     codex_target = targets.builder("codex")
@@ -742,10 +771,34 @@ def create_harness_app(
                     help="Open the session on the host instead of in the container",
                 ),
             ] = False,
+            max_recursive_agent: Annotated[
+                int | None,
+                typer.Option(
+                    "--max-recursive-agent",
+                    min=-1,
+                    help="Maximum child-agent depth; -1 allows unlimited recursion",
+                ),
+            ] = None,
+            transcribe_session: Annotated[
+                bool,
+                typer.Option(
+                    "--transcribe-session",
+                    help="Mirror the native CLI transcript when this mode disables it",
+                ),
+            ] = False,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
+            allowance = (
+                selection.mode.recursive_agent_limit(max_recursive_agent)
+                if selection.mode is not None
+                else -1
+                if max_recursive_agent is None
+                else max_recursive_agent
+            )
             launch.launch_codex(
-                selected_target(selection.mode, "codex", ignore_antipatterns),
+                selected_target(
+                    selection.mode, "codex", allowance, ignore_antipatterns
+                ),
                 selection.arguments,
                 codex_home,
                 profile,
@@ -756,7 +809,9 @@ def create_harness_app(
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
                 unsandboxed,
-                checkpoint,
+                checkpoint=checkpoint,
+                max_recursive_agent=allowance,
+                transcribe_session=transcribe_session,
             )
 
     return app

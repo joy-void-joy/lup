@@ -179,6 +179,11 @@ class Sandbox:
             makes one spelling true on both sides.
         docker_image: Docker image to use for the sandbox.
         network_mode: Network access level ("bridge" or "none").
+        memory_limit_bytes: Container memory ceiling, defaulting to
+            :attr:`DEFAULT_MEMORY_LIMIT_BYTES`. Crossing it has the kernel
+            kill the container outright, which reaches a caller as a dropped
+            connection rather than as a ``MemoryError``, so size it for the
+            workload rather than leaving it to be discovered.
         timeout_seconds: Default timeout for code execution.
         pre_install: Packages to pre-install on start. Pass ``None`` to skip.
         source_roots: Host import roots to bind read-only and put on
@@ -191,6 +196,18 @@ class Sandbox:
 
     DEFAULT_EGRESS_PROXY_IMAGE = "ubuntu/squid:6.6-24.04_edge"
     """The proxy image `filtered` mode bridges the sandbox's network through."""
+
+    DEFAULT_MEMORY_LIMIT_BYTES = 1024**3
+    """What a sandbox gets when its caller names no ceiling, in bytes.
+
+    Sized for the default workload — a scratch REPL running glue an agent
+    wrote a moment ago — and deliberately small, because the ceiling's job is
+    to keep a runaway cell from taking the host down with it. A caller whose
+    container does real computational work is the one that knows how much it
+    needs, which is why this is a default rather than the only value: a
+    workload sized against the wrong number pays for it in shrunken runs
+    rather than in an error that says what went wrong.
+    """
 
     SOURCE_ROOT = "/sources"
     """Where read-only host source trees are mounted, one directory each."""
@@ -219,6 +236,7 @@ class Sandbox:
         shared_path: str | None = None,
         docker_image: str = DEFAULT_DOCKER_IMAGE,
         network_mode: NetworkMode = "bridge",
+        memory_limit_bytes: int = DEFAULT_MEMORY_LIMIT_BYTES,
         require_rootless: bool = False,
         durable: bool = False,
         egress: EgressPolicy | None = None,
@@ -236,6 +254,7 @@ class Sandbox:
         self.shared_dir = Path(shared_dir).resolve()
         self.shared_path = shared_path or self.DEFAULT_SHARED_PATH
         self.network_mode = network_mode
+        self.memory_limit_bytes = memory_limit_bytes
         self.require_rootless = require_rootless
         self.durable = durable
         self.egress = egress or EgressPolicy()
@@ -823,7 +842,7 @@ class Sandbox:
             detach=True,
             mounts=self.docker_mounts(),
             working_dir="/workspace",
-            mem_limit="1g",
+            mem_limit=self.memory_limit_bytes,
             network_mode=self.network_name if filtered else self.network_mode,
             environment=self.container_environment(filtered),
             labels=self.infrastructure_labels() | {self.VOLUME_LABEL: self.volume_name},

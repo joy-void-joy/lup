@@ -1451,6 +1451,7 @@ def contained_argv(
     interactive: bool = True,
     banner: Banner | None = None,
     sentinels: LaunchSentinels = LaunchSentinels(),
+    inherited_environment: list[str] | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1563,4 +1564,5 @@ def contained_argv(
         interactive=interactive,
         proxy_address=reached_at,
         boundary=sentinels.within(),
+        inherited_environment=inherited_environment,
     )
