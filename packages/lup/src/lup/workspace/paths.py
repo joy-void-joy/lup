@@ -376,6 +376,20 @@ def feedback_path() -> Path:
     return notes_path() / "feedback_loop"
 
 
+def checkout_feedback_path() -> Path:
+    """Return ``<root>/notes/feedback_loop``, the directory a committed artifact names.
+
+    :func:`feedback_path` follows the notes override, which is right for the
+    process writing an analysis and wrong for anything generated into the
+    checkout: a session's override names that session's own directory, and
+    an artifact rendered under it would carry one session's private path as
+    the repository's, stale for every other session. This names the tree the
+    checkout keeps, spelled from the same segment :func:`feedback_path` uses,
+    so the two cannot drift apart.
+    """
+    return checkout_notes_path() / feedback_path().name
+
+
 def fetch_cache_path() -> Path:
     """Return ``<root>/.cache/fetch/``, where fetched payloads are kept.
 
