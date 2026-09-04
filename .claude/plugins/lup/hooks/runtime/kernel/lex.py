@@ -599,7 +599,12 @@ def resolve_redirection(
     if tokens[target].text in (recoverable_targets or []):
         return Redirection(decision=None, resume=target + 1)
     return Redirection(
-        decision=KernelDecision("ask", "file redirection is never auto-allowed"),
+        decision=KernelDecision(
+            "ask",
+            "file redirection is never auto-allowed",
+            checkpoint="targeted",
+            purpose="unrecovered_local_mutation",
+        ),
         resume=target + 1,
     )
 

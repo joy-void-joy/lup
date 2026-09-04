@@ -366,7 +366,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
-      "sha256": "10322139143a37c24da6bc0e00c6acec7baf276723f7dc2531dcce3e7757e366",
+      "sha256": "ae7a3cbbe0c550861f0ad26f66e35ecc0a289d6eb91eab750af80d2e59be748c",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
