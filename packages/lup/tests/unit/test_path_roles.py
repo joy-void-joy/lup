@@ -204,6 +204,34 @@ def test_traversal_cannot_carry_a_pattern_role_out_of_its_tree() -> None:
     assert path_role("src/a/__pycache__/../../main.py", PATTERN_ROLES) == "production"
 
 
+def test_a_word_that_does_not_spell_its_path_earns_no_role() -> None:
+    """A pattern matches directory names, and an expansion is not one.
+
+    `**` stands for any run of segments, so `**/tmp` read the `$W` in
+    `$W/tmp/f.py` as a directory name and called the whole path scratch —
+    on the strength of a component saying nothing about where `$W` resolves,
+    which at run time could be `/etc`. The literal spellings beside each one
+    are what the declaration was for, and they keep their role.
+    """
+    assert path_role("$W/tmp/f.py", NESTED) == "production"
+    assert path_role("${W}/tmp/f.py", NESTED) == "production"
+    assert path_role("~/tmp/f.py", NESTED) == "production"
+    assert path_role("src/tmp/f.py", NESTED) == "scratch"
+    assert path_role("tmp/f.py", NESTED) == "scratch"
+
+
+def test_the_scratchpad_answers_before_the_expansion_guard() -> None:
+    """`$TMPDIR` carries an expansion and is still the one root with an answer.
+
+    It earns it by checking its own suffix rather than by matching a pattern,
+    which is why the guard above can refuse every other opaque spelling
+    without taking the harness-provided scratch root down with them.
+    """
+    assert path_role("$TMPDIR/f.py", NESTED) == "scratch"
+    assert path_role("${TMPDIR}/f.py", NESTED) == "scratch"
+    assert path_role("$TMPDIR/$W/f.py", NESTED) == "production"
+
+
 def authoring(path: str) -> str:
     """The verdict on creating a file that does not exist yet."""
     return decide_edit(

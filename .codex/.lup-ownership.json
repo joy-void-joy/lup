@@ -135,14 +135,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
-      "sha256": "d369bd0926af8dc13ca74e04e1b301b664498e6af1967c7f29e88a657bf23644",
+      "sha256": "10322139143a37c24da6bc0e00c6acec7baf276723f7dc2531dcce3e7757e366",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/roles.py",
       "category": "generated",
-      "sha256": "fe7c9f8a8031816620713ea4640daf875930e7d3ca61b5e723803dc62a6917bb",
+      "sha256": "e396c3b3fa50031800dd1348bcd691fe59c19d3a9116d9b173aeac48e8ec2c5a",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

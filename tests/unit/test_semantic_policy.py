@@ -372,6 +372,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm packages/lup/tmpfile.py", effect="ask"),
     DecisionCase(input="rm tmp/x src/y", effect="ask"),
     DecisionCase(input="rm tmp/../src/x.py", effect="ask"),
+    # The opaque word the comment above promises keeps the verb's ask. A role
+    # pattern reads directory names, so `**/tmp` had been absorbing the `$W`
+    # and calling the whole path disposable — which bought a recursive delete
+    # of wherever `$W` resolves to, on the strength of the segment after it.
+    DecisionCase(input="rm -rf $W/tmp", effect="ask"),
+    DecisionCase(input="rm -rf $W/tmp/keep", effect="ask"),
+    DecisionCase(input="echo x > $W/tmp/f.py", effect="ask"),
+    DecisionCase(input="rm -rf ~/tmp", effect="ask"),
     DecisionCase(input="rm --no-preserve-root -rf tmp", effect="ask"),
     DecisionCase(input="rm -rf /", effect="ask"),
     DecisionCase(input="rm .claude/settings.local.json", effect="ask"),

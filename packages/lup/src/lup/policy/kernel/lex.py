@@ -13,7 +13,7 @@ from .decision import (
     unjudged,
 )
 from .archives import archive_write
-from .roles import path_role
+from .roles import path_role, spells_its_path
 from .rows import PathRoleRow, PathRuleRow
 from .words import (
     SCRATCH_VERB_FLAGS,
@@ -452,18 +452,6 @@ def is_control_operator(text: str) -> bool:
     return text in (";", "&", "&&", "||", "|", "|&", "\n")
 
 
-def literal_target(word: str) -> bool:
-    """Whether a redirection target names exactly the path it spells.
-
-    Existence is established against the word as written, so a target
-    carrying an unexpanded parameter, a substitution, or a tilde names a
-    different file at run time than the one that was stat'd. Such a target
-    never qualifies for the create-versus-overwrite relaxation, and keeps
-    the strict verdict the operator alone earns.
-    """
-    return not any(marker in word for marker in ("$", "~", "`", SUBSTITUTION_SENTINEL))
-
-
 def redirection_writes(operator: str) -> bool:
     """Whether one redirection operator opens its target for writing.
 
@@ -604,7 +592,7 @@ def resolve_redirection(
         return Redirection(decision=None, resume=target + 1)
     if (
         existing_targets is not None
-        and literal_target(tokens[target].text)
+        and spells_its_path(tokens[target].text)
         and tokens[target].text not in existing_targets
     ):
         return Redirection(decision=None, resume=target + 1)

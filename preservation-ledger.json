@@ -1,5 +1,5 @@
 {
-  "revision": "e19b449299238464463e36a33d6cbfacebb7bfa5",
+  "revision": "baf8ad32413866621cd46765dcb7656b8746e2d4",
   "roots": [
     "lup",
     "lup_template"
@@ -7698,7 +7698,6 @@
         "tokenize_shell.flush",
         "SENTINEL_OPS",
         "is_control_operator",
-        "literal_target",
         "redirection_writes",
         "python_script_targets",
         "shell_write_targets",
@@ -7715,6 +7714,7 @@
         "GENERATED_PLUGIN_ROOTS",
         "GENERATED_PLUGIN_REFUSAL",
         "FOREIGN_REPOSITORY_REFERRAL",
+        "spells_its_path",
         "is_generated_plugin_target",
         "is_session_scratch_target",
         "role_pattern_covers",

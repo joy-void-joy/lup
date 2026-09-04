@@ -19,6 +19,7 @@ import fnmatch
 import posixpath
 from pathlib import PurePosixPath
 
+from .decision import SUBSTITUTION_SENTINEL
 from .rows import PathRoleKind, PathRoleName, PathRoleRow
 
 # lup: ignore[library-default] — the native runtimes' own plugin directory names
@@ -49,6 +50,25 @@ about it, so the way through is not to satisfy them. A refusal naming a lup
 rule teaches an agent to restyle somebody else's code until the rule stops
 firing, which is exactly what happened.
 """
+
+
+def spells_its_path(word: str) -> bool:
+    """Whether a word names exactly the path it spells.
+
+    A word carrying an unexpanded parameter, a substitution, or a tilde names
+    a different file at run time than the one written down, so every answer
+    derived from reading it is an answer about a path that may never exist.
+
+    Both readers of that fact need it and were deriving it apart. The
+    redirection rule refused the create-versus-overwrite relaxation to such a
+    word, while :func:`path_role` matched its declared patterns against it as
+    though every component were a directory name. They disagreed about
+    ``$W/tmp/f.py``, and the role won: ``**/tmp`` absorbed the ``$W`` and
+    called the whole path scratch, which allowed ``rm -rf $W/tmp`` unprompted
+    on the strength of a component saying nothing about where ``$W``
+    resolves.
+    """
+    return not any(marker in word for marker in ("$", "~", "`", SUBSTITUTION_SENTINEL))
 
 
 def is_generated_plugin_target(word: str) -> bool:
@@ -192,6 +212,11 @@ def path_role(path: str, rows: list[PathRoleRow]) -> PathRoleName:
     if is_session_scratch_target(path):
         return "scratch"
     if normalized.startswith(("/", "../")) or normalized == "..":
+        return "production"
+    # A declared pattern matches directory names, and an unexpanded word is
+    # not one. The scratchpad above is the one opaque spelling with an answer,
+    # and it earns it by checking its own suffix rather than by pattern.
+    if not spells_its_path(normalized):
         return "production"
     for row in rows:
         if role_pattern_covers(row["root"], normalized):
