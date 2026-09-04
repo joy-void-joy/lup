@@ -8,6 +8,7 @@
     "pyright-lsp@claude-plugins-official": false
   },
   "env": {
+    "CLAUDE_CODE_THISTLE_GREBE": "default",
     "ENABLE_TOOL_SEARCH": "false"
   },
   "extraKnownMarketplaces": {

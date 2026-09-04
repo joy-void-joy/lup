@@ -282,7 +282,7 @@ the document was passing.
 
 Decision: while `[tool.lup] template = true`, a second and stricter row —
 `scaffold budget` — holds guidance to `GUIDANCE_BYTE_BUDGET` less
-`TEMPLATE_GUIDANCE_HEADROOM`, 12 KiB withheld for the adopter. Its own row
+`TEMPLATE_GUIDANCE_HEADROOM`, 11.5 KiB withheld for the adopter. Its own row
 rather than a stricter number in the existing one, because the two answer
 different questions of the same byte count: whether a runtime will truncate
 this tree, true of every project, and whether a scaffold is spending for a

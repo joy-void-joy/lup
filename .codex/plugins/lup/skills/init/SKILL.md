@@ -236,7 +236,7 @@ and leave the rest to the pages under `docs/` that already carry them.
 
 Clearing the scaffold flag is also what hands this domain its room. While the
 flag stood, the template was held to a *smaller* ceiling than the runtime's,
-holding roughly 12 KiB back on purpose — so what you inherit is a deliberately
+holding roughly 11.5 KiB back on purpose — so what you inherit is a deliberately
 lean document with space to say what is true of this domain, not a full budget
 already spent on somebody else's conventions. `dev guidance` reports what each
 section costs, and after adoption only the runtime ceiling applies.

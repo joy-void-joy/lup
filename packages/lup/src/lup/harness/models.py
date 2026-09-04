@@ -563,7 +563,7 @@ however little literal text the declaration holds. Reference material that a
 skill or a denial message surfaces at the right moment belongs in a generated
 document under ``docs/`` instead, reached by a file-path pointer."""
 
-TEMPLATE_GUIDANCE_HEADROOM = 12_288
+TEMPLATE_GUIDANCE_HEADROOM = 11_776
 """Bytes a scaffold holds back, out of the budget above, for its adopter.
 
 The ceiling above is what a *runtime* will load. This is what a **template**
@@ -574,9 +574,11 @@ workflow inside whatever is left. A scaffold that fills the runtime's ceiling
 has not passed its budget on, it has spent it — and the adopter discovers this
 by writing three paragraphs about its own project and being refused.
 
-12 KiB because that is what this repository's own architecture, conventions
-and tooling sections cost together: enough for a domain to say the equivalent
-about itself, rather than a round number that sounds generous.
+11.5 KiB, half a kilobyte under what this repository's own architecture,
+conventions and tooling sections cost together: a scaffold that also has to
+tell every domain how to answer its runtime's ambient instructions spends
+that much of the reserve on their behalf. Enough for a domain to say the
+equivalent about itself, rather than a round number that sounds generous.
 
 Only ``dev check`` weighs this, and only while ``[tool.lup] template = true``.
 It must never reach ``budget`` on the checks above: those decide what a real
