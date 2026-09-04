@@ -11,6 +11,7 @@ The pr tests pin output behavior with a stubbed gh: ``pr merge`` must
 print its MergeResult even when the tree-dir lookup raises ``typer.Exit``.
 """
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -260,3 +261,39 @@ def test_ending_a_run_needs_no_adapter_but_driving_one_still_does() -> None:
 
     driven = runner.invoke(app, ["harness", "resolve", "--run-id", "absent-run"])
     assert "--adapter is required" in driven.output
+
+
+def effect_of(arguments: list[str], environment: dict[str, str | None]) -> str:
+    """What `dev policy` reports for one invocation under one environment.
+
+    The exit code carries the verdict rather than the run's health — nothing
+    allowed exits non-zero so a caller can gate on it — so the effect is read
+    from the payload and the status says nothing here.
+    """
+    result = runner.invoke(
+        app, ["dev", "policy", "--json", *arguments], env=environment
+    )
+    assert result.stdout, result.output
+    return str(json.loads(result.stdout)[0]["effect"])
+
+
+def test_dev_policy_answers_for_the_session_it_is_asked_in() -> None:
+    """The default reads this session's boundary rather than a bare host's.
+
+    The guidance sends a reader here *before* they spend a turn, so answering
+    as an unconfined host would falls on the one reader the command exists
+    for, and reports the question a sandboxed session is never asked — which
+    makes the policy read as far more ask-happy than it is.
+    """
+    assert effect_of(["frobnicate"], {"LUP_SANDBOX_ACTIVE": "1"}) == "allow"
+    assert effect_of(["frobnicate"], {"LUP_SANDBOX_ACTIVE": None}) == "ask"
+
+
+def test_either_boundary_stays_askable_for_explicitly() -> None:
+    """The flag reads both ways, so neither answer needs a matching session."""
+    assert (
+        effect_of(["--no-sandbox", "frobnicate"], {"LUP_SANDBOX_ACTIVE": "1"}) == "ask"
+    )
+    assert (
+        effect_of(["--sandbox", "frobnicate"], {"LUP_SANDBOX_ACTIVE": None}) == "allow"
+    )

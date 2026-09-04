@@ -49,6 +49,7 @@ from lup.devtools.harness.launch import relocation_hint
 from lup.devtools.project import DevProject
 from lup.harness.models import HookSet, Plugin
 from lup.harness.process import LocalProcessLauncher
+from lup.policy.assets.host import sandbox_active
 from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.policy.vocabulary import default_vocabulary
 from lup.workspace.paths import is_template_scaffold, project_root
@@ -1128,9 +1129,12 @@ def create_dev_app(
             typer.Option("--kind", help="What the inputs are: shell, fetch, or edit"),
         ] = "shell",
         sandbox: Annotated[
-            bool,
-            typer.Option("--sandbox", help="Judge as an OS-sandboxed session would"),
-        ] = False,
+            bool | None,
+            typer.Option(
+                "--sandbox/--no-sandbox",
+                help="Judge as an OS-sandboxed session would (default: this one)",
+            ),
+        ] = None,
         autonomous: Annotated[
             bool,
             typer.Option(
@@ -1145,8 +1149,17 @@ def create_dev_app(
                 f"unknown kind {kind!r}: expected shell, fetch, or edit", err=True
             )
             raise typer.Exit(2)
+        # The guidance sends a reader here before they spend a turn, so the
+        # question is what *this* session would be told rather than what a bare
+        # host would be. Reading it here keeps the explanation a pure function
+        # of its arguments, the same seam the dispatcher's host half keeps.
         policy_explain.explain(
-            subjects, kind, sandbox, autonomous, as_json, declared().hooks
+            subjects,
+            kind,
+            sandbox_active() if sandbox is None else sandbox,
+            autonomous,
+            as_json,
+            declared().hooks,
         )
 
     @app.command("vocabulary")
