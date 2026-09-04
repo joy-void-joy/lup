@@ -452,6 +452,46 @@ def is_control_operator(text: str) -> bool:
     return text in (";", "&", "&&", "||", "|", "|&", "\n")
 
 
+STREAM_WRITE_TARGETS = (
+    "/dev/null",
+    "/dev/zero",
+    "/dev/full",
+    "/dev/stdout",
+    "/dev/stderr",
+    "/dev/fd/1",
+    "/dev/fd/2",
+    "/dev/tty",
+)
+"""Write targets that reach a stream or a sink rather than the filesystem.
+
+Named one by one rather than matched by their directory, because `/dev` is
+not a safe prefix and never was: `> /dev/sda` overwrites a disk, `>
+/dev/urandom` seeds the kernel's entropy pool, and `> /dev/mem` is worse than
+either. Every entry here either discards what it is given or hands it to a
+descriptor the process already holds.
+"""
+
+
+def writes_to_a_stream(
+    word: str, streams: tuple[str, ...] = STREAM_WRITE_TARGETS
+) -> bool:
+    """Whether a redirection into this target can destroy nothing.
+
+    Read before the rows that ask, because a stream has no prior contents to
+    lose and so raises no question for anybody to answer -- and, before this,
+    every one of these but `/dev/null` reached the fallback and was retired by
+    the recovery row instead, which told the reader that "the affected paths
+    are captured and restorable" about a terminal.
+
+    Only descriptors 1 and 2 are named, and `/dev/fd/<n>` is deliberately not
+    matched by shape. A higher descriptor is one the shell opened onto a file
+    -- `exec 3>notes.txt` makes `> /dev/fd/3` a write to `notes.txt` -- and
+    `/dev/stdin` is worse, since a command run with `< notes.txt` truncates it.
+    Those reach the filesystem and belong to the rows that ask about it.
+    """
+    return posixpath.normpath(word) in streams
+
+
 def redirection_writes(operator: str) -> bool:
     """Whether one redirection operator opens its target for writing.
 
@@ -522,11 +562,81 @@ def shell_write_targets(command: str, depth: int = 0) -> list[str]:
             continue
         following = index + 1
         if following < len(tokens) and tokens[following].kind == "word":
-            targets.append(tokens[following].text)
+            targets.append(
+                resolved_target(
+                    tokens[following].text, assigned_literals(tokens, index)
+                )
+            )
             index = following + 1
             continue
         index += 1
     return targets
+
+
+# lup: ignore[dict-str-payload] -- shell variable names, owned by the command
+# being judged rather than by this repository, so no closed set enumerates
+# them; the kernel is hermetic, which puts StringMap out of reach here
+def assigned_literals(tokens: list[ShellToken], before: int) -> dict[str, str]:
+    """Every name a standalone assignment gave a literal value, before an index.
+
+    Only a *standalone* assignment is read, and the segment the index falls in
+    is never read at all. `VAR=x cmd > $VAR` sets `VAR` for that one command's
+    environment, and the shell expands the redirection from the value it
+    already held -- so reading `x` as the target would judge a path the command
+    never writes, and judge it in the permissive direction.
+
+    Anything a segment holds that is not an assignment poisons that segment
+    rather than being skipped: a command word means the assignments beside it
+    were its environment, and a substitution means a value nothing here can
+    read. Later assignments to one name win, because the shell's do.
+    """
+    # lup: ignore[dict-str-payload] -- as above, shell variable names
+    literals: dict[str, str] = {}
+    # lup: ignore[dict-str-payload] -- as above, shell variable names
+    pending: dict[str, str] = {}
+    poisoned = False
+    for token in tokens[:before]:
+        if token.kind == "op" and is_control_operator(token.text):
+            if not poisoned:
+                literals.update(pending)
+            pending, poisoned = {}, False
+            continue
+        if poisoned:
+            continue
+        if token.kind != "word":
+            poisoned = True
+            continue
+        # lup: ignore[string-split] -- the shell's own assignment grammar, on a
+        # word the lexer has already separated; no parser here models it
+        name, separator, value = token.text.partition("=")
+        if not separator or not name.isidentifier() or not spells_its_path(value):
+            poisoned = True
+            continue
+        pending[name] = value
+    return literals
+
+
+# lup: ignore[dict-str-payload] -- as above, shell variable names
+def resolved_target(word: str, literals: dict[str, str]) -> str:
+    """The path a target spells once a known literal stands in for it.
+
+    Only a whole-word parameter is substituted -- `$NAME` or `${NAME}` and
+    nothing else. A word mixing an expansion with other text names a path this
+    cannot reconstruct, and half a substitution is worse than none: it would
+    hand the rows below a path that reads as resolved and is not.
+
+    Both readers of the redirection target need this and must not derive it
+    apart. :func:`shell_write_targets` decides which paths the caller tests for
+    existence and recoverability, and :func:`resolve_redirection` judges them;
+    resolving in one alone would let a resolved path that already exists reach
+    the create-versus-overwrite relaxation as though it were new.
+    """
+    name = word.removeprefix("$")
+    if name == word:
+        return word
+    if name.startswith("{") and name.endswith("}"):
+        name = name.removeprefix("{").removesuffix("}")
+    return literals[name] if name.isidentifier() and name in literals else word
 
 
 def resolve_redirection(
@@ -576,27 +686,28 @@ def resolve_redirection(
         )
     if "<" in operator:
         return Redirection(decision=None, resume=target + 1)
-    if posixpath.normpath(tokens[target].text) == "/dev/null":
+    spelled = resolved_target(tokens[target].text, assigned_literals(tokens, index))
+    if writes_to_a_stream(spelled):
         return Redirection(decision=None, resume=target + 1)
-    refused = refuses_generated_plugin_target(tokens[target].text)
+    refused = refuses_generated_plugin_target(spelled)
     if refused is not None:
         return Redirection(decision=refused, resume=target + 1)
     protected = protected_write_target(
-        [tokens[target].text],
+        [spelled],
         path_rules or [],
-        existing_targets is None or tokens[target].text in existing_targets,
+        existing_targets is None or spelled in existing_targets,
     )
     if protected is not None:
         return Redirection(decision=protected, resume=target + 1)
-    if path_role(tokens[target].text, path_roles or []) == "scratch":
+    if path_role(spelled, path_roles or []) == "scratch":
         return Redirection(decision=None, resume=target + 1)
     if (
         existing_targets is not None
-        and spells_its_path(tokens[target].text)
-        and tokens[target].text not in existing_targets
+        and spells_its_path(spelled)
+        and spelled not in existing_targets
     ):
         return Redirection(decision=None, resume=target + 1)
-    if tokens[target].text in (recoverable_targets or []):
+    if spelled in (recoverable_targets or []):
         return Redirection(decision=None, resume=target + 1)
     return Redirection(
         decision=KernelDecision(

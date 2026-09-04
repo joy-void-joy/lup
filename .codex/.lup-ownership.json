@@ -135,7 +135,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
-      "sha256": "ae7a3cbbe0c550861f0ad26f66e35ecc0a289d6eb91eab750af80d2e59be748c",
+      "sha256": "d57508cca1af6b563f6991f2493f009f014029f3130815d7fcf41377fd60c966",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
