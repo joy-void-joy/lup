@@ -20,7 +20,7 @@ import typer
 from pydantic import AnyHttpUrl, BaseModel
 
 from lup.devtools.utils import output_json
-from lup.harness.enforcement import semantic_policy_for
+from lup.harness.enforcement import measured_containment, semantic_policy_for
 from lup.harness.models import HookSet
 from lup.policy.models import EditBatch, EditChange, FetchUrl, ShellCommand
 from lup.policy.shell_rules import ShellCommandRule
@@ -63,7 +63,15 @@ def verdict_for(
     ones: the question this command answers is whether a path may be written
     at all, not whether some particular diff passes review.
     """
-    policy = semantic_policy_for(hooks, sandbox_active=sandbox, autonomous=autonomous)
+    held = measured_containment(cwd)
+    policy = semantic_policy_for(
+        hooks,
+        sandbox_active=sandbox,
+        autonomous=autonomous,
+        recovered=True,
+        contained=held.contained,
+        inside_placement=held.inside_placement,
+    )
     match kind:
         case "shell":
             event = ShellCommand(command=subject, cwd=cwd)

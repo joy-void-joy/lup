@@ -155,6 +155,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         sandbox_excluded_commands: list[str] | None = None,
         escapable: bool = False,
         recovered: bool = False,
+        contained: bool = False,
+        inside_placement: bool = False,
         trusted_script_roots: list[str] | None = None,
         interactive: bool = True,
         path_roles: list[PathRoleRow] | None = None,
@@ -174,6 +176,12 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         # caller that knows says so, and one that does not gets the strict
         # answer -- the one that relaxes nothing.
         self.recovered = recovered
+        # The container's half of the same question, and measured elsewhere for
+        # the same reason. They are stored apart and joined by
+        # `SettlementFacts.bounded`, so a composition that knows only one of
+        # them says only that rather than deciding what confinement means.
+        self.contained = contained
+        self.inside_placement = inside_placement
         self.rules = erase_shell_rules(rules)
         self.allowed_scopes = [url_scope_row(scope) for scope in allowed_urls or []]
         self.denied_scopes = [url_scope_row(scope) for scope in denied_urls or []]
@@ -213,6 +221,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 target_tables=self.target_tables,
                 escapable=self.escapable,
                 recovered=self.recovered,
+                contained=self.contained,
+                inside_placement=self.inside_placement,
                 relayed=self.relayed,
             )
         )

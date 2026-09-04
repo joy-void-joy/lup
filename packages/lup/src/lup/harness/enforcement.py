@@ -14,7 +14,11 @@ the other would mean a run's permissions depended on who launched it.
 
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from lup.harness.models import HookPathRole, HookSet, HookUrlScope
+from lup.policy.assets.host import contained as measured_contained
+from lup.policy.assets.host import delivers, measured_boundary
 from lup.policy.enforcement import SemanticToolPolicy
 from lup.policy.grants import LeaseGrants
 from lup.policy.kernel.rows import PathRoleRow
@@ -89,12 +93,44 @@ def declared_role_rows(roles: list[HookPathRole]) -> list[PathRoleRow]:
     return [PathRoleRow(root=role.root.as_posix(), role=role.role) for role in roles]
 
 
+class MeasuredContainment(BaseModel, frozen=True):
+    """The container's two terms, as this session's launch measured them.
+
+    They travel together because
+    :meth:`~lup.policy.kernel.settlement.SettlementFacts.bounded` needs both: a
+    container nothing measured a placement for confines nothing anybody here
+    can prove, so neither term answers alone.
+    """
+
+    contained: bool = False
+    inside_placement: bool = False
+
+
+def measured_containment(root: Path | None = None) -> MeasuredContainment:
+    """What the launch recorded about the boundary this process runs behind.
+
+    Read from the same ``.lup/preflight`` ledger a generated dispatcher reads,
+    so a policy composed in this process answers for the session composing it
+    rather than for a bare host. A composition that left these out reported the
+    question an unconfined host would ask, which is not what a contained
+    session is told -- and the guidance sends a reader to `dev policy` *before*
+    they spend a turn, so the whole gap fell on the one reader it exists for.
+    """
+    measured = measured_boundary(root)
+    return MeasuredContainment(
+        contained=measured_contained(measured),
+        inside_placement=delivers(measured, "inside_placement"),
+    )
+
+
 def semantic_policy_for(
     hooks: HookSet,
     *,
     sandbox_active: bool = False,
     escapable: bool = False,
     recovered: bool = False,
+    contained: bool = False,
+    inside_placement: bool = False,
     interactive: bool = True,
     autonomous: bool = False,
     trusted_script_roots: list[str] | None = None,
@@ -123,6 +159,8 @@ def semantic_policy_for(
             sandbox_excluded_commands=hooks.excluded_commands(),
             escapable=escapable,
             recovered=recovered,
+            contained=contained,
+            inside_placement=inside_placement,
             trusted_script_roots=trusted_script_roots,
             interactive=interactive,
             # A reviewed worker is the one non-interactive session with a

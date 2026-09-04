@@ -24,7 +24,11 @@ import typer
 from pydantic import AnyHttpUrl
 
 from lup.devtools.hooks.corpus import read_corpus
-from lup.harness.enforcement import declared_path_rules, semantic_policy_for
+from lup.harness.enforcement import (
+    declared_path_rules,
+    measured_containment,
+    semantic_policy_for,
+)
 from lup.harness.models import HookSet
 from lup.policy.foreign import foreign_warnings
 from lup.policy.models import Decision, FetchUrl, ShellCommand
@@ -97,12 +101,15 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         session snapshots the tree before every command, and a reader asking
         what they will be asked about should be told what a session is told.
         """
+        held = measured_containment(project_root())
         policy = semantic_policy_for(
             declared(),
             autonomous=autonomous,
             interactive=interactive,
             sandbox_active=trapped,
             recovered=True,
+            contained=held.contained,
+            inside_placement=held.inside_placement,
         )
         return policy.decide(ShellCommand(command=command, cwd=project_root()))
 
