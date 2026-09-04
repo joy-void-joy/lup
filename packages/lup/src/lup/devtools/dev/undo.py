@@ -54,13 +54,19 @@ produced the identical tree object between them. A snapshot of a tree with one
 line edited costs about 10 KB, which is why they expire.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from lup.execution.shell import git
-from lup.policy.assets.host import undo_namespace, undo_snapshot
+from lup.policy.assets.host import (
+    undo_expire,
+    undo_namespace,
+    undo_retention_count,
+    undo_retention_days,
+    undo_snapshot,
+)
 
 UNDO_NAMESPACE = undo_namespace()
 """Where snapshots live, asked of the half that writes them.
@@ -72,14 +78,24 @@ neither half would fail, because looking in an empty namespace is what an
 empty namespace looks like.
 """
 
-DEFAULT_RETENTION_DAYS = 7
-"""How long a snapshot is worth keeping, absent a caller's own answer.
+DEFAULT_RETENTION_DAYS = undo_retention_days()
+"""How long a snapshot is worth keeping, asked of the half that expires them.
 
-A default rather than a constant: how long ago a mistake is still worth
-undoing is a judgement about how somebody works, not a fact about git. Long
-enough to cover a week of sessions, short enough that a snapshot per mutating
-command does not accumulate without bound -- at roughly 10 KB each, a week is
-a few megabytes.
+Derived rather than restated, for the reason :data:`UNDO_NAMESPACE` is. The
+dispatcher retires a snapshot the first time a session takes one, and this
+command retires one on request; a window each of them spelled for itself
+would be two answers to how long the net holds, and the listing would
+disagree with what is actually there.
+
+At roughly 10 KB each, a week is a few megabytes.
+"""
+
+DEFAULT_RETENTION_COUNT = undo_retention_count()
+"""How many snapshots to keep, asked of the half that expires them.
+
+Derived for the same reason the window is. The two bounds are independent --
+a snapshot fails the window by being old and the cap by being surplus -- so
+what a listing holds is whichever of them binds first.
 """
 
 # lup: ignore[library-default] — the format this asks git for and the fields
@@ -215,22 +231,25 @@ def expire(
     keep_days: int = DEFAULT_RETENTION_DAYS,
     namespace: str = UNDO_NAMESPACE,
     now: datetime | None = None,
+    keep_most: int = DEFAULT_RETENTION_COUNT,
 ) -> list[UndoPoint]:
-    """Drop snapshots older than the retention window; report what went.
+    """Drop snapshots past the window or the cap; report what went.
 
     Without this the layer grows without bound -- one snapshot per mutating
     command, none ever removed -- and a safety net that fills a disk is a
     different kind of hazard. Deleting the ref is all that is needed: the
     objects it held become unreachable, and git's own housekeeping reclaims
     them.
+
+    Which refs are past either bound is asked of the half that also expires
+    them unprompted, so a snapshot this command would drop and one the
+    dispatcher drops are the same set. What is added here is the reading: a
+    caller who asked to expire wants to be told what went, and a ref name is
+    not that.
     """
-    cutoff = (now or datetime.now(UTC)).timestamp() - keep_days * 86400
-    stale = [
-        item for item in points(root, namespace) if item.taken_at.timestamp() < cutoff
-    ]
-    for item in stale:
-        git("-C", str(root), "update-ref", "-d", item.ref)
-    return stale
+    held = {item.ref: item for item in points(root, namespace)}
+    retired = undo_expire(root, keep_days, namespace, now, keep_most)
+    return [held[ref] for ref in retired if ref in held]
 
 
 def latest(root: Path, namespace: str = UNDO_NAMESPACE) -> UndoPoint | None:

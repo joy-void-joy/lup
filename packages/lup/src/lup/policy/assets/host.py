@@ -20,7 +20,7 @@ import json
 import os
 from hashlib import sha256
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
@@ -950,6 +950,102 @@ def undo_namespace() -> str:
     return "refs/lup/undo"
 
 
+def undo_retention_days() -> int:
+    """How long a snapshot is worth keeping, absent a caller's own answer.
+
+    How long ago a mistake is still worth undoing is a judgement about how
+    somebody works rather than a fact about git, so it reaches its caller as a
+    default they may differ on. Long enough to cover a week of sessions, short
+    enough that a snapshot per mutating command does not accumulate without
+    bound.
+
+    A function for the reason :func:`undo_namespace` is one: the dispatcher
+    splices this half in a function at a time, and the command that expires
+    snapshots on request has to read the same number the dispatcher expires
+    them by, or the two halves disagree about how long the net holds.
+    """
+    return 7
+
+
+def undo_retention_count() -> int:
+    """How many snapshots are worth keeping, absent a caller's own answer.
+
+    A second bound because the window answers a different question. "How long
+    ago is still worth undoing" is about how somebody works; this is about what
+    the net is allowed to cost, and neither answers the other -- a burst
+    session reaches a thousand snapshots inside the window, and a quiet
+    fortnight holds three that are all past it.
+
+    Measured on this checkout: a working day produces on the order of fifty
+    distinct states, so a week inside the window lands near three hundred and
+    this bound is the one that usually binds. That is deliberate. What the
+    listing is *for* is finding the snapshot from before the thing that went
+    wrong, and a reader who cannot see the entries cannot choose one -- so the
+    cap is set where the list stays readable rather than where growth would
+    become alarming.
+    """
+    return 200
+
+
+def undo_expire(
+    root: Path | None,
+    keep_days: int = 0,
+    namespace: str = "",
+    now: datetime | None = None,
+    keep_most: int = 0,
+) -> list[str]:
+    """Retire what outlived the window or sits past the cap; report what went.
+
+    Two bounds, and a snapshot need only fail one of them. The window cannot
+    hold a burst -- a session that touches a thousand states reaches them all
+    inside a week -- and the cap cannot express that a fortnight-old snapshot
+    has stopped being worth keeping when only three exist. Read together they
+    bound the namespace by age *and* by size, which is what makes the listing
+    finite whatever a session does.
+
+    Selection reads the stamp the ref name already carries rather than asking
+    git for each commit's date. The name was built to order the listing
+    exactly, which makes it fixed-width, zero-padded and UTC -- so comparing
+    it against a cutoff spelled the same way is the same judgement one string
+    comparison later, and sorting by name is sorting by age. Both bounds come
+    off one listing that costs a single call.
+
+    Deleting the ref is the whole of it: the objects it held become
+    unreachable and git's own housekeeping reclaims them.
+
+    Silent about its own failure, exactly as its caller is. This runs in front
+    of a command somebody asked for, and a repository that will not let a ref
+    be deleted is not a reason to stop them.
+    """
+    if root is None:
+        return []
+    where = namespace or undo_namespace()
+    taken = now or datetime.now(UTC)
+    cutoff = taken - timedelta(days=keep_days or undo_retention_days())
+    stamped = cutoff.strftime("%Y%m%dT%H%M%S%f")
+
+    def outlived(ref: str) -> bool:
+        """Whether this ref's own stamp sorts before the cutoff's."""
+        # lup: ignore[string-split] — the ref name is this module's own
+        # protocol, spelled `<stamp>-<tree>` by `undo_snapshot` below; git
+        # ships no parser for a ref name, and the separator being read here is
+        # the one that call chose
+        stamp = ref.removeprefix(f"{where}/").split("-")[0]
+        return len(stamp) == len(stamped) and stamp < stamped
+
+    listed = sorted(
+        git_answers(["for-each-ref", "--format=%(refname)", where], root) or []
+    )
+    # Taken off the front because the sort is by name and the name leads with
+    # the stamp, so the oldest are exactly the ones the cap has no room for.
+    limit = keep_most or undo_retention_count()
+    surplus = {ref for ref in listed[: max(0, len(listed) - limit)]}
+    retired = [ref for ref in listed if outlived(ref) or ref in surplus]
+    for ref in retired:
+        git_answers(["update-ref", "-d", ref], root)
+    return retired
+
+
 def undo_snapshot(
     root: Path | None,
     reason: str,
@@ -995,7 +1091,16 @@ def undo_snapshot(
     directory = git_answers(["rev-parse", "--absolute-git-dir"], root)
     if not directory:
         return ""
-    private = {"GIT_INDEX_FILE": f"{directory[0]}/lup-undo-{session}.index"}
+    index = Path(f"{directory[0]}/lup-undo-{session}.index")
+    # The session's index is written by the first snapshot and reused by every
+    # one after it, so its absence is what "nobody has snapshotted in this
+    # session yet" looks like -- already on disk, already being stat'd, and
+    # true exactly once however long the session runs. Read before the index is
+    # created and acted on after the ref is written, so the sweep counts the
+    # snapshot it runs beside and the cap means the same number here as it does
+    # to the command that offers it.
+    cold = not index.exists()
+    private = {"GIT_INDEX_FILE": str(index)}
     if git_answers(["add", "-A"], root, private) is None:
         return ""
     tree = git_answers(["write-tree"], root, private)
@@ -1022,6 +1127,8 @@ def undo_snapshot(
     reference = f"{where}/{stamp}-{held}"
     if git_answers(["update-ref", reference, commit[0]], root) is None:
         return ""
+    if cold:
+        undo_expire(root, namespace=where)
     return reference
 
 

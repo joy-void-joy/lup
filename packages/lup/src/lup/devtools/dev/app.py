@@ -911,6 +911,10 @@ def create_dev_app(
             int | None,
             typer.Option("--expire", help="Drop snapshots older than this many days"),
         ] = None,
+        keep_most: Annotated[
+            int | None,
+            typer.Option("--keep", help="Keep at most this many snapshots"),
+        ] = None,
     ) -> None:
         """List the recoverable snapshots of this tree, or take and expire them.
 
@@ -929,8 +933,10 @@ def create_dev_app(
                 else "No snapshot taken — this checkout could not be written to."
             )
             return
-        if expire_days is not None:
-            for gone in undo.expire(root, expire_days):
+        if expire_days is not None or keep_most is not None:
+            days = undo.DEFAULT_RETENTION_DAYS if expire_days is None else expire_days
+            most = undo.DEFAULT_RETENTION_COUNT if keep_most is None else keep_most
+            for gone in undo.expire(root, days, keep_most=most):
                 typer.echo(f"expired {gone.ref}")
             return
         found = undo.points(root)

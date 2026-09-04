@@ -8,10 +8,11 @@ not existing, because a net that breaks the working case is the first thing
 somebody turns off.
 """
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from lup.execution.shell import git
-from lup.policy.assets.host import undo_namespace, undo_snapshot
+from lup.policy.assets.host import undo_expire, undo_namespace, undo_snapshot
 
 import pytest
 
@@ -163,3 +164,83 @@ def test_an_earlier_state_survives_the_states_that_followed_it(
     (checkout / "new.txt").write_text("second\n", encoding="utf-8")
     undo_snapshot(checkout, "after the edit")
     assert held(checkout, reference, "new.txt") == "first"
+
+
+def aged(checkout: Path, days: int, tree: str) -> str:
+    """A snapshot ref stamped as though it were taken `days` ago.
+
+    Written by hand rather than by waiting, and given a tree part of its own
+    so the dedup pass -- which retires every earlier ref holding the tree the
+    new snapshot holds -- cannot be what removed it.
+    """
+    commit = git.out("-C", str(checkout), "rev-parse", "HEAD").strip()
+    stamp = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S%f")
+    reference = f"{undo_namespace()}/{stamp}-{tree}"
+    git("-C", str(checkout), "update-ref", reference, commit)
+    return reference
+
+
+def references(checkout: Path) -> list[str]:
+    """Every snapshot ref this checkout currently holds."""
+    listed = git.out(
+        "-C", str(checkout), "for-each-ref", "--format=%(refname)", undo_namespace()
+    )
+    return listed.splitlines()
+
+
+def test_the_first_snapshot_of_a_session_retires_what_outlived_the_window(
+    checkout: Path,
+) -> None:
+    """The retention window is a fact about the namespace, not a docstring.
+
+    Nothing else runs the expiry: the command that offers it does so behind a
+    flag, so a window nobody passes that flag to holds every snapshot ever
+    taken.
+    """
+    old = aged(checkout, 30, "aaaaaaaaaaaa")
+    recent = aged(checkout, 1, "bbbbbbbbbbbb")
+    undo_snapshot(checkout, "probe", session="cold")
+    assert old not in references(checkout)
+    assert recent in references(checkout)
+
+
+def test_a_later_snapshot_in_one_session_does_not_pay_for_the_sweep(
+    checkout: Path,
+) -> None:
+    """Once a session, because the net is paid for on every mutating command.
+
+    The session's index is what says which call this is, so the sweep lands on
+    the one call already paying for a cold index rather than on all of them.
+    """
+    undo_snapshot(checkout, "first", session="warm")
+    old = aged(checkout, 30, "aaaaaaaaaaaa")
+    (checkout / "new.txt").write_text("written since\n", encoding="utf-8")
+    undo_snapshot(checkout, "second", session="warm")
+    assert old in references(checkout)
+
+
+def test_the_cap_retires_the_oldest_past_it(checkout: Path) -> None:
+    """The window cannot bound a burst, which is why there are two bounds.
+
+    Every ref here sits well inside the retention window, so age retires none
+    of them and what is left is the cap alone.
+    """
+    written = [aged(checkout, 5 - index, f"{index:012d}") for index in range(5)]
+
+    undo_expire(checkout, keep_most=3)
+
+    assert references(checkout) == sorted(written[-3:])
+
+
+def test_the_cap_counts_the_snapshot_being_taken_beside_it(checkout: Path) -> None:
+    """Swept after the ref is written, so "at most three" means three.
+
+    Sweeping first would count a namespace the new snapshot is not in yet and
+    leave the cap meaning one thing here and another to `dev undo --keep`.
+    """
+    for index in range(4):
+        aged(checkout, 4 - index, f"{index:012d}")
+
+    undo_expire(checkout, keep_most=3)
+
+    assert len(references(checkout)) == 3
