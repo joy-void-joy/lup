@@ -8,6 +8,9 @@ spending a capture's discharge on a write to scratch. And every stream but
 captured and restorable" about a terminal.
 """
 
+from pathlib import Path
+
+from lup.policy.assets.host import unleased_write_targets
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.kernel.rows import PathRoleRow, ShellRuleRow
@@ -97,3 +100,25 @@ def test_an_unknown_name_stays_unresolved() -> None:
     """Nothing assigned it here, so the word keeps the only meaning we have."""
     assert shell_write_targets("cat > $B") == ["$B"]
     assert verdict("cat > $B").effect == "ask"
+
+
+def test_a_stream_sink_is_no_target_for_the_lease_to_read() -> None:
+    """The lease reads paths, and a sink is not one, so it never reaches it.
+
+    The redirection reading retires a stream on its own, which is why the
+    streams above never reach a row that asks. The lease reading takes its
+    targets from :func:`shell_write_targets` instead and asks a question the
+    redirection reading had already answered -- `/dev/null` exists, no capture
+    holds it, and no writable root contains it -- so a contained session met an
+    approval question in front of every `2>/dev/null` it wrote.
+    """
+    assert shell_write_targets("grep x f 2>/dev/null") == []
+    assert shell_write_targets("a > out.txt 2>/dev/null") == ["out.txt"]
+    assert (
+        unleased_write_targets(
+            shell_write_targets("grep x f 2>/dev/null"),
+            {"writable_roots": ["/checkout"]},
+            Path("/checkout"),
+        )
+        == []
+    )

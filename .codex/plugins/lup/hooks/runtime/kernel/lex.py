@@ -544,6 +544,14 @@ def shell_write_targets(command: str, depth: int = 0) -> list[str]:
     ones that already exist, so the kernel can tell creating a file from
     overwriting one without ever reading the filesystem itself. A command
     that does not lex yields nothing and keeps its unjudged verdict.
+
+    A stream sink is not among them. :func:`writes_to_a_stream` already holds
+    that a redirection into one destroys nothing, and every caller asks a
+    filesystem question of what this hands back -- whether the target exists,
+    whether a capture holds it, whether the lease covers it. ``/dev/null``
+    answers all three the wrong way: it exists, no capture holds it, and no
+    writable root contains it, so naming it here puts an approval question in
+    front of every ``2>/dev/null``.
     """
     tokens = tokenize_shell(command)
     if isinstance(tokens, KernelDecision):
@@ -570,7 +578,7 @@ def shell_write_targets(command: str, depth: int = 0) -> list[str]:
             index = following + 1
             continue
         index += 1
-    return targets
+    return [target for target in targets if not writes_to_a_stream(target)]
 
 
 # lup: ignore[dict-str-payload] -- shell variable names, owned by the command
