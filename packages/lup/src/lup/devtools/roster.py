@@ -138,8 +138,6 @@ class RosterEntry(BaseModel, frozen=True, arbitrary_types_allowed=True):
         return SubApp(spec=self.spec, app=self.build(declared))
 
 
-# lup: ignore[library-default] — the sub-apps this library authors, so the table
-# is what it ships rather than a choice made for an adopter
 def conversation_app(declared: "DevtoolsDeclarations") -> typer.Typer:
     """The conversation sub-app, imported where it is built.
 
@@ -164,6 +162,8 @@ def dashboard_app(declared: "DevtoolsDeclarations") -> typer.Typer:
     return create_dashboard_app(declared.integrations)
 
 
+# lup: ignore[library-default] — the sub-apps this library authors, so the table
+# is what it ships rather than a choice made for an adopter
 LIBRARY_ROSTER = [
     RosterEntry(
         spec=SubAppSpec(
