@@ -8,11 +8,15 @@ been read at all -- so `git -C . log` was a question about a redirect to
 nowhere in front of a verb that reads, and the guidance telling tests to bind
 git with `git -C <tmp>` collided with a policy that asked every time.
 
-Two conditions, and the second is easy to lose: the verb has to *observe*,
-and the directory has to be one this checkout covers. A read of another tree
-is the placement question `reads_path` asks at its `outside` scope, and the
-row cannot ask it -- a row declares one scope for every path its verb might
-touch, and this one says `project`.
+One condition, where there were two: the verb has to *observe*. The second
+asked that the directory be one this checkout covers, on the ground that a
+read of another tree is the placement question `reads_path` asks at its
+`outside` scope and a row declaring one `project` scope cannot raise it.
+What retired it is that no other spelling raises it either -- `cd /elsewhere
+&& git log` is two allowed segments and `cat /elsewhere/file` is an allowed
+read, both asserted below -- so the question deterred nothing and cost a
+turn on every sibling worktree and every project the sync registry mounts,
+each of which is named by absolute path.
 """
 
 from lup.policy.kernel.decision import KernelDecision
@@ -62,9 +66,23 @@ def test_a_redirect_in_front_of_a_mutation_still_asks() -> None:
         assert "-C" in settled.reason, command
 
 
-def test_a_read_of_a_tree_outside_the_checkout_keeps_its_question() -> None:
-    """The scope the row cannot state, asked where the row would have allowed."""
-    assert verdict("git -C /etc/somerepo log").effect == "ask"
+def test_a_read_of_a_tree_outside_the_checkout_costs_nothing_either() -> None:
+    """Where the redirect earns its keep, and where the guard cost the most.
+
+    A sibling worktree and a mounted project are both addressed by absolute
+    path, and both are read constantly. The spelling that asked was the only
+    one: the two below make the identical read and are allowed, which is
+    what leaves the question with nothing to deter.
+    """
+    for command in (
+        "git -C /etc/somerepo log",
+        "git -C ../sibling status",
+        "git -C /home/other/project diff",
+    ):
+        assert verdict(command).effect == "allow", command
+
+    assert verdict("cd /etc/somerepo && git log").effect == "allow"
+    assert verdict("cat /etc/somerepo/README.md").effect == "allow"
 
 
 def test_the_redirect_is_still_named_in_the_way_through() -> None:

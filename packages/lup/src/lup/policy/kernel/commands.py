@@ -38,7 +38,6 @@ from .words import (
     flag_write_targets,
     git_restore_operands,
     key_matches,
-    leaves_the_checkout,
     opaque_argument,
     protected_write_target,
     refspec_effects,
@@ -504,11 +503,10 @@ class Subcommand(TypedDict):
 
 def redirected_verb_only_reads(
     arguments: list[str],
-    value: str,
     value_flags: list[str],
     rows: list[ShellRuleRow],
 ) -> bool:
-    """Whether a directory redirect leads somewhere inside, to a verb that reads.
+    """Whether a directory redirect leads to a verb that only reads.
 
     The guard on `-C` exists because the verb behind it is answered by a row
     reasoning about *this* worktree: ``git -C /elsewhere commit`` reads as
@@ -517,13 +515,22 @@ def redirected_verb_only_reads(
     be somebody else's, so the redirect changes which tree is read and
     nothing about what the command does.
 
-    Both halves are required, and the second is why this reads the value.
-    ``git -C /elsewhere log`` is a read of a tree outside the checkout, which
-    is the placement question `reads_path` asks at its `outside` scope --
-    and the row cannot ask it, because a row declares one scope for every
-    path its verb might touch and this one says `project`. Left to the row,
-    the redirect would be the one spelling of an outside read that never
-    reaches that question.
+    Where the redirect *points* is deliberately not asked, where a first
+    version required it to stay inside the checkout. The argument for asking
+    was that ``git -C /elsewhere log`` is an outside read, which a row
+    declaring one `project` scope for its verb cannot raise. What refutes it
+    is that no other spelling of the same read raises it either: ``cd
+    /elsewhere && git log`` is two allowed segments and ``cat
+    /elsewhere/file`` is an allowed read, both measured. So the question
+    deterred nothing and cost a turn every time, and its own text said as
+    much -- it named `cd` into that tree as the way through. A question
+    whose remedy is the unguarded spelling of the same act is friction
+    wearing a boundary's clothes.
+
+    Which leaves it costing most exactly where reading elsewhere is the
+    work: a sibling worktree, and a project the sync registry mounts for a
+    session to commit in. Both are addressed by absolute path, and the test
+    it used read every absolute path as outside.
 
     The verb is judged by its own declared effects rather than by a list of
     names kept here. A list would be a second statement of what `git log`
@@ -533,10 +540,8 @@ def redirected_verb_only_reads(
     Read as "observes", not as "allowed", and the difference is the whole
     correctness of this: a commit is allowed for being reversible, so a first
     version asking the verdict let ``git -C elsewhere commit`` through -- the
-    one case the guard was written for.
+    one case the guard was written for, and the one this still holds.
     """
-    if leaves_the_checkout(value):
-        return False
     position = 0
     while position < len(arguments):
         word = arguments[position]
@@ -603,8 +608,7 @@ def split_subcommand(
                 # front of a verb that reads. The guard stands for everything
                 # else, and the redirect it names still applies.
                 following = arguments[position + 2 :]
-                value = arguments[position + 1] if position + 1 < len(arguments) else ""
-                if redirected_verb_only_reads(following, value, value_flags, rows):
+                if redirected_verb_only_reads(following, value_flags, rows):
                     position += 2
                     continue
             redirect = (
