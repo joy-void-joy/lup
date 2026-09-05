@@ -27,6 +27,7 @@ from .effects import (
     EffectRow,
     declare,
     declared_verdict,
+    member_for,
     purpose_of,
     verdict_for,
 )
@@ -37,6 +38,7 @@ from .words import (
     flag_write_targets,
     git_restore_operands,
     key_matches,
+    leaves_the_checkout,
     opaque_argument,
     protected_write_target,
     refspec_effects,
@@ -499,8 +501,60 @@ class Subcommand(TypedDict):
     remainder: list[str]
 
 
+def redirected_verb_only_reads(
+    arguments: list[str],
+    value: str,
+    value_flags: list[str],
+    rows: list[ShellRuleRow],
+) -> bool:
+    """Whether a directory redirect leads somewhere inside, to a verb that reads.
+
+    The guard on `-C` exists because the verb behind it is answered by a row
+    reasoning about *this* worktree: ``git -C /elsewhere commit`` reads as
+    reversible on the strength of a reflog that is somewhere else. That
+    premise is about mutation. A verb that only reads has no reflog in it to
+    be somebody else's, so the redirect changes which tree is read and
+    nothing about what the command does.
+
+    Both halves are required, and the second is why this reads the value.
+    ``git -C /elsewhere log`` is a read of a tree outside the checkout, which
+    is the placement question `reads_path` asks at its `outside` scope --
+    and the row cannot ask it, because a row declares one scope for every
+    path its verb might touch and this one says `project`. Left to the row,
+    the redirect would be the one spelling of an outside read that never
+    reaches that question.
+
+    The verb is judged by its own declared effects rather than by a list of
+    names kept here. A list would be a second statement of what `git log`
+    does, free to disagree with the table that already says it, and wrong
+    the first time a verb is reclassified.
+
+    Read as "observes", not as "allowed", and the difference is the whole
+    correctness of this: a commit is allowed for being reversible, so a first
+    version asking the verdict let ``git -C elsewhere commit`` through -- the
+    one case the guard was written for.
+    """
+    if leaves_the_checkout(value):
+        return False
+    position = 0
+    while position < len(arguments):
+        word = arguments[position]
+        if not word.startswith("-"):
+            named = [row for row in rows if row["subcommand"] == word]
+            return bool(named) and all(
+                member_for(effect["kind"]).observes
+                for row in named
+                for effect in row["effects"]
+            )
+        position += 2 if word in value_flags else 1
+    return False
+
+
 def split_subcommand(
-    executable: str, arguments: list[str], default: ShellRuleRow | None
+    executable: str,
+    arguments: list[str],
+    default: ShellRuleRow | None,
+    rows: list[ShellRuleRow] = [],
 ) -> Subcommand | KernelDecision:
     """Find the subcommand word, honoring global value-taking and guarded flags.
 
@@ -540,6 +594,18 @@ def split_subcommand(
             ):
                 position += named["words"]
                 continue
+            if flag_matches(word, value_flags):
+                # Asked before the question is raised rather than after it is
+                # answered, because the answer here was the whole verdict: the
+                # flag returned before the subcommand word had been read, so
+                # `git -C . log` was a question about a redirect to nowhere in
+                # front of a verb that reads. The guard stands for everything
+                # else, and the redirect it names still applies.
+                following = arguments[position + 2 :]
+                value = arguments[position + 1] if position + 1 < len(arguments) else ""
+                if redirected_verb_only_reads(following, value, value_flags, rows):
+                    position += 2
+                    continue
             redirect = (
                 " — or cd into that tree and run it there"
                 if flag_matches(word, value_flags)
@@ -601,7 +667,7 @@ def decide_command_rows(
             next(row for row in matches if not row["subcommand"]), arguments, measured
         )
     default = next((row for row in matches if not row["subcommand"]), None)
-    split = split_subcommand(executable, arguments, default)
+    split = split_subcommand(executable, arguments, default, matches)
     if isinstance(split, KernelDecision):
         return split
     subword = split["word"]

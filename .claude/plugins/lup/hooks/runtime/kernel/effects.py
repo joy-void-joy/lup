@@ -132,6 +132,25 @@ class Effect:
     row can state is an axis some member has to be able to refuse.
     """
 
+    observes = False
+    """Whether this member leaves the world exactly as it found it.
+
+    Not the same question as the verdict, and the difference is what makes it
+    worth a column. A verdict says whether anybody is asked, and plenty of
+    mutations are allowed for being reversible -- a commit is undone by the
+    reflog, so it earns ``allow`` while changing the repository. A caller that
+    needs to know whether an operation *changes* anything and reads the
+    verdict instead gets "yes" for a read and for a commit alike.
+
+    Read by the guard on a directory redirect, whose whole premise is that a
+    verb's reversibility is a fact about the tree it runs in: what survives
+    being pointed at another tree is exactly what does nothing to either.
+
+    Stated by the member, because the member is the thing that knows. Kept as
+    a class attribute rather than a set of kind names somewhere else, which
+    would be a second statement of the table free to disagree with it.
+    """
+
     reviewable = False
     """Whether this member's verdict reads the route axis, on the same terms.
 
@@ -181,6 +200,7 @@ class ChangesNothing(Effect):
     """
 
     kind = "changes_nothing"
+    observes = True
 
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
@@ -204,6 +224,7 @@ class ReadsPath(Effect):
     """
 
     kind = "reads_path"
+    observes = True
     scopes = ["project", "outside", "secret"]
     """Anywhere the checkout covers, anywhere it does not, and key material.
 
