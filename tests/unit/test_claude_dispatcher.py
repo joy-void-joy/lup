@@ -918,3 +918,71 @@ def test_an_effect_no_boundary_here_reaches_still_asks(delete_repo: Path) -> Non
     effect, _reason = snapshotting_effect("git push --delete origin feat", delete_repo)
 
     assert effect == "ask"
+
+
+CONTAINED_LEDGER = {
+    "profile": ["contained"],
+    "contained": ["yes"],
+    "unjudged_ambient": ["ask"],
+    "delivered": ["inside_placement", "question_relay"],
+    "blocked": ["host_executor"],
+}
+"""What a launch that opened a container and measured its placement wrote."""
+
+
+def unjudged_effect_under(
+    ledger: dict[str, list[str]], root: Path, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    """What the deployed dispatcher decides about unjudged work in one session.
+
+    The measurement is written where that launch would have put it and named
+    by the nonce this session is entitled to believe, because the dispatcher
+    reads the ledger rather than any variable. The native sandbox is switched
+    off, so a containment that fails to carry has nothing standing in for it.
+    """
+    written = root / ".lup" / "preflight" / "launch.json"
+    written.parent.mkdir(parents=True, exist_ok=True)
+    written.write_text(json.dumps(ledger), encoding="utf-8")
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "launch")
+    monkeypatch.delenv("LUP_SANDBOX_ACTIVE", raising=False)
+
+    decision = decide_from(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "frobnicate"},
+            "cwd": str(root),
+        },
+        root,
+    )
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"])
+
+
+def test_a_contained_session_settles_unjudged_work_inside(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The boundary this project ships, reaching the row named for it.
+
+    Every fact behind this is measured by the launch and read here, and the
+    dispatcher is the only thing a session runs — so a kernel that joins both
+    terms correctly still asks on every real call if the deployed script
+    hands it only one of them. That is exactly what happened: `contained`
+    travelled and the placement measurement beside it did not, which left
+    `bounded()` collapsed onto the native sandbox and a contained session
+    judged as an exposed one.
+    """
+    assert unjudged_effect_under(CONTAINED_LEDGER, tmp_path, monkeypatch) == "allow"
+
+
+def test_a_container_whose_placement_went_unmeasured_still_asks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the pair, so the row is not passing on `contained` alone.
+
+    A container is a promise about where an operation lands, and a promise no
+    probe confirmed is not evidence for settling one there.
+    """
+    unmeasured = {**CONTAINED_LEDGER, "delivered": ["question_relay"]}
+
+    assert unjudged_effect_under(unmeasured, tmp_path, monkeypatch) == "ask"

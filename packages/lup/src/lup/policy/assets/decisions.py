@@ -166,6 +166,12 @@ def bash_decision(
         # promised is a fact about the host with no runtime variation to it,
         # so neither dispatcher is given the chance to forget it.
         contained=inside,
+        # The other half of that pair, and the reason the first one alone
+        # settles nothing: a container is a promise about where an operation
+        # lands, and `bounded()` counts it only where the launch measured that
+        # the promise holds. Passed from the same ledger read, so the two
+        # cannot describe different launches.
+        inside_placement=delivers(boundary, "inside_placement"),
         # The profile's own answer for the long tail, which only an
         # uncontained session ever reaches: contained, the row above settles
         # the same operation first.
