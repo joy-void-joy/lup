@@ -404,13 +404,22 @@ class Image(BaseModel, frozen=True):
         ),
     )
     project_environment: str = Field(
-        default="/opt/lup/venv",
+        default=".venv-contained",
         description=(
-            "``UV_PROJECT_ENVIRONMENT``, deliberately outside the mounted "
-            "tree. A `.venv` inside the checkout is shared with the host "
-            "through the bind mount, so host tooling and container tooling "
-            "overwrite each other's interpreter paths. Container-private is "
-            "the fix, and it holds under a contained-Bash architecture too"
+            "``UV_PROJECT_ENVIRONMENT``, relative so `uv` resolves it against "
+            "each project root rather than naming one directory for the whole "
+            "machine. An absolute value is a single environment shared by "
+            "every project mounted here, and `uv sync` is exact by default -- "
+            "measured on uv 0.12.7, syncing a second project uninstalls the "
+            "first and its dependencies, so a session's own toolchain does "
+            "not survive an agent running `uv sync` in a mounted clone. "
+            "Relative, `uv` does that keying itself for every spelling, a "
+            "bare `uv run` in a shell included -- which is why this is not "
+            "re-keyed from lup's own code, that reaching only the processes "
+            "lup starts. What keeps the environment off the host is then the "
+            "mount rather than the path: a private directory is bound at "
+            "this name inside each project root, so the checkout's own "
+            "`.venv` and this one never meet"
         ),
     )
     agent_clis: list[Package] = Field(
@@ -937,13 +946,18 @@ RUN chmod +x /usr/local/bin/lup-clipboard \\
 # handed over here, the registry root included. Leaving that one out is how a
 # pinned toolchain ends up installed and unreachable, reported by whatever
 # tried to run it rather than by the layer that misplaced it.
+#
+# The project environment is not among them and cannot be: it is a name
+# relative to each project root, so it has no path here to create. The run
+# binds a host directory over it instead, which arrives owned by the host uid
+# this build is handing everything else to.
 ARG UID=1000
 ARG GID=1000
 RUN groupadd -g $GID agent 2>/dev/null || true \\
     && useradd -u $UID -g $GID -m -s /bin/bash agent 2>/dev/null || true \\
-    && mkdir -p {self.project_environment} {self.registry_root} \\
+    && mkdir -p {self.registry_root} \\
         {" ".join(c.path for c in self.caches)} \\
-    && chown -R $UID:$GID {self.project_environment} {self.registry_root} \\
+    && chown -R $UID:$GID {self.registry_root} \\
         {" ".join(c.path for c in self.caches)}
 
 {exported}
@@ -1064,6 +1078,48 @@ USER $UID:$GID
         """
         return ["-v", f"{config_home / 'ide'}:{self.config_home}/ide:rw"]
 
+    def environment_mounts(self, environments: Mapping[Path, Path]) -> list[str]:
+        """A container-private directory at each project root's environment name.
+
+        :attr:`project_environment` is relative, so every mounted project
+        resolves it inside its own bind mount -- which is the host's tree. A
+        session syncing there would write its environment into the checkout
+        the operator is also working in, and the interpreter paths a venv
+        bakes are absolute, so the two would overwrite each other's. Binding
+        a private directory at that name is what makes the relative value
+        safe, and it is per root rather than one shared directory because
+        sharing one is the collision this whole arrangement exists to end.
+
+        Host binds rather than named volumes, which is a departure from
+        :class:`CacheVolume` and deliberate. That class prefers named volumes
+        because a cache *shared with the host* mixes wheels built for two
+        platforms, and nothing here is shared: only the container ever reads
+        this path, so the objection does not reach it. What decides it
+        instead is ownership. A bind arrives owned by whoever owns it on the
+        host, and the launcher creates it as the operator; a fresh named
+        volume at a path the image does not hold is the engine's to own, and
+        the engines disagree about who that is. Measured on rootless podman
+        6.1.0 with ``--userns=keep-id``: a named volume nested here came out
+        ``1000:1000`` and writable, so on that engine the volume would have
+        worked. The bind is chosen for the engine that host could not answer
+        for -- a Docker daemon seeds a fresh volume from the image, and the
+        image cannot hold a project-relative path to seed it from, which
+        leaves the ownership its choice rather than ours. A bind takes that
+        question off the table on both. If a session ever does meet an
+        unwritable one, the entrypoint's config-home check is the shape of
+        the diagnostic it needs: a permission error on a path names neither
+        the mount nor the mapping.
+
+        Keyed by project root, and the caller decides which roots are in it:
+        a read-only root gets none, because a session cannot sync into one
+        and a directory bound inside it would be a mount nothing writes.
+        """
+        return [
+            argument
+            for root, held in environments.items()
+            for argument in ("-v", f"{held}:{root / self.project_environment}:rw")
+        ]
+
     def session_arguments(
         self,
         *,
@@ -1091,6 +1147,7 @@ USER $UID:$GID
         proxy_address: str = "",
         boundary: EnvVars | None = None,
         inherited_environment: list[str] | None = None,
+        environments: Mapping[Path, Path] | None = None,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1136,6 +1193,16 @@ USER $UID:$GID
         differently-assembled argv would verify a container no session opens
         -- but a probe's output is captured rather than shown, and ``-it``
         against a pipe fails on the terminal it was promised.
+
+        ``environments`` is what :meth:`environment_mounts` binds, and it is
+        emitted after the leased mounts because that is the order it reads
+        in, not because the engine needs it: measured on podman 6.1.0, a
+        nested mount emitted *before* the bind it sits inside still wins, so
+        that engine sorts by depth rather than applying the list in order.
+        The same sorting is what ``lease_for`` relies on for its read-only
+        holes, and this leans on it in the same direction -- so an engine
+        that applied the list in order would already be breaking that, and
+        the order here costs nothing to keep right either way.
         """
         mounts = [
             argument
@@ -1223,6 +1290,7 @@ USER $UID:$GID
             *inherited,
             *selected.mount_arguments(),
             *mounts,
+            *self.environment_mounts(environments or {}),
             *seeded,
             *bridged,
             *opening,

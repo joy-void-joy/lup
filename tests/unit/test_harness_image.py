@@ -115,7 +115,7 @@ def test_the_registry_root_is_reachable_by_the_user_the_session_runs_as() -> Non
     """
     rendered = Image().dockerfile(Manifest())
     assert "/root/.bun" not in rendered
-    assert "chown -R $UID:$GID /opt/lup/venv /opt/bun" in rendered
+    assert "chown -R $UID:$GID /opt/bun" in rendered
 
 
 def test_the_registry_root_is_declared_before_anything_installs_into_it() -> None:
@@ -249,6 +249,109 @@ def test_a_session_mounts_the_checkout_at_its_own_absolute_path() -> None:
     assert "-v" in started
     assert "/home/u/repo:/home/u/repo:rw" in started
     assert started[-1] == "lup-agent:x"
+
+
+def test_the_project_environment_is_keyed_per_project_rather_than_per_machine() -> None:
+    """An absolute value is one environment for every project mounted here.
+
+    Measured on uv 0.12.7: `uv sync` is exact by default, so syncing a second
+    project into a shared environment uninstalls the first and its
+    dependencies. Relative is what makes `uv` do the keying, and it has to
+    reach the container as-is -- resolved to an absolute path on the way out
+    would restore the collision while still reading as a fix.
+    """
+    image = Image()
+    assert not Path(image.project_environment).is_absolute()
+    assert image.environment()["UV_PROJECT_ENVIRONMENT"] == image.project_environment
+
+
+def test_the_build_cannot_pre_create_a_project_relative_environment() -> None:
+    """A path relative to each project root has no directory here to make.
+
+    The caches and the registry root are absolute and stay; the environment
+    leaving the `mkdir` is what forces the run to bind one instead, and a
+    `mkdir .venv-contained` in a Dockerfile would silently make one directory
+    in the build's working directory and satisfy nothing.
+    """
+    rendered = Image().dockerfile(Manifest())
+    handed = [line for line in rendered.splitlines() if "chown -R" in line]
+    assert handed, "the build hands its directories to the session's uid somewhere"
+    assert Image().project_environment not in "\n".join(handed)
+    assert "mkdir -p /opt/bun" in rendered
+
+
+def test_each_mounted_project_gets_its_own_environment_directory() -> None:
+    """One shared environment is the collision; one per root is the fix.
+
+    Two roots, two private directories, each bound at the environment's name
+    inside its own tree -- so a `uv sync` in either reaches only its own.
+    """
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={Path("/home/u/repo"): "/home/u/repo"},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        environments={
+            Path("/home/u/repo"): Path("/home/u/.cache/lup/environments/repo-aaaa"),
+            Path("/home/u/other"): Path("/home/u/.cache/lup/environments/other-bbbb"),
+        },
+    )
+    name = Image().project_environment
+    assert (
+        f"/home/u/.cache/lup/environments/repo-aaaa:/home/u/repo/{name}:rw" in started
+    )
+    assert (
+        f"/home/u/.cache/lup/environments/other-bbbb:/home/u/other/{name}:rw" in started
+    )
+
+
+def test_an_environment_mount_is_emitted_after_the_bind_it_sits_inside() -> None:
+    """The order a reader takes it in, though both engines sort by depth.
+
+    Measured on podman 6.1.0: a nested mount emitted first still wins. Pinned
+    anyway, because the day an engine applies the list in order is the day
+    the environment silently becomes the host's `.venv` again -- and nothing
+    else in a session would report it.
+    """
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={Path("/home/u/repo"): "/home/u/repo"},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        environments={Path("/home/u/repo"): Path("/held")},
+    )
+    name = Image().project_environment
+    assert started.index("/home/u/repo:/home/u/repo:rw") < started.index(
+        f"/held:/home/u/repo/{name}:rw"
+    )
+
+
+def test_a_session_without_declared_environments_binds_none() -> None:
+    """A probe and a one-off `run` pass none, and must still assemble.
+
+    The variable is still baked -- it is an image fact -- so what must be
+    absent is the mount, not the name.
+    """
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+    )
+    suffix = f"/{Image().project_environment}:rw"
+    assert not [argument for argument in started if argument.endswith(suffix)]
 
 
 def test_the_config_home_is_container_private_and_carries_across_launches() -> None:

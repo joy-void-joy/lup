@@ -110,6 +110,30 @@ def state_volume_name(root: Path) -> str:
     return f"lup-cfg-{repository_layout(root).name()}"
 
 
+def environment_directory(root: Path, cache: Path | None = None) -> Path:
+    """Where one project root's container-side environment lives on the host.
+
+    Per root rather than per repository, unlike the config home above, and for
+    the opposite reason: that one holds decisions worth sharing across
+    worktrees, and this one holds an environment that *is* the checkout it was
+    synced from -- a venv records absolute interpreter paths and the project
+    installed into it, so two worktrees sharing one is the collision again at
+    a smaller scale.
+
+    Named by the directory and a digest of its whole path, because the
+    readable half is not unique: the documented workflow makes worktrees named
+    for their branch, and two repositories both holding a `dev` would land on
+    one directory. The digest settles that, and the name in front is what
+    makes a listing legible to whoever has to clear one out.
+
+    Outside every checkout, so nothing here is reachable from a session's own
+    tree or visible to the host's git.
+    """
+    held = cache or Path.home() / ".cache" / "lup" / "environments"
+    digest = hashlib.sha256(str(root).encode()).hexdigest()[:12]
+    return held / f"{root.name}-{digest}"
+
+
 def superseded_volume_name(root: Path) -> str:
     """What this checkout's config home was called while the name was per branch.
 
@@ -1493,6 +1517,55 @@ def pruning_notice(refused: list[Path]) -> list[Notice]:
     ]
 
 
+def held_environments(
+    root: Path,
+    accessible: list[AccessibleRoot],
+    name: str,
+    cache: Path | None = None,
+) -> dict[Path, Path]:
+    """A host directory per project root the session may sync, created here.
+
+    The session's own checkout and every root declared writable. A read-only
+    root is left out deliberately rather than skipped for tidiness: `uv sync`
+    writes, so a root nobody may write is one no environment can be built in,
+    and binding a directory inside it would advertise a place to sync that
+    refuses the sync when it is tried.
+
+    Created on the host, which is the whole reason the launcher does this
+    rather than the declaration: a bind mount arrives owned by whoever owns
+    its source, so making these as the operator is what hands the session a
+    directory its own uid can write. A source that does not exist is one the
+    engine refuses the entire container for, so this runs before any argv is
+    assembled rather than lazily beside it.
+
+    The mount *point* is made here too, at ``name`` inside each root, and that
+    is the half worth stating. An engine asked to bind onto a path that is not
+    there creates it under its own mapping: measured on rootless podman 6.1.0
+    with ``--userns=keep-id``, the directory left in the checkout afterwards
+    belonged to uid 100000 -- `nobody` to the operator, who could then neither
+    write it nor sync into it, and whose own `uv` failed on `Permission
+    denied` for a path in their own tree. Made by the launcher first, it
+    belongs to the operator and stays writable. It outlives the container
+    either way; this decides whose it is.
+
+    So a session leaves one empty directory per root behind, at that name.
+    This repository gitignores it; a registered project that does not will
+    show it as untracked, which is the visible cost of keying the environment
+    per project, and cheaper than the sync that would otherwise land in the
+    `.venv` the operator is using.
+    """
+
+    def prepared(project: Path) -> Path:
+        """One root's directory and its mount point, before anything binds them."""
+        directory = environment_directory(project, cache)
+        directory.mkdir(parents=True, exist_ok=True)
+        (project / name).mkdir(exist_ok=True)
+        return directory
+
+    roots = [root, *[item.path for item in accessible if item.writable]]
+    return {project: prepared(project) for project in dict.fromkeys(roots)}
+
+
 def contained_argv(
     image: Image,
     manifest: Manifest,
@@ -1630,4 +1703,5 @@ def contained_argv(
         proxy_address=reached_at,
         boundary=sentinels.within(),
         inherited_environment=inherited_environment,
+        environments=held_environments(root, accessible, image.project_environment),
     )

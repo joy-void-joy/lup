@@ -140,6 +140,10 @@ celerybeat.pid
 .env.local
 .envrc
 .venv
+# The mount point a contained session's environment is bound at. The engine
+# creates it inside the bind, which is this tree, so it stands here on the
+# host as an empty directory whether or not a container is running.
+.venv-contained/
 env/
 venv/
 ENV/
