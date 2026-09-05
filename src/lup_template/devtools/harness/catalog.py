@@ -388,7 +388,16 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 Path(".codex"),
                 Path("pyproject.toml"),
                 Path("sync.json"),
-                Path("downstream.json"),
+                # The gitignored half alongside it, because a registration
+                # there can now carry a `mount` — and that key is what a
+                # session may open, at which mode, wherever the project sits
+                # on this machine. An agent free to write one would be
+                # choosing what its next launch mounts, which is the confined
+                # thing choosing what confines it: the same reason remotes,
+                # identity and the forge credential are resolved on the host.
+                # Gitignored is not a substitute. The gate is who may write
+                # it, and nothing was asking.
+                Path("sync.json.local"),
                 # What the agent is allowed to do at all is declared here, and
                 # an agent that can widen its own policy without a question
                 # has a preference rather than a boundary. Protected so the

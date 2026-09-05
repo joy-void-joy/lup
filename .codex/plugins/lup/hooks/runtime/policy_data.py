@@ -228,7 +228,7 @@ PATH_RULES: list[PathRuleRow] = [
     },
     {
         "kind": "subtree",
-        "value": "downstream.json",
+        "value": "sync.json.local",
         "reason": "protected path requires approval",
         "allow_autonomous": True,
     },

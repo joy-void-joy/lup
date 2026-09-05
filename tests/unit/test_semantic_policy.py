@@ -1363,9 +1363,12 @@ EDIT_POLICY_CASES = [
         effect="ask",
     ),
     EditDecisionCase(
-        path="downstream.json",
+        # The gitignored half, protected for what it can now say rather than
+        # for being config: an entry there carries the `mount` deciding what
+        # the next launch opens, so writing one is widening the boundary.
+        path="sync.json.local",
         before='{"projects": []}',
-        after='{"projects": [{"name": "fleet-app"}]}',
+        after='{"projects": [{"name": "fleet-app", "mount": "rw"}]}',
         effect="ask",
         path_exists=False,
     ),
@@ -1530,7 +1533,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                 ".claude",
                 "pyproject.toml",
                 "sync.json",
-                "downstream.json",
+                "sync.json.local",
             ],
             human_owned_files=["README.md"],
             autonomous_agent_identities=["resolver-worker"],
@@ -3261,7 +3264,7 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
         ),
         PathRule(
             kind="subtree",
-            value="downstream.json",
+            value="sync.json.local",
             reason="protected path requires approval",
             allow_autonomous=True,
         ),
@@ -3306,7 +3309,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             ),
             PathRule(
                 kind="subtree",
-                value="downstream.json",
+                value="sync.json.local",
                 reason="protected path requires approval",
                 allow_autonomous=True,
             ),
@@ -3333,7 +3336,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             case.path,
             case.before,
             case.after,
-            [".claude", "pyproject.toml", "sync.json", "downstream.json"],
+            [".claude", "pyproject.toml", "sync.json", "sync.json.local"],
             ["README.md"],
         )
         assert canonical.effect == generated.effect == case.effect
