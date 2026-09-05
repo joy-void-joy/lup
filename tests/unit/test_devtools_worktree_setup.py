@@ -54,8 +54,16 @@ def the_worktree_holds_its_own_environment(monkeypatch: pytest.MonkeyPatch) -> N
     environment is shared across worktrees and how the session image puts it
     outside the checkout. That is a fact about the machine and stays set for
     the suite -- but it makes :meth:`SyncedEnvironment.satisfied` read a
-    directory that is there whatever the sync did, so these two cases, whose
-    whole subject is a sync that produced nothing, take it away.
+    path that is not the one these cases wrote, so every case whose subject
+    is what a sync did or did not leave behind takes it away.
+
+    Both directions need it, which is what makes it a fixture rather than a
+    line in the one test that noticed. Where the value is absolute it names a
+    directory the image already holds, so an environment reads as built when
+    nothing built one; where it is relative -- which is what a contained
+    session now sets, so `uv` keys the environment per project -- it names a
+    sibling of the `.venv` these cases create, so an environment that *was*
+    built reads as missing and the sync runs again.
     """
     monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
 
@@ -186,7 +194,10 @@ def test_the_steps_that_did_not_run_are_named(
 
 
 def test_an_environment_that_was_built_is_not_rebuilt(
-    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
 ) -> None:
     """Readiness is read off the worktree, so a finished step is not repeated."""
     (interrupted_creation(repo, tree_dir, "topic") / ".venv").mkdir()
@@ -201,7 +212,10 @@ def test_an_environment_that_was_built_is_not_rebuilt(
 
 
 def test_an_opted_out_step_is_not_owed(
-    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
 ) -> None:
     """`--no-sync` removes the step, so its absence cannot make a worktree unready."""
     interrupted_creation(repo, tree_dir, "topic")
