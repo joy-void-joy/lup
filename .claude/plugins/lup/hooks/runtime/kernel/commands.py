@@ -49,6 +49,7 @@ from .words import (
     written_targets,
 )
 from .fetch import decide_fetch
+from .semantics import UnjudgedAmbient
 
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 IN_PLACE_SED_REFUSAL = (
@@ -1057,12 +1058,22 @@ def decide_curl_words(
     words: list[str],
     allowed_scopes: list[UrlScopeRow],
     denied_scopes: list[UrlScopeRow],
+    unjudged_ambient: UnjudgedAmbient = "ask",
 ) -> KernelDecision:
     """Allow only read-method curl against the declared fetch scopes.
 
-    Every positional word must be a URL the fetch policy allows; unlisted
-    origins stay an approval question and denied origins deny. Flags that
+    Every positional word must be a URL the fetch policy allows; denied
+    origins deny, and an origin no scope names is the profile's to answer --
+    the same declaration `WebFetch` reads, so one spelling of reaching an
+    undeclared origin cannot answer differently from the other. Flags that
     write files, send data, or carry credentials are not classified.
+
+    A `defer` returned from here is settled by `ProviderNative`, which is read
+    before the rule that would otherwise allow unjudged work inside a
+    boundary. That ordering is what makes this safe to thread: the contained
+    reading never sees it, and it must not, because its argument is that every
+    effect is confined there -- true of a command's writes and false of a
+    document entering the agent's context.
     """
     urls: list[str] = []
     expect_value = False
@@ -1105,15 +1116,9 @@ def decide_curl_words(
     if not urls:
         return unjudged("curl has no URL")
     for url in urls:
-        # lup: defer: thread the profile's `unjudged_ambient` here too, so a
-        # curl to an unlisted origin answers as `WebFetch` does. Left asking
-        # deliberately rather than by omission: a `defer` returned from inside
-        # the shell classifier meets the settlement order, where the rule that
-        # settles unjudged work inside a boundary would allow it — and that
-        # rule's argument, that every effect is confined there, is the one
-        # thing untrue of reading a document into context. Threading the
-        # declaration means teaching that rule the difference first.
-        verdict = decide_fetch(curl_url(url), allowed_scopes, denied_scopes)
+        verdict = decide_fetch(
+            curl_url(url), allowed_scopes, denied_scopes, unjudged_ambient
+        )
         if verdict.effect != "allow":
             return verdict
     return KernelDecision("allow", "read-only curl within declared scopes")

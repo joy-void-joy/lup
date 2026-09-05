@@ -88,6 +88,15 @@ class ShellContext(TypedDict):
     runner_targets: list[RunnerTargetRow]
     target_tables: list[ShellRuleRow]
     contained: bool
+    unjudged_ambient: UnjudgedAmbient
+    """The profile's answer for what nothing classified, carried for `curl`.
+
+    A segment classifier does not settle anything, so almost nothing here
+    needs this. `curl` does, because it is the one verb whose row hands the
+    question to the fetch scopes -- and an origin no scope names is the same
+    silence the shell reads this declaration for. Without it, one spelling of
+    reaching an undeclared origin answered from the profile and the other
+    from a constant."""
 
 
 def write_facts(context: ShellContext) -> WriteFacts:
@@ -131,6 +140,7 @@ def shell_context(
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
+    unjudged_ambient: UnjudgedAmbient = "ask",
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists.
 
@@ -160,6 +170,7 @@ def shell_context(
         runner_targets=runner_targets or [],
         target_tables=target_tables or [],
         contained=contained,
+        unjudged_ambient=unjudged_ambient,
     )
 
 
@@ -273,7 +284,10 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
         return decide_shell_segment(payload, context)
     if executable == "curl":
         return decide_curl_words(
-            words, context["allowed_scopes"], context["denied_scopes"]
+            words,
+            context["allowed_scopes"],
+            context["denied_scopes"],
+            context["unjudged_ambient"],
         )
     if executable == "gh" and len(words) > 1 and words[1] == "api":
         return decide_gh_api_words(words)
@@ -906,6 +920,7 @@ def classify_shell(
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
+    unjudged_ambient: UnjudgedAmbient = "ask",
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(
@@ -938,6 +953,7 @@ def classify_shell(
         runner_targets=runner_targets,
         target_tables=target_tables,
         contained=contained,
+        unjudged_ambient=unjudged_ambient,
     )
     decisions = decide_segment_list(segments, context)
     placement = joined_placement(decisions)
@@ -1116,6 +1132,10 @@ def decide_shell(
                 # same way a read of one is, so the redirection reading needs
                 # the same fact the settlement below already has.
                 contained=contained,
+                # And `curl` needs the same declaration the settlement below
+                # reads for a command nothing classified, because reaching an
+                # undeclared origin is that silence spelled as a verb.
+                unjudged_ambient=unjudged_ambient,
             ),
             escalation=reading.request,
             contained=contained,
