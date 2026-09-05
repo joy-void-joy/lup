@@ -13,21 +13,22 @@ patch touches without applying a byte of it.
 
 from pathlib import Path
 
-import sh
-
+from lup.execution.shell import git
 from lup.policy.assets.host import patch_write_targets
 from lup.policy.kernel.lex import shell_patch_operands
 
 
 def repository(root: Path, name: str, body: str) -> None:
     """A repository holding one committed file, which a patch can be cut from."""
-    sh.Command("git")("init", "-q", str(root))
+    git("init", "-q", str(root))
     (root / name).write_text(body, encoding="utf-8")
-    git = sh.Command("git").bake(
-        "-C", str(root), "-c", "user.email=t@e", "-c", "user.name=t"
-    )
-    git("add", "-A")
-    git("commit", "-qm", "in")
+    committing(root)("add", "-A")
+    committing(root)("commit", "-qm", "in")
+
+
+def committing(root: Path):
+    """Git in one repository, with an identity a fresh runner will not have."""
+    return git.bake("-C", str(root), "-c", "user.email=t@e", "-c", "user.name=t")
 
 
 def test_the_patch_a_command_hands_over_is_named() -> None:
@@ -67,15 +68,32 @@ def test_git_reads_out_the_paths_a_patch_would_write(tmp_path: Path) -> None:
     Asserted against a patch Git itself produced, because the thing under test
     is that the two halves of Git agree -- what `diff` writes is what
     `apply --numstat` reports, and no reader of ours sits between them.
+
+    Cut with :data:`lup.execution.shell.git` rather than a bare `sh.Command`.
+    That command exists because invoking Git for capture has more than one
+    answer to get right -- `--no-pager`, colour off, no terminal -- and this
+    fixture had picked one of the three. Which of them a given machine needs
+    is exactly the sort of thing that differs between a developer's box and a
+    runner, so the answer is to have one place decide rather than to work out
+    which one bit.
     """
     repository(tmp_path, "notes.md", "one\n")
-    # Colour off, because `sh` hands Git a terminal and a coloured diff is not
-    # a patch any more -- the escapes land between the marker and the line.
-    git = sh.Command("git").bake("-C", str(tmp_path), "-c", "color.ui=false")
     (tmp_path / "notes.md").write_text("two\n", encoding="utf-8")
-    (tmp_path / "fix.patch").write_text(str(git("diff")), encoding="utf-8")
-    git("restore", "notes.md")
+    (tmp_path / "fix.patch").write_text(
+        str(committing(tmp_path)("diff")), encoding="utf-8"
+    )
+    committing(tmp_path)("restore", "notes.md")
 
+    # Said before the real assertion, because these two fail identically and
+    # mean opposite things: a reader that missed a target, and a fixture that
+    # never wrote one. This test failed on CI as `[] == ['notes.md']` while
+    # passing everywhere else, and that message cannot tell them apart -- so
+    # whatever the environment turns out to be doing, the next failure says
+    # which half to look at.
+    assert (tmp_path / "fix.patch").read_text(encoding="utf-8").strip(), (
+        "the fixture produced an empty diff, so this asserts nothing about "
+        "patch_write_targets"
+    )
     assert patch_write_targets(["fix.patch"], tmp_path) == ["notes.md"]
 
 

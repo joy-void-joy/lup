@@ -51,6 +51,7 @@ from lup.formats.banner import (
     GeneratedBanner,
 )
 from lup.harness.generation import ArtifactValidationError
+from lup.harness.requirements import LostCapability, Requirement, Run
 from lup.harness.materialization import (
     AtomicMaterializer,
     MaterializationConflictError,
@@ -2857,13 +2858,56 @@ def test_leaving_a_worktree_is_granted_and_entering_one_is_not() -> None:
     assert "EnterWorktree" in refused
 
 
-def test_codex_sandbox_arguments_establish_the_envelope() -> None:
+def envelope_that(works: bool) -> Requirement:
+    """A stand-in for the envelope probe, which either passes or does not.
+
+    The real one runs `codex sandbox` and watches two witnesses, so it answers
+    about the machine rather than about the code. That is the right shape for
+    the probe and the wrong one for a unit test of what the launcher composes:
+    on a host with no Codex CLI it made this assert a capability nobody
+    claimed, and the failure named `LUP_SANDBOX_ACTIVE` rather than the
+    missing runtime. The real probe is exercised where a host is in scope.
+    """
+    return Requirement(
+        capability="codex envelope",
+        purpose="testing what the launcher does with a probe's answer",
+        where="host",
+        exercise=Run(command=["true"] if works else ["false"]),
+        absence=LostCapability(capability="the codex envelope"),
+    )
+
+
+def test_codex_sandbox_arguments_establish_the_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(launch, "codex_envelope_requirement", lambda: envelope_that(True))
     environment: EnvVars = {}
     arguments = codex_sandbox_arguments(
         portable_harness().plugins[0], environment, ["--model", "gpt-5.2"]
     )
     assert arguments[:2] == ["--sandbox", "workspace-write"]
     assert environment["LUP_SANDBOX_ACTIVE"] == "1"
+
+
+def test_a_failed_probe_leaves_the_deny_lattice_standing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The safety-relevant direction, and the one nothing asserted.
+
+    A flag set on an envelope nobody tested tells every dispatcher downstream
+    to relax into a boundary that may not be there. So when the probe fails the
+    envelope arguments still compose — the sandbox is still asked for — and the
+    flag stays unset, which is what keeps the lattice carrying the escalation
+    recipe.
+    """
+    monkeypatch.setattr(
+        launch, "codex_envelope_requirement", lambda: envelope_that(False)
+    )
+    environment: EnvVars = {}
+    arguments = codex_sandbox_arguments(portable_harness().plugins[0], environment, [])
+
+    assert arguments[:2] == ["--sandbox", "workspace-write"]
+    assert "LUP_SANDBOX_ACTIVE" not in environment
 
 
 def test_codex_sandbox_widens_the_root_to_sibling_worktrees(
