@@ -1496,7 +1496,12 @@ def contained_argv(
     # Started before the container rather than beside it, because a pipe with
     # no reader blocks its writer: a sign-in that raced the listener would
     # hang on the one step the whole bridge exists to unblock.
+    # Started here for the same reason and answering the same way: a broker
+    # that cannot listen is a session without a clipboard rather than a launch
+    # that fails, and the notice says which happened either way.
+    copying = image.clipboard.serve()
     handing = image.browser.serve()
+    said.add(image.clipboard.notice(copying is not None))
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
@@ -1560,6 +1565,7 @@ def contained_argv(
         rewrites=rewrites,
         identity=identity,
         browser_directory=handing,
+        clipboard_directory=copying,
         terminal=terminal.environment,
         interactive=interactive,
         proxy_address=reached_at,

@@ -30,6 +30,7 @@ import sh
 from pydantic import BaseModel, Field
 
 from lup.harness.browser import BrowserBridge
+from lup.harness.clipboard import ClipboardBridge, shim_program
 from lup.harness.credential import (
     ForgeCredential,
     GitAccess,
@@ -443,6 +444,19 @@ class Image(BaseModel, frozen=True):
             "address, and nothing back"
         ),
     )
+    clipboard: ClipboardBridge = Field(
+        default=ClipboardBridge(),
+        description=(
+            "How the operator's clipboard reaches a session that has no "
+            "display, no compositor and no clipboard client of its own. "
+            "Declared beside the browser bridge because it is the same kind "
+            "of thing -- one narrow channel through the boundary, named "
+            "rather than buried. The alternative it replaces is mounting the "
+            "host's display socket, which on X11 would hand a confined "
+            "session the ability to read and type into every other window, "
+            "and on Wayland or macOS would not work at all"
+        ),
+    )
     credential_seed: str = Field(
         default="/opt/lup/credential-seed",
         description=(
@@ -649,6 +663,7 @@ class Image(BaseModel, frozen=True):
         return {
             **NON_INTERACTIVE_SHELL_ENV,
             **self.browser.environment(),
+            **self.clipboard.environment(),
             "LUP_CONTAINED": "1",
             "LANG": self.terminal.fallback_locale,
             "UV_PROJECT_ENVIRONMENT": self.project_environment,
@@ -704,6 +719,8 @@ class Image(BaseModel, frozen=True):
         )
         agent_clis = " ".join(item.requested() for item in self.agent_clis)
         opening = self.browser.script(self.egress.shares_host_loopback())
+        clipping = shim_program()
+        shim_names = " ".join(self.clipboard.shims)
         # Quoted, because `ENV name=value` takes whitespace as separating
         # *more* pairs: an unquoted `GIT_SSH_COMMAND=ssh -o BatchMode=yes`
         # makes `-o` a name with no value and the whole file unparseable.
@@ -872,6 +889,18 @@ COPY <<'OPEN' {self.browser.opener}
 OPEN
 RUN chmod +x {self.browser.opener}
 
+# Every name a clipboard is asked for by, pointed at one program that speaks
+# to the broker in the launcher. The socket is mounted per launch; with none
+# mounted each shim exits non-zero, which is what "this machine has no
+# clipboard" already looked like to every caller.
+COPY <<'CLIP' /usr/local/bin/lup-clipboard
+{clipping}
+CLIP
+RUN chmod +x /usr/local/bin/lup-clipboard \\
+    && for name in {shim_names}; do \\
+        ln -sf /usr/local/bin/lup-clipboard "/usr/local/bin/$name"; \\
+    done
+
 # The identity the session runs as. Supplied at build time from the host's own
 # uid/gid, because a bind mount carries numbers rather than names: a container
 # that ran as its own root would leave root-owned files in the host checkout.
@@ -1028,6 +1057,7 @@ USER $UID:$GID
         rewrites: list[RemoteRewrite] | None = None,
         identity: GitIdentity | None = None,
         browser_directory: Path | None = None,
+        clipboard_directory: Path | None = None,
         terminal: EnvVars | None = None,
         interactive: bool = True,
         proxy_address: str = "",
@@ -1108,6 +1138,11 @@ USER $UID:$GID
             if browser_directory is not None
             else []
         )
+        clipping = (
+            ["-v", f"{clipboard_directory}:{self.clipboard.inside}:rw"]
+            if clipboard_directory is not None
+            else []
+        )
         # The forge configuration is passed rather than baked, and passed
         # here rather than through `run_arguments`, because it is the one
         # part of the run that is neither an image fact nor a posture: it is
@@ -1163,6 +1198,7 @@ USER $UID:$GID
             *seeded,
             *bridged,
             *opening,
+            *clipping,
             tag,
         ]
 

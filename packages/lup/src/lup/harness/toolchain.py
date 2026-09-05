@@ -438,11 +438,13 @@ def clipboard_requirement(
 ) -> Requirement:
     """Any one of the clipboard clients a desktop might have, as an advisory.
 
-    Advisory because it matters in exactly one moment -- somebody running a
-    command by hand and wanting the follow-up ready to paste -- and in none
-    of the sessions afterwards, where an agent moves itself and never touches
-    a clipboard. Said once to whoever is setting a machine up; silent at
-    every launch, where it would only teach people to skip the line above it.
+    Advisory because a machine without one still works: what is lost is
+    copying a printed command by hand, and the clipboard bridge a contained
+    session pastes through, which answers out of this same backend. Neither
+    stops a session, so this is said once to whoever is setting a machine up
+    and stays silent at every launch, where it would only teach people to
+    skip the line above it. The bridge says its own absence at the launch it
+    is absent from, which is the moment that one matters.
 
     The spellings come off :func:`~lup.devtools.clipboard.clipboard_probes`
     rather than being listed here, because which one a machine has is a fact
@@ -460,13 +462,19 @@ def clipboard_requirement(
     """
     return Requirement(
         capability="clipboard",
-        purpose="handing a printed command straight to the shell that runs it",
+        purpose=(
+            "handing a printed command straight to the shell that runs it, "
+            "and answering the clipboard bridge a contained session pastes "
+            "through"
+        ),
         where=where,
         checked="setup",
         exercise=AnyOf(
             alternatives=[Run(command=probe) for probe in clipboard_probes()]
         ),
-        absence=Advisory(improves="copying a command to the clipboard"),
+        absence=Advisory(
+            improves="copying a command, and pasting into a contained session"
+        ),
         install=install,
     )
 
