@@ -31,11 +31,11 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The permission policy.** Every shell command, URL scope, and edit in a batch is classified, and a denial names what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on it, and `# lup: escalate[decision]: <why>` as a command's leading line promotes a deny or ask into an approval question carrying that reason.
 
-An escalation is one-off. For recurring walls, **widen the protected declaration** so review approves the rule. Regenerate and reopen with `--continue` to load it at startup while keeping the conversation; it remains drift-checked next session.
+An escalation is one-off; a recurring wall means widening the protected declaration instead, which `docs/permissions.md` carries.
 
 **The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval: propose the exact edit and let the user apply it.
 
-**The drift check.** Generated trees are regenerated, never hand-edited and never hand-merged. Take either side of a conflict, regenerate, and let the check confirm it settled.
+**The drift check.** Generated trees are regenerated, never hand-edited or hand-merged: take either side of a conflict, regenerate, and let the check confirm it settled.
 
 `docs/rules.md` indexes every rule from the registry that runs, `docs/permissions.md` carries the lattice and what counts as a real changed line, and `docs/contributing.md` carries how a suppression is scoped.
 
@@ -47,7 +47,7 @@ Harness settings stay project-level, in the tree the harness owns (.codex/config
 
 A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — anything whose subject is the code and belongs at the site it concerns. Three flavors carry feedback, and **deleting one is denied**: bare `# lup: <text>` is open, `# lup: solved: <text>` claims you addressed it, `# lup: defer: <text>` parks it. Two more share the namespace without being feedback and go when what they annotate does — `# lup: ignore[<rule>]` is the suppression above, and `# lup: template: <decision>` marks a customization point the scaffold leaves to whoever adopts it.
 
-Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked; only the verify-solved pass retires one. `docs/contributing.md` carries the lifecycle, and how a customization marker reads differently in a scaffold and in a repository that adopted it (`$lup:resolve`), and `dev todos` walks the customization points still standing.
+Resolve open feedback by fixing what it points at — or, for a question, by answering it definitively — then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim can be checked against what was asked; only the verify-solved pass retires one. `docs/contributing.md` carries the lifecycle, and how a customization marker reads differently in a scaffold and in a repository that adopted it (`$lup:resolve`), and `dev todos` walks the customization points still standing.
 
 ### Deferred Work
 
@@ -63,7 +63,7 @@ Resolve open feedback by fixing what it points at, or, for a question, by answer
 
 ## Development Workflow
 
-Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev worktree create feat-name`, then start a session rooted at <the path it prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Already running, keep working where you are and address files there by absolute path, which reaches the same branch. — creation does not move the session, so old-checkout edits miss the branch. Late relocation may persistently reject ordinary shell words anywhere in argv. `docs/contributing.md` carries the branch model, refused-word set, and merge loop.
+Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev worktree create feat-name`, then start a session rooted at <the path it prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Already running, keep working where you are and address files there by absolute path, which reaches the same branch. — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused-word set a late relocation meets, and the merge loop.
 
 ### Merge Conflict Resolution
 
@@ -91,7 +91,7 @@ Build on `lup` and pydantic. The runtime an application composes against is prov
 
 **Error handling.** A `@lup_tool` handler takes a validated model and returns one; raise `ToolError` to send a recoverable failure back as an MCP error saying what to do about it — the `is_error` envelope and the input-validation reply are the decorator's. Elsewhere raise for unrecoverable errors, wrap transient ones in `with_retry`, validate inputs early, and never swallow one silently. A catch-all `except Exception` is fine at a boundary that logs, handles, or re-raises — a task loop, a subagent delegation — which is why no rule refuses one.
 
-**Placement, in this repository.** Reusable utilities belong in `packages/lup/`; what only this application needs belongs in `src/lup_template/`. If logic already exists in `lup`, import it rather than copying it. Deciding a module belongs on the other side is one line of judgement and a hundred of consequence, which is where the judgement usually gets abandoned — so the consequence is a command: `dev relocate old.module=new.module` repoints every import and reports the mentions it left for you.
+**Placement, in this repository.** Reusable utilities belong in `packages/lup/`, what only this application needs in `src/lup_template/`, and logic already in `lup` is imported rather than copied. Deciding a module belongs on the other side is one line of judgement and a hundred of consequence, which is where the judgement gets abandoned — so the consequence is a command: `dev relocate old.module=new.module` repoints every import and reports the mentions it left you.
 
 ### Design Principles
 
@@ -110,8 +110,8 @@ Some rules shape a design before any gate could catch it. Know these by name whi
 
 A rule states the shape it refuses. These carve-outs are ours, and its diagnostic does not carry them:
 
-- **Barrel files.** `__all__` and `__init__.py` re-exports are refused; import directly from the module that defines the symbol. The exception is a standalone package's own top-level `__init__.py`, which may declare a public API that way — the package root only, never a subpackage.
-- **Private prefixes.** Nothing is private, so a `_` prefix is refused on functions, methods, classes, and constants. An unused parameter (`_context`, `_exc_type`) is exempt: a linting convention, not a privacy one. A helper that should not pollute the module namespace **nests inside its only caller**, which hides it without claiming privacy; a wrapper whose only purpose is to call one other function is not worth hiding — inline it.
+- **Barrel files.** `__all__` and `__init__.py` re-exports are refused, so import from the module that defines the symbol. A standalone package's own top-level `__init__.py` may still declare a public API that way — the package root only, never a subpackage.
+- **Private prefixes.** A `_` prefix is refused because nothing is private, but an unused parameter (`_context`, `_exc_type`) is exempt: a linting convention, not a privacy one. A helper that should not pollute the module namespace **nests inside its only caller**, which hides it without claiming privacy; a wrapper that only calls one other function is not worth hiding — inline it.
 
 ---
 
@@ -139,6 +139,12 @@ The `codeintel` group answers questions about code by *resolving* it, through a 
 
 ---
 
+## Long-Running Work
+
+Work outliving its tool call is launched to survive its launcher — never from a delegated agent's shell — and declared as a `lup.runs` `Pipeline` rather than scripted, so it is resumable and watchable by construction: it writes a manifest, an atomic result per unit, and a heartbeat. Follow it with `dev monitor <dir> --events`: a line per landing, failure and stall, ending when the run does. Name it in the launch report. `docs/runs.md` carries the rest.
+
+---
+
 ## Configuration
 
 Configuration loads through pydantic-settings in `src/lup_template/agent/config.py`, the only module that reads the environment. `.env.local` holds secrets, is gitignored, and overrides the defaults in `.env`; `docs/template.md` lists the variables.
@@ -155,7 +161,7 @@ Configuration loads through pydantic-settings in `src/lup_template/agent/config.
 
 Verify claims against **what was actually asked** — the note or issue itself, not a title, commit, or prior summary. State surviving claims plainly; correct failures out loud, including yours.
 
-**After every command**, compare actual use with its docs and propose any update as a question. External docs, corrections, uncovered requests, or ignored sections signal that the command should evolve.
+**After every command**, compare actual use with its docs and propose any update as a question — external docs, corrections, uncovered requests, or ignored sections all say it should evolve.
 
 ### Reporting Friction
 
@@ -164,7 +170,7 @@ Verify claims against **what was actually asked** — the note or issue itself, 
 **Open an issue only when this session cannot repair it**: the owner is outside this repository, a design decision is missing, or reproduction is the work. A narrated workaround teaches nobody, so what cannot be fixed is still recorded.
 
 Record the exact command, error, resulting state, recovery cost, and owning component — repair commit or issue — with `uv run lup-devtools dev report-friction`; the checkout selects the repository. Evidence beats conclusions.
-**Read the tracker first.** `uv run lup-devtools dev issues` lists open reports; search closed ones too. Update a matching report with `--issue NUMBER`, or comment on a closed match, rather than splitting evidence across duplicates.
+**Read the tracker first.** `dev issues` lists the open reports and closed ones are worth searching: a match is updated with `--issue NUMBER`, never split across duplicates.
 
 ### External Resources
 
@@ -176,6 +182,6 @@ When a question is about the harness you run under, its agent SDK, or its model 
 
 `docs/self-improvement.md` carries the full loop, and the feedback-loop, review, and meta skills each work from it.
 
-**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" The fix is almost never a prompt line about a specific decision. Instead: does the agent have enough context? The right tools? A strong enough model?
+**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" Instead of a prompt line about the decision that went wrong: does the agent have enough context? The right tools? A strong enough model?
 
 The durable fix is a capability, not a rule: trace the failure to the missing input or the workflow step where the wrong decision entered, and change that — a prompt rule coexists peacefully with the failure it warns about.

@@ -59,7 +59,7 @@ MARKER_VOCABULARY: list[models.PromptPart] = [
 
 A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — anything whose subject is the code and belongs at the site it concerns. Three flavors carry feedback, and **deleting one is denied**: bare `# lup: <text>` is open, `# lup: solved: <text>` claims you addressed it, `# lup: defer: <text>` parks it. Two more share the namespace without being feedback and go when what they annotate does — `# lup: ignore[<rule>]` is the suppression above, and `# lup: template: <decision>` marks a customization point the scaffold leaves to whoever adopts it.
 
-Resolve open feedback by fixing what it points at, or, for a question, by answering it definitively in the code, the docs, or a recorded user decision. Then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim sits beside what it claims to fix and can be checked against what was asked; only the verify-solved pass retires one. `docs/contributing.md` carries the lifecycle, and how a customization marker reads differently in a scaffold and in a repository that adopted it (`"""
+Resolve open feedback by fixing what it points at — or, for a question, by answering it definitively — then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim can be checked against what was asked; only the verify-solved pass retires one. `docs/contributing.md` carries the lifecycle, and how a customization marker reads differently in a scaffold and in a repository that adopted it (`"""
     ),
     models.SkillInvocation(plugin="lup", skill="resolve"),
     models.TextPart(
@@ -95,7 +95,7 @@ Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev
     ),
     models.RelocateSession(path="the path it prints"),
     models.TextPart(
-        text=r""" — creation does not move the session, so old-checkout edits miss the branch. Late relocation may persistently reject ordinary shell words anywhere in argv. `docs/contributing.md` carries the branch model, refused-word set, and merge loop.
+        text=r""" — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused-word set a late relocation meets, and the merge loop.
 
 """
     ),
@@ -121,7 +121,7 @@ Build on `lup` and pydantic. The runtime an application composes against is prov
 
 **Error handling.** A `@lup_tool` handler takes a validated model and returns one; raise `ToolError` to send a recoverable failure back as an MCP error saying what to do about it — the `is_error` envelope and the input-validation reply are the decorator's. Elsewhere raise for unrecoverable errors, wrap transient ones in `with_retry`, validate inputs early, and never swallow one silently. A catch-all `except Exception` is fine at a boundary that logs, handles, or re-raises — a task loop, a subagent delegation — which is why no rule refuses one.
 
-**Placement, in this repository.** Reusable utilities belong in `packages/lup/`; what only this application needs belongs in `src/lup_template/`. If logic already exists in `lup`, import it rather than copying it. Deciding a module belongs on the other side is one line of judgement and a hundred of consequence, which is where the judgement usually gets abandoned — so the consequence is a command: `dev relocate old.module=new.module` repoints every import and reports the mentions it left for you.
+**Placement, in this repository.** Reusable utilities belong in `packages/lup/`, what only this application needs in `src/lup_template/`, and logic already in `lup` is imported rather than copied. Deciding a module belongs on the other side is one line of judgement and a hundred of consequence, which is where the judgement gets abandoned — so the consequence is a command: `dev relocate old.module=new.module` repoints every import and reports the mentions it left you.
 
 """
     ),
@@ -183,7 +183,7 @@ PROCESS_AND_COMMUNICATION: list[models.PromptPart] = [
 
 Verify claims against **what was actually asked** — the note or issue itself, not a title, commit, or prior summary. State surviving claims plainly; correct failures out loud, including yours.
 
-**After every command**, compare actual use with its docs and propose any update as a question. External docs, corrections, uncovered requests, or ignored sections signal that the command should evolve.
+**After every command**, compare actual use with its docs and propose any update as a question — external docs, corrections, uncovered requests, or ignored sections all say it should evolve.
 
 """
     ),
@@ -198,7 +198,7 @@ REPORTING_FRICTION: list[models.PromptPart] = [
 **Open an issue only when this session cannot repair it**: the owner is outside this repository, a design decision is missing, or reproduction is the work. A narrated workaround teaches nobody, so what cannot be fixed is still recorded.
 
 Record the exact command, error, resulting state, recovery cost, and owning component — repair commit or issue — with `uv run lup-devtools dev report-friction`; the checkout selects the repository. Evidence beats conclusions.
-**Read the tracker first.** `uv run lup-devtools dev issues` lists open reports; search closed ones too. Update a matching report with `--issue NUMBER`, or comment on a closed match, rather than splitting evidence across duplicates.
+**Read the tracker first.** `dev issues` lists the open reports and closed ones are worth searching: a match is updated with `--issue NUMBER`, never split across duplicates.
 
 """
     ),
@@ -254,6 +254,7 @@ def guidance_parts(selection: RuleSelection) -> list[models.PromptPart]:
         *conventions.design_principles(selection),
         *conventions.SANCTIONED_EXCEPTIONS,
         *TOOLING,
+        *conventions.LONG_RUNNING_WORK,
         *CONFIGURATION,
         *PROCESS_AND_COMMUNICATION,
         *REPORTING_FRICTION,

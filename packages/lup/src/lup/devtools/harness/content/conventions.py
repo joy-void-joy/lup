@@ -76,11 +76,11 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The permission policy.** Every shell command, URL scope, and edit in a batch is classified, and a denial names what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on it, and `# lup: escalate[decision]: <why>` as a command's leading line promotes a deny or ask into an approval question carrying that reason.
 
-An escalation is one-off. For recurring walls, **widen the protected declaration** so review approves the rule. Regenerate and reopen with `--continue` to load it at startup while keeping the conversation; it remains drift-checked next session.
+An escalation is one-off; a recurring wall means widening the protected declaration instead, which `docs/permissions.md` carries.
 
 **The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval: propose the exact edit and let the user apply it.
 
-**The drift check.** Generated trees are regenerated, never hand-edited and never hand-merged. Take either side of a conflict, regenerate, and let the check confirm it settled.
+**The drift check.** Generated trees are regenerated, never hand-edited or hand-merged: take either side of a conflict, regenerate, and let the check confirm it settled.
 
 `docs/rules.md` indexes every rule from the registry that runs, `docs/permissions.md` carries the lattice and what counts as a real changed line, and `docs/contributing.md` carries how a suppression is scoped.
 
@@ -182,8 +182,8 @@ SANCTIONED_EXCEPTIONS: list[models.PromptPart] = [
 
 A rule states the shape it refuses. These carve-outs are ours, and its diagnostic does not carry them:
 
-- **Barrel files.** `__all__` and `__init__.py` re-exports are refused; import directly from the module that defines the symbol. The exception is a standalone package's own top-level `__init__.py`, which may declare a public API that way — the package root only, never a subpackage.
-- **Private prefixes.** Nothing is private, so a `_` prefix is refused on functions, methods, classes, and constants. An unused parameter (`_context`, `_exc_type`) is exempt: a linting convention, not a privacy one. A helper that should not pollute the module namespace **nests inside its only caller**, which hides it without claiming privacy; a wrapper whose only purpose is to call one other function is not worth hiding — inline it.
+- **Barrel files.** `__all__` and `__init__.py` re-exports are refused, so import from the module that defines the symbol. A standalone package's own top-level `__init__.py` may still declare a public API that way — the package root only, never a subpackage.
+- **Private prefixes.** A `_` prefix is refused because nothing is private, but an unused parameter (`_context`, `_exc_type`) is exempt: a linting convention, not a privacy one. A helper that should not pollute the module namespace **nests inside its only caller**, which hides it without claiming privacy; a wrapper that only calls one other function is not worth hiding — inline it.
 
 """
     ),
@@ -199,7 +199,7 @@ linting convention. They stay because nothing else carries them.
 
 FAILURE_ANALYSIS_BRIEF: list[models.PromptPart] = [
     models.TextPart(
-        text=r"""**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" The fix is almost never a prompt line about a specific decision. Instead: does the agent have enough context? The right tools? A strong enough model?
+        text=r"""**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" Instead of a prompt line about the decision that went wrong: does the agent have enough context? The right tools? A strong enough model?
 
 """
     ),
@@ -230,6 +230,18 @@ downstream template, and the reference page — and already visibly drifted:
 one copy still asked "Is the model strong enough?" in the older, longer
 phrasing. Nothing but holding them once keeps three copies in step.
 """
+
+LONG_RUNNING_WORK: list[models.PromptPart] = [
+    models.TextPart(
+        text=r"""---
+
+## Long-Running Work
+
+Work outliving its tool call is launched to survive its launcher — never from a delegated agent's shell — and declared as a `lup.runs` `Pipeline` rather than scripted, so it is resumable and watchable by construction: it writes a manifest, an atomic result per unit, and a heartbeat. Follow it with `dev monitor <dir> --events`: a line per landing, failure and stall, ending when the run does. Name it in the launch report. `docs/runs.md` carries the rest.
+
+"""
+    ),
+]
 
 MERGE_CONFLICT_RESOLUTION: list[models.PromptPart] = [
     models.TextPart(

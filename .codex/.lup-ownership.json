@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "32222a367103d68ba125a5d9994e15a92c84bba0a24950bbf5afb0e1c6825ff7",
+  "source_digest": "c46ddbd90545db941d721b1b96c51db708d402e03467a0d8a76016f2b43a9599",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "2a0c49837cd13870bc407ff527704a78b3dc83301b246044ac8a7f5a04a8801c",
+      "sha256": "d34e81d222090e78938267d82636ccc0e9551563079b9ca5f4b8bdde50d78c86",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -443,7 +443,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "d80316be348f81a3ecbe383cbac0a332213615a2b8829ba85a23856d0f1d64a4",
+      "sha256": "133812d1cbfa0de975dc6db4a088028e579e5af289a812c4a8f980853798f4b8",
       "semantic_id": "harness.guidance",
       "executable": false
     }

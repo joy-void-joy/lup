@@ -27,6 +27,7 @@ from lup.devtools.harness.content.docs import (
     platform_differentiation,
     quality_pipeline,
     resolver,
+    runs,
     self_improvement,
     supervisor,
     upstream_reports,
@@ -90,6 +91,7 @@ def library_documents(
         published("architecture", "architecture.md", architecture.DOCUMENT, root),
         published("permissions", "permissions.md", permissions.DOCUMENT, root),
         published("resolver", "resolver.md", resolver.DOCUMENT, root),
+        published("runs", "runs.md", runs.DOCUMENT, root),
         published("supervisor", "supervisor.md", supervisor.DOCUMENT, root),
         published(
             "platform_differentiation",

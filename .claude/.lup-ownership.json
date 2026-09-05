@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "32222a367103d68ba125a5d9994e15a92c84bba0a24950bbf5afb0e1c6825ff7",
+  "source_digest": "c46ddbd90545db941d721b1b96c51db708d402e03467a0d8a76016f2b43a9599",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "0c55912262f4dac9969a1f08dddab2aee3c9859cd619d62c08efc118f3662fa3",
+      "sha256": "da321b1f163e4c65b204ca11b3a9b5da4bf897268a1f5058c3ac972868ca85ec",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "d58725dfc7c6df99a9c858e156b5db117d8c8247e20a0e540423636d2ba47b90",
+      "sha256": "e63c05ff64cbafe480669c91f83f7f40725a54d5698274f66d6a82148c3f8666",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -492,7 +492,7 @@
     {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "505d64c4a6fc836b6c11eef72d7f8b2760a5b178eafd20e7b8dea3fe4b28361c",
+      "sha256": "2a6ebe1c9da8838c180cf1904fadb91af3079a986deb899bb60a11c033884e2d",
       "semantic_id": "docs.library",
       "executable": false
     },
@@ -546,9 +546,16 @@
       "executable": false
     },
     {
+      "path": "docs/runs.md",
+      "category": "generated",
+      "sha256": "5570fa9294b3b8df8bbb6984d2eec2aec80ecb047458831d8d96e6516e1904ff",
+      "semantic_id": "docs.runs",
+      "executable": false
+    },
+    {
       "path": "docs/self-improvement.md",
       "category": "generated",
-      "sha256": "91e3684ac6bbe19fa14590aca447944a2b663431b2277630e5be7133949d1e3f",
+      "sha256": "5aacb3d87c816a999581333c385f30a480e8d09fe272222f1ea1da632512473c",
       "semantic_id": "docs.self-improvement",
       "executable": false
     },
