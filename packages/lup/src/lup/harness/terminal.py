@@ -159,7 +159,17 @@ class TerminalHandoff(BaseModel, frozen=True):
     """
 
     described_by: list[str] = Field(
-        default=["TERM", "COLORTERM", "TZ"],
+        default=[
+            "TERM",
+            "COLORTERM",
+            "TZ",
+            "TMUX",
+            "STY",
+            "ZELLIJ",
+            "TERM_PROGRAM",
+            "LC_TERMINAL",
+            "VTE_VERSION",
+        ],
         description=(
             "Variables carried across verbatim, because their value is a "
             "description that names nothing the image has to hold. ``TERM`` "
@@ -170,7 +180,19 @@ class TerminalHandoff(BaseModel, frozen=True):
             "losing 24-bit colour on entering the container with nothing "
             "saying why. ``TZ`` is here because a container with none runs "
             "in UTC, so every timestamp a session writes into the operator's "
-            "checkout is stamped in somebody else's day"
+            "checkout is stamped in somebody else's day. ``TMUX``, ``STY`` "
+            "and ``ZELLIJ`` say which multiplexer sits between what the "
+            "session prints and the screen, which is what decides whether a "
+            "runtime wraps an escape sequence in the passthrough that "
+            "survives one -- measured, a clipboard sequence emitted bare "
+            "into a tmux pane and swallowed there, while the operator's own "
+            "shift-selection worked and nothing said why. ``TERM_PROGRAM``, "
+            "``LC_TERMINAL`` and ``VTE_VERSION`` name the emulator itself, "
+            "which is what a runtime reads to tell the operator which "
+            "modifier to hold and which sequences it may spell. A "
+            "multiplexer variable is still only a description here: it is "
+            "read for whether it is set, never followed to the host socket "
+            "it points at, which is the one thing in it that does not cross"
         ),
     )
     locale_variables: list[str] = Field(

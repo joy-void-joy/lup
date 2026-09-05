@@ -46,6 +46,35 @@ def test_a_description_the_host_never_set_is_left_out_rather_than_emptied() -> N
     assert "COLORTERM" not in crossing
 
 
+def test_the_multiplexer_between_the_session_and_the_screen_crosses() -> None:
+    """Whether a sequence needs wrapping is a fact the container cannot see.
+
+    Measured: a clipboard escape emitted bare into a tmux pane and swallowed
+    there, because the runtime inside read no ``TMUX`` and concluded there
+    was no multiplexer to wrap for -- while the operator's own
+    shift-selection, which bypasses every layer, kept working and made the
+    loss look like the runtime's rather than the boundary's.
+    """
+    crossing = (
+        TerminalHandoff()
+        .for_host({"TERM": "tmux-256color", "TMUX": "/tmp/tmux-1000/default,7,0"})
+        .environment
+    )
+
+    assert crossing["TMUX"] == "/tmp/tmux-1000/default,7,0"
+
+
+def test_the_emulator_names_itself_rather_than_being_guessed_at() -> None:
+    """Which modifier a runtime tells the operator to hold is read from this.
+
+    A description like every other here: nothing follows it to a program, so
+    a name this image never heard of costs nothing.
+    """
+    crossing = TerminalHandoff().for_host({"TERM_PROGRAM": "iTerm.app"}).environment
+
+    assert crossing["TERM_PROGRAM"] == "iTerm.app"
+
+
 def test_an_editor_variable_is_written_even_when_the_host_sets_none() -> None:
     """The container has no editor of its own to fall back to.
 
