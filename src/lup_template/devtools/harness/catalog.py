@@ -35,6 +35,7 @@ from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.codex.harness import CodexSpellings
 from lup.harness.codescan.boundaries import ApplicationRoots, generated_tree_paths
 from lup.harness.codescan.common import RuleSelection
+from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import WorkflowSpec
 from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
@@ -281,6 +282,19 @@ def dev_project() -> DevProject:
         # here, so `dev seams` reads and edits it rather than looking
         # somewhere a library guessed at.
         catalog=Path(__file__).resolve().relative_to(project_root()),
+        # The library's seams plus this repository's own. What the image
+        # carries is settled where the image is composed rather than here,
+        # because that is the call it is a keyword of — so the seam names the
+        # module, and the library's list stays free of this layout.
+        seams=[
+            *DECLARED_SEAMS,
+            Seam(
+                call="Image",
+                keyword="tooling",
+                summary="programs this project's work needs inside the image",
+                module=Path("src/lup_template/devtools/harness/content/image.py"),
+            ),
+        ],
     )
 
 

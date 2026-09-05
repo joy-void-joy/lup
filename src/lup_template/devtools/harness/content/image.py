@@ -4,6 +4,13 @@ Mechanism from the library, composition here, exactly as `requirements.py`
 splits them: `lup.harness.image` says what an image declaration *is*, and what
 is this project's is which defaults it takes and which it overrules.
 
+It overrules two and fills one. The one it fills is `tooling`: the library
+ships it empty because what a project's own work needs inside the image is
+the one thing a library cannot guess, and it is the third door a package
+reaches an image through — `baseline` being what any shell session needs, and
+a `Requirement` being what a declared capability asked for and something
+exercises.
+
 It overrules two. The first is the network. The library defaults
 to a filtered proxy because an adopter's first session should not reach
 whatever is on their network before anybody has decided it may. This repository
@@ -38,6 +45,7 @@ still read first.
 from lup.harness.credential import GitAccess
 from lup.harness.egress import SessionEgress
 from lup.harness.image import Image
+from lup.harness.requirements import Package
 
 
 def agent_image() -> Image:
@@ -57,4 +65,17 @@ def agent_image() -> Image:
     return Image(
         egress=SessionEgress(mode="host"),
         forge=GitAccess(token_source="forge-login"),
+        # lup: template: what this project's own work needs inside the image,
+        # as against what a shell needs to be usable (`baseline`, the
+        # library's) and what a declared capability asked for (the manifest's).
+        # A domain that reads spreadsheets, renders diagrams or shells out to a
+        # converter names it here. Nothing exercises these: an unresolvable
+        # name fails the build.
+        tooling=[
+            # PDFs arrive as attachments and as fetched documents, and reading
+            # one means `pdftotext`. Declared rather than requirement-shaped
+            # because there is no capability here to exercise -- a session
+            # either has the binary or the build failed.
+            Package(name="poppler"),
+        ],
     )
