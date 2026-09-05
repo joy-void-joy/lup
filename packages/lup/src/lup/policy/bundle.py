@@ -22,6 +22,7 @@ from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
 from lup.policy.identity import AGENT_IDENTITY_ENV
 import lup.policy.kernel as kernel
+from lup.policy.kernel.effects import EffectRow, effect_row_values
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
@@ -32,6 +33,7 @@ from lup.policy.kernel.rows import (
     RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
+    runner_target_values,
     shell_row_values,
 )
 from lup.policy.edit_rules import EditRule, erase_edit_rules
@@ -309,14 +311,19 @@ def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
 
 
 def runner_target_rows_literal(rows: list[RunnerTargetRow]) -> str:
-    """Render the declared runner targets as primitive runtime rows."""
-    return dict_rows_literal(
+    """Render the declared runner targets as primitive runtime rows.
+
+    Walked off :func:`~lup.policy.kernel.rows.runner_target_values` rather
+    than spelled here, which is what :func:`mapping_rows_literal` exists for:
+    a renderer listing the fields itself is a second enumeration of the row,
+    and this row carries a list of mappings now, which a renderer written for
+    scalars turns into a string.
+    """
+    return mapping_rows_literal(
         [
             [
-                f'"name": {json.dumps(row["name"])}',
-                f'"sandbox": {json.dumps(row["sandbox"])}',
-                f'"effect": {json.dumps(row["effect"])}',
-                f'"reason": {json.dumps(row["reason"])}',
+                RenderedField(name=name, value=value)
+                for name, value in runner_target_values(row).items()
             ]
             for row in rows
         ]
@@ -337,8 +344,51 @@ def string_matrix_literal(rows: list[list[str]]) -> str:
     return "[\n" + "".join(f"    {json.dumps(row)},\n" for row in rows) + "]"
 
 
-def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
-    """Render erased shell rules as Ruff-stable dict literals.
+def literal_element(item: str | EffectRow) -> list[str]:
+    """One element of a rendered list, as the lines it occupies.
+
+    A mapping is exploded with a trailing comma rather than inlined, because
+    the magic trailing comma is what keeps the shape stable at any length: an
+    inline dict is rewrapped the moment a reason grows past the line budget,
+    and a generated file that reformats is a drift failure on a file nobody
+    edited.
+
+    Every element is rendered, and rendered as the type it is. The shape this
+    replaces filtered to strings, which read as a formatting choice and was a
+    data loss -- a list of mappings rendered as an empty pair of brackets, so a
+    column the rules declared never reached the compiled table at all. Coercing
+    each field with ``str`` was the same loss one level further down: it held
+    while every axis of a mapping happened to be a string, and rendered the
+    first boolean one as ``"False"``, which is a true value in the table the
+    dispatcher reads.
+    """
+    if isinstance(item, dict):
+        exploded = ["            {"]
+        exploded.extend(
+            f"                {json.dumps(name)}: {python_literal(field)},"
+            for name, field in effect_row_values(item).items()
+        )
+        exploded.append("            },")
+        return exploded
+    return [f"            {python_literal(item)},"]
+
+
+class RenderedField(BaseModel, frozen=True):
+    """One field of one compiled row, on its way to the generated data file.
+
+    The pair a row's ``*_values`` mapping yields, named. Carried rather than
+    the mapping itself so two differently-keyed shapes can share one renderer:
+    a ``dict`` is invariant in its key, and both of those key theirs on a
+    closed ``Literal`` — which is what makes a renamed axis a type error
+    instead of a column missing from the table a hook reads.
+    """
+
+    name: str
+    value: str | bool | list[str] | list[EffectRow]
+
+
+def mapping_rows_literal(rows: list[list[RenderedField]]) -> str:
+    """Render rows of named fields as Ruff-stable dict literals.
 
     A list value is broken across lines and a scalar is not, which is what
     Ruff's own formatter does with these lengths — so the generated file is
@@ -350,24 +400,34 @@ def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
     lines = ["["]
     for row in rows:
         lines.append("    {")
-        for name, value in shell_row_values(row).items():
-            key = json.dumps(name)
-            if isinstance(value, list):
-                if value:
+        for field in row:
+            key = json.dumps(field.name)
+            if isinstance(field.value, list):
+                if field.value:
                     lines.append(f"        {key}: [")
-                    lines.extend(
-                        f"            {python_literal(item)},"
-                        for item in value
-                        if isinstance(item, str)
-                    )
+                    for item in field.value:
+                        lines.extend(literal_element(item))
                     lines.append("        ],")
                 else:
                     lines.append(f"        {key}: [],")
             else:
-                lines.append(f"        {key}: {python_literal(value)},")
+                lines.append(f"        {key}: {python_literal(field.value)},")
         lines.append("    },")
     lines.append("]")
     return "\n".join(lines)
+
+
+def shell_rule_rows_literal(rows: list[ShellRuleRow]) -> str:
+    """Render erased shell rules as Ruff-stable dict literals."""
+    return mapping_rows_literal(
+        [
+            [
+                RenderedField(name=name, value=value)
+                for name, value in shell_row_values(row).items()
+            ]
+            for row in rows
+        ]
+    )
 
 
 def edit_rule_rows_literal(rows: list[EditRuleRow]) -> str:

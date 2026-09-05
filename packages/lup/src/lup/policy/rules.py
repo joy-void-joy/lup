@@ -27,9 +27,13 @@ from lup.policy.assets.host import (
     directory_write_targets,
     empty_directory_targets,
     recoverable_write_targets,
+    tracked_write_targets,
 )
+from lup.policy.kernel.effects import STRENGTH
 from lup.policy.kernel.lex import (
+    authored_writes,
     parse_shell_words,
+    shell_flag_write_targets,
     shell_path_verb_targets,
     shell_write_targets,
 )
@@ -164,7 +168,21 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         recoverable_target_limit: int = 5,
         runner_targets: list[RunnerTargetRule] | None = None,
         relayed: bool = False,
+        authored: DecisionPolicy[EditBatch] | None = None,
     ) -> None:
+        self.authored = authored
+        """The edit policy a write carrying its own content is put to.
+
+        The same instance the composition gives the edit family, because it is
+        the same judgement: one table saying what may be written, reached by
+        whichever call carries the bytes. A second instance here would be a
+        second table to keep in step, and the one that fell behind would read
+        as a decision.
+
+        ``None`` leaves a redirection judged by its path alone, which is what
+        every shell write was judged by before -- correct for output produced
+        by running, and a hole for output the command is holding.
+        """
         self.path_rules = [path_rule_row(rule) for rule in path_rules or []]
         self.path_roles = path_roles or []
         self.recoverable_target_limit = recoverable_target_limit
@@ -191,10 +209,60 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         self.interactive = interactive
         self.relayed = relayed
 
+    def authored_verdict(self, event: ShellCommand) -> Decision | None:
+        """What the edit gates say about the writes this command carries.
+
+        A redirection is judged by its path because a command produces its
+        output by running and nothing could read it first. `cat > f <<'EOF'`
+        and `echo x > f` carry the bytes instead, so the gates an `Edit` is
+        put to -- the anti-pattern audit, the review-note gate, the size
+        budget -- can read exactly what would land, at the moment that still
+        changes the answer. Measured before this: a heredoc replaced a tracked
+        library module with one line, allowed and unprompted.
+
+        The preimage is read here rather than left to
+        :meth:`~lup.policy.models.EditChange.as_documents`, which would resolve
+        it against this process's directory. The command's targets are relative
+        to the session's, and those are the same directory only by luck.
+
+        ``None`` where nothing was read: a command whose output is produced by
+        running, or a file this process cannot open. Neither is a refusal --
+        the reading is what a relaxation needs, not a gate of its own.
+        """
+        if self.authored is None:
+            return None
+        root = event.cwd or Path.cwd()
+        changes: list[EditChange] = []
+        for write in authored_writes(event.command):
+            landed = root / write["path"]
+            existing = landed.is_file()
+            try:
+                before = landed.read_text(encoding="utf-8") if existing else None
+            except OSError:
+                continue
+            changes.append(
+                EditChange(
+                    path=Path(write["path"]),
+                    before=before,
+                    after=(before or "") + write["content"]
+                    if write["append"]
+                    else write["content"],
+                    operation="modify"
+                    if write["append"]
+                    else "overwrite"
+                    if existing
+                    else "create",
+                )
+            )
+        if not changes:
+            return None
+        return self.authored.decide(EditBatch(changes=changes))
+
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
         acted_on = shell_path_verb_targets(event.command)
-        return pydantic_decision(
+        flagged = shell_flag_write_targets(event.command, self.rules)
+        verdict = pydantic_decision(
             decide_shell(
                 event.command,
                 self.rules,
@@ -208,9 +276,16 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 interactive=self.interactive,
                 existing_targets=[
                     target
-                    for target in [*shell_write_targets(event.command), *acted_on]
+                    for target in [
+                        *shell_write_targets(event.command),
+                        *acted_on,
+                        *flagged,
+                    ]
                     if (root / target).exists()
                 ],
+                tracked_targets=tracked_write_targets(
+                    [*shell_write_targets(event.command), *acted_on, *flagged], root
+                ),
                 recoverable_targets=recoverable_write_targets(
                     [*shell_write_targets(event.command), *acted_on], root
                 ),
@@ -226,6 +301,16 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 relayed=self.relayed,
             )
         )
+        # Strongest wins, the rule every other join in this policy uses. The
+        # shell verdict is kept where it is at least as strong, because it
+        # carries the placement and the checkpoint that an edit verdict has
+        # nothing to say about.
+        carried = self.authored_verdict(event)
+        if carried is None or STRENGTH.index(carried.effect) <= STRENGTH.index(
+            verdict.effect
+        ):
+            return verdict
+        return carried
 
     def decide_segment(self, segment: ShellSegment) -> Decision:
         return pydantic_decision(

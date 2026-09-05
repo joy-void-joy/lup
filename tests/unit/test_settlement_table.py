@@ -1,14 +1,15 @@
 """The permissions page's settlement order is read off the order itself.
 
-The page carried the same nine names and the same nine claims the kernel
-carries, written a second time in a second file with nothing holding the two
-together — so a row moved, added or dropped changed the precedence without
-changing the page that states it, and a page confidently wrong about
-precedence is worse than one that had to be looked up.
+The page carried the kernel's names and the kernel's claims, written a second
+time in a second file with nothing holding the two together — so a row moved,
+added or dropped changed the precedence without changing the page that states
+it, and a page confidently wrong about precedence is worse than one that had
+to be looked up.
 
-What that leaves worth pinning is the walk reading the real order, the claim
-being each rule's own words rather than a paraphrase, and a rule with nothing
-to say about itself failing generation rather than rendering blank.
+What that leaves worth pinning is the walk reading the real order, the id a
+settled verdict cites reaching the page a reader takes it to, the claim being
+each rule's own words rather than a paraphrase, and a rule with nothing to say
+about itself failing generation rather than rendering blank.
 """
 
 import inspect
@@ -35,14 +36,27 @@ def test_every_row_the_order_reads_gets_a_row_here() -> None:
     """Nothing left to keep in step: the rows are the order."""
     rows = settlement_table().rows
 
-    assert [cell.text for cell, _ in rows] == [
+    assert [cell.text for _, cell, _ in rows] == [
         type(rule).__name__ for rule in SETTLEMENT_ORDER
     ]
 
 
+def test_the_id_a_settled_verdict_cites_is_what_the_page_is_keyed_on() -> None:
+    """A reader arrives with the id, so it is the column they arrive at.
+
+    `unleased-write` and `contained-effects` reach a session in the verdict
+    that cites them and were indexed nowhere — while a kernel helper returned
+    exactly these ids "for the reference the docs render", which was this
+    table, which did not render them.
+    """
+    rows = settlement_table().rows
+
+    assert [cell.text for cell, _, _ in rows] == [rule.id for rule in SETTLEMENT_ORDER]
+
+
 def test_a_row_says_what_its_own_docstring_says() -> None:
     """The claim is the rule's summary line, not a paraphrase of it."""
-    for (_, claim), rule in zip(settlement_table().rows, SETTLEMENT_ORDER):
+    for (_, _, claim), rule in zip(settlement_table().rows, SETTLEMENT_ORDER):
         docstring = type(rule).__doc__
         assert docstring is not None
 

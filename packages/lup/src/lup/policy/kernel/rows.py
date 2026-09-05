@@ -2,7 +2,8 @@
 
 from typing import Literal, TypedDict
 
-from .decision import DecisionEffect, CheckpointRequirement, SandboxPlacement
+from .decision import CheckpointRequirement, SandboxPlacement
+from .effects import EffectRow
 from .semantics import ReviewerRequirement
 
 type PathRuleKind = Literal[
@@ -163,19 +164,53 @@ class RunnerTargetRow(TypedDict):
 
     ``sandbox`` is the same axis :class:`ShellRuleRow` carries, on the one
     surface a command row cannot reach: ``uv`` is parsed rather than matched,
-    so a target's placement has nowhere else to be declared. ``effect`` and
-    ``reason`` are there for the same reason — a target a project means to
-    refuse has nowhere else to say so, and leaving it off the table is not a
-    refusal but an absence of one: the verdict becomes no judgment, which a
-    confined session leaves to the runtime's own permissions. For a target
-    that spends money or runs for an hour, not refusing is precisely what
-    the declaration existed to prevent.
+    so a target's placement has nowhere else to be declared. ``effects``,
+    ``refuses`` and ``reason`` are there for the same reason — a target a
+    project means to refuse has nowhere else to say so, and leaving it off the
+    table is not a refusal but an absence of one: the verdict becomes no
+    judgment, which a confined session leaves to the runtime's own
+    permissions. For a target that spends money or runs for an hour, not
+    refusing is precisely what the declaration existed to prevent.
+
+    Those two are the pair :class:`ShellRuleRow` carries, read by the same
+    :func:`~lup.policy.kernel.effects.declared_verdict`. A target stating a
+    verdict outright was the last table saying what it earns rather than what
+    it does, and a target with subcommands then said both — once here and once
+    in the effects the command rows beneath it are judged by.
     """
 
     name: str
     sandbox: SandboxPlacement
-    effect: DecisionEffect
+    effects: list[EffectRow]
+    refuses: str
     reason: str
+
+
+type RunnerTargetField = Literal["name", "sandbox", "effects", "refuses", "reason"]
+"""Every field one erased runner target carries.
+
+Closed and enumerable on the same terms as :data:`ShellRowField`, and for the
+same reason: the generated dispatcher indexes these keys inside a hook, where
+a missing one is a permission that never happens.
+"""
+
+
+def runner_target_values(
+    row: RunnerTargetRow,
+) -> dict[RunnerTargetField, str | list[EffectRow]]:
+    """Every field of one erased runner target, as a mapping, in order.
+
+    The arrangement :func:`shell_row_values` makes for the row beside this one,
+    and for the reason that one gives. A renderer spelling the fields itself is
+    a second enumeration of the shape, kept in step by nobody.
+    """
+    return {
+        "name": row["name"],
+        "sandbox": row["sandbox"],
+        "effects": row["effects"],
+        "refuses": row["refuses"],
+        "reason": row["reason"],
+    }
 
 
 class ShellRuleRow(TypedDict):
@@ -220,6 +255,49 @@ class ShellRuleRow(TypedDict):
     judges, which makes its stated reason false for most of them -- and a
     question whose reason does not hold is one nobody can answer well.
 
+    ``setting_flags`` and ``guarded_settings`` state the same absence test
+    about the *globals* a subcommand-gated command reads before its verb.
+    ``git -c <key>=<value>`` and ``git config <key> <value>`` set the same
+    setting, and only the second could say which settings its question was
+    about — so every `-c` asked, and the question's stated reason, that git
+    config can change how commands execute, was false of `-c color.ui=false`
+    and every other display setting the guidance here asks for by name. The
+    keys are the pair of ``guarded_keys`` and the flags say which globals
+    carry one; they are a separate column rather than that one because a
+    command-level row of a gated command is also what an unclassified verb
+    falls back to, where an absence test over the whole argument list would
+    turn ``git something-new`` into an allow.
+
+    ``write_flags`` name the options whose value is a path the command writes
+    — ``sort -o``, ``yq -i``, ``git log --output``. They were among the
+    ``ask_flags`` until it became clear that list was holding two unlike
+    things: a flag that lands a file and a flag that runs a program both
+    escalated the row, so one column decided both and neither could be read
+    for what it was. It showed as `sort -o out.txt` asking while
+    `sort f > out.txt` allowed, and as `base64 -o README.md` allowing while
+    `echo x > README.md` asked — the same file, written two ways, answered
+    by whether a checkpoint happened to discharge the row.
+
+    Separated so the path can be resolved and judged as a write, by the row
+    every other spelling of a write reaches. What stays in ``ask_flags`` is
+    everything that escalates for some other reason: ``--compress-program``
+    runs a program, ``--repo`` retargets a remote, ``--delete`` removes a ref.
+
+    ``flag_effects`` is what a guarded flag *adds* to what the row does, as
+    against which spellings guard it. Escalating on a flag and describing the
+    escalation are two different statements, and only the first was ever
+    written down: ``git reset`` mutates the repository reversibly, and ``git
+    reset --hard`` also discards working-tree content the object store never
+    held — one row, two operations, and the row described the harmless one. So
+    an escalated verdict was a question whose subject nothing in the table
+    named, and what it was about had to be guessed from ``checkpoint``.
+
+    One list for every flag the row guards, because a row guards one kind of
+    thing: ``--hard``, ``--merge`` and ``--keep`` all discard working-tree
+    content, and a flag adding something else belongs to a rule that says so
+    rather than to a longer list here. Empty is the common case — most guarded
+    flags escalate an operation whose effects already describe them.
+
     ``ask_refspecs`` names the effects a refspec operand may carry that this
     row asks about — the same downgrade ``ask_flags`` states, about a word
     whose grammar rather than whose spelling says what it does. A push
@@ -249,38 +327,64 @@ class ShellRuleRow(TypedDict):
     person answering the same question twice is pointed at; the reason beside
     it is prose, and a taxonomy built on prose is a taxonomy of phrasings.
 
-    ``reviewer`` is who may answer a question this row produces, and
-    ``effect_class`` what the operation does beyond this machine — ``""``
-    where it does nothing outside it. Both cascade down the nesting like the
-    three axes above, so ``gh pr`` says once that its verbs are compensable
-    and only ``merge``, ``review --approve`` and ``review --request-changes``
-    say otherwise.
+    ``reviewer`` is who may answer a question this row produces. It cascades
+    down the nesting like the axes above, so a level says once who answers for
+    the verbs beneath it and only the ones that differ say otherwise.
 
     Every axis arrives already resolved down the nesting, so matching one
-    row is the whole answer. ``effect_source``, ``sandbox_source`` and
+    row is the whole answer. ``effects_source``, ``sandbox_source`` and
     ``checkpoint_source`` say which level supplied each value, which is what a
     reader needs at a verdict they did not expect; none is consulted in
     reaching one.
+
+    ``effects`` is what this row says the invocation *does*, and it is the
+    whole of what the row states about its verdict. It carried a second column
+    saying what that earns, written beside it and agreeing with it on every one
+    of the table's rows -- which is one judgement recorded twice, and the drift
+    this model exists to make unrepresentable. What a row earns is derived
+    where it is used instead, against evidence the row cannot hold: whether the
+    target exists, whether git tracks it, whether a boundary confines this
+    session. That is the question a table of declared verdicts had to guess at.
+
+    A row stating no effects allows, which is the reading of a rule that
+    positively says this does nothing worth guarding. Saying it is the point:
+    ``ShellCommandRule.effects`` is required for the reason its stated verdict
+    used to be, so a command nobody classified is a gap a reader sees rather
+    than a grant nothing wrote down.
+
+    ``refuses`` is the one verdict those effects do not reach, and it is
+    stated apart from them because it is not about them. ``pip install`` takes
+    the same dependency ``uv add`` takes; ``eval`` runs code the agent could
+    have written out; ``git checkout -- <path>`` discards what ``git restore``
+    discards. Each refusal is a route this project prefers, so the row names
+    the route -- and one that spelled the preference as an effect instead
+    would have the operation claiming to do something it does not, which is
+    the drift the effects exist to end. Empty is the common case: derive the
+    verdict, and say nothing about how it was spelled.
     """
 
     rule: str
     command: str
     subcommand: str
     operation: str
-    effect: DecisionEffect
-    effect_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
     checkpoint: CheckpointRequirement
     checkpoint_source: RuleLevel
     reviewer: ReviewerRequirement
-    effect_class: str
+    effects: list[EffectRow]
+    effects_source: RuleLevel
+    refuses: str
     ask_refspecs: list[str]
     ask_flags: list[str]
+    flag_effects: list[EffectRow]
+    write_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]
     write_markers: list[str]
     guarded_keys: list[str]
+    setting_flags: list[str]
+    guarded_settings: list[str]
     bare_reads: bool
     value_flags: list[str]
     reason: str
@@ -291,20 +395,24 @@ type ShellRowField = Literal[
     "command",
     "subcommand",
     "operation",
-    "effect",
-    "effect_source",
     "sandbox",
     "sandbox_source",
     "checkpoint",
     "checkpoint_source",
     "reviewer",
-    "effect_class",
+    "effects",
+    "effects_source",
+    "refuses",
     "ask_refspecs",
     "ask_flags",
+    "flag_effects",
+    "write_flags",
     "allow_flags",
     "read_verbs",
     "write_markers",
     "guarded_keys",
+    "setting_flags",
+    "guarded_settings",
     "bare_reads",
     "value_flags",
     "reason",
@@ -320,7 +428,7 @@ a hook — and a permission that never happens looks exactly like one granted.
 
 def shell_row_values(
     row: ShellRuleRow,
-) -> dict[ShellRowField, str | bool | list[str]]:
+) -> dict[ShellRowField, str | bool | list[str] | list[EffectRow]]:
     """Every field of one erased row, as a mapping, in declaration order.
 
     Declared beside the shape rather than at the renderer that needs it, so a
@@ -337,20 +445,24 @@ def shell_row_values(
         "command": row["command"],
         "subcommand": row["subcommand"],
         "operation": row["operation"],
-        "effect": row["effect"],
-        "effect_source": row["effect_source"],
         "sandbox": row["sandbox"],
         "sandbox_source": row["sandbox_source"],
         "checkpoint": row["checkpoint"],
         "checkpoint_source": row["checkpoint_source"],
         "reviewer": row["reviewer"],
-        "effect_class": row["effect_class"],
+        "effects": row["effects"],
+        "effects_source": row["effects_source"],
+        "refuses": row["refuses"],
         "ask_refspecs": row["ask_refspecs"],
         "ask_flags": row["ask_flags"],
+        "flag_effects": row["flag_effects"],
+        "write_flags": row["write_flags"],
         "allow_flags": row["allow_flags"],
         "read_verbs": row["read_verbs"],
         "write_markers": row["write_markers"],
         "guarded_keys": row["guarded_keys"],
+        "setting_flags": row["setting_flags"],
+        "guarded_settings": row["guarded_settings"],
         "bare_reads": row["bare_reads"],
         "value_flags": row["value_flags"],
         "reason": row["reason"],

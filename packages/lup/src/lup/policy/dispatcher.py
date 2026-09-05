@@ -79,6 +79,7 @@ DISPATCHER_STDLIB = (
     "subprocess",
     "datetime",
     "hashlib",
+    "csv",
 )
 """The standard library a compiled dispatcher may reach.
 
@@ -107,6 +108,13 @@ second, so two snapshots taken in the same second tie — and a tie means the
 listing hands back the older of the two at exactly the moment somebody is
 reaching for the newer one. Nothing already pinned here can produce a
 sub-second stamp.
+
+``csv`` earns its place the same way. Asking Git which paths a patch would
+touch answers in its tab-separated report, and this repository's own
+conventions refuse to take a structured format apart with ``split`` -- so the
+choice is the reader for that format or a hand-rolled one, and a hand-rolled
+one inside a hook is the parser nobody maintains. Nothing already pinned here
+reads delimited text.
 """
 
 ROUTER = "dispatch"
