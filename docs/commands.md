@@ -30,6 +30,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev base-branch` | Detect the base branch for the current (or specified) branch. |
 | `dev freshness` | Report how far this checkout sits behind its own remote and its base. |
 | `dev pr-body` | Generate a PR body (summary, commits, test plan) from branch commits. |
+| `dev monitor` | Follow a background run: its landed units, their statuses, its heartbeat. |
 | `dev pending` | Report the real pending changes, excluding sandbox-masked device paths. |
 | `dev survey` | Full branch inventory: containment, PRs, unique commits, diff sizes. |
 | `dev merge-driver` | Register the ownership-manifest merge driver `.gitattributes` names. |
