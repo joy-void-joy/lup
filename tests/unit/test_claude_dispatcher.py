@@ -493,18 +493,22 @@ def test_removing_an_untracked_file_still_asks(delete_repo: Path) -> None:
     assert effect == "ask"
 
 
-def test_removing_a_directory_asks_and_names_the_way_through(
+def test_removing_a_directory_asks_where_no_capture_covers_it(
     delete_repo: Path,
 ) -> None:
     """Nothing in the command bounds what a directory holds, however clean.
 
-    The refusal has to say what is open instead, or the agent reads a delete
-    it expected to pass as an unexplained wall.
+    A question rather than a wall, and worded as one. The earlier text said
+    the operation "is never granted" and offered approval in the same
+    sentence, which reads as a refusal and was worked around as one — so the
+    assertion is that the reason states what is being asked rather than
+    announcing an outcome nobody can reach.
     """
     effect, reason = effect_from("rm -rf src", delete_repo)
 
     assert effect == "ask"
-    assert "name the files instead" in reason
+    assert "requires approval" in reason
+    assert "never granted" not in reason
 
 
 def test_a_build_product_is_disposable_wherever_it_sits(delete_repo: Path) -> None:

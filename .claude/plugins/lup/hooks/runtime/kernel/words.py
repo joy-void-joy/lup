@@ -617,14 +617,33 @@ def asks_before_removing_a_directory(
     path_roles: list[PathRoleRow],
     directory_targets: list[str] | None = None,
 ) -> KernelDecision | None:
-    """Ask before a verb destroys a directory, naming the way through.
+    """Ask before a verb takes a whole directory, and let a capture answer it.
 
-    Git restores a file it tracks, so a delete confined to files is bounded by
-    the files named. A directory is not: its size is whatever it happens to
-    hold, nothing in the command says what that is, and untracked work inside
-    it is restored by nothing. The ask says which route is open rather than
-    leaving a refusal the agent can only guess at. A scratch root keeps its
-    own grant, because there the tree is disposable by declaration.
+    A delete confined to files is bounded by the files named. A directory is
+    not: its size is whatever it happens to hold, and nothing in the command
+    says what that is. That is the question, and it is a question rather than
+    a wall -- the earlier wording said the operation "is never granted" and
+    then offered approval in the same sentence, which reads as a refusal and
+    was worked around as one.
+
+    Recoverable in exactly the sense a file delete is, so it settles the same
+    way. The reasoning this replaces held that untracked work inside a
+    directory is restored by nothing, which was true of `git stash create`
+    and is why :mod:`lup.devtools.dev.undo` does not use it: that module
+    captures tracked content *and* untracked files, and names ``rm -rf src/``
+    as the case it exists for. Carrying the purpose and the requirement lets
+    the settlement layer discharge this against a capture that completed, and
+    keep the question where one did not -- rather than opting out of that
+    layer by returning a bare verdict, which is what left a proven capture
+    unable to answer the one operation it was built for.
+
+    What stays outside any capture is ignored content, which is not a fact
+    about directories: a path rule guards `.env`, and `git clean -fdx` keeps
+    its own question for being the command whose whole purpose is destroying
+    what this cannot restore.
+
+    A scratch root keeps its own grant, because there the tree is disposable
+    by declaration.
     """
     executable = posixpath.basename(words[0])
     if executable not in ("rm", "mv"):
@@ -638,10 +657,29 @@ def asks_before_removing_a_directory(
     ]
     if not named:
         return None
+    # `mv` is not a removal and saying it was is how a reader learns to
+    # distrust the reason: the directory leaves the path it was at, which is
+    # the fact worth stating, and it is the same fact `rm` states in stronger
+    # words.
+    taken = "deleting" if executable == "rm" else "moving"
+    # Read off the targets rather than asserted, which is the same correction
+    # :func:`verb_loss_scope` makes for the row this sits beside and for the
+    # same measured reason: a directory outside the checkout is one no capture
+    # of it has ever held, and a requirement stated by the rule rather than by
+    # the paths settled `rm -rf /etc/ssl` as "captured and restorable".
     return KernelDecision(
         "ask",
-        "removing a directory is never granted, because nothing in the command"
-        " bounds what it holds — name the files instead, or approve this",
+        f"{taken} a whole directory requires approval: nothing in the command"
+        " bounds what it holds",
+        checkpoint=(
+            "unrecoverable"
+            if any(
+                write_checkpoint(write_scope(target, path_roles)) == "unrecoverable"
+                for target in named
+            )
+            else "boundary_wide"
+        ),
+        purpose="unrecovered_local_mutation",
     )
 
 
