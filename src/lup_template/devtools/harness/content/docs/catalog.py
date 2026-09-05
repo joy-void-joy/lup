@@ -44,10 +44,20 @@ def reference_pages(root: Path) -> list[models.Document]:
     so composing them is what this root is for: the pages stay portable while
     the table they publish cannot claim a decoded set that stopped being true.
 
-    Takes the checkout because this repository is the tree holding lup's own
+    Takes the checkout because *this* repository is the tree holding lup's own
     suite, which the capability page resolves its fixture citations against —
     the same reason :func:`project_pages` takes one, and the same reason
     neither is a module-level constant.
+
+    It hands that checkout on only when the suite is actually in it, and that
+    condition is the whole point rather than defensiveness. A project built
+    from this scaffold resolves lup as a distribution: the fixtures the page
+    cites ship with lup's repository and not with its wheel, so the citation
+    stays true — it names where the evidence lives — while the path is simply
+    not present to check. Passing the checkout unconditionally made every
+    adopter's first `harness generate all` fail with `'packages/lup/tests/
+    unit/test_adapter_runtime.py' is cited as evidence but does not exist`,
+    which reads as a broken generator rather than as a tree that never had it.
     """
     return library_documents(
         SKILLS,
@@ -56,7 +66,7 @@ def reference_pages(root: Path) -> list[models.Document]:
         CLAUDE_DISPATCHER.routed_tools,
         CODEX_DISPATCHER.routed_tools,
         LAYOUT,
-        root,
+        root if (root / "packages" / "lup" / "tests").is_dir() else None,
     )
 
 

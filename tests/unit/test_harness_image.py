@@ -125,18 +125,32 @@ def test_the_trust_seed_names_no_host_path() -> None:
 
 
 def test_a_script_package_still_renders_when_an_adopter_declares_one() -> None:
-    """The hatch is refused by rule, not removed -- so it has to still work."""
+    """The hatch is refused by rule, not removed -- so it has to still work.
+
+    The rendered layer names the digest beside the line, because that comment
+    is the only place a reader of the Dockerfile can see what the install was
+    checked against: the line itself does the checking somewhere in the middle
+    of a shell pipeline nobody reads to the end.
+    """
     rendered = Image().dockerfile(
         Manifest(
             requirements=[
                 requirement(
                     "odd",
-                    [Package(name="odd", manager="script", command="make install")],
+                    [
+                        Package(
+                            name="odd",
+                            manager="script",
+                            command="make install",
+                            digest="ab" * 32,
+                        )
+                    ],
                 )
             ]
         )
     )
     assert "RUN make install" in rendered
+    assert "ab" * 32 in rendered
 
 
 def test_a_script_package_must_say_how_it_installs() -> None:
