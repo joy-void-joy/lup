@@ -1535,6 +1535,13 @@ def bash_decision(
         # Filtered here rather than inside `unleased_write_targets`, which is
         # compiled into a bare script that may not reach the kernel where
         # `is_session_scratch_target` says what a scratchpad path is.
+        #
+        # The temporary root around it is exempt too, and is not filtered
+        # here, because that one is only safe where the launch is a measured
+        # container -- a fact this site does not hold and the settlement row
+        # does. So the two sit apart by what each needs to know: this
+        # scratchpad is the harness's at every placement, and `/tmp` is
+        # nobody's until something confines it.
         unleased_targets=unleased_write_targets(
             [
                 target

@@ -116,6 +116,30 @@ def is_session_scratch_target(word: str) -> bool:
     return "$" not in word and posixpath.normpath(word).startswith("/tmp/claude-")
 
 
+def is_temporary_root_target(word: str) -> bool:
+    """Recognize a path under the machine's temporary root.
+
+    This says where a path is and nothing about whether writing there is
+    safe, because the same word means opposite things on either side of a
+    boundary. Inside a measured container the temporary root is this
+    launch's own and disappears with it; on a host it is shared with every
+    other process on the machine, and a file clobbered there belongs to
+    somebody who never saw the question. So the caller supplies the half
+    this cannot know, and :meth:`SettlementFacts.container_private` is the
+    fact it supplies.
+
+    Wider than :func:`is_session_scratch_target` in what it matches and
+    weaker in what it settles, which is the trade: the harness mints the
+    scratchpad per session and owns it at every placement, so that one needs
+    no boundary to be worth allowing and this one is worth nothing without.
+
+    A word carrying an expansion stays unrecognized, and a suffix that
+    climbs back out fails the same way — ``/tmp/../etc`` normalizes to a
+    path this does not claim.
+    """
+    return "$" not in word and posixpath.normpath(word).startswith("/tmp/")
+
+
 def role_pattern_covers(pattern: str, path: str) -> bool:
     """Whether a declared role pattern reaches a repository-relative path.
 

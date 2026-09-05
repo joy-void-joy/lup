@@ -31,6 +31,7 @@ from .decision import (
     recovery_dischargeable,
 )
 from .escalation import EscalationRequest
+from .roles import is_temporary_root_target
 from .semantics import CheckpointEvidence, UnjudgedAmbient
 
 # Every sentence below is one settlement row's own wording, declared beside the
@@ -134,7 +135,23 @@ class SettlementFacts:
         confirmed is not evidence, so the launch's measurement of it is what
         makes containment count.
         """
-        return self.sandbox_confined or (self.contained and self.inside_placement)
+        return self.sandbox_confined or self.container_private()
+
+    def container_private(self) -> bool:
+        """Whether a path this launch touches outside every lease is still its own.
+
+        The half of :meth:`bounded` that a *filesystem* claim rests on, named
+        because two rows want different halves. Anything confines the effects
+        of an operation, which is the question above; this one asks whether
+        the machine's own directories are shared, and only a container
+        measured to place its work inside itself answers yes.
+
+        The native sandbox cannot. It confines one call at a time on the
+        operator's own filesystem, so a temporary directory it leaves
+        writable is the host's, holding other programs' files — the same
+        word, and the opposite fact.
+        """
+        return self.contained and self.inside_placement
 
     def rewritten(self, decision: KernelDecision) -> "SettlementFacts":
         """These same facts, with a row's rewrite standing as the verdict."""
@@ -356,13 +373,27 @@ class UnleasedWrite(SettlementRule):
     id = "unleased-write"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if not facts.unleased or facts.decision.effect not in ("allow", "defer"):
+        # The machine's temporary root is not the lease's business where the
+        # launch is a container. A lease enumerates what came from the host,
+        # so `/tmp` reads as uncovered — and it is uncovered in the direction
+        # that makes it safe, the same argument the session scratchpad won:
+        # this launch's own directory, gone with it, holding nothing any
+        # capture was meant to protect. The measurement is what carries it,
+        # so the exception is spelled against `container_private` rather than
+        # against the path: uncontained, that same word is the operator's own
+        # `/tmp`, shared with every other process on the machine.
+        reported = [
+            target
+            for target in facts.unleased
+            if not (facts.container_private() and is_temporary_root_target(target))
+        ]
+        if not reported or facts.decision.effect not in ("allow", "defer"):
             return None
         return facts.decision.revised(
             effect="ask",
             reason=(
                 f"{facts.decision.reason}. This writes to "
-                f"{', '.join(facts.unleased)}, which the boundary this launch "
+                f"{', '.join(reported)}, which the boundary this launch "
                 "measured does not cover — so nothing here confines the write "
                 "and no capture of this session holds what it replaces"
             ),

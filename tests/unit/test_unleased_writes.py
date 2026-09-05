@@ -12,7 +12,10 @@ from pathlib import Path
 
 from lup.policy.assets.host import unleased_write_targets
 from lup.policy.kernel.decision import KernelDecision
-from lup.policy.kernel.roles import is_session_scratch_target
+from lup.policy.kernel.roles import (
+    is_session_scratch_target,
+    is_temporary_root_target,
+)
 from lup.policy.kernel.rows import PathRoleRow, ShellRuleRow
 from lup.policy.kernel.settlement import SettlementFacts, settle
 from lup.policy.kernel.shell import decide_shell
@@ -173,3 +176,85 @@ def test_the_session_scratchpad_is_not_a_target_the_lease_answers_for() -> None:
     assert unleased_write_targets(
         ["/tmp/claude-1000/session/scratchpad/out.txt"], MEASURED, Path("/repo")
     ) == ["/tmp/claude-1000/session/scratchpad/out.txt"]
+
+
+def test_the_temporary_root_is_the_launchs_own_where_the_launch_is_a_container() -> (
+    None
+):
+    """`/tmp` inside a container is uncovered the way the scratchpad is.
+
+    A lease enumerates what came from the host, so the machine's temporary
+    root reads as outside it — and inside a measured container that is the
+    direction that makes it safe: this launch's own directory, gone with it,
+    holding nothing a capture was meant to protect. The same argument the
+    scratchpad won, one root wider.
+    """
+    settled = settle(
+        SettlementFacts(
+            KernelDecision("allow", "every shell segment is declared safe"),
+            contained=True,
+            inside_placement=True,
+            unleased=["/tmp/cs.txt"],
+        )
+    )
+
+    assert settled.effect == "allow"
+
+
+def test_the_same_path_uncontained_is_the_operators_own_and_still_asks() -> None:
+    """The exception is spelled against the measurement, never against the path.
+
+    A native sandbox confines one call at a time on the operator's own
+    filesystem, so a temporary root it leaves writable holds other programs'
+    files — the same word, and the opposite fact. Which is why
+    `container_private` is the half asked for here and `bounded` is not.
+    """
+    settled = settle(
+        SettlementFacts(
+            KernelDecision("allow", "every shell segment is declared safe"),
+            sandbox_confined=True,
+            unleased=["/tmp/cs.txt"],
+        )
+    )
+
+    assert settled.effect == "ask"
+    assert settled.rule == "unleased-write"
+
+
+def test_a_target_that_is_still_the_leases_business_asks_and_names_only_itself() -> (
+    None
+):
+    """The row keeps working over the targets it is still right about.
+
+    Both in one operation, because that is where a filter goes wrong quietly:
+    dropping the question along with the exempt path would lose the sibling
+    worktree entirely, and keeping the question while still naming `/tmp`
+    would send a reviewer to look at something nobody is asking about.
+    """
+    settled = settle(
+        SettlementFacts(
+            KernelDecision("allow", "every shell segment is declared safe"),
+            contained=True,
+            inside_placement=True,
+            unleased=["/repo/tree/other/x", "/tmp/cs.txt"],
+        )
+    )
+
+    assert settled.effect == "ask"
+    assert "/repo/tree/other/x" in settled.reason
+    assert "/tmp/cs.txt" not in settled.reason
+
+
+def test_the_temporary_root_is_read_after_normalizing_rather_than_by_its_prefix() -> (
+    None
+):
+    """A word that climbs back out is not the temporary root, however it starts.
+
+    The scratchpad's predicate is written this way for the same reason, and an
+    exemption is exactly the wrong place to trust a prefix: `/tmp/../etc` is a
+    write to the operator's machine wearing the one spelling this exempts.
+    """
+    assert is_temporary_root_target("/tmp/cs.txt")
+    assert not is_temporary_root_target("/tmp/../etc/passwd")
+    assert not is_temporary_root_target("$SOMEWHERE/cs.txt")
+    assert not is_temporary_root_target("/repo/tree/other/x")
