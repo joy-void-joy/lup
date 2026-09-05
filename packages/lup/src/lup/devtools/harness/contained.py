@@ -35,7 +35,7 @@ from rich.live import Live
 from rich.text import Text
 
 from lup.devtools.harness.preflight import LaunchSentinels
-from lup.harness.credential import committer, remote_rewrites
+from lup.harness.credential import committer, fleet_rewrites
 from lup.harness.egress import PROXY_LABEL, SessionEgress
 from lup.harness.image import ContainerEngine, Image, detected_client
 from lup.harness.notice import Banner, Notice
@@ -1580,8 +1580,10 @@ def contained_argv(
     # cannot use an ssh credential however good the credential is.
     forge = image.forge.select(dict(environ), image.egress.carries_ssh(), Path.home())
     granted = image.forge.granted(dict(environ))
-    rewrites = remote_rewrites(
-        root, image.forge.host, forge.transport(image.forge.ssh_user)
+    rewrites = fleet_rewrites(
+        [root, *(item.path for item in accessible)],
+        image.forge.host,
+        forge.transport(image.forge.ssh_user),
     )
     # Read on the host for the same reason the rewrites are: `.git/config` is
     # writable from inside, so an identity resolved in there would be one the
