@@ -2880,7 +2880,9 @@ def envelope_that(works: bool) -> Requirement:
 def test_codex_sandbox_arguments_establish_the_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(launch, "codex_envelope_requirement", lambda: envelope_that(True))
+    monkeypatch.setattr(
+        launch, "codex_envelope_requirement", lambda: envelope_that(True)
+    )
     environment: EnvVars = {}
     arguments = codex_sandbox_arguments(
         portable_harness().plugins[0], environment, ["--model", "gpt-5.2"]

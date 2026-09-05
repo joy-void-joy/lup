@@ -18,17 +18,22 @@ from lup.policy.assets.host import patch_write_targets
 from lup.policy.kernel.lex import shell_patch_operands
 
 
+def inside(root: Path) -> list[str]:
+    """Where to run, and an identity a fresh runner will not have configured.
+
+    Words rather than a baked command: ``bake`` reaches the underlying
+    ``sh.Command`` through ``__getattr__``, which is where the typing runs out,
+    and the shared command already carries the capture settings this needs.
+    """
+    return ["-C", str(root), "-c", "user.email=t@e", "-c", "user.name=t"]
+
+
 def repository(root: Path, name: str, body: str) -> None:
     """A repository holding one committed file, which a patch can be cut from."""
     git("init", "-q", str(root))
     (root / name).write_text(body, encoding="utf-8")
-    committing(root)("add", "-A")
-    committing(root)("commit", "-qm", "in")
-
-
-def committing(root: Path):
-    """Git in one repository, with an identity a fresh runner will not have."""
-    return git.bake("-C", str(root), "-c", "user.email=t@e", "-c", "user.name=t")
+    git(*inside(root), "add", "-A")
+    git(*inside(root), "commit", "-qm", "in")
 
 
 def test_the_patch_a_command_hands_over_is_named() -> None:
@@ -80,9 +85,9 @@ def test_git_reads_out_the_paths_a_patch_would_write(tmp_path: Path) -> None:
     repository(tmp_path, "notes.md", "one\n")
     (tmp_path / "notes.md").write_text("two\n", encoding="utf-8")
     (tmp_path / "fix.patch").write_text(
-        str(committing(tmp_path)("diff")), encoding="utf-8"
+        str(git(*inside(tmp_path), "diff")), encoding="utf-8"
     )
-    committing(tmp_path)("restore", "notes.md")
+    git(*inside(tmp_path), "restore", "notes.md")
 
     # Said before the real assertion, because these two fail identically and
     # mean opposite things: a reader that missed a target, and a fixture that
