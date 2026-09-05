@@ -49,6 +49,7 @@ from lup_template.devtools.harness.content.guidance import document as guidance_
 from lup_template.devtools.harness.content.image import agent_image
 from lup_template.devtools.harness.content.requirements import manifest
 from lup_template.devtools.harness.content.shell_vocabulary import (
+    EVERYDAY_COMMANDS,
     RUNNER_TARGETS,
     SHELL_RULES,
 )
@@ -453,6 +454,10 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # every command of it that opens an agent session is unusable
             # confined.
             runner_targets=RUNNER_TARGETS,
+            # What this table has to keep allowing, swept by `dev check`
+            # against the table above. Every other measurement of the
+            # vocabulary reads the direction a tightening never shows up in.
+            everyday_commands=EVERYDAY_COMMANDS,
             # lup: template: what this domain's sessions cannot run without,
             # and what they merely lose. Each names the manifest handle that
             # measures it, so a capability declared here without a probe there

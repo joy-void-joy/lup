@@ -319,36 +319,67 @@ generated data, policy control flow is one copied module.
 ### Change the shell classification
 
 The shell auto-allow vocabulary is data too. The baseline lives in
-`lup.policy.vocabulary` (`default_vocabulary()`) as a readable table: a read-only
-command allows unless a listed `ask_flags` writer flag appears, and a
-subcommand command allows only the subcommands and operations it lists. To
+`lup.policy.vocabulary` (`default_vocabulary()`) as a readable table, and every
+rule in it states what the command *does* rather than what that earns: a
+subcommand command falls off its own enumeration into
+`unclassified_operation`, and each verb it lists declares its own effects. To
 teach the fleet a downstream toolchain, append rules through the `HookSet` in
 `catalog.py` — never edit the kernel:
 
 ```python
 shell_rules=[
-    ShellCommandRule(name="cargo", default_effect="ask", subcommands=[
-        ShellSubcommandRule(name="check", effect="allow"),
-        ShellSubcommandRule(name="build", effect="allow"),
-        ShellSubcommandRule(name="test", effect="allow"),
-    ]),
+    ShellCommandRule(
+        name="cargo",
+        effects=[declare("unclassified_operation", scope="cargo")],
+        subcommands=[
+            ShellSubcommandRule(
+                name="check", effects=[declare("reads_path", scope="project")]
+            ),
+            ShellSubcommandRule(
+                name="build",
+                effects=[declare("writes_path", scope="scratch", write="create")],
+            ),
+            ShellSubcommandRule(
+                name="test", effects=[declare("runs_declared_target")]
+            ),
+        ],
+    ),
 ]
 ```
 
 The extension is concatenated onto the baseline and erased into the same
 `SHELL_RULES` rows the kernel interprets. A universal command every repository
 should trust belongs in a `lup.policy.vocabulary` group instead. Regenerate and run the
-policy fixtures exactly as above. Destructive forms stay `ask`: guard a writer
-flag with `ask_flags`, or a destructive sub-operation with an `ask`
-`ShellOperationRule`, rather than widening a `default_effect`.
+policy fixtures exactly as above.
 
-Both axes cascade, so each subcommand above says `effect="allow"` rather than
-leaving it out — omitting a field means "inherit from the level above", never
-"allow". The same cascade is what lets `sandbox="outside"` be declared once on
-a command and reach every verb beneath it. Run
+`effects` is required, so a rule that forgot to say is a type error rather
+than a grant nobody wrote down, and a verb that genuinely does nothing this
+table guards says `changes_nothing`. Nothing here states a verdict: the two
+ways to reach one are declaring an effect that asks —
+`installs_dependency`, `external_mutation`, `mutates_environment` — or, where
+the objection is to the *spelling* rather than to the operation, setting
+`refuses` with the route to take instead. A destructive form under an
+allowing verb is guarded by naming the flag in `ask_flags` and what it adds
+in `flag_effects`, so the question names the operation somebody is actually
+being asked about.
+
+Every axis cascades, so each subcommand above states its own `effects` rather
+than leaving them out — omitting a field means "inherit from the level above",
+never "allow". The same cascade is what lets `sandbox="outside"` be declared
+once on a command and reach every verb beneath it. Run
 `uv run lup-devtools dev vocabulary --provenance` to see which level supplied
 each half of every rule, and `dev vocabulary --json --output <path>` before and
 after a reshaping to confirm no verdict moved that you did not move.
+
+Then sweep what an ordinary session runs. `uv run lup-devtools hooks sweep`
+classifies the everyday corpus this project declared in
+`HookSet.everyday_commands` and exits non-zero on anything that is not a plain
+allow — the one measurement that reads the direction a *tightening* shows up
+in, since a provenance diff and a verdict census both go on agreeing when a
+de-escalation quietly stops firing. Each command is swept once per posture a
+session runs in, so a rule that only asks where nobody can answer is caught
+too. `dev check` runs the same sweep, so a rule that stopped `git status`
+fails there rather than in somebody's session.
 
 ## Resolving a conflict
 

@@ -29,6 +29,13 @@ def settlement_table(
     A rule carrying no docstring fails generation loudly rather than
     rendering an empty claim, for the reason the roster in ``library.py``
     gives: a page that quietly drops a row reads exactly like a complete one.
+
+    The id is the first column because it is the half a reader arrives with.
+    A settled verdict cites it — ``unleased-write``, ``contained-effects`` —
+    and every other rule id this policy states is indexed somewhere; these
+    were indexed nowhere, while a helper in the kernel returned them for
+    "the reference the docs render", which was this table, which did not
+    render them.
     """
 
     def says(rule: SettlementRule) -> str:
@@ -49,9 +56,13 @@ def settlement_table(
         return inspect.cleandoc(docstring).splitlines()[0]
 
     return models.MarkdownTable(
-        headers=["row", "what it says"],
+        headers=["id", "row", "what it says"],
         rows=[
-            [CodeCell(text=type(rule).__name__), PlainCell(text=says(rule))]
+            [
+                CodeCell(text=rule.id),
+                CodeCell(text=type(rule).__name__),
+                PlainCell(text=says(rule)),
+            ]
             for rule in order
         ],
     )
@@ -97,6 +108,55 @@ nothing for unjudged work to defer to.
 
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively.
+
+### What a rule states, and what it earns
+
+**A rule says what an operation does. It never says what that earns.** The
+lattice was once keyed on how a command was *spelled*: a rule named an
+executable and stated a verdict beside it, so two commands with one effect
+reached different answers whenever two people wrote the two rules. `effects`
+is the declaration now — a list from the closed table in
+`policy/kernel/effects.py`, each member deciding its own verdict from the
+scope it was given, what the host measured, and where the session sits — and
+`declared_verdict` derives the answer wherever it is used. Two spellings of
+one effect cannot diverge, because there is one row for the effect and every
+spelling reaches it.
+
+`ShellCommandRule.effects` and `RunnerTargetRule.effects` are **required**. A
+declaration stating none derives an allow, so an omission would be a grant
+nobody wrote down rather than a gap a reader sees; a command that genuinely
+does nothing this table guards says `changes_nothing`, which exists to be
+sayable.
+
+Two things a rule states that are not effects:
+
+- `refuses` — where the agent goes instead, when this project declines the
+  *spelling*. Set, the row denies whatever its effects would have earned, and
+  the text is the whole of what the agent is told, so it names the route
+  rather than the objection: `uv add` for `pip install`, writing the command
+  out for `eval`. A refusal is about the route, and the route is not what an
+  operation does — which is why it sits outside the effects instead of being
+  spelled as one.
+- `sandbox` — where an invocation has to run, whatever it earns. The axis
+  below.
+
+And the columns that say what a *word* adds or removes, each answering one
+question the row alone cannot:
+
+| column | what it states |
+|---|---|
+| `ask_flags` | the spellings that escalate this row |
+| `flag_effects` | what the escalation is *about* — `git reset --hard` discards working-tree content, which the bare verb never did |
+| `write_flags` | options whose value is a path this command writes, so the path is resolved and judged by the write row every other spelling reaches |
+| `allow_flags`, `read_verbs`, `write_markers`, `bare_reads`, `guarded_keys` | the de-escalations: a pure read-only form, a verb that pins the query action, a marker whose absence means it only reads, the argument-less form, a setting that does not redirect execution |
+| `setting_flags`, `guarded_settings` | the same absence test about a global that carries a setting — `git -c color.ui=false` turns off colour, `git -c core.pager=x` runs a program, and only the second is worth interrupting about |
+| `ask_refspecs` | the effects an operand's *grammar* carries, for a push that spells force and delete twice |
+
+A rule declaring `reviewed` on a write says the route it takes has gates that
+read what it wrote. It is declared rather than measured: which gates a
+spelling passes through is fixed by the spelling, so it is known where the
+rule is written and not at the path. That axis is what keeps the write row's
+refusal aimed at *bypassing the content gates* rather than at editing a file.
 
 What the classified verdict then becomes is a second, ordered pass, declared
 as an order rather than written as a branch. `policy/kernel/settlement.py`
@@ -150,6 +210,16 @@ nobody annotated keeps asking. `git clean -fdx` carries it deliberately
 rather than by omission — it destroys ignored files, which is exactly what a
 capture leaves out.
 
+**A declared value is a claim about a path, so it is checked against the
+paths.** A row carries one value for every path it might touch, which stops
+being true the moment an operand leaves the checkout: the capture these name
+is a snapshot of the checkout, and a loss beyond it is held by nothing. So a
+redirection reads its scope off the target, and a path verb reads its
+strongest operand — only the ones it *writes*, since a source `cp` merely
+reads is an ordinary read however far out it sits. Without that, `rm
+/etc/hosts` was settled as "the affected paths are captured and restorable",
+which is a sentence about a file no snapshot had ever seen.
+
 Where the capture was actually *taken*, `RecoveredLoss` settles the question
 as a **permission**. Not a deferral: deferring would make the outcome depend
 on which mode the session happened to be started in, for a fact that has
@@ -200,41 +270,68 @@ command, so it fires for something other than what was judged. None of that
 touches a deferral, which is nobody's approval and is exactly known here.
 
 `uv run <target>` is parsed rather than matched against that table, so its
-targets carry the same three answers on a table of their own: each declares
-its effect, its placement, and its reason. Blessing is the default and the
-common case, and a project that means to stop a target — one that spends
-money, runs for an hour, or publishes something — says so there. Leaving it
-off is not the same answer: an undeclared target reaches no judgment, which
-denies unsandboxed and defers under the boundary, where the policy has
-stated nothing and the runtime's own permissions decide.
+targets carry a table of their own — and they carry it in the same vocabulary:
+each declares its `effects`, its `refuses`, its placement, and its reason.
+Blessing a toolchain is the common case and it is one word,
+`runs_declared_target`. A project that means to stop a target — one that
+spends money, runs for an hour, or publishes something — refuses it there.
+Leaving it off is not the same answer: an undeclared target reaches no
+judgment, which denies unsandboxed and defers under the boundary, where the
+policy has stated nothing and the runtime's own permissions decide.
 
 A target may also carry subcommands, because a toolchain reached through
 `uv run` is one target and many commands — a devtools CLI that mostly reads
 a repository may have one verb beneath it that opens a paid agent session,
 and without this the choice is blessing that verb or refusing the toolchain.
 The shape and the walk are the command table's own, so a target with verbs
-is judged exactly as the command spelled directly would be, with the
-target's own effect as the default beneath them.
+is judged exactly as the command spelled directly would be, with the target's
+own effects as the default beneath them. One statement serves both halves:
+while the runner row stated a verdict of its own, a target could bless itself
+and refuse its own verbs with nothing noticing.
 
-Both axes cascade down a table's nesting, and absence means one thing
-everywhere: a subcommand or operation omitting `effect` or `sandbox` inherits
-the level above it, and one stating either overrides what it inherited in
-either direction. `default_effect` is the exception, being required — a
-command that never said who decides is a gap a reader sees rather than a
-silent allow, and the fallback beneath every table denies.
+Every axis cascades down a table's nesting, and absence means one thing
+everywhere: a subcommand or operation omitting `effects`, `refuses` or
+`sandbox` inherits the level above it, and one stating any of them overrides
+what it inherited in either direction — widening a restrictive parent is as
+ordinary as narrowing a permissive one. So `git` says once where its
+subcommands run, and each of them says only what differs; a toolchain refused
+at the command keeps its one documented entry point by clearing `refuses` on
+the subcommand that has one.
 
 `$(...)` classifies recursively — the inner command joins the batch and its
 opaque result rides only argument-safe commands; command position, deep
 nesting, and backticks stay conservative. File writes (redirection, `rm`)
 auto-allow only into a repo `tmp/` — the one at the top or any a package
 opened beside itself — and the scratchpad (`$TMPDIR`,
-`/tmp/claude-*`; reassigning `TMPDIR` asks); discards and fd dups strip;
-heredoc-fed writes deny toward Edit/tmp scripts. Loops, conditionals, case
+`/tmp/claude-*`; reassigning `TMPDIR` asks); discards and fd dups strip.
+Loops, conditionals, case
 arms, subshells, and brace groups classify recursively over frozen bindings —
 literal assignments instantiate, opaque ones (`read`, globs) gate
 flag-guarded commands. `find -exec` payloads and `timeout`/`nice` wrappers
 recurse, `sed`/`awk` pass read-only screens, quoted-delimiter heredocs are
 literal data, and `curl` is read-screened within the declared fetch scopes.
+
+### A write that carries its own content
+
+A redirection is answered by its path, and the reason is that a command
+produces its output by running: before the fact there is nothing for the
+content gates to read, so `dev render > docs/api.md` is judged on where it
+lands and reviewed against the file *afterwards*.
+
+That premise is false for `cat > f <<'EOF'` and `echo x > f`, where the bytes
+are sitting in the command. Those go to the same gates an `Edit` goes to —
+the anti-pattern audit, the review-note gate, the size budget, the full-write
+gate — with the file about to be replaced as the preimage, and the strongest
+verdict wins. So a heredoc that drops a `# lup:` note is denied exactly as
+the edit would be, and one that replaces a tracked module asks; a write into
+scratch stays the ordinary work it was.
+
+Two shapes are read and no others: `cat` handed nothing but a
+quoted-delimiter heredoc, and `echo` handed literal words. `printf` is
+absent because its first argument is a format, and an unquoted heredoc
+because the shell substitutes into the body — a reading that was wrong would
+put a document in front of the gates that the command never writes, which is
+worse than putting nothing there. Everything unread keeps the answer it had.
 
 Codex's native prefix evaluator deliberately leaves an assignment-bearing
 script opaque. Its permission-request hook still passes literal assignments
@@ -431,13 +528,14 @@ Each rule id is shown in the deny message that cites it, and indexed in
 
 ## Asking before spending a turn on it
 
-A denial is the ordinary way to learn a verdict, and it costs a turn. Two
+A denial is the ordinary way to learn a verdict, and it costs a turn. Three
 commands answer the same question up front, against the declared policy
 rather than a reading of this page:
 
 ```bash
 uv run lup-devtools dev policy '<the command as you would run it>'
 uv run lup-devtools dev vocabulary --provenance
+uv run lup-devtools hooks sweep
 ```
 
 `dev policy` prints the decision and the sentence explaining it — the same
@@ -446,6 +544,29 @@ lattice through the same segments, so a pipeline or a `$(...)` answers as it
 actually would. `dev vocabulary` prints every shell form the vocabulary
 judges and where each rule came from, which is the one to reach for when the
 question is "what *would* be allowed here" rather than "is this".
+
+`hooks sweep` classifies a whole list at once and exits non-zero if any line
+is not a plain allow. With no file it reads the everyday corpus this project
+declared in `HookSet.everyday_commands` — the commands an ordinary session
+runs, which this table must keep allowing — and `dev check` runs the same
+sweep, so a rule that tightened something it did not mean to fails at the
+gate rather than in somebody's session. That is the one measurement of the
+vocabulary that reads a *tightening*: the recorded questions list what a
+session was interrupted about, and a verdict census lists what each row
+earns, so both go on agreeing when a de-escalation quietly stops firing.
+
+The corpus is swept once per posture a session runs in — interactive, worker,
+contained, and contained worker — because a verdict is only ever reached for
+somebody, and a rule that starts asking where nobody is there to answer stops
+a session rather than interrupting one. `--autonomous`, `--headless` and
+`--trapped` name one posture and ask about that one instead. Pass a file for
+a question this project has not settled — a candidate corpus, or the commands
+a recorded session was actually stopped for — asked from the posture those
+same flags name.
+
+Only what must keep allowing belongs in that corpus. A command that asks
+today is either a defect to fix or a question somebody meant, and neither is
+settled by adding it to a list that asserts allow.
 
 ## Hook execution evidence
 
