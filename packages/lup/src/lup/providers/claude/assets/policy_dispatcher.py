@@ -36,6 +36,7 @@ from decisions import (
     placed_document,
     placed_edit_text,
     refused_tool_decision,
+    written_review,
 )
 from host import (
     declared_identity,
@@ -174,6 +175,9 @@ def dispatch(payload):
             # therefore alone: the run it belongs to carries a mailbox that
             # reaches whoever is supervising it.
             relayed=autonomous,
+            # The same identity the edit branches below are given, because a
+            # command carrying its own content reaches the same gates.
+            autonomous=autonomous,
         )
     if name == "WebFetch":
         return fetch_decision(tool_input["url"])
@@ -285,20 +289,27 @@ def rendered(decision, payload, placed):
 
 
 def observe(payload):
-    """Record where an edit landed and type-check it, deciding nothing.
+    """Record where a write landed and read it, deciding nothing.
 
     Claude Code names the file the same way for both editing tools, so the
-    one key is the whole reading. A payload without it is a call this event
-    is registered for and has nothing to say about, which is not a failure —
-    the matcher is narrow, but the runtime owns it, and a tool that stops
-    carrying a path should cost a recorded edition rather than an error.
+    one key is the whole reading of an edit. A payload without it is a call
+    this event is registered for and has nothing to say about, which is not a
+    failure — the matcher is narrow, but the runtime owns it, and a tool that
+    stops carrying a path should cost a recorded edition rather than an error.
+
+    A shell command is the other shape, and it names no file: what it wrote
+    is whatever running it produced. That is exactly what no gate could read
+    before the fact, so the gates an edit passes on the way in are put to a
+    command's result on the way out — which is what lets the verdict before
+    it ran answer from the path alone and stay generous about the content.
     """
     tool_input = payload["tool_input"] if "tool_input" in payload else {}
     path = tool_input["file_path"] if "file_path" in tool_input else ""
-    if not path:
-        return []
-    publish_edition(path)
-    return file_diagnostics(path, DIAGNOSTICS_COMMAND)
+    if path:
+        publish_edition(path)
+        return file_diagnostics(path, DIAGNOSTICS_COMMAND)
+    command = tool_input["command"] if "command" in tool_input else ""
+    return written_review(command, Path.cwd()) if command else []
 
 
 def main():

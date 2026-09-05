@@ -16,6 +16,7 @@ arrives as an argument — the managed root to enumerate, the environment
 variable to read — never as a branch on which runtime is asking.
 """
 
+import csv
 import json
 import os
 from hashlib import sha256
@@ -1154,6 +1155,84 @@ def recoverable_write_targets(
         and git_answers(["ls-files", "--error-unmatch", "--", target], where)
         is not None
         and git_answers(["status", "--porcelain", "--", target], where) == []
+    ]
+
+
+def committed_text(path_text: str, root: Path | None = None) -> str | None:
+    """What the last commit holds at this path, or None where Git cannot say.
+
+    The "before" half of reviewing a write after it happened. An edit hands
+    both halves to the gates because it has both; a shell command that already
+    ran leaves only the result on disk, so the prior content has to come from
+    somewhere, and the last commit is the reading a reviewer would compare
+    against anyway.
+
+    Uncommitted work already in the file is therefore invisible to the
+    comparison, which overstates the change rather than understating it. That
+    is the right direction for a report: it can name a line the command did
+    not write, and cannot miss one it did.
+    """
+    where = Path.cwd() if root is None else root
+    lines = git_answers(["show", f"HEAD:{path_text}"], where)
+    return None if lines is None else "\n".join(lines)
+
+
+def patch_write_targets(patches: list[str], root: Path | None = None) -> list[str]:
+    """The paths these patches would write, as Git itself reads them.
+
+    A patch names its targets in a format with exactly one authoritative
+    reader, and that reader is already installed: ``--numstat`` parses the
+    patch and reports what it touches without applying a byte of it. Reaching
+    for it is the alternative to growing a unified-diff parser inside a hook,
+    which would be a second reader to keep in step with the one that decides.
+
+    Anything Git declines to read yields nothing. A path that is not a patch,
+    a patch against files that are not there, a missing file -- each exits
+    non-zero and collapses to ``None``, so a word swept up by mistake
+    contributes no target rather than a target nobody writes.
+
+    The report is tab-separated: added lines, deleted lines, path. It is read
+    with the reader for that format rather than split, and ``core.quotePath``
+    is turned off so a path outside ASCII arrives as itself instead of as an
+    escaped rendering no reader here would undo. A path holding a tab or a
+    newline is quoted by Git whatever that setting says, and drops out by
+    failing to name a file -- which loses a review rather than inventing one.
+
+    A rename reports the destination, which is the file that ends up written
+    and so the one worth reading afterwards.
+    """
+    where = Path.cwd() if root is None else root
+    return [
+        columns[2]
+        for patch in patches
+        for report in [
+            git_answers(
+                ["-c", "core.quotePath=false", "apply", "--numstat", "--", patch], where
+            )
+        ]
+        if report is not None
+        for columns in csv.reader(report, delimiter="\t")
+        if len(columns) == 3 and columns[2]
+    ]
+
+
+def tracked_write_targets(targets: list[str], root: Path | None = None) -> list[str]:
+    """Report which targets Git holds, so a reviewer could diff a change to one.
+
+    The weaker half of :func:`recoverable_write_targets`, and a different
+    question rather than a cheaper one. That asks whether the object store
+    could put the bytes back, so it wants the path clean as well as tracked;
+    this asks whether replacing the content would bypass review, and a file
+    carrying uncommitted work is *more* reviewable rather than less.
+
+    Existing on disk is not required either. A tracked path somebody deleted
+    is still a path a diff would show.
+    """
+    where = Path.cwd() if root is None else root
+    return [
+        target
+        for target in targets
+        if git_answers(["ls-files", "--error-unmatch", "--", target], where) is not None
     ]
 
 

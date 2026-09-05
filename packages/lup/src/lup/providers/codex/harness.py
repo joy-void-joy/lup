@@ -59,7 +59,9 @@ from lup.policy.dispatcher import (
     dispatcher_banner,
     guarded_hook_command,
 )
+from lup.policy.kernel.commands import no_write_facts, unresolved_evidence
 from lup.policy.kernel.decision import SandboxPlacement
+from lup.policy.kernel.effects import declared_verdict
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.kernel.shell import excluded_prefix, sandbox_excluded
 from lup.policy.refused_tools import routed_for
@@ -607,7 +609,14 @@ def codex_allow_prefixes(
     # expresses: each `add` reads the prefixes the ones before it produced
     prefixes: list[list[str]] = []
     for row in rows:
-        if row["effect"] != "allow" or row["ask_flags"] or row["sandbox"] == "inside":
+        # Derived, as everywhere a row's verdict is wanted now. The unresolved
+        # reading is the right one here for the reason it is right in the
+        # classifier: a prefix is written down ahead of any command, so nothing
+        # about a path is known when it is offered.
+        earned = declared_verdict(
+            row["effects"], row["refuses"], unresolved_evidence(no_write_facts())
+        )
+        if earned != "allow" or row["ask_flags"] or row["sandbox"] == "inside":
             continue
         if not row["subcommand"]:
             if row["command"] not in gated and row["command"] not in dynamic:
@@ -617,6 +626,15 @@ def codex_allow_prefixes(
         elif f"{row['command']} {row['subcommand']}" not in operational:
             add([row["command"], row["subcommand"]], row["sandbox"])
     for target in runner_targets:
+        # Read on the same terms as a command row above, which it was not
+        # while a target stated its verdict outright: every declared target
+        # took a native prefix allow, so one the project refused was approved
+        # here and refused only by the hook beside it.
+        earned = declared_verdict(
+            list(target.effects), target.refuses, unresolved_evidence(no_write_facts())
+        )
+        if earned != "allow":
+            continue
         add(["uv", "run", target.name], target.sandbox)
     # Seeded from the declaration rather than derived from a rule that happens
     # to overlap it. An exclusion may be narrower than any rule name — three

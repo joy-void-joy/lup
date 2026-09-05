@@ -37,6 +37,7 @@ from decisions import (
     edit_decision,
     fetch_decision,
     refused_tool_decision,
+    written_review,
 )
 from host import (
     declared_identity,
@@ -222,6 +223,9 @@ def dispatch(payload, permission_request=False):
             # therefore alone: the run it belongs to carries a mailbox that
             # reaches whoever is supervising it.
             relayed=autonomous,
+            # The same identity the edit branches are given, because a command
+            # carrying its own content reaches the same gates.
+            autonomous=autonomous,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
@@ -286,10 +290,23 @@ def observe(payload):
     reports diagnostics. Checking the directory instead would answer every
     patch with every finding in the tree, most of them about files this
     edit never touched.
+
+    A shell command is not coarser here, and gets the same reading Claude's
+    does. The envelope problem above is about a *patch*, whose files this
+    event can no longer decode; a command carries its own text, names its
+    write targets in that text, and the files it wrote are on disk to be
+    read. So the gates a shell write could never reach before it ran are put
+    to its result here, which is what lets the verdict beforehand answer
+    from the path alone.
     """
     root = payload["cwd"] if "cwd" in payload else ""
     if root:
         publish_edition(root)
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    command = tool_input["command"] if "command" in tool_input else ""
+    if not command:
+        return []
+    return written_review(command, Path(root) if root else Path.cwd())
 
 
 def main():
@@ -303,7 +320,18 @@ def main():
         # a call that already happened.
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
-            observe(payload)
+            found = observe(payload)
+            # The same one channel Claude's half has, for the same reason:
+            # the call has run, so a clean exit says nothing anybody reads.
+            # Silence when the result checks out, so the channel means
+            # something when it is used.
+            if found:
+                detail = "\n".join(found)
+                record_hook_evidence(
+                    plugin_data_root(), payload, "completed", "observed", detail
+                )
+                sys.stderr.write(detail)
+                raise SystemExit(2)
             record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
         permission_request = event == "PermissionRequest"

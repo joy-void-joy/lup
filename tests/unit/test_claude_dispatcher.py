@@ -20,7 +20,7 @@ from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.types import EnvVars, JsonObject
 from lup_template.devtools.harness.catalog import declared_hook_set
-from tests.unit.repos import initialized_repo
+from tests.unit.repos import commit_file, initialized_repo
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
 
@@ -905,6 +905,32 @@ def test_the_one_loss_the_snapshot_cannot_hold_still_asks(delete_repo: Path) -> 
     effect, _reason = snapshotting_effect("git clean -fdx", delete_repo)
 
     assert effect == "ask"
+
+
+def test_a_write_the_gates_already_read_is_not_reported_again(tmp_path: Path) -> None:
+    """The after-the-fact review answers for the writes nothing could read first.
+
+    A shell write is reported afterwards because its content only exists once
+    the command has run — true of `dev render > docs/api.md`, and false of a
+    command carrying its own bytes, which reaches the same gates before it
+    runs. A path both readers name is one finding told twice: once as the
+    question, once as the account of what landed.
+    """
+    work = tmp_path / "repo"
+    (work / "src").mkdir(parents=True)
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    commit_file(
+        git,
+        work,
+        "src/engine.py",
+        "# lup: this needs a second look\nvalue = 1\n",
+        "chore: base",
+    )
+    (work / "src" / "engine.py").write_text("value = 2\n", encoding="utf-8")
+    review = bundled_dispatcher().written_review
+
+    assert review("cat > src/engine.py <<'EOF'\nvalue = 2\nEOF", work) == []
+    assert review("dev render > src/engine.py", work) != []
 
 
 def test_an_effect_no_boundary_here_reaches_still_asks(delete_repo: Path) -> None:
