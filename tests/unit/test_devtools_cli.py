@@ -234,10 +234,10 @@ def test_a_merge_that_did_not_happen_still_fails(
         pr.merge(42, dry_run=False)
 
 
-def test_annotated_downstream_config_raises_a_typed_recovery_error(
+def test_annotated_registry_raises_a_typed_recovery_error(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "downstream.json"
+    path = tmp_path / "sync.json"
     assert load_json(path) == {"projects": []}
 
     path.write_text('{"projects": []}\n# a trailing annotation\n', encoding="utf-8")

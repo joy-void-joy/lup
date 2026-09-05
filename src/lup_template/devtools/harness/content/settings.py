@@ -54,7 +54,6 @@ DECLARED = Settings(
         "ExitWorktree",
         "Read(./.claude/settings.json.local*)",
         "Read(./sync.json.local)",
-        "Read(./downstream.json.local)",
     ],
     denied=[
         "Read(./**/.env*.local)",
