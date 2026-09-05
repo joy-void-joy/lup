@@ -12,6 +12,19 @@ uv run -m examples.profile_transform
 uv run -m examples.model_route
 ```
 
+`monitored_run` is the one that makes no model call at all: a three-stage
+pipeline — a shell step, a fan-out sized by what it found, and a reduce —
+written so the run can be resumed a part at a time and watched while it goes.
+
+```bash
+uv run -m examples.monitored_run plan
+uv run -m examples.monitored_run run
+uv run lup-devtools dev monitor tmp/runs/monitored-run --events
+```
+
+Run it twice and the second run does nothing; edit `measure` and only it and
+`report` recompute. `docs/runs.md` carries why.
+
 `profile_transform` expects a Claude configuration home at `~/.claude-work`.
 Change that path to a profile you own. `compatible_endpoint` expects an
 Anthropic-compatible service on `http://localhost:4000`:
