@@ -17,7 +17,8 @@ from lup.harness.process import (
     LocalProcessLauncher,
     ProcessLauncher,
 )
-from lup.resolver.dag import ConcernGraph, ConcernGraphError
+from lup.execution.dag import DependencyGraphError
+from lup.resolver.dag import ConcernGraph
 from lup.resolver.join_desk import JoinDesk, JoinPlan, JoinTip
 from lup.resolver.join_tools import (
     JoinReport,
@@ -226,9 +227,9 @@ def test_dag_batches_roots_single_parent_and_multi_parent() -> None:
 
 
 def test_dag_rejects_missing_nodes_and_cycles_and_filters_unapproved_ancestry() -> None:
-    with pytest.raises(ConcernGraphError, match="missing nodes"):
+    with pytest.raises(DependencyGraphError, match="missing nodes"):
         ConcernGraph([concern("child", ["missing"])])
-    with pytest.raises(ConcernGraphError, match="contains a cycle"):
+    with pytest.raises(DependencyGraphError, match="contains a cycle"):
         ConcernGraph([concern("a", ["b"]), concern("b", ["a"])])
 
     graph = ConcernGraph(
@@ -4452,11 +4453,11 @@ async def test_admission_refuses_a_reused_lease_a_cycle_and_a_missing_parent(
 
     with pytest.raises(LeaseViolationError, match="already has a lease"):
         await build_core(admitted_plan(admitted_concern("a"))).admit(evidence)
-    with pytest.raises(ConcernGraphError, match="contains a cycle"):
+    with pytest.raises(DependencyGraphError, match="contains a cycle"):
         await build_core(
             admitted_plan(admitted_concern("c", ["d"]), admitted_concern("d", ["c"]))
         ).admit(evidence)
-    with pytest.raises(ConcernGraphError, match="missing nodes"):
+    with pytest.raises(DependencyGraphError, match="missing nodes"):
         await build_core(admitted_plan(admitted_concern("e", ["absent"]))).admit(
             evidence
         )
