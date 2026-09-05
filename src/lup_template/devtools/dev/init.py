@@ -144,13 +144,28 @@ def rename_in_pyproject(path: Path, new_name: str, dry_run: bool) -> list[str]:
         new_text = new_text.replace(old_cli, new_cli, 1)
         changes.append(f"  CLI entry point: lup -> {new_name}")
 
-    old_devtools = 'lup-devtools = "lup_template.devtools.main:app"'
-    new_devtools = f'lup-devtools = "{new_name}.devtools.main:app"'
-    if old_devtools in new_text:
-        new_text = new_text.replace(old_devtools, new_devtools, 1)
-        changes.append(
-            f"  devtools import path: lup_template.devtools -> {new_name}.devtools"
-        )
+    # Every remaining place the manifest spells the package, each keyed by
+    # what it configures rather than by the table it happens to sit in. The
+    # entry point moved from `[project.scripts]` to
+    # `[project.entry-points."lup.devtools"]` and this went on matching the old
+    # spelling, so a renamed project kept an entry point naming a package that
+    # no longer existed -- and the failure it produced was `The environment
+    # must register exactly one 'lup.devtools' application entry point; found
+    # 2`, which names neither the manifest nor the rename. The package-data
+    # keys were never handled at all, so a renamed project shipped no assets.
+    #
+    # Matched on the module path rather than on the whole line for that
+    # reason: a key that moves tables keeps its value, and the value is the
+    # part this is about.
+    for spelling, what in (
+        ("lup_template.devtools.main:app", "devtools application entry point"),
+        ("lup_template.devtools.dashboard", "dashboard package data"),
+        ("lup_template.devtools.harness.content", "harness content package data"),
+    ):
+        renamed = spelling.replace("lup_template", new_name, 1)
+        if spelling in new_text:
+            new_text = new_text.replace(spelling, renamed, 1)
+            changes.append(f"  {what}: {spelling} -> {renamed}")
 
     if not dry_run and new_text != text:
         path.write_text(new_text)

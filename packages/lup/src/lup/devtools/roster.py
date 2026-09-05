@@ -28,8 +28,6 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.conversation.app import create_conversation_app
-from lup.devtools.dashboard.app import create_dashboard_app
 from lup.devtools.dev.app import DevDeclarations, create_dev_app
 from lup.devtools.feedback.app import create_feedback_app
 from lup.devtools.feedback.models import AgentPrompt
@@ -100,9 +98,27 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
     launch_checkpoint: LaunchCheckpoint | None = None
     """Application data saved before generation and after the native CLI closes."""
 
-    def roster(self) -> list[SubApp]:
-        """Every sub-app the library ships, wired over these declarations."""
-        return [entry.wired(self) for entry in LIBRARY_ROSTER]
+    def roster(self, retired: list[str] | None = None) -> list[SubApp]:
+        """Every sub-app the library ships, wired over these declarations.
+
+        ``retired`` is what a project has declined, and an entry named there is
+        *not built* rather than built and dropped afterwards. That distinction
+        is the whole reason this takes an argument: a builder may import an
+        optional extra, so constructing an app a project declined makes that
+        project carry a dependency for a command it does not serve. Measured —
+        a project retiring ``dashboard`` still could not start its CLI without
+        ``lup[web]``, because the roster built the dashboard before the
+        selection ever saw it.
+
+        Defaulting to none keeps every existing caller correct: a project that
+        declines nothing gets exactly what it got before.
+        """
+        declined = retired or []
+        return [
+            entry.wired(self)
+            for entry in LIBRARY_ROSTER
+            if entry.spec.name not in declined
+        ]
 
 
 class RosterEntry(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -124,16 +140,40 @@ class RosterEntry(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
 # lup: ignore[library-default] — the sub-apps this library authors, so the table
 # is what it ships rather than a choice made for an adopter
+def conversation_app(declared: "DevtoolsDeclarations") -> typer.Typer:
+    """The conversation sub-app, imported where it is built.
+
+    Deferred because retaining a hosted transcript drives a real browser,
+    which is the ``conversation`` extra. A module-level import makes that extra
+    a requirement of importing this file at all — so a project that declines
+    the sub-app still could not start its CLI without it.
+    """
+    from lup.devtools.conversation.app import create_conversation_app
+
+    return create_conversation_app(declared.profiles)
+
+
+def dashboard_app(declared: "DevtoolsDeclarations") -> typer.Typer:
+    """The dashboard sub-app, imported where it is built.
+
+    Deferred for the same reason as :func:`conversation_app`: it serves the
+    setup wizard over HTTP, which is the ``web`` extra.
+    """
+    from lup.devtools.dashboard.app import create_dashboard_app
+
+    return create_dashboard_app(declared.integrations)
+
+
 LIBRARY_ROSTER = [
     RosterEntry(
         spec=SubAppSpec(
             name="conversation", help="Retain authenticated AI conversations"
         ),
-        build=lambda declared: create_conversation_app(declared.profiles),
+        build=lambda declared: conversation_app(declared),
     ),
     RosterEntry(
         spec=SubAppSpec(name="dashboard", help="Host the local setup dashboard"),
-        build=lambda declared: create_dashboard_app(declared.integrations),
+        build=lambda declared: dashboard_app(declared),
     ),
     RosterEntry(
         spec=SubAppSpec(name="dev", help="Worktrees, branches, and pre-flight checks"),

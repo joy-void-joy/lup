@@ -8,6 +8,9 @@ diagnosis that stays quiet about a failure it does not explain.
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 import lup.devtools.harness.launch as launch
 from lup.harness.egress import SessionEgress
 from lup.harness.image import Podman
@@ -363,17 +366,20 @@ def test_the_declared_manifest_asks_the_host_for_nothing_image_side() -> None:
 def test_every_declared_package_is_obtained_by_something_that_verifies_it() -> None:
     """The property the base image was chosen for, pinned so a change is visible.
 
-    A `script` package runs a shell line the build never checks. None is
-    declared, and the `package-install-script` rule is what keeps it that way
-    -- but a rule catches the source shape, and this catches the roster the
-    image is actually built from, including anything a constructor default
+    Three managers verify their own downloads and the fourth has to say how,
+    by pinning the digest its shell line checks against. What this asserts is
+    the property rather than the manager: a `script` package with a digest has
+    done the verifying, and one without cannot be constructed at all.
+
+    A rule catches the source shape; this catches the roster the image is
+    actually built from, including anything a constructor default
     reintroduces.
     """
     from lup.harness.toolchain import default_manifest
     from lup_template.devtools.harness.content.requirements import manifest
 
     for roster in (default_manifest(), manifest()):
-        assert not [item for item in roster.packages() if item.manager == "script"]
+        assert not [item for item in roster.packages() if not item.verified()]
 
 
 def test_a_finding_carries_the_requirement_that_produced_it() -> None:
@@ -626,3 +632,39 @@ def test_spanning_targets_keeps_what_only_one_of_them_declares() -> None:
     )
 
     assert [item.capability for item in spanned.requirements] == ["uv", "bun"]
+
+
+def test_a_script_package_names_what_it_verifies_against() -> None:
+    """A shell line with no digest installs whatever the server answered with.
+
+    The refusal is at construction rather than at render, for the sharper
+    version of the reason the missing-command refusal is: an unverified install
+    produces an image that is *not* missing anything, so nothing later asks
+    what it got.
+    """
+    with pytest.raises(ValidationError, match="names no digest"):
+        Package(name="elan", manager="script", command="curl -fsSL x | sh")
+
+
+def test_a_managed_package_may_not_restate_an_integrity_claim() -> None:
+    """pacman, bun and uv check their own downloads, so a digest beside one is
+    a second claim nothing compares against the first."""
+    with pytest.raises(ValidationError, match="verifies its own downloads"):
+        Package(name="ripgrep", digest="00" * 32)
+
+
+def test_verification_is_a_property_rather_than_a_manager() -> None:
+    """What the roster is asked is whether an install is checked, not how.
+
+    A `script` carrying a digest has done the verifying the other three
+    managers do for a caller, and a test spelling `manager != "script"` would
+    go on refusing it — which is the shape this method exists to replace.
+    """
+    verified = Package(
+        name="elan",
+        manager="script",
+        command='curl -fsSL -o /tmp/x https://example.invalid/x && echo "d  /tmp/x" | sha256sum -c -',
+        digest="d" * 64,
+    )
+    assert verified.verified()
+    assert Package(name="ripgrep").verified()
