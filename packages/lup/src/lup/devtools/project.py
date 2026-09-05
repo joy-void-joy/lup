@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from lup.harness.codescan.boundaries import ApplicationRoots
 from lup.harness.codescan.common import AntiPattern, RuleSelection
+from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.subapps import SubAppSelection
 from lup.harness.models import ContentSelection
 from lup.policy.kernel.rows import PathRoleRow
@@ -84,4 +85,15 @@ class DevProject(BaseModel, frozen=True):
     Declaring none is a real answer — a project curating its declarations by
     hand needs no surface over them — and the seam command says so rather
     than reading somewhere it was never pointed.
+    """
+
+    seams: list[Seam] = DECLARED_SEAMS
+    """Which declarations this project is asked about, and where each is written.
+
+    The library's list as an overridable default, which is what that list
+    already said it was. A domain with a seam of its own extends this rather
+    than forking it — and a seam living outside the catalog is why it has to
+    be declared here: where an application keeps a declaration is the
+    application's business, and a library naming one of its paths has reached
+    into it.
     """

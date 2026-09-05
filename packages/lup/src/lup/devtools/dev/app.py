@@ -799,7 +799,8 @@ def create_dev_app(
         command that guessed at them would be answering for a layout it does
         not own.
         """
-        catalog = declared().project.catalog
+        project = declared().project
+        catalog = project.catalog
         answers = seams.Answers(
             own=own or [],
             disown=disown or [],
@@ -808,7 +809,7 @@ def create_dev_app(
             retire_all=retire_all,
         )
         if not answers.given():
-            for line in seams.survey(catalog):
+            for line in seams.survey(catalog, project.seams):
                 typer.echo(line)
             return
         if catalog is None:
