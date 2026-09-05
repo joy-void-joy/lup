@@ -64,6 +64,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.words import INTERPRETERS
+from kernel.roles import is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
 from kernel.tools import decide_tool
 from policy_data import (
@@ -203,8 +204,28 @@ def bash_decision(
         # Resolved against what this launch mounted writable, so a write into a
         # worktree cut after the container started reaches a reviewer instead of
         # the writable base no overlay covers.
+        #
+        # The session scratchpad is taken out first, because the lease is not
+        # the question there. A lease enumerates what the launch mounted from
+        # the host, so anything else reads as uncovered -- and the scratchpad
+        # is uncovered in the direction that makes it safe: the harness's own
+        # root, container-private where a container is running, holding
+        # nothing any capture was meant to protect. The role layer already
+        # had this right, and an edit to the same path allows; only the
+        # measured layer disagreed, so a write there asked while a write
+        # beside it in the checkout did not.
+        #
+        # Filtered here rather than inside `unleased_write_targets`, which is
+        # compiled into a bare script that may not reach the kernel where
+        # `is_session_scratch_target` says what a scratchpad path is.
         unleased_targets=unleased_write_targets(
-            [*shell_write_targets(command), *acted_on], boundary, cwd
+            [
+                target
+                for target in [*shell_write_targets(command), *acted_on]
+                if not is_session_scratch_target(target)
+            ],
+            boundary,
+            cwd,
         ),
         recovered=bool(reference),
     )

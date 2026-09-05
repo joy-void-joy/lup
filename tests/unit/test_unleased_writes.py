@@ -12,6 +12,7 @@ from pathlib import Path
 
 from lup.policy.assets.host import unleased_write_targets
 from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.roles import is_session_scratch_target
 from lup.policy.kernel.rows import PathRoleRow, ShellRuleRow
 from lup.policy.kernel.settlement import SettlementFacts, settle
 from lup.policy.kernel.shell import decide_shell
@@ -143,3 +144,32 @@ def test_an_unleased_write_outranks_a_capture_of_this_session() -> None:
 
     assert settled.effect == "ask"
     assert settled.rule == "unleased-write"
+
+
+def test_the_session_scratchpad_is_not_a_target_the_lease_answers_for() -> None:
+    """The harness's own root, uncovered in the direction that makes it safe.
+
+    A lease enumerates what a launch mounted from the host, so a path that is
+    not one of those reads as uncovered — and the scratchpad is uncovered
+    because it is container-private, not because it escapes. It holds nothing
+    a capture was meant to protect, and the role layer already says so: an
+    edit to the same path allows, and only the measured layer disagreed.
+
+    What that cost was two friction reports that both named the wrong thing.
+    `sed -n … > $TMPDIR/x` and `uv run python $TMPDIR/s.py` each asked, and
+    the reason named the redirect, so the reader read their own verb as
+    having been classified a write.
+
+    Asserted over the filter rather than over the rule, because the rule is
+    right about every target it is given: what was wrong is which targets
+    reached it.
+    """
+    assert is_session_scratch_target("/tmp/claude-1000/session/scratchpad/out.txt")
+    assert is_session_scratch_target("$TMPDIR/out.txt")
+    assert not is_session_scratch_target("/repo/tree/other/x")
+    # The path is genuinely outside the lease, which is why the filter has to
+    # be the thing that answers for it: asking the lease gives the wrong
+    # answer, correctly.
+    assert unleased_write_targets(
+        ["/tmp/claude-1000/session/scratchpad/out.txt"], MEASURED, Path("/repo")
+    ) == ["/tmp/claude-1000/session/scratchpad/out.txt"]
