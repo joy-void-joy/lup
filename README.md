@@ -47,6 +47,23 @@ A uv workspace member any project can depend on unmodified. Provider SDKs sit be
 | `web` | Local web surfaces: the boundaries a page served on this machine keeps |
 | `devtools` | The `lup-devtools` CLI, half of it reusable and half template-specific |
 
+#### Runtime capabilities
+
+Optional behavior is present on `SessionHandle` and `TurnHandle` or absent as `None` — no unsupported-operation stubs. This checked-in evidence targets Claude Agent SDK 0.2.89 and Codex CLI/app-server 0.144.4; regenerate it with `uv run lup-devtools agent capabilities --markdown` when native evidence changes.
+
+| Capability | claude-sdk-0.2.89 | codex-app-server-0.144.4 |
+| --- | --- | --- |
+| live_events | ✅ | ✅ |
+| interrupt | ✅ | ✅ |
+| steer | — | ✅ |
+| fork | ✅ | ✅ |
+| resume | ✅ | without a fresh dynamic tool |
+| typed_submission | reconnect per turn | thread-start schema only |
+| background | ✅ | ✅ |
+
+
+Codex accepts dynamic tools only on `thread/start`, so Lup rejects a typed-schema transition or typed resume rather than silently using a stale schema.
+
 ### The template — `src/lup_template`
 
 - **`agent`** — the part the feedback loop improves: orchestration, prompts, output models, subagent specs, MCP tools, and the tag-based tool policy. `/lup:init` renames it for your domain.
