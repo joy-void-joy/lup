@@ -163,7 +163,7 @@ def semantic_policy_for(
         edit_rules=hooks.resolved_edit_rules(),
     )
     return SemanticToolPolicy(
-        fetch=FetchPolicy(allowed, denied),
+        fetch=FetchPolicy(allowed, denied, hooks.unjudged_ambient),
         shell=ShellPolicy(
             hooks.resolved_shell_rules(),
             allowed_urls=allowed,

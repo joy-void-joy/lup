@@ -1105,6 +1105,14 @@ def decide_curl_words(
     if not urls:
         return unjudged("curl has no URL")
     for url in urls:
+        # lup: defer: thread the profile's `unjudged_ambient` here too, so a
+        # curl to an unlisted origin answers as `WebFetch` does. Left asking
+        # deliberately rather than by omission: a `defer` returned from inside
+        # the shell classifier meets the settlement order, where the rule that
+        # settles unjudged work inside a boundary would allow it — and that
+        # rule's argument, that every effect is confined there, is the one
+        # thing untrue of reading a document into context. Threading the
+        # declaration means teaching that rule the difference first.
         verdict = decide_fetch(curl_url(url), allowed_scopes, denied_scopes)
         if verdict.effect != "allow":
             return verdict

@@ -23,6 +23,7 @@ from lup.policy.kernel.edit import (
     path_rule_matches as kernel_path_rule_matches,
 )
 from lup.policy.kernel.fetch import decide_fetch
+from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.assets.host import (
     directory_write_targets,
     empty_directory_targets,
@@ -106,11 +107,22 @@ def url_scope_row(scope: UrlScope) -> UrlScopeRow:
 
 
 class FetchPolicy(DecisionPolicy[FetchUrl]):
-    """Evaluate deny scopes before allow scopes and ask on everything else."""
+    """Evaluate deny scopes before allow scopes, and let the profile answer the rest.
 
-    def __init__(self, allowed: list[UrlScope], denied: list[UrlScope]) -> None:
+    ``unjudged_ambient`` is the same declaration the shell family reads for a
+    command nothing classified, taken here so a profile that declared the
+    seamless posture gets it on both surfaces rather than on one.
+    """
+
+    def __init__(
+        self,
+        allowed: list[UrlScope],
+        denied: list[UrlScope],
+        unjudged_ambient: UnjudgedAmbient = "ask",
+    ) -> None:
         self.allowed = list(allowed)
         self.denied = list(denied)
+        self.unjudged_ambient: UnjudgedAmbient = unjudged_ambient
 
     def decide(self, event: FetchUrl) -> Decision:
         return pydantic_decision(
@@ -118,6 +130,7 @@ class FetchPolicy(DecisionPolicy[FetchUrl]):
                 str(event.url),
                 [url_scope_row(scope) for scope in self.allowed],
                 [url_scope_row(scope) for scope in self.denied],
+                self.unjudged_ambient,
             )
         )
 

@@ -1633,9 +1633,20 @@ def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
     )
 
 
-def fetch_decision(url: str) -> KernelDecision:
-    """Judge one outbound fetch against the declared scopes."""
-    return decide_fetch(url, ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES)
+def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
+    """Judge one outbound fetch against the declared scopes.
+
+    The profile's answer for an origin no scope names is read from the same
+    ledger the shell family reads it from, so one declaration answers on both
+    surfaces. Read here rather than passed, because this entry point is what
+    a dispatcher calls and a dispatcher holds nothing but the call.
+    """
+    return decide_fetch(
+        url,
+        ALLOWED_FETCH_SCOPES,
+        DENIED_FETCH_SCOPES,
+        "defer" if defers_unjudged(measured_boundary(root)) else "ask",
+    )
 
 
 def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:
@@ -1982,7 +1993,10 @@ def dispatch(payload):
             autonomous=autonomous,
         )
     if name == "WebFetch":
-        return fetch_decision(tool_input["url"])
+        # The same directory the shell branch reads its boundary from: the
+        # profile's answer for what nothing classified is one declaration,
+        # not one per surface.
+        return fetch_decision(tool_input["url"], session_directory)
     if name == "Edit":
         path = tool_input["file_path"]
         before, after = edit_documents(

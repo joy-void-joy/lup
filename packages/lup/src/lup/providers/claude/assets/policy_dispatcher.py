@@ -180,7 +180,10 @@ def dispatch(payload):
             autonomous=autonomous,
         )
     if name == "WebFetch":
-        return fetch_decision(tool_input["url"])
+        # The same directory the shell branch reads its boundary from: the
+        # profile's answer for what nothing classified is one declaration,
+        # not one per surface.
+        return fetch_decision(tool_input["url"], session_directory)
     if name == "Edit":
         path = tool_input["file_path"]
         before, after = edit_documents(
