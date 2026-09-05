@@ -36,12 +36,19 @@ def rows() -> list[ShellRuleRow]:
 
 
 def contained(command: str, recovered: bool = False) -> KernelDecision:
-    """One command under the default contained profile."""
+    """One command under the default contained profile.
+
+    Spelled without ``sandboxed``, which is what makes these rows about
+    containment. Setting both left every row carried by the native sandbox
+    and the containment fact inert beside it — so the profile these rows
+    describe was never the one they exercised, and a container reaching the
+    row named for it would have passed the suite either way.
+    """
     return decide_shell(
         command,
         rows(),
-        sandboxed=True,
         contained=True,
+        inside_placement=True,
         escapable=False,
         recovered=recovered,
     )
