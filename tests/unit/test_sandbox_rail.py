@@ -12,7 +12,11 @@ import pytest
 
 from lup.execution.shell import git
 from lup.sandbox.rail import (
+    AccessibleRoot,
     Lease,
+    fleet_lease,
+    hold_pruning_across,
+    in_repository,
     lease_for,
     repository_layout,
     same_path,
@@ -295,3 +299,179 @@ def test_a_lease_reports_whether_it_covers_a_path(repository: Path) -> None:
 
 def test_an_empty_lease_covers_nothing() -> None:
     assert not Lease().covers(Path("/anywhere"))
+
+
+@pytest.fixture
+def other_repository(tmp_path: Path) -> Path:
+    """A second repository entirely, which is what a declared root is.
+
+    Beside the first rather than under it, because the whole subject is a
+    checkout `git worktree list` in this repository will never mention. Its
+    own worktree is linked, so the arrangement a declared root gets is the
+    same nested one the checkout's own lease has rather than the degenerate
+    plain-checkout case.
+    """
+    root = tmp_path / "away" / "main"
+    root.mkdir(parents=True)
+    git("-C", str(root), "init", "-q", "-b", "main")
+    git("-C", str(root), "config", "user.email", "test@example.invalid")
+    git("-C", str(root), "config", "user.name", "Test")
+    (root / "README.md").write_text("readme\n", encoding="utf-8")
+    git("-C", str(root), "add", "-A")
+    git("-C", str(root), "commit", "-qm", "first")
+    git(
+        "-C",
+        str(root),
+        "worktree",
+        "add",
+        "-q",
+        str(root.parent / "side"),
+        "-b",
+        "side",
+    )
+    return root
+
+
+def test_a_declared_root_is_leased_with_the_repository_behind_it(
+    repository: Path, other_repository: Path
+) -> None:
+    """A bind of the working copy alone is a checkout pointing at nothing.
+
+    Its `.git` is a file holding an absolute `gitdir:` pointer, so the shared
+    directory has to come too -- and the siblings with it, or `git gc` inside
+    the boundary prunes the administrative state of worktrees it cannot see,
+    in a repository nobody in this session owns.
+    """
+    side = other_repository.parent / "side"
+    leased = fleet_lease(repository / "mine", accessible=[AccessibleRoot(path=side)])
+    layout = repository_layout(side)
+
+    assert side in leased.writable
+    assert layout.common in leased.writable
+    assert layout.private in leased.writable
+    assert other_repository in leased.read_only
+    assert repository / "mine" in leased.writable
+
+
+def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
+    repository: Path, other_repository: Path
+) -> None:
+    """Run rather than asserted about names, for the reason the local one is.
+
+    Committing is the whole point of declaring a root read-write, and a lease
+    that names the paths a commit needs can always miss one. Modelled the way
+    the checkout's own commit test models it: withhold write permission from
+    exactly what the lease calls read-only, then run the real command.
+    """
+    side = other_repository.parent / "side"
+    leased = fleet_lease(repository / "mine", accessible=[AccessibleRoot(path=side)])
+    layout = repository_layout(side)
+    withheld = [
+        found
+        for found in [layout.common, *layout.common.rglob("*"), other_repository]
+        if read_only_here(leased, found)
+    ]
+    assert other_repository in withheld
+
+    restored = {entry: entry.stat().st_mode for entry in withheld}
+    try:
+        for entry in withheld:
+            entry.chmod(restored[entry] & ~0o222)
+        (side / "second.txt").write_text("second\n", encoding="utf-8")
+        git("-C", str(side), "add", "-A")
+        git("-C", str(side), "commit", "-qm", "second")
+    finally:
+        for entry, mode in restored.items():
+            entry.chmod(mode)
+    assert git.out("-C", str(side), "log", "-1", "--format=%s").strip() == "second"
+
+
+def test_a_root_declared_read_only_has_nothing_writable_under_it(
+    repository: Path, other_repository: Path
+) -> None:
+    """Including its shared directory, which is what read-only has to mean."""
+    leased = fleet_lease(
+        repository / "mine",
+        accessible=[AccessibleRoot(path=other_repository, writable=False)],
+    )
+
+    assert other_repository in leased.read_only
+    assert repository_layout(other_repository).common in leased.read_only
+    assert not any(
+        other_repository == root or other_repository in root.parents
+        for root in leased.writable
+    )
+
+
+def test_two_declared_worktrees_of_one_repository_settle_toward_writable(
+    repository: Path, other_repository: Path
+) -> None:
+    """The collision only a global settlement catches.
+
+    Each worktree's own lease calls the other a sibling and holds it
+    read-only, so settling the leases one at a time leaves both of them
+    unwritable -- with each having been named read-write deliberately.
+    """
+    side = other_repository.parent / "side"
+    leased = fleet_lease(
+        repository / "mine",
+        accessible=[AccessibleRoot(path=other_repository), AccessibleRoot(path=side)],
+    )
+
+    assert other_repository in leased.writable
+    assert side in leased.writable
+    assert other_repository not in leased.read_only
+    assert side not in leased.read_only
+
+
+def test_a_declared_root_that_is_gone_is_skipped_rather_than_mounted(
+    repository: Path, tmp_path: Path
+) -> None:
+    """A bind whose source is absent is one the engine refuses the container for.
+
+    So a registration somebody moved costs its own reachability and not the
+    session.
+    """
+    leased = fleet_lease(
+        repository / "mine",
+        accessible=[AccessibleRoot(path=tmp_path / "never-existed")],
+    )
+
+    assert leased.writable == lease_for(repository / "mine").writable
+
+
+def test_a_declared_root_the_checkout_already_leases_is_not_mounted_twice(
+    repository: Path,
+) -> None:
+    leased = fleet_lease(
+        repository / "mine",
+        accessible=[AccessibleRoot(path=repository / "mine" / "src")],
+    )
+
+    assert leased.writable == lease_for(repository / "mine").writable
+
+
+def test_a_declared_root_that_is_not_a_repository_is_one_plain_mount(
+    repository: Path, tmp_path: Path
+) -> None:
+    """Not everything worth reaching is a checkout, and git is not asked about one."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    leased = fleet_lease(repository / "mine", accessible=[AccessibleRoot(path=corpus)])
+
+    assert corpus in leased.writable
+    assert not in_repository(corpus)
+
+
+def test_the_prune_guard_is_armed_per_repository_and_says_where_it_was_not(
+    repository: Path, other_repository: Path, tmp_path: Path
+) -> None:
+    """A directory git does not answer for is neither armed nor reported."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+
+    assert hold_pruning_across([repository / "mine", other_repository, corpus]) == []
+    assert (
+        git.out("-C", str(other_repository), "config", "gc.worktreePruneExpire").strip()
+        == "never"
+    )

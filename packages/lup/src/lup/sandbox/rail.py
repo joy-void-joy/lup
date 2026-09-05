@@ -90,6 +90,63 @@ class Lease(BaseModel, frozen=True):
         )
 
 
+class AccessibleRoot(BaseModel, frozen=True):
+    """One checkout outside this repository a session is meant to reach.
+
+    Declared rather than discovered, which is the whole of why this type
+    exists instead of a directory scan. A `refs/` symlink lives inside the
+    checkout and is writable from inside the boundary, so a mount table read
+    off one would let the confined thing choose what confines it -- the same
+    argument that keeps remotes, identity and credentials resolved on the
+    host rather than in the container they describe.
+    """
+
+    path: Path
+    writable: bool = Field(
+        default=True,
+        description="Whether this root may be written, or only read",
+    )
+
+
+def resolved(writable: dict[Path, str], read_only: dict[Path, str]) -> Lease:
+    """One path, one mode, settled toward writable.
+
+    Two ways to arrive at the same collision, and neither is hypothetical.
+    `git worktree list` reports the main worktree, and in a bare layout that
+    directory *is* the shared one -- so the shared directory arrives as its
+    own sibling and would be declared read-only and read-write at once. Once
+    more than one repository is leased, two registered worktrees of a single
+    repository each hold the other read-only while both were named writable
+    deliberately.
+
+    Settled toward writable because the paths that reach here writable are
+    the ones somebody named, and settled here rather than in the engine,
+    where two mounts at one target resolve by whichever order they happen to
+    be applied in. Exact paths only: a read-only entry *inside* a writable
+    one is the nesting this whole arrangement rests on, and survives.
+    """
+    return Lease(
+        writable=writable,
+        read_only={
+            path: inside for path, inside in read_only.items() if path not in writable
+        },
+    )
+
+
+def merged(leases: list[Lease]) -> Lease:
+    """Every lease as one, with collisions settled across all of them at once.
+
+    Settling each lease alone and concatenating is not the same thing, and
+    the difference is silent: a path one lease holds read-only and another
+    holds writable stays read-only, which mounts a worker's own checkout
+    unwritable because some other repository called it a sibling.
+    """
+    return resolved(
+        {path: inside for lease in leases for path, inside in lease.writable.items()},
+        {path: inside for lease in leases for path, inside in lease.read_only.items()},
+    )
+
+
 class RepositoryLayout(BaseModel, frozen=True):
     """The two git directories a linked worktree lives between.
 
@@ -252,18 +309,91 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
         for owned in (worktree / path for path in human_owned or [])
         if owned.exists()
     ]
-    # One path, one mode. `git worktree list` reports the main worktree, and
-    # in a bare layout that directory *is* the shared one -- so the shared
-    # directory arrives as its own sibling and would be declared read-only
-    # and read-write at once. Both spellings were read-only before this
-    # module made the shared directory writable, which is what kept the
-    # collision invisible rather than absent. Resolved toward writable
-    # because the paths that reach here writable are the ones named
-    # deliberately, and toward it here rather than in the engine, where two
-    # mounts at one target settle by whichever order they happen to be
-    # applied in.
-    kept = [path for path in read_only if path not in writable]
-    return Lease(writable=same_path(writable), read_only=same_path(kept))
+    return resolved(same_path(writable), same_path(read_only))
+
+
+def in_repository(path: Path) -> bool:
+    """Whether git answers for this directory at all.
+
+    Asked rather than assumed, because not everything worth reaching is a
+    checkout: a directory of reference material registered for access is a
+    plain bind, and putting it through the worktree arrangement would only
+    ask git about a place git knows nothing of.
+    """
+    try:
+        repository_layout(path)
+    except sh.ErrorReturnCode:
+        return False
+    return True
+
+
+def demoted(lease: Lease) -> Lease:
+    """This lease with nothing writable, for a root declared read-only.
+
+    Its shared git directory goes read-only along with the rest, which costs
+    the commands that take a lockfile beside the file they write -- `git
+    config`, an index refresh -- and that is what read-only means here rather
+    than an oversight. A root nobody may write is one whose repository state
+    nobody may move either, and the alternative is a mode that refuses the
+    file while admitting the thing that rewrites it.
+    """
+    return Lease(read_only={**lease.writable, **lease.read_only})
+
+
+def accessible_lease(root: AccessibleRoot) -> Lease:
+    """The mounts one declared root needs, whatever kind of directory it is.
+
+    A checkout gets the whole arrangement :func:`lease_for` builds, and the
+    reason is the same one that forces same-path mounting: a linked
+    worktree's `.git` is a file holding an absolute `gitdir:` pointer, so a
+    bind of the working copy alone hands the session a checkout pointing at a
+    path that is not there. That is a broken repository rather than a
+    boundary, and it is debugged as one.
+
+    The siblings matter here more than they do at home, not less. `git gc`
+    runs `git worktree prune`, which deletes the administrative state of any
+    worktree whose directory has gone missing -- so a session that could see
+    one checkout of somebody else's repository and none of the others would
+    remove their entries as ordinary housekeeping, in a repository nobody in
+    this session owns.
+    """
+    lease = (
+        lease_for(root.path)
+        if in_repository(root.path)
+        else Lease(writable=same_path([root.path]))
+    )
+    return lease if root.writable else demoted(lease)
+
+
+def fleet_lease(
+    worktree: Path,
+    human_owned: list[Path] | None = None,
+    accessible: list[AccessibleRoot] | None = None,
+) -> Lease:
+    """This worktree's lease, plus every root the project declared reachable.
+
+    A root already covered by this worktree's own lease is dropped rather
+    than mounted twice: a registration naming a sibling of this repository,
+    or a checkout kept inside it, is already leased, and saying so again
+    hands the engine two mounts at one target for it to settle by order.
+
+    A root that is not there is skipped rather than declared. A bind mount
+    whose source does not exist is one the engine refuses the whole container
+    for, so a registration somebody moved would take the session down instead
+    of costing its own reachability -- which is the only thing it should
+    cost.
+    """
+    own = lease_for(worktree, human_owned)
+    return merged(
+        [
+            own,
+            *[
+                accessible_lease(root)
+                for root in accessible or []
+                if root.path.exists() and not own.covers(root.path)
+            ],
+        ]
+    )
 
 
 def hold_worktree_pruning(worktree: Path) -> bool:
@@ -284,3 +414,23 @@ def hold_worktree_pruning(worktree: Path) -> bool:
         return True
     except sh.ErrorReturnCode:
         return False
+
+
+def hold_pruning_across(worktrees: list[Path]) -> list[Path]:
+    """Arm the prune guard in every repository given, and name the refusals.
+
+    Once per repository rather than once per launch, because a lease now
+    spans repositories nobody in this session owns: a `git gc` inside the
+    boundary reaches their administrative state through the same shared
+    directory it reaches this one's, and the mount guards only hold while the
+    mounts are exactly right. This one holds when they are not.
+
+    A path git does not answer for is neither armed nor reported. Nothing
+    there has administrative state to lose, and listing it would make a
+    directory of reference material read as a repository this failed on.
+    """
+    return [
+        worktree
+        for worktree in worktrees
+        if in_repository(worktree) and not hold_worktree_pruning(worktree)
+    ]
