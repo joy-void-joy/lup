@@ -113,15 +113,28 @@ def read_under(
     cwd: Path,
     hooks: HookSet,
 ) -> PolicyReading:
-    """Classify one input under one placement's composition of the policy."""
+    """Classify one input under one placement's composition of the policy.
+
+    The placement decides containment as well as the native sandbox, because
+    the kernel joins them -- a boundary stands when either does -- and the
+    launcher spells them with one flag: `--unsandboxed` opens on the host
+    with no container *and* the runtime's own sandbox off. Read separately,
+    the unsandboxed row inherited the container measured around this process
+    and answered the bounded question twice, under two headings.
+
+    Which is the reading a session is least able to notice and most likely to
+    act on: the guidance sends an agent here before it spends a turn, from
+    inside a contained session, to find out what happens without the
+    boundary -- and got told what happens with it.
+    """
     held = measured_containment(cwd)
     policy = semantic_policy_for(
         hooks,
         sandbox_active=placement.sandboxed,
         autonomous=autonomous,
         recovered=True,
-        contained=held.contained,
-        inside_placement=held.inside_placement,
+        contained=held.contained and placement.sandboxed,
+        inside_placement=held.inside_placement and placement.sandboxed,
     )
     match kind:
         case "shell":

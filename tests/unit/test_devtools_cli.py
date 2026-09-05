@@ -20,7 +20,9 @@ import sh
 import typer
 from typer.testing import CliRunner
 
-from lup.devtools.dev import pr
+from lup.devtools.dev import policy_explain, pr
+from lup.harness.enforcement import MeasuredContainment
+from lup_template.devtools.harness.catalog import declared_hook_set
 from lup_template.devtools.main import app
 from lup.devtools.sync import load_json
 
@@ -303,6 +305,40 @@ def test_dev_policy_answers_for_every_placement_rather_than_one() -> None:
         "unsandboxed",
     ]
     assert [reading["effect"] for reading in readings] == ["allow", "ask"]
+
+
+def test_the_unsandboxed_reading_ignores_the_container_around_this_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row that answers for no boundary, asked from behind one.
+
+    Not hypothetical, and not reachable from a clean checkout: containment is
+    measured from the `.lup/preflight` ledger the launch wrote, so the case
+    above passed everywhere except the one place `dev policy` is actually
+    read -- inside a contained session, which is where the guidance sends an
+    agent before it spends a turn. Both rows reported the bounded answer,
+    under two headings, and the row a reader consults to find out what the
+    boundary is doing for them said it was doing nothing.
+
+    Measured here rather than left to the environment, for the same reason
+    the case above pins the sandbox flag: a suite that reads the session's own
+    ledger passes or fails on where it was run.
+    """
+    monkeypatch.setattr(
+        policy_explain,
+        "measured_containment",
+        lambda _cwd: MeasuredContainment(contained=True, inside_placement=True),
+    )
+
+    verdict = policy_explain.verdict_for(
+        "frobnicate",
+        "shell",
+        autonomous=False,
+        cwd=Path.cwd(),
+        hooks=declared_hook_set(),
+    )
+
+    assert [reading.effect for reading in verdict.readings] == ["allow", "ask"]
 
 
 def test_either_boundary_stays_askable_for_explicitly() -> None:
