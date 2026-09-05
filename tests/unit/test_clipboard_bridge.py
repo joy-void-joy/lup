@@ -295,3 +295,20 @@ def test_the_shim_is_executable_in_its_own_right(
         _env={"LUP_CLIPBOARD_SOCKET": str(endpoint), "PATH": "/usr/bin:/bin"},
     )
     assert str(printed) == "on the clipboard"
+
+
+def test_the_shims_are_advertised_and_not_only_installed() -> None:
+    """A runtime deciding whether to look for a clipboard finds one here.
+
+    The socket alone was not enough, and the gap is upstream of everything
+    else this file proves: a runtime that reads the environment, sees no
+    display, and concludes the machine has no clipboard never runs a shim at
+    all -- so every spelling below answers perfectly to nobody. Measured
+    against Claude Code, which probes for `xclip` only where `DISPLAY` is
+    set and otherwise emits an escape sequence a multiplexer may swallow.
+    """
+    bridge = ClipboardBridge()
+    environment = bridge.environment()
+    assert environment[bridge.display_variable] == bridge.display
+    assert bridge.display, "a probe reads this for truth before it reads it at all"
+    assert sorted(environment) == sorted([bridge.variable, bridge.display_variable])

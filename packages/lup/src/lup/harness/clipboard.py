@@ -288,6 +288,32 @@ class ClipboardBridge(BaseModel, frozen=True):
             "clipboard is broken rather than that this bridge missed a name"
         ),
     )
+    display_variable: str = Field(
+        default="DISPLAY",
+        description=(
+            "The variable a runtime's own clipboard probe reads to decide "
+            "whether the machine it is on has a clipboard at all. Claude "
+            "Code's is the measured case: it looks for `wl-copy` only when "
+            "`WAYLAND_DISPLAY` is set and for `xclip` only when `DISPLAY` "
+            "is, so a container carrying every name under `shims` and no "
+            "display variable is judged to have no clipboard and falls back "
+            "to an escape sequence -- which the operator's multiplexer and "
+            "terminal each get to decline, where the shim beside it would "
+            "have answered"
+        ),
+    )
+    display: str = Field(
+        default="lup-bridge:0",
+        description=(
+            "What that variable is set to. Not a display: this image has "
+            "none, and mounting the operator's is the design this module's "
+            "header rejects. It is a marker that makes the shims findable, "
+            "so the value is chosen to name itself -- anything that does "
+            "try to connect reports `cannot open display lup-bridge:0` and "
+            "says where the variable came from, where `:0` would have read "
+            "as a display that was really there"
+        ),
+    )
     media_types: list[str] = Field(
         default=["image/png", "image/jpeg", "image/gif", "image/webp"],
         description=(
@@ -312,8 +338,15 @@ class ClipboardBridge(BaseModel, frozen=True):
         return f"{self.inside}/{self.channel}"
 
     def environment(self) -> EnvVars:
-        """What tells the shims inside where to reach this broker."""
-        return {self.variable: self.path()}
+        """What tells the shims inside where to reach this broker, and what finds them.
+
+        The socket is the channel and the display marker is the *discovery*.
+        A runtime that never runs a shim, because it read the environment and
+        concluded the machine has no display, reaches the operator's
+        clipboard through neither -- so both are this bridge's to declare,
+        both being true only where it is running.
+        """
+        return {self.variable: self.path(), self.display_variable: self.display}
 
     def answered(self, line: bytes) -> ClipboardReply:
         """One request line, answered or refused.
