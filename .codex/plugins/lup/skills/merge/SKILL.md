@@ -89,9 +89,19 @@ Show the conflict prediction and recommend a strategy, then Ask the user directl
 
 ### 5a. Standard merge (clean or light conflicts)
 
+Which spelling to use depends on whether the target already carries this branch. Where it does -- `sync-base` pulled the integration branch in before the rebase, which is the route `$lup:land` arrives by -- the join already happened in the branch's own worktree, and recording it again here would put a merge commit in an integration branch whose history is otherwise linear:
+
+```bash
+git merge --ff-only <branch>
+```
+
+Where the two have genuinely diverged -- Mode A's other use, merging one feature branch into another -- the merge commit is what records that they were joined, and `--no-ff` keeps it even where a fast-forward was available:
+
 ```bash
 git merge --no-ff <branch>
 ```
+
+A refusal from `--ff-only` is the useful signal rather than an obstacle: it says the target moved after the rebase, so the branch is rebased again in its own worktree instead of the divergence being buried under a merge commit here.
 
 If conflicts arise, resolve them using the **Resolution Decision Tree** below, then stage resolved files and complete the merge.
 

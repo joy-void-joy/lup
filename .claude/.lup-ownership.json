@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "7a08ae73d09f174f1f20ae90f542de82fde48ba27beafe102a6f8fe241e5eac4",
+  "source_digest": "49c1f9fbc9974d725817ead4b9e0c6bbf91616554bc2d917453c6d47eba7feba",
   "target_requirements": [
     "claude-code"
   ],
@@ -212,7 +212,7 @@
     {
       "path": ".claude/plugins/lup/commands/merge.md",
       "category": "generated",
-      "sha256": "48cb1018dd087791d9ec061a91e59441fc0cfdeda009a2bbcfb95d6390ba40ae",
+      "sha256": "c8101239bdb44cb85aa7def3ea7df5d2f904589ef06ae78ec1b1fdea20193189",
       "semantic_id": "skill.merge",
       "executable": false
     },
