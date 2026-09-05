@@ -739,8 +739,9 @@ class Image(BaseModel, frozen=True):
             if (obtained := self.obtained_by(manifest, registry.manager))
         )
         script_layer = "".join(
-            f"\n# {item.name}: installed by an unverified shell line, which the\n"
-            f"# package-install-script rule refuses. Present because it was declared.\n"
+            f"\n# {item.name}: no manager packages this, so it installs by a shell\n"
+            f"# line that checks what it fetched against a declared digest:\n"
+            f"# {item.digest}\n"
             f"RUN {item.command}\n"
             for item in self.obtained_by(manifest, "script")
         )

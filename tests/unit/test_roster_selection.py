@@ -12,12 +12,18 @@ the composed tree; what these need is the projection, so they take specs and
 throwaway Typer apps rather than a whole declaration.
 """
 
+from unittest import mock
+
 import typer
 
 from lup.devtools.harness.content.application import ApplicationLayout
 from lup.devtools.harness.content.catalog import library_content
 from lup.devtools.harness.content.docs.catalog import library_documents
-from lup.devtools.roster import LIBRARY_ROSTER, LIBRARY_SPECS
+from lup.devtools.roster import (
+    LIBRARY_ROSTER,
+    LIBRARY_SPECS,
+    DevtoolsDeclarations,
+)
 from lup.devtools.subapps import SubApp, SubAppSelection, subapp
 from lup.harness.models import ContentSelection
 from lup.workspace.paths import project_root
@@ -195,3 +201,57 @@ def test_this_repository_declines_nothing_without_saying_so() -> None:
         *(spec.name for spec in LIBRARY_SPECS),
         *(spec.name for spec in APPLICATION_SPECS),
     }
+
+
+def test_a_retired_subapp_is_never_built_at_all() -> None:
+    """Dropped after construction is not the same as never constructed.
+
+    A builder may import an optional extra — the dashboard serves over HTTP,
+    the conversation sub-app drives a browser — so building one a project
+    declined makes that project carry a dependency for a command it does not
+    serve. Measured: a project retiring `dashboard` still could not start its
+    CLI without `lup[web]`, because the roster built the app before the
+    selection ever saw it.
+    """
+    built: list[str] = []
+
+    def watched(name: str):
+        def build(declared: DevtoolsDeclarations) -> typer.Typer:
+            built.append(name)
+            return typer.Typer()
+
+        return build
+
+    entries = [
+        entry.model_copy(update={"build": watched(entry.spec.name)})
+        for entry in LIBRARY_ROSTER
+    ]
+    with mock.patch("lup.devtools.roster.LIBRARY_ROSTER", entries):
+        declarations = mock.Mock(spec=DevtoolsDeclarations)
+        DevtoolsDeclarations.roster(declarations, ["dashboard", "conversation"])
+
+    assert "dashboard" not in built
+    assert "conversation" not in built
+    assert "dev" in built
+
+
+def test_declining_nothing_builds_everything_it_used_to() -> None:
+    """The default is what every existing caller already got."""
+    built: list[str] = []
+
+    def watched(name: str):
+        def build(declared: DevtoolsDeclarations) -> typer.Typer:
+            built.append(name)
+            return typer.Typer()
+
+        return build
+
+    entries = [
+        entry.model_copy(update={"build": watched(entry.spec.name)})
+        for entry in LIBRARY_ROSTER
+    ]
+    with mock.patch("lup.devtools.roster.LIBRARY_ROSTER", entries):
+        declarations = mock.Mock(spec=DevtoolsDeclarations)
+        DevtoolsDeclarations.roster(declarations)
+
+    assert sorted(built) == sorted(entry.spec.name for entry in LIBRARY_ROSTER)

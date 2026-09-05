@@ -56,14 +56,21 @@ from lup.types import EnvVars
 type PackageManager = Literal["pacman", "bun", "uv", "script"]
 """Which ecosystem obtains an installable.
 
-Three that verify what they fetch, and one that does not. ``pacman`` takes
-distribution packages, signed by the distribution and checked before they
-unpack; ``bun`` and ``uv`` take a registry name at a pinned version, whose
-integrity hash the lockfile records. ``script`` runs a shell line, verifies
-nothing, and is refused by the ``package-install-script`` rule -- it stays
-expressible because an adopter may hold a dependency no registry carries, and
-refusing it by rule rather than by omission means that adopter writes down why
-instead of discovering the field is missing.
+Three that verify what they fetch on their own, and one that has to say how.
+``pacman`` takes distribution packages, signed by the distribution and checked
+before they unpack; ``bun`` and ``uv`` take a registry name at a pinned
+version, whose integrity hash the lockfile records. ``script`` runs a shell
+line, which verifies nothing by itself -- so it carries a ``digest``, and what
+the build gets is checked against that before it is used.
+
+``script`` stays the last resort rather than a fourth equal option, and the
+``package-install-script`` rule still asks about one, because a project
+reaching for it is usually reaching past a package that exists. What the digest
+changes is the case where none does: a toolchain a distribution has never
+packaged is obtainable exactly one way, and an adopter pinning its release and
+its checksum has done the verifying the other three managers do for them. That
+is a different thing from `curl | sh`, and the declaration can now tell them
+apart.
 """
 
 
@@ -109,6 +116,27 @@ class Package(BaseModel, frozen=True):
         default="",
         description="The shell line that installs a ``script`` package",
     )
+    digest: str = Field(
+        default="",
+        description=(
+            "What a ``script`` package's download must hash to, which is how "
+            "such a package is verified at all. Required for ``script`` and "
+            "refused for the rest, whose managers check their own downloads -- "
+            "a digest beside a registry name would be a second claim about "
+            "integrity that nothing compares against the first"
+        ),
+    )
+
+    def verified(self) -> bool:
+        """Whether what this installs is checked against what was declared.
+
+        The question the roster is actually asked, and the reason it is a
+        method rather than a manager comparison at each call site: a caller
+        testing ``manager != "script"`` is asking about the ecosystem when it
+        means to ask about integrity, and those stopped being the same question
+        the moment a script could carry a digest.
+        """
+        return self.manager != "script" or bool(self.digest)
 
     def requested(self) -> str:
         """How this package is named to its manager, version included."""
@@ -124,16 +152,33 @@ class Package(BaseModel, frozen=True):
 
     @model_validator(mode="after")
     def a_script_carries_the_line_that_runs_it(self) -> "Package":
-        """A script package with no command is one that installs nothing.
+        """A script package names the line that runs it and the hash to check.
 
         Caught here rather than at render time, because a package that
         silently installs nothing produces an image missing a tool and an
         error naming that tool -- pointing at the toolchain rather than at
-        the declaration that forgot to say how to get it.
+        the declaration that forgot to say how to get it. The digest is caught
+        here for the sharper version of the same reason: an unverified install
+        produces an image that is *not* missing anything, and nothing later
+        asks what it got.
         """
         if self.manager == "script" and not self.command:
             raise ValueError(
                 f"package {self.name!r} installs by script but names no command"
+            )
+        if self.manager == "script" and not self.digest:
+            raise ValueError(
+                f"package {self.name!r} installs by script but names no digest: "
+                "a shell line verifies nothing on its own, so the artifact it "
+                "fetches has to be checked against a hash the declaration "
+                "pins. Every other manager does this for you"
+            )
+        if self.manager != "script" and self.digest:
+            raise ValueError(
+                f"package {self.name!r} names a digest but is obtained by "
+                f"{self.manager!r}, which verifies its own downloads: a second "
+                "integrity claim nothing compares against the first is a "
+                "reassurance rather than a check"
             )
         return self
 

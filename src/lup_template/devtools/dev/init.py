@@ -18,11 +18,13 @@ Examples::
 """
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 import tomlkit
 from tomlkit.container import Container
 from tomlkit.items import Comment
 import typer
+from pydantic import BaseModel
 
 from lup.workspace.paths import find_project_root
 from lup.devtools.dev.plugin import set_marketplace_name
@@ -126,35 +128,105 @@ def rename_pattern_in_file(
     return changes
 
 
-def rename_in_pyproject(path: Path, new_name: str, dry_run: bool) -> list[str]:
-    """Update pyproject.toml: package name, CLI entry point, devtools import path."""
+class SpeltPath(BaseModel, frozen=True):
+    """One place a manifest spells the package, and what that key configures."""
+
+    spelling: str
+    configures: str
+
+    def renamed(self, new_name: str) -> str:
+        """The same key under the project's own package name."""
+        return self.spelling.replace("lup_template", new_name, 1)
+
+
+class Replacement(BaseModel, frozen=True):
+    """One substitution in a manifest, and the line that reports it."""
+
+    before: str
+    after: str
+    reported: str
+
+
+DEFAULT_SPELT_PATHS = [
+    SpeltPath(
+        spelling="lup_template.devtools.main:app",
+        configures="devtools application entry point",
+    ),
+    SpeltPath(
+        spelling="lup_template.devtools.dashboard",
+        configures="dashboard package data",
+    ),
+    SpeltPath(
+        spelling="lup_template.devtools.harness.content",
+        configures="harness content package data",
+    ),
+]
+"""Where *this* scaffold's manifest spells its own package.
+
+A default rather than a constant because the keys are a property of the
+manifest being renamed: a project laid out differently passes its own, and a
+key added here reaches every caller without one.
+"""
+
+
+def rename_in_pyproject(
+    path: Path,
+    new_name: str,
+    dry_run: bool,
+    spelt: list[SpeltPath] | None = None,
+) -> list[str]:
+    """Update pyproject.toml: package name, CLI entry point, every module path.
+
+    ``spelt`` is every remaining key whose *value* names the package, keyed by
+    what it configures rather than by the table it happens to sit in. That
+    distinction is what this defaults to rather than hardcodes, and what the
+    default got wrong: the devtools entry point moved from
+    ``[project.scripts]`` to ``[project.entry-points."lup.devtools"]``, and
+    matching the whole old line went on silently succeeding at nothing. A
+    renamed project kept an entry point naming a package that no longer
+    existed — failing later as ``must register exactly one 'lup.devtools'
+    application entry point; found 2``, which names neither the manifest nor
+    the rename — and shipped none of its package data, which was never matched
+    at all.
+
+    A key that moves tables keeps its value, so the value is what is matched.
+    """
+    keys = DEFAULT_SPELT_PATHS if spelt is None else spelt
     text = path.read_text()
-    changes: list[str] = []
-    new_text = text
 
-    old_name_line = 'name = "lup-template"'
-    new_name_line = f'name = "{new_name}"'
-    if old_name_line in new_text:
-        new_text = new_text.replace(old_name_line, new_name_line, 1)
-        changes.append(f"  package name: lup-template -> {new_name}")
+    def rewritten() -> Iterator[Replacement]:
+        """Each substitution this manifest admits, in the order it is applied.
 
-    old_cli = 'lup = "lup_template.environment.cli.__main__:app"'
-    new_cli = f'{new_name} = "{new_name}.environment.cli.__main__:app"'
-    if old_cli in new_text:
-        new_text = new_text.replace(old_cli, new_cli, 1)
-        changes.append(f"  CLI entry point: lup -> {new_name}")
-
-    old_devtools = 'lup-devtools = "lup_template.devtools.main:app"'
-    new_devtools = f'lup-devtools = "{new_name}.devtools.main:app"'
-    if old_devtools in new_text:
-        new_text = new_text.replace(old_devtools, new_devtools, 1)
-        changes.append(
-            f"  devtools import path: lup_template.devtools -> {new_name}.devtools"
+        Yielded rather than accumulated because the caller wants both halves —
+        the text to write and the lines to report — and a loop building two
+        lists in step is how those come to disagree about what was done.
+        """
+        yield Replacement(
+            before='name = "lup-template"',
+            after=f'name = "{new_name}"',
+            reported=f"  package name: lup-template -> {new_name}",
         )
+        yield Replacement(
+            before='lup = "lup_template.environment.cli.__main__:app"',
+            after=f'{new_name} = "{new_name}.environment.cli.__main__:app"',
+            reported=f"  CLI entry point: lup -> {new_name}",
+        )
+        for key in keys:
+            yield Replacement(
+                before=key.spelling,
+                after=key.renamed(new_name),
+                reported=(
+                    f"  {key.configures}: {key.spelling} -> {key.renamed(new_name)}"
+                ),
+            )
 
+    applied = [step for step in rewritten() if step.before in text]
+    new_text = text
+    for step in applied:
+        new_text = new_text.replace(step.before, step.after, 1)
     if not dry_run and new_text != text:
         path.write_text(new_text)
-    return changes
+    return [step.reported for step in applied]
 
 
 def clear_scaffold_flag(path: Path, dry_run: bool) -> list[str]:

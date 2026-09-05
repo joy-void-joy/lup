@@ -138,7 +138,7 @@ app = typer.Typer(
 ROSTER = {
     entry.spec.name: entry
     for entry in SELECTION.over(
-        DECLARATIONS.roster(),
+        DECLARATIONS.roster(SELECTION.retired),
         [
             SubApp(spec=spec, app=APPLICATION_APPS[spec.name])
             for spec in APPLICATION_SPECS
