@@ -48,7 +48,7 @@ from pydantic import BaseModel, ValidationError
 from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
-from lup.workspace.paths import find_project_root
+from lup.workspace.paths import project_root
 from lup.execution.shell import git
 
 # The three below spell where the vendored copy sits, which is a fact about
@@ -467,7 +467,7 @@ def use_library(
     dry_run: bool,
 ) -> None:
     """CLI entry for ``lup-devtools dev library use`` (see module docstring)."""
-    root = find_project_root()
+    root = project_root()
     if mode is not LibraryMode.LOCAL:
         guard_leaving_local(root, force)
     changes = set_mode(root, mode, version=version, dry_run=dry_run)
@@ -482,7 +482,7 @@ def git_library(
     source: GitSource, keep_vendored: bool, force: bool, dry_run: bool
 ) -> None:
     """CLI entry for ``lup-devtools dev library git`` (see module docstring)."""
-    root = find_project_root()
+    root = project_root()
     guard_leaving_local(root, force)
     changes = set_mode(root, LibraryMode.GIT, git=source, dry_run=dry_run)
     if not keep_vendored:
@@ -499,7 +499,7 @@ def link_library(
     checkout: Path, keep_vendored: bool, force: bool, dry_run: bool
 ) -> None:
     """CLI entry for ``lup-devtools dev library link`` (see module docstring)."""
-    root = find_project_root()
+    root = project_root()
     package = (checkout / VENDORED_ROOT).resolve()
     if not (package / "pyproject.toml").is_file():
         raise typer.BadParameter(f"no lup package at {package}")
@@ -512,7 +512,7 @@ def link_library(
 
 def library_status() -> None:
     """CLI entry for ``lup-devtools dev library status`` (see module docstring)."""
-    root = find_project_root()
+    root = project_root()
     mode = read_mode(root)
     typer.echo(f"mode: {mode}")
     match mode:

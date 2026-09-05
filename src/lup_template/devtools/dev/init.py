@@ -26,7 +26,7 @@ from tomlkit.items import Comment
 import typer
 from pydantic import BaseModel
 
-from lup.workspace.paths import find_project_root
+from lup.workspace.paths import project_root
 from lup.devtools.dev.plugin import set_marketplace_name
 from lup_template.devtools.harness.catalog import declared_plugin
 from lup.execution.shell import git
@@ -421,7 +421,7 @@ def rename_package(
         typer.echo("Error: new name is the same as the current name", err=True)
         raise typer.Exit(1)
 
-    root = find_project_root()
+    root = project_root()
     src_dir = root / "src"
     old_pkg = src_dir / "lup_template"
     new_pkg = src_dir / new_name
