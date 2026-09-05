@@ -37,7 +37,8 @@ from lup.harness.environment import non_interactive_environment
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
 from lup.policy.profiles import compile_boundary, depended_on, measured
-from lup.sandbox.rail import lease_for
+from lup.sandbox.rail import AccessibleRoot, fleet_lease
+from lup.devtools.sync import accessible_roots
 from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import (
     Finding,
@@ -707,6 +708,11 @@ def report_inside_requirements(
         login,
         interactive=False,
         sentinels=sentinels,
+        # The same mounts a session gets, for the reason this probe assembles
+        # nothing of its own: a container built without the declared roots is
+        # a container no session opens, and a placement verified in one says
+        # nothing about the other.
+        accessible=accessible_roots(),
     )
     # The same values on both sides of one call, which is the whole of what a
     # placement probe asks. Injected into the argv above and handed to the
@@ -836,6 +842,7 @@ def codex_sandbox_arguments(
     environment: EnvVars,
     extra_args: list[str],
     contained: bool = False,
+    accessible: list[AccessibleRoot] = [],
 ) -> list[str]:
     """Compose the interactive Codex envelope that LUP_SANDBOX_ACTIVE vouches for.
 
@@ -914,21 +921,34 @@ def codex_sandbox_arguments(
     # The envelope goes on either way. What a failed probe withdraws is the
     # claim, not the confinement: leaving the sandbox off because it could not
     # be verified would answer a boundary nobody could measure by removing it.
-    return ["--sandbox", "workspace-write", *writable_root_arguments()]
+    return ["--sandbox", "workspace-write", *writable_root_arguments(accessible)]
 
 
-def writable_root_arguments() -> list[str]:
+def writable_root_arguments(accessible: list[AccessibleRoot] = []) -> list[str]:
     """Widen the workspace-write root to the tree/ holding sibling worktrees.
 
     Codex roots writes at the launch directory, so a feature worktree this
     project's own workflow prescribes creating lands outside the boundary
     and cannot be edited from the session that created it.
+
+    The declared roots widen it alongside, which is what makes this the same
+    change as the Claude settings merge rather than a second policy: one
+    registration, and both runtimes' uncontained sandboxes admit it. The
+    spelling is each runtime's own -- a settings document there, a dotted
+    TOML override here, whose value the CLI parses as TOML and falls back to
+    treating as a literal string.
+
+    A root nothing declared writable is left out rather than admitted
+    read-only: this key grants writes, and there is no Codex spelling for
+    "reachable and not writable" to be faithful to. Reads are not what it
+    governs.
     """
     try:
         tree = get_tree_dir()
     except (typer.Exit, SystemExit):
         return []
-    return ["-c", f'sandbox_workspace_write.writable_roots=["{tree}"]']
+    roots = [str(tree), *[str(item.path) for item in accessible if item.writable]]
+    return ["-c", f"sandbox_workspace_write.writable_roots={json.dumps(roots)}"]
 
 
 def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
@@ -991,7 +1011,9 @@ def codex_resume_arguments(resume: Resumption) -> list[str]:
     return ["resume", "--last"] if resume.latest else []
 
 
-def claude_sandbox_arguments(plugin: Plugin, contained: bool = False) -> list[str]:
+def claude_sandbox_arguments(
+    plugin: Plugin, contained: bool = False, accessible: list[AccessibleRoot] = []
+) -> list[str]:
     """Say what this launch means the Claude sandbox to be, in one settings merge.
 
     Uncontained, that is a widening: Claude roots writes at the working
@@ -999,6 +1021,12 @@ def claude_sandbox_arguments(plugin: Plugin, contained: bool = False) -> list[st
     command a session runs — and running the toolchain over one is ordinary
     work here, which is why the symptom arrives as pytest failing to write a
     cache and `ruff format` refusing to save. Neither error names a sandbox.
+
+    The declared roots widen it the same way and for the same reason they
+    reach the container's mount table: a project registered as reachable is
+    one this session is meant to write, and a boundary that admitted it in
+    one posture and refused it in the other would make where the session runs
+    the thing that decides what it can do.
 
     The path is this machine's, so it is resolved at launch and passed as
     settings rather than declared: an artifact carrying an absolute path
@@ -1042,7 +1070,11 @@ def claude_sandbox_arguments(plugin: Plugin, contained: bool = False) -> list[st
         tree = get_tree_dir()
     except (typer.Exit, SystemExit):
         return []
-    allowed = [*hooks.sandbox.writable_paths, str(tree)]
+    allowed = [
+        *hooks.sandbox.writable_paths,
+        str(tree),
+        *[str(item.path) for item in accessible if item.writable],
+    ]
     widened = {"sandbox": {"filesystem": {"allowWrite": allowed}}}
     return ["--settings", json.dumps(widened)]
 
@@ -1097,6 +1129,7 @@ def settle_boundary(
     sentinels: LaunchSentinels,
     environment: EnvVars,
     banner: Banner,
+    accessible: list[AccessibleRoot] = [],
 ) -> BoundaryPreflight:
     """Compile what this launch promised, measure it, and refuse if it fell short.
 
@@ -1117,6 +1150,13 @@ def settle_boundary(
     them. One call answers for both postures, which is what stops the two
     from coming to disagree about what this session may write.
 
+    ``accessible`` arrives as an argument rather than being read here, which
+    is the one part of the lease that cannot be recomputed freely: resolving
+    a registration can clone it, so a launch settles the list once and hands
+    the same one to the boundary and to the argv. Passed empty, this answers
+    for the checkout alone -- which is what a caller with no registry to read
+    should get, rather than a boundary that quietly went looking for one.
+
     A refusal is said here and everything else is held. The banner is printed
     after the last measurement, and a launch that raises never reaches it --
     so the one report a reader cannot afford to lose is the one that cannot
@@ -1127,7 +1167,7 @@ def settle_boundary(
     boundary = compile_boundary(
         declared,
         contained=not unsandboxed,
-        writable=list(lease_for(root).writable),
+        writable=list(fleet_lease(root, accessible=accessible).writable),
     )
     preflight = measured(boundary, depended_on(declared, not unsandboxed), findings)
     said = preflight.opening()
@@ -1191,9 +1231,25 @@ def session_argv(
     session that had already ended.
     """
     banner = cleared.banner
+
+    # Settled once and handed to everything that needs it. Resolving a
+    # registration can clone it, so a second resolution would be a second
+    # trip to the forge -- and, where the two disagreed, a boundary compiled
+    # against one set of roots and mounts built from another.
+    def told(said: str) -> None:
+        """Route the registry's own progress into the banner rather than past it."""
+        banner.add([Notice(text=said, urgency="boundary")])
+
+    accessible = accessible_roots(told)
     if unsandboxed:
         settle_boundary(
-            plugin, unsandboxed, cleared.findings, sentinels, environment, banner
+            plugin,
+            unsandboxed,
+            cleared.findings,
+            sentinels,
+            environment,
+            banner,
+            accessible,
         )
         say_opening(cleared, cleared.findings, transcript)
         return [cli, *arguments]
@@ -1220,6 +1276,7 @@ def session_argv(
         ),
         banner=banner,
         sentinels=sentinels,
+        accessible=accessible,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -1245,7 +1302,9 @@ def session_argv(
     # placement behind the argv this session opens with. A preflight built
     # from either alone would report a capability nothing asked about.
     measured_here = [*cleared.findings, *inside]
-    settle_boundary(plugin, unsandboxed, measured_here, sentinels, environment, banner)
+    settle_boundary(
+        plugin, unsandboxed, measured_here, sentinels, environment, banner, accessible
+    )
     say_opening(cleared, measured_here, transcript)
     return [*opening, cli, *arguments]
 
@@ -1339,7 +1398,11 @@ def launch_claude(
     arguments.extend(
         [
             *[flag for directory in named for flag in ("--plugin-dir", str(directory))],
-            *claude_sandbox_arguments(plugin, contained=not unsandboxed),
+            *claude_sandbox_arguments(
+                plugin,
+                contained=not unsandboxed,
+                accessible=accessible_roots() if unsandboxed else [],
+            ),
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]
@@ -1451,7 +1514,11 @@ def launch_codex(
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     envelope = codex_sandbox_arguments(
-        plugin, environment, extra_args, contained=not unsandboxed
+        plugin,
+        environment,
+        extra_args,
+        contained=not unsandboxed,
+        accessible=accessible_roots() if unsandboxed else [],
     )
     store = CodexWorktreeHomeStore()
     home = select_codex_home(codex_home, environment, project_root(), profile, store)

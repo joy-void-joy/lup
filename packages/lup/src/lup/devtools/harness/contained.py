@@ -42,7 +42,13 @@ from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import Manifest
 from lup.providers.login import ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
-from lup.sandbox.rail import Lease, lease_for, repository_layout
+from lup.sandbox.rail import (
+    AccessibleRoot,
+    Lease,
+    fleet_lease,
+    hold_pruning_across,
+    repository_layout,
+)
 
 
 def image_tag(dockerfile: str) -> str:
@@ -1439,6 +1445,54 @@ def build_image(
             ) from error
 
 
+def fleet_notice(accessible: list[AccessibleRoot]) -> list[Notice]:
+    """What this session can reach beyond its own checkout, and in which mode.
+
+    Said because a mount nobody announced is one that gets debugged rather
+    than used: an operator who does not know another project is open will
+    work around its absence, and one who does not know it is read-only reads
+    the refusal as a broken checkout.
+
+    Whole paths rather than the registry's short names. The name is what the
+    symlink under `refs/` is called, and the thing a reader has to be able to
+    check is which directory on their machine this session can now write.
+    """
+    if not accessible:
+        return []
+    return [
+        Notice(
+            text="Reachable projects: "
+            + ", ".join(
+                f"{item.path} {'read-write' if item.writable else 'read-only'}"
+                for item in sorted(accessible, key=lambda item: item.path)
+            ),
+            urgency="boundary",
+        )
+    ]
+
+
+def pruning_notice(refused: list[Path]) -> list[Notice]:
+    """What to say when a repository would not take the prune guard.
+
+    Not a refusal to launch. The mounts are the guard that matters and they
+    stand either way; this is the one behind them, and it covers the case
+    where they are subtly wrong. Silence would leave a session one `git gc`
+    away from removing a worktree's administrative state in a repository
+    nobody here owns, with nothing having said so.
+    """
+    if not refused:
+        return []
+    return [
+        Notice(
+            text=", ".join(str(path) for path in refused)
+            + " would not take `gc.worktreePruneExpire`, so a `git gc` in this "
+            "session could remove the administrative state of a worktree it "
+            "cannot see. The mounts still hold; this is the guard behind them.",
+            urgency="boundary",
+        )
+    ]
+
+
 def contained_argv(
     image: Image,
     manifest: Manifest,
@@ -1452,6 +1506,7 @@ def contained_argv(
     banner: Banner | None = None,
     sentinels: LaunchSentinels = LaunchSentinels(),
     inherited_environment: list[str] | None = None,
+    accessible: list[AccessibleRoot] = [],
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1505,7 +1560,11 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
-    lease = lease_for(root, human_owned)
+    lease = fleet_lease(root, human_owned, accessible)
+    said.add(fleet_notice(accessible))
+    said.add(
+        pruning_notice(hold_pruning_across([root, *(item.path for item in accessible)]))
+    )
     record_boundary(lease, image.egress, root)
     # Read on the host and passed in, never resolved inside: the file that
     # answers "where does this remote point" is `.git/config`, which the

@@ -56,7 +56,9 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
     monkeypatch.setattr(launch, "session_argv", lambda name, *a, **k: [name])
     monkeypatch.setattr(
-        launch, "claude_sandbox_arguments", lambda _plugin, contained=False: []
+        launch,
+        "claude_sandbox_arguments",
+        lambda _plugin, contained=False, accessible=[]: [],
     )
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _env: {})
     monkeypatch.setattr(
@@ -107,7 +109,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "codex_sandbox_arguments",
-        lambda _plugin, _environment, _args, contained=False: [],
+        lambda _plugin, _environment, _args, contained=False, accessible=[]: [],
     )
     monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda: store)
     monkeypatch.setattr(launch, "select_codex_home", lambda *args: home)
