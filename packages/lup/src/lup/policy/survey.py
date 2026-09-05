@@ -13,7 +13,9 @@ which is why the walk is library mechanism rather than one repository's test.
 
 from pydantic import BaseModel
 
+from lup.policy.kernel.commands import no_write_facts, unresolved_evidence
 from lup.policy.kernel.decision import DecisionEffect, SandboxPlacement
+from lup.policy.kernel.effects import declared_verdict
 from lup.policy.kernel.rows import RuleLevel, ShellRuleRow
 from lup.policy.kernel.shell import classify_shell
 from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
@@ -44,7 +46,15 @@ class SurveyedRule(BaseModel, frozen=True):
     path: str
     level: RuleLevel
     effect: DecisionEffect
-    effect_source: RuleLevel
+    """What this row earns, derived from what it declares rather than read off it.
+
+    Taken against the same unresolved reading the classifier uses, so a survey
+    reports the answer a session would reach and not a second one beside it.
+    What only a resolved path could change -- a capture discharging a loss, a
+    write landing in a scratch tree -- is by definition not a property of the
+    row, and was not in the column this replaces either.
+    """
+    effects_source: RuleLevel
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
 
@@ -62,7 +72,7 @@ class SurveyedRule(BaseModel, frozen=True):
             return f"inherited from the {source}"
 
         return (
-            f"{self.path}: {self.effect} ({origin(self.effect_source)}),"
+            f"{self.path}: {self.effect} ({origin(self.effects_source)}),"
             f" runs {self.sandbox} ({origin(self.sandbox_source)})"
         )
 
@@ -88,8 +98,10 @@ def survey_shell_rules(rules: list[ShellCommandRule]) -> list[SurveyedRule]:
         SurveyedRule(
             path=rule_path(row),
             level=rule_level(row),
-            effect=row["effect"],
-            effect_source=row["effect_source"],
+            effect=declared_verdict(
+                row["effects"], row["refuses"], unresolved_evidence(no_write_facts())
+            ),
+            effects_source=row["effects_source"],
             sandbox=row["sandbox"],
             sandbox_source=row["sandbox_source"],
         )

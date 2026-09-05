@@ -9,6 +9,7 @@ stated reason survives it, and that it arrives somewhere a person reads.
 """
 
 from lup.policy.enforcement import RELAYED_NOTICE, policy_hook_output
+from lup.policy.kernel.effects import declare
 from lup.policy.kernel.shell import decide_shell
 from lup.policy.models import Decision
 from lup.policy.rules import pydantic_decision
@@ -17,7 +18,7 @@ from lup.policy.shell_rules import ShellCommandRule, erase_shell_rules
 REFUSING = [
     ShellCommandRule(
         name="rm",
-        default_effect="ask",
+        effects=[declare("destroys_uncaptured", scope="targeted")],
         reason="removing a file is not reversible",
     )
 ]

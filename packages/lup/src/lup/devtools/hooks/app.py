@@ -23,15 +23,13 @@ import typer
 
 from pydantic import AnyHttpUrl
 
+from lup.devtools.hooks.classify import shell_decision as classify_shell
 from lup.devtools.hooks.corpus import read_corpus
-from lup.harness.enforcement import (
-    declared_path_rules,
-    measured_containment,
-    semantic_policy_for,
-)
+from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
+from lup.policy.everyday import SESSION_SHAPES, SessionShape
 from lup.policy.foreign import foreign_warnings
-from lup.policy.models import Decision, FetchUrl, ShellCommand
+from lup.policy.models import Decision, FetchUrl
 from lup.workspace.paths import project_root
 from lup.devtools.utils import output_json
 
@@ -84,34 +82,13 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         interactive: bool,
         trapped: bool = False,
     ) -> Decision:
-        """Classify one shell command exactly as a live session would.
+        """This project's declaration, taken through the shared classifier.
 
-        The host facts a decision needs — which redirect targets already exist,
-        which operands Git could restore, which are directories — are resolved
-        by the policy itself against ``cwd``, so this answer is the answer a
-        session standing here would get rather than one reached without them.
-
-        ``trapped`` asks the other question a placement raises: what a session
-        an OS sandbox confines, on a runtime that puts no single call outside
-        it, is told about a command that has to run outside. Left off, the
-        answer is the declared verdict — the placement itself, which is what a
-        reader wants to see. Turned on, it is the refusal that boundary reaches.
-
-        The undo layer is reported as present either way, because it is: a
-        session snapshots the tree before every command, and a reader asking
-        what they will be asked about should be told what a session is told.
+        Which the everyday sweep in `dev check` also takes: two callers asking
+        what a command earns must not answer it differently, or the sweep is
+        checking a policy nobody runs.
         """
-        held = measured_containment(project_root())
-        policy = semantic_policy_for(
-            declared(),
-            autonomous=autonomous,
-            interactive=interactive,
-            sandbox_active=trapped,
-            recovered=True,
-            contained=held.contained,
-            inside_placement=held.inside_placement,
-        )
-        return policy.decide(ShellCommand(command=command, cwd=project_root()))
+        return classify_shell(declared(), command, autonomous, interactive, trapped)
 
     @app.command("classify")
     def classify_command(
@@ -164,7 +141,12 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
 
     @app.command("sweep")
     def sweep_commands(
-        file: Annotated[Path, typer.Argument(help="A file of commands, one per line")],
+        file: Annotated[
+            Path | None,
+            typer.Argument(
+                help="A file of commands, one per line; omit for the declared corpus"
+            ),
+        ] = None,
         autonomous: Annotated[
             bool,
             typer.Option("--autonomous", help="Judge as a reviewed worker session"),
@@ -173,35 +155,94 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
             bool,
             typer.Option("--headless", help="Judge with no human to answer an ask"),
         ] = False,
+        trapped: Annotated[
+            bool,
+            typer.Option(
+                "--trapped",
+                help="Judge as a confined session whose runtime cannot escape",
+            ),
+        ] = False,
         as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
     ) -> None:
         """Classify a list of commands at once, and exit non-zero if any is not allowed.
 
-        This is the shape a change to the vocabulary should be checked with:
-        keep the everyday commands in a file, and a rule that tightens
-        something it did not mean to tighten fails here instead of in
-        somebody's session.
+        This is the shape a change to the vocabulary should be checked with: a
+        rule that tightens something it did not mean to tighten fails here
+        instead of in somebody's session.
+
+        With no file, the list is the one this project declared as its
+        everyday commands — the same list `dev check` sweeps, in the same
+        postures, so a failure there is reproduced here with the reason each
+        command was stopped for. A file is for a question this project has not
+        settled: a candidate corpus, or the commands a recorded session was
+        interrupted about.
+
+        The declared corpus is swept in every posture a session runs in,
+        because it asserts that these commands allow and a verdict is only
+        ever reached for somebody. Naming one with a flag asks about that one
+        instead, which is also what a file gets: a question is asked from
+        somewhere, and the flags say where.
+
+        Examples::
+
+            $ uv run lup-devtools hooks sweep
+            $ uv run lup-devtools hooks sweep --autonomous --headless
+            $ uv run lup-devtools hooks sweep tmp/recorded_asks.txt
         """
-        commands = [
-            line.strip()
-            for line in file.read_text(encoding="utf-8").splitlines()
-            if line.strip() and not line.startswith("#")
-        ]
+        commands = (
+            [
+                command
+                for family in declared().everyday_commands
+                for command in family.commands
+            ]
+            if file is None
+            else [
+                line.strip()
+                for line in file.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
+        )
+        shapes = (
+            list(SESSION_SHAPES)
+            if file is None and not (autonomous or headless or trapped)
+            else [
+                SessionShape(
+                    what=", ".join(
+                        [
+                            "worker" if autonomous else "attended",
+                            *(["headless"] if headless else []),
+                            *(["contained"] if trapped else []),
+                        ]
+                    ),
+                    autonomous=autonomous,
+                    interactive=not headless,
+                    trapped=trapped,
+                )
+            ]
+        )
         decisions = [
-            (command, shell_decision(command, autonomous, not headless))
+            (
+                shape,
+                command,
+                shell_decision(
+                    command, shape.autonomous, shape.interactive, shape.trapped
+                ),
+            )
+            for shape in shapes
             for command in commands
         ]
         if as_json:
             output_json(
                 [
-                    {"subject": command, **decision.model_dump()}
-                    for command, decision in decisions
+                    {"subject": command, "shape": shape.what, **decision.model_dump()}
+                    for shape, command, decision in decisions
                 ]
             )
         else:
-            for command, decision in decisions:
-                typer.echo(f"{decision.effect:>5}  {command}")
-        if any(decision.effect != "allow" for _, decision in decisions):
+            for shape, command, decision in decisions:
+                posture = f"  {shape.what}:" if len(shapes) > 1 else ""
+                typer.echo(f"{decision.effect:>5}{posture}  {command}")
+        if any(decision.effect != "allow" for _, _, decision in decisions):
             raise typer.Exit(1)
 
     @app.command("roots")

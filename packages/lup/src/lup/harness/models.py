@@ -35,6 +35,7 @@ from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
+from lup.policy.everyday import CommandFamily
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
 from lup.seams import Selection
@@ -1068,6 +1069,20 @@ class HookSet(BaseModel, frozen=True):
             "library holds no opinion: an "
             "empty list judges every runner invocation by the ordinary shell "
             "vocabulary instead"
+        ),
+    )
+    everyday_commands: list[CommandFamily] = Field(
+        default=[],
+        description=(
+            "Commands an ordinary session runs here, which this policy must "
+            "keep allowing. Swept by `dev check` against the declared table, "
+            "so a rule that tightens something it did not mean to fails there "
+            "rather than in somebody's session. Read nowhere else and "
+            "compiled into nothing: it is a claim about the table, not a row "
+            "in it. `lup.policy.everyday.everyday_commands` offers the "
+            "families every project shares; an empty list asserts nothing, "
+            "which leaves the only measurement of this vocabulary the one "
+            "direction the recorded asks already read"
         ),
     )
     rules: RuleSelection = Field(

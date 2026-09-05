@@ -149,6 +149,19 @@ def semantic_policy_for(
     allowed = [declared_scope(scope) for scope in hooks.allowed_fetch]
     denied = [declared_scope(scope) for scope in hooks.denied_fetch]
     roles = declared_role_rows(list(hooks.path_roles))
+    # One instance, given to both families. A shell write carrying its own
+    # content reaches the edit gates, and it has to reach the same ones an
+    # `Edit` reaches: a second instance would be a second table to keep in
+    # step, and the route deciding which rules apply is the divergence this
+    # whole policy exists to remove.
+    edits = EditPolicy(
+        declared_path_rules(hooks),
+        autonomous=autonomous,
+        path_roles=roles,
+        grants=grants,
+        acceptance_guard=guard.erased() if (guard := hooks.acceptance_guard) else None,
+        edit_rules=hooks.resolved_edit_rules(),
+    )
     return SemanticToolPolicy(
         fetch=FetchPolicy(allowed, denied),
         shell=ShellPolicy(
@@ -172,16 +185,8 @@ def semantic_policy_for(
             path_rules=declared_path_rules(hooks),
             recoverable_target_limit=hooks.recoverable_target_limit,
             runner_targets=list(hooks.runner_targets),
+            authored=edits,
         ),
-        edit=EditPolicy(
-            declared_path_rules(hooks),
-            autonomous=autonomous,
-            path_roles=roles,
-            grants=grants,
-            acceptance_guard=guard.erased()
-            if (guard := hooks.acceptance_guard)
-            else None,
-            edit_rules=hooks.resolved_edit_rules(),
-        ),
+        edit=edits,
         refused_tools=list(hooks.refused_tools),
     )

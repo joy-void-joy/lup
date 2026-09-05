@@ -25,6 +25,7 @@ from lup.providers.codex.hooks import (
 from lup.policy.hooks import create_permission_hooks
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy
+from lup.policy.kernel.effects import declare
 from lup.policy.shell_rules import ShellCommandRule
 from lup.sessions.composition import (
     AcceptedTurn,
@@ -441,8 +442,12 @@ async def test_a_command_approval_is_judged_on_the_command_it_carries() -> None:
     policy = SemanticToolPolicy(
         shell=ShellPolicy(
             [
-                ShellCommandRule(name="ls", default_effect="allow"),
-                ShellCommandRule(name="curl", default_effect="deny", reason="egress"),
+                ShellCommandRule(
+                    name="ls", effects=[declare("reads_path", scope="project")]
+                ),
+                ShellCommandRule(
+                    name="curl", effects=[], refuses="egress", reason="egress"
+                ),
             ]
         )
     )

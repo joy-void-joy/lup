@@ -27,6 +27,7 @@ from lup.policy.enforcement import (
     policy_hook_output,
 )
 from lup.policy.kernel.decision import SANDBOX_TRAPPED_REASON, DecisionEffect
+from lup.policy.kernel.effects import declare
 from lup.policy.shell_rules import ShellCommandRule
 from lup.policy.vocabulary import runner_target_rules
 from lup.types import JsonObject
@@ -359,9 +360,21 @@ async def test_a_worker_is_judged_by_the_composition_a_run_actually_builds() -> 
 def placement_rules() -> list[ShellCommandRule]:
     """One command that follows the session, one confined, one on the host."""
     return [
-        ShellCommandRule(name="checker", default_effect="allow", sandbox="ambient"),
-        ShellCommandRule(name="confined", default_effect="allow", sandbox="inside"),
-        ShellCommandRule(name="remote", default_effect="allow", sandbox="outside"),
+        ShellCommandRule(
+            name="checker",
+            effects=[declare("reads_path", scope="project")],
+            sandbox="ambient",
+        ),
+        ShellCommandRule(
+            name="confined",
+            effects=[declare("reads_path", scope="project")],
+            sandbox="inside",
+        ),
+        ShellCommandRule(
+            name="remote",
+            effects=[declare("reads_path", scope="project")],
+            sandbox="outside",
+        ),
     ]
 
 

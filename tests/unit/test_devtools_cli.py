@@ -274,23 +274,44 @@ def effect_of(arguments: list[str], environment: dict[str, str | None]) -> str:
         app, ["dev", "policy", "--json", *arguments], env=environment
     )
     assert result.stdout, result.output
-    return str(json.loads(result.stdout)[0]["effect"])
+    readings = json.loads(result.stdout)[0]["readings"]
+    assert len(readings) == 1, f"expected one placement, got {readings}"
+    return str(readings[0]["effect"])
 
 
-def test_dev_policy_answers_for_the_session_it_is_asked_in() -> None:
-    """The default reads this session's boundary rather than a bare host's.
+def test_dev_policy_answers_for_every_placement_rather_than_one() -> None:
+    """Both answers, so no reader has to know which session they were given.
 
-    The guidance sends a reader here *before* they spend a turn, so answering
-    as an unconfined host would falls on the one reader the command exists
-    for, and reports the question a sandboxed session is never asked — which
-    makes the policy read as far more ask-happy than it is.
+    The guidance sends a reader here *before* they spend a turn, and placement
+    is the fact that moves the most verdicts — an unclassified command is
+    settled by containment inside the boundary and refused outside it. One
+    answer leaves the reader holding a guess about which session it described,
+    and the guess is invisible, which is the worst property an answer can have.
+
+    So the environment stops deciding what they are told. The pinning flags
+    below narrow this rather than switching it, which is why no setting reports
+    an answer the default would have withheld.
     """
-    assert effect_of(["frobnicate"], {"LUP_SANDBOX_ACTIVE": "1"}) == "allow"
-    assert effect_of(["frobnicate"], {"LUP_SANDBOX_ACTIVE": None}) == "ask"
+    result = runner.invoke(
+        app,
+        ["dev", "policy", "--json", "frobnicate"],
+        env={"LUP_SANDBOX_ACTIVE": None},
+    )
+    readings = json.loads(result.stdout)[0]["readings"]
+    assert [reading["placement"] for reading in readings] == [
+        "sandboxed",
+        "unsandboxed",
+    ]
+    assert [reading["effect"] for reading in readings] == ["allow", "ask"]
 
 
 def test_either_boundary_stays_askable_for_explicitly() -> None:
-    """The flag reads both ways, so neither answer needs a matching session."""
+    """The flag still narrows to one placement, and the environment still cannot.
+
+    Kept because a caller scripting against this wants one row rather than two,
+    and because dropping it would have been a capability removed for the
+    convenience of the change that replaced it.
+    """
     assert (
         effect_of(["--no-sandbox", "frobnicate"], {"LUP_SANDBOX_ACTIVE": "1"}) == "ask"
     )

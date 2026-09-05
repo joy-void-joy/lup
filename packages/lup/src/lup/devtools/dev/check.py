@@ -18,8 +18,11 @@ from lup.harness.codescan.markers import find_feedback
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     TEMPLATE_GUIDANCE_HEADROOM,
+    HookSet,
     document_byte_size,
 )
+from lup.devtools.hooks.classify import stopped_everyday
+from lup.policy.everyday import SESSION_SHAPES
 from lup.workspace.paths import is_template_scaffold, project_root
 
 from lup.devtools.dev.antipatterns import scan_antipatterns
@@ -370,6 +373,7 @@ def scan_reports(
     compositions: list[NativeHarnessComposition],
     repository_writers: list[RepositoryWriter],
     git_guards: list[GitGuard],
+    hooks_declaration: HookSet,
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them."""
 
@@ -511,6 +515,37 @@ def scan_reports(
             ],
         )
 
+        # The one measurement of the shell vocabulary that reads the direction
+        # a tightening shows up in. The recorded asks say which commands a
+        # question was raised about, and the rule census says what each row
+        # earns; neither would notice a de-escalation that stopped firing, so
+        # a change putting a question in front of `git status` passes both.
+        stopped = stopped_everyday(hooks_declaration)
+        declared_count = sum(
+            len(family.commands) for family in hooks_declaration.everyday_commands
+        )
+        swept = declared_count * len(SESSION_SHAPES)
+        yield CheckReport(
+            name="everyday commands",
+            passed=not stopped,
+            lines=[
+                f"everyday commands: FAIL ({len(stopped)} stopped of {swept})",
+                *(
+                    line
+                    for item in stopped
+                    for line in (
+                        f"  [{item.effect}] {item.command}",
+                        f"    {item.what}, {item.shape} — {item.reason}",
+                    )
+                ),
+            ]
+            if stopped
+            else [
+                f"everyday commands: ok, {declared_count} allowed in "
+                f"{len(SESSION_SHAPES)} session shapes"
+            ],
+        )
+
         # The same reading the commit hook and the pipeline refuse on, asked
         # here rather than recomposed, so a tree cannot be stale at one gate
         # and current at another.
@@ -565,6 +600,7 @@ def run_checks(
     compositions: list[NativeHarnessComposition],
     repository_writers: list[RepositoryWriter],
     git_guards: list[GitGuard],
+    hooks_declaration: HookSet,
     scope: list[str] | None = None,
     test_workers: int = TEST_WORKERS,
 ) -> None:
@@ -595,6 +631,7 @@ def run_checks(
         compositions,
         repository_writers,
         git_guards,
+        hooks_declaration,
     )
 
     if fix:

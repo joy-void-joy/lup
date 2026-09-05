@@ -50,7 +50,6 @@ from lup.devtools.harness.launch import relocation_hint
 from lup.devtools.project import DevProject
 from lup.harness.models import HookSet, Plugin
 from lup.harness.process import LocalProcessLauncher
-from lup.policy.assets.host import sandbox_active
 from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.policy.vocabulary import default_vocabulary
 from lup.runs.ledger import RunDirectory
@@ -634,6 +633,7 @@ def create_dev_app(
             compositions=native_targets.resolve(native_targets.every, project_root()),
             repository_writers=repository_writers,
             git_guards=declarations.git_guards,
+            hooks_declaration=declarations.hooks,
             scope=check.changed_paths(since) if since is not None else None,
         )
 
@@ -1189,7 +1189,7 @@ def create_dev_app(
             bool | None,
             typer.Option(
                 "--sandbox/--no-sandbox",
-                help="Judge as an OS-sandboxed session would (default: this one)",
+                help="Show only this placement's answer (default: show both)",
             ),
         ] = None,
         autonomous: Annotated[
@@ -1206,17 +1206,17 @@ def create_dev_app(
                 f"unknown kind {kind!r}: expected shell, fetch, or edit", err=True
             )
             raise typer.Exit(2)
-        # The guidance sends a reader here before they spend a turn, so the
-        # question is what *this* session would be told rather than what a bare
-        # host would be. Reading it here keeps the explanation a pure function
-        # of its arguments, the same seam the dispatcher's host half keeps.
+        # Every placement, not this session's. The guidance sends a reader here
+        # before they spend a turn, and one answer leaves them holding a guess
+        # about which session it described -- an invisible guess, which is the
+        # worst kind. Both answers cost one extra composition and end the guess.
         policy_explain.explain(
             subjects,
             kind,
-            sandbox_active() if sandbox is None else sandbox,
             autonomous,
             as_json,
             declared().hooks,
+            sandbox,
         )
 
     @app.command("vocabulary")
