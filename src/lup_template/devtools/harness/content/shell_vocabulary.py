@@ -23,6 +23,8 @@ remote ref outright stays guarded, because no second push restores it.
 and ``git restore``, so ``checkout`` denies and names them instead of asking.
 """
 
+from lup.policy.everyday import CommandFamily, everyday_commands
+from lup.policy.kernel.effects import declare
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
@@ -66,14 +68,22 @@ def lup_devtools_rule() -> ShellCommandRule:
         " commands must start while the manifest does not parse, is documented"
         " without it"
     )
+    # What it does is run this project's own toolchain, and that is the same
+    # whichever spelling reached it -- so the refusal is stated as one rather
+    # than as an effect. `uv run lup-devtools dev check` and `lup-devtools dev
+    # check` do identical things; only one of them guarantees the environment.
     return ShellCommandRule(
         name="lup-devtools",
-        default_effect="deny",
+        effects=[declare("runs_declared_target", scope="lup-devtools")],
+        refuses=reach_through_uv,
         subcommands=[
             ShellSubcommandRule(
                 name="dev",
-                effect="deny",
-                operations=[ShellOperationRule(name="conflict", effect="allow")],
+                operations=[
+                    # The documented exception, which clears the refusal it
+                    # would otherwise inherit rather than restating the grant.
+                    ShellOperationRule(name="conflict", refuses="")
+                ],
                 reason=reach_through_uv,
             )
         ],
@@ -86,6 +96,31 @@ RUNNER_TARGETS: list[RunnerTargetRule] = runner_target_rules()
 
 Taken as the library offers it: the checkers are this project's, and
 `lup-devtools` is the toolchain the group places outside the sandbox.
+"""
+
+
+EVERYDAY_COMMANDS: list[CommandFamily] = everyday_commands(
+    also=[
+        CommandFamily(
+            what="reaching this project's own toolchain",
+            commands=[
+                "uv run lup-devtools dev check",
+                "uv run lup-devtools dev pending",
+                "uv run lup-devtools dev issues",
+                "uv run lup-devtools hooks classify 'ls'",
+                "uv run lup-devtools hooks sweep tmp/commands.txt",
+                "uv run lup-devtools py info lup.policy.kernel.effects",
+                "uv run lup-devtools py search 'declare'",
+                "uv run lup-devtools harness generate all",
+            ],
+        )
+    ]
+)
+"""What an ordinary session here must keep being allowed to run.
+
+The library's families, plus the half no other project inherits: every one of
+these reaches `lup-devtools` through `uv run`, and a rule that stopped one of
+them would stop a step the guidance documents by name.
 """
 
 

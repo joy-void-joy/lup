@@ -44,6 +44,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel
 
 from lup.policy.kernel.decision import CheckpointRequirement, SandboxPlacement
+from lup.policy.kernel.effects import EffectRow, declare
 from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -58,6 +59,13 @@ class JudgedCommand(BaseModel, frozen=True):
 
     name: str
     reason: str
+    effects: list[EffectRow] = []
+    """What this command does, where the group cannot say it for every member.
+
+    A group whose members share one effect derives it (the destructive verbs
+    all destroy); one whose members differ has to be told. `export` decides
+    what a later command sees and `eval` runs code nothing read -- both are
+    refused for the same reason and neither does the other's thing."""
     checkpoint: CheckpointRequirement = "unrecoverable"
     """What capture would put back what this command destroys, if any would.
 
@@ -172,7 +180,13 @@ def read_only_rules(
     are deliberately absent — each decides what some later command sees or
     does, which is the thing this list promises a reader it does not touch.
     """
-    return [ShellCommandRule(name=name, default_effect="allow") for name in commands]
+    return [
+        ShellCommandRule(
+            name=name,
+            effects=[declare("reads_path", scope="project")],
+        )
+        for name in commands
+    ]
 
 
 def judged_ask_rules(
@@ -351,7 +365,10 @@ def judged_ask_rules(
     return [
         ShellCommandRule(
             name=command.name,
-            default_effect="ask",
+            # The checkpoint column read as behaviour rather than as a
+            # requirement: it already names what capture would put back what
+            # this destroys, which is the whole of what the loss row asks.
+            effects=[declare("destroys_uncaptured", scope=command.checkpoint)],
             read_verbs=command.read_verbs,
             write_markers=command.write_markers,
             bare_reads=command.bare_reads,
@@ -364,8 +381,16 @@ def judged_ask_rules(
 
 def redirected_rules(
     commands: Sequence[JudgedCommand] = (
-        JudgedCommand(name="pip", reason="use uv add / uv remove instead of pip"),
-        JudgedCommand(name="pip3", reason="use uv add / uv remove instead of pip"),
+        JudgedCommand(
+            name="pip",
+            reason="use uv add / uv remove instead of pip",
+            effects=[declare("installs_dependency", scope="python package")],
+        ),
+        JudgedCommand(
+            name="pip3",
+            reason="use uv add / uv remove instead of pip",
+            effects=[declare("installs_dependency", scope="python package")],
+        ),
     ),
 ) -> list[ShellCommandRule]:
     """Commands denied toward the spelling a project actually uses.
@@ -373,10 +398,20 @@ def redirected_rules(
     A redirect is house style rather than a safety verdict, which is why the
     pairs are a parameter: a project on a different package manager replaces
     them instead of inheriting an argument about uv.
+
+    It is also why the refusal is stated as one rather than folded into the
+    effects. `pip install` takes the very dependency `uv add` takes -- the
+    trust question is identical and is answered identically -- and what
+    differs is which command this project keeps its lockfile through. A rule
+    that expressed that as an effect would be describing the project rather
+    than the operation.
     """
     return [
         ShellCommandRule(
-            name=command.name, default_effect="deny", reason=command.reason
+            name=command.name,
+            effects=command.effects,
+            refuses=command.reason,
+            reason=command.reason,
         )
         for command in commands
     ]
@@ -388,31 +423,37 @@ def reaching_builtin_rules(
             name="eval",
             reason="eval runs text as code, which no gate reading the command"
             " can see into — write the command out",
+            effects=[declare("runs_undeclared_program", scope="unread code")],
         ),
         JudgedCommand(
             name="source",
             reason="sourcing a script runs its code in this shell, where no"
             " gate read it — run the commands it holds",
+            effects=[declare("runs_undeclared_program", scope="unread code")],
         ),
         JudgedCommand(
             name=".",
             reason="sourcing a script runs its code in this shell, where no"
             " gate read it — run the commands it holds",
+            effects=[declare("runs_undeclared_program", scope="unread code")],
         ),
         JudgedCommand(
             name="export",
             reason="an exported variable decides what later commands see —"
             " set it on the command that needs it",
+            effects=[declare("mutates_environment", scope="shell variable")],
         ),
         JudgedCommand(
             name="declare",
             reason="a declared variable decides what later commands see —"
             " set it on the command that needs it",
+            effects=[declare("mutates_environment", scope="shell variable")],
         ),
         JudgedCommand(
             name="unset",
             reason="unsetting a variable decides what later commands see —"
             " set it on the command that needs it",
+            effects=[declare("mutates_environment", scope="shell variable")],
         ),
     ),
 ) -> list[ShellCommandRule]:
@@ -443,10 +484,18 @@ def reaching_builtin_rules(
     judged as ``rm -rf src`` and a row here would never be reached. Which is
     also the right answer — what ``exec`` runs is the whole of what it does
     to anything outside the shell it replaces.
+
+    Each states what it does beside the refusal, and the two families here do
+    different things: `eval` and the two sourcing spellings run code no gate
+    read, while `export`, `declare` and `unset` change what a later command
+    sees. Both refuse, and neither refuses because of what the other does.
     """
     return [
         ShellCommandRule(
-            name=command.name, default_effect="deny", reason=command.reason
+            name=command.name,
+            effects=command.effects,
+            refuses=command.reason,
+            reason=command.reason,
         )
         for command in commands
     ]
@@ -468,8 +517,17 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # neither — `-p` is a no-op on one that exists, and it holds
             # nothing to run. Everything landing inside it still passes the
             # write and edit gates on its own path.
+            #
+            # Which is also why the scope here is not read off the targets, as
+            # a delete's and an archive's are. `production` is untrue of
+            # `mkdir /etc/newdir` on the face of it, and the reading that
+            # would correct it — outside the checkout, so ask — is answering
+            # a question this verb does not raise: what makes a write outside
+            # worth an approval is the content arriving there, and the first
+            # write that carries any is judged on its own path, wherever the
+            # directory turned out to be. Emptiness is the claim, not the tree.
             name="mkdir",
-            default_effect="allow",
+            effects=[declare("writes_path", scope="production", write="create")],
         ),
         ShellCommandRule(
             # The same test `mkdir` passes, for the same reason. `touch` has
@@ -478,35 +536,49 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # authors an empty file, which holds nothing to run. Whatever
             # lands in that file afterwards passes the write and edit gates
             # on its own path, so asking here buys a prompt and no decision.
+            # `touch /etc/newfile` is the same answer for the reason spelled
+            # out above: the scope is stated rather than resolved because
+            # emptiness is what this row is claiming, and emptiness is the
+            # same fact in every tree.
             name="touch",
-            default_effect="allow",
+            effects=[declare("writes_path", scope="production", write="create")],
         ),
         ShellCommandRule(
             # -l/-L print fingerprints and public keys — the read-only
             # diagnostic for push-auth failures; every other form mutates the
             # agent.
             name="ssh-add",
-            default_effect="deny",
+            # The agent is the user's, not this session's, and it outlives the
+            # session either way -- which is machine state that is neither
+            # this checkout nor another host.
+            effects=[declare("mutates_environment", scope="credential agent")],
+            refuses="credential-agent changes stay with the user — ask them to run it",
             allow_flags=["-l", "-L"],
             reason="credential-agent changes stay with the user — ask them to run it",
         ),
         ShellCommandRule(
             name="ssh-agent",
-            default_effect="deny",
+            effects=[declare("mutates_environment", scope="credential agent")],
+            refuses="credential-agent lifecycle stays with the user"
+            " — ask them to run it",
             reason="credential-agent lifecycle stays with the user — ask them to run it",
         ),
         ShellCommandRule(
             name="sort",
-            default_effect="allow",
-            ask_flags=["-o", "--output", "--compress-program"],
+            effects=[declare("reads_path", scope="project")],
+            # The two halves of what was one list, and the reason it had to
+            # be two: `-o` lands the sorted output at a path, and
+            # `--compress-program` names a program run over the temporaries.
+            write_flags=["-o", "--output"],
+            ask_flags=["--compress-program"],
             reason="a sort flag that writes a file or runs a program requires approval",
         ),
         ShellCommandRule(
             # Listing a directory is a read, and `-o` lands that listing in a
             # file — the same flag on the same kind of tool as `sort -o`.
             name="tree",
-            default_effect="allow",
-            ask_flags=["-o"],
+            effects=[declare("reads_path", scope="project")],
+            write_flags=["-o"],
             checkpoint="boundary_wide",
             reason="a tree flag that writes a file requires approval",
         ),
@@ -516,21 +588,28 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # arbitrary execution wearing a search's clothes, and `-z` hands
             # the input to whichever decompressor the extension implies.
             name="rg",
-            default_effect="allow",
+            effects=[declare("reads_path", scope="project")],
             ask_flags=["--pre", "--hostname-bin", "--search-zip", "-z"],
             reason="a ripgrep flag that runs another program requires approval",
         ),
         ShellCommandRule(
             # Encoding is a filter; `-o` is the one form that lands a file.
             name="base64",
-            default_effect="allow",
-            ask_flags=["-o", "--output"],
+            effects=[declare("reads_path", scope="project")],
+            write_flags=["-o", "--output"],
             checkpoint="boundary_wide",
             reason="a base64 flag that writes a file requires approval",
         ),
         ShellCommandRule(
             name="yq",
-            default_effect="allow",
+            effects=[declare("reads_path", scope="project")],
+            # Not `write_flags`, though every one of these writes. That list
+            # is for options whose *value* is the path, and none of these
+            # carries one: `-i` is a bare marker and the file it rewrites is
+            # the operand, while `-s` takes an expression that computes the
+            # names it splits into. Nothing here resolves to a path, so the
+            # row keeps its own question rather than relaxing on a word that
+            # was never a filename.
             ask_flags=["-i", "--inplace", "--in-place", "-s", "--split-exp"],
             checkpoint="boundary_wide",
             reason=(
@@ -544,8 +623,9 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # cluster-match benign words like -noout, and no bare "-o" option
             # exists.
             name="xmllint",
-            default_effect="allow",
-            ask_flags=["--output", "-output", "--shell", "-shell"],
+            effects=[declare("reads_path", scope="project")],
+            write_flags=["--output", "-output"],
+            ask_flags=["--shell", "-shell"],
             reason=(
                 "an xmllint flag that writes files or opens a shell requires approval"
             ),
@@ -555,15 +635,19 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # screen; only the file-writing and deleting actions remain
             # flag-guarded.
             name="find",
-            default_effect="allow",
-            ask_flags=["-delete", "-fprint", "-fprint0", "-fprintf", "-fls"],
+            effects=[declare("reads_path", scope="project")],
+            # The printing actions each name the file they land in; `-delete`
+            # names nothing and removes what it matched, so it is not a write
+            # this row can resolve a path for.
+            write_flags=["-fprint", "-fprint0", "-fprintf", "-fls"],
+            ask_flags=["-delete"],
             checkpoint="boundary_wide",
             reason="a mutating find action requires approval",
         ),
         ShellCommandRule(
             # `ss -K` closes established sockets; every other form reports.
             name="ss",
-            default_effect="allow",
+            effects=[declare("reads_path", scope="project")],
             ask_flags=["-K", "--kill"],
             checkpoint="boundary_wide",
             reason="killing sockets requires approval",
@@ -574,13 +658,18 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # nothing else: connect, report, close. Every other form moves
             # bytes — `-l` listens, `-e`/`-c` hand the socket to a program.
             name="nc",
-            default_effect="deny",
+            # Reaching a host is what it does; `-z` pins it to asking whether
+            # a port answers, which is the reading form the verb list keeps.
+            effects=[declare("reaches_host", scope="netcat")],
+            refuses="netcat moves data unless -z pins it to a port scan",
             read_verbs=["-z"],
             ask_flags=["-l", "-e", "-c"],
             reason="netcat moves data unless -z pins it to a port scan",
         ),
         ShellCommandRule(
-            name="cd", default_effect="allow", reason="directory navigation"
+            name="cd",
+            effects=[declare("changes_nothing", reason="directory navigation")],
+            reason="directory navigation",
         ),
     ]
 
@@ -624,8 +713,16 @@ def runner_target_rules(
     of the boundary. Declared as a placement instead it was unmeasurable: the
     profile that grants the path and the profile that does not both read as
     ``outside``, and the second one only finds out at the first shell call.
+
+    Every target here does the one thing a blessing is: it runs something this
+    repository declares as its own. What such a target then goes on to write
+    is answered by the rows its own commands match, so nothing is said about
+    it twice.
     """
-    return [RunnerTargetRule(name=name) for name in (*ambient, *session_opening)]
+    return [
+        RunnerTargetRule(name=name, effects=[declare("runs_declared_target")])
+        for name in (*ambient, *session_opening)
+    ]
 
 
 # One criterion decides this table, applied across git's surface rather than to
@@ -698,10 +795,16 @@ GIT_REVERSIBLE_SUBCOMMANDS = (
     "mv",
     "cherry-pick",
     "revert",
-    "merge",
     "notes",
     "stage",
 )
+"""Subcommands whose changes the object store still holds afterwards.
+
+`merge` is deliberately not among them. What it does to *this* checkout is as
+reversible as a cherry-pick, but that is not what a merge is for: it is the
+step that puts work onto a branch other people build on, and the question it
+carries is about that rather than about recovering the tree.
+"""
 
 GIT_CONFIG_EXECUTING_KEYS = (
     "core.hookspath",
@@ -791,16 +894,37 @@ def git_rule(
     from where the agent runs; it is not the default, because it usually is.
     """
     leaf = [
-        ShellSubcommandRule(name=name, effect="allow")
-        for name in (*GIT_READ_ONLY_SUBCOMMANDS, *GIT_REVERSIBLE_SUBCOMMANDS)
+        *[
+            ShellSubcommandRule(
+                name=name,
+                effects=[declare("reads_path", scope="project")],
+            )
+            for name in GIT_READ_ONLY_SUBCOMMANDS
+        ],
+        *[
+            ShellSubcommandRule(
+                name=name,
+                effects=[declare("mutates_repository", scope="reversible")],
+            )
+            for name in GIT_REVERSIBLE_SUBCOMMANDS
+        ],
+        ShellSubcommandRule(
+            name="merge",
+            effects=[declare("integrates")],
+            reason="merging puts work on a branch other people build on",
+        ),
     ]
     push_flags = ["--delete", "--mirror", "--prune"]
     guarded = [
         *[
             ShellSubcommandRule(
                 name=name,
-                effect="allow",
-                ask_flags=["--output"],
+                # The read is what the verb does; `--output` is what one flag
+                # makes it also do, and the flag still carries that alone
+                # until an argument shape can add an effect rather than
+                # escalate a verdict.
+                effects=[declare("reads_path", scope="project")],
+                write_flags=["--output"],
                 checkpoint="boundary_wide",
                 reason="writing command output to a file requires approval",
             )
@@ -839,31 +963,44 @@ def git_rule(
         ],
         ShellSubcommandRule(
             name="grep",
-            effect="allow",
+            effects=[declare("reads_path", scope="project")],
             ask_flags=["-O", "--open-files-in-pager"],
             reason="opening matches in an arbitrary program requires approval",
         ),
         ShellSubcommandRule(
             name="rebase",
-            effect="allow",
+            # Rewrites commits the reflog still holds, which is what makes
+            # replaying them ordinary and `--exec` a separate question.
+            effects=[declare("mutates_repository", scope="reversible")],
             ask_flags=["-x", "--exec"],
             reason="replaying commits through a shell command requires approval",
         ),
+        # Both reach a declared remote and land objects in the store. Only
+        # `pull` puts any of it in the working tree, and it does so through a
+        # merge of refs this repository already tracks -- which is why neither
+        # carries the trust row that `clone` and `submodule` do, where the
+        # code arriving is somebody else's by definition.
         ShellSubcommandRule(
             name="fetch",
-            effect="allow",
+            effects=[
+                declare("fetches", scope="declared"),
+                declare("mutates_repository", scope="reversible"),
+            ],
             ask_flags=["--upload-pack"],
             reason="overriding the transport program requires approval",
         ),
         ShellSubcommandRule(
             name="pull",
-            effect="allow",
+            effects=[
+                declare("fetches", scope="declared"),
+                declare("mutates_repository", scope="reversible"),
+            ],
             ask_flags=["--upload-pack"],
             reason="overriding the transport program requires approval",
         ),
         ShellSubcommandRule(
             name="push",
-            effect="allow",
+            effects=[declare("publishes", scope="branch")],
             ask_refspecs=(["delete", "force"] if guard_force_push else ["delete"]),
             ask_flags=(
                 [*push_flags, "-f", "--force", "--force-with-lease"]
@@ -876,27 +1013,53 @@ def git_rule(
                 else "removing a remote ref requires approval"
             ),
         ),
+        # The same arrival `gh repo clone` is, reached by the other spelling:
+        # a whole tree of somebody's code, landing where a build can run it.
         ShellSubcommandRule(
             name="clone",
-            effect="ask",
+            effects=[
+                declare("fetches", scope="undeclared"),
+                declare("installs_dependency", scope="repository"),
+                declare("writes_path", scope="production", write="create"),
+            ],
             reason="cloning fetches external code — requires approval",
         ),
         ShellSubcommandRule(
             name="apply",
-            effect="allow",
+            # Replaces tracked content wholesale, which is what the write row
+            # refuses -- but refusing is the one answer that cannot be right
+            # here. A refusal names a route this project prefers, and for a
+            # patch there is none: re-authoring every hunk through `Edit` is
+            # not the same operation, it is a transcription of it.
+            #
+            # So the content is read where it can be, which is afterwards.
+            # `written_review` asks Git which paths the patch touches and puts
+            # each result to the gates an edit passes -- the same arrangement
+            # a redirection already gets, reached by the one route whose
+            # targets are inside a file rather than in the command.
+            effects=[
+                declare(
+                    "writes_path",
+                    scope="production",
+                    write="overwrite",
+                    reviewed=True,
+                )
+            ],
             ask_flags=["--unsafe-paths", "--build-fake-ancestor"],
             checkpoint="boundary_wide",
             reason="a patch that writes outside the working area requires approval",
         ),
         ShellSubcommandRule(
             name="restore",
-            effect="ask",
+            # Discards working-tree changes, which is the one thing in a
+            # checkout the object store was never holding.
+            effects=[declare("destroys_uncaptured", scope="targeted")],
             checkpoint="targeted",
             reason="restoring files discards working-tree changes",
         ),
         ShellSubcommandRule(
             name="rm",
-            effect="ask",
+            effects=[declare("destroys_uncaptured", scope="targeted")],
             checkpoint="targeted",
             reason="removing tracked files requires approval",
         ),
@@ -908,12 +1071,15 @@ def git_rule(
             # virtual environment. Naming a restorer here would relax the one
             # command whose whole purpose is destroying what nothing holds.
             name="clean",
-            effect="ask",
+            effects=[declare("destroys_uncaptured", scope="unrecoverable")],
             reason="deleting untracked files is destructive — requires approval",
         ),
         ShellSubcommandRule(
             name="config",
-            effect="ask",
+            # A write to a file a rule names, which is what `protected` is
+            # for. What makes it worth naming is on the key list below: some
+            # of these settings are the program git runs next.
+            effects=[declare("writes_path", scope="protected", write="overwrite")],
             # Where the write lands, when the key says nothing about it. The
             # guarded keys below judge a write to this repository's own
             # configuration; these flags aim the same write at a file the
@@ -937,7 +1103,17 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="checkout",
-            effect="deny" if redirect_checkout else "ask",
+            # What the verb does is the same either way the parameter goes:
+            # `checkout -- <path>` discards working-tree changes. What
+            # `redirect_checkout` changes is which spelling reaches that,
+            # which is a refusal rather than a different effect -- `switch`
+            # and `restore` do the same things to the same checkout.
+            effects=[declare("destroys_uncaptured", scope="targeted")],
+            refuses=(
+                "use git switch for branches or git restore for files"
+                if redirect_checkout
+                else ""
+            ),
             checkpoint="targeted",
             reason=(
                 "use git switch for branches or git restore for files"
@@ -947,37 +1123,43 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="reflog",
-            effect="allow",
+            effects=[declare("reads_path", scope="project")],
             operations=[
+                # Unrecoverable in the strict sense the scope means: the
+                # reflog is what would have recovered the thing being
+                # removed, so no capture is holding it once this runs.
                 ShellOperationRule(
                     name="expire",
-                    effect="ask",
+                    effects=[declare("destroys_uncaptured", scope="unrecoverable")],
                     reason="expiring reflog entries is destructive — requires approval",
                 ),
                 ShellOperationRule(
                     name="delete",
-                    effect="ask",
+                    effects=[declare("destroys_uncaptured", scope="unrecoverable")],
                     reason="deleting reflog entries is destructive — requires approval",
                 ),
             ],
         ),
         ShellSubcommandRule(
             name="branch",
-            effect="allow",
+            effects=[declare("mutates_repository", scope="reversible")],
             ask_flags=["-d", "-D", "--delete", "-m", "-M", "--move"],
             reason="deleting or moving a branch requires approval",
         ),
         ShellSubcommandRule(
             name="bisect",
-            effect="ask",
+            effects=[declare("destroys_uncaptured", scope="targeted")],
             operations=[
-                ShellOperationRule(name="log", effect="allow"),
+                ShellOperationRule(
+                    name="log",
+                    effects=[declare("reads_path", scope="project")],
+                ),
                 ShellOperationRule(
                     # Falls back to `git log` where no display is available,
                     # and hands it the arguments it was given.
                     name="view",
-                    effect="allow",
-                    ask_flags=["--output"],
+                    effects=[declare("reads_path", scope="project")],
+                    write_flags=["--output"],
                     checkpoint="boundary_wide",
                     reason="writing command output to a file requires approval",
                 ),
@@ -985,18 +1167,30 @@ def git_rule(
             checkpoint="targeted",
             reason="a bisect step moves HEAD across commits",
         ),
+        # The reason has always said what this is: fetching and checking out
+        # external code. That is the trust row the clones reach, spelled as a
+        # git verb, so it answers there rather than on a rule of its own.
         ShellSubcommandRule(
             name="submodule",
-            effect="ask",
+            effects=[
+                declare("fetches", scope="undeclared"),
+                declare("installs_dependency", scope="submodule"),
+            ],
             operations=[
-                ShellOperationRule(name="status", effect="allow"),
-                ShellOperationRule(name="summary", effect="allow"),
+                ShellOperationRule(
+                    name="status",
+                    effects=[declare("reads_path", scope="project")],
+                ),
+                ShellOperationRule(
+                    name="summary",
+                    effects=[declare("reads_path", scope="project")],
+                ),
             ],
             reason="submodule operations fetch and check out external code",
         ),
         ShellSubcommandRule(
             name="tag",
-            effect="allow",
+            effects=[declare("mutates_repository", scope="reversible")],
             ask_flags=["-d", "--delete"],
             reason="deleting a tag requires approval",
         ),
@@ -1005,39 +1199,81 @@ def git_rule(
             # than by a flag: a second operand points the ref somewhere else.
             # The kernel recognizes the reading form ahead of this row.
             name="symbolic-ref",
-            effect="ask",
+            # A write to a ref this rule names, which is what `protected` is:
+            # the reflog holds where HEAD was, so the question is about the
+            # ref rather than about recovering anything.
+            effects=[declare("writes_path", scope="protected", write="overwrite")],
             reason="pointing a symbolic ref somewhere else moves HEAD",
         ),
         ShellSubcommandRule(
             name="reset",
-            effect="allow",
+            effects=[declare("mutates_repository", scope="reversible")],
             ask_flags=["--hard", "--merge", "--keep"],
+            # Moving a ref is what the object store already holds. Each of
+            # these also throws away what the working tree was carrying, which
+            # no commit records, so the escalated command is a different
+            # operation and says so.
+            flag_effects=[
+                declare(
+                    "destroys_uncaptured",
+                    scope="targeted",
+                    reason="a working-tree-destroying reset requires approval",
+                )
+            ],
             checkpoint="targeted",
             reason="a working-tree-destroying reset requires approval",
         ),
         ShellSubcommandRule(
             name="switch",
-            effect="allow",
+            effects=[declare("mutates_repository", scope="reversible")],
             ask_flags=["-f", "--force", "--discard-changes"],
+            # Switching refuses to lose work; forcing it is the instruction to
+            # lose the work anyway, which is the whole of the difference.
+            flag_effects=[
+                declare(
+                    "destroys_uncaptured",
+                    scope="targeted",
+                    reason="a force switch can discard working-tree changes",
+                )
+            ],
             checkpoint="targeted",
             reason="a force switch can discard working-tree changes",
         ),
         ShellSubcommandRule(
             name="worktree",
-            effect="deny",
+            effects=[declare("unclassified_operation", scope="git worktree")],
             operations=[
-                ShellOperationRule(name="list", effect="allow"),
-                ShellOperationRule(name="add", effect="allow"),
-                ShellOperationRule(name="move", effect="allow"),
-                ShellOperationRule(name="repair", effect="allow"),
+                ShellOperationRule(
+                    name="list",
+                    effects=[declare("reads_path", scope="project")],
+                ),
+                # Lands a checkout at a path nothing was occupying, which is
+                # the create the write row never questions.
+                ShellOperationRule(
+                    name="add",
+                    effects=[
+                        declare("writes_path", scope="production", write="create"),
+                        declare("mutates_repository", scope="reversible"),
+                    ],
+                ),
+                ShellOperationRule(
+                    name="move",
+                    effects=[declare("mutates_repository", scope="reversible")],
+                ),
+                ShellOperationRule(
+                    name="repair",
+                    effects=[declare("mutates_repository", scope="reversible")],
+                ),
+                # A worktree holds whatever was not committed in it, and no
+                # capture of this checkout reaches into another one.
                 ShellOperationRule(
                     name="remove",
-                    effect="ask",
+                    effects=[declare("destroys_uncaptured", scope="unrecoverable")],
                     reason="removing a worktree deletes it — requires approval",
                 ),
                 ShellOperationRule(
                     name="prune",
-                    effect="ask",
+                    effects=[declare("destroys_uncaptured", scope="unrecoverable")],
                     reason="pruning worktrees is destructive — requires approval",
                 ),
             ],
@@ -1045,62 +1281,87 @@ def git_rule(
         ),
         ShellSubcommandRule(
             name="stash",
-            effect="allow",
+            effects=[declare("mutates_repository", scope="reversible")],
             operations=[
                 ShellOperationRule(
                     # Forwards its arguments to `git log`, `--output` included.
                     name="list",
-                    effect="allow",
-                    ask_flags=["--output"],
+                    effects=[declare("reads_path", scope="project")],
+                    write_flags=["--output"],
                     checkpoint="boundary_wide",
                     reason="writing command output to a file requires approval",
                 ),
                 ShellOperationRule(
                     # Accepts any format git diff knows, `--output` included.
                     name="show",
-                    effect="allow",
-                    ask_flags=["--output"],
+                    effects=[declare("reads_path", scope="project")],
+                    write_flags=["--output"],
                     checkpoint="boundary_wide",
                     reason="writing command output to a file requires approval",
                 ),
-                ShellOperationRule(name="push", effect="allow"),
-                ShellOperationRule(name="save", effect="allow"),
-                ShellOperationRule(name="pop", effect="allow"),
-                ShellOperationRule(name="apply", effect="allow"),
+                # Putting work into the stash and taking it back out. The
+                # object store holds what each of these moves, so a later
+                # command reaches it by an ordinary operation and no snapshot
+                # is standing in for one.
+                ShellOperationRule(
+                    name="push",
+                    effects=[declare("mutates_repository", scope="reversible")],
+                ),
+                ShellOperationRule(
+                    name="save",
+                    effects=[declare("mutates_repository", scope="reversible")],
+                ),
+                ShellOperationRule(
+                    name="pop",
+                    effects=[declare("mutates_repository", scope="reversible")],
+                ),
+                ShellOperationRule(
+                    name="apply",
+                    effects=[declare("mutates_repository", scope="reversible")],
+                ),
+                # A dropped stash leaves a commit nothing references, which
+                # is not what a snapshot of the working tree is holding.
                 ShellOperationRule(
                     name="drop",
-                    effect="ask",
+                    effects=[declare("destroys_uncaptured", scope="unrecoverable")],
                     reason="dropping a stash is destructive — requires approval",
                 ),
                 ShellOperationRule(
                     name="clear",
-                    effect="ask",
+                    effects=[declare("destroys_uncaptured", scope="unrecoverable")],
                     reason="clearing stashes is destructive — requires approval",
                 ),
             ],
         ),
         ShellSubcommandRule(
             name="remote",
-            effect="allow",
+            effects=[declare("mutates_repository", scope="reversible")],
             operations=[
+                # Removing takes the tracking refs with it, and pruning is
+                # that deletion on its own. Neither is in the object store
+                # afterwards in any form a later command reaches by name.
                 ShellOperationRule(
                     name="remove",
-                    effect="ask",
+                    effects=[declare("destroys_uncaptured", scope="targeted")],
                     reason="removing a remote requires approval",
                 ),
                 ShellOperationRule(
                     name="rm",
-                    effect="ask",
+                    effects=[declare("destroys_uncaptured", scope="targeted")],
                     reason="removing a remote requires approval",
                 ),
+                # Destroys nothing and changes where every later push lands,
+                # which is the configured-path question rather than the loss.
                 ShellOperationRule(
                     name="set-url",
-                    effect="ask",
+                    effects=[
+                        declare("writes_path", scope="protected", write="overwrite")
+                    ],
                     reason="changing a remote URL requires approval",
                 ),
                 ShellOperationRule(
                     name="prune",
-                    effect="ask",
+                    effects=[declare("destroys_uncaptured", scope="targeted")],
                     reason="pruning a remote is destructive — requires approval",
                 ),
             ],
@@ -1130,7 +1391,7 @@ def git_rule(
     directory_flags = ["-C", "--git-dir", "--work-tree"]
     return ShellCommandRule(
         name="git",
-        default_effect="deny",
+        effects=[declare("unclassified_operation", scope="git")],
         # `git version` is classified read-only as a subcommand, and the same
         # question spelled as a flag was reaching the default deny -- so the
         # policy answered "this git subcommand is not classified" about a
@@ -1147,6 +1408,13 @@ def git_rule(
             *directory_flags,
         ],
         value_flags=directory_flags,
+        # The two globals that set a setting, judged by the same keys the
+        # `config` verb is judged by — one statement about which settings hand
+        # over execution, answering for both spellings that reach them. Only
+        # `-c` and `--config-env` are here: the directory flags carry a path,
+        # and `--exec-path` and `--super-prefix` carry one too.
+        setting_flags=["-c", "--config-env"],
+        guarded_settings=list(config_executing_keys),
         sandbox=sandbox,
         subcommands=[*leaf, *guarded],
         reason="this git subcommand is not classified as read-only or reversible",
@@ -1208,15 +1476,59 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
     attesting = ["--approve", "-a", "--request-changes", "-r"]
 
     def reads(names: list[str]) -> list[ShellOperationRule]:
-        """Operations that report and change nothing."""
-        return [ShellOperationRule(name=name, effect="allow") for name in names]
+        """Operations that report and change nothing.
+
+        A query still reaches GitHub, and saying so is what separates these
+        from the local reads elsewhere in this table: the host is declared, so
+        the fetch allows, and a project that stops declaring it stops allowing
+        these without anybody editing the rows.
+        """
+        return [
+            ShellOperationRule(
+                name=name,
+                effects=[declare("fetches", scope="declared")],
+            )
+            for name in names
+        ]
+
+    def lands(names: list[str], scope: str, reason: str) -> list[ShellOperationRule]:
+        """Fetches that leave somebody else's code on the disk.
+
+        Not the same act as the queries above, and the difference is not that
+        these write. A query puts what it found in the terminal, where the
+        agent reads it and nothing else does; these put it in the tree, where
+        a build, a test run, or an import can reach it later. What separates
+        them is trust rather than observation.
+
+        So they ask, on the row that already guards trust rather than on the
+        write. The write is a create -- git refuses to clone onto an occupied
+        path, a download lands beside what is there -- and a create is the one
+        write shape this table never questions, which is exactly why the
+        question has to come from what the bytes *are* instead.
+
+        This is also what puts the two clones on one answer. `git clone` has
+        always asked and `gh repo clone` always allowed, which is the same
+        code arriving in the same tree by two spellings and the divergence
+        this model exists to make unrepresentable.
+        """
+        return [
+            ShellOperationRule(
+                name=name,
+                effects=[
+                    declare("fetches", scope="declared"),
+                    declare("installs_dependency", scope=scope),
+                    declare("writes_path", scope="production", write="create"),
+                ],
+                reason=reason,
+            )
+            for name in names
+        ]
 
     def compensable(names: list[str]) -> list[ShellOperationRule]:
         """Collaboration a normal follow-up operation restores."""
         return [
             ShellOperationRule(
                 name=name,
-                effect="allow",
                 effect_class="compensable",
                 ask_flags=elsewhere,
                 reason="this operation against another repository requires approval",
@@ -1234,7 +1546,6 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
         return [
             ShellOperationRule(
                 name=name,
-                effect="ask",
                 effect_class=effect_class,
                 reviewer=reviewer,
                 reason=reason,
@@ -1243,21 +1554,44 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
         ]
 
     def group(name: str, operations: list[ShellOperationRule]) -> ShellSubcommandRule:
+        """One gh noun, and the refusal for a verb of it nobody classified.
+
+        The operations below it are a finished list, so falling past them is
+        that list saying no rather than a gap: `gh pr` reaches a remote, and
+        no boundary this session runs in covers what an unclassified verb
+        would do there.
+        """
         return ShellSubcommandRule(
             name=name,
-            effect="deny",
+            effects=[declare("unclassified_operation", scope=f"gh {name}")],
             operations=operations,
             reason=f"this gh {name} operation is not classified",
         )
 
     return ShellCommandRule(
         name="gh",
-        default_effect="deny",
+        effects=[declare("unclassified_operation", scope="gh")],
         subcommands=[
             group(
                 "pr",
                 [
-                    *reads(["list", "view", "diff", "status", "checks", "checkout"]),
+                    *reads(["list", "view", "diff", "status", "checks"]),
+                    # Leaves a branch the object store holds like any other,
+                    # and a working tree holding whatever the head contained.
+                    # A pull request is a stranger's work by design -- that is
+                    # what makes it a request -- so this is the same arrival
+                    # the clones are, and the branch it moves is the lesser
+                    # half of what it did.
+                    ShellOperationRule(
+                        name="checkout",
+                        effects=[
+                            declare("fetches", scope="declared"),
+                            declare("installs_dependency", scope="pull request"),
+                            declare("mutates_repository", scope="reversible"),
+                        ],
+                        reason="checking out a pull request puts its author's"
+                        " code in this tree — requires approval",
+                    ),
                     *compensable(
                         [
                             "comment",
@@ -1270,7 +1604,6 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     # its own question.
                     ShellOperationRule(
                         name="close",
-                        effect="allow",
                         effect_class="compensable",
                         ask_flags=[*elsewhere, "--delete-branch", "-d"],
                         reason="deleting the branch alongside the close"
@@ -1281,7 +1614,6 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     # saying something else later is not unsaying them.
                     ShellOperationRule(
                         name="review",
-                        effect="allow",
                         effect_class="compensable",
                         ask_flags=[*elsewhere, *attesting],
                         reason="approving or requesting changes attests in your"
@@ -1329,15 +1661,31 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         "execution",
                         "changing what a workflow run is doing requires approval",
                     ),
-                    *compensable(["download"]),
+                    # Classed compensable once, which read as a publication
+                    # restored by a follow-up. Nothing is published: the
+                    # artifact comes here and the remote is untouched. What
+                    # it is instead is a build's output arriving as files,
+                    # which is somebody else's code on this disk.
+                    *lands(
+                        ["download"],
+                        "workflow artifact",
+                        "a workflow artifact is code from a build — requires approval",
+                    ),
                 ],
             ),
             group(
                 "repo",
                 [
                     *reads(["view", "list"]),
-                    # Cloning writes here and reaches nobody there.
-                    ShellOperationRule(name="clone", effect="allow"),
+                    # Reaches nobody there and brings a whole tree here, which
+                    # is the half worth the question. `git clone` already
+                    # asked; this is the same arrival by the other spelling.
+                    *lands(
+                        ["clone"],
+                        "repository",
+                        "cloning brings a repository's code into this tree"
+                        " — requires approval",
+                    ),
                     *judged(
                         ["create", "fork", "rename", "archive", "delete", "edit"],
                         "repository_security",
@@ -1349,7 +1697,12 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
             group(
                 "release",
                 [
-                    *reads(["list", "view", "download"]),
+                    *reads(["list", "view"]),
+                    *lands(
+                        ["download"],
+                        "release asset",
+                        "a release asset is a published binary — requires approval",
+                    ),
                     *judged(
                         ["create", "upload", "edit", "delete"],
                         "publication",
@@ -1436,7 +1789,13 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
             group(
                 "gist",
                 [
-                    *reads(["list", "view", "clone"]),
+                    *reads(["list", "view"]),
+                    *lands(
+                        ["clone"],
+                        "gist",
+                        "a gist is somebody's code, cloned into this tree"
+                        " — requires approval",
+                    ),
                     *judged(
                         ["create", "edit", "delete"],
                         "publication",
@@ -1459,8 +1818,17 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 ],
             ),
             group("config", [*reads(["get", "list"]), *compensable(["set"])]),
-            ShellSubcommandRule(name="status", effect="allow"),
-            ShellSubcommandRule(name="browse", effect="allow"),
+            ShellSubcommandRule(
+                name="status",
+                effects=[declare("fetches", scope="declared")],
+            ),
+            # `--no-browser` prints the URL and the bare form opens it. Neither
+            # reaches further than the query above: what the browser then does
+            # is the browser's, and this table answers for what gh does.
+            ShellSubcommandRule(
+                name="browse",
+                effects=[declare("fetches", scope="declared")],
+            ),
             ShellSubcommandRule(
                 # The default method is GET, so the unguarded form is a read.
                 # Every way of making it something else — naming a method,
@@ -1472,7 +1840,11 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 # that can reach any endpoint, so what a mutation here does is
                 # exactly what the table cannot say.
                 name="api",
-                effect="allow",
+                # Stated rather than read off the class, because the class
+                # describes the flagged form. A bare call is a read of a host
+                # this repository declared; what `--method` and `--field` reach
+                # is the opaque mutation, and it is those that carry it.
+                effects=[declare("fetches", scope="declared")],
                 effect_class="opaque",
                 ask_flags=[
                     "-X",
@@ -1502,15 +1874,22 @@ def docker_rule() -> ShellCommandRule:
     def noun(name: str, verbs: list[str]) -> ShellSubcommandRule:
         return ShellSubcommandRule(
             name=name,
-            effect="ask",
+            effects=[declare("mutates_environment", scope=name)],
             operations=[
-                ShellOperationRule(name=verb, effect="allow") for verb in verbs
+                ShellOperationRule(
+                    name=verb,
+                    effects=[declare("reads_environment", scope=name)],
+                )
+                for verb in verbs
             ],
             reason="container operations require approval",
         )
 
     queries = [
-        ShellSubcommandRule(name=name, effect="allow")
+        ShellSubcommandRule(
+            name=name,
+            effects=[declare("reads_environment", scope="docker")],
+        )
         for name in (
             "info",
             "version",
@@ -1528,7 +1907,7 @@ def docker_rule() -> ShellCommandRule:
     ]
     return ShellCommandRule(
         name="docker",
-        default_effect="ask",
+        effects=[declare("mutates_environment", scope="docker")],
         subcommands=[
             *queries,
             noun(
@@ -1565,32 +1944,54 @@ def bun_rule() -> ShellCommandRule:
     """
     return ShellCommandRule(
         name="bun",
-        default_effect="deny",
+        # The refusal is of the spelling: handing an interpreter a program is
+        # the thing this project does not do, and writing the program to a
+        # file is where it goes instead.
+        effects=[declare("runs_undeclared_program", scope="unread code")],
+        refuses="bare interpreters and inline code are not allowed",
         # The version banner is not a subcommand and would otherwise fall to
         # the default deny, which is the wrong answer for a pure read.
         allow_flags=["--version", "--revision"],
         subcommands=[
+            # Turns a lockfile into code on disk, which is what `uv sync` and
+            # `npm ci` do -- and both of those already ask. Allowing here was
+            # the same act answered two ways, and a lock pins a version rather
+            # than vouching for it: what a sync fetches is as unreviewed as
+            # what an add fetches, and a pin written before a release was
+            # compromised resolves to the compromised artefact unchanged.
             ShellSubcommandRule(
                 name="install",
-                effect="allow",
-                reason="restoring declared dependencies reaches the registry",
+                effects=[declare("materializes_lockfile", scope="bun lockfile")],
+                refuses="",
+                reason="restoring declared dependencies fetches code this"
+                " project has not reviewed — requires approval",
             ),
-            ShellSubcommandRule(name="run", effect="allow"),
-            ShellSubcommandRule(name="test", effect="allow"),
-            ShellSubcommandRule(name="build", effect="allow"),
+            *[
+                ShellSubcommandRule(
+                    name=name,
+                    effects=[declare("runs_declared_target", scope="bun")],
+                    refuses="",
+                )
+                for name in ("run", "test", "build")
+            ],
             ShellSubcommandRule(
                 name="add",
-                effect="ask",
+                effects=[declare("installs_dependency", scope="bun package")],
+                refuses="",
                 reason="adding a dependency changes what this project needs",
             ),
+            # Rewrites the lock and re-materializes what it names, which is
+            # the same arrival `install` makes rather than a removal only.
             ShellSubcommandRule(
                 name="remove",
-                effect="ask",
+                effects=[declare("materializes_lockfile", scope="bun lockfile")],
+                refuses="",
                 reason="removing a dependency changes what this project needs",
             ),
             ShellSubcommandRule(
                 name="x",
-                effect="ask",
+                effects=[declare("installs_dependency", scope="bun package")],
+                refuses="",
                 reason="running a package that is not a declared dependency",
             ),
         ],
@@ -1626,27 +2027,36 @@ def typescript_rule() -> list[ShellCommandRule]:
     """
     checking = ShellSubcommandRule(
         name="tsc",
-        effect="ask",
         read_verbs=["--noEmit", "--version"],
         reason="emitting compiler output writes files the command does not bound",
     )
     return [
         ShellCommandRule(
             name="tsc",
-            default_effect="ask",
+            # A configuration file chooses where the output lands, so no word
+            # of the invocation names what is about to be replaced.
+            effects=[
+                declare(
+                    "writes_path",
+                    scope="unbounded",
+                    reason="emitting compiler output writes files the command does not bound",
+                )
+            ],
             allow_flags=["--version"],
             read_verbs=["--noEmit"],
             reason="emitting compiler output writes files the command does not bound",
         ),
+        # Fetching a package that is not a declared dependency is the trust
+        # question, reached by a runner rather than by an install verb.
         ShellCommandRule(
             name="bunx",
-            default_effect="ask",
+            effects=[declare("installs_dependency", scope="package runner")],
             subcommands=[checking],
             reason="the package runner fetches what is not already a dependency",
         ),
         ShellCommandRule(
             name="npx",
-            default_effect="ask",
+            effects=[declare("installs_dependency", scope="package runner")],
             subcommands=[checking],
             reason="the package runner fetches what is not already a dependency",
         ),

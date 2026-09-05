@@ -10,6 +10,7 @@ import importlib
 import importlib.util
 import json
 import sys
+from itertools import product
 from pathlib import Path, PurePosixPath
 from types import ModuleType
 from typing import Literal, get_args
@@ -47,7 +48,9 @@ from lup.policy.bundle import (
     render_policy_data,
     runtime_path_rules,
     runtime_url_scope,
+    shell_rule_rows_literal,
 )
+from lup.policy.kernel.effects import EffectEvidence, declare, deciding
 from lup.policy.kernel.decision import (
     DecisionEffect,
     KernelDecision,
@@ -56,11 +59,19 @@ from lup.policy.kernel.decision import (
     sandbox_escaped,
 )
 from lup.policy.kernel.edit import decide_edit
-from lup.policy.kernel.rows import PathRoleRow, ShellRuleRow, shell_row_values
+from lup.policy.kernel.rows import (
+    PathRoleRow,
+    RunnerTargetRow,
+    ShellRuleRow,
+    runner_target_values,
+    shell_row_values,
+)
+from lup.providers.codex.harness import codex_allow_prefixes
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.edit_rules import EditRule
 from lup.policy.shell_rules import (
     ShellCommandRule,
+    erase_runner_targets,
     erase_shell_rules,
     RunnerTargetRule,
     ShellOperationRule,
@@ -229,6 +240,10 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="find . -name '*.tmp' -delete", effect="ask"),
     DecisionCase(input="cat x |& rm -rf ~", effect="ask"),
     DecisionCase(input="cat x ;& rm -rf ~", effect="deny"),
+    # The two halves of what a redirection is answered on. A path a rule
+    # names is settled before the write; ordinary source in the checkout is
+    # not, because what lands there is produced by running the command and
+    # read afterwards, against the file.
     DecisionCase(
         input="echo payload > pyproject.toml",
         effect="ask",
@@ -236,7 +251,7 @@ SHELL_POLICY_CASES = [
     ),
     DecisionCase(
         input="echo payload >> src/generated.py",
-        effect="ask",
+        effect="allow",
         existing=["src/generated.py"],
     ),
     # `gh api` is the read path for everything the typed subcommands cannot
@@ -293,29 +308,35 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="grep x f > /dev/null", effect="allow"),
     DecisionCase(input="cat f 2>/dev/null", effect="allow"),
     DecisionCase(input="ls >&2", effect="allow"),
-    # Overwriting an existing file is the destructive case and asks; creating
-    # one destroys nothing, and a target that cannot be resolved to a literal
-    # path keeps the strict verdict rather than guessing it is new.
-    DecisionCase(input="echo x > out.txt", effect="ask", existing=["out.txt"]),
+    # Whether the file was already there decides nothing, because what
+    # separated the two was content nobody had read and content is read after
+    # the command runs. A target that cannot be resolved to a literal path
+    # still keeps the strict verdict: there is no path to answer about.
+    DecisionCase(input="echo x > out.txt", effect="allow", existing=["out.txt"]),
     DecisionCase(input="echo x > out.txt", effect="allow"),
     DecisionCase(input="echo x > nested/new.txt", effect="allow"),
     DecisionCase(input="echo x >> notes.log", effect="allow"),
     DecisionCase(input="echo x > $UNSET_DIR/out.txt", effect="ask"),
     DecisionCase(input="echo x > ~/out.txt", effect="ask"),
     DecisionCase(input="cat <<EOF", effect="deny"),
-    # The session scratchpad is a write-allowed root like repo-relative tmp/;
-    # reassigning TMPDIR is a security-sensitive assignment, and a suffix that
-    # climbs out of the root falls back to the ordinary redirection rule —
-    # which still asks whenever the target cannot be resolved to a literal.
+    # The session scratchpad is a write-allowed root like repo-relative tmp/,
+    # and its role is read before the path is spelled — which is what keeps an
+    # absolute root from reading as somewhere outside the checkout.
+    # Reassigning TMPDIR is a security-sensitive assignment, and a suffix that
+    # climbs out of the root leaves the root's grant behind: unresolvable it
+    # asks for having no path to answer about, and resolvable it asks for
+    # naming one the checkout does not cover.
     DecisionCase(input="echo x > $TMPDIR/out.txt", effect="allow"),
     DecisionCase(input='sort f > "${TMPDIR}/sorted.txt"', effect="allow"),
     DecisionCase(input="echo x > /tmp/claude-1000/scratch/out.txt", effect="allow"),
     DecisionCase(input="cat <<'EOF' > $TMPDIR/notes.md\nbody\nEOF", effect="allow"),
     DecisionCase(input="echo x > $TMPDIR/../etc/crontab", effect="ask"),
-    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="allow"),
-    # A /tmp path outside the session root is not scratch, so it follows the
-    # ordinary create-versus-overwrite rule rather than being written freely.
-    DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
+    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="ask"),
+    # A /tmp path outside the session root is not scratch and not in the
+    # checkout either, so it asks for the same reason any write beyond the
+    # tree does — the boundary is what would have confined it, and none was
+    # measured here.
+    DecisionCase(input="echo x > /tmp/other/file", effect="ask"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
     # Publishing is how work becomes reviewable, so the verbs that put a
@@ -427,6 +448,13 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="mkdir src/newpkg", effect="allow"),
     DecisionCase(input="touch src/newfile.py", effect="allow"),
     DecisionCase(input="touch -m src/existing.py", effect="allow"),
+    # And the same outside the checkout, which is a decision rather than an
+    # oversight: these two state their scope instead of resolving it, because
+    # what makes a write beyond the tree worth an approval is the content
+    # arriving there, and neither of these carries any. The first write that
+    # does is judged on its own path, wherever the container turned out to be.
+    DecisionCase(input="mkdir /etc/newdir", effect="allow"),
+    DecisionCase(input="touch /etc/newfile", effect="allow"),
     DecisionCase(input="cp --archive tmp/a tmp/b", effect="ask"),
     # An archive replaces nothing where nothing stands, and what it holds
     # never has to be read to establish that. The destination carries the
@@ -454,6 +482,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="gunzip tmp/notes.txt.gz", effect="allow"),
     # A generated tree refuses whatever verb reaches it.
     DecisionCase(input="tar -xzf a.tgz -C .claude/plugins/lup", effect="deny"),
+    # Every grant above reasons from what this checkout knows of a path — a
+    # declared role, the object store, nothing standing there — and none of
+    # those readings reaches beyond it. So a target outside gives the line
+    # back to the row, which is where a contained session's placement is read.
+    DecisionCase(input="cp README.md /etc/newfile", effect="ask"),
+    DecisionCase(input="mv tmp/a ../elsewhere/b", effect="ask"),
+    DecisionCase(input="tar -czf /etc/backup.tgz src", effect="ask"),
+    DecisionCase(input="unzip a.zip -d /etc/out", effect="ask"),
     # Copying reads its sources and writes only its destination, so landing
     # production in a scratch root destroys nothing; moving out of one does,
     # because the source is removed, and that keeps the verb's ask.
@@ -516,9 +552,17 @@ SHELL_POLICY_CASES = [
     DecisionCase(input='for f in a; do wc "$f"', effect="deny"),
     DecisionCase(input="while do done", effect="deny"),
     DecisionCase(input='for f a; do wc "$f"; done', effect="deny"),
-    # Expanded read-only vocabulary with writer-flag guards.
+    # Expanded read-only vocabulary with writer-flag guards. A flag that
+    # lands a file is judged on the path it lands at, which is the same
+    # reading the redirection spelling of it gets — `sort -o out f` and
+    # `sort f > out` write one file and answer once.
     DecisionCase(input="sort f", effect="allow"),
-    DecisionCase(input="sort -o out f", effect="ask"),
+    DecisionCase(input="sort -o out f", effect="allow"),
+    DecisionCase(input="sort -o .git/HEAD f", effect="ask"),
+    DecisionCase(input="sort -o /tmp/other/file f", effect="ask"),
+    # A flag that runs a program is not a flag that writes a file, and keeps
+    # its own question however ordinary the file beside it is.
+    DecisionCase(input="sort --compress-program=x -o out f", effect="ask"),
     DecisionCase(input="sed -n '1,5p' f", effect="allow"),
     DecisionCase(input="sed -i 's/a/b/' f", effect="deny"),
     DecisionCase(input="sed 's/x/y/e' f", effect="deny"),
@@ -534,9 +578,13 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="awk -f prog.awk f", effect="deny"),
     DecisionCase(input="jq . f", effect="allow"),
     DecisionCase(input="yq '.a' f", effect="allow"),
+    # `yq -i` writes and still asks: the file it rewrites is the operand, so
+    # the flag carries no path and there is nothing for the write row to be
+    # asked about. Under-naming keeps the row's own question.
     DecisionCase(input="yq -i '.a = 1' f", effect="ask"),
     DecisionCase(input="xmllint --noout f", effect="allow"),
-    DecisionCase(input="xmllint -output out f", effect="ask"),
+    DecisionCase(input="xmllint -output out f", effect="allow"),
+    DecisionCase(input="xmllint --output /etc/hosts f", effect="ask"),
     DecisionCase(input="cut -f1 f", effect="allow"),
     DecisionCase(input="diff a b", effect="allow"),
     DecisionCase(input="rg TODO", effect="allow"),
@@ -600,6 +648,29 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git -C status restore f", effect="ask"),
     DecisionCase(input="git -c core.pager=touch log", effect="ask"),
     DecisionCase(input="git --exec-path=/tmp/x status", effect="ask"),
+    # A settings global is judged by the setting, exactly as `git config` is
+    # judged by the key it writes: `-c` reaches a program only through the
+    # keys listed there, and asking about every other one told whoever
+    # answered that git config can change how commands execute — untrue of
+    # the display settings that are nearly all of `-c`'s everyday use.
+    DecisionCase(input="git -c color.ui=false diff", effect="allow"),
+    DecisionCase(input="git -c color.ui=false -c log.date=iso log", effect="allow"),
+    DecisionCase(input="git --config-env=color.ui=UI status", effect="allow"),
+    DecisionCase(input="git -c credential.helper=/tmp/x fetch", effect="ask"),
+    DecisionCase(input="git -c alias.x='!rm -rf /' status", effect="ask"),
+    DecisionCase(input="git --config-env=core.pager=EVIL status", effect="ask"),
+    # Two spellings this deliberately cannot read, and both keep the
+    # question. An expansion could become any key; a short flag with its
+    # value pressed against it carries an `=` that belongs to the setting
+    # rather than to the flag, so splitting on it would compare a value
+    # against a list of keys and find no match.
+    DecisionCase(input="git -c $KEY=x status", effect="ask"),
+    DecisionCase(input="git -ccore.pager=x status", effect="ask"),
+    # An unguarded setting relaxes the global and nothing else: what follows
+    # is judged by its own row, and a verb that fell off the enumeration
+    # still falls off it.
+    DecisionCase(input="git -c color.ui=false reset --hard", effect="ask"),
+    DecisionCase(input="git -c color.ui=false something-new", effect="deny"),
     # The pager is not gated: it moves nothing, these subcommands already run
     # it by default, and the program it names is reachable only through `-c`
     # and `git config`, which ask.
@@ -697,14 +768,20 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rg --pre=./decrypt needle", effect="ask"),
     DecisionCase(input="rg --hostname-bin ./who needle", effect="ask"),
     DecisionCase(input="rg -z needle archive", effect="ask"),
-    DecisionCase(input="find . -name '*.py' -fprint0 out", effect="ask"),
-    # Filters that read and print, and the one flag on each that lands a file.
+    DecisionCase(input="find . -name '*.py' -fprint0 out", effect="allow"),
+    DecisionCase(input="find . -name '*.py' -fprint0 /etc/hosts", effect="ask"),
+    # `-delete` names no path for the write row to read, and removes what it
+    # matched rather than landing a file, so it keeps the verb's question.
+    DecisionCase(input="find . -name '*.tmp' -delete", effect="ask"),
+    # Filters that read and print, and the one flag on each that lands a file
+    # — judged on where it lands, exactly as the redirection spelling is.
     DecisionCase(input="expr 1 + 2", effect="allow"),
     DecisionCase(input="numfmt --to=iec 1024", effect="allow"),
     DecisionCase(input="base64 payload.bin", effect="allow"),
-    DecisionCase(input="base64 -o out.txt payload.bin", effect="ask"),
+    DecisionCase(input="base64 -o out.txt payload.bin", effect="allow"),
+    DecisionCase(input="base64 -o .git/HEAD payload.bin", effect="ask"),
     DecisionCase(input="tree -L 2 src", effect="allow"),
-    DecisionCase(input="tree -o listing.txt", effect="ask"),
+    DecisionCase(input="tree -o listing.txt", effect="allow"),
     # Patch application allows in every in-repository form; only the flags that
     # write outside the working area are guarded.
     DecisionCase(input="git apply p.diff", effect="allow"),
@@ -736,7 +813,19 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="gh secret set TOKEN", effect="ask"),
     DecisionCase(input="gh repo edit --visibility public", effect="ask"),
     DecisionCase(input="gh workflow run deploy.yml", effect="ask"),
-    DecisionCase(input="gh pr checkout 123", effect="allow"),
+    # Fetching somebody else's code into the tree asks on the trust row,
+    # wherever it arrives from: a clone, a release asset, a workflow artifact
+    # and a pull request head are one act with one answer. `git clone` always
+    # asked, so this is the spelling that used to disagree with it.
+    DecisionCase(input="gh pr checkout 123", effect="ask"),
+    DecisionCase(input="gh repo clone owner/name", effect="ask"),
+    DecisionCase(input="gh gist clone abc123", effect="ask"),
+    DecisionCase(input="gh release download v1.0", effect="ask"),
+    DecisionCase(input="gh run download 42", effect="ask"),
+    # The queries beside them are untouched: what they fetch is read once and
+    # lands nowhere a later build could reach it.
+    DecisionCase(input="gh release list", effect="allow"),
+    DecisionCase(input="gh run view 42", effect="allow"),
     # Authoring allows because the work is the author's own and the branch is
     # already pushed — both claims about this repository, and `--repo` is what
     # makes them someone else's. Reading elsewhere keeps its grant.
@@ -878,30 +967,36 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="cat <<EOF\nplain body\nEOF", effect="allow"),
     DecisionCase(input="cat <<EOF\n$(id)\nEOF", effect="deny"),
     DecisionCase(input="grep x <<< 'needle haystack'", effect="allow"),
-    # A heredoc is judged by what its target costs, not by its own shape: an
-    # unrecoverable file asks in both operator orders, and one that is not
-    # there yet overwrites nothing and passes. The body never decides —
-    # `echo` authors the same content and always could.
+    # A heredoc is judged by where its target is, not by its own shape and
+    # not by whether something was already there. The body never decides —
+    # `echo` authors the same content and always could — and what the body
+    # turns out to be is read after the write, against the file.
     DecisionCase(
-        input="cat > out.py <<'EOF'\nbody\nEOF", effect="ask", existing=["out.py"]
+        input="cat > out.py <<'EOF'\nbody\nEOF", effect="allow", existing=["out.py"]
     ),
     DecisionCase(
-        input="cat <<'EOF' > out.py\nbody\nEOF", effect="ask", existing=["out.py"]
+        input="cat <<'EOF' > out.py\nbody\nEOF", effect="allow", existing=["out.py"]
     ),
     DecisionCase(
         input="cat > out.py <<'EOF'\nbody\nEOF",
-        effect="ask",
+        effect="allow",
         sandboxed=True,
         existing=["out.py"],
     ),
     DecisionCase(input="cat > fresh.py <<'EOF'\nbody\nEOF", effect="allow"),
     DecisionCase(input="cat > tmp/oneoff.py <<'EOF'\nbody\nEOF", effect="allow"),
+    DecisionCase(input="cat > .git/HEAD <<'EOF'\nref\nEOF", effect="ask"),
     # Frozen variable bindings: assignments and read rebind for the segments
     # that follow; literal values instantiate references, opaque ones gate
     # guarded rows, and unresolved expansions deny toward explicit binding.
     DecisionCase(input="x=5", effect="allow"),
     DecisionCase(input="f=notes.txt; sort $f", effect="allow"),
-    DecisionCase(input="f=-o; sort $f x", effect="ask"),
+    # A bound flag reaches the row exactly as the spelled one does, and is
+    # answered the same way: `-o` names a path and the path decides, while
+    # `--compress-program` names a program and keeps its question.
+    DecisionCase(input="f=-o; sort $f x", effect="allow"),
+    DecisionCase(input="f=-o; sort $f /etc/hosts", effect="ask"),
+    DecisionCase(input="f=--compress-program; sort $f zstd x", effect="ask"),
     DecisionCase(input="PATH=/tmp", effect="ask"),
     DecisionCase(input='while read -r line; do echo "$line"; done < f', effect="allow"),
     DecisionCase(input='while read -r line; do sort "$line"; done', effect="deny"),
@@ -1987,13 +2082,17 @@ def test_a_runner_target_a_project_refuses_is_refused_with_its_own_reason(
     reach the same end, not only the refusal.
     """
     targets = [
-        RunnerTargetRule(name="pytest"),
+        RunnerTargetRule(name="pytest", effects=[declare("runs_declared_target")]),
         RunnerTargetRule(
             name="forecast",
-            effect="deny",
+            effects=[declare("runs_declared_target")],
+            refuses="forecasts are the user's to run",
             reason="forecasts are the user's to run — print the exact command",
         ),
-        RunnerTargetRule(name="publish", effect="ask"),
+        RunnerTargetRule(
+            name="publish",
+            effects=[declare("external_mutation", scope="publication")],
+        ),
     ]
     policy = ShellPolicy(SHELL_RULES, runner_targets=targets)
 
@@ -2037,13 +2136,15 @@ def test_a_blessed_target_can_still_refuse_one_verb_beneath_it(
     targets = [
         RunnerTargetRule(
             name="devtools",
+            effects=[declare("runs_declared_target")],
             subcommands=[
                 ShellSubcommandRule(
                     name="worldview",
-                    effect="allow",
                     operations=[
                         ShellOperationRule(
-                            name="loop", effect="deny", reason="this opens an agent"
+                            name="loop",
+                            refuses="this opens an agent",
+                            reason="this opens an agent",
                         )
                     ],
                 ),
@@ -2132,10 +2233,17 @@ def test_redirecting_over_a_file_costs_what_deleting_it_costs(
     assert effect("echo x > notes.md") == "allow"
     assert effect("echo x >> notes.md") == "allow"
     assert effect("cat > notes.md <<'EOF'\nbody\nEOF") == "allow"
-    # A file the host cannot vouch for keeps its ask, whatever the shape.
+    # And a file nothing can vouch for lands the same way, because vouching
+    # was never what the question was about: what a command writes is read
+    # after it runs, and until then only the path is knowable.
     (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
-    assert effect("echo x > dirty.md") == "ask"
-    assert effect("cat > dirty.md <<'EOF'\nbody\nEOF") == "ask"
+    assert effect("echo x > dirty.md") == "allow"
+    assert effect("cat > dirty.md <<'EOF'\nbody\nEOF") == "allow"
+    # What the path reading *can* answer, it still answers ahead of the write.
+    assert effect("echo x > README.md") == "ask"
+    assert effect("echo x > .git/HEAD") == "ask"
+    assert effect("echo x > ../elsewhere.md") == "ask"
+    assert effect("echo x > $NAME") == "ask"
     # Ownership is a different question from cost, and still answers first.
     (tmp_path / "README.md").write_text("human\n", encoding="utf-8")
     assert effect("echo x > README.md") == "ask"
@@ -2275,15 +2383,24 @@ def test_write_targets_name_only_the_paths_a_command_opens_for_writing() -> None
     assert shell_write_targets("frobnicate --weird") == []
 
 
-def test_creating_a_file_passes_where_overwriting_one_still_asks(
+def test_whether_a_file_was_already_there_no_longer_decides_a_redirection(
     tmp_path: Path,
 ) -> None:
+    """The axis that separated these is spent, and the path is what is left.
+
+    Creating allowed and overwriting asked, because overwriting replaced
+    content nothing had read. Content is now read after the command runs,
+    against the file it wrote -- which is the only moment it *can* be read,
+    since a redirection's content is produced by running -- so the question
+    the existence test was standing in for is answered elsewhere, and both
+    forms land on what was always knowable in advance: where the write goes.
+    """
     policy = ShellPolicy(SHELL_RULES)
     existing = tmp_path / "kept.txt"
     existing.write_text("prior work", encoding="utf-8")
     command = "echo x > kept.txt"
 
-    assert policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect == "ask"
+    assert policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect == "allow"
     existing.unlink()
     assert policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect == "allow"
 
@@ -2325,7 +2442,11 @@ def test_an_operation_the_profile_cannot_place_is_refused_by_capability() -> Non
     """
     command = ShellCommand(command="hostonly --run")
     rules = [
-        ShellCommandRule(name="hostonly", default_effect="allow", sandbox="outside")
+        ShellCommandRule(
+            name="hostonly",
+            effects=[declare("reads_path", scope="project")],
+            sandbox="outside",
+        )
     ]
 
     placed = ShellPolicy(rules, sandbox_active=True, escapable=True).decide(command)
@@ -2349,7 +2470,13 @@ def test_a_help_probe_keeps_the_placement_its_target_declares() -> None:
     probe in the vocabulary, whatever its depth. So the probe replaces the
     effect and the walk still answers for the placement.
     """
-    targets = [RunnerTargetRule(name="placed-tool", sandbox="inside")]
+    targets = [
+        RunnerTargetRule(
+            name="placed-tool",
+            sandbox="inside",
+            effects=[declare("runs_declared_target")],
+        )
+    ]
 
     placed = ShellPolicy(
         SHELL_RULES,
@@ -3954,8 +4081,103 @@ def test_every_shell_row_field_reaches_the_generated_data_file() -> None:
     renderer walks is checked against the shape's own annotations rather than
     trusted to have been updated alongside it.
     """
-    row = erase_shell_rules([ShellCommandRule(name="example", default_effect="allow")])[
-        0
-    ]
+    row = erase_shell_rules(
+        [
+            ShellCommandRule(
+                name="example", effects=[declare("reads_path", scope="project")]
+            )
+        ]
+    )[0]
 
     assert set(shell_row_values(row)) == set(ShellRuleRow.__annotations__)
+
+
+def test_every_runner_target_field_reaches_the_generated_data_file() -> None:
+    """The same gap, on the one table a command row cannot reach.
+
+    This shape is smaller and was rendered by a renderer that spelled its
+    fields by hand, which is exactly the arrangement that drops a column: the
+    row gained `effects` and `refuses` while the renderer still named the
+    verdict that had gone.
+    """
+    row = erase_runner_targets(
+        [RunnerTargetRule(name="example", effects=[declare("runs_declared_target")])]
+    )[0]
+
+    assert set(runner_target_values(row)) == set(RunnerTargetRow.__annotations__)
+
+
+def test_a_refused_runner_target_takes_no_native_prefix_allow() -> None:
+    """A prefix rule approves before the hook is reached, so it has to agree.
+
+    Codex's native prefix table is read by the runtime itself, and a target
+    approved there is approved whatever the dispatcher beside it would have
+    said. While a target stated its verdict outright, every declared target
+    took a prefix regardless of that verdict — so a project's refusal was
+    contradicted by the same declaration that carried it.
+    """
+    prefixes = codex_allow_prefixes(
+        [],
+        [
+            RunnerTargetRule(name="checker", effects=[declare("runs_declared_target")]),
+            RunnerTargetRule(
+                name="forecast",
+                effects=[declare("runs_declared_target")],
+                refuses="forecasts are the user's to run",
+            ),
+        ],
+        excluded_commands=["uv run *"],
+    )
+
+    assert ["uv", "run", "checker"] in prefixes
+    assert ["uv", "run", "forecast"] not in prefixes
+
+
+def test_no_row_changes_which_effect_decides_it_when_the_reading_changes() -> None:
+    """What `row_verdict` relies on to read a purpose without resolving a path.
+
+    The purpose is the deciding effect's, and `row_verdict` asks for it with no
+    evidence in hand — which is exact, not approximate, only while every row in
+    the table is decided by the same member under every reading a host could
+    supply. A row declaring two effects whose ranking flips on the evidence
+    would break that quietly, reporting whichever one an empty reading happened
+    to rank first, so the property is held here rather than assumed there.
+    """
+    placements: list[SandboxPlacement] = ["inside", "outside", "ambient"]
+    readings: list[tuple[EffectEvidence, SandboxPlacement]] = [
+        (EffectEvidence(contained, tracked, existing, captured), placement)
+        for contained, tracked, existing, captured in product([True, False], repeat=4)
+        for placement in placements
+    ]
+
+    for row in erase_shell_rules(SHELL_RULES):
+        deciders = {
+            answered.row["kind"]
+            for evidence, placement in readings
+            for answered in [deciding(row["effects"], evidence, placement)]
+            if answered is not None
+        }
+        assert len(deciders) <= 1, f"{row['rule']} is decided by {sorted(deciders)}"
+
+
+def test_every_effect_axis_reaches_the_data_file_as_the_type_it_is() -> None:
+    """The same gap one level down, where coercing to text reads as harmless.
+
+    An axis rendered with ``str`` arrives as ``"False"``, which the dispatcher
+    reads back as a true value — so a write declaring that nothing reviews it
+    would be judged as reviewed, and the row this whole table exists for would
+    stop refusing anything at all.
+    """
+    rendered = shell_rule_rows_literal(
+        erase_shell_rules(
+            [
+                ShellCommandRule(
+                    name="example",
+                    effects=[declare("writes_path", scope="scratch", write="create")],
+                )
+            ]
+        )
+    )
+
+    assert '"reviewed": False,' in rendered
+    assert '"reviewed": "False",' not in rendered

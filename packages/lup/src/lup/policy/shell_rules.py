@@ -17,41 +17,58 @@ every generated dispatcher decide identically. This repository's table is
 
 Three nesting levels mirror how real tools are shaped:
 
-* a bare command — ``ls``, ``sort`` — declares ``default_effect="allow"``,
-  optionally with ``ask_flags`` that turn a reader into a writer (``sort -o``,
-  ``find -delete``);
-* a subcommand command — ``git``, ``gh`` — declares ``default_effect="deny"``
-  (an unjudged subcommand bounces back to the agent) and lists the subcommands
-  it has judged (``git status`` allows, ``git push`` asks); its ``value_flags``
+* a bare command — ``ls``, ``sort`` — declares the effects it has (``ls``
+  reads a path), optionally with ``ask_flags`` that turn a reader into a
+  writer (``sort -o``, ``find -delete``);
+* a subcommand command — ``git``, ``gh`` — declares what falls off the end of
+  its enumeration (an unjudged subcommand bounces back to the agent) and lists
+  the subcommands it has judged (``git status`` allows, ``git push`` asks);
+  its ``value_flags``
   skip value-taking globals (``git -C <path>``) so the value is never read as
-  the subcommand, and its ``ask_flags`` guard dangerous globals (``git -c``);
+  the subcommand, its ``ask_flags`` guard dangerous globals (``git -c``), and
+  its ``setting_flags`` say which of those carry a setting, so the guard reads
+  the setting rather than the flag;
 * a subcommand whose *operation* word decides safety — ``git worktree add`` is
   reversible, ``git worktree remove`` is not — carries ``operations``.
 
-Both axes cascade down that nesting, and absence has exactly one meaning
-everywhere: a level that omits ``effect`` or ``sandbox`` inherits the value
+Every axis cascades down that nesting, and absence has exactly one meaning
+everywhere: a level that omits ``effects`` or ``sandbox`` inherits the value
 from the level above it, and a level that states one overrides what it
 inherited in either direction — widening a restrictive parent is as ordinary
 as narrowing a permissive one. So ``git`` says once where its subcommands run,
 and each of them says only what differs.
 
+What a rule states is what it *does*, never what it earns. A stated verdict
+sat beside the effects for the length of the migration, agreeing with them on
+every row, and one judgement recorded twice is the drift this model removes —
+so it is gone, and :func:`~lup.policy.kernel.effects.declared_verdict` derives
+the answer where it is used. A rule that means to refuse a spelling says
+``refuses``; one that means to raise a question declares an effect that asks.
+
+The runner table says it the same way. ``uv`` is parsed rather than matched,
+so a ``uv run`` target is declared on a surface of its own — and it was the
+last one stating a verdict outright, which left a target with subcommands
+declaring both halves separately: what the target earns, and what the command
+rows beneath it do.
+
 Absence is distinguished from a stated value of the same word by what pydantic
 already records about which fields a declaration supplied, so no field is
-retyped as optional to carry the distinction. The one field with no such
-escape is ``ShellCommandRule.default_effect``, which is required: who decides
-has no member meaning "no opinion", so a command that forgot to say is a gap a
-reader should see rather than a value it silently inherited. ``ROOT_EFFECT``
-is what would be inherited beneath every table, spelled restrictively for the
-same reason.
+retyped as optional to carry the distinction. The two fields with no such
+escape are ``ShellCommandRule.effects`` and ``RunnerTargetRule.effects``, both
+required: a declaration stating none derives an allow, so one that forgot to
+say would be a grant nobody wrote down rather than a gap a reader sees. A
+command that genuinely does nothing this table guards says so —
+``changes_nothing`` exists to be sayable.
 """
 
-from typing import Literal, TypedDict
+from collections.abc import Callable
+from typing import TypedDict
 
 from pydantic import BaseModel
 
+from lup.policy.kernel.effects import EffectRow, external_effects
 from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.kernel.decision import (
-    DecisionEffect,
     CheckpointRequirement,
     SandboxPlacement,
 )
@@ -63,21 +80,10 @@ from lup.policy.kernel.rows import (
 )
 from lup.seams import SelectableRule
 
-type CommandEffect = Literal["allow", "ask", "deny"]
-
-ROOT_EFFECT: CommandEffect = "deny"
-"""Who decides, beneath a table that says nothing — nobody, so a human.
-
-Every command declares its own effect, so this is structurally unreachable
-through the models. It is spelled anyway, and spelled restrictively, because
-the value a forgotten declaration would fall to is the one place a silent
-default becomes a grant.
-"""
-
 ROOT_SANDBOX: SandboxPlacement = "ambient"
 """Where a call runs, beneath a table that says nothing — wherever it lands.
 
-Unlike the effect axis, this one has a member meaning "no opinion", so
+Unlike the effects axis, this one has a member meaning "no opinion", so
 omission is a statement here rather than a gap, and a command is not made to
 repeat it.
 """
@@ -85,8 +91,8 @@ repeat it.
 ROOT_CHECKPOINT: CheckpointRequirement = "unrecoverable"
 """What puts back a loss nobody named — nothing does, so the question stands.
 
-The restrictive value, for the reason ``ROOT_EFFECT`` is: this axis is read
-to *relax* an approval question, so the value a forgotten declaration falls
+The restrictive value, and for the reason every root here is: this axis is
+read to *relax* an approval question, so the value a forgotten declaration falls
 to has to be the one that relaxes nothing. Annotating a rule is what says a
 boundary answers for it, and silence can then only cost a prompt somebody did
 not need, never a loss nobody could put back.
@@ -96,8 +102,8 @@ not need, never a loss nobody could put back.
 ROOT_REVIEWER: ReviewerRequirement = "human_only"
 """Who answers a question no rule said anything about — a person.
 
-The restrictive value, and for the reason ``ROOT_EFFECT`` is restrictive: this
-axis is read to *widen* who may answer, so what a forgotten declaration falls
+The restrictive value, and for the same reason: this axis is read to
+*widen* who may answer, so what a forgotten declaration falls
 to has to widen nothing. A rule that means its question to be answerable by a
 supervisor says so, and silence can then only cost a person a question a
 supervisor could have taken, never route a release past them.
@@ -111,7 +117,8 @@ class DeclaredAxes(BaseModel, frozen=True):
     the table — never a reset to the most permissive value.
     """
 
-    effect: CommandEffect | None = None
+    effects: list[EffectRow] | None = None
+    refuses: str | None = None
     sandbox: SandboxPlacement | None = None
     checkpoint: CheckpointRequirement | None = None
     reviewer: ReviewerRequirement | None = None
@@ -126,51 +133,90 @@ class RowAxes(TypedDict):
     resolved value alone cannot answer it.
     """
 
-    effect: DecisionEffect
-    effect_source: RuleLevel
+    effects: list[EffectRow]
+    effects_source: RuleLevel
+    refuses: str
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
     checkpoint: CheckpointRequirement
     checkpoint_source: RuleLevel
     reviewer: ReviewerRequirement
-    effect_class: str
 
 
 class ResolvedAxes(BaseModel, frozen=True):
     """Every axis as one level resolved it, and where each value came from."""
 
-    effect: CommandEffect
-    effect_source: RuleLevel
+    effects: list[EffectRow]
+    effects_source: RuleLevel
+    refuses: str
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
     checkpoint: CheckpointRequirement
     checkpoint_source: RuleLevel
     reviewer: ReviewerRequirement
     effect_class: EffectClass | None
+    """The class a level stated, kept for the levels beneath to inherit.
+
+    Not a row field any more. It reached the compiled table beside the effects
+    it derives, which is the same judgement twice, and nothing read it there
+    once the purpose stopped being inferred from it. It stays here because it
+    is still a *declaration*: most of the remote table says what it does by
+    naming its class and letting :func:`external_effects` turn that into
+    effects, which is one judgement read once rather than a hundred remote
+    operations transcribed by hand.
+    """
 
     def row_fields(self) -> RowAxes:
-        """This triple as the erased row spells it, provenance included."""
+        """This triple as the erased row spells it, provenance included.
+
+        The effects arrive resolved. Deriving them here would read the class
+        this level *ended up carrying* rather than the one it stated, and
+        those are the same value only until a level above declares effects of
+        its own -- after which every level below it that states a class and no
+        effects reports what the level above does.
+        """
         return RowAxes(
-            effect=self.effect,
-            effect_source=self.effect_source,
+            effects=self.effects,
+            effects_source=self.effects_source,
+            refuses=self.refuses,
             sandbox=self.sandbox,
             sandbox_source=self.sandbox_source,
             checkpoint=self.checkpoint,
             checkpoint_source=self.checkpoint_source,
             reviewer=self.reviewer,
-            effect_class=self.effect_class or "",
         )
 
-    def inherit(self, declared: DeclaredAxes, level: RuleLevel) -> "ResolvedAxes":
+    def inherit(
+        self,
+        declared: DeclaredAxes,
+        level: RuleLevel,
+        derive: Callable[[str], list[EffectRow]] = external_effects,
+    ) -> "ResolvedAxes":
         """These axes as the level beneath resolves them over its own statements.
 
         A declaration wins in either direction: widening a restrictive parent is
         as ordinary as narrowing a permissive one, so nothing here compares the
         two values — only whether the level supplied one.
+
+        Effects take a third source between those two, because a level has two
+        ways of stating them. Declaring them outright is the first; declaring
+        the external class they follow from is the second, and it is the one
+        most of the remote table uses. Both are this level speaking, so both
+        have to outrank the level above -- a subcommand that refuses what fell
+        off its enumeration must not hand that refusal to the operations the
+        enumeration actually lists.
         """
+        stated = declared.effects is not None or declared.effect_class is not None
         return ResolvedAxes(
-            effect=self.effect if declared.effect is None else declared.effect,
-            effect_source=self.effect_source if declared.effect is None else level,
+            effects=(
+                declared.effects
+                if declared.effects is not None
+                else derive(declared.effect_class)
+                if declared.effect_class is not None
+                else self.effects
+            ),
+            effects_source=level if stated else self.effects_source,
+            refuses=self.refuses if declared.refuses is None else declared.refuses,
             sandbox=self.sandbox if declared.sandbox is None else declared.sandbox,
             sandbox_source=self.sandbox_source if declared.sandbox is None else level,
             checkpoint=self.checkpoint
@@ -191,8 +237,9 @@ class ResolvedAxes(BaseModel, frozen=True):
 
 
 ROOT_AXES = ResolvedAxes(
-    effect=ROOT_EFFECT,
-    effect_source="root",
+    effects=[],
+    effects_source="root",
+    refuses="",
     sandbox=ROOT_SANDBOX,
     sandbox_source="root",
     checkpoint=ROOT_CHECKPOINT,
@@ -223,15 +270,30 @@ class RunnerTargetRule(BaseModel, frozen=True):
     name: str
     sandbox: SandboxPlacement = "ambient"
 
-    effect: CommandEffect = "allow"
-    """What running this target costs, on the same vocabulary a command row uses.
+    effects: list[EffectRow]
+    """What reaching this target does, which is the whole of what it earns.
 
-    Blessing is the common case and stays the default. The other effects are
-    here because a target a project means to refuse has nowhere else to say
-    so: leaving it undeclared is not a refusal but an absence of judgment,
-    which a confined session hands to the runtime's own permissions. For a
-    target that spends money, runs for an hour, or publishes something, not
-    refusing is precisely the outcome the declaration existed to prevent.
+    Required, for the reason :attr:`ShellCommandRule.effects` is: a target
+    stating none derives an allow, so an omission would be a grant nobody
+    wrote down rather than a gap a reader sees. Blessing a toolchain is the
+    common case and it is said in one word — ``runs_declared_target``.
+
+    One statement serving both halves. A target with subcommands is erased
+    twice, as a runner row and as the command rows its verbs are judged by,
+    and while a verdict was stated here as well the two halves were declared
+    separately — a target could bless itself and refuse its own verbs, or the
+    reverse, with nothing noticing.
+    """
+
+    refuses: str = ""
+    """Where the agent goes instead, when this project refuses the target.
+
+    The command table's field, on the same terms: set, the target denies
+    whatever its effects would have earned, and :attr:`reason` carries the
+    route. A target that spends money, runs for an hour, or publishes
+    something is refused here rather than left undeclared — leaving it off is
+    not a refusal but an absence of judgment, which a confined session hands
+    to the runtime's own permissions.
     """
 
     reason: str = ""
@@ -262,8 +324,11 @@ class ShellOperationRule(BaseModel, frozen=True):
     """One operation word under a subcommand — e.g. ``worktree remove``."""
 
     name: str
-    effect: CommandEffect = ROOT_EFFECT
+    effects: list[EffectRow] = []
+    refuses: str = ""
     ask_flags: list[str] = []
+    flag_effects: list[EffectRow] = []
+    write_flags: list[str] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
     checkpoint: CheckpointRequirement = ROOT_CHECKPOINT
     reviewer: ReviewerRequirement = ROOT_REVIEWER
@@ -274,7 +339,8 @@ class ShellOperationRule(BaseModel, frozen=True):
         """The axes this operation states itself, leaving the rest to inherit."""
         supplied = self.model_fields_set
         return DeclaredAxes(
-            effect=self.effect if "effect" in supplied else None,
+            effects=self.effects if "effects" in supplied else None,
+            refuses=self.refuses if "refuses" in supplied else None,
             sandbox=self.sandbox if "sandbox" in supplied else None,
             checkpoint=self.checkpoint if "checkpoint" in supplied else None,
             reviewer=self.reviewer if "reviewer" in supplied else None,
@@ -297,9 +363,12 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     """
 
     name: str
-    effect: CommandEffect = ROOT_EFFECT
+    effects: list[EffectRow] = []
+    refuses: str = ""
     ask_refspecs: list[RefspecEffect] = []
     ask_flags: list[str] = []
+    flag_effects: list[EffectRow] = []
+    write_flags: list[str] = []
     read_verbs: list[str] = []
     guarded_keys: list[str] = []
     operations: list[ShellOperationRule] = []
@@ -313,7 +382,8 @@ class ShellSubcommandRule(BaseModel, frozen=True):
         """The axes this subcommand states itself, leaving the rest to inherit."""
         supplied = self.model_fields_set
         return DeclaredAxes(
-            effect=self.effect if "effect" in supplied else None,
+            effects=self.effects if "effects" in supplied else None,
+            refuses=self.refuses if "refuses" in supplied else None,
             sandbox=self.sandbox if "sandbox" in supplied else None,
             checkpoint=self.checkpoint if "checkpoint" in supplied else None,
             reviewer=self.reviewer if "reviewer" in supplied else None,
@@ -351,8 +421,49 @@ class ShellCommandRule(SelectableRule, frozen=True):
     """
 
     name: str
-    default_effect: CommandEffect
+    effects: list[EffectRow]
+    refuses: str = ""
+    """Where the agent goes instead, when this project refuses the spelling.
+
+    Set, the row denies whatever its effects would have earned, and the text
+    is the whole of what the agent is told -- so it names the route rather
+    than the objection: `uv add` for `pip install`, writing the command out
+    for `eval`. Empty is the ordinary case and derives as usual.
+
+    Apart from the effects because it is not one of them. `pip install` takes
+    exactly the dependency `uv add` takes, and a row that spelled the
+    preference as a distinct effect would have the command claiming to do
+    something it does not -- which is the drift this whole table is removing.
+    A refusal is about the route, and the route is not what an operation does.
+
+    Inherited like every other axis, so a toolchain refused at the command
+    keeps its one documented entry point by clearing it (`refuses=""`) on the
+    subcommand that has one.
+    """
     ask_flags: list[str] = []
+    flag_effects: list[EffectRow] = []
+    """What a guarded flag adds to what this command does.
+
+    ``ask_flags`` says which spellings escalate; this says what the escalation
+    is about, and the two are different statements. A row that made only the
+    first described the command without the flag and then asked about the
+    command with it, so the question's subject was named nowhere.
+    """
+    write_flags: list[str] = []
+    """Options whose *value* is a path this command writes.
+
+    Held apart from ``ask_flags`` because the two escalate for unlike
+    reasons and only one of them names something a write row can judge:
+    `sort -o out.txt` lands a file where the command would have written
+    stdout, and `sort --compress-program=x` runs a program. One list
+    answering for both meant the row's single verdict decided each, so a
+    write to scratch asked and a write over tracked source did not.
+
+    The value is what makes an entry belong here, not the writing. `yq -i`
+    rewrites a file and stays an ``ask_flags`` entry, because the file it
+    rewrites is the operand and the flag carries nothing -- reading the next
+    word as its path would name the expression instead.
+    """
     allow_flags: list[str] = []
     read_verbs: list[str] = []
     write_markers: list[str] = []
@@ -383,6 +494,32 @@ class ShellCommandRule(SelectableRule, frozen=True):
     `core.hooksPath`, and the families worth naming are shaped around a
     subsection the caller chooses (`merge.*.driver`).
     """
+    setting_flags: list[str] = []
+    """Guarded globals whose value names a setting this command will apply.
+
+    `git -c <key>=<value>` and `git config <key> <value>` set the same thing,
+    and until this existed only the second could say which settings its
+    question was about. So every `-c` asked on the strength of what `-c` can
+    reach — while the reason it gave, that a setting can change how commands
+    execute, was untrue of `-c color.ui=false`, which is the spelling this
+    repository's own guidance asks for whenever a diff is captured.
+
+    Read against :attr:`guarded_settings`, and only in the two spellings that
+    can be read without guessing: the value in the next word, or after the
+    `=` of a long option. A short flag with its value pressed against it keeps
+    asking, because the `=` in that word belongs to the setting rather than to
+    the flag.
+    """
+    guarded_settings: list[str] = []
+    """Which settings those globals must name for the question to stand.
+
+    `guarded_keys` for the globals, and the same glob patterns — the point of
+    both being that one judgement about which settings hand over execution
+    answers for every spelling that reaches them. Declared separately from
+    `guarded_keys` because that one is an absence test over the whole argument
+    list, and on a subcommand-gated command's own row it would also answer for
+    the verbs that fell off the enumeration.
+    """
     bare_reads: bool = False
     """Whether this command only reads when handed no arguments at all.
 
@@ -410,7 +547,8 @@ class ShellCommandRule(SelectableRule, frozen=True):
         """The axes this command states itself, leaving the rest to inherit."""
         supplied = self.model_fields_set
         return DeclaredAxes(
-            effect=self.default_effect,
+            effects=self.effects if "effects" in supplied else None,
+            refuses=self.refuses if "refuses" in supplied else None,
             sandbox=self.sandbox if "sandbox" in supplied else None,
             checkpoint=self.checkpoint if "checkpoint" in supplied else None,
             reviewer=self.reviewer if "reviewer" in supplied else None,
@@ -424,7 +562,8 @@ def erase_runner_targets(targets: list[RunnerTargetRule]) -> list[RunnerTargetRo
         RunnerTargetRow(
             name=target.name,
             sandbox=target.sandbox,
-            effect=target.effect,
+            effects=list(target.effects),
+            refuses=target.refuses,
             reason=target.reason,
         )
         for target in targets
@@ -443,7 +582,8 @@ def runner_target_tables(targets: list[RunnerTargetRule]) -> list[ShellRuleRow]:
         [
             ShellCommandRule(
                 name=target.name,
-                default_effect=target.effect,
+                effects=target.effects,
+                refuses=target.refuses,
                 subcommands=target.subcommands,
                 sandbox=target.sandbox,
                 reason=target.reason,
@@ -495,10 +635,14 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 operation=operation.name,
                 ask_refspecs=[],
                 ask_flags=list(operation.ask_flags),
+                flag_effects=list(operation.flag_effects),
+                write_flags=list(operation.write_flags),
                 allow_flags=[],
                 read_verbs=[],
                 write_markers=[],
                 guarded_keys=[],
+                setting_flags=[],
+                guarded_settings=[],
                 bare_reads=False,
                 value_flags=[],
                 reason=operation.reason,
@@ -513,10 +657,14 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             operation="",
             ask_refspecs=list(subcommand.ask_refspecs),
             ask_flags=list(subcommand.ask_flags),
+            flag_effects=list(subcommand.flag_effects),
+            write_flags=list(subcommand.write_flags),
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
             write_markers=[],
             guarded_keys=list(subcommand.guarded_keys),
+            setting_flags=[],
+            guarded_settings=[],
             bare_reads=False,
             value_flags=[],
             reason=subcommand.reason,
@@ -533,10 +681,14 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             operation="",
             ask_refspecs=[],
             ask_flags=list(command.ask_flags),
+            flag_effects=list(command.flag_effects),
+            write_flags=list(command.write_flags),
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
             write_markers=list(command.write_markers),
             guarded_keys=list(command.guarded_keys),
+            setting_flags=list(command.setting_flags),
+            guarded_settings=list(command.guarded_settings),
             bare_reads=command.bare_reads,
             value_flags=list(command.value_flags),
             reason=command.reason,
