@@ -1,12 +1,13 @@
-"""Registry resolution tests for `lup-devtools sync`.
+"""Registry resolution and reachability tests for `lup-devtools sync`.
 
 The sync registry contract: sync.json(.local) is the canonical pair, and a
-repo still carrying the legacy downstream.json(.local) names is read as a
-fallback with a deprecation warning that tells the user to rename the file.
+registration says a project may be *reviewed*. What says it may be *opened*
+is a `mount` written on the entry, which is a separate claim and is never
+defaulted — sync.json is committed scaffold, so a default there would decide
+what every project adopting this template can reach.
 """
 
 import json
-import logging
 from pathlib import Path
 
 import pytest
@@ -26,35 +27,64 @@ def registry_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def test_registry_prefers_sync_json_over_legacy(registry_root: Path) -> None:
-    write_registry(registry_root / "sync.json")
-    write_registry(registry_root / "downstream.json")
+def registered(registry_root: Path, *projects: dict) -> None:
+    """Write these entries as this project's personal registrations."""
+    (registry_root / "sync.json.local").write_text(
+        json.dumps({"projects": list(projects)})
+    )
 
-    assert sync.sync_file() == registry_root / "sync.json"
 
-
-def test_registry_falls_back_to_legacy_name_with_deprecation_warning(
-    registry_root: Path, caplog: pytest.LogCaptureFixture
+def test_a_registration_is_not_reachable_until_it_says_so(
+    registry_root: Path, tmp_path: Path
 ) -> None:
-    write_registry(registry_root / "downstream.json")
+    """The whole of the opt-in: tracked is not the same claim as open."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    registered(registry_root, {"name": "other", "path": str(elsewhere)})
 
-    with caplog.at_level(logging.WARNING):
-        resolved = sync.sync_file()
-
-    assert resolved == registry_root / "downstream.json"
-    assert "downstream.json is deprecated; rename it to sync.json" in caplog.text
+    assert sync.accessible_roots(lambda said: None) == []
 
 
-def test_local_registry_falls_back_to_legacy_name(
-    registry_root: Path, caplog: pytest.LogCaptureFixture
+def test_a_declared_mount_reaches_the_lease_at_the_mode_it_names(
+    registry_root: Path, tmp_path: Path
 ) -> None:
-    write_registry(registry_root / "downstream.json.local")
+    open_wide = tmp_path / "open"
+    read_only = tmp_path / "readable"
+    open_wide.mkdir()
+    read_only.mkdir()
+    registered(
+        registry_root,
+        {"name": "open", "path": str(open_wide), "mount": "rw"},
+        {"name": "readable", "path": str(read_only), "mount": "ro"},
+    )
 
-    with caplog.at_level(logging.WARNING):
-        resolved = sync.local_file()
+    roots = sync.accessible_roots(lambda said: None)
 
-    assert resolved == registry_root / "downstream.json.local"
-    assert "rename it to sync.json.local" in caplog.text
+    assert [(root.path, root.writable) for root in roots] == [
+        (open_wide, True),
+        (read_only, False),
+    ]
+
+
+def test_a_mount_nobody_can_locate_is_reported_rather_than_raised(
+    registry_root: Path,
+) -> None:
+    """A launch does not fail over an unfinished note in a gitignored file."""
+    registered(registry_root, {"name": "gone", "mount": "rw"})
+    said: list[str] = []
+
+    assert sync.accessible_roots(said.append) == []
+    assert "gone" in "\n".join(said)
+
+
+def test_a_misspelled_mode_is_refused_by_the_registry_rather_than_ignored(
+    registry_root: Path, tmp_path: Path
+) -> None:
+    """The reason the key is a literal: a typo is an error, not silence."""
+    registered(registry_root, {"name": "other", "path": str(tmp_path), "mount": "rwx"})
+
+    with pytest.raises(Exception):
+        sync.load_projects()
 
 
 def test_missing_registries_resolve_to_sync_names(registry_root: Path) -> None:

@@ -31,12 +31,17 @@ The registry is direction-neutral: "sync" names the mechanism, not a
 direction. Seen from a project built on the template, the shipped lup entry
 is an upstream to pull improvements from; seen from the lup repo itself,
 sync.json.local registers the downstream fleet whose commits /lup:update
-reviews. Same tooling, opposite seats. A repo still carrying the legacy
-names downstream.json / downstream.json.local is read as a fallback with a
-deprecation warning; migrate by renaming the files.
+reviews. Same tooling, opposite seats.
 
 The script merges both: .local entries override sync.json entries by name.
 Projects with a URL but no local path are auto-cloned to .cache/sync/.
+
+An entry carrying a "mount" is also a declaration about *access*: a session
+can open that project, at the mode it names, wherever the project lives on
+this machine. Absent, nothing is mounted — which is the whole difference
+between a registry and a boundary, and the reason the key has to be written
+rather than defaulted. sync.json is committed scaffold, so a default here
+would decide what every project adopting this template opens.
 
 Examples::
 
@@ -54,7 +59,7 @@ import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Required, TypedDict
+from typing import Annotated, Literal, Required, TypedDict, get_args
 
 import sh
 import typer
@@ -64,6 +69,7 @@ from lup.workspace.paths import project_root
 from lup.devtools.subapps import subapp
 from lup.devtools.utils import decode_stderr, format_table, short_sha
 from lup.execution.shell import git
+from lup.sandbox.rail import AccessibleRoot
 
 app = typer.Typer(no_args_is_help=True)
 SUBAPP = subapp("sync", "Track sync.json repos and review their commits", app)
@@ -88,6 +94,20 @@ class ProjectEntry(TypedDict, total=False):
     branch: str
     last_synced_commit: str
     ignore: bool
+    mount: Literal["rw", "ro"]
+    """Whether a session may open this project, and in which mode.
+
+    Written or absent, never defaulted. Tracking a project for review and
+    handing a session the keys to it are different claims, and the file that
+    makes the first one is committed scaffold shipped to every project built
+    on this template -- so a default would open a repository on machines
+    nobody here has seen.
+
+    A separate question from ``ignore``, which governs sync *review*: being
+    the upstream of this repository is a reason not to read its commits back
+    and no reason at all to be unable to open it. Spelled as a literal so a
+    misspelling is the error this registry's validation exists to raise
+    rather than a project quietly out of reach."""
 
 
 @with_config(ConfigDict(extra="allow"))
@@ -104,23 +124,20 @@ class SyncConfig(TypedDict):
 SYNC_CONFIG_ADAPTER = TypeAdapter(SyncConfig)
 PROJECT_ENTRY_ADAPTER = TypeAdapter(ProjectEntry)
 
+MOUNT_MODES: tuple[str, ...] = get_args(ProjectEntry.__annotations__["mount"])
+"""The modes a registration may ask for, read off the entry that declares them.
 
-def registry_path(name: str, legacy_name: str) -> Path:
-    """Resolve a registry file, falling back to its legacy downstream name."""
-    preferred = project_root() / name
-    legacy = project_root() / legacy_name
-    if preferred.exists() or not legacy.exists():
-        return preferred
-    logger.warning("%s is deprecated; rename it to %s", legacy_name, name)
-    return legacy
+Derived rather than restated, so the command line and the document cannot come
+to accept different words. A second spelling here is how the CLI would end up
+taking a mode the registry then refuses to validate."""
 
 
 def sync_file() -> Path:
-    return registry_path("sync.json", "downstream.json")
+    return project_root() / "sync.json"
 
 
 def local_file() -> Path:
-    return registry_path("sync.json.local", "downstream.json.local")
+    return project_root() / "sync.json.local"
 
 
 def cache_dir() -> Path:
@@ -215,6 +232,79 @@ def resolve_existing_path(proj: ProjectEntry) -> str | None:
     return None
 
 
+def own_commits(path: str, upstream: str) -> bool:
+    """Whether this checkout holds commits its upstream ref does not.
+
+    Asked before a hard reset, because the reset is how a cached checkout
+    stays current for review and it is also how work done inside one
+    disappears with nothing said. A cache checkout lives under the project
+    root, so it is writable with the checkout and a session can commit there
+    -- and could, before anything asked this.
+
+    A checkout that cannot answer is read as holding nothing, which is the
+    reset's own precondition rather than a guess: `rev-list` fails where the
+    upstream ref is missing, and a reset to a ref that is not there fails
+    immediately after, naming it.
+    """
+    try:
+        return commit_count(path, upstream) > 0
+    except (sh.ErrorReturnCode, ValueError):
+        return False
+
+
+def accessible_roots(
+    report: Callable[[str], None] = typer.echo,
+) -> list[AccessibleRoot]:
+    """Every registered project that asked to be reachable, as mounts.
+
+    Only the entries carrying a ``mount``. Registering a project says the
+    tooling may read its commits; nothing about it says a session may open
+    it, and the two live in the same file only because the file is where a
+    project is named. Silence here is the answer for every registration
+    written before this key existed, and for the lup entry the committed
+    scaffold ships to every adopter.
+
+    Read from the registry rather than from `refs/`, and that difference is
+    the whole of why this exists. `refs/` is a directory of symlinks built
+    from this registry; it is gitignored, and it sits inside the checkout, so
+    it is writable from inside the boundary. A mount table read off it would
+    be one the confined session could extend by writing a symlink, which is
+    the confined thing choosing what confines it.
+
+    A registration carrying only a URL is materialized on the way past, so
+    naming a project on a forge is enough to be able to open it. That happens
+    on the host, before the boundary and on the only side that can reach the
+    forge -- and only where nothing is on disk yet, because
+    :func:`ensure_local` also fetches and resets, and opening a session is
+    not a review.
+
+    A registration that asked for a mount and has neither a path nor a URL is
+    reported and skipped. That is a note somebody did not finish, in a
+    gitignored file, and failing a launch over one would turn it into a
+    session that will not open.
+    """
+
+    def located(project: ProjectEntry) -> AccessibleRoot | None:
+        """Where one registration is on disk, materializing it if it is not."""
+        if "mount" not in project:
+            return None
+        mode = project["mount"]
+        found = resolve_existing_path(project)
+        if found is None and project.get("url", ""):
+            found = ensure_local(project, report)
+        if found is None:
+            report(
+                f"'{project['name']}' has neither a local path nor a URL, "
+                "so it stays out of reach"
+            )
+            return None
+        return AccessibleRoot(path=Path(found).resolve(), writable=mode == "rw")
+
+    return [
+        root for project in load_projects() if (root := located(project)) is not None
+    ]
+
+
 def ensure_local(
     proj: ProjectEntry,
     report: Callable[[str], None] = typer.echo,
@@ -250,7 +340,14 @@ def ensure_local(
         report(f"Fetching latest for '{name}' from cache...")
         try:
             git("-C", str(cache_path), "fetch", "--quiet")
-            git("-C", str(cache_path), "reset", "--hard", reset_target, "--quiet")
+            if own_commits(str(cache_path), reset_target):
+                report(
+                    f"'{name}' holds commits {reset_target} does not, so it was "
+                    "left where it stands rather than reset over. Push them or "
+                    "drop them to review against the upstream again."
+                )
+            else:
+                git("-C", str(cache_path), "reset", "--hard", reset_target, "--quiet")
         except sh.ErrorReturnCode as e:
             report(f"Warning: fetch failed: {decode_stderr(e)}")
         ensure_ref_symlink(name, str(cache_path))
@@ -328,18 +425,29 @@ def status_cmd() -> None:
         typer.echo("No projects tracked. Check sync.json(.local) or run 'setup'.")
         raise typer.Exit(1)
 
+    def reach(p: ProjectEntry) -> str:
+        """Whether a session can open this project, in the words it declared.
+
+        Its own column rather than a note on the source, because it answers a
+        different question from the rest of the table: everything else says
+        how far behind an upstream is, and this says what the next session
+        can write. A registration that never asked reads as `—`, which is the
+        same absence the launch acts on.
+        """
+        return p["mount"] if "mount" in p else "—"
+
     def project_row(p: ProjectEntry) -> list[str]:
         synced = p.get("last_synced_commit", "")
         synced_short = short_sha(synced) if synced else "never"
 
         if p.get("ignore"):
-            return [p["name"], "—", "ignored", "(skipped)"]
+            return [p["name"], "—", "ignored", reach(p), "(skipped)"]
 
         resolved = resolve_existing_path(p)
         if resolved is None:
             has_url = bool(p.get("url"))
             note = "not cloned (run: sync fetch)" if has_url else "no path/url"
-            return [p["name"], "—", synced_short, note]
+            return [p["name"], "—", synced_short, reach(p), note]
 
         try:
             behind: int | str = commit_count(resolved, synced)
@@ -347,12 +455,14 @@ def status_cmd() -> None:
             behind = "?"
         branch = p.get("branch", "")
         source = f"{resolved} ({branch})" if branch else resolved
-        return [p["name"], str(behind), synced_short, source]
+        return [p["name"], str(behind), synced_short, reach(p), source]
 
     rows = [project_row(p) for p in projects]
 
     typer.echo()
-    typer.echo(format_table(("Project", "Behind", "Last Synced", "Source"), rows))
+    typer.echo(
+        format_table(("Project", "Behind", "Last Synced", "Mount", "Source"), rows)
+    )
     typer.echo()
 
 
@@ -482,15 +592,44 @@ def setup_project(
         str,
         typer.Option("--branch", "-b", help="Branch to track (default: remote HEAD)"),
     ] = "",
+    mount: Annotated[
+        str,
+        typer.Option(
+            "--mount",
+            help=(
+                f"Open this project from a session: {' or '.join(MOUNT_MODES)}. "
+                "Omitted, it is tracked and not reachable"
+            ),
+        ),
+    ] = "",
 ) -> None:
-    """Set the local path for a project (writes to sync.json.local)."""
+    """Set the local path for a project (writes to sync.json.local).
+
+    ``--mount`` is what makes the project *reachable* rather than merely
+    tracked: a session opens it at this same path, inside the container as
+    well as outside, and `refs/<name>` resolves there instead of dangling.
+    Separate from registering it because the two are separate claims, and the
+    one that hands a session the keys is the one worth typing out.
+    """
+    if mount and mount not in MOUNT_MODES:
+        raise typer.BadParameter(f"--mount takes {' or '.join(MOUNT_MODES)}")
     resolved = Path(path).resolve()
     if not resolved.exists():
         typer.echo(f"Path does not exist: {resolved}")
         raise typer.Exit(1)
 
-    if not (resolved / ".git").exists() and not (resolved / ".git").is_file():
-        typer.echo(f"Not a git repository: {resolved}")
+    repository = (resolved / ".git").exists() or (resolved / ".git").is_file()
+    # A directory that is not a checkout can still be worth reaching -- a
+    # corpus, a set of reference material -- and the lease mounts one as a
+    # plain bind. What it cannot do is be *reviewed*, which is what the rest
+    # of this registry is for, so it is admitted only where the mount is the
+    # point and refused where somebody meant to track commits it has none of.
+    if not repository and not mount:
+        typer.echo(
+            f"Not a git repository: {resolved}\n"
+            "Pass --mount to register it for access alone; tracking a project "
+            "means reading its commits, and there are none to read here."
+        )
         raise typer.Exit(1)
 
     local_data = load_json(local_file())
@@ -507,6 +646,9 @@ def setup_project(
     if branch:
         entry["branch"] = branch
 
+    if mount:
+        entry["mount"] = "rw" if mount == "rw" else "ro"
+
     head = current_head(str(resolved)) if synced else ""
     if synced:
         entry["last_synced_commit"] = head
@@ -516,5 +658,10 @@ def setup_project(
     typer.echo(f"Set '{name}' local path to {resolved}")
     if branch:
         typer.echo(f"  Tracking branch: {branch}")
+    if mount:
+        typer.echo(
+            f"  Reachable from a session {'read-write' if mount == 'rw' else 'read-only'}"
+            " — takes effect at the next launch, which is when mounts are built"
+        )
     if synced:
         typer.echo(f"  Marked as synced at {short_sha(head)}")
