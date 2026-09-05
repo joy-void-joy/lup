@@ -1,5 +1,5 @@
 {
-  "revision": "538eb27b9da31b13176a8f01babbfaa77e511bd0",
+  "revision": "ac83b88292da5c6848c24c5a713daa4df5dc5a6a",
   "roots": [
     "lup",
     "lup_template"
@@ -43,6 +43,8 @@
     "dev worktree create",
     "dev worktree list",
     "dev worktree remove",
+    "dev env status",
+    "dev env sync",
     "dev pr status",
     "dev pr merge",
     "dev pr sync-base",
@@ -318,6 +320,8 @@
         "ClipboardTool.typed",
         "CLIPBOARD_TOOLS",
         "clipboard_probes",
+        "reachable_backend",
+        "readable_backends",
         "copy_to_clipboard",
         "clipboard_text",
         "clipboard_image",
@@ -846,6 +850,8 @@
         "DevDeclarations.test_roots",
         "DevDeclarations.git_guards",
         "create_dev_app",
+        "create_dev_app.env_status_cmd",
+        "create_dev_app.env_sync_cmd",
         "create_dev_app.worktree_create_cmd",
         "create_dev_app.worktree_list_cmd",
         "create_dev_app.worktree_remove_cmd",
@@ -1271,6 +1277,17 @@
         "conflict_audit",
         "conflict_audit.audit_file",
         "conflict_complete"
+      ]
+    },
+    {
+      "module": "lup.devtools.dev.environment",
+      "declares": [
+        "installed_from",
+        "installed_from.declared",
+        "foreign_installs",
+        "borrowed_report",
+        "environment_status",
+        "sync_environment"
       ]
     },
     {
@@ -2007,6 +2024,7 @@
         "Seam.call",
         "Seam.keyword",
         "Seam.summary",
+        "Seam.module",
         "Seam.read",
         "DECLARED_SEAMS",
         "survey",
@@ -3361,7 +3379,8 @@
         "DevProject.subapps",
         "DevProject.content",
         "DevProject.roots",
-        "DevProject.catalog"
+        "DevProject.catalog",
+        "DevProject.seams"
       ]
     },
     {
@@ -4276,6 +4295,8 @@
         "ClipboardBridge.channel",
         "ClipboardBridge.variable",
         "ClipboardBridge.shims",
+        "ClipboardBridge.display_variable",
+        "ClipboardBridge.display",
         "ClipboardBridge.media_types",
         "ClipboardBridge.limit",
         "ClipboardBridge.path",
@@ -5048,6 +5069,7 @@
         "Image.snapshot",
         "Image.baseline",
         "Image.inner_sandbox",
+        "Image.tooling",
         "Image.project_environment",
         "Image.agent_clis",
         "Image.terminal",
@@ -7544,6 +7566,7 @@
         "Subcommand",
         "Subcommand.word",
         "Subcommand.remainder",
+        "redirected_verb_only_reads",
         "split_subcommand",
         "declares_command",
         "decide_command_rows",
@@ -7856,15 +7879,18 @@
         "Effect.kind",
         "Effect.scopes",
         "Effect.writes",
+        "Effect.observes",
         "Effect.reviewable",
         "Effect.verdict",
         "Effect.reason",
         "Effect.purpose",
         "ChangesNothing",
         "ChangesNothing.kind",
+        "ChangesNothing.observes",
         "ChangesNothing.verdict",
         "ReadsPath",
         "ReadsPath.kind",
+        "ReadsPath.observes",
         "ReadsPath.scopes",
         "ReadsPath.verdict",
         "ReadsPath.purpose",
@@ -8054,6 +8080,7 @@
         "spells_its_path",
         "is_generated_plugin_target",
         "is_session_scratch_target",
+        "is_temporary_root_target",
         "role_pattern_covers",
         "role_pattern_covers.covers",
         "normalized_path",
@@ -8188,6 +8215,7 @@
         "SettlementFacts.__init__",
         "SettlementFacts.asks",
         "SettlementFacts.bounded",
+        "SettlementFacts.container_private",
         "SettlementFacts.rewritten",
         "SettlementRule",
         "SettlementRule.settles",
@@ -8261,6 +8289,7 @@
         "ShellContext.runner_targets",
         "ShellContext.target_tables",
         "ShellContext.contained",
+        "ShellContext.unjudged_ambient",
         "write_facts",
         "shell_context",
         "decide_find_words",

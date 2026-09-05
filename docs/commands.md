@@ -58,6 +58,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev worktree create` | Create or re-attach a git worktree. |
 | `dev worktree list` | List all git worktrees with branch and status info. |
 | `dev worktree remove` | Remove a git worktree. |
+| `dev env status` | Where this project&#x27;s environment is, and who is installed in it. |
+| `dev env sync` | Install this project&#x27;s dependencies into its own environment. |
 | `dev pr status` | Fetch PR review status, checks, and comments for a branch. |
 | `dev pr merge` | Merge a PR and pull changes into the integration branch. |
 | `dev pr sync-base` | Sync the base branch and merge it into the current feature branch. |
