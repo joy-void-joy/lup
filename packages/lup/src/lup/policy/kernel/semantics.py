@@ -36,6 +36,7 @@ type ReviewPurpose = Literal[
     "external_consequence",
     "policy_override",
     "unrecovered_local_mutation",
+    "untrusted_dependency",
 ]
 """What a question is *for*, so the queue can be read without the rule ids.
 
@@ -44,6 +45,15 @@ person is being asked to make, which is what lets a reviewer triage a queue
 and an audit count interruptions by kind. It never replaces the rule id or
 the complete reason — a purpose is a category, and two rules sharing one are
 still two rules.
+
+``untrusted_dependency`` is the one that is not about what the agent does but
+about what it *trusts*. Taking a package is the moment third-party code enters
+a tree, a compromised release is indistinguishable from a good one at that
+moment, and the window between publication and discovery is exactly when an
+eager agent reaches for a name it read somewhere. Counted apart from
+``external_consequence`` because the direction is inward: nothing leaves this
+machine, and the exposure outlives the command by however long the dependency
+stays.
 """
 
 type AbstentionPurpose = Literal["provider_native", "boundary_settle"]

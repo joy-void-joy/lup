@@ -205,3 +205,20 @@ def archive_write(words: list[str]) -> ArchiveWrite | None:
             return compression_write(executable, words)
         case _:
             return None
+
+
+def archive_targets(write: ArchiveWrite) -> list[str]:
+    """Every path one archive verb names, whichever of the three ways it named it.
+
+    The three lists are separate because absence means something different of
+    each, and a caller asking *where* rather than *whether* wants them
+    together: a generated tree is replaced by an extraction as surely as by an
+    authored archive, and a loss reaches outside the checkout whichever list
+    the path arrived in.
+    """
+    directory = write["directory"]
+    return [
+        *write["authored"],
+        *write["consumed"],
+        *([] if directory is None else [directory]),
+    ]

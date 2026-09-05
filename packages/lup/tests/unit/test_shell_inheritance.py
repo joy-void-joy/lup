@@ -14,10 +14,13 @@ verdict, because `git` declares its placement at the command its verbs share.
 """
 
 from lup.providers.codex.harness import codex_allow_prefixes
+from lup.policy.kernel.commands import no_write_facts, unresolved_evidence
 from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.effects import declared_verdict
+from lup.policy.kernel.rows import ShellRuleRow
+from lup.policy.kernel.effects import declare
 from lup.policy.kernel.shell import auto_escape_matches, decide_shell
 from lup.policy.shell_rules import (
-    ROOT_EFFECT,
     ROOT_SANDBOX,
     ShellCommandRule,
     ShellOperationRule,
@@ -93,7 +96,10 @@ ALLOWED_UNDER_A_RESTRICTIVE_PARENT = (
     "git mv",
     "git cherry-pick",
     "git revert",
-    "git merge",
+    # `git merge` is deliberately absent. It sat here while it was classed
+    # among the reversible subcommands, which is true of what it does to this
+    # checkout and beside the point: a merge puts work on a branch other
+    # people build on, and that is the question it carries.
     "git notes",
     "git stage",
     "git log",
@@ -129,6 +135,13 @@ ALLOWED_UNDER_A_RESTRICTIVE_PARENT = (
     "docker stats",
     "docker events",
 )
+
+
+def earned(row: ShellRuleRow) -> str:
+    """What one erased row is worth, on the unresolved reading."""
+    return declared_verdict(
+        row["effects"], row["refuses"], unresolved_evidence(no_write_facts())
+    )
 
 
 def verdict(command: str, rules: list[ShellCommandRule]) -> KernelDecision:
@@ -173,20 +186,32 @@ def test_a_declaration_overrides_what_it_inherited_in_either_direction() -> None
     widening = [
         ShellCommandRule(
             name="tool",
-            default_effect="deny",
+            effects=[],
+            refuses="this toolchain is not reached this way",
             sandbox="inside",
             subcommands=[
-                ShellSubcommandRule(name="show", effect="allow", sandbox="outside")
+                ShellSubcommandRule(
+                    name="show",
+                    # The one documented entry point keeps itself by clearing
+                    # the refusal, which is the shape the row model names.
+                    refuses="",
+                    effects=[declare("reads_path", scope="project")],
+                    sandbox="outside",
+                )
             ],
         )
     ]
     narrowing = [
         ShellCommandRule(
             name="tool",
-            default_effect="allow",
+            effects=[declare("reads_path", scope="project")],
             sandbox="outside",
             subcommands=[
-                ShellSubcommandRule(name="wipe", effect="ask", sandbox="inside")
+                ShellSubcommandRule(
+                    name="wipe",
+                    effects=[declare("destroys_uncaptured", scope="targeted")],
+                    sandbox="inside",
+                )
             ],
         )
     ]
@@ -204,7 +229,7 @@ def test_omission_inherits_at_every_depth_including_an_operation() -> None:
     rules = [
         ShellCommandRule(
             name="tool",
-            default_effect="ask",
+            effects=[declare("destroys_uncaptured", scope="targeted")],
             sandbox="outside",
             subcommands=[
                 ShellSubcommandRule(
@@ -219,6 +244,41 @@ def test_omission_inherits_at_every_depth_including_an_operation() -> None:
     assert verdict("tool area", rules).effect == "ask"
 
 
+def test_a_declared_class_outranks_the_effects_of_the_level_above() -> None:
+    """A level states its effects two ways, and both are that level speaking.
+
+    Declaring an external class is how most of the remote table says what it
+    does, so a class stated beneath a parent that declared effects outright
+    has to win -- otherwise a subcommand refusing what fell off its
+    enumeration hands that refusal to every operation the enumeration lists,
+    which is the opposite of what enumerating them was for.
+    """
+    rules = [
+        ShellCommandRule(
+            name="tool",
+            effects=[declare("unclassified_operation", scope="tool")],
+            subcommands=[
+                ShellSubcommandRule(
+                    name="area",
+                    effects=[declare("unclassified_operation", scope="tool area")],
+                    operations=[
+                        ShellOperationRule(name="offer", effect_class="compensable"),
+                        ShellOperationRule(name="quiet"),
+                    ],
+                )
+            ],
+        )
+    ]
+    erased = {row["rule"]: row for row in erase_shell_rules(rules)}
+
+    def kinds(rule: str) -> list[str]:
+        return [effect["kind"] for effect in erased[rule]["effects"]]
+
+    assert kinds("shell:tool.area.offer") == ["publishes"]
+    assert kinds("shell:tool.area.quiet") == ["unclassified_operation"]
+    assert kinds("shell:tool.area") == ["unclassified_operation"]
+
+
 def test_stating_the_value_a_level_would_have_inherited_still_counts() -> None:
     """Declared and defaulted are different, or a level cannot pin what it got.
 
@@ -229,11 +289,17 @@ def test_stating_the_value_a_level_would_have_inherited_still_counts() -> None:
     rules = [
         ShellCommandRule(
             name="tool",
-            default_effect="deny",
+            effects=[declare("unclassified_operation", scope="tool")],
             sandbox="outside",
             subcommands=[
-                ShellSubcommandRule(name="here", effect="allow", sandbox=ROOT_SANDBOX),
-                ShellSubcommandRule(name="there", effect="allow"),
+                ShellSubcommandRule(
+                    name="here",
+                    effects=[declare("reads_path", scope="project")],
+                    sandbox=ROOT_SANDBOX,
+                ),
+                ShellSubcommandRule(
+                    name="there", effects=[declare("reads_path", scope="project")]
+                ),
             ],
         )
     ]
@@ -251,7 +317,7 @@ def test_a_row_says_which_level_supplied_each_half_of_its_verdict() -> None:
         rule.path: rule for rule in survey_shell_rules([git_rule(sandbox="inside")])
     }
 
-    assert surveyed["git worktree add"].effect_source == "operation"
+    assert surveyed["git worktree add"].effects_source == "operation"
     assert surveyed["git worktree add"].sandbox_source == "command"
     assert surveyed["git worktree add"].provenance() == (
         "git worktree add: allow (declared here),"
@@ -264,14 +330,13 @@ def test_a_row_says_which_level_supplied_each_half_of_its_verdict() -> None:
 
 def test_a_table_that_declares_nothing_about_placement_reaches_the_root() -> None:
     """Absence on the placement axis is a statement, so no command repeats it."""
-    surveyed = survey_shell_rules([ShellCommandRule(name="ls", default_effect="allow")])
+    surveyed = survey_shell_rules(
+        [ShellCommandRule(name="ls", effects=[declare("reads_path", scope="project")])]
+    )
 
     assert surveyed[0].sandbox == ROOT_SANDBOX
     assert surveyed[0].sandbox_source == "root"
-    assert surveyed[0].effect_source == "command"
-    # Who decides has no member meaning "no opinion", so the command declares
-    # it and the root fallback beneath every table refuses rather than grants.
-    assert ROOT_EFFECT == "deny"
+    assert surveyed[0].effects_source == "command"
 
 
 def test_every_subcommand_allowed_beneath_a_restrictive_parent_allows() -> None:
@@ -289,13 +354,13 @@ def test_the_enumeration_above_is_the_table_s_own_and_cannot_fall_behind() -> No
     it misses is exactly the one a reshaping moves unnoticed.
     """
     rows = erase_shell_rules(default_vocabulary())
-    parents = {row["command"]: row["effect"] for row in rows if not row["subcommand"]}
+    parents = {row["command"]: earned(row) for row in rows if not row["subcommand"]}
     derived = sorted(
         f"{row['command']} {row['subcommand']}"
         for row in rows
         if row["subcommand"]
         and not row["operation"]
-        and row["effect"] == "allow"
+        and earned(row) == "allow"
         and parents[row["command"]] != "allow"
     )
 
@@ -313,7 +378,7 @@ def test_a_native_prefix_reads_the_resolved_effect_and_not_the_declared_one() ->
     inheriting = [
         ShellCommandRule(
             name="tool",
-            default_effect="allow",
+            effects=[declare("reads_path", scope="project")],
             sandbox="outside",
             subcommands=[ShellSubcommandRule(name="show")],
         )
@@ -331,7 +396,7 @@ def test_a_confined_placement_is_never_widened_into_a_native_allow() -> None:
     confined = [
         ShellCommandRule(
             name="tool",
-            default_effect="allow",
+            effects=[declare("reads_path", scope="project")],
             sandbox="inside",
             subcommands=[ShellSubcommandRule(name="show")],
         )

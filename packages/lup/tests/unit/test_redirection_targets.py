@@ -12,7 +12,8 @@ from pathlib import Path
 
 from lup.policy.assets.host import unleased_write_targets
 from lup.policy.kernel.decision import KernelDecision
-from lup.policy.kernel.lex import shell_write_targets
+from lup.policy.kernel.lex import shell_path_verb_targets, shell_write_targets
+from lup.policy.kernel.words import flag_write_targets
 from lup.policy.kernel.rows import PathRoleRow, ShellRuleRow
 from lup.policy.kernel.shell import decide_shell
 from lup.policy.shell_rules import erase_shell_rules
@@ -122,3 +123,157 @@ def test_a_stream_sink_is_no_target_for_the_lease_to_read() -> None:
         )
         == []
     )
+
+
+def test_a_program_a_command_carries_is_not_one_of_its_paths() -> None:
+    """The same shape as the sink above, reached by a word rather than a target.
+
+    Every non-flag word of a `sed` was named as something it acted on, which
+    was defended as harmless because a script is not a file. Two of the three
+    questions asked of these stat the path and drop whatever is not on disk;
+    the lease resolves the string, and a sed address script *begins with a
+    slash* -- so it resolved to an absolute path no writable root contains and
+    was reported as a write outside the lease. The command was a read.
+    """
+    scripted = "sed -n '/^def one/,/^def two/p' vocabulary.py"
+    assert shell_path_verb_targets(scripted) == ["vocabulary.py"]
+    assert (
+        unleased_write_targets(
+            shell_path_verb_targets(scripted),
+            {"writable_roots": ["/checkout"]},
+            Path("/checkout"),
+        )
+        == []
+    )
+
+
+def test_the_operand_a_rewrite_does_write_is_still_named() -> None:
+    """Under-naming is the conservative direction, not a free one.
+
+    `sed -i` is why this command is read at all, so dropping the script must
+    not drop the file beside it -- by any of the spellings that say where the
+    program came from.
+    """
+    assert shell_path_verb_targets("sed -i 's/a/b/' src.py") == ["src.py"]
+    assert shell_path_verb_targets("sed -i.bak 's/a/b/' src.py") == ["src.py"]
+    assert shell_path_verb_targets("sed -i -e 's/a/b/' src.py") == ["src.py"]
+    assert shell_path_verb_targets("sed -ne '1p' a.py b.py") == ["a.py", "b.py"]
+    assert shell_path_verb_targets("sed --expression=s/a/b/ src.py") == ["src.py"]
+    # `-f` names the program's own file, which is read rather than written.
+    assert shell_path_verb_targets("sed -i -f rules.sed src.py") == ["src.py"]
+
+
+def test_a_write_flag_names_its_path_by_every_spelling_that_reaches_it() -> None:
+    """`-o path`, `--output path` and `--output=path` land the same file."""
+    assert flag_write_targets(["sort", "-o", "out.txt", "f"], ["-o"]) == ["out.txt"]
+    assert flag_write_targets(["git", "log", "--output", "l.txt"], ["--output"]) == (
+        ["l.txt"]
+    )
+    assert flag_write_targets(["git", "log", "--output=l.txt"], ["--output"]) == (
+        ["l.txt"]
+    )
+    assert flag_write_targets(
+        ["find", ".", "-fprint", "a", "-fls", "b"], ["-fprint", "-fls"]
+    ) == (["a", "b"])
+
+
+def test_a_write_flag_it_cannot_resolve_names_nothing() -> None:
+    """Silence costs a relaxation; a guess would cost the grant itself.
+
+    The guard beside this reads a short flag anywhere inside a cluster, which
+    is right for asking whether one is present and wrong for deciding which
+    word is the path -- `-no` would carry `-o` and take somebody else's
+    operand as the file. Whatever is unresolved here leaves the row's own
+    verdict standing, so under-naming is the safe direction and taken.
+    """
+    assert flag_write_targets(["sort", "-no", "f"], ["-o"]) == []
+    assert flag_write_targets(["sort", "-o"], ["-o"]) == []
+    assert flag_write_targets(["sort", "-o", "-x", "f"], ["-o"]) == []
+    assert flag_write_targets(["git", "log", "--output="], ["--output"]) == []
+
+
+def written(
+    command: str, tracked: list[str] | None = None, contained: bool = False
+) -> KernelDecision:
+    """One command judged with `tmp` scratch and a stated tracked reading."""
+    return decide_shell(
+        command,
+        rows(),
+        path_roles=SCRATCH,
+        existing_targets=["notes.txt", "src.py"],
+        tracked_targets=tracked or [],
+        contained=contained,
+    )
+
+
+class TestAFlagThatWritesIsJudgedWhereEveryWriteIs:
+    """`-o path` and `> path` land the same bytes, so they answer alike.
+
+    Before this the flag never looked at the path. It carried one verdict per
+    row and a checkpoint decided whether anything discharged it, so `tree -o`
+    and `base64 -o` allowed onto tracked source while `sort -o` asked about a
+    file in a scratch tree.
+    """
+
+    def test_landing_a_new_file_allows(self) -> None:
+        """A create replaces nothing, which is the commonest form by far."""
+        assert written("sort -o fresh.txt f").effect == "allow"
+
+    def test_landing_in_a_scratch_tree_allows_whatever_is_there(self) -> None:
+        """The tree is disposable by declaration, so nothing is being lost."""
+        assert written("sort -o tmp/out.txt f").effect == "allow"
+
+    def test_replacing_an_untracked_file_allows(self) -> None:
+        """`cmd -o run.log` over yesterday's log: nothing reviews it."""
+        assert written("sort -o notes.txt f").effect == "allow"
+
+    def test_replacing_tracked_source_allows_and_is_read_afterwards(self) -> None:
+        """The content question is not refused here, because it is not asked here.
+
+        What a command writes is produced by running it, so no gate could
+        read it in advance and a refusal would fall on exactly the writes for
+        which that is unavoidable. The path question is answered before the
+        fact and the content question after it, against the file itself.
+        """
+        assert written("sort -o src.py f", tracked=["src.py"]).effect == "allow"
+
+    def test_the_same_file_answers_alike_by_either_spelling(self) -> None:
+        """The whole point: the path decides, not which word named it."""
+        for spelling in ("sort -o src.py f", "sort f > src.py"):
+            assert written(spelling, tracked=["src.py"]).effect == "allow", spelling
+        for spelling in ("sort -o tmp/o.txt f", "sort f > tmp/o.txt"):
+            assert written(spelling, tracked=["src.py"]).effect == "allow", spelling
+
+    def test_a_path_the_reading_can_answer_for_still_decides_beforehand(self) -> None:
+        """Generous about content is not generous about where it lands.
+
+        Which tree a path is in is knowable before the command runs, so it is
+        still answered then: a protected path asks and one outside the
+        checkout asks unless a boundary confines it.
+        """
+        for spelling in ("sort -o ../elsewhere.txt f", "sort f > ../elsewhere.txt"):
+            assert written(spelling).effect == "ask", spelling
+        for spelling in ("sort -o /etc/hosts f", "sort f > /etc/hosts"):
+            assert written(spelling).effect == "ask", spelling
+
+    def test_a_boundary_confines_both_spellings_or_neither(self) -> None:
+        """Whether a write outside is confined is a fact about the session.
+
+        The flag spelling had no way to read it and reached for the row's
+        declared `sandbox` instead -- which states where a command must run,
+        not where this one is, and reads `ambient` on every row in the table.
+        So a contained session was told its own boundary did not count, but
+        only when the path arrived as a flag value.
+        """
+        for spelling in ("sort -o /etc/hosts f", "sort f > /etc/hosts"):
+            assert written(spelling, contained=True).effect == "allow", spelling
+
+    def test_a_flag_naming_no_resolvable_path_keeps_the_row_s_question(self) -> None:
+        """A write nobody can locate is what the guard was written for."""
+        assert written("sort -no f").effect == "ask"
+
+    def test_a_flag_that_runs_a_program_still_asks_beside_one_that_writes(
+        self,
+    ) -> None:
+        """The stronger question survives: a file's answer is not a program's."""
+        assert written("sort --compress-program=x -o tmp/o.txt f").effect == "ask"
