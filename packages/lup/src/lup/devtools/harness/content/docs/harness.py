@@ -381,6 +381,41 @@ session runs in, so a rule that only asks where nobody can answer is caught
 too. `dev check` runs the same sweep, so a rule that stopped `git status`
 fails there rather than in somebody's session.
 
+### Put a program in the image
+
+A package reaches the container through one of three doors, and picking the
+wrong one is how a tool ends up absent with nothing having said so.
+
+`Image.baseline` is the library's answer to what any shell session needs to be
+usable at all — `git`, `curl`, `jq`, the registry managers. It is not a place
+for a project's own tools, and overriding it means restating every name in it
+to add one.
+
+A `Requirement` in the manifest is what a declared *capability* asked for. It
+takes a purpose, an exercise that proves a machine has the thing, and a policy
+for going without — so it is the right door exactly when the absence deserves
+a diagnostic. It is the wrong one otherwise: a manifest that invents
+prerequisites refuses machines that were fine, which is why ripgrep was
+declared here once and taken back out.
+
+`Image.tooling` is the third, and the one for a program this project's work
+simply needs present. Declared where the image is composed:
+
+```python
+return Image(
+    egress=SessionEgress(mode="host"),
+    tooling=[
+        Package(name="poppler"),
+        Package(name="prettier", manager="bun", version="3.4.2"),
+    ],
+)
+```
+
+Whole packages rather than bare names, so a registry package is pinned and
+reached through the manager that obtains it. Nothing exercises these: a name
+the manager cannot resolve fails the build and names itself, which beats a
+probe. `dev seams` reports what this project declared and where.
+
 ## Resolving a conflict
 
 `harness reconcile` compares the current files, the desired render, and the

@@ -64,6 +64,42 @@ def test_a_registry_package_carries_its_pinned_version_into_the_install() -> Non
     assert "bun add -g typescript@6.0.3" in rendered
 
 
+def test_declared_tooling_reaches_the_layer_its_manager_installs() -> None:
+    """The third door a package gets into an image through.
+
+    `baseline` is the library's answer to what a shell needs, and a
+    requirement is what a capability asked for and something exercises.
+    Neither has room for a program this project's own work shells out to, and
+    a declaration that did not reach the layer would be a field that reads
+    like a decision and installs nothing.
+    """
+    rendered = Image(
+        tooling=[
+            Package(name="poppler"),
+            Package(name="prettier", manager="bun", version="3.4.2"),
+        ]
+    ).dockerfile(Manifest())
+
+    assert "poppler" in rendered
+    assert "bun add -g prettier@3.4.2" in rendered
+
+
+def test_declared_tooling_is_the_images_alone_and_not_the_manifests() -> None:
+    """The two audiences a package list has, kept apart.
+
+    `Manifest.packages` feeds an image *and* answers for what a machine is
+    expected to have; merging the two produced `apt-get install -y uv` against
+    a runner that cannot satisfy it. Tooling is the image's alone, so nothing
+    reading the manifest learns a new prerequisite from it.
+    """
+    manifest = Manifest()
+
+    assert Package(name="poppler") in Image(tooling=[Package(name="poppler")]).packages(
+        manifest
+    )
+    assert Package(name="poppler") not in manifest.packages()
+
+
 def test_globally_installed_executables_are_reachable_by_directory() -> None:
     """Measured: linking the CLI by name left `tsc` installed and unreachable."""
     assert "ENV PATH=/opt/bun/bin:$PATH" in Image().dockerfile(Manifest())

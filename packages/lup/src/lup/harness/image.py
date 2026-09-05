@@ -382,6 +382,27 @@ class Image(BaseModel, frozen=True):
             "option costs before it does"
         ),
     )
+    tooling: list[Package] = Field(
+        default=[],
+        description=(
+            "What *this project's* work needs inside the image, which is the "
+            "other side of the line ``baseline`` draws: that field is a shell "
+            "being usable at all and is the library's answer, this one is the "
+            "application's and starts empty. A project that reads PDFs or "
+            "renders diagrams says so here, in the same call where it "
+            "declares its image, rather than restating fourteen baseline "
+            "names to add one -- and rather than inventing a capability. "
+            "A ``Requirement`` is the other door and a narrower one: it takes "
+            "a purpose, an exercise proving a machine has the thing, and a "
+            "policy for going without, so a tool whose *absence* deserves a "
+            "diagnostic belongs there and one that simply has to be present "
+            "belongs here. Nothing exercises these, deliberately: a name the "
+            "manager cannot resolve fails the build, naming it, which is a "
+            "better answer than a probe. Whole packages rather than bare "
+            "names, so a registry package can be pinned and reached through "
+            "the manager that obtains it"
+        ),
+    )
     project_environment: str = Field(
         default="/opt/lup/venv",
         description=(
@@ -601,7 +622,7 @@ class Image(BaseModel, frozen=True):
     )
 
     def packages(self, manifest: Manifest) -> list[Package]:
-        """Everything the image installs: baseline, editors, then declared.
+        """Everything the image installs: baseline, editors, tooling, declared.
 
         Deduplicated with declaration order kept, so a rebuild does not
         invalidate a layer because two lists mentioned one package. The
@@ -615,6 +636,11 @@ class Image(BaseModel, frozen=True):
         apart in the direction that is hardest to see: the launch forwards a
         name it believes is carried, the layer never installed it, and the
         operator's editor fails to open with the runtime blamed for it.
+
+        The project's own tooling sits between the library's answer and the
+        manifest's, which is where it belongs in the reading as well as in
+        the layer: after what a shell needs to work at all, before what a
+        declared capability asked for.
         """
         return list(
             dict.fromkeys(
@@ -622,6 +648,7 @@ class Image(BaseModel, frozen=True):
                     *(Package(name=name) for name in self.baseline),
                     *(Package(name=name) for name in self.inner_sandbox),
                     *self.terminal.packages(),
+                    *self.tooling,
                     *manifest.packages(),
                 ]
             )
