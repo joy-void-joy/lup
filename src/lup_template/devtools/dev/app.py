@@ -20,7 +20,7 @@ import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.library as library
 import lup_template.devtools.harness.catalog as catalog
 from lup.devtools.dev.app import DevDeclarations
-from lup.workspace.paths import find_project_root
+from lup.workspace.paths import project_root
 
 
 def declared() -> DevDeclarations:
@@ -92,7 +92,7 @@ def init_drop_examples_cmd(
     Lines still naming what went are reported rather than rewritten: a link in
     a README its human owner is already rewriting is theirs to remove.
     """
-    root = find_project_root()
+    root = project_root()
     removed = init.drop_scaffold_demonstrations(root, dry_run)
     if not removed:
         typer.echo("no scaffold demonstrations left to remove")
