@@ -47,6 +47,8 @@ from lup.devtools.clipboard import (
     clipboard_image,
     clipboard_text,
     copy_to_clipboard,
+    reachable_backend,
+    readable_backends,
 )
 from lup.harness.notice import Notice
 from lup.types import EnvVars
@@ -356,10 +358,30 @@ class ClipboardBridge(BaseModel, frozen=True):
     def notice(self, serving: bool) -> list[Notice]:
         """What an operator is told about their clipboard crossing.
 
-        Said whichever way it went, because both answers change what they do
-        next: an operator who does not know the bridge is there is one who
-        will not paste a screenshot, and one who does not know it is absent
-        reads a dead Ctrl+V as the runtime being broken.
+        Said whichever way it went, because all three answers change what they
+        do next: an operator who does not know the bridge is there is one who
+        will not paste a screenshot, one who does not know it is absent reads a
+        dead Ctrl+V as the runtime being broken, and one told the bridge works
+        when the host end answers nothing debugs the container.
+
+        Three rather than two, and the third is the one this was missing. The
+        socket opening says a listener exists; it says nothing about whether
+        anything on this machine answers a clipboard read, and the promise made
+        on the strength of it -- "this session can read and replace what you
+        have copied" -- was asserted every launch and measured on none. The
+        capability requirement that would have caught it is ``checked="setup"``
+        by design, so the one moment it mattered was the one moment nothing
+        asked.
+
+        Named backends rather than a platform. Which tool answers is a fact
+        about the machine and the process asking, not about the desktop: a
+        Wayland session usually also answers through XWayland, an X11 session
+        over a forwarded display answers only while that display is reachable
+        from *this* process, and a headless host answers through none of them.
+        So the absent case lists what was tried, in order, and leaves the
+        reader to see whether their own is missing or simply not answering
+        here. Naming a package would be right on one distribution and wrong on
+        the rest.
         """
         if not serving:
             return [
@@ -371,12 +393,29 @@ class ClipboardBridge(BaseModel, frozen=True):
                     urgency="boundary",
                 )
             ]
+        answering = reachable_backend()
+        if not answering:
+            return [
+                Notice(
+                    text=(
+                        "Clipboard: the bridge is up and nothing on this "
+                        "machine answered a clipboard read, so copy and paste "
+                        "will come back empty. Tried "
+                        f"{', '.join(readable_backends())} in that order — one "
+                        "of them being installed is not enough, it also has to "
+                        "reach a display from the process that launched this "
+                        "session."
+                    ),
+                    urgency="warning",
+                )
+            ]
         return [
             Notice(
                 text=(
                     "Clipboard: this session can read and replace what you have "
-                    f"copied, including {len(self.media_types)} image types; it "
-                    "reaches nothing else on your desktop."
+                    f"copied, through {answering}, including "
+                    f"{len(self.media_types)} image types; it reaches nothing "
+                    "else on your desktop."
                 ),
                 urgency="boundary",
             )
