@@ -342,6 +342,15 @@ class UnleasedWrite(SettlementRule):
     answer and asking about it would be offering to overturn it, and an ask
     already reaches a reviewer -- who is shown the operation, and can see for
     themselves where it points.
+
+    Not the write row spelled twice, though it reads like it. ``WritesPath``
+    decides on the *declaration*: which tree a spelling puts the target in,
+    read off the words before anything runs. This decides on the
+    *measurement*: where the launch actually mounted writable, resolved
+    against the filesystem. ``mkdir -p tmp/build`` is the case that separates
+    them -- declared scratch, so that row allows it at every placement, and
+    outside the lease of a worktree cut after the container started, which
+    only a measurement can know.
     """
 
     id = "unleased-write"
@@ -493,6 +502,13 @@ class ContainedEffects(SettlementRule):
     Lup's and holds however permissive the session's own mode is. That is the
     whole difference between containing something and hoping the provider
     contains it.
+
+    Not answered by the effect table reading placement, though both are about
+    containment. That table decides what a *declaration* earns, and every one
+    of its members returns a permission, a question or a refusal -- none of
+    them returns ``defer``, because a rule that describes an operation has
+    said something about it. This row answers the operations no rule
+    described at all, which is the one verdict the effects can never reach.
     """
 
     id = "contained-effects"
@@ -649,8 +665,3 @@ def settle(
             return reached
         facts = facts.rewritten(reached)
     return facts.decision
-
-
-def settlement_rule_ids() -> list[str]:
-    """Every row's stable id, in order, for the reference the docs render."""
-    return [rule.id for rule in SETTLEMENT_ORDER]

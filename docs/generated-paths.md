@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 82 artifacts
+## `claude` — 83 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -61,6 +61,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.claude/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.claude/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |
+| `.claude/plugins/lup/hooks/runtime/kernel/effects.py` | lup.policy.kernel.effects |
 | `.claude/plugins/lup/hooks/runtime/kernel/escalation.py` | lup.policy.kernel.escalation |
 | `.claude/plugins/lup/hooks/runtime/kernel/fetch.py` | lup.policy.kernel.fetch |
 | `.claude/plugins/lup/hooks/runtime/kernel/lex.py` | lup.policy.kernel.lex |
@@ -95,7 +96,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.devtools.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.devtools.harness.content.docs.upstream_reports |
 
-## `codex` — 63 artifacts
+## `codex` — 64 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -115,6 +116,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.codex/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.codex/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |
+| `.codex/plugins/lup/hooks/runtime/kernel/effects.py` | lup.policy.kernel.effects |
 | `.codex/plugins/lup/hooks/runtime/kernel/escalation.py` | lup.policy.kernel.escalation |
 | `.codex/plugins/lup/hooks/runtime/kernel/fetch.py` | lup.policy.kernel.fetch |
 | `.codex/plugins/lup/hooks/runtime/kernel/lex.py` | lup.policy.kernel.lex |

@@ -24,6 +24,7 @@ from kernel.decision import KernelDecision, SANDBOX_TRAPPED_REASON
 from kernel.shell import auto_escape_matches
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
+import csv
 from hashlib import sha256
 from datetime import UTC, datetime, timedelta
 
@@ -35,9 +36,13 @@ from kernel.edit import (
     relocated_edit_text,
     relocated_suppressions,
 )
+from kernel.effects import STRENGTH
 from kernel.fetch import decide_fetch
 from kernel.lex import (
+    authored_writes,
     python_script_targets,
+    shell_flag_write_targets,
+    shell_patch_operands,
     shell_path_verb_targets,
     shell_write_targets,
 )
@@ -1195,6 +1200,84 @@ def recoverable_write_targets(
     ]
 
 
+def committed_text(path_text: str, root: Path | None = None) -> str | None:
+    """What the last commit holds at this path, or None where Git cannot say.
+
+    The "before" half of reviewing a write after it happened. An edit hands
+    both halves to the gates because it has both; a shell command that already
+    ran leaves only the result on disk, so the prior content has to come from
+    somewhere, and the last commit is the reading a reviewer would compare
+    against anyway.
+
+    Uncommitted work already in the file is therefore invisible to the
+    comparison, which overstates the change rather than understating it. That
+    is the right direction for a report: it can name a line the command did
+    not write, and cannot miss one it did.
+    """
+    where = Path.cwd() if root is None else root
+    lines = git_answers(["show", f"HEAD:{path_text}"], where)
+    return None if lines is None else "\n".join(lines)
+
+
+def patch_write_targets(patches: list[str], root: Path | None = None) -> list[str]:
+    """The paths these patches would write, as Git itself reads them.
+
+    A patch names its targets in a format with exactly one authoritative
+    reader, and that reader is already installed: ``--numstat`` parses the
+    patch and reports what it touches without applying a byte of it. Reaching
+    for it is the alternative to growing a unified-diff parser inside a hook,
+    which would be a second reader to keep in step with the one that decides.
+
+    Anything Git declines to read yields nothing. A path that is not a patch,
+    a patch against files that are not there, a missing file -- each exits
+    non-zero and collapses to ``None``, so a word swept up by mistake
+    contributes no target rather than a target nobody writes.
+
+    The report is tab-separated: added lines, deleted lines, path. It is read
+    with the reader for that format rather than split, and ``core.quotePath``
+    is turned off so a path outside ASCII arrives as itself instead of as an
+    escaped rendering no reader here would undo. A path holding a tab or a
+    newline is quoted by Git whatever that setting says, and drops out by
+    failing to name a file -- which loses a review rather than inventing one.
+
+    A rename reports the destination, which is the file that ends up written
+    and so the one worth reading afterwards.
+    """
+    where = Path.cwd() if root is None else root
+    return [
+        columns[2]
+        for patch in patches
+        for report in [
+            git_answers(
+                ["-c", "core.quotePath=false", "apply", "--numstat", "--", patch], where
+            )
+        ]
+        if report is not None
+        for columns in csv.reader(report, delimiter="\t")
+        if len(columns) == 3 and columns[2]
+    ]
+
+
+def tracked_write_targets(targets: list[str], root: Path | None = None) -> list[str]:
+    """Report which targets Git holds, so a reviewer could diff a change to one.
+
+    The weaker half of :func:`recoverable_write_targets`, and a different
+    question rather than a cheaper one. That asks whether the object store
+    could put the bytes back, so it wants the path clean as well as tracked;
+    this asks whether replacing the content would bypass review, and a file
+    carrying uncommitted work is *more* reviewable rather than less.
+
+    Existing on disk is not required either. A tracked path somebody deleted
+    is still a path a diff would show.
+    """
+    where = Path.cwd() if root is None else root
+    return [
+        target
+        for target in targets
+        if git_answers(["ls-files", "--error-unmatch", "--", target], where) is not None
+    ]
+
+
 def unleased_write_targets(
     targets: list[str], measured: dict[str, list[str]], root: Path | None = None
 ) -> list[str]:
@@ -1328,6 +1411,7 @@ def bash_decision(
     escapable: bool,
     cwd: Path | None,
     relayed: bool = False,
+    autonomous: bool = False,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -1352,6 +1436,13 @@ def bash_decision(
     whether it can put a single call outside its own sandbox. It arrives as an
     argument for the same reason the rest does — a fact one dispatcher stopped
     passing is a rule that silently stopped applying.
+
+    ``autonomous`` is the identity the edit gates read, carried here because a
+    command that writes its own content reaches those gates. It is the same
+    answer the dispatcher hands ``edit_decision``, passed rather than derived
+    from ``relayed``: a session holding a mailbox and a session implementing
+    against fixed acceptance tests are different facts that happen to coincide
+    on one runtime.
     """
     # Read once and passed to each fact that needs it, rather than re-read per
     # question: the ledger is one measurement of one launch, and a second read
@@ -1359,6 +1450,12 @@ def bash_decision(
     boundary = measured_boundary(cwd)
     inside = contained(boundary)
     acted_on = shell_path_verb_targets(command)
+    # The third way a command names a file it writes, after a redirection and
+    # a path verb's operand. It joins the two relaxing facts below and not the
+    # lease's list, because it gathers every write flag the executable has a
+    # row for rather than only the row that matches -- which is safe for a
+    # fact consulted about a path and not for a list that asks about one.
+    flagged = shell_flag_write_targets(command, SHELL_RULES)
     # Before the verdict rather than after it, because the verdict reads it:
     # an approval question exists where a loss is permanent, and a tree the
     # object store already holds has no permanent loss to ask about. Ordered
@@ -1377,7 +1474,10 @@ def bash_decision(
         path_roles=PATH_ROLES,
         path_rules=PATH_RULES,
         existing_targets=existing_write_targets(
-            [*shell_write_targets(command), *acted_on], cwd
+            [*shell_write_targets(command), *acted_on, *flagged], cwd
+        ),
+        tracked_targets=tracked_write_targets(
+            [*shell_write_targets(command), *acted_on, *flagged], cwd
         ),
         recoverable_targets=recoverable_write_targets(
             [*shell_write_targets(command), *acted_on], cwd
@@ -1424,6 +1524,17 @@ def bash_decision(
         ),
         recovered=bool(reference),
     )
+    # The gates an edit is judged by, over the writes this command carries the
+    # content of. Joined here rather than inside the classifier because they
+    # read the filesystem -- the file about to be replaced, so a note removed
+    # or an anti-pattern introduced is seen against what is actually there --
+    # and the kernel reads nothing. Strongest wins, the rule every other join
+    # in this policy uses.
+    authored = authored_review(command, cwd or Path.cwd(), autonomous)
+    if authored is not None and STRENGTH.index(authored.effect) > STRENGTH.index(
+        verdict.effect
+    ):
+        verdict = authored
     # Parked before anything is rendered, because the relay is the durable
     # record every final ask is written to and the provider's own prompt is
     # that record's renderer rather than a second authority. Written here, at
@@ -1597,6 +1708,132 @@ def edit_decision(
     )
 
 
+def authored_review(command: str, cwd: Path, autonomous: bool) -> KernelDecision | None:
+    """What the edit gates say about a write whose content the command carries.
+
+    :func:`written_review` is the same reading a moment too late. It exists
+    because a shell write was answered by its path alone -- the command
+    produces its output by running, so before the fact there is nothing to
+    read -- and that premise holds for `dev render > docs/api.md` and fails
+    for `cat > f <<'EOF'`, where the bytes are in the command. Where they are,
+    they go to the same `edit_decision` an `Edit` is put to, at the moment
+    that can still change the answer.
+
+    What that closes: a redirection declares its route reviewed, which is what
+    lets the write row allow an overwrite of tracked source. For a route
+    nothing could read that is the honest trade. For this one it was a hole --
+    measured, `cat > packages/lup/src/lup/seams.py <<'EOF'` replaced a tracked
+    library module with one line, allowed and unprompted, past the
+    anti-pattern audit, the review-note gate and the size budget alike.
+
+    The strongest verdict of the writes it could read, or ``None`` where it
+    read none. An unreadable file leaves the write judged as it was rather
+    than refused for being unreadable: the reading is a relaxation's
+    precondition, not a gate of its own.
+    """
+    verdicts: list[KernelDecision] = []
+    for write in authored_writes(command):
+        landed = cwd / write["path"]
+        existing = landed.is_file()
+        try:
+            before = landed.read_text() if existing else None
+        except OSError:
+            continue
+        after = (
+            (before or "") + write["content"] if write["append"] else write["content"]
+        )
+        verdicts.append(
+            edit_decision(
+                write["path"],
+                before,
+                after,
+                path_exists=existing,
+                autonomous=autonomous,
+                operation=(
+                    "modify"
+                    if write["append"]
+                    else "overwrite"
+                    if existing
+                    else "create"
+                ),
+                cwd=cwd,
+            )
+        )
+    stopped = [verdict for verdict in verdicts if verdict.effect != "allow"]
+    if not stopped:
+        return None
+    return max(stopped, key=lambda verdict: STRENGTH.index(verdict.effect))
+
+
+def written_review(command: str, cwd: Path) -> list[str]:
+    """What the gates say about the files a shell command just wrote.
+
+    The half of an edit's review a shell write cannot reach in advance. An
+    `Edit` carries its content, so the note gate, the size budget and the
+    anti-pattern audit read it before it lands; `dev render > docs/api.md`
+    produces its content by running, so before the fact there is nothing to
+    read and the write is answered by its path alone.
+
+    Which is a smaller set than it was, and smaller here rather than only in
+    the telling. A command that carries its own bytes is put to the same
+    gates *before* it runs by :func:`authored_review`, so what reaches here
+    is the output that genuinely did not exist yet -- and a path that reader
+    already named is skipped, or an approved write would report its finding
+    once on the way in and again on the way out.
+
+    Answering it afterwards is what lets the path answer stay generous. The
+    write is allowed on what can be known in advance -- a protected path, a
+    generated tree -- and what only the result can settle is settled here,
+    against the same `edit_decision` an edit is put to rather than a second
+    reading of the same rules.
+
+    It reports and does not undo. The command has run, so a refusal here is
+    an account of what landed rather than a verdict on whether it should
+    have; the agent is told, in the words the gate would have used, and what
+    it does about it is the next turn's business.
+
+    A patch is the third route in, and the one that is read rather than
+    resolved: `git apply` replaces tracked content wholesale by a spelling no
+    content gate sees, and its targets are inside the file it is handed. Git
+    reads them out, and what lands is put to the same gates as the rest --
+    which is what lets that row allow instead of refusing an operation with no
+    reasonable substitute.
+    """
+    findings: list[str] = []
+    carried = [write["path"] for write in authored_writes(command)]
+    for target in [
+        *shell_write_targets(command),
+        *shell_flag_write_targets(command, SHELL_RULES),
+        *patch_write_targets(shell_patch_operands(command), cwd),
+    ]:
+        # A write whose bytes were in the command went to these gates before
+        # it ran, and reporting it again tells the agent the same thing twice
+        # about a write somebody has already answered for.
+        if target in carried:
+            continue
+        landed = cwd / target
+        if not landed.is_file():
+            continue
+        try:
+            after = landed.read_text()
+        except OSError:
+            continue
+        verdict = edit_decision(
+            target,
+            committed_text(target, cwd),
+            after,
+            path_exists=True,
+            # There is nobody to ask about a file already written, so the
+            # gates are put the question in the form that states what they
+            # found rather than the one that offers somebody a choice.
+            autonomous=True,
+            cwd=cwd,
+        )
+        if verdict.effect != "allow":
+            findings.append(f"{target}: {verdict.reason}")
+    return findings
+
+
 def hook_environment():
     """The native environment passed to this bare hook process."""
     # lup: ignore[os-environ] — bare hooks have no settings package
@@ -1768,6 +2005,9 @@ def dispatch(payload, permission_request=False):
             # therefore alone: the run it belongs to carries a mailbox that
             # reaches whoever is supervising it.
             relayed=autonomous,
+            # The same identity the edit branches are given, because a command
+            # carrying its own content reaches the same gates.
+            autonomous=autonomous,
         )
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
@@ -1832,10 +2072,23 @@ def observe(payload):
     reports diagnostics. Checking the directory instead would answer every
     patch with every finding in the tree, most of them about files this
     edit never touched.
+
+    A shell command is not coarser here, and gets the same reading Claude's
+    does. The envelope problem above is about a *patch*, whose files this
+    event can no longer decode; a command carries its own text, names its
+    write targets in that text, and the files it wrote are on disk to be
+    read. So the gates a shell write could never reach before it ran are put
+    to its result here, which is what lets the verdict beforehand answer
+    from the path alone.
     """
     root = payload["cwd"] if "cwd" in payload else ""
     if root:
         publish_edition(root)
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    command = tool_input["command"] if "command" in tool_input else ""
+    if not command:
+        return []
+    return written_review(command, Path(root) if root else Path.cwd())
 
 
 def main():
@@ -1849,7 +2102,18 @@ def main():
         # a call that already happened.
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
-            observe(payload)
+            found = observe(payload)
+            # The same one channel Claude's half has, for the same reason:
+            # the call has run, so a clean exit says nothing anybody reads.
+            # Silence when the result checks out, so the channel means
+            # something when it is used.
+            if found:
+                detail = "\n".join(found)
+                record_hook_evidence(
+                    plugin_data_root(), payload, "completed", "observed", detail
+                )
+                sys.stderr.write(detail)
+                raise SystemExit(2)
             record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
         permission_request = event == "PermissionRequest"

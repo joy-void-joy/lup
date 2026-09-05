@@ -6,8 +6,8 @@ import posixpath
 from fnmatch import fnmatchcase
 from typing import TypedDict
 
-from .archives import archive_write
-from .decision import KernelDecision, SUBSTITUTION_SENTINEL
+from .archives import archive_targets, archive_write
+from .decision import CheckpointRequirement, KernelDecision, SUBSTITUTION_SENTINEL
 from .edit import path_rule_matches
 from .roles import (
     GENERATED_PLUGIN_REFUSAL,
@@ -178,6 +178,209 @@ SCRATCH_VERB_FLAGS = {
 }
 
 
+class OperandGrammar(TypedDict):
+    """How a command that carries a program tells its paths from its program.
+
+    The verbs above take paths and nothing else, so their operands are
+    whatever is not a flag. A command handed a program does not work that way:
+    `sed -n '/^def x/,/^def y/p' file.py` names one path and one script, and
+    reading both as paths is reading a script as a path.
+
+    That mattered because the reading feeds three questions and only two of
+    them stat anything. Whether a target is a directory and whether it is an
+    empty one both skip a path that is not on disk, so a script fell out
+    harmlessly; whether a target sits under a writable root resolves the
+    string and asks -- and a sed address script *begins with a slash*, so it
+    resolved to an absolute path no root contains and was reported as a write
+    outside the lease. `sed -n '/^def x/,/^def y/p' file.py` asked for
+    approval, naming the script as the file it was about to write.
+    """
+
+    script_flags: str
+    """Short options that supply the program, so no operand carries it."""
+    script_options: list[str]
+    """Long spellings of the same, matched before any ``=`` value."""
+    value_flags: str
+    """Short options that consume the following word, program or otherwise."""
+
+
+# lup: ignore[constant-declaration] — each command's own documented grammar, fixed by what the utility parses rather than by anybody's judgement
+PROGRAM_CARRYING_COMMANDS = {
+    "sed": OperandGrammar(
+        script_flags="ef", script_options=["expression", "file"], value_flags="efl"
+    )
+}
+"""Commands whose first operand is a program unless an option supplied one.
+
+One entry, and a table rather than a branch because the fact is about `sed`
+rather than about this function: what is declared is where the paths start,
+and a second command with the same shape is a row instead of a second `if`
+that has to be found and read to know it is the same shape.
+"""
+
+
+def leaves_the_checkout(path_text: str) -> bool:
+    """Whether this spelling reaches somewhere the checkout does not cover.
+
+    Read off the spelling rather than resolved against a root, because the
+    readings that need it run before any root is in hand. That makes it
+    conservative in the one direction that is safe: an absolute path *inside*
+    the checkout reads as outside it and earns the question anyway, while
+    nothing outside can read as inside.
+
+    Both escapes are spellings rather than places. An absolute path names
+    somewhere without reference to where this session is, and a leading `..`
+    climbs out of wherever it is -- and a `..` further along cannot climb past
+    what preceded it without an absolute segment, which the first test already
+    holds.
+    """
+    if path_text.startswith("/"):
+        return True
+    return path_text == ".." or path_text.startswith("../")
+
+
+def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
+    """Which tree a write's target is in, as :class:`WritesPath` names them.
+
+    One reading for every spelling of a write, which is the whole point: a
+    redirection and a write flag land the same bytes at the same path, so
+    what separates the answers has to be the path rather than the syntax that
+    named it.
+
+    ``.git`` is ``protected`` rather than ``production`` because it is not
+    reviewable source and not the working tree either -- it is the repository
+    the working tree is checked out *of*. A write there is what `git` itself
+    does through verbs this table judges one by one; reaching it with a
+    redirection goes around all of them, which is the shape an approval
+    question exists for. Nothing declares this, because a checkout that did
+    not hold it would not be a checkout.
+
+    A declared role is read before either spelling, because a role is somebody
+    saying where a path belongs and a spelling is only this reading guessing.
+    The session scratchpad is the case that settles it: it is absolute, so the
+    escape test would call it outside, and it is declared scratch, which is
+    what it is.
+    """
+    if path_role(path_text, path_roles) == "scratch":
+        return "scratch"
+    if path_text == ".git" or path_text.startswith(".git/"):
+        return "protected"
+    if leaves_the_checkout(path_text):
+        return "outside"
+    return "production"
+
+
+def write_checkpoint(scope: str) -> CheckpointRequirement:
+    """Which capture would put back what a write to this scope replaced.
+
+    Read off the scope rather than off the row, because it is the same fact
+    the scope already states and a row carries one value for every path it
+    might touch. A snapshot of this checkout holds the checkout: a write
+    inside it is a targeted loss that capture answers for, and a write to
+    ``/etc/hosts`` or into ``.git`` is not held by it at all.
+
+    Getting this from the row is what let a redirection outside the tree be
+    settled by the capture row -- "the affected paths are captured and
+    restorable", said of a path no capture had ever seen.
+    """
+    return "targeted" if scope in ("scratch", "production") else "unrecoverable"
+
+
+def written_beyond_the_checkout(
+    targets: list[str], path_roles: list[PathRoleRow]
+) -> bool:
+    """Whether any of these paths is somewhere this checkout cannot answer for.
+
+    The grants below reason about a path from what the checkout knows of it: a
+    role declared it disposable, Git could put it back, nothing stands there
+    yet. Each of those is a fact about a path inside the checkout, and none of
+    them says anything about ``/etc/newfile`` -- where no role reaches, the
+    object store holds nothing, and "nothing stands there" is a fact about
+    somebody else's filesystem.
+
+    Read through :func:`write_scope`, which is what a redirection and a delete
+    already read, so one answer covers every spelling of a write. Measured
+    before this: `ls > /etc/newfile` asked, while `cp README.md /etc/newfile`,
+    `touch /etc/newfile`, `mkdir /etc/newdir` and `tar -cf /etc/backup.tar
+    src` were allowed -- one place, five spellings, two answers.
+
+    ``True`` gives the line back to the row that judges it rather than
+    refusing it, which is where a contained session's placement is read: the
+    write row allows a write outside the checkout when the call cannot leave
+    the boundary, and that is a reading no grant here is holding.
+    """
+    return any(
+        write_checkpoint(write_scope(target, path_roles)) == "unrecoverable"
+        for target in targets
+    )
+
+
+def flag_write_targets(words: list[str], write_flags: list[str]) -> list[str]:
+    """The paths this command's declared write flags name, in the order given.
+
+    Three spellings reach the same place and all three are read, because a
+    guard that recognized two of them would be the flag guard's own history
+    repeating: ``--output=path`` carries the value attached, ``--output path``
+    and ``-o path`` carry it in the following word.
+
+    Matched exactly rather than through :func:`flag_matches`, which the guard
+    beside this one uses. That reader accepts a short flag anywhere inside a
+    cluster, which is right for asking whether a guarded flag is present and
+    wrong for deciding which word is the path: ``-no`` would carry ``-o``, and
+    the following word is then somebody else's operand. A flag whose value is
+    missing, clustered, or otherwise unresolvable yields nothing rather than a
+    guess -- what reads this uses it to relax a row, so an unnamed target
+    leaves the row's own verdict standing and a misnamed one would not.
+    """
+    targets: list[str] = []
+    following = False
+    for word in words[1:]:
+        if following:
+            following = False
+            if not word.startswith("-"):
+                targets.append(word)
+            continue
+        name, sign, value = word.partition("=")
+        if sign and name in write_flags:
+            if value:
+                targets.append(value)
+            continue
+        following = word in write_flags
+    return targets
+
+
+def program_carrying_operands(words: list[str], grammar: OperandGrammar) -> list[str]:
+    """The words this command names paths with, by its declared grammar.
+
+    Over-naming is safe for the questions that stat what they are handed and
+    unsafe for the one that does not, so this under-names instead: an option
+    whose value is unknown takes the following word with it, and the leading
+    operand is a path only once something else has supplied the program.
+    """
+    operands: list[str] = []
+    supplied = not grammar["script_flags"]
+    skipping = False
+    for word in words[1:]:
+        if skipping:
+            skipping = False
+            continue
+        if word.startswith("--") and len(word) > 2:
+            if word[2:].split("=", 1)[0] in grammar["script_options"]:
+                supplied = True
+            continue
+        if word.startswith("-") and len(word) > 1:
+            letters = word[1:]
+            if any(letter in grammar["script_flags"] for letter in letters):
+                supplied = True
+            skipping = letters[-1] in grammar["value_flags"]
+            continue
+        if not supplied:
+            supplied = True
+            continue
+        operands.append(word)
+    return operands
+
+
 def is_trusted_script(word: str, roots: list[str]) -> bool:
     """Recognize an absolute script confined to a native-managed package root."""
     if "$" in word or not word.startswith("/"):
@@ -264,6 +467,34 @@ def git_restore_operands(words: list[str]) -> RestoreOperands | None:
     return RestoreOperands(source=source, paths=paths)
 
 
+def git_apply_patches(words: list[str]) -> list[str]:
+    """The patch files ``git apply`` is handed, which name the paths it writes.
+
+    A patch is the one write in this table whose targets are neither operands
+    nor flag values: they are inside a file, in a format with a reader of its
+    own. So this names the file, and what reads it asks Git what the patch
+    would touch -- delegating to the format's parser rather than growing a
+    second one here, which is the same arrangement the archive readers keep.
+
+    Empty where the patch arrives on standard input, which is a spelling this
+    cannot see and must not guess at: ``git apply < f`` names no operand, and
+    reporting the redirection's source as a write would be reporting the wrong
+    file in the wrong direction. The row's own verdict answers for that.
+
+    Over-naming is safe here in a way it is not elsewhere, because nothing
+    consults these words as paths. They are handed to a patch reader that
+    rejects whatever is not a patch, so a flag value swept up by mistake
+    yields no targets rather than a target nobody writes.
+    """
+    if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "apply":
+        return []
+    return [
+        word
+        for word in words[2:]
+        if not word.startswith("-") and word != "--" and not opaque_argument(word)
+    ]
+
+
 def written_operands(executable: str, operands: list[str]) -> list[str]:
     """The operands a path verb modifies, as opposed to the ones it reads.
 
@@ -274,6 +505,33 @@ def written_operands(executable: str, operands: list[str]) -> list[str]:
     if executable == "cp" and len(operands) > 1:
         return operands[-1:]
     return operands
+
+
+def written_targets(words: list[str]) -> list[str] | None:
+    """Every path this line would write over, or ``None`` where none can be named.
+
+    Two grammars answer one question. A path verb takes paths and nothing
+    else, so its operands are its targets; an archive verb states separately
+    where it authors, what it consumes and which directory it unpacks into.
+    What a caller wants of either is the same list, because what it asks of
+    that list is the same question -- where the loss lands.
+
+    ``None`` for an unmodelled line and for a verb whose flags could move
+    which paths are touched, which leaves every caller with the answer it had
+    before it asked.
+    """
+    if not words:
+        return None
+    archived = archive_write(words)
+    if archived is not None:
+        return archive_targets(archived)
+    executable = posixpath.basename(words[0])
+    if executable not in SCRATCH_VERB_FLAGS:
+        return None
+    verb = path_verb_operands(words)
+    if not verb["inert"]:
+        return None
+    return written_operands(executable, verb["operands"])
 
 
 def created_destination(
@@ -336,12 +594,7 @@ def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
     executable = posixpath.basename(words[0])
     archived = archive_write(words)
     if archived is not None:
-        directory = archived["directory"]
-        for word in [
-            *archived["authored"],
-            *archived["consumed"],
-            *([directory] if directory is not None else []),
-        ]:
+        for word in archive_targets(archived):
             refused = refuses_generated_plugin_target(word)
             if refused is not None:
                 return refused
@@ -503,6 +756,10 @@ def confined_to_recoverable_roots(
     and the cap does not reach it because there is nothing there to restore
     — provided the content arriving there already lives in production, where
     the edit gate has read it.
+
+    All three readings are about a path this checkout answers for, so a target
+    beyond it gives the line back to the row rather than taking any of them:
+    see :func:`written_beyond_the_checkout`.
     """
     executable = posixpath.basename(words[0])
     if executable not in SCRATCH_VERB_FLAGS:
@@ -513,6 +770,8 @@ def confined_to_recoverable_roots(
     if not inert or not operands:
         return None
     targets = written_operands(executable, operands)
+    if written_beyond_the_checkout(targets, path_roles):
+        return None
     created = created_destination(executable, operands, existing_targets, path_roles)
     disposable = [word for word in targets if path_role(word, path_roles) == "scratch"]
     restorable = [
@@ -559,6 +818,10 @@ def archive_lands_on_nothing(
     archive turns out to hold. Everything the extraction then writes is new,
     and a later edit to any of it passes the edit gate on its own path.
 
+    Both readings are about a path this checkout answers for, so a target
+    beyond it gives the line back to the row rather than taking either: see
+    :func:`written_beyond_the_checkout`.
+
     ``None`` wherever the answer is not established — an unmodelled line, an
     expansion that names a different path at run time, a caller that resolved
     no filesystem facts — and ``None`` leaves the verb's own ask standing.
@@ -568,13 +831,15 @@ def archive_lands_on_nothing(
         return None
     authored, consumed = write["authored"], write["consumed"]
     directory = write["directory"]
-    named = [*authored, *consumed, *([directory] if directory is not None else [])]
+    named = archive_targets(write)
     # An extraction that named no destination unpacks where it stands, which
     # is the repository itself — certain to be occupied, and the one place an
     # unread archive should never land without a question.
     if not named:
         return None
     if any(opaque_argument(word) or word.startswith("~") for word in named):
+        return None
+    if written_beyond_the_checkout(named, path_roles):
         return None
     for word in authored:
         if path_role(word, path_roles) == "scratch":
@@ -627,6 +892,47 @@ def flag_matches(word: str, flags: list[str]) -> bool:
         ):
             return True
     return False
+
+
+class CarriedSetting(TypedDict):
+    """The setting a guarded global names, and how many words it took to say it.
+
+    Both halves, because the reader needs both: the value decides whether the
+    global is one worth interrupting about, and the count is how far the parse
+    advances past it. Deriving the second from the first would be re-doing the
+    spelling test that produced it.
+    """
+
+    value: str
+    words: int
+
+
+def carried_setting(
+    word: str, flags: list[str], following: list[str]
+) -> CarriedSetting:
+    """The ``key=value`` a settings global carries, in the spellings that read.
+
+    Two of them, and deliberately not the third. A long option carries its
+    value after an ``=`` (``--config-env=core.pager=VAR``), and any of them
+    carries it in the next word (``git -c core.pager=x``). A short option with
+    the value pressed against it — ``git -ccore.pager=x`` — reads as neither:
+    the ``=`` in that word separates the *setting's* value rather than the
+    flag's, so splitting on it yields ``x``, and a guard reading that would
+    compare a value against a list of keys.
+
+    Nothing found is an empty value, which a caller reads as "this is not a
+    shape I can judge" and answers as it would have answered without this. The
+    failure worth avoiding is the other direction, where a spelling read
+    wrongly makes a guarded key look unguarded.
+    """
+    for flag in flags:
+        if flag.startswith("--") and word.startswith(flag + "="):
+            return CarriedSetting(value=word[len(flag) + 1 :], words=1)
+        if word == flag:
+            return CarriedSetting(
+                value=following[0] if following else "", words=2 if following else 1
+            )
+    return CarriedSetting(value="", words=1)
 
 
 def opaque_argument(word: str) -> bool:

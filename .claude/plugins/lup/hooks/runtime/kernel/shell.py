@@ -41,8 +41,11 @@ from .words import (
 from .escalation import read_escalation
 from .semantics import UnjudgedAmbient
 from .lex import parse_shell_words
+from .effects import declared_verdict
 from .commands import (
+    WriteFacts,
     declares_command,
+    unresolved_evidence,
     decide_awk_words,
     decide_command_rows,
     decide_curl_words,
@@ -77,12 +80,39 @@ class ShellContext(TypedDict):
     path_roles: list[PathRoleRow]
     path_rules: list[PathRuleRow]
     existing_targets: list[str] | None
+    tracked_targets: list[str]
     recoverable_targets: list[str]
     directory_targets: list[str]
     empty_directories: list[str]
     recoverable_target_limit: int
     runner_targets: list[RunnerTargetRow]
     target_tables: list[ShellRuleRow]
+    contained: bool
+
+
+def write_facts(context: ShellContext) -> WriteFacts:
+    """The readings a write flag's path is judged against, off the bundle.
+
+    A projection rather than a second bundle, so the classifier below takes
+    what it needs without being handed the URL scopes and runner targets it
+    has no business reading -- and so the names it knows them by stay its own.
+
+    ``contained`` travels with the paths because the write row reads it beside
+    them: whether a write outside the checkout is confined by a boundary is a
+    fact about this session rather than about the target. Left out, the
+    classifier had nothing to answer with and reached for the row's *declared*
+    placement instead -- a requirement about where a command must run, read as
+    a measurement of where this one is. So a write flag landing outside asked
+    in a contained session while the same path reached by a redirection
+    allowed, which is exactly the divergence this table exists to remove.
+    """
+    return WriteFacts(
+        existing=context["existing_targets"],
+        tracked=context["tracked_targets"],
+        path_roles=context["path_roles"],
+        path_rules=context["path_rules"],
+        contained=context["contained"],
+    )
 
 
 def shell_context(
@@ -93,18 +123,26 @@ def shell_context(
     path_roles: list[PathRoleRow] | None = None,
     path_rules: list[PathRuleRow] | None = None,
     existing_targets: list[str] | None = None,
+    tracked_targets: list[str] | None = None,
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     empty_directories: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
+    contained: bool = False,
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists.
 
     ``existing_targets`` keeps its ``None``, because that is a fact about the
     caller rather than an empty list of paths: nothing was established, so
     every write target is treated as already there.
+
+    ``tracked_targets`` takes an empty list instead, and the asymmetry is the
+    difference between the two facts. Absence of an existing-target reading
+    means "assume something is there", which is the cautious reading; absence
+    of a tracked reading has to mean "assume nothing is under review", because
+    the alternative would refuse every write on a host that could not answer.
     """
     return ShellContext(
         rows=rows,
@@ -114,12 +152,14 @@ def shell_context(
         path_roles=path_roles or [],
         path_rules=path_rules or [],
         existing_targets=existing_targets,
+        tracked_targets=tracked_targets or [],
         recoverable_targets=recoverable_targets or [],
         directory_targets=directory_targets or [],
         empty_directories=empty_directories or [],
         recoverable_target_limit=recoverable_target_limit,
         runner_targets=runner_targets or [],
         target_tables=target_tables or [],
+        contained=contained,
     )
 
 
@@ -162,7 +202,7 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
             continue
         remaining.append(word)
         position += 1
-    return decide_command_rows(remaining, context["rows"])
+    return decide_command_rows(remaining, context["rows"], write_facts(context))
 
 
 def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecision:
@@ -254,8 +294,13 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
             return KernelDecision("deny", "inline code is not allowed")
         return unjudged("uvx command is not classified")
     if executable == "uv" and len(words) > 1:
-        return decide_uv(words, context["runner_targets"], context["target_tables"])
-    return decide_command_rows(words, context["rows"])
+        return decide_uv(
+            words,
+            context["runner_targets"],
+            context["target_tables"],
+            write_facts(context),
+        )
+    return decide_command_rows(words, context["rows"], write_facts(context))
 
 
 def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
@@ -414,11 +459,20 @@ def argument_safe_words(words: list[str], context: ShellContext) -> bool:
     if executable in INTERPRETERS or executable in ("sed", "git", "uvx", "xargs"):
         return False
     matches = [row for row in context["rows"] if row["command"] == executable]
+    if len(matches) != 1 or matches[0]["subcommand"] or matches[0]["ask_flags"]:
+        return False
+    # The same reading the classifier reaches for the same row, so a command
+    # judged safe for an opaque argument here and judged again there cannot
+    # come to differ -- which is the whole reason the verdict is derived from
+    # one declaration rather than written down twice.
     return (
-        len(matches) == 1
-        and not matches[0]["subcommand"]
-        and matches[0]["effect"] == "allow"
-        and not matches[0]["ask_flags"]
+        declared_verdict(
+            matches[0]["effects"],
+            matches[0]["refuses"],
+            unresolved_evidence(write_facts(context)),
+            "inside" if context["contained"] else "ambient",
+        )
+        == "allow"
     )
 
 
@@ -844,16 +898,24 @@ def classify_shell(
     path_roles: list[PathRoleRow] | None = None,
     path_rules: list[PathRuleRow] | None = None,
     existing_targets: list[str] | None = None,
+    tracked_targets: list[str] | None = None,
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     empty_directories: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
+    contained: bool = False,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(
-        command, 0, existing_targets, path_roles, path_rules, recoverable_targets
+        command,
+        0,
+        existing_targets,
+        path_roles,
+        path_rules,
+        recoverable_targets,
+        contained,
     )
     if isinstance(segments, KernelDecision):
         return segments
@@ -868,12 +930,14 @@ def classify_shell(
         path_roles=path_roles,
         path_rules=path_rules,
         existing_targets=existing_targets,
+        tracked_targets=tracked_targets,
         recoverable_targets=recoverable_targets,
         directory_targets=directory_targets,
         empty_directories=empty_directories,
         recoverable_target_limit=recoverable_target_limit,
         runner_targets=runner_targets,
         target_tables=target_tables,
+        contained=contained,
     )
     decisions = decide_segment_list(segments, context)
     placement = joined_placement(decisions)
@@ -955,6 +1019,7 @@ def decide_shell(
     path_rules: list[PathRuleRow] | None = None,
     interactive: bool = True,
     existing_targets: list[str] | None = None,
+    tracked_targets: list[str] | None = None,
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     empty_directories: list[str] | None = None,
@@ -1040,12 +1105,17 @@ def decide_shell(
                 path_roles=path_roles,
                 path_rules=path_rules,
                 existing_targets=existing_targets,
+                tracked_targets=tracked_targets,
                 recoverable_targets=recoverable_targets,
                 directory_targets=directory_targets,
                 empty_directories=empty_directories,
                 recoverable_target_limit=recoverable_target_limit,
                 runner_targets=runner_targets,
                 target_tables=target_tables,
+                # A write outside the checkout is confined by a boundary the
+                # same way a read of one is, so the redirection reading needs
+                # the same fact the settlement below already has.
+                contained=contained,
             ),
             escalation=reading.request,
             contained=contained,
