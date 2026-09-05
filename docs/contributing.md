@@ -124,7 +124,18 @@ The worktree is created as a sibling under `tree/`. Never nest one inside
 another checkout. `git checkout -b` would make a branch and switch the
 current directory in place; `git worktree add` gives the branch a directory
 of its own, which is what keeps several live at once. `worktrees/` and
-`refs/` are gitignored, the latter holding symlinks to downstream projects.
+`refs/` are gitignored, the latter holding symlinks to the projects this
+repository tracks.
+
+Those symlinks resolve inside a contained session only for a project whose
+registration in `sync.json.local` carries a `"mount"` of `"rw"` or `"ro"` —
+`dev sync setup <name> <path> --mount rw` writes one, and `dev sync status`
+shows which projects have it. A mounted project is leased whole: its
+checkout at that mode, its shared git directory with it, and its own sibling
+worktrees read-only, which is what lets a session commit in it. Without the
+key the project is tracked for review and nothing more, and the symlink
+dangles inside the container the way an unmounted path does. The key is why
+`sync.json.local` is a protected edit root: writing one widens the boundary.
 
 The base the branch is cut from is recorded against it, because topology
 cannot recover a creation point once the parent has merged on. It is read

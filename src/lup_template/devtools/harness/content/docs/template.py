@@ -214,9 +214,13 @@ entry and registers its downstream fleet in `sync.json.local`, so """
         text=r""" can generalize emerged patterns back into the template. Same
 registry, opposite seats.
 
-Repositories created before the rename may still carry
-`downstream.json`/`downstream.json.local`; the tooling reads them as a
-fallback with a deprecation warning, and renaming the files is the migration.
+An entry may also carry a `"mount"` of `"rw"` or `"ro"`, which is a
+declaration about *access* rather than about review: a session opens that
+project at its own path, inside the container as well as outside it, and
+`refs/<name>` resolves there rather than dangling. Written or absent, never
+defaulted — tracking a project and handing a session the keys to it are
+different claims, and `sync.json` is committed scaffold that would otherwise
+make the second one on every adopter's behalf.
 
 ## How the two halves depend on each other
 

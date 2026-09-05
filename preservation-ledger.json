@@ -1,5 +1,5 @@
 {
-  "revision": "3502da4c6b01296d45f30decbf47320ee2fcf88f",
+  "revision": "538eb27b9da31b13176a8f01babbfaa77e511bd0",
   "roots": [
     "lup",
     "lup_template"
@@ -2503,6 +2503,8 @@
         "network_present",
         "build_image",
         "build_image.record",
+        "fleet_notice",
+        "pruning_notice",
         "contained_argv"
       ]
     },
@@ -3111,6 +3113,7 @@
         "ambient_config_home",
         "settle_boundary",
         "session_argv",
+        "session_argv.told",
         "say_opening",
         "probing",
         "launch_claude",
@@ -3773,11 +3776,12 @@
         "ProjectEntry.branch",
         "ProjectEntry.last_synced_commit",
         "ProjectEntry.ignore",
+        "ProjectEntry.mount",
         "SyncConfig",
         "SyncConfig.projects",
         "SYNC_CONFIG_ADAPTER",
         "PROJECT_ENTRY_ADAPTER",
-        "registry_path",
+        "MOUNT_MODES",
         "sync_file",
         "local_file",
         "cache_dir",
@@ -3788,12 +3792,16 @@
         "load_projects",
         "find_project",
         "resolve_existing_path",
+        "own_commits",
+        "accessible_roots",
+        "accessible_roots.located",
         "ensure_local",
         "git_in",
         "commit_count",
         "current_head",
         "resolved_checkpoint",
         "status_cmd",
+        "status_cmd.reach",
         "status_cmd.project_row",
         "fetch_cmd",
         "show_log",
@@ -11608,6 +11616,11 @@
         "Lease.writable",
         "Lease.read_only",
         "Lease.covers",
+        "AccessibleRoot",
+        "AccessibleRoot.path",
+        "AccessibleRoot.writable",
+        "resolved",
+        "merged",
         "RepositoryLayout",
         "RepositoryLayout.common",
         "RepositoryLayout.private",
@@ -11617,7 +11630,12 @@
         "repository_layout",
         "sibling_worktrees",
         "lease_for",
-        "hold_worktree_pruning"
+        "in_repository",
+        "demoted",
+        "accessible_lease",
+        "fleet_lease",
+        "hold_worktree_pruning",
+        "hold_pruning_across"
       ]
     },
     {
