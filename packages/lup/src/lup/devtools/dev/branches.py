@@ -30,6 +30,7 @@ from lup.devtools.utils import (
     format_table,
     gh,
     config_lock_diagnosis,
+    attributed_stderr,
     decode_stderr,
     output_json,
     repository_arguments,
@@ -2152,7 +2153,7 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
             typer.echo(f"Pruned stranded worktree: {plan.worktree}")
             completed.append("pruned worktree")
         except sh.ErrorReturnCode as error:
-            abort_deletion(plan, completed, f"prune failed: {decode_stderr(error)}")
+            abort_deletion(plan, completed, f"prune failed: {attributed_stderr(error)}")
     elif plan.worktree is not None:
         try:
             git("worktree", "remove", *(["--force"] if force else []), plan.worktree)
@@ -2160,7 +2161,7 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
             completed.append("removed worktree")
         except sh.ErrorReturnCode as error:
             abort_deletion(
-                plan, completed, f"worktree removal failed: {decode_stderr(error)}"
+                plan, completed, f"worktree removal failed: {attributed_stderr(error)}"
             )
 
     try:

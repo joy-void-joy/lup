@@ -12,6 +12,9 @@ from pydantic import BaseModel
 
 from lup.execution.shell import LazyCommand, git
 from lup.execution.writability import admin_dirs, diagnose_git_admin, inspect_git_admin
+from lup.sandbox.attribution import attribute_filesystem
+from lup.sandbox.observed import observed_topology
+from lup.sandbox.translation import MountTopology
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,37 @@ def decode_stderr(e: sh.ErrorReturnCode) -> str:
     """
     raw = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
     return raw.strip()
+
+
+def attributed_stderr(
+    e: sh.ErrorReturnCode, topology: MountTopology | None = None
+) -> str:
+    """A failed command's words, plus the boundary's where the boundary is why.
+
+    `Read-only file system` is what the kernel says when a lease refuses a
+    write, and it is indistinguishable from what it says about a genuinely
+    read-only disk. :mod:`lup.sandbox.rail` argues that leaving it at that is
+    worse than having no rail at all, because the reader debugs a filesystem
+    instead of learning they hold a lease -- so where the mount table agrees
+    that this boundary made the path unwritable, the account is appended to
+    the tool's own message rather than replacing it. Both halves are wanted:
+    the command's words say what it was doing, and the attribution says why it
+    was refused.
+
+    Where nothing attributes, this is :func:`decode_stderr` exactly. That is
+    the common case and the one worth keeping cheap: a caller can reach for
+    this in place of the plain decode without deciding first whether a
+    boundary is involved.
+
+    ``topology`` is read from the running system when a caller does not pass
+    one, which is what every caller here wants and what no test can rely on:
+    the machine's own mounts are not a fixture. Overridable so the judgement
+    reaches its caller rather than being sealed inside the call.
+    """
+    reported = decode_stderr(e)
+    observed = topology if topology is not None else observed_topology()
+    account = attribute_filesystem(reported, observed)
+    return f"{reported}\n{account.sentence()}" if account.explains() else reported
 
 
 def git_admin_dirs(cwd: Path | None = None) -> list[Path]:
