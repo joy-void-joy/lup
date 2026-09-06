@@ -389,3 +389,91 @@ def test_a_named_base_is_recorded_from_a_detached_head(
 
     recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
     assert str(recorded).strip() == "main"
+
+
+def on_a_feature_branch(repo: Path) -> str:
+    """Put the checkout on a branch of its own, and report the tip work lands on."""
+    git = repo_git(repo)
+    landing = str(git("rev-parse", "main")).strip()
+    git("checkout", "-q", "-b", "feature")
+    commit_file(git, repo, "feature.txt", "feature\n", "feat: feature")
+    return landing
+
+
+def test_a_fresh_branch_is_cut_from_where_work_lands(
+    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not from whichever checkout the command was run in.
+
+    A worktree is routinely created from another worktree, which is on a
+    branch holding nothing but its own work. Cut from there, the new branch
+    carries commits its own pull request never asked for: the request opens
+    conflicting against the integration branch, no CI runs on it, and the
+    repair is a rebase and a force-push after the fact.
+    """
+    landing = on_a_feature_branch(repo)
+    monkeypatch.chdir(repo)
+
+    create("topic")
+
+    tip = str(repo_git(repo)("rev-parse", "topic")).strip()
+    assert tip == landing
+    recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
+    assert str(recorded).strip() == "main"
+
+
+def test_the_base_a_feature_checkout_did_not_get_is_said_out_loud(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Stacking is a real intent, and a default that overrides it silently costs it.
+
+    Whoever meant to build on the checkout they were standing in has one
+    flag to say so, and this is where they find out they need it.
+    """
+    on_a_feature_branch(repo)
+    monkeypatch.chdir(repo)
+
+    create("topic")
+
+    reported = capsys.readouterr().out
+    assert "--base feature" in reported
+
+
+def test_a_named_base_is_taken_over_the_integration_branch(
+    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The flag is the whole answer to stacking, so it wins where it is passed."""
+    on_a_feature_branch(repo)
+    monkeypatch.chdir(repo)
+
+    worktree.create(
+        "topic",
+        no_sync=True,
+        no_copy_data=True,
+        base_branch="feature",
+        launcher=relocation_hint,
+    )
+
+    tip = str(repo_git(repo)("rev-parse", "topic")).strip()
+    assert tip == str(repo_git(repo)("rev-parse", "feature")).strip()
+
+
+def test_re_attaching_leaves_a_branch_where_it_stands(
+    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A default base applies to a branch being cut, and there is nothing to cut.
+
+    `worktree add <path> <branch>` takes a branch where it already is, so a
+    base could only reach it by moving it — and whatever sits on it would go.
+    """
+    on_a_feature_branch(repo)
+    tip = str(repo_git(repo)("rev-parse", "feature")).strip()
+    repo_git(repo)("checkout", "-q", "main")
+    monkeypatch.chdir(repo)
+
+    create("feature")
+
+    assert str(repo_git(repo)("rev-parse", "feature")).strip() == tip

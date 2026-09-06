@@ -200,6 +200,58 @@ class ArmedGitGuards(SetupStep, frozen=True):
             typer.echo(line)
 
 
+class BranchBase(BaseModel, frozen=True):
+    """What a worktree's branch is cut from, and what is recorded as its base.
+
+    A worktree is routinely created from another worktree, which stands on a
+    branch holding nothing but its own work. Reading the base off that
+    checkout gave the new branch commits its own pull request never asked
+    for — the request opens conflicting against the integration branch, no
+    CI runs on it, and the repair is a rebase and a force-push after the
+    fact, on work that was correct.
+
+    So a branch being cut takes the integration branch, which is the one
+    answer that holds however many worktrees deep the caller is. Stacking on
+    the checkout they are standing in is a real intent and stays available as
+    ``--base``, said out loud by :meth:`notice` in exactly the case where the
+    two differ, because a default that overrides an intent silently strands
+    work as surely as one that inherits it silently.
+
+    A branch that already exists is not cut at all: ``worktree add <path>
+    <branch>`` takes it where it stands, and a base could only reach it by
+    moving it. Nothing here moves one, so the record for a re-attached branch
+    stays what a caller named or what the checkout says.
+    """
+
+    named: str | None
+    current: str
+    integration: str
+    fresh: bool
+
+    def cut_from(self) -> str | None:
+        """The ref the branch starts at; ``None`` starts it where HEAD is."""
+        if self.named:
+            return self.named
+        if self.fresh and self.current:
+            return self.integration
+        return None
+
+    def recorded(self) -> str:
+        """The name written as this branch's base, empty where nobody can say."""
+        return self.cut_from() or self.current
+
+    def notice(self) -> str:
+        """What to tell a caller whose checkout is not what the branch was cut from."""
+        if self.named or not self.fresh or self.current in ("", self.integration):
+            return ""
+        return (
+            f"Cut from {self.integration}, not from {self.current}, which this ran "
+            f"in: work lands on {self.integration}, and a branch cut anywhere else "
+            f"carries commits its own pull request never asked for. --base "
+            f"{self.current} stacks it on this checkout instead."
+        )
+
+
 class RecordedBase(SetupStep, frozen=True):
     """The branch a worktree was cut from, recorded where detection reads it.
 
@@ -447,18 +499,22 @@ def create(
     worktree_path = tree_dir / name
     resuming = worktree_path.exists() and worktree_is_registered(worktree_path)
 
-    # What a base is recorded from, settled before anything is created. The
-    # fallback reads this checkout's current branch, which answers only while
-    # there is one: on a detached HEAD the read comes back empty, the record
-    # is skipped, and nothing says so — which is why `sync base` reports "Base
+    from lup.devtools.dev.branches import get_integration_branch
+
+    # What the branch comes from and what is recorded of it, settled before
+    # anything is created. Neither answers on a detached HEAD that is
+    # re-attaching a branch: there is no current branch to read, the record is
+    # skipped, and nothing says so — which is why `sync base` reports "Base
     # guessed" long afterwards, on a topology that has since moved. A base
     # nobody can name is refused here instead, where the answer is a flag
     # rather than archaeology.
-    recorded = RecordedBase(
-        branch=name,
-        origin=base_branch or git.out("branch", "--show-current"),
-        cut_fresh=not branch_exists(name),
+    base = BranchBase(
+        named=base_branch,
+        current=git.out("branch", "--show-current"),
+        integration=get_integration_branch(),
+        fresh=not branch_exists(name),
     )
+    recorded = RecordedBase(branch=name, origin=base.recorded(), cut_fresh=base.fresh)
     if not recorded.origin and not no_record and not recorded.already_recorded():
         typer.echo(
             f"Cannot tell what {name} would be cut from: {current_dir} is not on "
@@ -482,7 +538,10 @@ def create(
         shutil.rmtree(worktree_path)
 
     if not resuming:
-        register_worktree(name, worktree_path, base_branch)
+        register_worktree(name, worktree_path, base.cut_from())
+        elsewhere = base.notice()
+        if elsewhere:
+            typer.echo(elsewhere)
 
     def setup() -> Iterator[SetupStep]:
         """Everything that has to hold before this worktree can be used."""
