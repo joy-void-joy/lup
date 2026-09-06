@@ -84,6 +84,13 @@ class ShellContext(TypedDict):
     recoverable_targets: list[str]
     directory_targets: list[str]
     empty_directories: list[str]
+    repository_worktrees: list[str]
+    """Every checkout git calls part of this repository, resolved on the host.
+
+    Read by the `-C` guard, which asks whether a redirect leaves this
+    repository rather than whether it leaves this directory. Empty wherever
+    the host could not answer, which leaves every redirect asking."""
+
     recoverable_target_limit: int
     runner_targets: list[RunnerTargetRow]
     target_tables: list[ShellRuleRow]
@@ -121,6 +128,7 @@ def write_facts(context: ShellContext) -> WriteFacts:
         path_roles=context["path_roles"],
         path_rules=context["path_rules"],
         contained=context["contained"],
+        worktrees=context["repository_worktrees"],
     )
 
 
@@ -136,6 +144,7 @@ def shell_context(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     empty_directories: list[str] | None = None,
+    repository_worktrees: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
@@ -166,6 +175,7 @@ def shell_context(
         recoverable_targets=recoverable_targets or [],
         directory_targets=directory_targets or [],
         empty_directories=empty_directories or [],
+        repository_worktrees=repository_worktrees or [],
         recoverable_target_limit=recoverable_target_limit,
         runner_targets=runner_targets or [],
         target_tables=target_tables or [],
@@ -916,6 +926,7 @@ def classify_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     empty_directories: list[str] | None = None,
+    repository_worktrees: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
@@ -949,6 +960,7 @@ def classify_shell(
         recoverable_targets=recoverable_targets,
         directory_targets=directory_targets,
         empty_directories=empty_directories,
+        repository_worktrees=repository_worktrees,
         recoverable_target_limit=recoverable_target_limit,
         runner_targets=runner_targets,
         target_tables=target_tables,
@@ -1039,6 +1051,7 @@ def decide_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     empty_directories: list[str] | None = None,
+    repository_worktrees: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
@@ -1125,6 +1138,7 @@ def decide_shell(
                 recoverable_targets=recoverable_targets,
                 directory_targets=directory_targets,
                 empty_directories=empty_directories,
+                repository_worktrees=repository_worktrees,
                 recoverable_target_limit=recoverable_target_limit,
                 runner_targets=runner_targets,
                 target_tables=target_tables,

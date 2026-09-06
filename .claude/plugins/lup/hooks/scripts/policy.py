@@ -1280,6 +1280,35 @@ def tracked_write_targets(targets: list[str], root: Path | None = None) -> list[
     ]
 
 
+def repository_worktrees(root: Path | None = None) -> list[str]:
+    """Every checkout of the repository this session is in, as absolute paths.
+
+    Resolved here rather than in the kernel because the kernel is pure: it
+    holds `posixpath` and `re` and reaches no filesystem, so a question about
+    what git considers one repository cannot be asked from inside it. This is
+    the same arrangement every other host fact in this module uses -- the
+    reading is taken out here and threaded in as data.
+
+    Which is also why the first version of the `-C` guard tested a path
+    *prefix* and got it wrong: containment is all a pure evaluator can do
+    alone, and it read every absolute path as outside. Asked of git, the
+    question is one of identity instead, and a sibling worktree answers yes
+    wherever it happens to sit on disk.
+
+    An empty list wherever git cannot answer, which leaves every redirect
+    asking exactly as it does now. That is the safe direction: the cost of an
+    unanswerable question is one approval, and the cost of guessing yes is a
+    redirect into a repository nobody here vouched for.
+    """
+    where = Path.cwd() if root is None else root
+    listed = git_answers(["worktree", "list", "--porcelain"], where)
+    return [
+        str(Path(line.removeprefix("worktree ")).resolve())
+        for line in listed or []
+        if line.startswith("worktree ")
+    ]
+
+
 def unleased_write_targets(
     targets: list[str], measured: dict[str, list[str]], root: Path | None = None
 ) -> list[str]:
@@ -1486,6 +1515,7 @@ def bash_decision(
         ),
         directory_targets=directory_write_targets(acted_on, cwd),
         empty_directories=empty_directory_targets(acted_on, cwd),
+        repository_worktrees=repository_worktrees(cwd),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,

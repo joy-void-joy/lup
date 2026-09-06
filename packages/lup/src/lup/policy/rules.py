@@ -28,6 +28,7 @@ from lup.policy.assets.host import (
     directory_write_targets,
     empty_directory_targets,
     recoverable_write_targets,
+    repository_worktrees,
     tracked_write_targets,
 )
 from lup.policy.kernel.effects import STRENGTH
@@ -304,6 +305,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 ),
                 directory_targets=directory_write_targets(acted_on, root),
                 empty_directories=empty_directory_targets(acted_on, root),
+                repository_worktrees=repository_worktrees(root),
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,
                 target_tables=self.target_tables,

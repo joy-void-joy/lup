@@ -144,6 +144,17 @@ class WriteFacts(TypedDict):
     anything confines the write is the whole of the answer.
     """
 
+    worktrees: list[str]
+    """Every checkout git calls part of this repository, measured on the host.
+
+    Read by the `-C` guard below, and measured rather than derived for exactly
+    the reason that sank the first version of it: this module is pure, so the
+    only test it can make alone is a path prefix, and a prefix read every
+    absolute spelling as outside. Asked of git on the host and handed down
+    here, the question becomes one of identity, which a sibling worktree
+    answers wherever it happens to sit on disk.
+    """
+
 
 class WriteAnswer(TypedDict):
     """What one write target earned, beside the scope that decided it."""
@@ -161,7 +172,12 @@ def no_write_facts() -> WriteFacts:
     than the permissive one.
     """
     return WriteFacts(
-        existing=None, tracked=[], path_roles=[], path_rules=[], contained=False
+        existing=None,
+        tracked=[],
+        path_roles=[],
+        path_rules=[],
+        contained=False,
+        worktrees=[],
     )
 
 
@@ -556,11 +572,38 @@ def redirected_verb_only_reads(
     return False
 
 
+def redirect_stays_in_this_repository(value: str, worktrees: list[str]) -> bool:
+    """Whether a directory redirect lands in a checkout of this same repository.
+
+    The `-C` guard exists because the verb behind it is answered by a row
+    reasoning about *this* worktree: `git -C /elsewhere commit` reads as
+    reversible on the strength of a reflog somewhere else. Inside this
+    repository that premise is satisfied rather than dodged -- linked worktrees
+    share one object store and one reflog, so the reversibility the row asserts
+    is the reflog that is actually there.
+
+    Compared against what git called a worktree rather than against a prefix of
+    this directory, which is the distinction the first version of this missed.
+    Worktrees of one repository sit wherever somebody put them, so a
+    containment test read every absolute spelling as outside and cost a turn on
+    exactly the case where reaching another checkout is the work.
+
+    An unresolvable or relative value answers no. A redirect this cannot settle
+    keeps its question, which is the direction that costs an approval rather
+    than a boundary.
+    """
+    if opaque_argument(value) or not posixpath.isabs(value):
+        return False
+    resolved = posixpath.normpath(value)
+    return any(resolved == worktree for worktree in worktrees)
+
+
 def split_subcommand(
     executable: str,
     arguments: list[str],
     default: ShellRuleRow | None,
     rows: list[ShellRuleRow] = [],
+    worktrees: list[str] = [],
 ) -> Subcommand | KernelDecision:
     """Find the subcommand word, honoring global value-taking and guarded flags.
 
@@ -609,6 +652,19 @@ def split_subcommand(
                 # else, and the redirect it names still applies.
                 following = arguments[position + 2 :]
                 if redirected_verb_only_reads(following, value_flags, rows):
+                    position += 2
+                    continue
+                # A redirect that stays inside this repository leaves the
+                # guard's own premise intact: what it protects is a row
+                # reasoning about this worktree's reflog, and every checkout of
+                # one repository shares that reflog. The verb behind it is
+                # judged exactly as it would be here, which is what the guard
+                # was asking to be sure of.
+                if position + 1 < len(arguments) and (
+                    redirect_stays_in_this_repository(
+                        arguments[position + 1], worktrees
+                    )
+                ):
                     position += 2
                     continue
             redirect = (
@@ -672,7 +728,9 @@ def decide_command_rows(
             next(row for row in matches if not row["subcommand"]), arguments, measured
         )
     default = next((row for row in matches if not row["subcommand"]), None)
-    split = split_subcommand(executable, arguments, default, matches)
+    split = split_subcommand(
+        executable, arguments, default, matches, measured["worktrees"]
+    )
     if isinstance(split, KernelDecision):
         return split
     subword = split["word"]
