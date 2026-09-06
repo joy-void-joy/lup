@@ -318,6 +318,82 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
     return resolved(same_path(writable), same_path(read_only))
 
 
+def worker_lease(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
+    """The mounts that confine one worker to the tree it was given.
+
+    The arrangement :func:`lease_for` used to carry, at the level it is
+    actually true at. Taken when a worker starts rather than when a session
+    does, it covers the checkouts that exist by then -- which is every
+    worktree a run leases, the population a launch-time table missed
+    entirely. Nothing about the shape changed; only when it is computed, and
+    for whom.
+
+    Three nested modes rather than two flat ones: this worktree writable,
+    every sibling read-only, and the shared administrative directory writable
+    with each sibling's own entry read-only inside it. The shared directory is
+    writable so `config` and a new worktree's entry can both be written --
+    without which no worker can cut a worktree -- and the comment below
+    records what that deliberately exposes.
+
+    ``human_owned`` are paths inside the checkout the project already
+    declared its author owns; they come back read-only here rather than being
+    listed a second time. That is the whole point of taking them: a path
+    added to that declaration becomes unwritable inside a container without
+    anybody remembering there was a second list to update.
+    """
+    layout = repository_layout(worktree)
+    writable = [worktree]
+    read_only = list(sibling_worktrees(worktree))
+    if layout.linked():
+        # The shared directory is mounted writable as a whole, with each
+        # sibling's administrative entry punched read-only back over it -- so
+        # every one stays present and unwritable, which is what keeps
+        # `worktree prune` from removing it. Each entry rather than the
+        # `worktrees/` directory holding them, because a read-only directory
+        # refuses two different acts and only one of them was the subject:
+        # rewriting an entry that is already there endangers a sibling, and
+        # creating a new one beside them endangers nobody. Held read-only,
+        # the second goes with the first and no worker in a container can
+        # cut a worktree at all. That nesting is the whole arrangement, and
+        # `Sandbox.declared_mounts` is what holds it up: it emits mounts
+        # parent before child, so a read-only hole is applied after the
+        # writable base it sits in instead of being shadowed by it.
+        #
+        # Writable rather than read-only because `config` lives here, and a
+        # worker that cannot write it cannot cut a worktree or record a base
+        # branch: git takes a `config.lock` beside the file for every write,
+        # so a read-only directory refuses the lock rather than the file, and
+        # reports it as a lock it cannot take on a file nobody is holding.
+        #
+        # This is an accepted exposure, chosen rather than overlooked. A
+        # writable `config` lets a worker set `core.hooksPath`, `alias.*`,
+        # `credential.helper` or a `merge.*.driver`, every one of which runs
+        # on the host at the operator's next git command in any worktree of
+        # this repository; `hooks/` is writable alongside it for the same
+        # reason, a read-only one moving that reach one key sideways rather
+        # than closing it. What guards this is the semantic policy, which
+        # holds an approval question against those keys by name -- so the
+        # barrier here is a judgement, and the mount table is not pretending
+        # to be one.
+        read_only += [
+            entry
+            for entry in sorted((layout.common / "worktrees").iterdir())
+            if entry != layout.private
+        ]
+        writable += [
+            layout.common,
+            layout.private,
+        ]
+    else:
+        writable.append(layout.common)
+    read_only += [
+        owned
+        for owned in (worktree / path for path in human_owned or [])
+        if owned.exists()
+    ]
+    return resolved(same_path(writable), same_path(read_only))
+
+
 def in_repository(path: Path) -> bool:
     """Whether git answers for this directory at all.
 
