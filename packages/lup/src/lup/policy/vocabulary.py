@@ -1115,8 +1115,11 @@ def git_rule(
             # Where the write lands, when the key says nothing about it. The
             # guarded keys below judge a write to this repository's own
             # configuration; these flags aim the same write at a file the
-            # caller names, so a key that reads as ordinary is not.
-            ask_flags=["--file", "-f", "--blob"],
+            # caller names, so a key that reads as ordinary is not. `--edit`
+            # defeats the same test from the other side: it opens every key
+            # in the file while naming none, so absence of a guarded word is
+            # not absence of a guarded write.
+            ask_flags=["--file", "-f", "--blob", "--edit", "-e"],
             read_verbs=[
                 "--get",
                 "--get-all",

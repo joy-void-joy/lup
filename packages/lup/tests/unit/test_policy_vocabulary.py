@@ -208,6 +208,10 @@ def test_a_config_key_this_cannot_read_holds_the_question() -> None:
 
     assert verdict('git config --local "$KEY" value', rules).effect == "ask"
     assert verdict("git config --file /tmp/x user.name y", rules).effect == "ask"
+    # The same gap from the other side: `--edit` opens every key in the file
+    # and names none, so no absence test can see what it writes.
+    assert verdict("git config --edit", rules).effect == "ask"
+    assert verdict("git config --global -e", rules).effect == "ask"
 
 
 def test_a_guarded_config_key_is_matched_without_regard_to_case() -> None:

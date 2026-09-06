@@ -14924,6 +14924,8 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--file",
             "-f",
             "--blob",
+            "--edit",
+            "-e",
         ],
         "flag_effects": [],
         "write_flags": [],
