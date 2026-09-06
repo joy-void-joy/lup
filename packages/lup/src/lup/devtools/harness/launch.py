@@ -130,6 +130,23 @@ class LaunchSandbox(StrEnum):
         return self is LaunchSandbox.OUTER
 
 
+def declared_mounts(
+    writable: list[Path], read_only: list[Path]
+) -> list[AccessibleRoot]:
+    """The folders one command line asked this session to reach, as roots.
+
+    The same shape a `sync.json.local` registration resolves to, because the
+    two say the same thing at different lifetimes: a registration is standing
+    and reviewed, a flag lasts one launch. Everything downstream -- the lease,
+    the boundary declaration, each runtime's own widening -- already speaks
+    this type, so the flag costs no second path.
+    """
+    return [
+        *[AccessibleRoot(path=path) for path in writable],
+        *[AccessibleRoot(path=path, writable=False) for path in read_only],
+    ]
+
+
 @runtime_checkable
 class LaunchCheckpoint(Protocol):
     """Application-owned data persistence at native launch boundaries."""
@@ -1265,6 +1282,7 @@ def session_argv(
     transcript: Path | None = None,
     sentinels: LaunchSentinels = LaunchSentinels(),
     cleared: LaunchOpening = LaunchOpening(),
+    mounts: list[AccessibleRoot] = [],
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1295,12 +1313,14 @@ def session_argv(
     # Settled once and handed to everything that needs it. Resolving a
     # registration can clone it, so a second resolution would be a second
     # trip to the forge -- and, where the two disagreed, a boundary compiled
-    # against one set of roots and mounts built from another.
+    # against one set of roots and mounts built from another. The ad-hoc
+    # mounts the caller named lead the list: they were asked for on this
+    # command line, so they belong to this launch even where no registry does.
     def told(said: str) -> None:
         """Route the registry's own progress into the banner rather than past it."""
         banner.add([Notice(text=said, urgency="boundary")])
 
-    accessible = accessible_roots(told)
+    accessible = [*mounts, *accessible_roots(told)]
     if not sandbox.contained():
         settle_boundary(
             plugin,
@@ -1426,6 +1446,7 @@ def launch_claude(
     transcribe_session: bool = False,
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
+    mounts: list[AccessibleRoot] = [],
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     contradiction = resume.contradicted()
@@ -1462,7 +1483,9 @@ def launch_claude(
                 plugin,
                 sandbox=sandbox,
                 accessible=(
-                    accessible_roots() if sandbox is LaunchSandbox.INNER else []
+                    [*mounts, *accessible_roots()]
+                    if sandbox is LaunchSandbox.INNER
+                    else []
                 ),
             ),
             *(mode.command_words("claude") if mode is not None else []),
@@ -1521,6 +1544,7 @@ def launch_claude(
                 transcript.journal.path,
                 sentinels,
                 cleared,
+                mounts,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -1558,6 +1582,7 @@ def launch_codex(
     transcribe_session: bool = False,
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
+    mounts: list[AccessibleRoot] = [],
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     contradiction = resume.contradicted()
@@ -1580,7 +1605,9 @@ def launch_codex(
         environment,
         extra_args,
         sandbox=sandbox,
-        accessible=(accessible_roots() if sandbox is LaunchSandbox.INNER else []),
+        accessible=(
+            [*mounts, *accessible_roots()] if sandbox is LaunchSandbox.INNER else []
+        ),
     )
     store = CodexWorktreeHomeStore()
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
@@ -1641,6 +1668,7 @@ def launch_codex(
                 transcript.journal.path,
                 sentinels,
                 cleared,
+                mounts,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

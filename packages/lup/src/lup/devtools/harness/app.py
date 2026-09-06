@@ -688,6 +688,28 @@ def create_harness_app(
                     "(inner), or the semantic policy alone (none)",
                 ),
             ] = launch.LaunchSandbox.OUTER,
+            mount: Annotated[
+                list[Path],
+                typer.Option(
+                    "--mount",
+                    exists=True,
+                    file_okay=False,
+                    resolve_path=True,
+                    help="Extra folder this session may read and write "
+                    "(repeatable); registered for this launch only",
+                ),
+            ] = [],
+            mount_ro: Annotated[
+                list[Path],
+                typer.Option(
+                    "--mount-ro",
+                    exists=True,
+                    file_okay=False,
+                    resolve_path=True,
+                    help="Extra folder this session may read and must not "
+                    "write (repeatable)",
+                ),
+            ] = [],
             max_recursive_agent: Annotated[
                 int | None,
                 typer.Option(
@@ -730,6 +752,7 @@ def create_harness_app(
                 transcribe_session=transcribe_session,
                 companions=companion_targets(selection.mode, "claude", allowance),
                 repository_writers=repository_writers,
+                mounts=launch.declared_mounts(mount, mount_ro),
             )
 
     codex_target = targets.builder("codex")
@@ -799,6 +822,28 @@ def create_harness_app(
                     "(inner), or the semantic policy alone (none)",
                 ),
             ] = launch.LaunchSandbox.OUTER,
+            mount: Annotated[
+                list[Path],
+                typer.Option(
+                    "--mount",
+                    exists=True,
+                    file_okay=False,
+                    resolve_path=True,
+                    help="Extra folder this session may read and write "
+                    "(repeatable); registered for this launch only",
+                ),
+            ] = [],
+            mount_ro: Annotated[
+                list[Path],
+                typer.Option(
+                    "--mount-ro",
+                    exists=True,
+                    file_okay=False,
+                    resolve_path=True,
+                    help="Extra folder this session may read and must not "
+                    "write (repeatable)",
+                ),
+            ] = [],
             max_recursive_agent: Annotated[
                 int | None,
                 typer.Option(
@@ -842,6 +887,7 @@ def create_harness_app(
                 transcribe_session=transcribe_session,
                 companions=companion_targets(selection.mode, "codex", allowance),
                 repository_writers=repository_writers,
+                mounts=launch.declared_mounts(mount, mount_ro),
             )
 
     return app
