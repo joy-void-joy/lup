@@ -223,6 +223,106 @@ def test_a_guarded_config_key_is_matched_without_regard_to_case() -> None:
     assert verdict("git config Core.Pager less", rules).effect == "ask"
 
 
+def test_a_write_that_retargets_the_repository_asks_in_every_spelling() -> None:
+    """One operation spelled two ways was answered two ways.
+
+    `git remote set-url origin <url>` asked and `git config remote.origin.url
+    <url>` allowed, which is the same byte written to the same file. It is
+    also what `gh` reads to decide which repository an issue comment, a close
+    or a pull request is about, so the allowed spelling aimed the whole
+    compensable forge band at any repository on the forge without a question
+    anywhere in the chain -- while `--repo`, the flag that says the same thing
+    out loud, was guarded.
+    """
+    rules = default_vocabulary()
+
+    def effect(command: str) -> str:
+        return verdict(command, rules).effect
+
+    for spelling in (
+        "git remote set-url origin git@github.com:evil/x.git",
+        "git config remote.origin.url git@github.com:evil/x.git",
+        "git config --local remote.origin.url x",
+        "git config --global remote.origin.url x",
+        "git config --file /tmp/c remote.origin.url x",
+        "git config --add remote.upstream.url x",
+        "git config --unset remote.origin.url",
+        "git config --replace-all remote.origin.url x",
+        "git config remote.origin.pushurl x",
+        "git config REMOTE.Origin.URL x",
+        "git -c remote.origin.url=x push",
+    ):
+        assert effect(spelling) == "ask", spelling
+    # Reading where this repository points is how an agent finds out whose
+    # work it is on, and nothing about a read moves the destination.
+    for reading in (
+        "git config --get remote.origin.url",
+        "git config --get-all remote.origin.url",
+        "git config --get-regexp remote.*",
+        "git config --list",
+        "git remote -v",
+        "git remote get-url origin",
+    ):
+        assert effect(reading) == "allow", reading
+    # And the guard is about destinations rather than about `git config`: a
+    # write recording a fact is the same allow it was, and so is one choosing
+    # among the remotes the table already holds.
+    for unrelated in (
+        "git config user.email a@b.invalid",
+        "git config --global user.name x",
+        "git config --local branch.x.lup-base dev",
+        "git config remote.pushdefault upstream",
+        "git -c color.ui=false status",
+    ):
+        assert effect(unrelated) == "allow", unrelated
+
+
+def test_config_retargeting_keys_moves_only_the_destination_writes() -> None:
+    """The parameter a project scoped elsewhere can decline.
+
+    Passing none of them puts the remote-url writes back where the rest of
+    `git config` sits, and leaves the executing keys and every other row
+    answering exactly as they did.
+    """
+    guarded = [git_rule()]
+    open_table = [git_rule(config_retargeting_keys=())]
+
+    assert verdict("git config remote.origin.url x", guarded).effect == "ask"
+    assert verdict("git config remote.origin.url x", open_table).effect == "allow"
+    assert verdict("git -c remote.origin.url=x push", open_table).effect == "allow"
+    # Its neighbours do not move with it.
+    assert verdict("git config core.hooksPath /tmp/x", open_table).effect == "ask"
+    assert verdict("git config user.email a@b.invalid", guarded).effect == "allow"
+    # Nor does the verb that spells the same write, which states the effect
+    # itself rather than reading it off a key list.
+    assert verdict("git remote set-url origin x", open_table).effect == "ask"
+
+
+def test_putting_a_destination_in_the_remote_table_asks() -> None:
+    """Adding and renaming decide where later work goes, so they join set-url.
+
+    `git remote add` does not retarget `origin` -- git refuses the name while
+    one exists -- so the `gh` argument does not reach it. What reaches it is
+    that `git push <name>` at a named remote allows, so `git remote add` was
+    the entire approval a copy of this repository into somebody else's needed.
+    Renaming is the other half: with two remotes defined, moving `origin` off
+    one name and onto the other retargets `gh` using no other verb.
+    """
+    rules = default_vocabulary()
+
+    def effect(command: str) -> str:
+        return verdict(command, rules).effect
+
+    assert effect("git remote add evil git@github.com:someone/else.git") == "ask"
+    assert effect("git remote rename origin upstream") == "ask"
+    assert effect("git remote set-url --add origin x") == "ask"
+    assert effect("git remote remove origin") == "ask"
+    # Reporting the table, and choosing which of its branches are tracked,
+    # move no destination.
+    assert effect("git remote show origin") == "allow"
+    assert effect("git remote set-branches origin main") == "allow"
+
+
 def test_a_global_that_moves_git_to_another_tree_is_judged_before_the_verb() -> None:
     """The criterion is about refs, index and working tree — not about whose.
 
