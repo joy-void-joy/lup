@@ -516,7 +516,15 @@ Plugin hooks receive a writable data directory: `PLUGIN_DATA` under Codex and
 then `completed` with the final policy outcome or `failed` with the exact
 dispatcher exception. Records carry the event, session, turn, tool, tool-use
 id, and UTC timestamp. They deliberately omit tool input and output, which may
-contain commands, patches, or credentials.
+contain commands, patches, or credentials — with one exception. A call whose
+input names a URL also records `fetch_origin`: the scheme, host, and port of
+that URL, and nothing else. That is the coarse half a scope is written
+against and the half the verdict turned on, so without it a refusal says a
+URL was outside the declared scopes without saying which origin asked, and
+the host has to be inferred from what the session did next. The path and
+query stay omitted because they are where a document id, a search phrase, or
+a token spelled into the URL ride; userinfo goes with them, since the host is
+read from the parse rather than from the authority that would carry it.
 
 This journal distinguishes failures whose UI is otherwise identical. A
 `failed` record is a dispatcher failure; `completed` with `deny` is an

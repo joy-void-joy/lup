@@ -30,6 +30,7 @@ from datetime import UTC, datetime, timedelta
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
+from urllib.parse import urlsplit
 from kernel.edit import (
     awaits_resolution,
     decide_edit,
@@ -162,6 +163,41 @@ def append_hook_evidence(path: Path, encoded: str) -> None:
         stream.write(encoded + "\n")
 
 
+def fetch_origin(payload: dict) -> str:
+    """The scheme, host and port a fetch names, with the path left behind.
+
+    A journal that omits tool input entirely leaves a refused fetch
+    unattributable: the record says a URL was outside the declared scopes,
+    and which URL has to be inferred from whatever the session did next.
+    The origin closes that without reopening what the omission protects. It
+    is the coarse half of a URL and the one a scope is written against,
+    while the path and the query are where a token, a document id or a
+    search phrase ride -- so those are read to parse the origin out and are
+    never written. Userinfo goes the same way: the hostname and port come
+    from the parse rather than the netloc, which would carry a credential
+    spelled into the URL.
+
+    Empty for a tool whose input names no URL, which is what keeps the
+    omission whole everywhere but the fetch surface, and empty for a URL no
+    scope could have matched either -- an unparseable one reaches its
+    verdict on being unparseable, not on an origin.
+    """
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    named = isinstance(tool_input, dict) and "url" in tool_input
+    url = tool_input["url"] if named else ""
+    if not isinstance(url, str):
+        return ""
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return ""
+    if not parsed.scheme or hostname is None:
+        return ""
+    return f"{parsed.scheme}://{hostname}" + (f":{port}" if port else "")
+
+
 def record_hook_evidence(
     data_root: Path | None,
     payload: dict,
@@ -169,7 +205,13 @@ def record_hook_evidence(
     outcome: str | None = None,
     detail: str | None = None,
 ) -> None:
-    """Append hook metadata without retaining a tool's input or output."""
+    """Append hook metadata, keeping of a tool's input only a fetch origin.
+
+    Input and output stay out of a record because they carry commands,
+    patches and credentials. A fetch's origin is the one part that does not:
+    it is what the verdict was reached against, and :func:`fetch_origin`
+    bounds it to the scheme, host and port.
+    """
     if data_root is None:
         return
     record = {
@@ -190,6 +232,8 @@ def record_hook_evidence(
             if field in payload and isinstance(payload[field], str)
         }
     )
+    origin = fetch_origin(payload)
+    record.update({"fetch_origin": origin} if origin else {})
     record.update({"outcome": outcome} if outcome is not None else {})
     record.update({"detail": detail} if detail is not None else {})
     encoded = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
