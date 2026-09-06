@@ -162,12 +162,12 @@ class ClaudeSpellings(NativeSpellings):
         """
         return Instruction(
             f"work in <{path}> by whichever of these you can reach: launch a "
-            f"session rooted there; or, already running, address files under "
-            f"<{path}> by absolute path, where that tree is writable. "
+            "session rooted there; or, already running, address its files by "
+            "absolute path, where that tree is writable. "
             "`EnterWorktree` is refused, and takes a `tree/` path only as a "
             "session's first switch: entering one arms worktree "
             "isolation, whose refusals cover ordinary read-only commands for "
-            "the rest of the session. Escalate it if you truly need it, and "
+            "the rest of the session. Escalate it if you must, and "
             'leave with `ExitWorktree(action="keep")`'
         )
 
