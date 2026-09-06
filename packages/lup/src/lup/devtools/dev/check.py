@@ -205,6 +205,28 @@ class TestRoot(BaseModel):
     name: str
     directory: Path
 
+    def absent(self) -> CheckReport:
+        """The verdict a root naming a directory this checkout lacks earns.
+
+        A different fact from a suite that failed, and the reader's next move
+        differs: the declaration is wrong, or the tree it named is somewhere
+        else. It is answered before the run rather than caught after it,
+        because `sh` changes directory in the forked child — where the failure
+        arrives as a fork exception rather than an exit status, escapes the
+        handler that reads exit statuses, and takes the whole gate down with a
+        traceback while the checks that had already passed go unreported.
+        """
+        return CheckReport(
+            name=self.name,
+            passed=False,
+            lines=[
+                f"{self.name}: FAIL (no directory at {self.directory})",
+                f"  the '{self.name}' test root names a path this checkout does "
+                "not hold — drop it from the project's declared `test_roots`, "
+                "or point it at the suite it meant",
+            ],
+        )
+
     def checked(self, workers: int, excluded_roots: list[str]) -> CheckReport:
         """Whether this suite passes, run from its own root.
 
@@ -213,6 +235,8 @@ class TestRoot(BaseModel):
         a library test reaching for a template fixture passes at the root and
         fails there, which is the only place that difference shows.
         """
+        if not self.directory.is_dir():
+            return self.absent()
         return ran(
             self.name,
             lambda: uv(
