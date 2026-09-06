@@ -37,7 +37,7 @@ from lup.harness.codescan.boundaries import ApplicationRoots, generated_tree_pat
 from lup.harness.codescan.common import RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import WorkflowSpec
-from lup.devtools.project import DevProject
+from lup.devtools.project import DevProject, Tracker
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
 from lup.policy.boundary import depends_on
@@ -276,6 +276,27 @@ def dev_project() -> DevProject:
         roots=application_roots(),
         rules=hooks.rules,
         subapps=SELECTION,
+        # lup: template: which trackers beyond this checkout this project may
+        # report to. What is here is lup's own, and an adopted scaffold
+        # inheriting it is the point rather than a leak: a project built on
+        # lup meets most of its friction in lup's machinery — the resolver,
+        # the permission policy, the sandbox — none of which is editable from
+        # the consuming tree, and a report filed against the consuming
+        # repository becomes evidence for a run that will plan a repair it
+        # cannot make. A project that outgrows this replaces the entry; one
+        # that owns everything it runs empties the list, and `dev tracker`
+        # then reaches nowhere but here.
+        trackers=[
+            Tracker(
+                repository="joy-void-joy/lup",
+                what="the framework this project is built on",
+                # Every spelling a report has been filed under, as prefixes
+                # rather than paths: a component arrives as whatever the
+                # reporter typed — `lup/policy`, `lup.resolver.state`,
+                # `lup-devtools` — and one prefix answers for all of them.
+                components=["lup"],
+            )
+        ],
         content=RETIRED,
         path_roles=declared_role_rows(list(hooks.path_roles)),
         # This file: what this repository settled about itself is written
