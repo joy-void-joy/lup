@@ -8,6 +8,7 @@ read from what the template happens to hold, so both were green here and broken
 for every project that installed the library.
 """
 
+import os
 from importlib.machinery import ModuleSpec
 from pathlib import Path
 
@@ -79,6 +80,31 @@ def test_a_root_that_names_a_file_is_no_root(tmp_path: Path) -> None:
     named.write_text("", encoding="utf-8")
 
     assert not check.TestRoot(name="pytest", directory=named).checked(4, []).passed
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root enters a directory whatever its mode says"
+)
+def test_a_root_that_cannot_be_entered_is_reported_rather_than_forked_out(
+    tmp_path: Path,
+) -> None:
+    # The directory is there, so no declaration is wrong and no guard reading
+    # one would see this. `sh` enters it in the forked child, and a failure
+    # there is a fork exception rather than an exit status — the class the
+    # missing-directory guard fixed one instance of. A gate that crashes on a
+    # condition of the environment reports nothing at all, including the
+    # checks that had already passed.
+    barred = tmp_path / "barred"
+    barred.mkdir()
+    barred.chmod(0o000)
+    try:
+        report = check.TestRoot(name="pytest (lup)", directory=barred).checked(4, [])
+    finally:
+        barred.chmod(0o700)
+
+    assert not report.passed
+    assert report.lines[0] == "pytest (lup): FAIL (never started)"
+    assert any("Permission denied" in line for line in report.lines)
 
 
 def declared_roots(workspace: Path) -> list[check.TestRoot]:

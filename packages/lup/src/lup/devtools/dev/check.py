@@ -79,12 +79,30 @@ class CheckReport(BaseModel):
 
 
 def ran(name: str, command: Callable[[], object], ok: str = "ok") -> CheckReport:
-    """One external tool's verdict, carrying what it printed when it failed."""
+    """One external tool's verdict, carrying what it printed when it failed.
+
+    A tool that never started is a verdict too. `sh` prepares the child before
+    exec — the working directory among it — and what fails there arrives as a
+    fork exception rather than an exit status, so it is a sibling of the class
+    a caller catches rather than a kind of it. Escaping here takes the whole
+    gate down: the checks that had already passed go unreported, and a
+    condition of the environment reads as a crash in the checker. So the two
+    are reported the same way and told apart by what the row says.
+    """
     try:
         command()
     except sh.ErrorReturnCode as error:
         printed = [error.stdout.decode().rstrip()] if error.stdout else []
         return CheckReport(name=name, passed=False, lines=[f"{name}: FAIL", *printed])
+    except sh.ForkException as error:
+        return CheckReport(
+            name=name,
+            passed=False,
+            lines=[
+                f"{name}: FAIL (never started)",
+                *(f"  {line}" for line in str(error).strip().splitlines()),
+            ],
+        )
     return CheckReport(name=name, lines=[f"{name}: {ok}"])
 
 
@@ -356,6 +374,9 @@ def run_selected(
                 _fg=True,
             )
         except sh.ErrorReturnCode:
+            failed.append(group.root.name)
+        except sh.ForkException as error:
+            typer.echo(f"{group.root.name}: never started\n{str(error).strip()}")
             failed.append(group.root.name)
     if failed:
         typer.echo(f"\nFailed: {', '.join(failed)}")
