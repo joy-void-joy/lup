@@ -9,6 +9,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
+import lup.devtools.dev.records as records
 from lup.devtools.dev.git_guards import DECLARED_GUARDS, GitGuard, arm, read_guards
 from lup.policy.assets.host import project_environment
 from lup.devtools.layout import get_tree_dir
@@ -92,6 +93,21 @@ def worktree_is_registered(path: Path) -> bool:
         line == f"worktree {resolved}"
         for line in git.lines("worktree", "list", "--porcelain")
     )
+
+
+def adopt_records() -> None:
+    """Empty lup's own keys out of the shared config, saying what moved.
+
+    Reads answer from either place, so a clone that never runs this behaves
+    exactly as one that did. What it buys is a shared ``config`` holding
+    nothing lup wrote — which is what lets that file, whose keys name
+    programs git runs on the host, stop having to be writable by a worker.
+    """
+    refuse_blocked_config_writes()
+    moved = list(records.adopt_legacy_records())
+    for line in moved:
+        typer.echo(line)
+    typer.echo(f"Adopted {len(moved)} record(s) out of the shared config.")
 
 
 # lup: ignore[constant-declaration] — the driver name `.gitattributes` and this
@@ -295,11 +311,7 @@ class RecordedBase(SetupStep, frozen=True):
 
     def already_recorded(self) -> bool:
         """Whether a base is written for this branch, whoever wrote it."""
-        return bool(
-            git.out(
-                "config", "--get", f"branch.{self.branch}.lup-base", _ok_code=[0, 1]
-            )
-        )
+        return bool(records.recorded_base(self.branch))
 
     def satisfied(self) -> bool:
         if self.origin == self.branch:
@@ -307,13 +319,11 @@ class RecordedBase(SetupStep, frozen=True):
         return self.already_recorded()
 
     def run(self) -> None:
-        git("config", f"branch.{self.branch}.lup-base", self.origin)
-        if self.cut_fresh:
-            git(
-                "config",
-                f"branch.{self.branch}.lup-base-commit",
-                git.out("rev-parse", self.branch).strip(),
-            )
+        reserved = git.out("rev-parse", self.branch).strip() if self.cut_fresh else ""
+        records.remember(
+            self.branch,
+            records.BranchRecord(base=self.origin, base_commit=reserved),
+        )
 
 
 class CopiedExtras(SetupStep, frozen=True):
@@ -448,11 +458,9 @@ def create(
     is given its remote by the first push that carries something, which is
     `dev pr push` and which the pre-push guard judges.
     """
-    # Three config writes follow — the two merge-driver settings and the
-    # recorded base — and `worktree add` takes the same lock before any of
-    # them, so a confinement that owns `config.lock` is said once here rather
-    # than discovered as `File exists` against a half-created worktree.
-    #
+    # The two merge-driver settings are the only config writes left here, and
+    # a confinement that owns `config.lock` is said once up front rather than
+    # discovered as `File exists` against a half-created worktree.
     refuse_blocked_config_writes()
     current_dir = Path.cwd()
 
