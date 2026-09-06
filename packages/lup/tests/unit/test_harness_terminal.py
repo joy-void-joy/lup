@@ -64,6 +64,58 @@ def test_the_multiplexer_between_the_session_and_the_screen_crosses() -> None:
     assert crossing["TMUX"] == "/tmp/tmux-1000/default,7,0"
 
 
+def test_the_multiplexer_that_forwards_truecolour_crosses_with_the_one_that_caps() -> (
+    None
+):
+    """The pair that has to travel together, measured coming apart.
+
+    A runtime that finds ``TMUX`` set caps colour at 256, on the assumption
+    that a multiplexer may not forward 24-bit; the operator overrules it by
+    setting this, which is them answering for the tmux they actually run.
+    Carrying the assumption's trigger while leaving its answer behind was
+    measured as a session rendering 24-bit outside the container and 256
+    inside it, against one unchanged terminal.
+    """
+    crossing = (
+        TerminalHandoff()
+        .for_host(
+            {
+                "TERM": "tmux-256color",
+                "COLORTERM": "truecolor",
+                "TMUX": "/tmp/tmux-1000/default,7,0",
+                "CLAUDE_CODE_TMUX_TRUECOLOR": "1",
+            }
+        )
+        .environment
+    )
+
+    assert crossing["CLAUDE_CODE_TMUX_TRUECOLOR"] == "1"
+    assert crossing["TMUX"] == "/tmp/tmux-1000/default,7,0"
+
+
+def test_the_operator_who_set_no_truecolour_flag_is_not_given_one() -> None:
+    """Parity is the point, so the sandbox does not out-colour the host.
+
+    Deriving the flag from ``COLORTERM`` was the alternative and overclaims:
+    that names the multiplexer's *client*, not whether the multiplexer
+    forwards, and a session brighter inside the container than outside it is
+    a handoff that stopped describing the terminal it was opened from.
+    """
+    crossing = (
+        TerminalHandoff()
+        .for_host(
+            {
+                "TERM": "tmux-256color",
+                "COLORTERM": "truecolor",
+                "TMUX": "/tmp/tmux-1000/default,7,0",
+            }
+        )
+        .environment
+    )
+
+    assert "CLAUDE_CODE_TMUX_TRUECOLOR" not in crossing
+
+
 def test_the_emulator_names_itself_rather_than_being_guessed_at() -> None:
     """Which modifier a runtime tells the operator to hold is read from this.
 

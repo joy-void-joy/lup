@@ -162,6 +162,7 @@ class TerminalHandoff(BaseModel, frozen=True):
         default=[
             "TERM",
             "COLORTERM",
+            "CLAUDE_CODE_TMUX_TRUECOLOR",
             "TZ",
             "TMUX",
             "STY",
@@ -178,7 +179,16 @@ class TerminalHandoff(BaseModel, frozen=True):
             "``COLORTERM`` unset, which is exactly the state a truecolour "
             "terminal is indistinguishable from -- measured, a session "
             "losing 24-bit colour on entering the container with nothing "
-            "saying why. ``TZ`` is here because a container with none runs "
+            "saying why. ``CLAUDE_CODE_TMUX_TRUECOLOR`` is the operator "
+            "overruling a runtime that caps colour at 256 whenever it finds "
+            "``TMUX`` set, on the assumption that a multiplexer may not "
+            "forward 24-bit -- an assumption their tmux answers, and their "
+            "having set the variable is them saying so. Carried for the "
+            "parity this whole model is for: the same terminal, capped in "
+            "both places or in neither. Left behind while ``TMUX`` crossed, "
+            "it was measured as a session dropping to 256 colour on entering "
+            "a container it had rendered 24-bit in the week before. ``TZ`` "
+            "is here because a container with none runs "
             "in UTC, so every timestamp a session writes into the operator's "
             "checkout is stamped in somebody else's day. ``TMUX``, ``STY`` "
             "and ``ZELLIJ`` say which multiplexer sits between what the "
