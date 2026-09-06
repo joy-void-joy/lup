@@ -183,6 +183,34 @@ type EngineFlavor = Literal["docker", "podman", "unknown"]
 """Which of the two engines something is, or that it did not say."""
 
 
+type SessionStreams = Literal["terminal", "piped", "captured"]
+"""How one container's standard streams are wired to whatever opened it.
+
+Three states because a bool covered two and the third is a real caller. An
+operator's session owns a terminal and wants ``-it``. A probe's output is
+captured and wants neither, since ``-it`` against a pipe fails on the terminal
+it was promised. A worker sits between them: it speaks a protocol over its
+stdin, so it needs ``-i`` to be given one and must not have ``-t``, which would
+put a terminal discipline in front of a stream carrying framed JSON.
+
+Spelled as three names rather than two flags because the flags are the
+engine's vocabulary and these are the situations -- and the situation is what a
+caller knows. A caller reaching for ``-i`` directly is deciding a container
+argument from a place that should only know it is talking over pipes.
+"""
+
+
+def stream_arguments(streams: SessionStreams) -> list[str]:
+    """The engine flags that wire one container's standard streams."""
+    match streams:
+        case "terminal":
+            return ["-it"]
+        case "piped":
+            return ["-i"]
+        case "captured":
+            return []
+
+
 def flavor_of(reported: str) -> EngineFlavor:
     """Read an engine's own words for which of the two it is."""
     return "podman" if "podman" in reported.lower() else "docker"
@@ -1143,7 +1171,7 @@ USER $UID:$GID
         browser_directory: Path | None = None,
         clipboard_directory: Path | None = None,
         terminal: EnvVars | None = None,
-        interactive: bool = True,
+        streams: SessionStreams = "terminal",
         proxy_address: str = "",
         boundary: EnvVars | None = None,
         inherited_environment: list[str] | None = None,
@@ -1188,11 +1216,11 @@ USER $UID:$GID
         ``TERM`` read inside it would report a generated tree stale for having
         been checked from a different terminal.
 
-        ``interactive`` is what a probe turns off. The same argv has to open a
-        session and carry an exercise, because an exercise that ran through a
-        differently-assembled argv would verify a container no session opens
-        -- but a probe's output is captured rather than shown, and ``-it``
-        against a pipe fails on the terminal it was promised.
+        ``streams`` is how this container's standard streams are wired, and
+        the same argv has to serve every way of reaching it: an exercise that
+        ran through a differently-assembled argv would verify a container no
+        session opens. Three states rather than two, because the third is the
+        one a bool had no room for -- see :type:`SessionStreams`.
 
         ``environments`` is what :meth:`environment_mounts` binds, and it is
         emitted after the leased mounts because that is the order it reads
@@ -1276,7 +1304,7 @@ USER $UID:$GID
             engine.binary,
             "run",
             "--rm",
-            *(["-it"] if interactive else []),
+            *stream_arguments(streams),
             "-v",
             f"{state_volume}:{self.config_home}",
             "-e",
