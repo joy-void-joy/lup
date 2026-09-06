@@ -76,6 +76,33 @@ def test_a_later_fact_keeps_the_ones_written_before_it(repo: Path) -> None:
     assert records.recorded_upstream("topic", repo) == "origin/topic"
 
 
+def test_a_landing_keeps_the_facts_written_before_it(repo: Path) -> None:
+    """Where the ref stood as it went, beside what it was cut from."""
+    records.remember("topic", records.BranchRecord(base="main"), repo)
+
+    records.record_landing("topic", "dev", repo)
+
+    assert records.read_record("topic", repo).landed_in == "dev"
+    assert records.recorded_base("topic", repo) == "main"
+
+
+def test_a_name_deleted_holding_work_stops_claiming_an_earlier_landing(
+    repo: Path,
+) -> None:
+    """The one write here that has to be able to state the empty answer.
+
+    A landing is a verdict a deletion reaches in full, and "it held commits
+    the integration branch lacked" is spelled blank. Folded in the way every
+    other fact is, that blank would read as "not mine to say" and leave a
+    second branch of a reused name claiming the first one's landing.
+    """
+    records.record_landing("topic", "dev", repo)
+
+    records.record_landing("topic", "", repo)
+
+    assert records.read_record("topic", repo).landed_in == ""
+
+
 def test_a_record_written_in_one_worktree_reads_from_a_sibling(
     repo: Path, tmp_path: Path
 ) -> None:

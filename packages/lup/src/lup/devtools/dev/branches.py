@@ -2375,11 +2375,8 @@ def delete_branch(
         raise typer.Exit(1)
 
     integration = get_integration_branch()
-    if (
-        plan.delete_remote
-        and not is_ancestor(plan.ref(), integration)
-        and not preserved
-    ):
+    contained = is_ancestor(plan.ref(), integration)
+    if plan.delete_remote and not contained and not preserved:
         typer.echo(
             f"Warning: {name} holds commits {integration} does not, and origin/{name} "
             "is going with it — after this the work is in no branch. To keep "
@@ -2391,6 +2388,11 @@ def delete_branch(
     # Before the worktree goes, not after: its trace store is usually the only
     # copy, and every later reader would see absence rather than loss.
     traces.keep_before_deleting(name)
+    # The same reason, one fact along. Whether this branch landed is read off
+    # the ref the next line removes, and a deferral parked on it asks that
+    # question later, when absence is all there is to read and absence is not
+    # an answer. So the verdict already reached above is written down.
+    records.record_landing(name, integration if contained else "")
     run_deletion(plan, force)
 
 
