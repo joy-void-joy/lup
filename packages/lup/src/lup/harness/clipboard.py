@@ -295,14 +295,30 @@ class ClipboardBridge(BaseModel, frozen=True):
         description="What tells the shims inside where to reach the broker",
     )
     shims: list[str] = Field(
-        default=["xclip", "xsel", "wl-copy", "wl-paste", "pbcopy", "pbpaste"],
+        default=[
+            "xclip",
+            "xsel",
+            "wl-copy",
+            "wl-paste",
+            "pbcopy",
+            "pbpaste",
+            "tmux",
+        ],
         description=(
             "The names a clipboard is asked for by, all pointed at one "
             "program. Every name a CLI might reach for is carried because the "
             "session's runtimes are not this repository's to change: a tool "
             "that shells out to `wl-paste` on a host that had X11 would "
             "otherwise find nothing, and the operator would be told their "
-            "clipboard is broken rather than that this bridge missed a name"
+            "clipboard is broken rather than that this bridge missed a name. "
+            "`tmux` is carried on the same reasoning and is not a clipboard "
+            "program: the terminal handoff crosses `TMUX` while the socket it "
+            "names stays on the host, so a session is told a multiplexer owns "
+            "its screen and then handed no `tmux` to ask -- and a runtime "
+            "spelling a copy the way a multiplexer takes one, `load-buffer` "
+            "on standard input, finds the contradiction rather than the "
+            "clipboard. The shim answers the buffer verbs and refuses the "
+            "rest by name, because the server is genuinely out of reach"
         ),
     )
     display_variable: str = Field(
