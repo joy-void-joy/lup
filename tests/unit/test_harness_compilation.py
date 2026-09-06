@@ -4,6 +4,7 @@ import ast
 import errno
 import json
 import os
+import shlex
 import sys
 import tomllib
 from collections.abc import Callable
@@ -505,13 +506,32 @@ def test_template_flavors_render_the_declared_codeintel_tools() -> None:
     assert expected in codex_prompt_renderer().render(TEMPLATE_CODEX)
 
 
+def registered_hook_commands(config: str) -> list[str]:
+    """Every shell command one runtime's hook registration would run."""
+    registered = json.loads(config)["hooks"]
+    return [
+        hook["command"]
+        for entries in registered.values()
+        for entry in entries
+        for hook in entry["hooks"]
+    ]
+
+
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
+    """The hook starts outside the workspace, so nothing it runs may need uv.
+
+    Asked of the words a shell would split the command into rather than of the
+    text: the guard around the dispatcher names the rebuild command in the
+    diagnostic it writes when the compiled script will not start, and a
+    substring read cannot tell that argument from a call.
+    """
     recipe = claude_target(Path.cwd()).recipe
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
 
     hook_config = artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content
-    assert "uv run" not in hook_config
-    assert "hooks/scripts/policy.py" in hook_config
+    for command in registered_hook_commands(hook_config):
+        assert "uv" not in shlex.split(command)
+        assert "hooks/scripts/policy.py" in command
     assert Path(".claude/plugins/lup/hooks/runtime/kernel/shell.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/policy_data.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/evidence.json") in artifacts
@@ -523,7 +543,9 @@ def test_codex_recipe_registers_semantic_permission_approval() -> None:
 
     hook_config = artifacts[Path(".codex/plugins/lup/hooks/hooks.json")].content
     assert '"PermissionRequest"' in hook_config
-    assert "hooks/scripts/policy.py" in hook_config
+    for command in registered_hook_commands(hook_config):
+        assert "uv" not in shlex.split(command)
+        assert "hooks/scripts/policy.py" in command
 
 
 def test_the_watching_event_is_registered_for_editing_tools_alone() -> None:

@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it\" >&2; exit 2; }",
+            "command": "[ -r \"$PLUGIN_ROOT/hooks/scripts/policy.py\" ] || { echo \"lup policy: no dispatcher at $PLUGIN_ROOT/hooks/scripts/policy.py judged this call; refusing rather than passing it. $PLUGIN_ROOT/hooks/scripts/policy.py is a generated build product rather than a file to repair by hand: rebuild the tree with uv run lup-devtools harness generate all, preceded by git merge --abort if a merge left conflict markers in it. Both are calls this boundary refuses while the dispatcher cannot judge, so they have to be run from outside the session.\" >&2; exit 2; }; python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it. $PLUGIN_ROOT/hooks/scripts/policy.py is a generated build product rather than a file to repair by hand: rebuild the tree with uv run lup-devtools harness generate all, preceded by git merge --abort if a merge left conflict markers in it. Both are calls this boundary refuses while the dispatcher cannot judge, so they have to be run from outside the session.\" >&2; exit 2; }",
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
             "type": "command"
@@ -17,7 +17,7 @@
       {
         "hooks": [
           {
-            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it\" >&2; exit 2; }",
+            "command": "[ -r \"$PLUGIN_ROOT/hooks/scripts/policy.py\" ] || { echo \"lup policy: no dispatcher at $PLUGIN_ROOT/hooks/scripts/policy.py judged this call; refusing rather than passing it. $PLUGIN_ROOT/hooks/scripts/policy.py is a generated build product rather than a file to repair by hand: rebuild the tree with uv run lup-devtools harness generate all, preceded by git merge --abort if a merge left conflict markers in it. Both are calls this boundary refuses while the dispatcher cannot judge, so they have to be run from outside the session.\" >&2; exit 2; }; python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it. $PLUGIN_ROOT/hooks/scripts/policy.py is a generated build product rather than a file to repair by hand: rebuild the tree with uv run lup-devtools harness generate all, preceded by git merge --abort if a merge left conflict markers in it. Both are calls this boundary refuses while the dispatcher cannot judge, so they have to be run from outside the session.\" >&2; exit 2; }",
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
             "type": "command"
@@ -30,7 +30,7 @@
       {
         "hooks": [
           {
-            "command": "python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it\" >&2; exit 2; }",
+            "command": "[ -r \"$PLUGIN_ROOT/hooks/scripts/policy.py\" ] || { echo \"lup policy: no dispatcher at $PLUGIN_ROOT/hooks/scripts/policy.py judged this call; refusing rather than passing it. $PLUGIN_ROOT/hooks/scripts/policy.py is a generated build product rather than a file to repair by hand: rebuild the tree with uv run lup-devtools harness generate all, preceded by git merge --abort if a merge left conflict markers in it. Both are calls this boundary refuses while the dispatcher cannot judge, so they have to be run from outside the session.\" >&2; exit 2; }; python3 \"$PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it. $PLUGIN_ROOT/hooks/scripts/policy.py is a generated build product rather than a file to repair by hand: rebuild the tree with uv run lup-devtools harness generate all, preceded by git merge --abort if a merge left conflict markers in it. Both are calls this boundary refuses while the dispatcher cannot judge, so they have to be run from outside the session.\" >&2; exit 2; }",
             "statusMessage": "Checking Lup policy",
             "timeout": 30,
             "type": "command"

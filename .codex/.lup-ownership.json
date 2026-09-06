@@ -65,7 +65,7 @@
     {
       "path": ".codex/plugins/lup/hooks/hooks.json",
       "category": "generated",
-      "sha256": "0cde54c6f9c2db4f350f6c6365b43816e98c1f8f1db278169931589f688aa756",
+      "sha256": "5265b2d79f89115357a8b6a28319dfb3e2353753b1957cb2402a8d30fb96a959",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

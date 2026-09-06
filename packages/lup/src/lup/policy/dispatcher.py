@@ -169,15 +169,48 @@ def guarded_hook_command(plugin_root_env: str) -> str:
     own reason; anything else names the status it exited with, so a missing
     interpreter and a dispatcher that crashed are told apart by whoever reads
     the line rather than by rerunning it.
+
+    What the status alone cannot tell apart is a verdict from a build product
+    that never ran, and both halves of that need saying. A refusal is the only
+    way either dispatcher ever exits non-zero deliberately, so every other
+    status means the script did not reach one — and the answer to all of them
+    is the same regeneration, which is why the diagnostic carries it rather
+    than leaving a reader to recognize a compiled artifact from its path.
+    ``REFUSAL_STATUS`` is also what an interpreter exits when the file is not
+    there to open, so a dispatcher a merge or a half-written tree removed
+    would otherwise pass the status test and refuse the call in silence. That
+    one is settled before the interpreter is asked, by reading the file the
+    command is about to run.
+
+    Refusing is the answer in every branch, a script that cannot judge being
+    the one thing no boundary may take as permission. The diagnostic is what
+    changes: naming the tree, saying it is compiled rather than written, and
+    spelling the rebuild, so the reason a session is stopped arrives with the
+    command that ends it instead of looking like a verdict about the call.
     """
-    script = f'"${plugin_root_env}/hooks/scripts/{DISPATCHER_SCRIPT}"'
+    path = f"${plugin_root_env}/hooks/scripts/{DISPATCHER_SCRIPT}"
+    script = f'"{path}"'
+    rebuild = (
+        f"{path} is a generated build product rather than a file to repair by "
+        f"hand: rebuild the tree with {REGENERATE_COMMAND}, preceded by git "
+        "merge --abort if a merge left conflict markers in it. Both are calls "
+        "this boundary refuses while the dispatcher cannot judge, so they have "
+        "to be run from outside the session"
+    )
+    absent = (
+        f"lup policy: no dispatcher at {path} judged this call; "
+        "refusing rather than passing it"
+    )
     complaint = (
         "lup policy: dispatcher exited $status without judging this call; "
         "refusing rather than passing it"
     )
     return (
+        f'[ -r {script} ] || {{ echo "{absent}. {rebuild}." >&2; '
+        f"exit {REFUSAL_STATUS}; }}; "
         f"python3 {script} || {{ status=$?; "
-        f'[ "$status" -eq {REFUSAL_STATUS} ] || echo "{complaint}" >&2; '
+        f'[ "$status" -eq {REFUSAL_STATUS} ] || '
+        f'echo "{complaint}. {rebuild}." >&2; '
         f"exit {REFUSAL_STATUS}; }}"
     )
 
