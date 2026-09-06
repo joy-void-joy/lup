@@ -6,6 +6,7 @@ import tomllib
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from importlib.util import find_spec
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -176,6 +177,28 @@ def pyright_check(excluded_roots: list[str]) -> CheckReport:
         configuration.unlink(missing_ok=True)
 
 
+def parallel_arguments(workers: int) -> list[str]:
+    """The flag that spreads a suite over processes, where one answers for it.
+
+    `-n` belongs to pytest-xdist, and a project building on this library has
+    no reason to hold it: a package declares what it needs to run, and a
+    dependency group installs for the project that writes it rather than for
+    anyone depending on that project. Declaring the plugin would therefore
+    either reach this library's own developers alone or push test parallelism
+    into every adopter's runtime install, so the flag is offered where it is
+    importable and dropped where it is not. Pytest rejects an unrecognized
+    argument before collecting anything, and a gate that failed on that would
+    be reporting on its own speed rather than on the suite.
+
+    Fewer than two workers spells serial, so the count descends into running
+    the same tests behind a single interpreter rather than needing a second
+    way of saying nothing.
+    """
+    if workers < 2 or find_spec("xdist") is None:
+        return []
+    return ["-n", str(workers)]
+
+
 class TestRoot(BaseModel):
     """One independently installed test suite the project asks the gate to run."""
 
@@ -195,8 +218,7 @@ class TestRoot(BaseModel):
             lambda: uv(
                 "run",
                 "pytest",
-                "-n",
-                str(workers),
+                *parallel_arguments(workers),
                 *option_arguments(
                     "--ignore-glob",
                     [
