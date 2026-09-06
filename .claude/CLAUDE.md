@@ -63,7 +63,7 @@ Resolve open feedback by fixing what it points at — or, for a question, by ans
 
 ## Development Workflow
 
-Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev worktree create feat-name`, then work in <the path it prints> by whichever of these you can reach: launch a session rooted there; or, already running, keep working where you are and address files under <the path it prints> by absolute path. `EnterWorktree(path=<the path it prints>)` reaches any worktree from anywhere and is refused for it: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you truly need it, and leave with `ExitWorktree(action="keep")` — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused-word set a late relocation meets, and the merge loop.
+Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev worktree create feat-name`, then work in <the path it prints> by whichever of these you can reach: launch a session rooted there; or, already running, address files under <the path it prints> by absolute path, where that tree is writable. `EnterWorktree(path=<the path it prints>)` reaches any worktree from anywhere and is refused for it: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you truly need it, and leave with `ExitWorktree(action="keep")` — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused-word set a late relocation meets, and the merge loop.
 
 ### Merge Conflict Resolution
 

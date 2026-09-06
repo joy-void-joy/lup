@@ -182,7 +182,11 @@ no git in them — for as long as it lasts, and no approval marker reaches the
 refusal.
 A session launched already rooted in the worktree is never isolated and
 keeps all of them, which is why the workflow asks for a launch. Staying put
-and editing through absolute paths works too. Measured against Claude Code
+and editing through absolute paths works too, but only into a worktree that
+is writable: a contained session mounts every sibling that already existed
+when it started read-only, so that route reaches a filesystem refusing every
+write, while one cut afterwards is outside the lease and takes edits
+normally. Measured against Claude Code
 2.1.237; `docs/native-capabilities.md` carries the evidence.
 
 Commit early, commit often, and keep commits atomic — if the message needs an

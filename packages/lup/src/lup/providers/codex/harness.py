@@ -131,12 +131,24 @@ class CodexSpellings(NativeSpellings):
         )
 
     def relocate_session(self, path: str) -> Instruction:
+        """Spell the two routes this runtime has, with the second's condition.
+
+        No third route to name: this runtime cannot move a running session, so
+        the tool the other adapter refuses does not exist here. The second
+        carries its condition for the same reason it does there -- a lease
+        mounts every pre-existing sibling read-only, so addressing one by
+        absolute path reaches a filesystem refusing every write, while a
+        worktree cut after the session started is outside the lease and
+        writable. Four words here and a paragraph in `docs/contributing.md`,
+        because what this renders into is budgeted: see the note on the
+        other adapter's method.
+        """
         return Instruction(
             f"start a session rooted at <{path}> and continue there — "
             "this runtime cannot move a running session, so work "
             "carried on here would land in the checkout it started from. "
-            "Already running, keep working where you are and address files "
-            "there by absolute path, which reaches the same branch."
+            "Already running, address files there by absolute path, where "
+            "that tree is writable, which reaches the same branch."
         )
 
     def escape_sandbox(self, reason: str) -> Spelling:

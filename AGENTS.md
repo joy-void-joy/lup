@@ -63,7 +63,7 @@ Resolve open feedback by fixing what it points at — or, for a question, by ans
 
 ## Development Workflow
 
-Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev worktree create feat-name`, then start a session rooted at <the path it prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Already running, keep working where you are and address files there by absolute path, which reaches the same branch. — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused-word set a late relocation meets, and the merge loop.
+Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev worktree create feat-name`, then start a session rooted at <the path it prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Already running, address files there by absolute path, where that tree is writable, which reaches the same branch. — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused-word set a late relocation meets, and the merge loop.
 
 ### Merge Conflict Resolution
 
