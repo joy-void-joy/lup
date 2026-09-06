@@ -139,8 +139,31 @@ def within_scope(rel: str, paths: Sequence[str] | None) -> bool:
     """
     if paths is None:
         return True
+
+    def scoped(path: str) -> PurePosixPath:
+        """One scope as the walk spells the files it is compared against.
+
+        Those come from `git ls-files`, which names them relative to the
+        repository, and the walk runs where that command runs. An absolute
+        path names the same file in a spelling the other side never takes, so
+        it matched nothing and the sweep reported a clean tree — an answer,
+        rather than a scope that caught no files. That is the same failure a
+        trailing separator used to cause, reached from the other direction.
+
+        One outside this checkout keeps its spelling and goes on matching
+        nothing, which is not the same bug: it names a file the sweep is not
+        answerable for, and no relative form of it would be true.
+        """
+        named = Path(path)
+        if not named.is_absolute():
+            return PurePosixPath(path)
+        try:
+            return PurePosixPath(named.resolve().relative_to(Path.cwd().resolve()))
+        except ValueError:
+            return PurePosixPath(path)
+
     subject = PurePosixPath(rel)
-    return any(subject.is_relative_to(PurePosixPath(path)) for path in paths)
+    return any(subject.is_relative_to(scoped(path)) for path in paths)
 
 
 def declared_rules(project: DevProject) -> AntiPatternSet:

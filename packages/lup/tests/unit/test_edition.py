@@ -352,11 +352,11 @@ def test_a_removed_directive_names_the_rule_it_claimed(tmp_path: Path) -> None:
 def test_the_sweep_is_given_the_file_the_way_it_names_its_own(
     tmp_path: Path,
 ) -> None:
-    """The sweep scans a project and selects within it.
+    """The sweep is asked in the spelling it answers in.
 
-    Handed a path anchored anywhere else it selects nothing and reports a
-    clean file, which is indistinguishable from a file with nothing wrong —
-    the same silence a missing checker used to produce.
+    Which is also the only spelling a project's own declared sweep must
+    understand: selecting by repository-relative prefix is the shape this can
+    count on, where anything else is a shape it would have to assume.
     """
     work = checkout(tmp_path / "repo")
     (work / "package").mkdir()

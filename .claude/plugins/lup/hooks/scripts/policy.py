@@ -914,9 +914,11 @@ def repaired_directives(
     located = declared_program(root, command[0])
     if not located:
         return []
-    # Named the way the sweep names its own files: it scans a project and
-    # selects within it, so a path anchored anywhere else selects nothing and
-    # reports a clean file rather than an unanswered question.
+    # Named the way the sweep names its own files, which is how the request
+    # and the report come back in one spelling. It is also the only spelling
+    # every sweep must understand: a project declares its own program here,
+    # and one that selects by repository-relative prefix is the shape this
+    # can count on rather than one it would have to assume.
     try:
         named = str(Path(path_text).resolve().relative_to(Path(root).resolve()))
     except ValueError:

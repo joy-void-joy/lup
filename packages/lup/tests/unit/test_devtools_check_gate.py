@@ -11,6 +11,8 @@ gate that read the whole repository to set most of it aside paid that cost to
 reach a verdict it then threw away.
 """
 
+from pathlib import Path
+
 from lup.devtools.dev.antipatterns import within_scope
 
 
@@ -61,3 +63,22 @@ def test_a_directory_names_one_scope_however_it_is_spelled() -> None:
     assert within_scope(under, ["packages/lup/src/lup/devtools"])
     assert within_scope(under, ["./packages/lup/src/lup/devtools"])
     assert not within_scope(under, ["packages/lup/src/lup/devtools_other/"])
+
+
+def test_a_file_named_absolutely_names_the_same_scope() -> None:
+    # A caller holding a path holds an absolute one — a hook handed the file
+    # that was written, a script resolving its own argument. Compared as
+    # written it matched nothing, so the sweep answered "clean" for a file it
+    # never read: the same false answer the trailing separator gave.
+    under = "packages/lup/src/lup/devtools/dev/check.py"
+
+    assert within_scope(under, [str(Path.cwd() / under)])
+    assert within_scope(under, [str(Path.cwd() / "packages/lup/src/lup/devtools")])
+
+
+def test_a_file_outside_this_checkout_still_names_nothing() -> None:
+    # Not the same bug: no relative spelling of it would be true, and the
+    # sweep is not answerable for a file outside the tree it walks.
+    assert not within_scope(
+        "packages/lup/src/lup/devtools/dev/check.py", ["/elsewhere/repo/src"]
+    )
