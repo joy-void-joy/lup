@@ -89,6 +89,13 @@ class JudgedCommand(BaseModel, frozen=True):
     Where `write_markers` still needs a word to find no marker in, this needs
     every word to be absent: `mount` alone prints the mount table, and each
     form that acts names a device or a mountpoint."""
+    write_flags: list[str] = []
+    """Options whose value is the path this command lands on.
+
+    What `write_markers` says about the *form* said in terms of the path, for
+    the same word: `dd of=x` writes `x`, and a row that only knew a marker was
+    present left the scope column claiming a capture covered wherever it
+    pointed. Named here, the path is read like any other destination."""
 
 
 def read_only_rules(
@@ -230,6 +237,7 @@ def judged_ask_rules(
             # in it. No verb list can name that, which is why every
             # `dd if=x` stopped for approval as a write.
             write_markers=["of="],
+            write_flags=["of"],
             reason="raw device or file writes require approval",
             checkpoint="boundary_wide",
         ),
@@ -371,6 +379,7 @@ def judged_ask_rules(
             effects=[declare("destroys_uncaptured", scope=command.checkpoint)],
             read_verbs=command.read_verbs,
             write_markers=command.write_markers,
+            write_flags=command.write_flags,
             bare_reads=command.bare_reads,
             checkpoint=command.checkpoint,
             reason=command.reason,

@@ -4780,7 +4780,9 @@ SHELL_RULES: list[ShellRuleRow] = [
         "ask_refspecs": [],
         "ask_flags": [],
         "flag_effects": [],
-        "write_flags": [],
+        "write_flags": [
+            "of",
+        ],
         "allow_flags": [],
         "read_verbs": [],
         "write_markers": [
