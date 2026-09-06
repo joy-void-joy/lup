@@ -137,6 +137,16 @@ key the project is tracked for review and nothing more, and the symlink
 dangles inside the container the way an unmounted path does. The key is why
 `sync.json.local` is a protected edit root: writing one widens the boundary.
 
+A registration naming only a URL is mounted on the same terms, because it is
+materialized into the same shape: a full bare clone under
+`~/.cache/lup/sync/<name>.git` with a worktree attached at `tree/<branch>`,
+and the worktree is what the lease binds. Commit in it, cut branches in it,
+push from it — the remotes of every mounted checkout are rewritten onto the
+transport this session can reach, not just the one it was launched from. A
+review never moves a branch there: `sync` reads the upstream's commits from
+its remote-tracking ref, so refreshing is a fetch and nothing in the clone is
+reset over.
+
 The base the branch is cut from is recorded against it, because topology
 cannot recover a creation point once the parent has merged on. It is read
 from the checkout you run in, so a detached HEAD has nothing to read: rather

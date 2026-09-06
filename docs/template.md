@@ -253,6 +253,24 @@ defaulted — tracking a project and handing a session the keys to it are
 different claims, and `sync.json` is committed scaffold that would otherwise
 make the second one on every adopter's behalf.
 
+A registration that names only a URL is materialized under
+`~/.cache/lup/sync/<name>.git` in the layout one naming a local path already
+points at: a full bare clone — every branch, whole history — with a worktree
+attached at `tree/<branch>`. What is mounted is that worktree, so a session
+opens either kind of registration on the same terms, and `dev worktree
+create` inside one lands its next checkout beside the first. The cache sits
+outside the project deliberately. A clone under the checkout is inside the
+session's own writable mount, which makes a `"ro"` registration silently
+`"rw"`, and it is re-cloned once per worktree where the history is worth
+having once per machine.
+
+Nothing a review does moves a branch in one of those clones. The upstream's
+commits are read from its remote-tracking ref rather than from `HEAD`, so
+refreshing is a fetch: `sync fetch`, `sync log` and `sync diff` leave a
+branch cut in the clone, a commit made on it, and every uncommitted file
+beside it exactly where they stand. `sync log` reports what the *upstream*
+added, never what a session working in the clone did.
+
 ## How the two halves depend on each other
 
 `lup_template` imports `lup`. `lup` never imports `lup_template` — it is

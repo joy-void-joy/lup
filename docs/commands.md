@@ -194,10 +194,10 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | Command | What it does |
 | --- | --- |
 | `sync status` | Show tracked projects and their sync status (read-only). |
-| `sync fetch` | Clone missing repos and fetch/reset cached ones (network + writes). |
+| `sync fetch` | Clone missing repos and fetch cached ones (network + writes). |
 | `sync log` | List commits to review: everything upstream added since the last sync. |
 | `sync diff` | Show full diff for a specific commit. |
-| `sync mark-synced` | Advance the sync checkpoint to the upstream&#x27;s current HEAD. |
+| `sync mark-synced` | Advance the sync checkpoint to where the upstream now stands. |
 | `sync setup` | Set the local path for a project (writes to sync.json.local). |
 
 ## `trace`
