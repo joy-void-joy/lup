@@ -231,11 +231,28 @@ class ClipboardHandler(socketserver.StreamRequestHandler):
         constructed by the server class it is registered with, and the
         declaration that carries the bridge is that class rather than the
         base one this signature sees.
+
+        A peer gone by the time the answer is written has already been
+        answered or has stopped caring, and either way the clipboard has
+        done its work: a client is entitled to close, and a write onto a
+        closed socket is this exchange ending rather than failing.
+
+        Both arms end here rather than escaping, because this server runs in
+        the launcher -- inside the operator's own terminal, beside a session
+        drawing a full-screen interface. The base class prints what escapes
+        to stderr, so an exception reaches the operator as a traceback
+        painted over the session, for a copy that worked.
         """
         listener = self.server
         if not isinstance(listener, ClipboardServer):
             return
-        self.wfile.write(listener.bridge.answered(self.rfile.readline()).rendered())
+        try:
+            answer = listener.bridge.answered(self.rfile.readline())
+            self.wfile.write(answer.rendered())
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception:
+            logger.warning("clipboard request failed", exc_info=True)
 
 
 class ClipboardServer(socketserver.ThreadingUnixStreamServer):

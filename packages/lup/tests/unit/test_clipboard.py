@@ -7,6 +7,8 @@ the shape -- the ordering that keeps XWayland from answering for the wrong
 clipboard, and the refusal to ask a text-only backend for an image.
 """
 
+import socket
+
 from lup.devtools.clipboard import (
     CLIPBOARD_TOOLS,
     ClipboardTool,
@@ -17,6 +19,7 @@ from lup.devtools.clipboard import (
     reachable_backend,
     readable_backends,
 )
+from lup.harness.clipboard import ClipboardBridge, ClipboardHandler, ClipboardServer
 from lup.harness.toolchain import clipboard_requirement
 
 
@@ -155,3 +158,23 @@ def test_the_backends_named_in_a_diagnostic_are_the_ones_actually_tried() -> Non
     assert readable_backends() == [
         tool.reader for tool in CLIPBOARD_TOOLS if tool.reader
     ]
+
+
+def test_a_peer_that_closed_before_its_answer_is_not_an_error() -> None:
+    """The measured failure: a copy that worked, then a traceback over the session.
+
+    A client may close as soon as it stops caring about the reply, and the
+    write that lands on the closed socket is the only thing that notices.
+    Left to escape, it reaches the operator through the base class's stderr
+    -- painted over a session drawing a full-screen interface, blaming a
+    clipboard that did its job.
+
+    Refused rather than answered, so this stays a test about the socket and
+    talks to no real clipboard, as this module's header promises.
+    """
+    ours, theirs = socket.socketpair()
+    theirs.sendall(b"not a request\n")
+    theirs.close()
+    listener = ClipboardServer.__new__(ClipboardServer)
+    listener.bridge = ClipboardBridge()
+    ClipboardHandler(ours, "", listener)
