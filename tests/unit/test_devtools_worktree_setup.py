@@ -24,9 +24,10 @@ from tests.unit.repos import commit_file, initialized_repo
 def repo(tmp_path: Path) -> Path:
     """A checkout with an origin, which is what worktrees are cut in.
 
-    The remote is part of the fixture rather than one test's setup because a
-    branch is given one at creation: without it every case here would run the
-    offline path, and the step that pushes would never be exercised at all.
+    The remote is part of the fixture rather than one test's setup because
+    what several cases here assert is that nothing was sent to it. A repo
+    with no origin cannot tell a run that declined to publish from one that
+    had nowhere to publish to.
     """
     work = tmp_path / "repo"
     git = initialized_repo(work, tmp_path / "no-hooks")
@@ -254,23 +255,32 @@ def test_the_gitignored_extras_are_finished_too(
 
 
 @pytest.mark.usefixtures("tree_dir")
-def test_a_new_branch_is_given_a_remote_to_track(
+def test_a_new_branch_is_published_nowhere_until_it_carries_work(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An upstream is what a later session's pull and push both name.
+    """A branch with no commits of its own has nothing origin does not hold.
 
-    Without one the freshness reading has nothing to keep this checkout level
-    with, and the branch has no copy anywhere but this disk until somebody
-    opens a pull request.
+    Publishing one leaves a ref at the base's tip: noise to anybody reading
+    the remote, and an obstacle to the branch it is named after. Rebuilding
+    the branch on a different base meets that ref as a non-fast-forward, and
+    the force-push that answers is a decision nobody wanted to make about a
+    branch that had never been pushed with work on it.
+
+    What the ref claimed to buy was something to be kept level with, and
+    level with a copy of the base is a reading with no content. The base
+    itself is what a checkout is kept level with, and `RecordedBase` writes
+    that down. The tracking relationship arrives with the first push that
+    carries something, which `dev pr push` makes and the pre-push guard
+    judges.
     """
     monkeypatch.chdir(repo)
 
     create("topic")
 
-    tracked = repo_git(repo)(
-        "rev-parse", "--abbrev-ref", "--symbolic-full-name", "topic@{upstream}"
-    )
-    assert str(tracked).strip() == "origin/topic"
+    published = repo_git(repo)("ls-remote", "--heads", "origin", "topic")
+    assert str(published).strip() == ""
+    tracked = repo_git(repo)("config", "--get", "branch.topic.merge", _ok_code=[0, 1])
+    assert str(tracked).strip() == ""
 
 
 def test_a_checkout_with_no_remote_is_still_handed_over(
@@ -279,18 +289,19 @@ def test_a_checkout_with_no_remote_is_still_handed_over(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A worktree that could not be pushed is a worktree to work in.
+    """A checkout made offline is a checkout to work in.
 
-    Every other step answers for whether the checkout is usable; this one
-    answers for whether a remote was told about it, and failing the command
-    over that would cost more than the step is worth.
+    Nothing in setup reaches origin, so a repository that has no remote at
+    all takes the same path as one that has: every step answers for whether
+    the checkout is usable, and none of them for whether a remote was told
+    about it.
     """
     repo_git(repo)("remote", "remove", "origin")
     monkeypatch.chdir(repo)
 
     create("topic")
 
-    assert "the remote branch tracking topic" in capsys.readouterr().out
+    assert "not ready" not in capsys.readouterr().out
     assert (tree_dir / "topic").is_dir()
 
 
@@ -298,14 +309,13 @@ def test_commits_no_remote_holds_are_left_for_the_gated_push(
     repo: Path,
     tree_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Creation pushes a tip the remote already has, and nothing else.
+    """Finishing a worktree does not publish the work found in it.
 
-    The pre-push guard is armed a step earlier and runs the whole gate on any
-    push, so creation only ever pushes where there is nothing to gate. A
-    branch that has advanced is `dev pr push`'s to send, with the guard doing
-    what it is there for.
+    The pre-push guard runs the whole gate on any push, and setting a
+    checkout up is not where somebody's commits are sent through it. A branch
+    that has advanced is `dev pr push`'s to send, with the guard doing what
+    it is there for — which is also what gives the branch its upstream.
     """
     interrupted_creation(repo, tree_dir, "topic")
     commit_file(
@@ -319,7 +329,8 @@ def test_commits_no_remote_holds_are_left_for_the_gated_push(
 
     create("topic")
 
-    assert "Not pushing topic" in capsys.readouterr().out
+    published = repo_git(repo)("ls-remote", "--heads", "origin", "topic")
+    assert str(published).strip() == ""
 
 
 def test_a_base_nobody_can_name_is_refused_before_the_worktree_exists(
@@ -477,3 +488,31 @@ def test_re_attaching_leaves_a_branch_where_it_stands(
     create("feature")
 
     assert str(repo_git(repo)("rev-parse", "feature")).strip() == tip
+
+
+def test_a_branch_rebuilt_on_another_base_still_pushes_forward(
+    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The collision a published placeholder guaranteed, and its whole cost.
+
+    Discovering that the code being changed lives on another branch, and
+    resetting the new branch onto it, is an ordinary correction. Where
+    creation had already published the first base's tip, that correction made
+    every later push a non-fast-forward — on a branch nobody had ever pushed
+    work from, so the force-push answering it was a decision about nothing.
+    """
+    git = repo_git(repo)
+    git("checkout", "-q", "-b", "other")
+    commit_file(git, repo, "other.txt", "other\n", "feat: other")
+    git("checkout", "-q", "main")
+    commit_file(git, repo, "main.txt", "main\n", "feat: main")
+    git("push", "-q", "origin", "main", "other")
+    monkeypatch.chdir(repo)
+
+    create("topic")
+
+    rebuilt = repo_git(tree_dir / "topic")
+    rebuilt("reset", "-q", "--hard", "other")
+    commit_file(rebuilt, tree_dir / "topic", "mine.txt", "mine\n", "feat: mine")
+
+    rebuilt("push", "--no-verify", "-u", "origin", "topic")

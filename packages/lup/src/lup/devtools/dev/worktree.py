@@ -316,53 +316,6 @@ class RecordedBase(SetupStep, frozen=True):
             )
 
 
-class PushedBranch(SetupStep, frozen=True):
-    """The branch given a remote to track, from the moment it exists.
-
-    An upstream is what lets a later session keep this checkout level without
-    asking anybody: a fast-forward pull and a push both name a remote branch,
-    and a branch that has none has nothing to be kept level with and no copy
-    anywhere but this disk until a pull request is opened. Pushed at creation
-    rather than at that point, because the whole span between them is when
-    the work happens.
-    """
-
-    branch: str
-
-    def label(self) -> str:
-        return f"the remote branch tracking {self.branch}"
-
-    def satisfied(self) -> bool:
-        return bool(
-            git.out("config", "--get", f"branch.{self.branch}.merge", _ok_code=[0, 1])
-        )
-
-    def carries_unpushed_work(self) -> bool:
-        """Whether this branch holds commits no remote does, unknown counting as yes."""
-        counted = git.out(
-            "rev-list", "--count", self.branch, "--not", "--remotes", _ok_code=[0, 1]
-        )
-        return not counted.isdigit() or bool(int(counted))
-
-    def run(self) -> None:
-        if self.carries_unpushed_work():
-            typer.echo(
-                f"Not pushing {self.branch}: it holds commits no remote does, "
-                "and setting a checkout up does not publish somebody's work. "
-                "`dev pr push` sends them."
-            )
-            return
-        # This push carries a tip some remote already holds, so there is
-        # nothing in it for a guard to judge — and a project declaring one at
-        # this moment would make setup wait through its whole gate for that
-        # nothing. Which is why the branch is only ever given its remote here
-        # while that is still true of it.
-        git("push", "--no-verify", "-u", "origin", self.branch)
-
-    def required(self) -> bool:
-        return False
-
-
 class CopiedExtras(SetupStep, frozen=True):
     """The gitignored files a checkout needs that ``worktree add`` leaves behind."""
 
@@ -486,7 +439,15 @@ def create(
     extras: list[str] = GITIGNORED_EXTRAS,
     guards: list[GitGuard] = DECLARED_GUARDS,
 ) -> None:
-    """Create a git worktree, re-attach one, or finish one left half-made."""
+    """Create a git worktree, re-attach one, or finish one left half-made.
+
+    Nothing here reaches origin. A branch that has no commits of its own can
+    only publish a ref holding what origin already had, and rebuilding the
+    branch on a different base then meets that ref as a non-fast-forward —
+    an obstacle to the work, on a remote where it read as noise. The branch
+    is given its remote by the first push that carries something, which is
+    `dev pr push` and which the pre-push guard judges.
+    """
     # Three config writes follow — the two merge-driver settings and the
     # recorded base — and `worktree add` takes the same lock before any of
     # them, so a confinement that owns `config.lock` is said once here rather
@@ -549,7 +510,6 @@ def create(
         yield ArmedGitGuards(guards=guards, worktree=worktree_path)
         if not no_record:
             yield recorded
-        yield PushedBranch(branch=name)
         if not no_copy_data:
             yield CopiedExtras(
                 source=current_dir, worktree=worktree_path, extras=extras
