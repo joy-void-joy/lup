@@ -1219,6 +1219,25 @@ class ResolveSpec(BaseModel, frozen=True):
     review_skill: SkillInvocation
     merge_skill: SkillInvocation
 
+    contain_actors: bool = True
+    """Whether each actor a run opens gets a container, and a lease, of its own.
+
+    Declared rather than assumed because it decides what a run *requires*: with
+    this set, a host with no container engine cannot start one and is told so,
+    rather than quietly running its actors on the host. That refusal is the
+    point. Two actors sharing a repository is the concurrency the mount rail
+    exists for, and a run that silently dropped the boundary would look exactly
+    like one that held it.
+
+    True because the alternative was never a decision anybody made. Actors ran
+    unconfined for as long as the lease was a launch-time snapshot, which
+    covered the checkouts a lone operator was landing and none of the worktrees
+    a run leases -- so the protection reached the sessions working alone and
+    missed the ones working at once. A project that means to run its actors on
+    the host overrules this here, in one place, where it reads as the posture
+    it is.
+    """
+
 
 class Plugin(BaseModel, frozen=True):
     id: str
