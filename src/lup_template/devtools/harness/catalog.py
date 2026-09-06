@@ -340,6 +340,13 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # declared scopes one hop in.
                 HookUrlScope(origin=AnyHttpUrl("https://platform.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://platform.claude.com")),
+                # docs.anthropic.com 301s both of those routes onward: the
+                # Claude Code paths to code.claude.com and the API paths to
+                # platform.claude.com, each declared above. Admitting the
+                # legacy host admits the origin a redirect starts at, not a
+                # document these scopes did not already carry.
+                HookUrlScope(origin=AnyHttpUrl("https://docs.anthropic.com")),
+                HookUrlScope(origin=AnyHttpUrl("http://docs.anthropic.com")),
                 # Where a session publishes a settled classification for a
                 # later one to read back, so a briefing can cite the artifact
                 # rather than restate it.

@@ -2712,6 +2712,10 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert isinstance(domains, list)
     assert "code.claude.com" in domains
     assert "github.com" in domains
+    # The redirecting documentation host, and the domain around it left out:
+    # egress reaches exactly the origins the fetch scopes name.
+    assert "docs.anthropic.com" in domains
+    assert "anthropic.com" not in domains
     assert "sandbox" not in project_settings(None)
     assert sandbox["excludedCommands"] == hooks.excluded_commands()
 
