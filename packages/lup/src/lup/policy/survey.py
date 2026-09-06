@@ -11,6 +11,8 @@ A downstream project wants exactly this whenever it edits its own composition,
 which is why the walk is library mechanism rather than one repository's test.
 """
 
+from collections.abc import Sequence
+
 from pydantic import BaseModel
 
 from lup.policy.kernel.commands import no_write_facts, unresolved_evidence
@@ -158,3 +160,56 @@ def classify_forms(rules: list[ShellCommandRule]) -> list[ClassifiedForm]:
         )
 
     return [classified(form) for form in shell_forms(rules)]
+
+
+def allowed_programs(
+    rules: list[ShellCommandRule],
+    builtins: Sequence[str] = (
+        ".",
+        "break",
+        "cd",
+        "command",
+        "continue",
+        "declare",
+        "eval",
+        "exec",
+        "exit",
+        "export",
+        "local",
+        "read",
+        "return",
+        "set",
+        "shift",
+        "source",
+        "test",
+        "trap",
+        "unset",
+        "wait",
+    ),
+) -> list[str]:
+    """Every program this table says an agent may run unattended, sorted.
+
+    A vocabulary is a promise about what may be run without asking, and the
+    promise is worth what the environment behind it answers. Where the two
+    disagree the disagreement is silent and not loud: a missing program exits
+    127, and a shell spends its exit codes on meaning rather than on
+    availability, so ``cmp -s A B && echo same || echo differs`` prints
+    ``differs`` for two byte-identical files on a machine carrying no ``cmp``.
+    That is the wrong answer in the confident voice of the right one, and it
+    was measured inside an agent image whose table declared ``cmp`` safe.
+
+    So the set is enumerated rather than assumed, and what comes back is what
+    a requirement's exercise can be aimed at.
+
+    *builtins* are words a shell answers itself. A table has to judge them --
+    ``eval`` is refused, ``cd`` is ordinary -- and no image installs them, so
+    measuring an environment against them would report every machine broken
+    for lacking programs that were never programs.
+    """
+    rows = erase_shell_rules(rules)
+    declared = sorted({row["command"] for row in rows})
+    return [
+        name
+        for name in declared
+        if name not in builtins and classify_shell(name, rows).effect == "allow"
+    ]
