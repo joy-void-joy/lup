@@ -10,7 +10,13 @@ import typer
 from pydantic import BaseModel
 
 import lup.devtools.dev.records as records
-from lup.devtools.dev.git_guards import DECLARED_GUARDS, GitGuard, arm, read_guards
+from lup.devtools.dev.git_guards import (
+    DECLARED_GUARDS,
+    GitGuard,
+    arm,
+    blocked_arming,
+    read_guards,
+)
 from lup.policy.assets.host import project_environment
 from lup.devtools.layout import get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
@@ -160,6 +166,32 @@ def refuse_a_blocked_registration(root: Path | None = None) -> None:
     if merge_driver_registered(root):
         return
     refuse_blocked_config_writes(root)
+
+
+def refuse_a_blocked_arming(
+    guards: list[GitGuard] = DECLARED_GUARDS, root: Path | None = None
+) -> None:
+    """Stop before an arming write the hooks directory will not take.
+
+    The same pre-flight as :func:`refuse_a_blocked_registration`, over the
+    other thing under the shared directory whose contents name a program the
+    host runs. `<common>/hooks/` holds scripts git executes at the operator's
+    next commit in any worktree of this repository, so it is held read-only —
+    and holding it costs nothing, because arming is a once-per-clone act too:
+    hooks resolve through that shared directory, so a guard armed on the host
+    covers every worktree cut after it.
+
+    Conditional for the reason the registration's is, and refusing for a
+    reason of its own. Handing back a worktree whose guards could not be
+    armed would hand back one whose commits skip the drift gate, and skip it
+    quietly — a checkout that runs no hook reads exactly like one whose hooks
+    are green. So a run with an arming outstanding is told which moment is
+    outstanding and which host command settles it, before anything is cut.
+    """
+    diagnosis = blocked_arming(guards, root if root is not None else Path.cwd())
+    if diagnosis:
+        typer.echo(diagnosis, err=True)
+        raise typer.Exit(1)
 
 
 class SetupStep(BaseModel, ABC, frozen=True):
@@ -485,6 +517,7 @@ def create(
     `dev pr push` and which the pre-push guard judges.
     """
     refuse_a_blocked_registration()
+    refuse_a_blocked_arming(guards)
     current_dir = Path.cwd()
 
     tree_dir = get_tree_dir()
