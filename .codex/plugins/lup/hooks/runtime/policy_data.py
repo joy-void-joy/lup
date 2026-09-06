@@ -15050,6 +15050,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--delete",
             "--mirror",
             "--prune",
+            "--repo",
         ],
         "flag_effects": [],
         "write_flags": [],
@@ -15061,7 +15062,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "removing a remote ref requires approval",
+        "reason": "removing a remote ref, or aiming the push elsewhere, requires approval",
     },
     {
         "rule": "shell:git.clone",

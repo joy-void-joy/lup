@@ -932,7 +932,13 @@ def git_rule(
             reason="merging puts work on a branch other people build on",
         ),
     ]
-    push_flags = ["--delete", "--mirror", "--prune"]
+    # `--repo` is the one spelling of a destination the operand reading below
+    # cannot reach: it carries the repository as a flag value, and a flag is
+    # exactly what that reading skips. It asks whatever it names, because the
+    # flag is legacy — git documents it as relevant only when no repository
+    # operand is passed — and a question on an invocation nobody writes costs
+    # less than a second reader for one word.
+    push_flags = ["--delete", "--mirror", "--prune", "--repo"]
     guarded = [
         *[
             ShellSubcommandRule(
@@ -1027,9 +1033,11 @@ def git_rule(
                 else push_flags
             ),
             reason=(
-                "rewriting or removing a remote ref requires approval"
+                "rewriting or removing a remote ref, or aiming the push"
+                " elsewhere, requires approval"
                 if guard_force_push
-                else "removing a remote ref requires approval"
+                else "removing a remote ref, or aiming the push elsewhere,"
+                " requires approval"
             ),
         ),
         # The same arrival `gh repo clone` is, reached by the other spelling:
