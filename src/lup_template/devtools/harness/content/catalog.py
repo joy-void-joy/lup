@@ -6,10 +6,11 @@
 """This repository's harness content: what it inherits, and what only it has.
 
 The skills automating agent work come from the library. Declared here are the
-six whose subject is a lup-based project rather than the work inside one —
-standing one up, installing the plugin into it, importing from a downstream
-repo, and keeping the whole thing in step with upstream — plus the composed
-rosters every document and the compiled plugin read.
+ones whose subject is a lup-based project rather than the work inside one —
+standing one up, restarting one from an explored predecessor, installing the
+plugin into it, importing from a downstream repo, and keeping the whole thing
+in step with upstream — plus the composed rosters every document and the
+compiled plugin read.
 
 This is also where the library learns what this application is called. Several
 of its skills name a path inside the reading project's own package, and only
@@ -23,6 +24,9 @@ from lup.devtools.harness.content.application import ApplicationLayout
 from lup.devtools.harness.content.catalog import library_content
 from lup_template.devtools.harness.content.skills.brainstorm import (
     skill as build_brainstorm,
+)
+from lup_template.devtools.harness.content.skills.distill import (
+    SKILL as SKILL_DISTILL,
 )
 from lup_template.devtools.harness.content.skills.import_skill import (
     SKILL as SKILL_IMPORT,
@@ -56,6 +60,7 @@ def project_skills(layout: ApplicationLayout) -> list[models.Skill]:
     """
     return [
         build_brainstorm(layout),
+        SKILL_DISTILL,
         SKILL_IMPORT,
         SKILL_INIT,
         SKILL_INSTALL,

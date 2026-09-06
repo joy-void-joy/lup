@@ -172,6 +172,7 @@ regenerate.
 - /lup:commit — Review all diffs and create atomic commits
 - /lup:create-investigator — Create a new diagnostic command that traces pasted output to a root cause, like the debug skill
 - /lup:debug — Trace an error through logs to find root cause
+- /lup:distill — Restart from an explored repo — distill its direction into a fresh design
 - /lup:fb-analyze — Aggregate tool health, capability gaps, and reasoning patterns across sessions
 - /lup:fb-implement — Implement prioritized changes from feedback loop analysis
 - /lup:fb-investigate — Deep trace reading and error classification for selected sessions
