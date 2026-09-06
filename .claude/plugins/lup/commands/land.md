@@ -75,6 +75,8 @@ One table covering every branch, ordered `LAND` and `COMMIT` first (that is the 
 
 `remote_branches` is every branch a remote carries that no local branch corresponds to. Read it as part of the sweep, not as an appendix: a branch whose local copy went when its work landed leaves nothing in `branches` to classify, so without this list nothing mentions it again and the remote keeps it for good. That is the silent bucket this command exists to empty, one clone removed.
 
+**Read `remotes_fetched` before `remote_branches`.** Where it is false the remotes were not read for this survey — `fetch_complaint` says why — and an empty list then means nothing at all: it is what a repository with nothing stranded produces and what a fetch that never answered produces. Say so and treat the step as unperformed rather than as clean. Do not carry out any remote verb on those rows; get the fetch to work and survey again, and report that the remote bucket went unswept if it cannot be made to.
+
 Each row carries the same `disposition` the local classifier gave it, so it means what it means everywhere else. What differs is the verb — a push, not a local delete — and that a remote branch has no worktree, no lease, and no dirt to weigh:
 
 | Disposition | What it means here | Action |

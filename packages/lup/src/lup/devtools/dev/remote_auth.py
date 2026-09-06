@@ -244,6 +244,16 @@ def remote_auth_refusal(remote_url: str) -> RemoteRefusal:
             return RemoteRefusal()
 
 
+def origin_auth_complaint() -> str:
+    """Why the origin remote would refuse this checkout, empty when it answers.
+
+    The sentence rather than the verdict, for a caller that has to carry the
+    reason somewhere a message on stderr does not reach — a structured
+    result whose reader is another command.
+    """
+    return remote_auth_refusal(git.out("remote", "get-url", "origin")).complaint
+
+
 def check_remote_auth() -> bool:
     """Verify auth for the origin remote. Returns True if remote ops can proceed.
 
@@ -254,10 +264,10 @@ def check_remote_auth() -> bool:
     whether an operation needing the remote can go ahead, and one that never
     reaches the host cannot either.
     """
-    refusal = remote_auth_refusal(git.out("remote", "get-url", "origin"))
-    if refusal.complaint:
-        typer.echo(refusal.complaint, err=True)
-    return not refusal.complaint
+    complaint = origin_auth_complaint()
+    if complaint:
+        typer.echo(complaint, err=True)
+    return not complaint
 
 
 def check_forge_api() -> bool:

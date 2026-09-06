@@ -20,7 +20,11 @@ from pydantic import BaseModel, Field
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, ProcessLauncher
 import lup.devtools.dev.traces as traces
-from lup.devtools.dev.remote_auth import check_remote_auth, remote_auth_refusal
+from lup.devtools.dev.remote_auth import (
+    check_remote_auth,
+    origin_auth_complaint,
+    remote_auth_refusal,
+)
 from lup.resolver.models import HeldLease
 from lup.resolver.state import live_lease_branches
 from lup.types import StringMap
@@ -216,6 +220,25 @@ class SurveyResult(BaseModel):
     not handed rows it has no verb for, and present at all so the ones whose
     work already landed stop being invisible to the sweep that would clear
     them.
+    """
+
+    remotes_fetched: bool = True
+    """Whether the remotes were read before the rows above were derived.
+
+    An empty ``remote_branches`` has two opposite meanings — a repository
+    with nothing stranded on a remote, and a repository whose fetch never
+    answered — and the list alone spells them identically. ``/lup:land``
+    reads that list to empty the one bucket a local sweep cannot see, so a
+    failed fetch reported as an empty list skips the step silently and
+    leaves exactly the branches it exists to clear. Reported rather than
+    raised, because every local disposition here is still correct.
+    """
+
+    fetch_complaint: str = ""
+    """Why the remotes were not read, empty when they were.
+
+    Carried beside the flag rather than left on stderr, which is where the
+    fetch's own message went and where a reader of the JSON never looks.
     """
 
 
@@ -1615,14 +1638,21 @@ def pr_body(
 
 def survey(as_json: bool) -> None:
     """Collect branch, worktree, PR, and containment data."""
-    has_remote = check_remote_auth()
+    complaint = origin_auth_complaint()
+    if complaint:
+        typer.echo(complaint, err=True)
+    has_remote = not complaint
     if has_remote:
         if not as_json:
             typer.echo("Fetching and pruning remote...", err=True)
         try:
             fetch_remote_tracking()
         except sh.ErrorReturnCode as e:
-            logger.warning("Failed to fetch: %s", decode_stderr(e))
+            # The refs already here are still read, so the survey says what
+            # the last successful fetch left rather than nothing at all --
+            # which is the reading `remotes_fetched` marks as unrefreshed.
+            complaint = decode_stderr(e)
+            logger.warning("Failed to fetch: %s", complaint)
 
     integration = get_integration_branch()
     cur = git.out("branch", "--show-current")
@@ -1742,6 +1772,8 @@ def survey(as_json: bool) -> None:
         branches=branches_list,
         runs=runs_holding(leased),
         remote_branches=remote_list,
+        remotes_fetched=not complaint,
+        fetch_complaint=complaint,
     )
 
     if as_json:
@@ -1776,6 +1808,13 @@ def survey(as_json: bool) -> None:
             "Reason",
         )
         typer.echo(format_table(headers, [display_row(bi) for bi in branches_list]))
+
+        if not result.remotes_fetched:
+            typer.echo(
+                "\nThe remotes were not read for this survey, so what it says"
+                " about them is whatever the last read left, and an empty list"
+                f" means nothing here: {result.fetch_complaint}"
+            )
 
         if result.remote_branches:
             typer.echo("\nOn the remote, with no local branch:\n")

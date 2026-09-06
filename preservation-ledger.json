@@ -1,5 +1,5 @@
 {
-  "revision": "c9f35126acff267767fd5509f1756c73d683c14b",
+  "revision": "bdb9ba9e4d087b68691cc4b61333f411378ce01d",
   "roots": [
     "lup",
     "lup_template"
@@ -983,6 +983,8 @@
         "SurveyResult.branches",
         "SurveyResult.runs",
         "SurveyResult.remote_branches",
+        "SurveyResult.remotes_fetched",
+        "SurveyResult.fetch_complaint",
         "runs_holding",
         "leased_on_disk",
         "BranchClassification",
@@ -1934,6 +1936,7 @@
         "ssh_auth_refusal.offered_identity",
         "gh_auth_refusal",
         "remote_auth_refusal",
+        "origin_auth_complaint",
         "check_remote_auth",
         "check_forge_api"
       ]
