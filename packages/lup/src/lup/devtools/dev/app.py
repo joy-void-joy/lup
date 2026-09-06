@@ -44,7 +44,7 @@ import lup.devtools.harness.content.docs.upstream_reports as upstream_reports
 from lup.harness.codescan.markers import NoteKind
 from lup.harness.codescan.registry import all_rules
 from lup.devtools.dev.conflict_app import create_conflict_app
-from lup.devtools.utils import output_json, repository_slug
+from lup.devtools.utils import decode_stderr, output_json, repository_slug
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.launch import relocation_hint
@@ -92,6 +92,7 @@ def create_dev_app(
     guard_app = typer.Typer(no_args_is_help=True)
     preserve_app = typer.Typer(no_args_is_help=True)
     env_app = typer.Typer(no_args_is_help=True)
+    tracker_app = typer.Typer(no_args_is_help=True)
     app.add_typer(worktree_app, name="worktree", help="Worktree management")
     app.add_typer(
         env_app,
@@ -103,6 +104,11 @@ def create_dev_app(
         conflict_app, name="conflict", help="Merge/rebase conflict resolution"
     )
     app.add_typer(plugin_app, name="plugin", help="Local plugin marketplace wiring")
+    app.add_typer(
+        tracker_app,
+        name="tracker",
+        help="Answer an issue here or on a declared tracker (comment, close, reopen)",
+    )
     app.add_typer(
         guard_app,
         name="git-hooks",
@@ -123,6 +129,123 @@ def create_dev_app(
         name="questions",
         help="The parked asks a reviewer answers, and what each is waiting on",
     )
+
+    # -- tracker commands --
+
+    def tracker_routes() -> issues_mod.TrackerRoutes:
+        """Where a forge operation may land, read when the command runs.
+
+        `origin` answers for this checkout and the declaration answers for
+        everywhere else, both resolved here rather than held on the app: a
+        CLI is imported long before anybody knows which repository it will be
+        pointed at, and a worktree created mid-session is a different answer
+        to the first question.
+        """
+        return issues_mod.TrackerRoutes(
+            own=repository_slug(), declared=list(declared().project.trackers)
+        )
+
+    def answer(
+        verb: issues_mod.TrackerVerb, number: int, note: str, repository: str
+    ) -> None:
+        """Run one compensable verb, saying where it landed or why it did not.
+
+        The three verbs differ only in the word, so they share this rather
+        than restating the resolution, the failure handling and the refusal
+        three times — which is where a fourth verb would have quietly skipped
+        one of them.
+        """
+        routes = tracker_routes()
+        try:
+            target = routes.chosen(
+                issues_mod.issue_arguments(verb, number, note), named=repository
+            )
+        except RuntimeError as refused:
+            typer.echo(str(refused), err=True)
+            raise typer.Exit(1) from refused
+        if not target:
+            typer.echo(
+                "No repository to reach: origin names none and no tracker was"
+                " given. `--repo <owner/name>` names one this project declares.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        try:
+            typer.echo(issues_mod.act_on_issue(verb, number, target, note))
+        except sh.ErrorReturnCode as failure:
+            typer.echo(decode_stderr(failure), err=True)
+            raise typer.Exit(1) from failure
+
+    @tracker_app.command("comment")
+    def tracker_comment_cmd(
+        number: Annotated[int, typer.Argument(min=1, help="Issue number")],
+        body: Annotated[str, typer.Option("--body", help="What to say")],
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which repository, if not this checkout's"),
+        ] = "",
+    ) -> None:
+        """Say something on an issue, here or on a declared tracker.
+
+        Compensable: a comment that was wrong is answered by the next one.
+        What this will not do is anything a follow-up does not restore — the
+        surface is these three verbs, and reaching further means `gh`, which
+        the permission policy asks about.
+        """
+        answer("comment", number, body, repository)
+
+    @tracker_app.command("close")
+    def tracker_close_cmd(
+        number: Annotated[int, typer.Argument(min=1, help="Issue number")],
+        comment: Annotated[
+            str,
+            typer.Option("--comment", help="Why it is being closed"),
+        ] = "",
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which repository, if not this checkout's"),
+        ] = "",
+    ) -> None:
+        """Close an issue, here or on a declared tracker.
+
+        Reopening restores it, which is what puts closing in reach at all. A
+        comment is optional and worth writing: whoever was watching sees the
+        state change either way, and only the note says why.
+        """
+        answer("close", number, comment, repository)
+
+    @tracker_app.command("reopen")
+    def tracker_reopen_cmd(
+        number: Annotated[int, typer.Argument(min=1, help="Issue number")],
+        comment: Annotated[
+            str,
+            typer.Option("--comment", help="Why it is being reopened"),
+        ] = "",
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which repository, if not this checkout's"),
+        ] = "",
+    ) -> None:
+        """Reopen an issue, here or on a declared tracker."""
+        answer("reopen", number, comment, repository)
+
+    @tracker_app.command("list")
+    def tracker_list_cmd() -> None:
+        """Which repositories this project may reach, and what each is for.
+
+        The same list a refusal reads out, answerable before meeting one:
+        where a report can go is a question with an answer, and finding it
+        by being told no is a worse way to learn it.
+        """
+        routes = tracker_routes()
+        typer.echo(f"this checkout: {routes.own or 'origin names no repository'}")
+        for entry in routes.declared:
+            claimed = f"  components: {', '.join(entry.components)}"
+            typer.echo(f"declared: {entry.repository} — {entry.what}")
+            if entry.components:
+                typer.echo(claimed)
+        if not routes.declared:
+            typer.echo("declared: none — every other repository goes through gh")
 
     # -- environment commands --
 
@@ -937,8 +1060,22 @@ def create_dev_app(
         state: Annotated[str, typer.Option("--state")],
         recovery_cost: Annotated[str, typer.Option("--recovery-cost")],
         issue: Annotated[int | None, typer.Option("--issue", min=1)] = None,
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which tracker, if not the one routing picks"),
+        ] = "",
     ) -> None:
-        """File or correct workflow friction in this checkout's repository."""
+        """File or correct workflow friction, on the tracker that owns the fix.
+
+        Routed by the component the report names rather than by where the
+        session was standing. A project consuming a library as a dependency
+        meets most of its friction in machinery it cannot edit, and a report
+        filed here about code that is not here is worse than misplaced: the
+        resolver takes every open issue in this repository as evidence, so
+        the next run plans a repair it cannot make. A component no declared
+        tracker claims stays here, which is every defect this tree owns.
+        """
+        routes = tracker_routes()
         report = issues_mod.FrictionReport(
             summary=summary,
             component=component,
@@ -948,9 +1085,19 @@ def create_dev_app(
             recovery_cost=recovery_cost,
         )
         try:
-            url = report.file(issue=issue)
-        except (RuntimeError, sh.ErrorReturnCode) as failure:
-            typer.echo(str(failure), err=True)
+            target = routes.chosen(
+                ["issue", "create", "--title", summary],
+                named=repository,
+                component=component,
+            )
+            url = report.file(repository=target, issue=issue)
+        except RuntimeError as refused:
+            typer.echo(str(refused), err=True)
+            raise typer.Exit(1) from refused
+        except sh.ErrorReturnCode as failure:
+            spoken = decode_stderr(failure)
+            advice = issues_mod.disabled_issues_advice(spoken, routes)
+            typer.echo(spoken if not advice else f"{spoken}\n{advice}", err=True)
             raise typer.Exit(1) from failure
         typer.echo(url)
 
@@ -1038,15 +1185,29 @@ def create_dev_app(
             str,
             typer.Option("--excluded", help="Label that withholds an issue"),
         ] = issues_mod.EXCLUDED_LABEL,
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which repository, if not this checkout's"),
+        ] = "",
     ) -> None:
         """List the open issues a resolver run would take as evidence.
 
         Answerable without starting a run, which is the whole point: a run
         leases a worktree per concern, so "what would this plan from?" should
         not cost one.
+
+        A declared tracker can be read the same way. Reading somebody else's
+        issues is a read wherever it points, and asking what is open upstream
+        is how a session finds out that the defect in front of it is already
+        filed.
         """
-        found = issues_mod.fetch_open_issues(excluded)
-        slug = repository_slug()
+        routes = tracker_routes()
+        try:
+            slug = routes.chosen(["issue", "list", "--state", "open"], named=repository)
+        except RuntimeError as refused:
+            typer.echo(str(refused), err=True)
+            raise typer.Exit(1) from refused
+        found = issues_mod.fetch_open_issues(excluded, repository=slug)
         typer.echo(f"{len(found)} open issue(s) in {slug or 'this repository'}")
         for issue in found:
             typer.echo(f"  {issue.reference()}  {issue.title}")

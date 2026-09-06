@@ -46,7 +46,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev seams` | Show what this project settled about itself, or settle one of them. |
 | `dev refutations` | Resolve one file&#x27;s proposed content and report what it refutes. |
 | `dev directives` | Measure every `# lup: ignore` against the canonical inline placement. |
-| `dev report-friction` | File or correct workflow friction in this checkout&#x27;s repository. |
+| `dev report-friction` | File or correct workflow friction, on the tracker that owns the fix. |
 | `dev upstream` | Print a measured upstream defect, or list the ones declared. |
 | `dev undo` | List the recoverable snapshots of this tree, or take and expire them. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
@@ -71,6 +71,10 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev conflict audit` | Post-resolution deletion audit: check for accidentally dropped code. |
 | `dev conflict complete` | Finalize the merge/rebase/cherry-pick after all conflicts are resolved. |
 | `dev plugin name` | Name this repo&#x27;s plugin marketplace uniquely (the plugin entry is kept). |
+| `dev tracker comment` | Say something on an issue, here or on a declared tracker. |
+| `dev tracker close` | Close an issue, here or on a declared tracker. |
+| `dev tracker reopen` | Reopen an issue, here or on a declared tracker. |
+| `dev tracker list` | Which repositories this project may reach, and what each is for. |
 | `dev git-hooks install` | Install every git hook this repository declares. |
 | `dev git-hooks status` | Report what this clone refuses, at every moment a hook sits at. |
 | `dev git-hooks uninstall` | Remove them, leaving hooks written elsewhere alone. |
