@@ -30,6 +30,7 @@ from lup.harness.requirements import (
     HostFacts,
     LostCapability,
     Manifest,
+    MisleadingAbsence,
     MountProbe,
     Package,
     SENTINEL_VARIABLE,
@@ -39,6 +40,7 @@ from lup.harness.requirements import (
     SentinelProbe,
     Side,
     SupplementaryGroup,
+    VocabularyProbe,
 )
 
 
@@ -1146,6 +1148,77 @@ def checkpoint_store_requirement(
                 "recovery-backed permission — destructive local work asks "
                 "instead of being allowed against a capture"
             )
+        ),
+        install=install,
+    )
+
+
+def shell_vocabulary_requirement(
+    vocabulary: list[str],
+    where: Side = "both",
+    at_launch: bool = True,
+    install: list[Package] = [
+        Package(name="diffutils"),
+        Package(name="which"),
+        Package(name="tree"),
+        Package(name="lsof"),
+        Package(name="inetutils"),
+        Package(name="go-yq"),
+    ],
+) -> Requirement:
+    """Every program the permission policy promised, asked of the environment.
+
+    The requirement with no program of its own. What it holds is the seam
+    between two declarations that had never been compared: a shell vocabulary
+    saying which commands an agent may run without asking, and an image
+    saying which packages it installs. Both were right and the pair was not,
+    which is a shape this module already has a name for -- a list written
+    twice comes apart in the direction hardest to see -- except that here the
+    lists were never even the same kind of thing, so nothing was written
+    twice and nothing could notice.
+
+    What that cost is measured and specific. ``diff`` and ``cmp`` were
+    declared safe and absent from the image, and an agent comparing two files
+    with ``cmp -s A B && echo IDENTICAL || echo DIFFERS`` was told ``DIFFERS``
+    about two byte-identical files. That is worse than a missing convenience:
+    this project's guidance tells an agent to verify rather than assume, and
+    the tool it verifies with inverted its answer without saying anything.
+
+    *vocabulary* has no default because it is not lup's to guess -- it comes
+    off the composing project's own table, through
+    :func:`~lup.policy.survey.allowed_programs`, so the promise measured here
+    is the promise that project made rather than one this module invented.
+
+    *install* is the pacman answer for the words an agent's triage vocabulary
+    turns on: comparison, location, listing, sockets, this host's name, and
+    the YAML counterpart to the ``jq`` the baseline already carries. A
+    project on another base passes its own.
+
+    *at_launch* is on, which buys one container start per contained launch,
+    and it is the one this roster's own criterion asks for: a failure
+    invisible from outside. Every other image entry announces itself by
+    something failing, and this one announces itself by an answer that looks
+    fine.
+    """
+    return Requirement(
+        capability="shell vocabulary",
+        purpose=(
+            "answering the commands this project's permission policy declares "
+            "safe for an agent to run unattended"
+        ),
+        where=where,
+        at_launch=at_launch,
+        exercise=VocabularyProbe(vocabulary=vocabulary),
+        absence=MisleadingAbsence(
+            capability="part of the shell vocabulary the policy declares safe",
+            mistaken_for=(
+                "an ordinary answer: a program that is not there exits 127, "
+                "so `cmp -s A B && echo same || echo differs` reports two "
+                "identical files as differing, and any `command || fallback` "
+                "takes the fallback for a reason nobody measured. Rebuild the "
+                "image to install what the declaration asks for, or stop "
+                "declaring the words it does not carry"
+            ),
         ),
         install=install,
     )
