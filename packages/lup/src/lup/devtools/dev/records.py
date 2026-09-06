@@ -21,6 +21,7 @@ run first. :func:`adopt_legacy_records` is what finally empties ``config``,
 and it is a once-per-clone move rather than something a read performs.
 """
 
+import functools
 from collections.abc import Iterator
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
@@ -124,16 +125,29 @@ def at(cwd: Path | None) -> list[str]:
     return ["-C", str(cwd)] if cwd is not None else []
 
 
-def shared_directory(cwd: Path | None = None) -> Path:
-    """The git directory every worktree of this repository shares.
+@functools.cache
+def shared_directory_of(root: Path) -> Path:
+    """The git directory every worktree of *root*'s repository shares.
 
     Asked of git rather than reconstructed from the checkout, because a
     linked worktree's ``.git`` is a file, a bare clone has none at all, and
     the caller may be standing anywhere beneath either.
+
+    Cached on the path asked about, which is what keeps a survey from paying
+    for a subprocess per branch: a checkout's common directory is fixed for
+    as long as the checkout is, and the key is a resolved path rather than
+    "wherever this process is", so a caller that moves is a different ask.
     """
     return Path(
-        git.out(*at(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir")
+        git.out(
+            "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
     )
+
+
+def shared_directory(cwd: Path | None = None) -> Path:
+    """The shared git directory of a named checkout, or of this process's own."""
+    return shared_directory_of(cwd if cwd is not None else Path.cwd())
 
 
 def record_location(branch: str) -> PurePosixPath:

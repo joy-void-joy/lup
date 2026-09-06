@@ -285,8 +285,21 @@ def parse_branches() -> list[ParsedBranch]:
             "is_current": head == "*",
         }
 
+    def published(branch: ParsedBranch) -> ParsedBranch:
+        """The row with the remote lup recorded, where git's config names none.
+
+        A branch `dev pr push` published carries no tracking configuration,
+        because the push states its destination instead of asking git to
+        write one. Read from git alone the row says the branch answers to
+        nothing, which is the report for a branch nobody ever sent anywhere.
+        """
+        if branch["tracking"]:
+            return branch
+        recorded = records.recorded_upstream(branch["name"])
+        return {**branch, "tracking": recorded or None}
+
     return [
-        parse(row)
+        published(parse(row))
         for row in git.lines(
             "for-each-ref",
             "refs/heads",
@@ -1921,15 +1934,37 @@ def remote_branch_exists(name: str) -> bool:
         return False
 
 
-def upstream_ref(name: str) -> str | None:
-    """The remote-tracking ref this branch is set to follow, if it has one."""
+def resolvable(ref: str) -> bool:
+    """Whether this checkout still carries the ref, as a commit."""
     try:
-        return (
-            git.out("rev-parse", "--symbolic-full-name", f"{name}@{{upstream}}").strip()
-            or None
-        )
+        git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+        return True
     except sh.ErrorReturnCode:
-        return None
+        return False
+
+
+def upstream_ref(name: str) -> str | None:
+    """The remote-tracking ref this branch follows, if anything says it has one.
+
+    Git's own tracking configuration answers first, and lup's record answers
+    where there is none — a branch published by `dev pr push` has no tracking
+    configuration at all, because the push names its destination rather than
+    asking git to write one into the shared config.
+
+    The recorded name is checked against the refs actually here before it is
+    handed back, since the caller compares against it and a comparison
+    against a ref nothing carries answers no — which reads as a branch ahead
+    of a remote it never fell behind, and turns an ordinary delete into one
+    reported as discarding work.
+    """
+    try:
+        tracked = git.out(
+            "rev-parse", "--symbolic-full-name", f"{name}@{{upstream}}"
+        ).strip()
+    except sh.ErrorReturnCode:
+        tracked = ""
+    recorded = records.recorded_upstream(name)
+    return tracked or (recorded if recorded and resolvable(recorded) else None)
 
 
 def outgrew_upstream(name: str) -> bool:
@@ -1937,8 +1972,8 @@ def outgrew_upstream(name: str) -> bool:
 
     The question ``git branch -d`` actually asks of a tracking branch, and
     the reason it refuses one every commit of which is already in HEAD. A
-    worktree is given an upstream the moment it is created, so this is the
-    ordinary shape of a branch that landed by a merge into the integration
+    branch has a remote from the first push that carried something, so this
+    is the ordinary shape of one that landed by a merge into the integration
     branch rather than by a push of its own: the work is in, and the remote
     copy is simply behind.
     """

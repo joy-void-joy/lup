@@ -24,6 +24,7 @@ import sh
 import typer
 from pydantic import BaseModel, Field
 
+import lup.devtools.dev.records as records
 from lup.devtools.dev.branches import (
     delete_branch,
     detect_base_branch,
@@ -244,6 +245,15 @@ class PushResult(PRResult):
     pushed: bool
     force: bool
     existing_pr: ExistingPR | None
+
+    upstream: str = ""
+    """The remote branch this one was recorded as publishing to, or none.
+
+    Reported because the record is the thing `-u` claimed to write and did
+    not: a push that says it set up tracking and recorded nothing looks
+    exactly like one that recorded everything, and a reader had no field to
+    tell them apart by.
+    """
 
 
 class CreateResult(PRResult):
@@ -624,19 +634,29 @@ def push(
 ) -> None:
     """Push the current branch and report any existing PR.
 
-    Both spellings name the branch and set it to track, because a checkout
-    reaches this with no upstream: creation publishes nothing, so the first
-    push of either kind is what gives the branch a remote. A bare `push
-    --force` would have nothing to resolve the destination from, and where
-    it did resolve one it took whatever `push.default` offered.
+    Both spellings state the destination as a full refspec, because a
+    checkout reaches this with no upstream: creation publishes nothing, so
+    the first push of either kind is what gives the branch a remote. A bare
+    `push --force` would have nothing to resolve the destination from, and
+    where it did resolve one it took whatever `push.default` offered.
+
+    Stated rather than asked for with `-u`, which records the relationship by
+    writing `branch.<name>.remote` and `branch.<name>.merge` into the shared
+    config. Where that file cannot be written the flag fails *mendaciously*:
+    the push happens, git prints `set up to track`, and the command exits 0
+    having recorded nothing — so every reader of the tracking configuration
+    sees a branch that was never published. The refspec needs no such write,
+    and what the flag was for is recorded beside the branch's other facts.
     """
     branch_name = current_branch()
+    destination = f"refs/heads/{branch_name}:refs/heads/{branch_name}"
 
     try:
-        if force:
-            git("push", "--force", "-u", "origin", branch_name)
-        else:
-            git("push", "-u", "origin", branch_name)
+        forced = ["--force"] if force else []
+        git("push", *forced, "origin", destination)
+        records.remember(
+            branch_name, records.BranchRecord(upstream=f"origin/{branch_name}")
+        )
         pushed = True
     except sh.ErrorReturnCode as e:
         typer.echo(f"Push failed: {decode_stderr(e)}", err=True)
@@ -667,6 +687,7 @@ def push(
         pushed=pushed,
         force=force,
         existing_pr=existing_pr,
+        upstream=records.recorded_upstream(branch_name),
     )
     output_result(result, as_json)
     if not pushed:
