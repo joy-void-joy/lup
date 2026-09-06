@@ -37,7 +37,12 @@ from rich.text import Text
 from lup.devtools.harness.preflight import LaunchSentinels
 from lup.harness.credential import committer, fleet_rewrites
 from lup.harness.egress import PROXY_LABEL, SessionEgress
-from lup.harness.image import ContainerEngine, Image, detected_client
+from lup.harness.image import (
+    ContainerEngine,
+    Image,
+    SessionStreams,
+    detected_client,
+)
 from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import Manifest
 from lup.providers.login import ProviderLogin
@@ -1575,11 +1580,12 @@ def contained_argv(
     credential: Path | None,
     login: ProviderLogin,
     engine: ContainerEngine | None = None,
-    interactive: bool = True,
+    streams: SessionStreams = "terminal",
     banner: Banner | None = None,
     sentinels: LaunchSentinels = LaunchSentinels(),
     inherited_environment: list[str] | None = None,
     accessible: list[AccessibleRoot] = [],
+    lease: Lease | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1598,6 +1604,15 @@ def contained_argv(
     caller with nothing to add passes nothing and each line is printed as it
     is produced, which is what a probe wants: its notices interleave with the
     build they describe rather than arriving after it.
+
+    ``lease`` is the mount table this container runs under, defaulting to the
+    one a session gets over its own repository. A worker passes
+    :func:`~lup.sandbox.rail.worker_lease` instead and reaches everything else
+    here unchanged -- the same image, egress, credential, identity and
+    same-path mounting -- because the only thing that differs between an
+    operator's container and a worker's is which checkouts it may write. A
+    second builder for that one difference would be a second declaration of
+    everything it has in common, free to drift from this one.
     """
     said = banner if banner is not None else Banner()
     if engine is not None:
@@ -1633,7 +1648,7 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
-    lease = fleet_lease(root, human_owned, accessible)
+    lease = lease if lease is not None else fleet_lease(root, human_owned, accessible)
     said.add(fleet_notice(accessible))
     said.add(
         pruning_notice(hold_pruning_across([root, *(item.path for item in accessible)]))
@@ -1701,7 +1716,7 @@ def contained_argv(
         browser_directory=handing,
         clipboard_directory=copying,
         terminal=terminal.environment,
-        interactive=interactive,
+        streams=streams,
         proxy_address=reached_at,
         boundary=sentinels.within(),
         inherited_environment=inherited_environment,
