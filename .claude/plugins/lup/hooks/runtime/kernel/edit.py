@@ -2594,11 +2594,17 @@ def suppression_site(number: int, line: str) -> str:
 def suppression_reason(sites: list[str], creation: bool = False) -> str:
     """Name every suppression this edit declares, not merely that it declares one.
 
-    A permission prompt carries the reason and nothing else, so a verdict
-    that said only what kind of thing happened left the reviewer to find the
-    line themselves — in a diff they were being asked to approve precisely
-    because it needed reading. Every site is listed rather than the first,
-    since approving is one decision over the whole batch.
+    A verdict that said only what kind of thing happened left the reviewer to
+    find the line themselves — in a diff they were being asked to approve
+    precisely because it needed reading. Every site is listed rather than the
+    first, since approving is one decision over the whole batch.
+
+    Where the sites are read is the runtime's to answer and not this
+    function's. One of them puts the reason in the prompt for a command and
+    drops it in the dialog for a write, so the adapter repeats what its own
+    prompt will not carry; another writes the reason out whole and needs
+    nothing. What is owed here is that the words name the sites, in terms any
+    of them can render.
 
     A creation is the case where that matters most and reads least. The whole
     file arrives at once, so its directives are approved along with everything
