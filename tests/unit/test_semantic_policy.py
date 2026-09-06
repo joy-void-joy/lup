@@ -637,9 +637,19 @@ SHELL_POLICY_CASES = [
     # A redirect is judged before the subcommand word is even found, so it
     # cannot be answered by the row that would otherwise reason about this
     # worktree — `commit` is reversible here, where the reflog lives.
-    DecisionCase(input="git -C /other status", effect="ask"),
+    #
+    # Where the redirect points is not part of that: a verb that only reads
+    # changes which tree is read and nothing about what the command does, and
+    # the `cd` case two lines below is the same read already allowed. Asking
+    # about the redirect and allowing the `cd` deterred nothing and cost a
+    # turn on every sibling worktree and every mounted project, both of which
+    # are addressed by absolute path.
+    DecisionCase(input="git -C /other status", effect="allow"),
+    DecisionCase(input="git -C /other log --oneline", effect="allow"),
+    DecisionCase(input="git -C ../sibling diff", effect="allow"),
     DecisionCase(input="git -C /tmp/other commit -am x", effect="ask"),
     DecisionCase(input="git -C /tmp/o merge --abort", effect="ask"),
+    DecisionCase(input="git -C /other push", effect="ask"),
     DecisionCase(input="git --git-dir=/tmp/x --work-tree=/tmp add .", effect="ask"),
     DecisionCase(input="git --namespace=other push", effect="ask"),
     DecisionCase(input="git --super-prefix=x/ status", effect="ask"),

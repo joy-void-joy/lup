@@ -244,8 +244,12 @@ def test_a_global_that_moves_git_to_another_tree_is_judged_before_the_verb() -> 
     # The refusal names the way through rather than leaving it to be guessed —
     # but only where one exists. A namespace is not a directory, so offering to
     # cd into it would send an agent somewhere it cannot go.
-    assert "cd into that tree" in verdict("git -C /tmp/o status", rules).reason
+    assert "cd into that tree" in verdict("git -C /tmp/o commit -am x", rules).reason
     assert "cd into" not in verdict("git --namespace=o push", rules).reason
+    # And the redirect is asked about only where it changes what the command
+    # does. A verb that reads is the same read `cd /tmp/o && git status` makes
+    # in two allowed segments, so asking here bought nothing but a turn.
+    assert effect("git -C /tmp/o status") == "allow"
     # Forcing the pager moves nothing, and the program it names is reachable
     # only through the globals that already ask.
     assert effect("git --paginate diff") == "allow"
