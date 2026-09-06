@@ -27,6 +27,7 @@ import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.traces as traces
 import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
+import lup.devtools.dev.environment as environment_mod
 import lup.devtools.dev.monitor as monitor
 import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
@@ -90,7 +91,13 @@ def create_dev_app(
     plugin_app = typer.Typer(no_args_is_help=True)
     guard_app = typer.Typer(no_args_is_help=True)
     preserve_app = typer.Typer(no_args_is_help=True)
+    env_app = typer.Typer(no_args_is_help=True)
     app.add_typer(worktree_app, name="worktree", help="Worktree management")
+    app.add_typer(
+        env_app,
+        name="env",
+        help="This project's own environment, and who else is installed in it",
+    )
     app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
     app.add_typer(
         conflict_app, name="conflict", help="Merge/rebase conflict resolution"
@@ -116,6 +123,32 @@ def create_dev_app(
         name="questions",
         help="The parked asks a reviewer answers, and what each is waiting on",
     )
+
+    # -- environment commands --
+
+    @env_app.command("status")
+    def env_status_cmd() -> None:
+        """Where this project's environment is, and who is installed in it."""
+        environment_mod.environment_status()
+
+    @env_app.command("sync")
+    def env_sync_cmd(
+        take_over: Annotated[
+            bool,
+            typer.Option(
+                "--take-over",
+                help="Sync even where another project is installed, uninstalling it",
+            ),
+        ] = False,
+    ) -> None:
+        """Install this project's dependencies into its own environment.
+
+        `uv sync` with the one question `uv` cannot ask asked first: an
+        absolute ``UV_PROJECT_ENVIRONMENT`` names a single directory for
+        every project on the machine, and a sync into a shared one
+        uninstalls whoever was there.
+        """
+        environment_mod.sync_environment(take_over)
 
     # -- worktree commands --
 

@@ -22,6 +22,7 @@ from lup.harness.models import (
     document_byte_size,
 )
 from lup.devtools.hooks.classify import stopped_everyday
+from lup.policy.assets.host import project_environment
 from lup.policy.everyday import SESSION_SHAPES
 from lup.workspace.paths import is_template_scaffold, project_root
 
@@ -35,6 +36,7 @@ from lup.devtools.dev.boundaries import (
 from lup.devtools.dev.branches import unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.comments import FoundComment, scan_tracked
+from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
 from lup.devtools.harness.drift import (
     RepositoryWriter,
@@ -576,6 +578,31 @@ def scan_reports(
         )
 
         yield from budget_reports(guidance_bytes(compositions), scaffold)
+
+        # advisory — the environment is the operator's arrangement rather than
+        # this branch's, so a borrowed one is worth reading and not worth
+        # refusing a merge over. It is reported at all because nothing else
+        # would ever say it: a sync into a shared environment succeeds, and
+        # the project it uninstalled finds out somewhere nobody touched.
+        environment = project_environment(project_root())
+        borrowed = (
+            foreign_installs(project_root(), environment)
+            if environment.is_dir()
+            else []
+        )
+        if borrowed:
+            yield CheckReport(
+                name="borrowed environment",
+                counted=False,
+                lines=[
+                    f"borrowed environment: {len(borrowed)} other project(s) "
+                    "(advisory)",
+                    f"  {environment}",
+                    *(f"  holds {owner}" for owner in borrowed),
+                    "  `dev env sync` refuses to write over them, "
+                    "`dev env status` says why",
+                ],
+            )
 
         # advisory — reports another tree's state, so it never gates this one
         unlanded = unlanded_siblings()
