@@ -422,7 +422,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "1f050180db32d3819a375258f44f659377c5638cb162e5111db4661122a4878f",
+      "sha256": "64c23f4864fedef0e261474c8d88685b2745de7471d0b1332adc727abe45441d",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

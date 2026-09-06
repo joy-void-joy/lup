@@ -266,6 +266,16 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     question exists for. Nothing declares this, because a checkout that did
     not hold it would not be a checkout.
 
+    Read as a segment anywhere rather than as a leading ``.git``, because a
+    linked worktree has no leading one: its ``.git`` is a *file* pointing at
+    ``<somewhere>/repo.git/worktrees/<name>``, and the config and hooks it
+    shares live under that ``repo.git`` directory. So the repository these
+    sessions run out of was reachable by absolute path and graded ``outside``,
+    where a contained placement writes freely — and the measured rule that
+    catches an unleased write cannot hold it either, since a launch mounts the
+    shared administrative directory writable on purpose. A hook written there
+    runs on the operator's next Git command, outside whatever granted it.
+
     A declared role is read before either spelling, because a role is somebody
     saying where a path belongs and a spelling is only this reading guessing.
     The session scratchpad is the case that settles it: it is absolute, so the
@@ -274,7 +284,7 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     """
     if path_role(path_text, path_roles) == "scratch":
         return "scratch"
-    if path_text == ".git" or path_text.startswith(".git/"):
+    if any(segment.endswith(".git") for segment in path_text.split("/")):
         return "protected"
     if leaves_the_checkout(path_text):
         return "outside"
