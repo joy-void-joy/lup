@@ -145,18 +145,27 @@ class ClaudeSpellings(NativeSpellings):
         place here are the ones that stop a wrong move, and the ones that
         explain it belong where there is room to explain.
 
-        The third is named as refused rather than merely discouraged, because
-        that is what it now is: the tool table denies it, carrying the cost as
-        its reason, and a deliberate use escalates. Prose that only called it
-        expensive was the whole of the gate before, and prose is what falls
-        out of context first.
+        The third is named as refused rather than merely discouraged: the
+        tool table denies it, carrying the cost as its reason, and a
+        deliberate use escalates. Prose that only calls a route expensive is
+        prose an agent reads once, so the gate is the table and the sentence
+        is what keeps the reflex from reaching for it.
+
+        What it reaches is stated beside the refusal, because escalating past
+        one wall meets another. `dev worktree create` cuts under a sibling
+        `tree/`, and this runtime switches into a path outside its own
+        `.claude/worktrees/` only as a session's first entry from the
+        directory it launched in -- so a second switch is refused by the tool
+        itself, whatever this project decides. An agent told the refusal
+        alone would escalate it and meet an error the prose said could not
+        happen; `docs/contributing.md` carries the measurement.
         """
         return Instruction(
             f"work in <{path}> by whichever of these you can reach: launch a "
             f"session rooted there; or, already running, address files under "
             f"<{path}> by absolute path, where that tree is writable. "
-            f"`EnterWorktree(path=<{path}>)` reaches any worktree from "
-            "anywhere and is refused for it: entering one arms worktree "
+            "`EnterWorktree` is refused, and takes a `tree/` path only as a "
+            "session's first switch: entering one arms worktree "
             "isolation, whose refusals cover ordinary read-only commands for "
             "the rest of the session. Escalate it if you truly need it, and "
             'leave with `ExitWorktree(action="keep")`'

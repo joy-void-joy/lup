@@ -169,6 +169,12 @@ none of them is gated on the command being a git command. So an isolated
 session loses `grep -c hash` and `rg complete src/` — read-only commands with
 no git in them — for as long as it lasts, and no approval marker reaches the
 refusal.
+Relocation is bounded as well as expensive: `dev worktree create` cuts under
+a sibling `tree/`, outside the `.claude/worktrees/` a relocating tool
+switches within, so such a path is taken only as a session's first entry from
+the directory it launched in. A session already sitting in one worktree is
+refused a second switch by the tool itself, whatever this project decides, so
+stacking a branch means a launch or absolute paths either way.
 A session launched already rooted in the worktree is never isolated and
 keeps all of them, which is why the workflow asks for a launch. Staying put
 and editing through absolute paths works too, but only into a worktree that
