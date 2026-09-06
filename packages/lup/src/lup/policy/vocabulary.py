@@ -45,6 +45,7 @@ from pydantic import BaseModel
 
 from lup.policy.kernel.decision import CheckpointRequirement, SandboxPlacement
 from lup.policy.kernel.effects import EffectRow, declare
+from lup.policy.kernel.rows import DestinationForm
 from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -845,10 +846,11 @@ def git_rule(
     redirect_checkout: bool = False,
     sandbox: SandboxPlacement = "ambient",
     config_executing_keys: tuple[str, ...] = GIT_CONFIG_EXECUTING_KEYS,
+    push_destinations: tuple[DestinationForm, ...] = ("url", "path"),
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
 
-    Three judgements a project can reasonably differ on are parameters rather
+    The judgements a project can reasonably differ on are parameters rather
     than a reason to fork the table.
 
     ``guard_force_push`` decides whether replacing what a remote ref points
@@ -892,6 +894,22 @@ def git_rule(
     other means can pass fewer. Passing none makes every config write allow,
     which is a coherent answer for a project whose config is not writable
     from where the agent runs; it is not the default, because it usually is.
+
+    ``push_destinations`` are the ways of naming a repository inline that a
+    push has to ask about. `git push <url> main` needs no remote and writes
+    no configuration, so every guard over the remote table looks straight
+    past it -- and the table is worth trusting precisely because putting a
+    destination in it asks. Both forms are guarded by default. A project that
+    mirrors into a bare repository beside its checkout drops ``path`` and
+    keeps the one that leaves the machine; a project whose network is closed
+    to everything but its forge can drop ``url`` on the same reasoning, and
+    one that passes neither is saying its push has nowhere unapproved to go.
+
+    Structural, and only structural: whether a bare word is a remote this
+    repository holds is a question for `git remote`, which the kernel reading
+    this is hermetic in order not to run. A bare name that is not configured
+    reaches nothing -- git fails before any object moves -- so the forms that
+    do reach somewhere are the whole of what is left to guard.
     """
     leaf = [
         *[
@@ -1001,6 +1019,7 @@ def git_rule(
         ShellSubcommandRule(
             name="push",
             effects=[declare("publishes", scope="branch")],
+            ask_destinations=list(push_destinations),
             ask_refspecs=(["delete", "force"] if guard_force_push else ["delete"]),
             ask_flags=(
                 [*push_flags, "-f", "--force", "--force-with-lease"]

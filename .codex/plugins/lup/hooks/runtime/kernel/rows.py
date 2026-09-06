@@ -298,6 +298,16 @@ class ShellRuleRow(TypedDict):
     rather than to a longer list here. Empty is the common case — most guarded
     flags escalate an operation whose effects already describe them.
 
+    ``ask_destinations`` names the forms of inline repository this row asks
+    about, read off the first operand that is not a flag — the one word a
+    push takes to say where it lands. A destination reached through the
+    remote table is a destination somebody approved, because every way of
+    putting one in that table asks; a URL or a path in the command line
+    reaches a repository the table never heard of, and no key guard can see
+    it because there is no key and no configuration write. Declared as forms
+    rather than as spellings for the reason below it: the transports are
+    open-ended and the grammar is not.
+
     ``ask_refspecs`` names the effects a refspec operand may carry that this
     row asks about — the same downgrade ``ask_flags`` states, about a word
     whose grammar rather than whose spelling says what it does. A push
@@ -375,6 +385,7 @@ class ShellRuleRow(TypedDict):
     effects: list[EffectRow]
     effects_source: RuleLevel
     refuses: str
+    ask_destinations: list[str]
     ask_refspecs: list[str]
     ask_flags: list[str]
     flag_effects: list[EffectRow]
@@ -403,6 +414,7 @@ type ShellRowField = Literal[
     "effects",
     "effects_source",
     "refuses",
+    "ask_destinations",
     "ask_refspecs",
     "ask_flags",
     "flag_effects",
@@ -453,6 +465,7 @@ def shell_row_values(
         "effects": row["effects"],
         "effects_source": row["effects_source"],
         "refuses": row["refuses"],
+        "ask_destinations": row["ask_destinations"],
         "ask_refspecs": row["ask_refspecs"],
         "ask_flags": row["ask_flags"],
         "flag_effects": row["flag_effects"],
@@ -467,6 +480,17 @@ def shell_row_values(
         "value_flags": row["value_flags"],
         "reason": row["reason"],
     }
+
+
+type DestinationForm = Literal["url", "path"]
+"""How an operand names the repository a command sends its work to.
+
+The two ways of naming one inline, kept apart because a project can
+reasonably guard them separately: a URL leaves this machine, and a path stays
+on it. A remote this repository has configured is neither, and is spelled as
+absence rather than as a third word — a table declares the forms it asks
+about, and the bare name every ordinary push carries is the one it does not.
+"""
 
 
 type RefspecEffect = Literal["delete", "force"]

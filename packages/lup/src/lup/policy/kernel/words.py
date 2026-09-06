@@ -1080,3 +1080,39 @@ def refspec_effects(word: str) -> list[str]:
     source = word[1:] if forced else word
     effects = ["force"] if forced else []
     return [*effects, "delete"] if source.startswith(":") else effects
+
+
+def destination_form(word: str) -> str:
+    """How one ``git push`` operand names the repository it lands in.
+
+    The destination is the first operand a push takes, and git accepts two
+    kinds of word for it: the name of a remote this repository has configured,
+    or the repository itself spelled out — a URL in any of git's transports,
+    or a path to a checkout on this machine. The first is a destination
+    somebody put in the remote table; the second names one inline and reaches
+    it without the table having heard of it, which is why the two are told
+    apart here at all.
+
+    Read structurally, and that is the whole of what this can do. Whether a
+    bare word is a remote this repository holds is a question about the
+    repository rather than about the word, and answering it means running
+    `git remote` — which this kernel is stdlib-only and hermetic in order not
+    to do. So the test is the other half: a word carrying a transport is a
+    repository named inline whatever the remote table says, and a bare name
+    that is not in the table makes git fail before it reaches anything.
+
+    The url form is every transport in one test, because they agree on where
+    the colon falls: `https://host/p`, `ssh://host/p`, `git://host/p`,
+    `file:///p` and the scp-style `git@host:p` all put a colon in the word
+    with no slash before it, and no remote name may contain a colon at all.
+    The path form is what is left that is not a bare name: a slash anywhere,
+    or a leading `.` or `~` for the checkout beside this one.
+
+    Returns the empty string for a bare name, which is the operand a push
+    normally carries and the reading that leaves `git push origin main` alone.
+    """
+    if ":" in word and "/" not in word.partition(":")[0]:
+        return "url"
+    if "/" in word or word.startswith((".", "~")):
+        return "path"
+    return ""

@@ -34,6 +34,7 @@ from .effects import (
 from .words import (
     INTERPRETERS,
     carried_setting,
+    destination_form,
     flag_matches,
     flag_write_targets,
     git_restore_operands,
@@ -470,6 +471,26 @@ def apply_command_row(
         if any(flag_matches(word, row["write_flags"]) for word in arguments):
             return flag_write_verdict(
                 row, arguments, no_write_facts() if facts is None else facts
+            )
+    if stated == "allow" and row["ask_destinations"]:
+        # The first word that is not a flag, which is where git reads the
+        # repository from and nowhere else: every later operand is a refspec.
+        # A flag's separate value can land here instead — `-o <option>` — and
+        # a bare option word reads as a remote name, so the miss costs a
+        # question that was not asked rather than one that was owed.
+        #
+        # No opacity test, on the same grounds as the block below: a row
+        # declaring destination forms declares flag effects too, so an
+        # unreadable word has already been bounced above.
+        named = next((word for word in arguments if not word.startswith("-")), "")
+        form = destination_form(named)
+        if form in row["ask_destinations"]:
+            return row_verdict(
+                row,
+                "ask",
+                f"{named} names the destination by {form} rather than by a"
+                " remote this repository holds — sending work there requires"
+                " approval",
             )
     if stated == "allow" and row["ask_refspecs"]:
         # No opacity test of its own: a row declaring refspec effects declares
