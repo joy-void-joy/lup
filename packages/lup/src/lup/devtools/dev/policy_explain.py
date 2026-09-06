@@ -117,10 +117,11 @@ def read_under(
 
     The placement decides containment as well as the native sandbox, because
     the kernel joins them -- a boundary stands when either does -- and the
-    launcher spells them with one flag: `--unsandboxed` opens on the host
-    with no container *and* the runtime's own sandbox off. Read separately,
-    the unsandboxed row inherited the container measured around this process
-    and answered the bounded question twice, under two headings.
+    launcher spells them with one flag: `--sandbox none` opens on the host
+    with no container *and* the runtime's own sandbox off, where `outer` and
+    `inner` each stand one of the walls up. Read separately, the unsandboxed
+    row inherited the container measured around this process and answered the
+    bounded question twice, under two headings.
 
     Which is the reading a session is least able to notice and most likely to
     act on: the guidance sends an agent here before it spends a turn, from

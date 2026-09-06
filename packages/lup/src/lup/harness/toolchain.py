@@ -602,8 +602,8 @@ def proxy_reachable_requirement(
                 "pointed at, so nothing in it can reach the network — and the "
                 "runtime reports that as the operator's own internet being "
                 "down. `harness egress --down` removes the network and the "
-                "proxy so the next launch rebuilds the pair; `--unsandboxed` "
-                "opens on the host under the semantic policy alone"
+                "proxy so the next launch rebuilds the pair; `--sandbox "
+                "inner` opens on the host, outside the egress boundary"
             )
         ),
         install=install,
@@ -669,7 +669,7 @@ def proxy_tunnels_requirement(
                 "every model call fails. The rendered policy is at "
                 "`tmp/egress.conf` and the proxy's own log says which rule "
                 "refused; `harness egress --down` rebuilds the pair, and "
-                "`--unsandboxed` opens without an egress boundary at all"
+                "`--sandbox inner` opens without an egress boundary at all"
             )
         ),
         install=install,
@@ -1023,9 +1023,9 @@ def inside_placement_requirement(
             because=(
                 "this profile's operations are placed by a boundary the launch "
                 "could not observe, so `inside` would name wherever the session "
-                "happened to land. `--unsandboxed` opens on the host under the "
-                "semantic policy alone, which is the same posture stated rather "
-                "than assumed"
+                "happened to land. `--sandbox inner` opens on the host under "
+                "the runtime's own sandbox, which is the same posture stated "
+                "rather than assumed"
             )
         ),
         install=install,

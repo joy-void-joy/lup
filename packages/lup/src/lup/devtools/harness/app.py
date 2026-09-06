@@ -679,13 +679,15 @@ def create_harness_app(
                     help="Open a session the anti-pattern gate leaves alone",
                 ),
             ] = False,
-            unsandboxed: Annotated[
-                bool,
+            sandbox: Annotated[
+                launch.LaunchSandbox,
                 typer.Option(
-                    "--unsandboxed",
-                    help="Open the session on the host instead of in the container",
+                    "--sandbox",
+                    help="Which sandbox holds the session: the verified "
+                    "container (outer), the runtime's own on the host "
+                    "(inner), or the semantic policy alone (none)",
                 ),
-            ] = False,
+            ] = launch.LaunchSandbox.OUTER,
             max_recursive_agent: Annotated[
                 int | None,
                 typer.Option(
@@ -722,7 +724,7 @@ def create_harness_app(
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
-                unsandboxed,
+                sandbox,
                 checkpoint=checkpoint,
                 max_recursive_agent=allowance,
                 transcribe_session=transcribe_session,
@@ -788,13 +790,15 @@ def create_harness_app(
                     help="Open a session the anti-pattern gate leaves alone",
                 ),
             ] = False,
-            unsandboxed: Annotated[
-                bool,
+            sandbox: Annotated[
+                launch.LaunchSandbox,
                 typer.Option(
-                    "--unsandboxed",
-                    help="Open the session on the host instead of in the container",
+                    "--sandbox",
+                    help="Which sandbox holds the session: the verified "
+                    "container (outer), the runtime's own on the host "
+                    "(inner), or the semantic policy alone (none)",
                 ),
-            ] = False,
+            ] = launch.LaunchSandbox.OUTER,
             max_recursive_agent: Annotated[
                 int | None,
                 typer.Option(
@@ -832,7 +836,7 @@ def create_harness_app(
                 selection.mode,
                 Resumption(latest=continue_latest, pick=resume, session=session),
                 ignore_antipatterns,
-                unsandboxed,
+                sandbox,
                 checkpoint=checkpoint,
                 max_recursive_agent=allowance,
                 transcribe_session=transcribe_session,

@@ -11,6 +11,7 @@ import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 from uuid import uuid4
@@ -91,6 +92,42 @@ from lup.devtools.harness.preflight import (
 )
 from lup.devtools.dev.worktree import RelocationHint
 from lup.devtools.layout import get_tree_dir
+
+
+class LaunchSandbox(StrEnum):
+    """Which sandbox a launch opens the session under.
+
+    One axis with three points rather than two booleans, because the two
+    walls were never independent: the container stands the runtime's own
+    sandbox down, and skipping the container is what makes that sandbox
+    worth establishing. Named from the session's point of view -- which
+    wall is load-bearing -- so the flag that selects one reads as the
+    posture it buys rather than as the machinery it toggles.
+
+    Distinct from :class:`~lup.policy.enforcement.SandboxPosture`, which is
+    what a session's *configuration* means to the policy kernel once it is
+    open; this is the launcher's choice of what to configure.
+    """
+
+    OUTER = "outer"
+    """The verified container is the boundary; the native sandbox stands down
+    inside it, because a wall that has to be weakened to start nested is worth
+    less than saying plainly which wall is load-bearing."""
+
+    INNER = "inner"
+    """The session opens on the host and the launcher establishes the
+    runtime's own workspace-write sandbox, vouching for it only after
+    exercising the tools it stands on."""
+
+    NONE = "none"
+    """The session opens on the host under the semantic policy alone. Nothing
+    is established and nothing is vouched for, so the deny lattice stays
+    standing -- the posture a broken inner sandbox used to degrade into
+    silently, stated as a choice."""
+
+    def contained(self) -> bool:
+        """Whether this launch opens inside the verified container."""
+        return self is LaunchSandbox.OUTER
 
 
 @runtime_checkable
@@ -755,7 +792,7 @@ def apply_sandbox_environment(
     environment: EnvVars,
     label: str,
     required_tools: list[Requirement],
-    contained: bool = False,
+    sandbox: LaunchSandbox = LaunchSandbox.INNER,
     announce: bool = True,
 ) -> bool:
     """Export LUP_SANDBOX_ACTIVE when the declared sandbox can actually run.
@@ -772,15 +809,16 @@ def apply_sandbox_environment(
     both leave the lattice standing, which is the safe direction, and the
     message says which of the two was found rather than only that one was.
 
-    Asked only of an uncontained launch. A contained one has a boundary
-    already, and the kernel reads it from what the launch measured rather than
-    from anything a launcher asserts -- ``boundary = sandboxed or contained``,
-    so the flag would change no verdict. Probing anyway printed
-    a sandbox verdict about a session that was not going to rely on it, and
-    on a failed probe printed ``deny lattice stays active`` for a session
-    whose lattice was about to stand down behind the container. Saying
-    nothing is the honest report, and the container's own line says what the
-    boundary is.
+    Asked only of a launch establishing the inner sandbox. A contained one
+    has a boundary already, and the kernel reads it from what the launch
+    measured rather than from anything a launcher asserts -- ``boundary =
+    sandboxed or contained``, so the flag would change no verdict. Probing
+    anyway printed a sandbox verdict about a session that was not going to
+    rely on it, and on a failed probe printed ``deny lattice stays active``
+    for a session whose lattice was about to stand down behind the container.
+    Saying nothing is the honest report, and the container's own line says
+    what the boundary is. A launch that chose no sandbox at all is not asked
+    either: it wants the lattice standing, so there is nothing to vouch for.
 
     Each tool carries its own exercise rather than being named here and
     probed with a flag chosen by this function. That is not tidiness: the
@@ -801,7 +839,7 @@ def apply_sandbox_environment(
     from the environment it just passed in.
     """
     hooks = plugin.hooks
-    if contained or hooks is None or hooks.sandbox is None:
+    if sandbox is not LaunchSandbox.INNER or hooks is None or hooks.sandbox is None:
         return False
     findings = [tool.check(environment) for tool in required_tools]
     unusable = [finding for finding in findings if not finding.working]
@@ -841,12 +879,12 @@ def codex_sandbox_arguments(
     plugin: Plugin,
     environment: EnvVars,
     extra_args: list[str],
-    contained: bool = False,
+    sandbox: LaunchSandbox = LaunchSandbox.INNER,
     accessible: list[AccessibleRoot] = [],
 ) -> list[str]:
     """Compose the interactive Codex envelope that LUP_SANDBOX_ACTIVE vouches for.
 
-    Uncontained, the launcher establishes the boundary it announces: an
+    Establishing the inner sandbox, the launcher builds the boundary it announces: an
     explicit workspace-write sandbox on the Codex command line, mirroring how
     the Claude settings artifact compiles the same declaration into an OS
     wall. Path-level write and credential denials have no Codex equivalent,
@@ -867,10 +905,15 @@ def codex_sandbox_arguments(
     Claude's off switch, and it is what "every runtime, in the same change"
     means for a posture: one concept, each runtime's own word for it.
 
-    LUP_SANDBOX_ACTIVE stays unset either way here, because a contained
-    session does not need it -- the kernel reads the containment out of what
-    the launch measured, and a boundary that was observed is a boundary
-    whether this flag vouched for it or not.
+    Choosing no sandbox at all spells the same off switch on the host, and
+    the notice says which wall holds instead: none, so the deny lattice
+    stays standing and every unjudged command keeps its escalation recipe.
+
+    LUP_SANDBOX_ACTIVE stays unset in both of those, because neither session
+    relies on it -- the kernel reads the containment out of what the launch
+    measured, and a boundary that was observed is a boundary whether this
+    flag vouched for it or not, while a session with no boundary wants the
+    lattice the flag would relax.
     """
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
@@ -889,15 +932,27 @@ def codex_sandbox_arguments(
             urgency="warning",
         ).say()
         return []
-    if contained:
-        Notice(
-            text=(
-                "codex sandbox: off inside the container — "
-                "the container is the boundary, and its proxy is the way out"
-            ),
-            urgency="boundary",
-        ).say()
-        return list(CODEX_CONFINEMENT.off)
+    match sandbox:
+        case LaunchSandbox.OUTER:
+            Notice(
+                text=(
+                    "codex sandbox: off inside the container — "
+                    "the container is the boundary, and its proxy is the way out"
+                ),
+                urgency="boundary",
+            ).say()
+            return list(CODEX_CONFINEMENT.off)
+        case LaunchSandbox.NONE:
+            Notice(
+                text=(
+                    "codex sandbox: off on the host — "
+                    "the semantic policy alone judges, and its deny lattice stands"
+                ),
+                urgency="boundary",
+            ).say()
+            return list(CODEX_CONFINEMENT.off)
+        case LaunchSandbox.INNER:
+            pass
     # Exercised before it is vouched for, the way the Claude path exercises
     # its confinement tools. Asserting the flag outright was the asymmetry:
     # `codex sandbox` runs a command under this exact envelope and no model
@@ -907,7 +962,7 @@ def codex_sandbox_arguments(
         environment,
         "codex",
         [codex_envelope_requirement()],
-        contained=contained,
+        sandbox=sandbox,
         announce=False,
     )
     if vouched:
@@ -1012,11 +1067,13 @@ def codex_resume_arguments(resume: Resumption) -> list[str]:
 
 
 def claude_sandbox_arguments(
-    plugin: Plugin, contained: bool = False, accessible: list[AccessibleRoot] = []
+    plugin: Plugin,
+    sandbox: LaunchSandbox = LaunchSandbox.INNER,
+    accessible: list[AccessibleRoot] = [],
 ) -> list[str]:
     """Say what this launch means the Claude sandbox to be, in one settings merge.
 
-    Uncontained, that is a widening: Claude roots writes at the working
+    Establishing the inner sandbox, that is a widening: Claude roots writes at the working
     directory just as Codex does, so a second checkout is read-only to every
     command a session runs — and running the toolchain over one is ordinary
     work here, which is why the symptom arrives as pytest failing to write a
@@ -1036,9 +1093,9 @@ def claude_sandbox_arguments(
     scopes, values that override per session — and a list carrying both is
     the same list under either reading.
 
-    Contained, it is an *off* switch, and the artifact still says ``enabled:
-    true`` because that is the right answer for the uncontained launch the
-    same file serves. The switch itself is spelled by
+    Contained -- or with no sandbox chosen at all -- it is an *off* switch,
+    and the artifact still says ``enabled: true`` because that is the right
+    answer for the inner-sandbox launch the same file serves. The switch itself is spelled by
     :data:`~lup.providers.claude.confinement.CLAUDE_CONFINEMENT` rather than
     here, so the image-side probe that asks whether a session can open at all
     opens the same one this does -- spelled twice, the probe verifies a
@@ -1064,7 +1121,7 @@ def claude_sandbox_arguments(
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
         return []
-    if contained:
+    if sandbox is not LaunchSandbox.INNER:
         return list(CLAUDE_CONFINEMENT.off)
     try:
         tree = get_tree_dir()
@@ -1124,7 +1181,7 @@ def ambient_config_home(login: ProviderLogin, fallback: Path) -> Path:
 
 def settle_boundary(
     plugin: Plugin,
-    unsandboxed: bool,
+    sandbox: LaunchSandbox,
     findings: list[Finding],
     sentinels: LaunchSentinels,
     environment: EnvVars,
@@ -1166,10 +1223,10 @@ def settle_boundary(
     declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
     boundary = compile_boundary(
         declared,
-        contained=not unsandboxed,
+        contained=sandbox.contained(),
         writable=list(fleet_lease(root, accessible=accessible).writable),
     )
-    preflight = measured(boundary, depended_on(declared, not unsandboxed), findings)
+    preflight = measured(boundary, depended_on(declared, sandbox.contained()), findings)
     said = preflight.opening()
     if not preflight.launchable():
         Notice(text=said, urgency="boundary").say()
@@ -1177,19 +1234,22 @@ def settle_boundary(
             f"{boundary.name}: "
             + ", ".join(entry.capability for entry in preflight.missing_required())
             + " required and not delivered. Each is reported above with what "
-            "was tried; `--unsandboxed` opens on the host under the semantic "
-            "policy alone, which is the same posture stated rather than assumed."
+            "was tried; `--sandbox inner` opens on the host under the "
+            "runtime's own sandbox, and `--sandbox none` under the semantic "
+            "policy alone -- the degraded posture stated rather than assumed."
         )
     if said:
         banner.add([Notice(text=said, urgency="boundary")])
     record_preflight(preflight, sentinels, root)
-    if unsandboxed:
+    if not sandbox.contained():
         # No mounts, so no mount table -- and the one a contained launch left
         # behind describes a boundary this session is not behind. Attributing
         # a refusal to it teaches an agent to reach for the host when the bug
         # was its own, which outlives the command it was wrong about.
         retire_mount_table(root)
-    environment.update(sentinels.outside() if unsandboxed else sentinels.within())
+    environment.update(
+        sentinels.within() if sandbox.contained() else sentinels.outside()
+    )
     return preflight
 
 
@@ -1200,7 +1260,7 @@ def session_argv(
     plugin: Plugin,
     config_home: Path,
     login: ProviderLogin,
-    unsandboxed: bool,
+    sandbox: LaunchSandbox,
     environment: EnvVars,
     transcript: Path | None = None,
     sentinels: LaunchSentinels = LaunchSentinels(),
@@ -1241,10 +1301,10 @@ def session_argv(
         banner.add([Notice(text=said, urgency="boundary")])
 
     accessible = accessible_roots(told)
-    if unsandboxed:
+    if not sandbox.contained():
         settle_boundary(
             plugin,
-            unsandboxed,
+            sandbox,
             cleared.findings,
             sentinels,
             environment,
@@ -1303,7 +1363,7 @@ def session_argv(
     # from either alone would report a capability nothing asked about.
     measured_here = [*cleared.findings, *inside]
     settle_boundary(
-        plugin, unsandboxed, measured_here, sentinels, environment, banner, accessible
+        plugin, sandbox, measured_here, sentinels, environment, banner, accessible
     )
     say_opening(cleared, measured_here, transcript)
     return [*opening, cli, *arguments]
@@ -1360,7 +1420,7 @@ def launch_claude(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
-    unsandboxed: bool = False,
+    sandbox: LaunchSandbox = LaunchSandbox.OUTER,
     checkpoint: LaunchCheckpoint | None = None,
     max_recursive_agent: int = -1,
     transcribe_session: bool = False,
@@ -1400,8 +1460,10 @@ def launch_claude(
             *[flag for directory in named for flag in ("--plugin-dir", str(directory))],
             *claude_sandbox_arguments(
                 plugin,
-                contained=not unsandboxed,
-                accessible=accessible_roots() if unsandboxed else [],
+                sandbox=sandbox,
+                accessible=(
+                    accessible_roots() if sandbox is LaunchSandbox.INNER else []
+                ),
             ),
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
@@ -1414,7 +1476,7 @@ def launch_claude(
         environment,
         "claude",
         [bubblewrap_requirement(), socat_requirement()],
-        contained=not unsandboxed,
+        sandbox=sandbox,
     )
     # A name no origin answers to reaches here from an explicit --profile, and
     # from an active selection whose profile has since gone; both are the
@@ -1454,7 +1516,7 @@ def launch_claude(
                 if home is not None
                 else ambient_config_home(profiles.login, Path.home() / ".claude"),
                 profiles.login,
-                unsandboxed,
+                sandbox,
                 environment,
                 transcript.journal.path,
                 sentinels,
@@ -1490,7 +1552,7 @@ def launch_codex(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
-    unsandboxed: bool = False,
+    sandbox: LaunchSandbox = LaunchSandbox.OUTER,
     checkpoint: LaunchCheckpoint | None = None,
     max_recursive_agent: int = -1,
     transcribe_session: bool = False,
@@ -1517,8 +1579,8 @@ def launch_codex(
         plugin,
         environment,
         extra_args,
-        contained=not unsandboxed,
-        accessible=accessible_roots() if unsandboxed else [],
+        sandbox=sandbox,
+        accessible=(accessible_roots() if sandbox is LaunchSandbox.INNER else []),
     )
     store = CodexWorktreeHomeStore()
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
@@ -1574,7 +1636,7 @@ def launch_codex(
                 plugin,
                 selected_home,
                 CODEX_LOGIN,
-                unsandboxed,
+                sandbox,
                 environment,
                 transcript.journal.path,
                 sentinels,

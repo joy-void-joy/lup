@@ -267,8 +267,8 @@ class ContainerClient(BaseModel, frozen=True):
             "a Docker client rejects that flag before the daemon sees it, so the "
             "session's own checkout would be read-only to it. Install podman's "
             "own CLI, or unset DOCKER_HOST to reach a Docker daemon, or open the "
-            "session with --unsandboxed to run on the host under the semantic "
-            "policy alone."
+            "session with `--sandbox inner` to run on the host under the "
+            "runtime's own sandbox and the semantic policy."
         )
 
 
