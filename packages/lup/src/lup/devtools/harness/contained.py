@@ -1728,16 +1728,6 @@ def contained_argv(
     )
 
 
-WORKER_PROGRAM = "claude"
-"""The program a wrapper execs inside the container, where a caller replaces it.
-
-Named rather than spelled at the call site because the two runtimes disagree
-about it and the disagreement is the whole of what varies: Codex's own CLI is
-``codex``, and a wrapper built for one and pointed at the other would start a
-container running the wrong agent and report nothing unusual.
-"""
-
-
 def engine_absence() -> str | None:
     """Why this host cannot open a worker container, or ``None`` if it can.
 
@@ -1769,7 +1759,7 @@ def engine_absence() -> str | None:
     )
 
 
-def wrapper_script(argv: list[str], program: str = WORKER_PROGRAM) -> str:
+def wrapper_script(argv: list[str], program: str) -> str:
     """The shell that execs one worker's CLI inside its container.
 
     ``exec`` rather than a call, so the container replaces this shell instead
@@ -1791,7 +1781,7 @@ def wrapper_script(argv: list[str], program: str = WORKER_PROGRAM) -> str:
     )
 
 
-def written_wrapper(path: Path, argv: list[str], program: str = WORKER_PROGRAM) -> Path:
+def written_wrapper(path: Path, argv: list[str], program: str) -> Path:
     """Write one actor's wrapper where its runtime can start it, and mark it runnable.
 
     Executable because that is what being named as a program means: the runtime
@@ -1814,7 +1804,7 @@ def worker_cli(
     host_config_home: Path | None,
     credential: Path | None,
     login: ProviderLogin,
-    program: str = WORKER_PROGRAM,
+    program: str,
     read_only: bool = False,
     sentinels: LaunchSentinels = LaunchSentinels(),
     accessible: list[AccessibleRoot] = [],
@@ -1837,6 +1827,12 @@ def worker_cli(
     opened by pointing that field at the wrapper this writes, and neither
     adapter learns anything about containers -- from where they stand a program
     was named and started.
+
+    ``program`` is required rather than defaulted because a CLI's own name is
+    that provider's vocabulary, and this builder is neutral between them. The
+    caller naming it is already the composition root that picked the adapter,
+    so the name is spelled where the runtime is chosen instead of a second
+    place that would have to be kept agreeing with it.
 
     ``lease_root`` is both the tree this actor was given and the checkout its
     container opens on, which is not two decisions that happen to agree: every
