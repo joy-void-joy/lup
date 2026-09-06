@@ -19,6 +19,7 @@ import lup.harness.models as models
 from lup.providers.claude.harness import CLAUDE_DISPATCHER
 from lup.providers.codex.harness import CODEX_DISPATCHER
 from lup.devtools.harness.content.docs.catalog import library_documents, published
+from lup_template.devtools.dev.library import LibraryMode, read_mode
 from lup_template.devtools.harness.content.catalog import (
     AGENTS,
     LAYOUT,
@@ -49,15 +50,16 @@ def reference_pages(root: Path) -> list[models.Document]:
     the same reason :func:`project_pages` takes one, and the same reason
     neither is a module-level constant.
 
-    It hands that checkout on only when the suite is actually in it, and that
-    condition is the whole point rather than defensiveness. A project built
-    from this scaffold resolves lup as a distribution: the fixtures the page
-    cites ship with lup's repository and not with its wheel, so the citation
-    stays true — it names where the evidence lives — while the path is simply
-    not present to check. Passing the checkout unconditionally made every
-    adopter's first `harness generate all` fail with `'packages/lup/tests/
-    unit/test_adapter_runtime.py' is cited as evidence but does not exist`,
-    which reads as a broken generator rather than as a tree that never had it.
+    Whether that suite is in this tree is what the library mode declares, so
+    the mode is what decides it. ``local`` wires ``packages/lup`` in as a
+    workspace member and is refused unless the package is there; the other
+    three resolve lup as a distribution, which ships the code those fixtures
+    pin and none of the fixtures themselves. The citation names where the
+    evidence lives in *lup's* repository, which is true read from anywhere —
+    only its existence is checked, and only against the one mode whose tree
+    is required to hold it. Asking the mode rather than testing for the
+    directory is what keeps a copy left behind by ``--keep-vendored`` from
+    voting on a page that describes the lup actually being resolved.
     """
     return library_documents(
         SKILLS,
@@ -66,7 +68,7 @@ def reference_pages(root: Path) -> list[models.Document]:
         CLAUDE_DISPATCHER.routed_tools,
         CODEX_DISPATCHER.routed_tools,
         LAYOUT,
-        root if (root / "packages" / "lup" / "tests").is_dir() else None,
+        root if read_mode(root) is LibraryMode.LOCAL else None,
     )
 
 
