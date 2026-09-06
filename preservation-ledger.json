@@ -1,5 +1,5 @@
 {
-  "revision": "91764f60059b793607bec677b4443785c2b240ca",
+  "revision": "05df780385d5ff763461c75a25d61ff6efe9a9a4",
   "roots": [
     "lup",
     "lup_template"
@@ -1722,6 +1722,7 @@
         "PushResult.pushed",
         "PushResult.force",
         "PushResult.existing_pr",
+        "PushResult.push_complaint",
         "CreateResult",
         "CreateResult.number",
         "CreateResult.url",
@@ -1737,6 +1738,12 @@
         "merge",
         "sync_base",
         "push",
+        "HeadOnRemote",
+        "HeadOnRemote.present",
+        "HeadOnRemote.absent",
+        "HeadOnRemote.unknown",
+        "head_on_remote",
+        "creation_diagnosis",
         "parse_pr_url",
         "resolve_body",
         "create",

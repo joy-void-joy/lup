@@ -302,6 +302,17 @@ class PushResult(PRResult):
     force: bool
     existing_pr: ExistingPR | None
 
+    push_complaint: str = ""
+    """Why the branch did not reach the remote, empty when it did.
+
+    ``pushed: false`` on its own is a verdict with no case behind it: git's
+    own message went to stderr, which is not where a reader of the JSON
+    looks, and this transport fails intermittently — a plain retry clears
+    it — so the message is what says whether to retry or to go and fix
+    something. It is a field rather than a log line for the same reason the
+    flag is.
+    """
+
 
 class CreateResult(PRResult):
     number: int
@@ -672,15 +683,15 @@ def push(
     """Push the current branch and report any existing PR."""
     branch_name = current_branch()
 
+    complaint = ""
     try:
         if force:
             git("push", "--force")
         else:
             git("push", "-u", "origin", branch_name)
-        pushed = True
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Push failed: {decode_stderr(e)}", err=True)
-        pushed = False
+        complaint = decode_stderr(e)
+        typer.echo(f"Push failed: {complaint}", err=True)
 
     existing_pr = None
     try:
@@ -704,13 +715,70 @@ def push(
 
     result = PushResult(
         branch=branch_name,
-        pushed=pushed,
+        pushed=not complaint,
         force=force,
         existing_pr=existing_pr,
+        push_complaint=complaint,
     )
     output_result(result, as_json)
-    if not pushed:
+    if complaint:
         raise typer.Exit(1)
+
+
+class HeadOnRemote(StrEnum):
+    """Whether the remote carries the branch a request would be opened over."""
+
+    present = "present"
+    absent = "absent"
+    unknown = "unknown"
+
+
+def head_on_remote(branch: str, remote: str = "origin") -> HeadOnRemote:
+    """Ask the remote whether it holds this branch, rather than assume it does.
+
+    The remote is asked rather than the remote-tracking ref read, because a
+    push that failed leaves that ref exactly as a fetch nobody ran does, and
+    the whole question here is which of those happened.
+    """
+    try:
+        listed = git.out("ls-remote", "--heads", remote, branch).strip()
+    except sh.ErrorReturnCode:
+        logger.exception("could not ask %s whether it holds %s", remote, branch)
+        return HeadOnRemote.unknown
+    return HeadOnRemote.present if listed else HeadOnRemote.absent
+
+
+def creation_diagnosis(branch: str, base: str, complaint: str) -> str:
+    """What "no commits between" is saying, which is one of two things.
+
+    GitHub refuses a request over a branch the remote never received with
+    the same sentence it refuses one holding nothing its base lacks, and the
+    two are opposite: the first is a push to retry, and the sentence points
+    away from it by describing a branch with nothing to merge. Only the
+    remote separates them, so it is asked and the answer said out loud.
+
+    Empty for every other refusal, which says what it means already.
+    """
+    if "No commits between" not in complaint:
+        return ""
+    match head_on_remote(branch):
+        case HeadOnRemote.absent:
+            return (
+                f"The remote has no {branch}. Nothing is wrong with the request:"
+                f" the push that would have put the branch there did not land."
+                f" Push it again and retry."
+            )
+        case HeadOnRemote.present:
+            return (
+                f"The remote's {branch} holds nothing {base} lacks, so there is"
+                f" no change for a request to describe."
+            )
+        case HeadOnRemote.unknown:
+            return (
+                f"Whether the remote holds {branch} could not be established,"
+                f" and that is what separates a branch that never arrived from"
+                f" one identical to {base}."
+            )
 
 
 def parse_pr_url(stdout: str) -> str:
@@ -768,6 +836,7 @@ def create(
     """
     if not check_forge_api():
         raise typer.Exit(1)
+    head = current_branch()
     try:
         raw = gh.out(
             "pr",
@@ -776,14 +845,17 @@ def create(
             "--base",
             base,
             "--head",
-            current_branch(),
+            head,
             "--title",
             title,
             "--body",
             body,
         )
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Failed to create PR: {decode_stderr(e)}", err=True)
+        complaint = decode_stderr(e)
+        typer.echo(f"Failed to create PR: {complaint}", err=True)
+        if diagnosis := creation_diagnosis(head, base, complaint):
+            typer.echo(diagnosis, err=True)
         raise typer.Exit(1)
 
     url = parse_pr_url(raw)
