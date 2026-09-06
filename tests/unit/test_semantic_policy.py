@@ -1913,6 +1913,29 @@ def test_the_declared_scopes_admit_the_host_a_documentation_route_starts_at() ->
     assert effect("https://www.anthropic.com/news") == "ask"
 
 
+def test_the_declared_scopes_carry_the_product_pages_no_manual_answers() -> None:
+    """What the product is and costs is declared as itself, not as a redirect.
+
+    A reference manual answers how a thing is called and what it returns. What
+    it is, what it costs and what it claims are answered on the product's own
+    pages and nowhere in the scopes beside them, so a question about the
+    product rather than the API otherwise buys an approval prompt on every
+    hop. Both spellings are named because a site that redirects apex to www,
+    or the reverse, would put the ask back on the redirect.
+
+    This one widens rather than tidies: the origin is admitted for its own
+    content, and the same table grants it egress.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("https://claude.com/product/overview") == "allow"
+    assert effect("https://www.claude.com/pricing") == "allow"
+    assert effect("https://claude.com.evil.test/pricing") == "ask"
+
+
 def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) -> None:
     bundled = load_bundled_kernel(tmp_path, "fetch")
     scope = UrlScope(

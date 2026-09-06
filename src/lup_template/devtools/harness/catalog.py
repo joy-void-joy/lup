@@ -347,6 +347,14 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # document these scopes did not already carry.
                 HookUrlScope(origin=AnyHttpUrl("https://docs.anthropic.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://docs.anthropic.com")),
+                # The product's own pages — what it is, what it costs, what it
+                # claims — which no reference manual answers and which a
+                # question about the product rather than the API lands on.
+                # Declared for what they are rather than as a redirect: this
+                # admits an origin these scopes did not already reach, and
+                # widens the egress the same table grants to it.
+                HookUrlScope(origin=AnyHttpUrl("https://claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("https://www.claude.com")),
                 # Where a session publishes a settled classification for a
                 # later one to read back, so a briefing can cite the artifact
                 # rather than restate it.
