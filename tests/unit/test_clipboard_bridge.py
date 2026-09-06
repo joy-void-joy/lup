@@ -276,7 +276,7 @@ def test_the_shim_answers_a_targets_query_with_text_and_image_alike(
 def test_the_shim_is_executable_in_its_own_right(
     held: dict[str, str], tmp_path: Path
 ) -> None:
-    """The image links six names at it and the kernel runs whichever is spelled.
+    """The image links every shim name at it and runs whichever is spelled.
 
     Exercised by executing the file rather than by handing it to an
     interpreter, which is what the container does and what every other test
@@ -312,3 +312,93 @@ def test_the_shims_are_advertised_and_not_only_installed() -> None:
     assert environment[bridge.display_variable] == bridge.display
     assert bridge.display, "a probe reads this for truth before it reads it at all"
     assert sorted(environment) == sorted([bridge.variable, bridge.display_variable])
+
+
+def test_a_copy_spelled_the_way_a_multiplexer_takes_one_reaches_the_clipboard(
+    held: dict[str, str], tmp_path: Path
+) -> None:
+    """The measured gap: `TMUX` crosses and the socket it names does not.
+
+    A runtime told a multiplexer owns the screen spells its copy as
+    `load-buffer` on standard input, and found no `tmux` at all -- a session
+    contradicting itself, with the runtime's own fallbacks the only reason a
+    copy still landed. `-w` is carried because that is how the spelling
+    arrives, and it asks for the terminal's clipboard too, which is the one
+    this bridge already is.
+    """
+    import sh
+
+    endpoint = serving(ClipboardBridge())
+    sh.Command(sys.executable)(
+        shim(tmp_path, "tmux"),
+        "load-buffer",
+        "-w",
+        "-",
+        _in="taken by the buffer",
+        _env={"LUP_CLIPBOARD_SOCKET": str(endpoint), "PATH": "/usr/bin:/bin"},
+    )
+    assert held["text"] == "taken by the buffer"
+
+
+def test_a_buffer_set_from_its_argument_is_not_read_from_stdin(
+    held: dict[str, str], tmp_path: Path
+) -> None:
+    """The two verbs differ in where the text is, which is the whole parse.
+
+    `-b` names a buffer and takes a value that is not the text, so a shim
+    reading the first word after the verb would copy the buffer's name.
+    """
+    import sh
+
+    endpoint = serving(ClipboardBridge())
+    sh.Command(sys.executable)(
+        shim(tmp_path, "tmux"),
+        "set-buffer",
+        "-b",
+        "scratch",
+        "written as an argument",
+        _env={"LUP_CLIPBOARD_SOCKET": str(endpoint), "PATH": "/usr/bin:/bin"},
+    )
+    assert held["text"] == "written as an argument"
+
+
+def test_a_buffer_loaded_from_a_file_is_read_from_it(
+    held: dict[str, str], tmp_path: Path
+) -> None:
+    """`load-buffer` takes a path as readily as `-`, so both are answered."""
+    import sh
+
+    endpoint = serving(ClipboardBridge())
+    source = tmp_path / "buffer.txt"
+    source.write_text("read off the disk", encoding="utf-8")
+    sh.Command(sys.executable)(
+        shim(tmp_path, "tmux"),
+        "load-buffer",
+        str(source),
+        _env={"LUP_CLIPBOARD_SOCKET": str(endpoint), "PATH": "/usr/bin:/bin"},
+    )
+    assert held["text"] == "read off the disk"
+
+
+def test_the_tmux_questions_this_session_cannot_answer_are_refused_by_name(
+    held: dict[str, str], tmp_path: Path
+) -> None:
+    """Refused rather than answered, because the server really is out of reach.
+
+    The alternative was a silent success, and it is the shape this bridge's
+    header argues against everywhere else: a runtime asking which panes exist
+    would get agreement and no panes, and read the emptiness as the answer.
+    What it gets instead names where tmux actually is, which is more than the
+    `command not found` this replaces -- that one contradicts the `TMUX` the
+    same session was handed.
+    """
+    import sh
+
+    endpoint = serving(ClipboardBridge())
+    with pytest.raises(sh.ErrorReturnCode) as refusal:
+        sh.Command(sys.executable)(
+            shim(tmp_path, "tmux"),
+            "list-panes",
+            _env={"LUP_CLIPBOARD_SOCKET": str(endpoint), "PATH": "/usr/bin:/bin"},
+        )
+    assert "tmux runs on the host" in refusal.value.stderr.decode("utf-8")
