@@ -48,10 +48,6 @@ WRITERS = ("wl-copy", "pbcopy", "clip")
 TYPE_FLAGS = ("-t", "--type")
 TMUX_BUFFER_VERBS = ("load-buffer", "set-buffer")
 TMUX_VALUE_FLAGS = ("-b", "-t", "-n")
-TMUX_UNREACHABLE = (
-    "tmux: this session reaches the operator's clipboard but not their "
-    "server; tmux runs on the host.\n"
-)
 
 
 def ask(request):
@@ -140,11 +136,22 @@ def tmux_text(verb, operand):
         return handle.read()
 
 
-def tmux(argv):
-    """Answer the buffer verbs, and name the boundary for everything else."""
+def tmux(
+    argv,
+    unreachable=(
+        "tmux: this session reaches the operator's clipboard but not their "
+        "server; tmux runs on the host.\n"
+    ),
+):
+    """Answer the buffer verbs, and name the boundary for everything else.
+
+    What the refusal *says* is a judgement rather than tmux's own vocabulary,
+    so it arrives as a default a caller can replace -- unlike the verbs and
+    flags above, which are spelled by tmux and not by anyone here.
+    """
     verb = argv[0] if argv else ""
     if verb not in TMUX_BUFFER_VERBS:
-        sys.stderr.write(TMUX_UNREACHABLE)
+        sys.stderr.write(unreachable)
         sys.exit(1)
     ask({"op": "set", "text": tmux_text(verb, tmux_operand(argv[1:]))})
 
