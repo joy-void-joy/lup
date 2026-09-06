@@ -123,6 +123,8 @@ A `KEEP` branch an open PR is driving is not finished work — it is work whose 
 
 **Offer these. Leaving one open is a decision the user makes, not one the sweep makes on their behalf.** Present them as their own group, each with its PR's review decision and check state — `uv run lup-devtools dev pr status --branch <branch> --json` — and ask which to merge. A draft PR, a failing check, or a review still owed are all reasons to leave one standing, and each of them is the user's to weigh.
 
+**`checks_state` has three answers, and only `passing` is one.** `running` says the checks have not finished — report it as its own state, never merged into the passing group and never presented as a difference between branches, because a probe that has not reported says nothing about the branch it is probing. Where the sweep turns on it, wait for the checks and read the status again rather than reading the unfinished answer.
+
 **They share step 6's queue.** Every merge moves the integration branch, so open-PR branches and `LAND` branches form one ordered sequence rather than two independent passes. Take them one at a time, and re-derive the next one's base after each.
 
 **Order by what the branches touch, not by when they started.** Branches cut from the same tip have no divergence to sort by, so compare their file sets — `git diff --name-only <integration>...<branch>` for each — and read the intersection:

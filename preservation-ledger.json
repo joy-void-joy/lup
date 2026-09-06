@@ -1,5 +1,5 @@
 {
-  "revision": "ac83b88292da5c6848c24c5a713daa4df5dc5a6a",
+  "revision": "c9f35126acff267767fd5509f1756c73d683c14b",
   "roots": [
     "lup",
     "lup_template"
@@ -1643,6 +1643,11 @@
         "MergeMethod.merge",
         "MergeMethod.squash",
         "MergeMethod.rebase",
+        "ChecksState",
+        "ChecksState.passing",
+        "ChecksState.failing",
+        "ChecksState.running",
+        "ChecksState.marker",
         "current_branch",
         "ReviewInfo",
         "ReviewInfo.author",
@@ -1652,6 +1657,8 @@
         "CheckInfo.name",
         "CheckInfo.status",
         "CheckInfo.conclusion",
+        "check_state",
+        "rollup_state",
         "GhAuthor",
         "GhAuthor.login",
         "GhReview",
@@ -1680,7 +1687,7 @@
         "PRInfo.url",
         "PRInfo.review_decision",
         "PRInfo.mergeable",
-        "PRInfo.checks_passing",
+        "PRInfo.checks_state",
         "PRInfo.reviews",
         "PRInfo.checks",
         "PRInfo.render",
@@ -2458,6 +2465,7 @@
         "image_tag",
         "checkout_tag",
         "state_volume_name",
+        "environment_directory",
         "superseded_volume_name",
         "superseded_volume_notice",
         "existing_volumes",
@@ -2523,7 +2531,14 @@
         "build_image.record",
         "fleet_notice",
         "pruning_notice",
-        "contained_argv"
+        "held_environments",
+        "held_environments.prepared",
+        "contained_argv",
+        "engine_absence",
+        "wrapper_script",
+        "written_wrapper",
+        "worker_cli",
+        "worker_wrapper_path"
       ]
     },
     {
@@ -3072,6 +3087,12 @@
     {
       "module": "lup.devtools.harness.launch",
       "declares": [
+        "LaunchSandbox",
+        "LaunchSandbox.OUTER",
+        "LaunchSandbox.INNER",
+        "LaunchSandbox.NONE",
+        "LaunchSandbox.contained",
+        "declared_mounts",
         "LaunchCheckpoint",
         "LaunchCheckpoint.__call__",
         "relocation_hint",
@@ -3283,6 +3304,7 @@
         "run_resolve.execute",
         "run_resolve.execute.codex_policy_environment",
         "run_resolve.execute.isolated_claude_environment",
+        "run_resolve.execute.actor_cli",
         "run_resolve.execute.toolchain_writable_paths",
         "run_resolve.execute.worker_factory",
         "run_resolve.execute.worker_factory.relay",
@@ -3560,6 +3582,8 @@
         "RosterEntry.spec",
         "RosterEntry.build",
         "RosterEntry.wired",
+        "conversation_app",
+        "dashboard_app",
         "LIBRARY_ROSTER",
         "LIBRARY_SPECS"
       ]
@@ -3942,6 +3966,7 @@
         "repository_slug",
         "repository_arguments",
         "decode_stderr",
+        "attributed_stderr",
         "git_admin_dirs",
         "config_lock_diagnosis",
         "clear_stale_config_locks",
@@ -4090,7 +4115,8 @@
         "LazyCommand.__getattr__",
         "LazyCommand.out",
         "LazyCommand.lines",
-        "git"
+        "git",
+        "findmnt"
       ]
     },
     {
@@ -4238,9 +4264,15 @@
         "READERS",
         "WRITERS",
         "TYPE_FLAGS",
+        "TMUX_BUFFER_VERBS",
+        "TMUX_VALUE_FLAGS",
         "ask",
         "wanted_type",
         "writing",
+        "tmux_operand",
+        "tmux_operand.operands",
+        "tmux_text",
+        "tmux",
         "main"
       ]
     },
@@ -5068,6 +5100,8 @@
         "reported_version",
         "reported_server",
         "EngineFlavor",
+        "SessionStreams",
+        "stream_arguments",
         "flavor_of",
         "ContainerClient",
         "ContainerClient.binary",
@@ -5107,6 +5141,7 @@
         "Image.run_arguments",
         "Image.sealed",
         "Image.ide_bridge",
+        "Image.environment_mounts",
         "Image.session_arguments",
         "Image.seed_configuration"
       ]
@@ -5358,6 +5393,7 @@
         "ResolveSpec.worker_skill",
         "ResolveSpec.review_skill",
         "ResolveSpec.merge_skill",
+        "ResolveSpec.contain_actors",
         "Plugin",
         "Plugin.id",
         "Plugin.name",
@@ -5583,6 +5619,8 @@
         "Package.manager",
         "Package.version",
         "Package.command",
+        "Package.digest",
+        "Package.verified",
         "Package.requested",
         "Package.a_bare_name_is_a_distribution_package",
         "Package.a_script_carries_the_line_that_runs_it",
@@ -7045,6 +7083,7 @@
         "committed_text",
         "patch_write_targets",
         "tracked_write_targets",
+        "repository_worktrees",
         "unleased_write_targets",
         "empty_directory_targets",
         "directory_write_targets",
@@ -7568,6 +7607,7 @@
         "WriteFacts.path_roles",
         "WriteFacts.path_rules",
         "WriteFacts.contained",
+        "WriteFacts.worktrees",
         "WriteAnswer",
         "WriteAnswer.effect",
         "WriteAnswer.scope",
@@ -7581,6 +7621,7 @@
         "Subcommand.word",
         "Subcommand.remainder",
         "redirected_verb_only_reads",
+        "redirect_stays_in_this_repository",
         "split_subcommand",
         "declares_command",
         "decide_command_rows",
@@ -8299,6 +8340,7 @@
         "ShellContext.recoverable_targets",
         "ShellContext.directory_targets",
         "ShellContext.empty_directories",
+        "ShellContext.repository_worktrees",
         "ShellContext.recoverable_target_limit",
         "ShellContext.runner_targets",
         "ShellContext.target_tables",
@@ -9153,6 +9195,7 @@
         "ClaudeSessionConfig.max_buffer_size",
         "ClaudeSessionConfig.stderr_tail_lines",
         "ClaudeSessionConfig.setting_sources",
+        "ClaudeSessionConfig.cli_path",
         "ClaudeSessionConfig.extra_args",
         "SubmissionBindingSource",
         "attach_cli_stderr",
@@ -11644,6 +11687,21 @@
       ]
     },
     {
+      "module": "lup.sandbox.observed",
+      "declares": [
+        "refuses_writes",
+        "ObservedMount",
+        "ObservedMount.target",
+        "ObservedMount.fsroot",
+        "ObservedMount.declared",
+        "ObservedTable",
+        "ObservedTable.filesystems",
+        "parsed",
+        "observed_topology",
+        "leased_read_only"
+      ]
+    },
+    {
       "module": "lup.sandbox.process",
       "declares": [
         "decode_output",
@@ -11673,6 +11731,7 @@
         "repository_layout",
         "sibling_worktrees",
         "lease_for",
+        "worker_lease",
         "in_repository",
         "demoted",
         "accessible_lease",
@@ -13207,7 +13266,17 @@
         "rename_match",
         "rename_pattern_in_file",
         "rename_pattern_in_file.replace_match",
+        "SpeltPath",
+        "SpeltPath.spelling",
+        "SpeltPath.configures",
+        "SpeltPath.renamed",
+        "Replacement",
+        "Replacement.before",
+        "Replacement.after",
+        "Replacement.reported",
+        "DEFAULT_SPELT_PATHS",
         "rename_in_pyproject",
+        "rename_in_pyproject.rewritten",
         "clear_scaffold_flag",
         "clear_scaffold_flag.drop_with_preamble",
         "rename_cli_app_name",

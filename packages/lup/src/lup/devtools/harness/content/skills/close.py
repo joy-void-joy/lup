@@ -45,7 +45,11 @@ If no PR is found, check if the user passed a PR number as an argument. If still
             models.TextPart(
                 text=r"""`.
 
-**If all reviews are approved (or no reviews but checks pass):**
+### 3b. Read where the checks stand
+
+`checks_state` answers `passing`, `failing`, or `running`, and the third is not the first. **If it is `running`, stop and say so** — the checks have not finished, so nothing yet says whether they pass, and a merge decided here is decided on an answer the forge has not given. Name the checks whose `status` is not `COMPLETED` and let the user re-run once they settle. **If it is `failing`, stop** and report the failing checks, the same as a review requesting changes.
+
+**If all reviews are approved (or there are none) and `checks_state` is `passing`:**
 
 1. Show the PR summary
 2. """

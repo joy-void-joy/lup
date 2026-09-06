@@ -61,6 +61,32 @@ class MergeMethod(StrEnum):
     rebase = "rebase"
 
 
+class ChecksState(StrEnum):
+    """Where a PR's checks stand, in the three answers they can give.
+
+    A check that has not finished is neither passing nor failing, and two
+    names force it under one of them: filtering to the completed checks and
+    asking ``all()`` answers "passing" for a PR whose only check is still
+    running, because nothing is left to disagree. That is how a run that
+    concluded as a failure was presented as the one clean branch of three.
+    The third name is what lets a reader wait rather than decide.
+    """
+
+    passing = "passing"
+    failing = "failing"
+    running = "running"
+
+    def marker(self) -> str:
+        """The character this state prints beside a check's name."""
+        match self:
+            case ChecksState.passing:
+                return "✓"
+            case ChecksState.failing:
+                return "✗"
+            case ChecksState.running:
+                return "…"
+
+
 def current_branch() -> str:
     return git.out("branch", "--show-current")
 
@@ -75,6 +101,47 @@ class CheckInfo(BaseModel):
     name: str
     status: str
     conclusion: str
+
+
+def check_state(
+    check: CheckInfo,
+    # Which conclusions a finished check may report without being a failure
+    # is a judgement about the forge's vocabulary, so a project reading it
+    # differently passes its own rather than editing this.
+    passing: tuple[str, ...] = ("SUCCESS", "NEUTRAL", "SKIPPED"),
+) -> ChecksState:
+    """Where one check stands, reading its status before its conclusion.
+
+    A check reports a conclusion only once it has one, so an unfinished
+    check's empty conclusion is not a verdict to compare — asking anyway
+    reads "not a success" off a run that has not said anything yet.
+    """
+    if check.status.upper() != "COMPLETED":
+        return ChecksState.running
+    return (
+        ChecksState.passing
+        if check.conclusion.upper() in passing
+        else ChecksState.failing
+    )
+
+
+def rollup_state(checks: list[CheckInfo]) -> ChecksState:
+    """The one answer a PR's checks give together, worst first.
+
+    A check that concluded as a failure settles the run whatever else is
+    still going; short of one, anything unfinished holds the answer open.
+    Passing is what is left — every check finished, none of them failing —
+    which is also what an empty list says, having nothing to wait for.
+    """
+    states = [check_state(check) for check in checks]
+    return next(
+        (
+            state
+            for state in (ChecksState.failing, ChecksState.running)
+            if state in states
+        ),
+        ChecksState.passing,
+    )
 
 
 class GhAuthor(BaseModel):
@@ -126,7 +193,7 @@ class PRInfo(BaseModel):
     url: str
     review_decision: str
     mergeable: str
-    checks_passing: bool
+    checks_state: ChecksState
     reviews: list[ReviewInfo]
     checks: list[CheckInfo]
 
@@ -144,19 +211,9 @@ class PRInfo(BaseModel):
                 typer.echo(f"    {r.author:<{author_width}} {r.state}")
 
         if self.checks:
-            typer.echo(f"\n  Checks ({len(self.checks)}):")
-            passed = sum(
-                1
-                for c in self.checks
-                if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
-            )
-            typer.echo(f"    {passed}/{len(self.checks)} passing")
+            typer.echo(f"\n  Checks ({len(self.checks)}): {self.checks_state}")
             for c in self.checks:
-                marker = (
-                    "✓"
-                    if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
-                    else "✗"
-                )
+                marker = check_state(c).marker()
                 typer.echo(f"    {marker} {c.name}: {c.conclusion or c.status}")
 
 
@@ -346,23 +403,13 @@ def status(
         for c in detail.checks
     ]
 
-    checks_passing = (
-        all(
-            c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
-            for c in checks
-            if c.status.upper() == "COMPLETED"
-        )
-        if checks
-        else True
-    )
-
     pr_info = PRInfo(
         number=pr_number,
         title=pr_data.title,
         url=pr_data.url,
         review_decision=detail.review_decision,
         mergeable=detail.mergeable,
-        checks_passing=checks_passing,
+        checks_state=rollup_state(checks),
         reviews=reviews,
         checks=checks,
     )
