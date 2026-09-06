@@ -403,7 +403,7 @@ def fetch_pr_status(branch_names: list[str]) -> dict[str, PRStatus]:
                 "--limit",
                 "200",
                 "--json",
-                "number,title,headRefName,state,mergedAt",
+                "number,title,headRefName,state,mergedAt,url",
             )
         )
     except sh.ErrorReturnCode as e:
