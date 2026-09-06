@@ -25,6 +25,7 @@ import lup.devtools.dev.git_guards as git_guards_mod
 import lup.devtools.dev.guidance as guidance
 import lup.devtools.dev.issues as issues_mod
 import lup.devtools.dev.traces as traces
+import lup.devtools.dev.history as history
 import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.environment as environment_mod
@@ -1031,6 +1032,45 @@ def create_dev_app(
         for item in found:
             typer.echo(f"{item.taken_at:%Y-%m-%d %H:%M}  {item.reason}")
             typer.echo(f"    {item.restore_command()}")
+
+    @app.command("history")
+    def history_cmd(
+        text: Annotated[str, typer.Argument(help="The symbol or literal to trace")],
+        regex: Annotated[
+            bool,
+            typer.Option("--regex", help="Read the text as a regular expression"),
+        ] = False,
+        path: Annotated[
+            list[Path] | None,
+            typer.Option("--path", help="Limit the search to these paths"),
+        ] = None,
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """Trace a symbol through every branch, past this tree's own snapshots.
+
+        `git log --all -S <symbol>` cannot answer this in a guarded checkout.
+        The permission dispatcher snapshots the tree before every command
+        under `refs/lup/undo`, each snapshot a parentless commit whose whole
+        tree reads as an addition -- so the pickaxe matches every symbol the
+        checkout holds, once per snapshot, and the first match is the one
+        taken in front of the search. Those refs are left out of the
+        traversal here and nothing they recorded is disturbed.
+
+        Examples::
+
+            $ uv run lup-devtools dev history undo_retention_count
+            $ uv run lup-devtools dev history 'def parse' --path packages/lup
+            $ uv run lup-devtools dev history 'Hook(Set|Rule)' --regex
+        """
+        found = history.commits_matching(project_root(), text, regex, path)
+        if as_json:
+            output_json([hit.model_dump(mode="json") for hit in found])
+            return
+        for hit in found:
+            typer.echo(hit.line())
+        typer.echo(
+            f"{len(found)} commit(s), snapshots under {history.SNAPSHOT_REFS} aside"
+        )
 
     @app.command("issues")
     def issues_cmd(

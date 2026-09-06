@@ -49,6 +49,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev report-friction` | File or correct workflow friction in this checkout&#x27;s repository. |
 | `dev upstream` | Print a measured upstream defect, or list the ones declared. |
 | `dev undo` | List the recoverable snapshots of this tree, or take and expire them. |
+| `dev history` | Trace a symbol through every branch, past this tree&#x27;s own snapshots. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
