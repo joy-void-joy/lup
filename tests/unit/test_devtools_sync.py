@@ -329,3 +329,49 @@ def test_a_clone_at_the_old_location_is_used_where_it_stands(
     assert found.checkout == legacy
     assert found.tip == "refs/remotes/origin/main"
     assert not (cache / "up.git").exists()
+
+
+def test_a_mount_registration_spells_the_reopening_launch(
+    registry_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The session that proposed the mount is told which launch to repeat.
+
+    Mounts are built at launch, so a registration's effect waits for one —
+    and the launch that opened this session recorded its own invocation
+    precisely so this moment names the reopening instead of sending whoever
+    reads it to reconstruct profile and flags from memory.
+    """
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    ledger = registry_root / ".lup" / "preflight" / "opened.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(json.dumps({"launch": ["harness", "claude", "-p", "dev"]}))
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "opened")
+
+    sync.setup_project("corpus", str(corpus), mount="ro")
+
+    assert (
+        "Reopen this conversation to mount it: "
+        "uv run lup-devtools harness claude -p dev --continue"
+    ) in capsys.readouterr().out
+
+
+def test_a_session_with_no_recorded_launch_gets_no_reopening(
+    registry_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A hint reconstructed from nothing would name a launch nobody took."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+
+    sync.setup_project("corpus", str(corpus), mount="ro")
+
+    out = capsys.readouterr().out
+    assert "takes effect at the next launch" in out
+    assert "Reopen this conversation" not in out
