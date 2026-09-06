@@ -211,14 +211,24 @@ resolution — and during a merge the bias is toward inclusion: audit the result
 against both parents and confirm every removed function, parameter, or command
 was removed deliberately rather than lost to a conflict side.
 
-Generated artifacts are regenerated, never hand-merged. A digest manifest
-(`.lup-ownership.json`) conflicts on every parallel branch because each field
-is derived, so `.gitattributes` gives it a driver that keeps one side, and
-`lup-devtools dev merge-driver` registers that driver in a clone that has not
-run `worktree create`. Reconciling such a file hunk by hunk produces a proof
-matching neither tree: take either side, run
+Generated artifacts are regenerated, never hand-merged. Every file in a
+generated tree conflicts on parallel branches because every line is derived,
+so `.gitattributes` declares those trees under a driver that keeps one side,
+and `lup-devtools dev merge-driver` registers that driver in a clone that has
+not run `worktree create`. Reconciling such a file hunk by hunk produces an
+artifact matching neither tree: take either side, run
 `lup-devtools harness generate all`, and let `harness check all` confirm it
 settled.
+
+That declaration is a lockout guard as much as a convenience. One file in
+those trees is executed rather than read — the compiled hook dispatcher — so
+conflict markers in it leave a script that will not parse, and the permission
+boundary answers every shell command and every edit by refusing, `git merge
+--abort` included. Reaching that state, the refusal says which build product
+broke and what rebuilds it, and the rebuild has to be run from outside the
+session. The driver is per-clone git config, so it covers a merge performed in
+a clone that registered it and nothing else: a merge run on the forge's own
+server reads no config and lands the conflict anyway.
 
 ## What has to be green
 
