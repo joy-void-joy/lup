@@ -126,6 +126,25 @@ class ClaudeSpellings(NativeSpellings):
         be instructing it to do what it cannot -- so the fallback that
         reaches the same branch from where it stands is named second.
 
+        That fallback carries its condition, because it is the one route a
+        lease can take away. A contained session mounts every worktree but
+        its own read-only (:mod:`lup.sandbox.rail`), so addressing a
+        *pre-existing* sibling by absolute path reaches a filesystem refusing
+        every write -- while one cut after that session started is outside
+        the lease and writable, which is why the same sentence is right where
+        a worktree was just made and wrong where one was merely found. Stated
+        flatly it read as an equal alternative to launching, and an agent
+        following it into a leased sibling spends its next hour discovering
+        the mount.
+
+        The condition is four words here and a paragraph in
+        `docs/contributing.md`, which this instruction's paragraph already
+        points at. Not a stylistic split: the scaffold ceiling this renders
+        into leaves an adopting domain its own room, and the guidance sat
+        within twenty-one bytes of that ceiling -- so the words that earn a
+        place here are the ones that stop a wrong move, and the ones that
+        explain it belong where there is room to explain.
+
         The third is named as refused rather than merely discouraged, because
         that is what it now is: the tool table denies it, carrying the cost as
         its reason, and a deliberate use escalates. Prose that only called it
@@ -134,8 +153,8 @@ class ClaudeSpellings(NativeSpellings):
         """
         return Instruction(
             f"work in <{path}> by whichever of these you can reach: launch a "
-            f"session rooted there; or, already running, keep working where "
-            f"you are and address files under <{path}> by absolute path. "
+            f"session rooted there; or, already running, address files under "
+            f"<{path}> by absolute path, where that tree is writable. "
             f"`EnterWorktree(path=<{path}>)` reaches any worktree from "
             "anywhere and is refused for it: entering one arms worktree "
             "isolation, whose refusals cover ordinary read-only commands for "
