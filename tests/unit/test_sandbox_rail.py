@@ -14,6 +14,7 @@ from lup.execution.shell import git
 from lup.sandbox.rail import (
     AccessibleRoot,
     Lease,
+    demoted,
     fleet_lease,
     hold_pruning_across,
     in_repository,
@@ -21,6 +22,7 @@ from lup.sandbox.rail import (
     repository_layout,
     same_path,
     sibling_worktrees,
+    worker_lease,
 )
 
 
@@ -505,3 +507,69 @@ def test_the_prune_guard_is_armed_per_repository_and_says_where_it_was_not(
         git.out("-C", str(other_repository), "config", "gc.worktreePruneExpire").strip()
         == "never"
     )
+
+
+def test_a_worker_lease_makes_only_its_own_worktree_writable(
+    repository: Path,
+) -> None:
+    """The half the session table deliberately stopped answering.
+
+    Where `lease_for` hands a session every checkout of its repository, this
+    confines one actor to the tree it was given -- which is the population the
+    launch-time table missed, since every worktree a run leases is cut after
+    its operator's container started.
+    """
+    leased = worker_lease(repository / "mine")
+    assert repository / "mine" in leased.writable
+    assert repository / "other" in leased.read_only
+    assert repository / "other" not in leased.writable
+
+
+def test_a_worker_lease_still_mounts_the_siblings_it_withholds(
+    repository: Path,
+) -> None:
+    """Read-only, not absent. `git gc` prunes worktrees whose directory is gone."""
+    leased = worker_lease(repository / "mine")
+    assert leased.covers(repository / "other")
+
+
+def test_a_worker_lease_holds_each_sibling_entry_read_only_inside_a_writable_share(
+    repository: Path,
+) -> None:
+    """The nesting the arrangement rests on, and the reason it is per entry.
+
+    The shared directory stays writable so `config` can be written and a
+    worktree cut at all; each sibling's own administrative entry is punched
+    read-only back over it so nothing in here can remove one. The worktree's
+    own entry is left writable, since that is the one it is entitled to move.
+    """
+    layout = repository_layout(repository / "mine")
+    leased = worker_lease(repository / "mine")
+    assert layout.common in leased.writable
+    assert layout.common / "worktrees" / "other" in leased.read_only
+    assert layout.private in leased.writable
+    assert layout.private not in leased.read_only
+
+
+def test_a_reviewer_lease_is_the_worker_lease_with_nothing_writable(
+    repository: Path,
+) -> None:
+    """Built from the same call rather than a table of its own.
+
+    Two tables could come to disagree about which checkouts exist; demoting
+    one cannot, which is why a read-only actor is spelled this way.
+    """
+    working = worker_lease(repository / "mine")
+    reviewing = demoted(working)
+    assert reviewing.writable == {}
+    assert repository / "mine" in reviewing.read_only
+    assert repository / "other" in reviewing.read_only
+
+
+def test_a_worker_lease_withholds_a_declared_human_owned_path(
+    repository: Path,
+) -> None:
+    owned = repository / "mine" / "CLAUDE.md"
+    owned.write_text("owned\n", encoding="utf-8")
+    leased = worker_lease(repository / "mine", [Path("CLAUDE.md")])
+    assert owned in leased.read_only

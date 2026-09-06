@@ -27,7 +27,11 @@ from lup.policy.enforcement import (
     SandboxPosture,
     create_policy_hooks,
 )
-from lup.tools.mcp import create_mcp_server, serve_stdio, server_tool_names
+from lup.tools.mcp import (
+    RawStdioServerConfig,
+    create_mcp_server,
+    serve_stdio,
+)
 from lup.policy.grants import LeaseGrants, allowance_grants_environment
 from lup.policy.identity import agent_identity_environment
 from lup.harness.environment import non_interactive_environment
@@ -95,7 +99,15 @@ from lup.devtools.dev.worktree import (
     copy_gitignored_extras,
     sync_dependencies,
 )
+from lup.devtools.harness.contained import (
+    engine_absence,
+    worker_cli,
+    worker_wrapper_path,
+)
 from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.devtools.sync import accessible_roots
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.codex.login import CODEX_LOGIN
 from lup.devtools.supervisor.page import SUPERVISOR_PORT
 from lup.devtools.utils import refuse_blocked_config_writes
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
@@ -1632,6 +1644,63 @@ def run_resolve(
         if fault is not None:
             raise typer.BadParameter(fault)
 
+        # Once, before anything is leased, and for the same reason the config
+        # home is read here: a host that cannot give its actors a boundary is a
+        # fact about the machine rather than about any concern, and discovering
+        # it per worker would turn one environmental refusal into an exception
+        # group of concern failures after the run had already taken its leases.
+        contained_actors = harness.resolver.contain_actors
+        if contained_actors:
+            absence = engine_absence()
+            if absence is not None:
+                raise typer.BadParameter(absence)
+
+        # The program this run's actors are started as, named here because
+        # this is where the adapter is already chosen. A CLI's own name is its
+        # provider's vocabulary, so it is spelled at the composition root that
+        # picked the provider rather than in the neutral container builder,
+        # which would then be a second place to keep agreeing with this one.
+        actor_program = "claude" if adapter == "claude" else "codex"
+
+        def actor_cli(
+            workspace: Path,
+            concern_id: str,
+            actor: str,
+            environment: EnvVars,
+            read_only: bool = False,
+        ) -> Path | None:
+            """The program one actor is started as, so it runs in its own container.
+
+            ``None`` when the project declared its actors uncontained, which is
+            what both runtimes take to mean "find the CLI the way you always
+            do" — so the unconfined path stays the one that was there rather
+            than becoming a second arrangement this has to keep working.
+
+            The configuration home is read from the actor's own environment
+            rather than the run's. Each workspace already gets a derived home so
+            that no two actors write one document at once, and a container bound
+            to the run's home instead would put every actor back on the shared
+            file that race needs.
+            """
+            if not contained_actors:
+                return None
+            login = CLAUDE_LOGIN if adapter == "claude" else CODEX_LOGIN
+            config_home = selected_config_home(environment).directory
+            credential = login.credentials_path(config_home)
+            return worker_cli(
+                worker_wrapper_path(state_root / resolved_run_id, concern_id, actor),
+                harness.image,
+                harness.requirements,
+                workspace,
+                plugin.hooks.human_owned_files if plugin.hooks is not None else [],
+                config_home,
+                credential if credential.exists() else None,
+                login,
+                program=actor_program,
+                read_only=read_only,
+                accessible=accessible_roots(),
+            )
+
         def toolchain_writable_paths() -> list[Path]:
             """Absolute paths a sandboxed worker's toolchain must be able to write.
 
@@ -1738,7 +1807,9 @@ def run_resolve(
                 ),
             ]
             if adapter == "claude":
-                server = create_mcp_server("resolver", tools=actor_tools)
+                worker_environment_for = isolated_claude_environment(
+                    concern_environment, cwd
+                )
                 return create_claude(
                     ClaudeSessionConfig(
                         model=session_model,
@@ -1747,13 +1818,43 @@ def run_resolve(
                         add_dirs=[cwd, *toolchain_writable_paths()],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
                         sandbox=claude_worker_sandbox,
-                        environment=isolated_claude_environment(
-                            concern_environment, cwd
+                        environment=worker_environment_for,
+                        cli_path=actor_cli(
+                            cwd,
+                            context.concern_id,
+                            context.actor.kind,
+                            worker_environment_for,
                         ),
-                        tool_servers={"resolver": server},
+                        # Over stdio rather than in process, which is what
+                        # makes the boundary reachable at all: a CLI running
+                        # inside a container cannot see an object living in
+                        # this one. The transport is the one the Codex worker
+                        # beside it already uses, so both runtimes answer the
+                        # question the same way instead of one of them holding
+                        # a server only an uncontained worker could reach.
+                        tool_servers={
+                            "resolver": RawStdioServerConfig(
+                                command="uv",
+                                args=[
+                                    "run",
+                                    "lup-devtools",
+                                    "harness",
+                                    "serve-resolver-tools",
+                                ],
+                                env={
+                                    **session_environment,
+                                    **tool_context.to_env(),
+                                },
+                            )
+                        },
+                        # Named from the tools rather than from the server,
+                        # which is the half a stdio transport cannot answer:
+                        # `server_tool_names` reports nothing for an external
+                        # config because introspecting one means connecting to
+                        # it, so reading the allowlist from there would empty
+                        # it in silence and deny this worker its own questions.
                         allowed_tools=[
-                            f"mcp__resolver__{name}"
-                            for name in server_tool_names(server)
+                            f"mcp__resolver__{tool.name}" for tool in actor_tools
                         ],
                         hooks=merge_hooks(
                             merge_hooks(
@@ -1781,6 +1882,18 @@ def run_resolve(
                     ),
                     cwd=cwd,
                     sandbox="workspace-write",
+                    # Falls back to the program's own name, which is what this
+                    # field already defaults to. Claude's seam takes ``None``
+                    # for the same case instead, because its SDK searches for a
+                    # CLI that is often not on PATH and a name passed there
+                    # would skip the search rather than stand in for it.
+                    executable=actor_cli(
+                        cwd,
+                        context.concern_id,
+                        context.actor.kind,
+                        concern_environment,
+                    )
+                    or Path(actor_program),
                     # An asking policy is what makes the app-server put this
                     # worker's commands to the hooks below. Left at "never" a
                     # Codex worker ran with the OS sandbox as its only floor,
@@ -1820,7 +1933,15 @@ def run_resolve(
             # already settled elsewhere, a base that moved under the tree it
             # is judging — was the one nobody could tell.
             cwd = context.root
+            # Named for the tree it opens rather than for a concern, which is
+            # the one identifier a reviewer's context carries. The lease
+            # directory is already named for what it holds, so this separates
+            # two reviewers exactly where their leases differ.
+            reviewing = cwd.name
             if adapter == "claude":
+                reviewer_environment_for = isolated_claude_environment(
+                    reviewer_environment, cwd
+                )
                 return create_claude(
                     ClaudeSessionConfig(
                         model=session_model,
@@ -1830,8 +1951,17 @@ def run_resolve(
                         cwd=cwd,
                         add_dirs=[cwd],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
-                        environment=isolated_claude_environment(
-                            reviewer_environment, cwd
+                        environment=reviewer_environment_for,
+                        # A reviewer is read-only by design, so its lease is
+                        # the worker's with nothing writable rather than a
+                        # table of its own: built from one call, the two cannot
+                        # come to disagree about which checkouts exist.
+                        cli_path=actor_cli(
+                            cwd,
+                            reviewing,
+                            "reviewer",
+                            reviewer_environment_for,
+                            read_only=True,
                         ),
                         hooks=merge_hooks(
                             create_permission_hooks([], [cwd]), context.hooks
@@ -1850,6 +1980,14 @@ def run_resolve(
                     ),
                     cwd=cwd,
                     sandbox="read-only",
+                    executable=actor_cli(
+                        cwd,
+                        reviewing,
+                        "reviewer",
+                        reviewer_environment,
+                        read_only=True,
+                    )
+                    or Path(actor_program),
                     environment=reviewer_environment,
                 )
             )

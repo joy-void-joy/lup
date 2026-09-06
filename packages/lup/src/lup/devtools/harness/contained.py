@@ -21,6 +21,8 @@ cannot be gets a refusal naming what was missing, and the operator decides.
 import hashlib
 import json
 import os
+import shlex
+import stat
 import time
 from collections import deque
 from contextlib import nullcontext
@@ -37,7 +39,12 @@ from rich.text import Text
 from lup.devtools.harness.preflight import LaunchSentinels
 from lup.harness.credential import committer, fleet_rewrites
 from lup.harness.egress import PROXY_LABEL, SessionEgress
-from lup.harness.image import ContainerEngine, Image, detected_client
+from lup.harness.image import (
+    ContainerEngine,
+    Image,
+    SessionStreams,
+    detected_client,
+)
 from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import Manifest
 from lup.providers.login import ProviderLogin
@@ -45,9 +52,11 @@ from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.sandbox.rail import (
     AccessibleRoot,
     Lease,
+    demoted,
     fleet_lease,
     hold_pruning_across,
     repository_layout,
+    worker_lease,
 )
 
 
@@ -1575,11 +1584,12 @@ def contained_argv(
     credential: Path | None,
     login: ProviderLogin,
     engine: ContainerEngine | None = None,
-    interactive: bool = True,
+    streams: SessionStreams = "terminal",
     banner: Banner | None = None,
     sentinels: LaunchSentinels = LaunchSentinels(),
     inherited_environment: list[str] | None = None,
     accessible: list[AccessibleRoot] = [],
+    lease: Lease | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1598,6 +1608,15 @@ def contained_argv(
     caller with nothing to add passes nothing and each line is printed as it
     is produced, which is what a probe wants: its notices interleave with the
     build they describe rather than arriving after it.
+
+    ``lease`` is the mount table this container runs under, defaulting to the
+    one a session gets over its own repository. A worker passes
+    :func:`~lup.sandbox.rail.worker_lease` instead and reaches everything else
+    here unchanged -- the same image, egress, credential, identity and
+    same-path mounting -- because the only thing that differs between an
+    operator's container and a worker's is which checkouts it may write. A
+    second builder for that one difference would be a second declaration of
+    everything it has in common, free to drift from this one.
     """
     said = banner if banner is not None else Banner()
     if engine is not None:
@@ -1633,7 +1652,7 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
-    lease = fleet_lease(root, human_owned, accessible)
+    lease = lease if lease is not None else fleet_lease(root, human_owned, accessible)
     said.add(fleet_notice(accessible))
     said.add(
         pruning_notice(hold_pruning_across([root, *(item.path for item in accessible)]))
@@ -1701,9 +1720,165 @@ def contained_argv(
         browser_directory=handing,
         clipboard_directory=copying,
         terminal=terminal.environment,
-        interactive=interactive,
+        streams=streams,
         proxy_address=reached_at,
         boundary=sentinels.within(),
         inherited_environment=inherited_environment,
         environments=held_environments(root, accessible, image.project_environment),
     )
+
+
+def engine_absence() -> str | None:
+    """Why this host cannot open a worker container, or ``None`` if it can.
+
+    Asked of the client rather than of whether this session is itself
+    contained, because the absence is what actually blocks the launch and it
+    has more than one cause: a session inside a container has no engine to
+    reach, and neither does a host that never installed one. Both need the
+    same thing done about them, and naming the engine says so without this
+    having to work out which side of a boundary it is standing on.
+
+    Mounting the host's engine socket into a contained session is the obvious
+    way to make this answer yes, and it is why the question is asked at all: a
+    confined session holding that socket can start a sibling with the whole
+    host bound into it, which is a total escape and defeats the containment
+    that asked for the worker boundary in the first place. Degrading silently
+    to unconfined workers is the other way, and it is worse -- the run looks
+    identical and the boundary is simply not there.
+    """
+    if detected_client() is not None:
+        return None
+    return (
+        "No container client answered, so this run cannot give its workers "
+        "their own boundary. A session inside a container has no engine to "
+        "reach: start the run from an uncontained session (`harness claude "
+        "--unsandboxed`, or a plain shell) so each worker gets a container of "
+        "its own. Mounting the engine's socket into a contained session would "
+        "let it start a sibling with the whole host bound in, which is why "
+        "that is not the answer here."
+    )
+
+
+def wrapper_script(argv: list[str], program: str) -> str:
+    """The shell that execs one worker's CLI inside its container.
+
+    ``exec`` rather than a call, so the container replaces this shell instead
+    of running under it: what the runtime holds is then the engine's own
+    process, and a signal sent to the worker reaches the thing actually running
+    rather than a parent that would have to forward it.
+
+    ``"$@"`` is the one thing here that must not be quoted as a unit -- the
+    runtime appends its own arguments, and a wrapper folding them into a single
+    word would hand the CLI one long argument instead of the flags it was
+    given. Everything this writes itself goes through :func:`shlex.quote`,
+    which is what keeps a path with a space in it from becoming two arguments.
+    """
+    quoted = " ".join(shlex.quote(argument) for argument in [*argv, program])
+    return (
+        "#!/bin/sh\n"
+        "# Generated by lup: opens one resolver actor inside its own container.\n"
+        f'exec {quoted} "$@"\n'
+    )
+
+
+def written_wrapper(path: Path, argv: list[str], program: str) -> Path:
+    """Write one actor's wrapper where its runtime can start it, and mark it runnable.
+
+    Executable because that is what being named as a program means: the runtime
+    spawns this path directly rather than handing it to a shell, so a file
+    without the bit set fails as a permission error naming a path, which reads
+    as a broken install rather than as a file written a moment ago.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(wrapper_script(argv, program))
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def worker_cli(
+    wrapper: Path,
+    image: Image,
+    manifest: Manifest,
+    lease_root: Path,
+    human_owned: list[Path],
+    host_config_home: Path | None,
+    credential: Path | None,
+    login: ProviderLogin,
+    program: str,
+    read_only: bool = False,
+    sentinels: LaunchSentinels = LaunchSentinels(),
+    accessible: list[AccessibleRoot] = [],
+) -> Path:
+    """The program to start one resolver actor as, so it runs in its own container.
+
+    :mod:`lup.sandbox.rail` argues that confinement has to be a mount fact
+    rather than a judgement, because deciding from a command's text where it
+    will act is undecidable and ``cd ../other && git commit`` walks past any
+    policy that tries. That argument is right and was being applied to the
+    wrong population: a table computed when a *session* starts covers the
+    checkouts existing at that instant, which is every branch an operator is
+    landing and no worktree a run leases, since those are cut afterwards. The
+    concurrency the rail was built for is between actors, and this is where
+    their boundary is taken.
+
+    The seam is the program, on both runtimes. Claude's SDK spawns whatever
+    ``cli_path`` names and hands it the arguments it would have handed
+    ``claude``; Codex takes the same question as ``executable``. So an actor is
+    opened by pointing that field at the wrapper this writes, and neither
+    adapter learns anything about containers -- from where they stand a program
+    was named and started.
+
+    ``program`` is required rather than defaulted because a CLI's own name is
+    that provider's vocabulary, and this builder is neutral between them. The
+    caller naming it is already the composition root that picked the adapter,
+    so the name is spelled where the runtime is chosen instead of a second
+    place that would have to be kept agreeing with it.
+
+    ``lease_root`` is both the tree this actor was given and the checkout its
+    container opens on, which is not two decisions that happen to agree: every
+    path is mounted at its own absolute location because a linked worktree's
+    ``.git`` is a file holding an absolute ``gitdir:`` pointer, so the tree an
+    actor works in is the only place its container can open it.
+
+    ``read_only`` is what a reviewer sets, and its lease is the worker's with
+    nothing writable rather than a table of its own -- built from the same
+    call, the two cannot come to hold different ideas of which checkouts exist.
+
+    Everything but the mount table is the session's: :func:`contained_argv`
+    resolves the image and its shared layers, the egress network, the
+    credential, the git identity and remote rewrites, and the same-path
+    mounting the rail depends on. The streams are fixed at ``piped`` rather
+    than offered, because an actor has no terminal and does not capture -- it
+    speaks a protocol over stdin, and either other state would leave its
+    runtime talking to a stream nothing reads.
+    """
+    lease = worker_lease(lease_root, human_owned)
+    return written_wrapper(
+        wrapper,
+        contained_argv(
+            image,
+            manifest,
+            lease_root,
+            human_owned,
+            host_config_home,
+            credential,
+            login,
+            streams="piped",
+            sentinels=sentinels,
+            accessible=accessible,
+            lease=demoted(lease) if read_only else lease,
+        ),
+        program,
+    )
+
+
+def worker_wrapper_path(run_dir: Path, concern_id: str, actor: str) -> Path:
+    """Where one actor's wrapper is written, named for the actor that runs it.
+
+    Under the run directory rather than inside the lease, because the lease is
+    a worktree the run deletes when it is done and the wrapper has to outlive
+    the turn that spawned it. Named for both the concern and the actor since
+    one concern opens more than one -- a worker and the reviewer that judges it
+    -- whose leases differ in exactly the way a shared filename would hide.
+    """
+    return run_dir / "workers" / f"{concern_id}-{actor}.sh"

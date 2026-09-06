@@ -706,7 +706,7 @@ def report_inside_requirements(
         config_home,
         credential if credential.exists() else None,
         login,
-        interactive=False,
+        streams="captured",
         sentinels=sentinels,
         # The same mounts a session gets, for the reason this probe assembles
         # nothing of its own: a container built without the declared roots is

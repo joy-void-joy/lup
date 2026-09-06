@@ -8,7 +8,13 @@ the broken version too.
 
 from pathlib import Path
 
-from lup.harness.image import Docker, Image, Podman, detected_client
+from lup.harness.image import (
+    Docker,
+    Image,
+    Podman,
+    detected_client,
+    stream_arguments,
+)
 from lup.harness.requirements import Manifest, Package, Requirement, Run
 from lup.harness.requirements import LostCapability
 
@@ -514,3 +520,22 @@ def test_every_baked_variable_is_a_line_the_dockerfile_parser_accepts() -> None:
         value = pair.split("=", 1)[1]
         quoted = value.startswith('"') and value.endswith('"')
         assert quoted or not any(character.isspace() for character in value), pair
+
+
+def test_a_terminal_session_takes_both_flags() -> None:
+    assert stream_arguments("terminal") == ["-it"]
+
+
+def test_a_piped_session_is_given_stdin_without_a_terminal() -> None:
+    """The state a bool had no room for, and the one a worker needs.
+
+    A worker speaks framed JSON over its stdin, so it has to be given one --
+    which `captured` does not do -- and must not be handed a terminal
+    discipline in front of that stream, which `terminal` would.
+    """
+    assert stream_arguments("piped") == ["-i"]
+
+
+def test_a_captured_session_takes_neither() -> None:
+    """`-it` against a pipe fails on the terminal it was promised."""
+    assert stream_arguments("captured") == []
