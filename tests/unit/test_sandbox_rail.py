@@ -115,19 +115,20 @@ def test_a_lease_makes_its_own_worktree_writable(repository: Path) -> None:
     assert repository / "mine" in leased.writable
 
 
-def test_a_lease_mounts_siblings_read_only_rather_than_leaving_them_out(
+def test_a_lease_mounts_siblings_rather_than_leaving_them_out(
     repository: Path,
 ) -> None:
     """Omitting them is the trap: `git gc` prunes worktrees whose directory is gone.
 
-    A worker that could not see its siblings would find every one of their
+    A session that could not see its siblings would find every one of their
     directories absent and delete their administrative state from the shared
     repository as ordinary housekeeping, with no error anywhere. So they are
-    present, and unwritable.
+    present -- which is the guard, and mounting them at all is what satisfies
+    it, rather than the mode they are mounted in.
     """
     leased = lease_for(repository / "mine")
-    assert repository / "other" in leased.read_only
-    assert repository / "other" not in leased.writable
+    assert repository / "other" in leased.writable
+    assert repository / "other" not in leased.read_only
 
 
 def test_a_lease_does_not_mount_the_worktree_it_is_for_as_a_sibling(
@@ -137,23 +138,21 @@ def test_a_lease_does_not_mount_the_worktree_it_is_for_as_a_sibling(
     assert repository / "mine" not in leased.read_only
 
 
-def test_the_shared_directory_is_writable_with_only_sibling_entries_held_back(
+def test_the_shared_directory_is_writable_with_nothing_held_back_inside_it(
     repository: Path,
 ) -> None:
-    """`config` has to be writable to cut a worktree; a sibling's entry must not be.
+    """`config` has to be writable to cut a worktree, and every entry to remove one.
 
-    Three nested modes rather than two: the shared directory writable, each
-    sibling's administrative entry read-only inside it, and this worktree's
-    own entry writable alongside them. Which is what keeps every sibling's
-    entry present and unwritable while this worktree's own entry stays
-    writable.
+    One mode rather than three nested ones. A sibling's administrative entry
+    used to be punched read-only back over the shared directory, which kept
+    it present and unwritable -- and made `git worktree remove` impossible
+    from inside, since removing a worktree unlinks exactly that entry.
     """
     layout = repository_layout(repository / "mine")
     leased = lease_for(repository / "mine")
     assert layout.common in leased.writable
     assert layout.common not in leased.read_only
-    assert layout.common / "worktrees" / "other" in leased.read_only
-    assert layout.common / "worktrees" / "other" not in leased.writable
+    assert layout.common / "worktrees" / "other" not in leased.read_only
     assert layout.private in leased.writable
 
 
@@ -188,10 +187,11 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
         for found in [layout.common, *layout.common.rglob("*")]
         if read_only_here(leased, found)
     ]
-    # The sibling's administrative entry is the one this has to cover, and
-    # naming it here is what stops the set quietly emptying again.
-    assert layout.common / "worktrees" / "other" in withheld
-    assert layout.private not in withheld
+    # Nothing under the shared directory is withheld any more, and asserting
+    # that rather than deleting the line is the point: this is the contract
+    # the lease now states, so a path reappearing here is a change somebody
+    # has to mean rather than one that slips in.
+    assert withheld == []
     restored = {entry: entry.stat().st_mode for entry in withheld}
     try:
         for entry in withheld:
@@ -211,10 +211,7 @@ def test_a_new_worktree_can_be_cut_under_everything_the_lease_withholds(
     """Cutting a worktree is the workflow this repository mandates, run rather than named.
 
     `git worktree add` writes a whole administrative entry of its own beside
-    the siblings', so the directory holding them has to admit a new child
-    while every child already in it stays unwritable. Those two are one
-    permission on a directory and separate ones on its entries, which is why
-    the lease names the entries.
+    the siblings', so the directory holding them has to admit a new child.
 
     Modelled the way the commit test models it -- withhold write permission
     from exactly what the lease calls read-only, then run the real command --
@@ -229,7 +226,6 @@ def test_a_new_worktree_can_be_cut_under_everything_the_lease_withholds(
         for found in [layout.common, *layout.common.rglob("*")]
         if read_only_here(leased, found)
     ]
-    assert layout.common / "worktrees" / "other" in withheld
 
     restored = {entry: entry.stat().st_mode for entry in withheld}
     try:
@@ -250,6 +246,40 @@ def test_a_new_worktree_can_be_cut_under_everything_the_lease_withholds(
             entry.chmod(mode)
     assert (repository / "cut").is_dir()
     assert (layout.common / "worktrees" / "cut").is_dir()
+
+
+def test_a_sibling_worktree_can_be_removed_under_the_lease(
+    repository: Path,
+) -> None:
+    """The other half of the workflow, and the one the old arrangement refused.
+
+    `git worktree remove` deletes the checkout and unlinks its administrative
+    entry, so a lease holding either read-only refuses it -- and refuses it
+    with an errno about a filesystem, which reads as a broken disk rather
+    than as confinement. A sweep that lands every branch then cannot clear
+    any of them, which is where this was found.
+
+    Run rather than asserted about names, for the reason the two above are.
+    """
+    worktree = repository / "mine"
+    leased = lease_for(worktree)
+    layout = repository_layout(worktree)
+    withheld = [
+        found
+        for found in [layout.common, *layout.common.rglob("*"), repository / "other"]
+        if read_only_here(leased, found)
+    ]
+
+    restored = {entry: entry.stat().st_mode for entry in withheld}
+    try:
+        for entry in withheld:
+            entry.chmod(restored[entry] & ~0o222)
+        git("-C", str(worktree), "worktree", "remove", str(repository / "other"))
+    finally:
+        for entry, mode in restored.items():
+            entry.chmod(mode)
+    assert not (repository / "other").exists()
+    assert not (layout.common / "worktrees" / "other").exists()
 
 
 def test_a_plain_checkout_leases_its_own_git_directory(tmp_path: Path) -> None:
@@ -349,7 +379,7 @@ def test_a_declared_root_is_leased_with_the_repository_behind_it(
     assert side in leased.writable
     assert layout.common in leased.writable
     assert layout.private in leased.writable
-    assert other_repository in leased.read_only
+    assert other_repository in leased.writable
     assert repository / "mine" in leased.writable
 
 
@@ -371,7 +401,7 @@ def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
         for found in [layout.common, *layout.common.rglob("*"), other_repository]
         if read_only_here(leased, found)
     ]
-    assert other_repository in withheld
+    assert withheld == []
 
     restored = {entry: entry.stat().st_mode for entry in withheld}
     try:

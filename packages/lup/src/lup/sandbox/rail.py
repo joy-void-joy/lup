@@ -1,34 +1,49 @@
-"""Confining a worker to its own worktree, by mounting rather than by judging.
+"""The mounts one session gets over the repository it was opened on.
 
 Worktrees of one repository share an object store and a branch set, so from
 any of them `git -C ../other commit` writes to another's branch and
-`cp x ../other/src/` overwrites another's file. Nothing separates them. The
-guidance says to work in your own tree, and that holds because an agent reads
-and complies -- which is prose, not a rail.
+`cp x ../other/src/` overwrites another's file. Nothing separates them, and
+this table does not try to: it hands a session the repository it works in,
+every checkout of it writable.
 
-Every attempt to build the rail out of *judgement* runs into the same wall.
-The policy would have to decide, from a command's text, where it will act:
-that is undecidable the moment a Makefile, an `xargs`, or a script that shells
+**Why it does not separate them.** Holding siblings read-only was meant to
+keep one session out of another's uncommitted work, which is the one thing
+the reflog cannot restore. It did not protect that set. The table is
+computed once, when a container starts, so it covers exactly the checkouts
+that existed at that instant: one cut a minute later is outside it and
+writable by everything in the session. Every worktree a resolver run leases
+is cut after its operator started, so none of the checkouts with several
+sessions touching them were ever covered -- while the branches an operator
+is landing all predate it, and were. The protection reached the sessions
+working alone and missed the ones working at once, which is the reverse of
+what it was for, and a boundary that holds by an accident of timing teaches
+a reader a rule that is not there.
+
+So confining two workers from each other is a lease per worker, taken when
+that worker starts against the tree it was given. What is left here is the
+other question -- what one session may reach across its own repository --
+and answering both from one table is what tied a worker's confinement to
+whether its checkout predated somebody else's container.
+
+**Where a boundary is wanted it stays a mount fact, not a judgement.** The
+policy would have to decide, from a command's text, where it will act: that
+is undecidable the moment a Makefile, an `xargs`, or a script that shells
 out is involved, and `cd ../other && git commit` already walks past it. An OS
 boundary does not predict. It observes the write and refuses it, whatever
-route reached the syscall.
-
-So the lease is a mount fact. Absolute paths stay identical on both sides --
+route reached the syscall. Absolute paths stay identical on both sides --
 forced rather than chosen, because a linked worktree's `.git` is a file
-holding an absolute `gitdir:` pointer -- and only the modes vary: this
-worktree read-write, every sibling read-only, the shared admin directory
-read-write, and each sibling's administrative entry read-only inside it.
+holding an absolute `gitdir:` pointer -- and only the modes vary.
 
-**The trap that makes read-only siblings load-bearing.** The obvious move is
-not to mount siblings at all. It is wrong, and quietly so. `git gc` runs
-`git worktree prune`, which deletes the admin directory of any worktree whose
-`gitdir` target has gone missing. A worker whose container could not see its
-siblings would look around, find every one of their directories absent, and
-delete their administrative state from the shared repository -- as ordinary
-housekeeping, with no error anywhere. Hence three guards rather than one:
-siblings are mounted so they exist, each sibling's administrative entry is
-read-only so nothing can remove it, and `gc.worktreePruneExpire` is set to
-never.
+**Siblings are still mounted, and that is load-bearing.** The obvious move
+is to leave them out. It is wrong, and quietly so. `git gc` runs `git
+worktree prune`, which deletes the admin directory of any worktree whose
+`gitdir` target has gone missing. A session whose container could not see
+its siblings would look around, find every one of their directories absent,
+and delete their administrative state from the shared repository -- as
+ordinary housekeeping, with no error anywhere. Two guards, where holding
+each entry read-only used to be a third: siblings are mounted so they exist,
+and `gc.worktreePruneExpire` is set to never. The third is not missed,
+because it only ever answered for a directory that was present anyway.
 
 **What the shared directory being writable costs.** It holds `config`, and a
 worker that cannot write `config` cannot cut a worktree at all, so it is
@@ -47,14 +62,15 @@ read as though it were.
 The object store and refs have to be writable to commit at all, so branch
 isolation would need a separate clone per worker -- and git already ships an
 undo layer for refs in the reflog, where a mistaken commit is recoverable
-completely. What the reflog cannot restore is a sibling's *uncommitted* work,
-which is exactly what this covers.
+completely. A sibling's *uncommitted* work is what the reflog cannot restore,
+and it is the per-worker lease that covers it, not this table.
 
 Boundary attribution is a prerequisite rather than a follow-on, and
-:mod:`lup.sandbox.attribution` is it. A read-only sibling turns a stray write
-into `Read-only file system: .../tree/dev/src/foo.py`, and an agent reading
-that debugs the filesystem instead of learning it holds a lease. A rail
-without attribution is worse than no rail.
+:mod:`lup.sandbox.attribution` is it, reading the running mount table through
+:mod:`lup.sandbox.observed` where the refusal is met from inside. A read-only
+mount turns a stray write into `Read-only file system: .../src/foo.py`, and an
+agent reading that debugs the filesystem instead of learning it holds a lease.
+A rail without attribution is worse than no rail.
 """
 
 from pathlib import Path
@@ -244,14 +260,14 @@ def sibling_worktrees(worktree: Path) -> list[Path]:
 
 
 def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
-    """The mounts that confine one worker to this worktree.
+    """The mounts one session needs over the repository it works in.
 
-    Three nested modes rather than two flat ones: this worktree writable,
-    every sibling read-only, and the shared administrative directory writable
-    with each sibling's own entry read-only inside it. The shared directory is
-    writable so `config` and a new worktree's entry can both be written --
-    without which no session can cut a worktree -- and the comment below
-    records what that deliberately exposes.
+    Every checkout of this repository writable, the shared administrative
+    directory with them, and the paths the project declared its author owns
+    held read-only inside. Siblings are mounted rather than left out for the
+    reason the module docstring gives -- absent, they are what `git worktree
+    prune` deletes the administrative state of -- and writable for the reason
+    it gives beside that.
 
     ``human_owned`` are paths inside the checkout the project already
     declared its author owns; they come back read-only here rather than being
@@ -260,22 +276,17 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
     anybody remembering there was a second list to update.
     """
     layout = repository_layout(worktree)
-    writable = [worktree]
-    read_only = list(sibling_worktrees(worktree))
+    writable = [worktree, *sibling_worktrees(worktree)]
+    read_only: list[Path] = []
     if layout.linked():
-        # The shared directory is mounted writable as a whole, with each
-        # sibling's administrative entry punched read-only back over it -- so
-        # every one stays present and unwritable, which is what keeps
-        # `worktree prune` from removing it. Each entry rather than the
-        # `worktrees/` directory holding them, because a read-only directory
-        # refuses two different acts and only one of them was the subject:
-        # rewriting an entry that is already there endangers a sibling, and
-        # creating a new one beside them endangers nobody. Held read-only,
-        # the second goes with the first and no session in a container can
-        # cut a worktree at all. That nesting is the whole arrangement, and
-        # `Sandbox.declared_mounts` is what holds it up: it emits mounts
-        # parent before child, so a read-only hole is applied after the
-        # writable base it sits in instead of being shadowed by it.
+        # The shared directory is mounted writable as a whole, with nothing
+        # punched back over it: every sibling's administrative entry stays
+        # present, which is the guard that matters, and `worktree prune`
+        # removes an entry for a directory that has gone rather than one it
+        # can see. Holding each entry read-only bought the second half of
+        # that and cost the ability to remove a worktree at all -- `git
+        # worktree remove` unlinks the entry, so a read-only one refuses the
+        # removal with an errno about a filesystem.
         #
         # Writable rather than read-only because `config` lives here, and a
         # worker that cannot write it cannot cut a worktree or record a base
@@ -293,11 +304,6 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
         # holds an approval question against those keys by name -- so the
         # barrier here is a judgement, and the mount table is not pretending
         # to be one.
-        read_only += [
-            entry
-            for entry in sorted((layout.common / "worktrees").iterdir())
-            if entry != layout.private
-        ]
         writable += [
             layout.common,
             layout.private,
