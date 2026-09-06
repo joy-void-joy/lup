@@ -56,6 +56,40 @@ from policy_data import (
 )
 
 
+def announced(effect, tool_name, reason, dialogs=("Edit", "Write")):
+    """What a verdict has to say that its own prompt will not carry, or "".
+
+    *dialogs* names the calls whose approval prompt is this runtime's own
+    dialog. Claude Code renders a hook's ``permissionDecisionReason`` in the
+    prompt it raises for a shell command, and drops it in the one it raises
+    for a file write — that dialog shows the path, a preview and the two
+    answers, and takes nothing from a hook. Measured against 2.1.237, in both
+    directions.
+
+    Silent wherever the prompt already speaks. A shell command's prompt shows
+    the reason, so repeating it would say everything twice; a reason of one
+    line names a category and adds nothing to a dialog already showing the
+    file and its content. What is left is the case this exists for — a verdict
+    that enumerated something the approver cannot otherwise see, about a call
+    whose prompt drops it.
+
+    ``systemMessage`` is the one field this runtime displays to a person from
+    every hook, and it arrives with the tool call rather than with the prompt,
+    so this informs rather than gates. That is the whole of what is reachable:
+    the reason is dropped here, and ``PermissionRequest`` — the event that runs
+    before the prompt — belongs to the control protocol rather than to a local
+    plugin, and never fires for one.
+
+    The colour is spelled here rather than in the kernel because it is this
+    terminal's alphabet. The kernel states the sites; a runtime that shows them
+    some other way is showing the same verdict.
+    """
+    lines = reason.splitlines()
+    if effect != "ask" or tool_name not in dialogs or len(lines) < 2:
+        return ""
+    return "\n".join([lines[0], *(f"\033[33m{site}\033[0m" for site in lines[1:])])
+
+
 def plugin_data_root():
     """The plugin-owned writable directory Claude Code gives hook processes."""
     environ = os.environ  # lup: ignore[os-environ]
@@ -278,19 +312,27 @@ def rendered(decision, payload, placed):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
+
+    def surfaced(result):
+        """The same verdict, with what this runtime will not show it said."""
+        message = announced(settled.effect, payload["tool_name"], settled.reason)
+        return {**result, "systemMessage": message} if message else result
+
     if placed is not None and settled.effect != "deny":
-        return {"hookSpecificOutput": {**answer, "updatedInput": placed}}
+        return surfaced({"hookSpecificOutput": {**answer, "updatedInput": placed}})
     if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
-        return {"hookSpecificOutput": answer}
-    return {
-        "hookSpecificOutput": {
-            **answer,
-            "updatedInput": {
-                **payload["tool_input"],
-                "dangerouslyDisableSandbox": sandbox_escaped(settled.sandbox),
-            },
+        return surfaced({"hookSpecificOutput": answer})
+    return surfaced(
+        {
+            "hookSpecificOutput": {
+                **answer,
+                "updatedInput": {
+                    **payload["tool_input"],
+                    "dangerouslyDisableSandbox": sandbox_escaped(settled.sandbox),
+                },
+            }
         }
-    }
+    )
 
 
 def observe(payload):

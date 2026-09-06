@@ -436,7 +436,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "966e79f9f4ed07d2456802b565ada24a7b7c18b5898afab61ce71dd04719b532",
+      "sha256": "f8ff55a5ada3481c6ee11b2c36cea07c4f561e97ce4f48e00b3afbcb3268f583",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -534,7 +534,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "18ef21d710c99cbceb490fecbf78f923f3c0c239412994050e751f6b78398cf6",
+      "sha256": "df2f57b5bc2a3e40872844306e34c5a6344c21351a017feb4c614e60deff75ef",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
