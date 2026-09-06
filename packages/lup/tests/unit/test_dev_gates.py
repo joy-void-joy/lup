@@ -13,7 +13,7 @@ from lup.harness.codescan.markers import (
 )
 from lup.devtools.dev import records
 from lup.execution.shell import git
-from lup.devtools.dev.branches import get_integration_branch
+from lup.devtools.dev.branches import delete_branch, get_integration_branch
 from lup.devtools.dev.comments import FoundComment
 from lup.devtools.dev.gates import (
     BranchInPlay,
@@ -184,6 +184,117 @@ def test_a_checkout_missing_every_feature_branch_wakes_nothing() -> None:
     )
     assert sweep.asked == 2
     assert sweep.woken == []
+
+
+def scratch_repo(root: Path) -> None:
+    """A one-commit repository on `main`, which `dev delete` can be run inside.
+
+    Built rather than borrowed, because the subject here is a branch being
+    deleted and this repository's own branches are not available for that.
+    """
+    root.mkdir()
+    git.out("-C", str(root), "init", "--initial-branch=main")
+    git.out("-C", str(root), "config", "commit.gpgsign", "false")
+    git.out("-C", str(root), "config", "core.hooksPath", str(root / "absent-hooks"))
+    git.out("-C", str(root), "config", "user.email", "test@example.invalid")
+    git.out("-C", str(root), "config", "user.name", "test")
+    (root / "file.txt").write_text("base\n", encoding="utf-8")
+    git.out("-C", str(root), "add", "file.txt")
+    git.out("-C", str(root), "commit", "-m", "chore: base")
+
+
+def worked_on(root: Path, branch: str, carries: str = "work.txt") -> None:
+    """Cut *branch*, commit the file only it carries, and return to `main`.
+
+    The file is named by the caller so a name cut a second time commits
+    something the first branch did not already land.
+    """
+    git.out("-C", str(root), "checkout", "-q", "-b", branch)
+    (root / carries).write_text("work\n", encoding="utf-8")
+    git.out("-C", str(root), "add", carries)
+    git.out("-C", str(root), "commit", "-m", f"feat: {branch}")
+    git.out("-C", str(root), "checkout", "-q", "main")
+
+
+def test_a_branch_deleted_after_it_landed_fires_from_what_was_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The branch this gate used to be silent about forever.
+
+    Landing and deleting in one sweep, with no check in between, left nothing
+    to read: containment lives on the ref, the deletion takes the ref, and
+    absence is dormant by a ruling that has to stay. `dev delete` judges
+    containment while the ref is still there, so the verdict is written down
+    where it outlives the branch.
+    """
+    root = tmp_path / "landed"
+    scratch_repo(root)
+    worked_on(root, "topic")
+    git.out("-C", str(root), "merge", "--ff-only", "topic")
+    monkeypatch.chdir(root)
+
+    delete_branch("topic", dry_run=False, force=False)
+
+    verdict = BranchInPlay(argument="topic").asked()
+    assert verdict.fired
+    assert "reached main" in verdict.evidence
+
+
+def test_a_branch_deleted_holding_work_the_integration_branch_lacks_is_dormant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Discarding is not landing, and the record says which one happened."""
+    root = tmp_path / "discarded"
+    scratch_repo(root)
+    worked_on(root, "topic")
+    monkeypatch.chdir(root)
+
+    delete_branch("topic", dry_run=False, force=True)
+
+    verdict = BranchInPlay(argument="topic").asked()
+    assert not verdict.fired
+    assert "not in this checkout" in verdict.evidence
+
+
+def test_a_checkout_holding_neither_the_ref_nor_a_record_stays_dormant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CI shape, which is what the dormancy ruling exists for.
+
+    A job clones the ref under test and nothing else, so every feature branch
+    is missing there — and a clone that never fetched a branch never deleted
+    one either, so it holds no record of any landing to read.
+    """
+    root = tmp_path / "clone"
+    scratch_repo(root)
+    monkeypatch.chdir(root)
+
+    verdict = BranchInPlay(argument="topic").asked()
+    assert not verdict.fired
+    assert "not in this checkout" in verdict.evidence
+
+
+def test_a_name_cut_again_answers_from_its_ref_rather_than_the_old_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record is what absence is asked, and only absence.
+
+    A name reused after its first branch landed carries that landing in its
+    record, and a second branch of that name is a different branch. The ref is
+    back, so it is read, and it answers for itself.
+    """
+    root = tmp_path / "reused"
+    scratch_repo(root)
+    worked_on(root, "topic")
+    git.out("-C", str(root), "merge", "--ff-only", "topic")
+    monkeypatch.chdir(root)
+    delete_branch("topic", dry_run=False, force=False)
+
+    worked_on(root, "topic", carries="second.txt")
+
+    verdict = BranchInPlay(argument="topic").asked()
+    assert not verdict.fired
+    assert "has not reached main" in verdict.evidence
 
 
 def planted_deferral(root: Path, names: str) -> None:

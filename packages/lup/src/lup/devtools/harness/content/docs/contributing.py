@@ -109,6 +109,12 @@ it — so the check reads the integration branch as well as the working tree,
 for the notes naming the branch in hand. Write one where you are, aimed at the
 branch that has to act, and it reaches them without waiting for a merge.
 
+Landing wakes it even where the branch was deleted in the same sweep, because
+`dev delete` judges containment off the ref it is about to remove and records
+that verdict beside the branch. A checkout that never deleted it holds no such
+record and stays quiet — which is what keeps a clone that merely never fetched
+the branch, every CI job among them, from waking every gate in the repository.
+
 A gate the checkout cannot see — "until the v2 API ships" — stays prose and
 stays advisory, which is the whole of what a stated gate ever did before.
 Prefer a resolvable spelling where one fits, because a deferral is dormant
