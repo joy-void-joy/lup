@@ -136,6 +136,9 @@ worktrees read-only, which is what lets a session commit in it. Without the
 key the project is tracked for review and nothing more, and the symlink
 dangles inside the container the way an unmounted path does. The key is why
 `sync.json.local` is a protected edit root: writing one widens the boundary.
+For a folder one session needs without a standing registration, the launchers
+take `--mount <dir>` and `--mount-ro <dir>` (repeatable): the same lease, the
+same widening in every posture, lasting exactly one launch.
 
 A registration naming only a URL is mounted on the same terms, because it is
 materialized into the same shape: a full bare clone under

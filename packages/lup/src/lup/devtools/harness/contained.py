@@ -676,7 +676,7 @@ def start_egress(
                 "reached at the address it holds on that network, and it "
                 "holds none. Remove the pair with `harness egress --down` and "
                 "let the next launch rebuild them, or open the session with "
-                "--unsandboxed."
+                "`--sandbox inner`."
             ) from error
         return proxy_address(egress, project, engine)
     # A proxy that is here and not being kept is one this has to account for
@@ -704,7 +704,7 @@ def start_egress(
             f"Could not start {egress.proxy_name(project)}, so this session "
             "would open on an internal network with no way out of it. The "
             "policy it was given is at "
-            f"{configuration}; open the session with --unsandboxed, or "
+            f"{configuration}; open the session with `--sandbox inner`, or "
             "declare `mode='bridge'` on the image's egress to run without "
             "an egress boundary."
         ) from error
@@ -1122,7 +1122,7 @@ class EgressState(BaseModel, frozen=True):
         recovery = Notice(
             text=(
                 "`harness egress --down` removes both pieces so the next "
-                "launch rebuilds them; `--unsandboxed` opens on the host."
+                "launch rebuilds them; `--sandbox inner` opens on the host."
             ),
             urgency="detail",
             indent=1,
@@ -1626,8 +1626,9 @@ def contained_argv(
         if found is None:
             raise typer.BadParameter(
                 "No container client answered, so this session cannot be "
-                "contained. Install docker or podman, or open the session with "
-                "--unsandboxed to run on the host under the semantic policy alone."
+                "contained. Install docker or podman, or open the session "
+                "with `--sandbox inner` to run on the host under the "
+                "runtime's own sandbox and the semantic policy."
             )
         if not found.drives_its_server():
             raise typer.BadParameter(found.consequence())
@@ -1752,7 +1753,7 @@ def engine_absence() -> str | None:
         "No container client answered, so this run cannot give its workers "
         "their own boundary. A session inside a container has no engine to "
         "reach: start the run from an uncontained session (`harness claude "
-        "--unsandboxed`, or a plain shell) so each worker gets a container of "
+        "--sandbox inner`, or a plain shell) so each worker gets a container of "
         "its own. Mounting the engine's socket into a contained session would "
         "let it start a sibling with the whole host bound in, which is why "
         "that is not the answer here."

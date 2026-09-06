@@ -2812,6 +2812,32 @@ def test_claude_sandbox_widens_the_writable_set_to_sibling_worktrees(
     ]
 
 
+def test_a_launch_mount_widens_the_inner_sandbox_where_it_asked_to_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--mount` says this session may reach a folder, in whichever posture.
+
+    Contained, that promise lands in the container's mount table through the
+    fleet lease; on the host it has to land here, in the runtime's own
+    widening, or where the session runs would decide what it can do. The
+    read-only mount stays out of `allowWrite` because writing is exactly what
+    it withheld -- reads are not what this key governs.
+    """
+    monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
+    plugin = portable_harness().plugins[0]
+    writable = tmp_path / "notes"
+    read_only = tmp_path / "reference"
+
+    arguments = claude_sandbox_arguments(
+        plugin, accessible=launch.declared_mounts([writable], [read_only])
+    )
+
+    widened = json.loads(arguments[arguments.index("--settings") + 1])
+    allowed = widened["sandbox"]["filesystem"]["allowWrite"]
+    assert str(writable) in allowed
+    assert str(read_only) not in allowed
+
+
 def test_a_plugin_kept_beside_the_generated_one_is_named_at_launch(
     tmp_path: Path,
 ) -> None:
