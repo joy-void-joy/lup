@@ -95,32 +95,52 @@ def test_another_project_in_the_same_environment_is_named(tmp_path: Path) -> Non
     assert foreign_installs(root, environment) == [other]
 
 
-def test_a_sync_refuses_to_write_over_another_project(tmp_path: Path) -> None:
+def test_a_sync_refuses_to_write_over_another_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Refused before the install, which is the only moment it can be refused.
 
     Afterwards the other project's packages are gone and the command that
     removed them reported success, because removing them is what `uv sync`
     is for.
+
+    The variable is set to the seeded environment because that *is* the
+    arrangement under test: an absolute value, outside the project, shared
+    with whoever else points at it. Left to the ambient one, the lookup lands
+    on a directory beside a checkout this test never creates, finds no
+    occupant, and the refusal never fires -- which reaches the run as `uv`
+    forking into a missing cwd rather than as the assertion failing.
     """
     root = tmp_path / "repo"
     environment = tmp_path / "venv"
     install(environment, "other-1.0", tmp_path / "other")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(environment))
 
     with pytest.raises(typer.Exit):
         sync_environment(root=root, take_over=False)
 
 
 def test_taking_over_is_sayable_rather_than_walled_off(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Somebody moving between two projects that share one is obeying the
-    configuration, and must be able to say so without editing their shell."""
+    configuration, and must be able to say so without editing their shell.
+
+    Pointed at the seeded environment for the reason the refusal above is,
+    and with more riding on it: without an occupant found there is nothing to
+    take over, so the assertion below passes on a run that never reached the
+    branch it names.
+    """
     root = tmp_path / "repo"
     environment = tmp_path / "venv"
     install(environment, "other-1.0", tmp_path / "other")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(environment))
     synced: list[Path] = []
     monkeypatch.setattr("lup.devtools.dev.environment.sync_dependencies", synced.append)
 
     sync_environment(root=root, take_over=True)
 
     assert synced == [root]
+    assert (
+        f"Taking {environment} over from 1 other project(s)." in capsys.readouterr().out
+    )
