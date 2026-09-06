@@ -177,6 +177,17 @@ class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
         ),
     )
     setting_sources: list[ClaudeSettingSource] | None = None
+    cli_path: Path | None = Field(
+        default=None,
+        description=(
+            "The program this session's CLI is started as, where the default "
+            "is whichever `claude` the SDK finds on PATH. Named so a session "
+            "can be opened through a wrapper that execs the real CLI inside a "
+            "container: the SDK spawns whatever is here and passes it the "
+            "same arguments, so a worker gets its own boundary without this "
+            "adapter learning anything about containers"
+        ),
+    )
     extra_args: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
 
 
@@ -1054,6 +1065,7 @@ def build_claude_options(
         output_format=None,
         max_buffer_size=config.max_buffer_size,
         setting_sources=config.setting_sources,
+        cli_path=config.cli_path,
         extra_args=dict(config.extra_args),
     )
 
