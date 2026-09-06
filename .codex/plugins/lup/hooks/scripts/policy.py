@@ -141,6 +141,18 @@ def delivers(measured: dict[str, list[str]], capability: str) -> bool:
     return capability in (measured["delivered"] if "delivered" in measured else [])
 
 
+def launched(measured: dict[str, list[str]]) -> list[str]:
+    """The invocation the launch that opened this session recorded for itself.
+
+    What lets a session spell its own reopening — a mount registered
+    mid-session takes effect only at the next launch, and this record is the
+    only thing that remembers which launch that is. Empty wherever nothing
+    was recorded (an older launcher, or no measurement at all), and every
+    caller reads empty as "no reopening can be spelled".
+    """
+    return measured["launch"] if "launch" in measured else []
+
+
 def defers_unjudged(measured: dict[str, list[str]]) -> bool:
     """Whether this profile hands legible work nothing judged to the runtime.
 
