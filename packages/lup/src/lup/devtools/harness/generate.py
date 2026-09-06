@@ -40,6 +40,7 @@ from lup.harness.models import (
     PromptDocument,
 )
 from lup.types import JsonObject
+from lup.workspace.paths import declared_project_root
 from lup.harness.ownership import (
     OwnershipManifest,
     build_manifest,
@@ -265,8 +266,19 @@ def claude_generation_recipe(
     plugin = Path(".claude/plugins") / source.plugins[0].name
 
     def copied_from(asset: Path) -> str:
-        """Where the asset sits, as a reader of this checkout would name it."""
-        inside = asset.relative_to(root) if asset.is_relative_to(root) else asset
+        """Where the asset sits, named from the project that holds it.
+
+        The bytes are read from wherever the declaring package was imported,
+        which is not always the checkout being written: generating into a
+        sibling worktree leaves the two apart. Anchoring on ``root`` there
+        names the asset by an absolute path into somebody else's tree, and
+        that path is committed — so the map a reader opens points at a
+        checkout they may not have, and the same source compiles to different
+        bytes depending on where the command ran. The asset's own project
+        answers the same in every checkout, which is what the row means.
+        """
+        anchor = declared_project_root(asset.parent) or root
+        inside = asset.relative_to(anchor) if asset.is_relative_to(anchor) else asset
         return inside.as_posix()
 
     verbatim = [
