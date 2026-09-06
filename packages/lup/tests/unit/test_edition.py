@@ -248,6 +248,28 @@ def test_a_bare_name_is_asked_of_the_checkout_environment_before_the_path(
     assert declared_program(str(work), "pyright") == str(program)
 
 
+def test_an_interpreter_outside_the_conventional_directory_still_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hook runs under whichever `python3` the runtime found.
+
+    One installed in `sbin` names a scripts directory no environment has, so
+    every declared program resolved to a bare name and went to `PATH` — where
+    a project's own toolchain is exactly what is not installed. Measured, that
+    left both the checker and the repair sweep silent on a machine holding
+    both, which is the failure this gate was built to stop being.
+    """
+    monkeypatch.delenv(ENVIRONMENT_VARIABLE, raising=False)
+    monkeypatch.setattr(sys, "executable", "/usr/sbin/python3")
+    work = checkout(tmp_path / "repo")
+    scripts = work / ".venv" / "bin"
+    scripts.mkdir(parents=True)
+    program = scripts / "pyright"
+    program.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert declared_program(str(work), "pyright") == str(program)
+
+
 def test_a_redirected_environment_is_where_a_bare_name_resolves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

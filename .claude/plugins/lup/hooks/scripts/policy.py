@@ -757,16 +757,24 @@ def declared_program(root: str, declared: str) -> str:
     POSIX, ``Scripts`` on Windows — because that is a property of how Python
     is installed rather than of any project, and reading it is what keeps
     this from being a second layout assumption behind the one it replaces.
+    It is read as a candidate rather than as the answer: a hook runs under
+    whichever ``python3`` the runtime found, and one installed in ``sbin``
+    names a directory no environment has, which resolved every declared
+    program to a bare name and left the gate silent on a machine where it
+    was installed all along. The conventional pair follows it, so the
+    interpreter still decides where it can and never decides alone.
     """
     located = Path(root) / declared
     if located.is_file():
         return str(located)
     if "/" in declared or "\\" in declared:
         return ""
-    installed = (
-        project_environment(Path(root)) / Path(sys.executable).parent.name / declared
-    )
-    return str(installed) if installed.is_file() else declared
+    environment = project_environment(Path(root))
+    for scripts in dict.fromkeys([Path(sys.executable).parent.name, "bin", "Scripts"]):
+        installed = environment / scripts / declared
+        if installed.is_file():
+            return str(installed)
+    return declared
 
 
 def conflicted(path_text: str) -> bool:
