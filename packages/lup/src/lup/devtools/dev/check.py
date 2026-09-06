@@ -199,6 +199,14 @@ def parallel_arguments(workers: int) -> list[str]:
     return ["-n", str(workers)]
 
 
+def ignored_arguments(excluded_roots: list[str]) -> list[str]:
+    """The globs that keep collection out of retained data and scratch."""
+    return option_arguments(
+        "--ignore-glob",
+        [pattern for root in excluded_roots for pattern in (root, f"{root}/**")],
+    )
+
+
 class TestRoot(BaseModel):
     """One independently installed test suite the project asks the gate to run."""
 
@@ -243,17 +251,115 @@ class TestRoot(BaseModel):
                 "run",
                 "pytest",
                 *parallel_arguments(workers),
-                *option_arguments(
-                    "--ignore-glob",
-                    [
-                        pattern
-                        for root in excluded_roots
-                        for pattern in (root, f"{root}/**")
-                    ],
-                ),
+                *ignored_arguments(excluded_roots),
                 _cwd=str(self.directory),
             ),
         )
+
+
+class RootSelection(BaseModel):
+    """One suite's share of what a caller named, spelled from inside that suite.
+
+    Empty *paths* asks for everything the suite declares, which is what the
+    root's own `testpaths` already says — so a caller who named nothing gets
+    each suite whole rather than a selection of none.
+    """
+
+    root: TestRoot
+    paths: list[str]
+
+
+def owning_index(test_roots: list[TestRoot], selection: Path) -> int | None:
+    """Which declared suite holds a named path, deepest root winning.
+
+    A workspace root contains the package roots under it, so the outermost
+    suite would claim every path if the roots were read in the order they
+    were declared. The deepest one containing the path is the suite that
+    installs it.
+    """
+    named = selection.resolve()
+    deepest = sorted(
+        range(len(test_roots)),
+        key=lambda index: len(test_roots[index].directory.resolve().parts),
+        reverse=True,
+    )
+    return next(
+        (
+            index
+            for index in deepest
+            if named.is_relative_to(test_roots[index].directory.resolve())
+        ),
+        None,
+    )
+
+
+def group_by_root(
+    test_roots: list[TestRoot], selections: list[str]
+) -> list[RootSelection]:
+    """Split what a caller named into one invocation per suite that owns part.
+
+    Two independently installed suites each own a top-level `tests` package,
+    and one interpreter has one meaning for that name: a run naming a path
+    from each has both suites claiming `tests.conftest`, and collection dies
+    before a test runs. No import mode settles it, because the collision is in
+    what the suites are rather than in how pytest finds them — the isolation
+    that makes them separate installs is the same isolation that stops them
+    sharing an interpreter. So the narrowing move a caller reaches for — run
+    the suites I touched — is served by one run per suite instead.
+    """
+    owned: list[list[str]] = [[] for _ in test_roots]
+    for selection in selections:
+        index = owning_index(test_roots, Path(selection))
+        if index is None:
+            declared = ", ".join(str(root.directory) for root in test_roots)
+            raise typer.BadParameter(
+                f"{selection} sits under no declared test root ({declared})"
+            )
+        installed = test_roots[index].directory.resolve()
+        owned[index].append(str(Path(selection).resolve().relative_to(installed)))
+    return [
+        RootSelection(root=root, paths=paths)
+        for root, paths in zip(test_roots, owned, strict=True)
+        if paths or not selections
+    ]
+
+
+def run_selected(
+    test_roots: list[TestRoot],
+    selections: list[str],
+    excluded_roots: list[str],
+    workers: int = TEST_WORKERS,
+) -> None:
+    """Run each named path in the suite that installs it, reporting per suite.
+
+    Output reaches the terminal as it arrives rather than being carried back
+    the way the gate carries it: a caller who named one file wants pytest's
+    own failure report, and the gate's ordered summary exists for a run whose
+    checks finish out of order.
+    """
+    failed: list[str] = []
+    for group in group_by_root(test_roots, selections):
+        if not group.root.directory.is_dir():
+            for line in group.root.absent().lines:
+                typer.echo(line)
+            failed.append(group.root.name)
+            continue
+        typer.echo(f"\n{group.root.name}  ({group.root.directory})")
+        try:
+            uv(
+                "run",
+                "pytest",
+                *group.paths,
+                *parallel_arguments(workers),
+                *ignored_arguments(excluded_roots),
+                _cwd=str(group.root.directory),
+                _fg=True,
+            )
+        except sh.ErrorReturnCode:
+            failed.append(group.root.name)
+    if failed:
+        typer.echo(f"\nFailed: {', '.join(failed)}")
+        raise typer.Exit(1)
 
 
 def inline_notes_lines(found: list[FoundComment], scaffold: bool = False) -> list[str]:

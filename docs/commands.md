@@ -41,6 +41,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev resolve-review` | Render a resolve manifest and its branch diffs into one static HTML review. |
 | `dev resolve-summary` | Print per-concern verdicts from a resolve manifest. |
 | `dev check` | Run ruff format, ruff check, pyright, and pytest. Read-only by default. |
+| `dev test` | Run named tests in the suite that installs each, one run per suite. |
 | `dev comments` | List unresolved `# lup:` feedback comments, or act on specific ones. |
 | `dev todos` | List `# lup: template:` markers — a scaffold&#x27;s open decisions. |
 | `dev seams` | Show what this project settled about itself, or settle one of them. |

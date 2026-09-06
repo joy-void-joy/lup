@@ -2,15 +2,17 @@
 
 The gate runs one pytest per declared root, and everything it decides before
 that run is decided from a declaration rather than from this repository: which
-flags the environment can answer for, and whether the directory a root names is
-even there. Both were read from what the template happens to hold, so both were
-green here and broken for every project that installed the library.
+flags the environment can answer for, whether the directory a root names is
+even there, and which suite installs a path somebody named. The first two were
+read from what the template happens to hold, so both were green here and broken
+for every project that installed the library.
 """
 
 from importlib.machinery import ModuleSpec
 from pathlib import Path
 
 import pytest
+import typer
 
 import lup.devtools.dev.check as check
 
@@ -77,3 +79,54 @@ def test_a_root_that_names_a_file_is_no_root(tmp_path: Path) -> None:
     named.write_text("", encoding="utf-8")
 
     assert not check.TestRoot(name="pytest", directory=named).checked(4, []).passed
+
+
+def declared_roots(workspace: Path) -> list[check.TestRoot]:
+    """The two-suite shape the template declares, rooted in a temporary tree."""
+    return [
+        check.TestRoot(name="pytest", directory=workspace),
+        check.TestRoot(name="pytest (lup)", directory=workspace / "packages/lup"),
+    ]
+
+
+def test_paths_from_two_suites_become_two_invocations(tmp_path: Path) -> None:
+    # Named in one pytest run, the two suites both claim `tests.conftest` and
+    # collection dies before a test runs — so the narrowing move a caller
+    # reaches for, run the suites I touched, is served one suite at a time.
+    grouped = check.group_by_root(
+        declared_roots(tmp_path),
+        [
+            str(tmp_path / "packages/lup/tests/unit/test_profiles.py"),
+            str(tmp_path / "tests/unit/test_harness_compilation.py"),
+        ],
+    )
+
+    assert [group.root.name for group in grouped] == ["pytest", "pytest (lup)"]
+    assert [group.paths for group in grouped] == [
+        ["tests/unit/test_harness_compilation.py"],
+        ["tests/unit/test_profiles.py"],
+    ]
+
+
+def test_a_nested_suite_claims_what_sits_under_it(tmp_path: Path) -> None:
+    # The workspace root contains the package root, so read in declaration
+    # order it would claim every path and run the library's tests from a
+    # directory where `src` is the application's.
+    grouped = check.group_by_root(
+        declared_roots(tmp_path), [str(tmp_path / "packages/lup/tests/unit")]
+    )
+
+    assert [group.root.name for group in grouped] == ["pytest (lup)"]
+    assert grouped[0].paths == ["tests/unit"]
+
+
+def test_naming_nothing_asks_every_suite_for_all_of_itself(tmp_path: Path) -> None:
+    grouped = check.group_by_root(declared_roots(tmp_path), [])
+
+    assert [group.paths for group in grouped] == [[], []]
+
+
+def test_a_path_under_no_declared_suite_is_refused(tmp_path: Path) -> None:
+    # Silently dropping it would report a green run over tests nobody ran.
+    with pytest.raises(typer.BadParameter):
+        check.group_by_root(declared_roots(tmp_path / "workspace"), [str(tmp_path)])

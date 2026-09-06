@@ -670,6 +670,27 @@ def create_dev_app(
             scope=check.changed_paths(since) if since is not None else None,
         )
 
+    # -- test command --
+
+    @app.command("test")
+    def test_cmd(
+        paths: Annotated[
+            list[str] | None,
+            typer.Argument(
+                help="Test files or directories to run. Each is dispatched to the "
+                "declared test root that installs it; with none, every root runs "
+                "its whole suite"
+            ),
+        ] = None,
+    ) -> None:
+        """Run named tests in the suite that installs each, one run per suite."""
+        declarations = declared()
+        check.run_selected(
+            test_roots=declarations.test_roots,
+            selections=paths or [],
+            excluded_roots=check.non_code_roots(declarations.project),
+        )
+
     # -- comments command --
 
     @app.command("comments")
