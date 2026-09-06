@@ -2946,12 +2946,37 @@ def antipattern_decision(
             suppression_site(number, original_lines[number - 1]) for number in numbers
         ]
 
+    def silences_nothing(number: int) -> bool:
+        """Whether the bare directive on this line guards no rule these rows see.
+
+        Only the untyped form is answerable here. A typed directive naming an
+        id no row owns belongs to the scanner that does own it, and the
+        refusal loop above has already taken out every typed one this table
+        can call dead — so what is left is the bare form, which the audit
+        reports spurious on exactly this test and `--fix` then deletes.
+
+        Asked only where the tree parsed, because a rule that reads the tree
+        contributes no hit when it did not: without that guard a directive
+        standing over a live violation would look dead for the gate's own
+        blindness, and be dropped from the prompt that exists to name it.
+        """
+        directive = IGNORE_RE.search(original_lines[number - 1])
+        if directive is None or ignore_rule_ids(directive) is not None:
+            return False
+        return not guarded_hits(number)
+
     # Every violation the edit added is covered, so what is left to decide is
     # the suppressions themselves: the ones this edit declares, or the standing
-    # one an added line has moved under.
-    if declared:
+    # one an added line has moved under. A directive that silences nothing is
+    # not among them: naming it would spend the reader's attention on a line
+    # the audit deletes unread, and the listing exists so that what is read
+    # there is what the approval is actually about.
+    listed = [
+        number for number in declared if not (decidable and silences_nothing(number))
+    ]
+    if listed:
         return KernelDecision(
-            suppression, suppression_reason(sites_at(declared), before is None)
+            suppression, suppression_reason(sites_at(listed), before is None)
         )
     if covering:
         return KernelDecision(suppression, suppression_reason(sites_at(list(covering))))
