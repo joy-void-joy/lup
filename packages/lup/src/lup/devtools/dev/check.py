@@ -290,17 +290,31 @@ def budget_reports(used: int, scaffold: bool) -> list[CheckReport]:
     ]
 
 
-def guidance_budget_report(used: int) -> CheckReport:
-    """Whether a session will load the whole document or a truncated one."""
-    free = GUIDANCE_BYTE_BUDGET - used
+def budget_report(name: str, used: int, ceiling: int, note: str) -> CheckReport:
+    """One budget's verdict, in the sentence every budget row answers in.
+
+    Both rows weigh the same document against a different ceiling, so the
+    sentence is written once: what a reader learns to expect from one row
+    holds for the other, and neither can drift into reporting a different set
+    of facts than its neighbour. What differs is the note each appends, which
+    is the only part its own ceiling makes it the authority on.
+    """
+    free = ceiling - used
     state = "ok" if free >= 0 else f"FAIL (over by {-free})"
     return CheckReport(
-        name="guidance budget",
+        name=name,
         passed=free >= 0,
-        lines=[
-            f"guidance budget: {state} — {used}/{GUIDANCE_BYTE_BUDGET} bytes, "
-            f"{free} free"
-        ],
+        lines=[f"{name}: {state} — {used}/{ceiling} bytes, {note}"],
+    )
+
+
+def guidance_budget_report(used: int) -> CheckReport:
+    """Whether a session will load the whole document or a truncated one."""
+    return budget_report(
+        "guidance budget",
+        used,
+        GUIDANCE_BYTE_BUDGET,
+        f"{GUIDANCE_BYTE_BUDGET - used} free",
     )
 
 
@@ -319,18 +333,17 @@ def scaffold_budget_report(
     Gating rather than advisory: a reservation nobody has to honour is spent
     by the first section that wants the room, which is how the headroom
     disappeared before anyone declared one.
+
+    A passing row states the room left, because the number a session needs
+    before it writes is how much it may spend, and the reservation — which
+    never moves — cannot tell it that. The failing row states the overage
+    instead: a negative amount of room is what the overage already says.
     """
     ceiling = GUIDANCE_BYTE_BUDGET - headroom
-    over = used - ceiling
-    state = "ok" if over <= 0 else f"FAIL (over by {over})"
-    return CheckReport(
-        name="scaffold budget",
-        passed=over <= 0,
-        lines=[
-            f"scaffold budget: {state} — {used}/{ceiling} bytes, "
-            f"{headroom} reserved for the adopting domain"
-        ],
-    )
+    free = ceiling - used
+    reserved = f"{headroom} reserved for the adopting domain"
+    note = f"{free} free, {reserved}" if free >= 0 else reserved
+    return budget_report("scaffold budget", used, ceiling, note)
 
 
 def changed_paths(since: str) -> list[str]:
