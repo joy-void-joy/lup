@@ -3093,7 +3093,7 @@ def edit_verdict(
     effect = decided["effect"]
     if effect not in ("allow", "ask", "deny", "defer"):
         return default
-    return KernelDecision(effect, decided["reason"] or default.reason)
+    return default.revised(effect=effect, reason=decided["reason"] or default.reason)
 
 
 def edit_threshold(

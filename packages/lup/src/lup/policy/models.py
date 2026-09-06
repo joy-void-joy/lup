@@ -313,6 +313,17 @@ class Decision(BaseModel, frozen=True):
     relay what was asked for. See
     :attr:`~lup.policy.kernel.decision.KernelDecision.escalated`.
     """
+    hard: bool = False
+    """Whether this prohibition is one no reviewer may override."""
+    findings: tuple["Decision", ...] = ()
+    """The rule verdicts that composed into this one, empty where this is one.
+
+    What a reviewer is owed past the sentence: every gate that had something
+    to say about this call, including the ones that decided nothing. A
+    verdict carrying them can name the evidence a reader would otherwise have
+    to go find in the diff being approved. See
+    :attr:`~lup.policy.kernel.decision.KernelDecision.findings`.
+    """
 
     @field_validator("sandbox")
     @classmethod
@@ -363,6 +374,8 @@ class Decision(BaseModel, frozen=True):
             rule=decision.rule,
             evaluator=decision.evaluator,
             escalated=decision.escalated,
+            hard=decision.hard,
+            findings=tuple(cls.of(finding) for finding in decision.findings),
         )
 
     def as_kernel(self) -> KernelDecision:
@@ -387,6 +400,8 @@ class Decision(BaseModel, frozen=True):
             abstention=self.abstention,
             rule=self.rule,
             evaluator=self.evaluator,
+            hard=self.hard,
+            findings=tuple(finding.as_kernel() for finding in self.findings),
         )
 
 
