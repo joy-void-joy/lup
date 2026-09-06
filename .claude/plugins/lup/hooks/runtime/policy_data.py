@@ -16871,3 +16871,12 @@ RESOLUTION_COMMAND: list[str] = [
     "dev",
     "refutations",
 ]
+
+REPAIR_COMMAND: list[str] = [
+    "lup-devtools",
+    "dev",
+    "check",
+    "--antipatterns",
+    "--fix",
+    "--json",
+]

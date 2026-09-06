@@ -660,15 +660,20 @@ def report(
     would claim to have fixed something it had just moved.
     """
     scan = scan_antipatterns(project, paths)
+    repaired: list[RepairedDirective] = []
     if fix:
         repaired = repair_spurious(project, scan.findings)
-        for item in repaired:
+        # Under --json the same report is a payload key. Echoing it here as
+        # well would put prose in front of the document, which is the one
+        # thing a caller reading this as data cannot recover from.
+        for item in repaired if not as_json else []:
             named = f"[{item.rule_id}]" if item.rule_id else ""
             typer.echo(
                 f"{item.file}:{item.line} [repaired] removed dead `# lup: ignore{named}`"
             )
         if repaired:
-            typer.echo(f"{len(repaired)} dead directive(s) removed\n")
+            if not as_json:
+                typer.echo(f"{len(repaired)} dead directive(s) removed\n")
             scan = scan_antipatterns(project, paths)
     found = scan.findings
     blocking = [finding for finding in found if finding.kind not in advisory]
@@ -677,6 +682,7 @@ def report(
             {
                 "findings": [finding.model_dump() for finding in found],
                 "refuted": [refutation.model_dump() for refutation in scan.refuted],
+                "repaired": [item.model_dump() for item in repaired],
             }
         )
         if blocking:

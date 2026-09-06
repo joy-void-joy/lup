@@ -44,6 +44,7 @@ from host import (
     publish_edition,
     read_document,
     record_hook_evidence,
+    repaired_directives,
     sandbox_active,
 )
 from kernel.decision import KernelDecision, sandbox_escaped
@@ -51,6 +52,7 @@ from policy_data import (
     AGENT_IDENTITY_ENV,
     AUTONOMOUS_AGENT_IDENTITIES,
     DIAGNOSTICS_COMMAND,
+    REPAIR_COMMAND,
 )
 
 
@@ -310,7 +312,13 @@ def observe(payload):
     path = tool_input["file_path"] if "file_path" in tool_input else ""
     if path:
         publish_edition(path)
-        return file_diagnostics(path, DIAGNOSTICS_COMMAND)
+        # Repaired before checked, because the repair rewrites the file: run
+        # the other way round and the diagnostics describe lines that have
+        # already moved. Both reports reach the agent together, which is the
+        # one channel this event has.
+        return repaired_directives(path, REPAIR_COMMAND) + file_diagnostics(
+            path, DIAGNOSTICS_COMMAND
+        )
     command = tool_input["command"] if "command" in tool_input else ""
     return written_review(command, Path.cwd()) if command else []
 

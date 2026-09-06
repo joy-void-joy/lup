@@ -836,6 +836,66 @@ def file_diagnostics(
     ]
 
 
+def repaired_directives(
+    path_text: str,
+    command: list[str],
+    suffixes: tuple[str, ...] = (".py", ".pyi"),
+    timeout_seconds: float = 30.0,
+) -> list[str]:
+    """Take the dead `# lup: ignore` directives out of one written file.
+
+    A directive guarding nothing is the one audit finding whose fix is not a
+    judgement — there is a single correct edit and this is it — so the gate
+    ahead of the write neither refuses it nor spends an approval naming it,
+    and it goes afterwards instead. That pairing is what lets the prompt leave
+    it unmentioned: unlisted and removed is one behaviour, while unlisted and
+    kept would be a directive nobody ever reads.
+
+    Reported back rather than done in silence. The agent wrote the directive
+    believing it did something, and a line that disappears without a word is
+    one it writes again on the next file.
+
+    Anything that goes wrong is nothing repaired, exactly as an unreadable
+    checker is no diagnostics: this runs after the tool, so the alternative
+    to saying nothing is failing a write that has already happened.
+    """
+    if not command or Path(path_text).suffix.lower() not in suffixes:
+        return []
+    if conflicted(path_text):
+        return []
+    root = worktree_root(path_text)
+    if not root:
+        return []
+    located = declared_program(root, command[0])
+    if not located:
+        return []
+    # Named the way the sweep names its own files: it scans a project and
+    # selects within it, so a path anchored anywhere else selects nothing and
+    # reports a clean file rather than an unanswered question.
+    try:
+        named = str(Path(path_text).resolve().relative_to(Path(root).resolve()))
+    except ValueError:
+        return []
+    try:
+        finished = subprocess.run(
+            [located, *command[1:], "--path", named],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        reported = json.loads(finished.stdout)["repaired"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return []
+    return [
+        f"line {item['line']}: removed `# lup: ignore"
+        + (f"[{item['rule_id']}]" if item["rule_id"] else "")
+        + "` — it guarded no rule, so it silenced nothing"
+        for item in reported
+    ]
+
+
 def resolved_refutations(
     path_text: str,
     proposed: str,

@@ -1558,6 +1558,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             auto_escape_prefixes=[],
             diagnostics_command=[],
             resolution_command=[],
+            repair_command=[],
         ),
         encoding="utf-8",
     )
