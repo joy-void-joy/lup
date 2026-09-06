@@ -219,3 +219,22 @@ def test_a_regeneration_only_commit_does_not_survive_a_rebase(
 
     assert unmerged(repo) == []
     assert str(git("log", "--format=%s", "main..HEAD")).splitlines() == []
+
+
+def test_an_unregistered_driver_is_a_readable_state_not_a_silent_one(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What `dev check` reads, so a checkout degrading has somewhere to show.
+
+    The declaration is in the repository and the registration is not, so a
+    clone that never ran `worktree create` carries the attributes, resolves
+    the name to nothing, and text-merges the generated trees without saying
+    a word about it.
+    """
+    monkeypatch.chdir(repo)
+    worktree.register_merge_driver()
+    assert worktree.MergeDriver().satisfied()
+
+    drop_driver(repo)
+
+    assert not worktree.MergeDriver().satisfied()

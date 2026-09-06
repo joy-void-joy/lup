@@ -35,6 +35,7 @@ from lup.devtools.dev.boundaries import (
 )
 from lup.devtools.dev.branches import unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
+from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
@@ -514,6 +515,32 @@ def scan_reports(
                     ]
                 ),
                 *(f"  {state.describe()}" for state in hooks.orphaned),
+            ],
+        )
+
+        # Asked here for the reason the guards above are: git resolves a driver
+        # name from config alone, which no repository can ship, so a checkout
+        # that never ran `worktree create` reads the declaration, finds nothing
+        # registered, and text-merges the generated trees without a word. What
+        # that costs is the compiled dispatcher: conflict markers in a script
+        # the runtime executes leave a boundary refusing every call in the
+        # session, the merge abort included.
+        registered = MergeDriver().satisfied()
+        yield CheckReport(
+            name="merge driver",
+            passed=registered,
+            lines=[
+                f"merge driver: ok ({OWNERSHIP_MERGE_DRIVER})"
+                if registered
+                else f"merge driver: FAIL ({OWNERSHIP_MERGE_DRIVER} is unregistered)",
+                *(
+                    []
+                    if registered
+                    else [
+                        "  the generated trees text-merge and can conflict",
+                        "  register it with `lup-devtools dev merge-driver`",
+                    ]
+                ),
             ],
         )
 
