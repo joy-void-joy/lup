@@ -230,6 +230,11 @@ def create_dev_app(
 
         Once per clone, and on the host: it is the one step that writes the
         shared config, and reads answer from either place until it has run.
+
+        Every worktree of the clone answers from the records afterwards, so
+        run it once each of them is at a version that reads them: a checkout
+        older than the records reads the config alone, and a branch it was
+        cut from is a fact it stops finding once that config is empty.
         """
         worktree.adopt_records()
 
