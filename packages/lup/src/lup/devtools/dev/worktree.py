@@ -16,6 +16,7 @@ from lup.devtools.layout import get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
 from lup.execution.shell import git
 from lup.devtools.utils import (
+    attributed_stderr,
     decode_stderr,
     format_table,
     refuse_blocked_config_writes,
@@ -128,6 +129,39 @@ def register_merge_driver() -> None:
     git("config", f"merge.{OWNERSHIP_MERGE_DRIVER}.driver", "true")
 
 
+def merge_driver_registered(root: Path | None = None) -> bool:
+    """Whether this clone can already resolve the driver `.gitattributes` names."""
+    return all(
+        git.out(
+            *records.at(root),
+            "config",
+            "--get",
+            f"merge.{OWNERSHIP_MERGE_DRIVER}.{setting}",
+            _ok_code=[0, 1],
+        )
+        for setting in ("name", "driver")
+    )
+
+
+def refuse_a_blocked_registration(root: Path | None = None) -> None:
+    """Stop before a merge-driver registration that cannot take its lock.
+
+    Registering the driver is the one config write left in making a worktree,
+    and it is a once-per-clone one: git resolves a driver name from config
+    alone, so no repository can ship it and the clone that first cut a
+    worktree registered it for every worktree after.
+
+    Which makes the refusal conditional on the write being outstanding. A
+    clone that already resolves the driver writes nothing here, and refusing
+    it regardless denied a worktree over a write nobody was going to make —
+    while a clone that has never registered still meets the diagnosis up
+    front rather than as `File exists` against a half-created worktree.
+    """
+    if merge_driver_registered(root):
+        return
+    refuse_blocked_config_writes(root)
+
+
 class SetupStep(BaseModel, ABC, frozen=True):
     """One part of making a worktree usable, checkable on its own.
 
@@ -172,15 +206,7 @@ class MergeDriver(SetupStep, frozen=True):
         return f"the {OWNERSHIP_MERGE_DRIVER} merge driver"
 
     def satisfied(self) -> bool:
-        return all(
-            git.out(
-                "config",
-                "--get",
-                f"merge.{OWNERSHIP_MERGE_DRIVER}.{setting}",
-                _ok_code=[0, 1],
-            )
-            for setting in ("name", "driver")
-        )
+        return merge_driver_registered()
 
     def run(self) -> None:
         register_merge_driver()
@@ -458,10 +484,7 @@ def create(
     is given its remote by the first push that carries something, which is
     `dev pr push` and which the pre-push guard judges.
     """
-    # The two merge-driver settings are the only config writes left here, and
-    # a confinement that owns `config.lock` is said once up front rather than
-    # discovered as `File exists` against a half-created worktree.
-    refuse_blocked_config_writes()
+    refuse_a_blocked_registration()
     current_dir = Path.cwd()
 
     tree_dir = get_tree_dir()
@@ -632,10 +655,16 @@ def list_worktrees() -> None:
 
 
 def remove(name: str, force: bool) -> None:
-    """Remove a git worktree."""
-    # `worktree remove` rewrites the admin directory the same lock guards, so
-    # it fails exactly as `create` does and gets the same diagnosis.
-    refuse_blocked_config_writes()
+    """Remove a git worktree.
+
+    Nothing here writes git config: the removal rewrites the entry under the
+    shared directory's ``worktrees/`` and touches ``config`` at no point. A
+    config-lock diagnosis up front therefore refused a removal that would
+    have worked wherever the shared config alone was held, which is the
+    arrangement a session that cannot configure the host's git runs under.
+    Where the shared directory as a whole is unwritable, git says so and the
+    failure is attributed to the mount that caused it.
+    """
     path = Path(name)
 
     if not path.is_absolute():
@@ -653,7 +682,7 @@ def remove(name: str, force: bool) -> None:
         git(*args)
         typer.echo(f"Removed worktree: {path}")
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Error removing worktree: {decode_stderr(e)}", err=True)
+        typer.echo(f"Error removing worktree: {attributed_stderr(e)}", err=True)
         if not force:
             typer.echo("Use --force to remove even if dirty")
         raise typer.Exit(1)
