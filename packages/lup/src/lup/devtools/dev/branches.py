@@ -1574,21 +1574,59 @@ def base_branch(branch: str | None, as_json: bool) -> None:
 
 
 COMMIT_PREFIX_LABELS = {
-    "feat": "Added",
-    "fix": "Fixed",
-    "refactor": "Refactored",
-    "docs": "Updated docs for",
-    "test": "Added tests for",
-    "chore": "Updated",
-    "meta": "Updated",
-    "data": "Added data for",
+    "feat": "Features",
+    "fix": "Fixes",
+    "refactor": "Refactoring",
+    "docs": "Documentation",
+    "test": "Tests",
+    "chore": "Chores",
+    "meta": "Meta",
+    "data": "Data",
 }
-"""How a PR body reads each commit type aloud, for a project that uses these.
+"""How a PR body heads the group of commits sharing one type.
+
+A heading over the subjects rather than a sentence opener joined to one. A
+commit subject is written in whatever voice the project writes them in, and
+a past-tense opener in front of a declarative one — "Fixed say that a
+sign-in ends on an error" — is ungrammatical for every commit written that
+way, which in a project writing them that way is all of them. A noun phrase
+stands over any of them.
 
 The types are one convention among several, and the English is a second
 choice on top: a project spelling either differently passes its own table
 rather than reading someone else's vocabulary back in its summaries.
 """
+
+
+def names_a_test(
+    path: str,
+    directories: tuple[str, ...] = ("test", "tests", "spec", "specs"),
+    affixes: tuple[str, ...] = ("test_", "_test", ".test", "spec_", "_spec", ".spec"),
+) -> bool:
+    """Whether a changed path names a test rather than what a test covers.
+
+    Read off the path, because what a project calls its tests is a naming
+    convention and a diff records no more than the names. Both halves are
+    defaults, so a project spelling either differently passes its own.
+    """
+    posix = PurePosixPath(path)
+    stem = posix.stem.lower()
+    return any(part.lower() in directories for part in posix.parent.parts) or any(
+        stem.startswith(affix) or stem.endswith(affix) for affix in affixes
+    )
+
+
+def tests_touched(base: str) -> list[str]:
+    """The test files this branch's diff touches, sorted, possibly none.
+
+    What a branch's own tests are is derivable from its diff, so the test
+    plan is derived. The alternative a fixed checklist offers is a sentence
+    nobody wrote about a change nobody read, which a reviewer meets as a
+    claim that a plan exists — and where a branch touches no test at all,
+    saying nothing is the honest form of that.
+    """
+    changed = git.lines("diff", "--name-only", f"{base}...HEAD", _ok_code=[0])
+    return sorted(path for path in changed if path and names_a_test(path))
 
 
 def pr_body(
@@ -1621,17 +1659,22 @@ def pr_body(
         prefix = head.partition(":")[0].lower()  # lup: ignore[string-split] — type
         groups[prefix].append(message)
 
-    def summarize(prefix: str, messages: list[str]) -> str:
-        fallback = prefix.capitalize()
-        label = labels.get(prefix, fallback)
-        first = messages[0].partition(":")[2]  # lup: ignore[string-split] — log line
-        desc = (first or messages[0]).lstrip()
-        more = f" (+{len(messages) - 1} more)" if len(messages) > 1 else ""
-        return f"- {label} {desc}{more}"
+    def summarize(prefix: str, messages: list[str]) -> list[str]:
+        """One heading and one bullet per commit, with none of them folded."""
+        heading = labels.get(prefix, prefix.capitalize())
+        subjects = [
+            # lup: ignore[string-split] — commit subject after its type
+            (message.partition(":")[2] or message).strip()
+            for message in messages
+        ]
+        return [f"**{heading}**", *(f"- {subject}" for subject in subjects), ""]
 
-    summary_lines = [summarize(p, msgs) for p, msgs in groups.items()]
-    body_parts = ["## Summary", *summary_lines, "", "## Commits", *log_lines]
-    body_parts.extend(["", "## Test plan", "- [ ] Verify changes work as expected"])
+    summary_lines = [
+        line for prefix, msgs in groups.items() for line in summarize(prefix, msgs)
+    ]
+    body_parts = ["## Summary", "", *summary_lines, "## Commits", *log_lines]
+    if tests := tests_touched(base):
+        body_parts.extend(["", "## Test plan", *(f"- [ ] `{path}`" for path in tests)])
 
     typer.echo("\n".join(body_parts))
 

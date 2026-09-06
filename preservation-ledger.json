@@ -1,5 +1,5 @@
 {
-  "revision": "bdb9ba9e4d087b68691cc4b61333f411378ce01d",
+  "revision": "91764f60059b793607bec677b4443785c2b240ca",
   "roots": [
     "lup",
     "lup_template"
@@ -1088,6 +1088,8 @@
         "branch_status.row",
         "base_branch",
         "COMMIT_PREFIX_LABELS",
+        "names_a_test",
+        "tests_touched",
         "pr_body",
         "pr_body.summarize",
         "survey",
