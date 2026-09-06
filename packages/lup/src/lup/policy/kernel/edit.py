@@ -816,13 +816,15 @@ def spent_notes(
     was_open: list[LocatedNote],
     is_open: list[LocatedNote],
     python_source: bool,
-) -> str | None:
-    """The first note this edit dropped while its subject stands, or `None`.
+) -> list[str]:
+    """Every note this edit dropped while its subject stands.
 
     A note leaves a file honestly three ways: it is still open under the same
     words, it was converted into a claim this edit added, or the code it
     annotated went with it. Anything else is feedback stripped off code that
-    is still there, which is the one act the gate exists to refuse.
+    is still there, which is the one act the gate exists to refuse. All of
+    them are returned rather than the first, because the denial quotes what
+    was lost and a reader repairing the edit repairs it once.
 
     Survival is asked of the words, not of each copy of them. A file holding
     the same note twice holds one piece of feedback written in two places, so
@@ -835,6 +837,7 @@ def spent_notes(
     survived = note_bodies(is_open) + added_claims
     lines = previous.splitlines()
     removed = deleted_lines(previous, updated)
+    lost: list[str] = []
     for note in was_open:
         body = note_body(note["text"])
         if survived[body] > 0:
@@ -848,8 +851,8 @@ def spent_notes(
             else note["line"] in removed and subject in removed
         )
         if not spent:
-            return note["text"]
-    return None
+            lost.append(note["text"])
+    return lost
 
 
 class MarkerVerdict(TypedDict):
@@ -916,13 +919,20 @@ def marker_decision(
     ):
         return None
     lost = spent_notes(previous, updated, was_open, is_open, python_source)
-    if lost is not None:
+    if lost:
+        spelled = "\n".join(lost)
+        removes = (
+            "this edit removes inline review feedback that still has a subject"
+            if len(lost) == 1
+            else f"this edit removes {len(lost)} pieces of inline review"
+            " feedback that still have a subject"
+        )
         return MarkerVerdict(
             gate="feedback-removed",
             decision=KernelDecision(
                 "deny",
-                "this edit removes inline review feedback that still has a "
-                f"subject — {lost}. Resolving a note means replacing `# lup:` "
+                f"{removes} — {spelled}\n"
+                "Resolving a note means replacing `# lup:` "
                 "with `# lup: solved:` and keeping its text, so the claim can be "
                 "checked against what was asked; deleting it leaves nothing to "
                 "check. Where the note was mistaken rather than answered, "
@@ -934,21 +944,42 @@ def marker_decision(
     # retires nothing, because the review pass still finds the claim standing
     # and can still check it against what was asked.
     surviving_claims = note_bodies(claimed_now)
-    if any(surviving_claims[note_body(note["text"])] == 0 for note in claimed_before):
+    dropped_claims = [
+        note["text"]
+        for note in claimed_before
+        if surviving_claims[note_body(note["text"])] == 0
+    ]
+    if dropped_claims:
+        spelled = "\n".join(dict.fromkeys(dropped_claims))
+        claims = (
+            "a `# lup: solved:` claim"
+            if len(dropped_claims) == 1
+            else (f"{len(dropped_claims)} `# lup: solved:` claims")
+        )
         return MarkerVerdict(
             gate="claim-removed",
             decision=KernelDecision(
                 "deny",
-                "this edit removes a `# lup: solved:` claim. Only the review pass "
+                f"this edit removes {claims} — {spelled}\n"
+                "Only the review pass "
                 "retires one — it either confirms the claim and removes the note "
                 "(`dev comments --retire file:line`), or restores it to open "
                 "feedback (`dev comments --restore file:line`)",
             ),
         )
-    if note_bodies(is_open) - note_bodies(was_open):
+    added_bodies = note_bodies(is_open) - note_bodies(was_open)
+    if added_bodies:
+        added = [
+            f"line {note['line']}: {note['text']}"
+            for note in is_open
+            if added_bodies[note_body(note["text"])] > 0
+        ]
         return MarkerVerdict(
             gate="feedback-added",
-            decision=KernelDecision("ask", "edit adds inline review feedback"),
+            decision=KernelDecision(
+                "ask",
+                "edit adds inline review feedback — " + "; ".join(added),
+            ),
         )
     return None
 
@@ -3026,6 +3057,22 @@ def path_rule_matches(path: str, path_exists: bool, row: PathRuleRow) -> bool:
             raise ValueError(f"invalid path rule kind {kind!r}")
 
 
+def protected_path_reason(path: str, matched: PathRuleRow) -> str:
+    """One protected-path question, naming the path and the rule it tripped.
+
+    The row's reason states the category; the path and the pattern are what
+    the evaluator matched on, and a reviewer answering from the reason alone
+    needs all three to know what they are approving. Beside
+    :func:`path_rule_matches` so the words a question uses and the match that
+    raised it come from one module, for the edit gate and the shell path
+    alike.
+    """
+    return (
+        f"{path} matches the protected-path rule {matched['value']!r}:"
+        f" {matched['reason']}"
+    )
+
+
 PACKAGE_MARKER_FILES = ("__init__.py",)
 """Files whose name is their whole content, when they carry nothing else.
 
@@ -3317,7 +3364,11 @@ def decide_edit(
         # person the declaration names.
         return judged(
             "protected-path",
-            KernelDecision("ask", protected["reason"], purpose="quality_review"),
+            KernelDecision(
+                "ask",
+                protected_path_reason(path, protected),
+                purpose="quality_review",
+            ),
         )
     # Feedback is feedback wherever it is left, so this gate follows the file
     # rather than the conventions: a note on a test still names work somebody
@@ -3359,11 +3410,14 @@ def decide_edit(
         # reads, which is what a supervisor reads. The classification is
         # semantic and independent of which native call carried the write —
         # a whole file arriving at once is what makes it a checkpoint.
+        count = len(updated.splitlines())
+        arriving = "1 line" if count == 1 else f"{count} lines"
         return judged(
             "full-write",
             KernelDecision(
                 "ask",
-                "full-file writes require approval",
+                f"full-file writes require approval — {path} arrives whole,"
+                f" {arriving} at once",
                 purpose="quality_review",
                 reviewer="supervisor_allowed",
             ),

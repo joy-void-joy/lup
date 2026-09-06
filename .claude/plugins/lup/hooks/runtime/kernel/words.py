@@ -9,7 +9,7 @@ from typing import TypedDict
 
 from .archives import archive_targets, archive_write
 from .decision import CheckpointRequirement, KernelDecision, SUBSTITUTION_SENTINEL
-from .edit import path_rule_matches
+from .edit import path_rule_matches, protected_path_reason
 from .roles import (
     GENERATED_PLUGIN_REFUSAL,
     is_generated_plugin_target,
@@ -19,10 +19,14 @@ from .rows import PathRoleRow, PathRuleRow
 
 
 class EffectiveCommand(TypedDict):
-    """The words the shell finally executes, and whether a binding was dangerous."""
+    """The words the shell finally executes, and the dangerous names it binds.
+
+    The names rather than a flag, because the verdict they earn has to say
+    which variable tripped it: the reviewer reads the reason and nothing else.
+    """
 
     words: list[str]
-    dangerous: bool
+    dangerous: list[str]
 
 
 class VerbOperands(TypedDict):
@@ -109,13 +113,14 @@ def effective_command(segment: list[str]) -> EffectiveCommand:
     ``env`` with nothing to wrap is itself the command, and ``command -v`` asks
     where a program is rather than running one, so it is the command too.
     """
-    dangerous = False
+    dangerous: list[str] = []
     position = 0
     while position < len(segment):
         word = segment[position]
         name, separator, _value = word.partition("=")
         if separator and name.isidentifier():
-            dangerous = dangerous or dangerous_env_name(name)
+            if dangerous_env_name(name) and name not in dangerous:
+                dangerous.append(name)
             position += 1
             continue
         executable = posixpath.basename(word)
@@ -702,6 +707,13 @@ def asks_before_removing_a_directory(
     # the fact worth stating, and it is the same fact `rm` states in stronger
     # words.
     taken = "deleting" if executable == "rm" else "moving"
+    spelled = ", ".join(named)
+    directory = (
+        f"the whole directories {spelled}"
+        if len(named) > 1
+        else f"the whole directory {spelled}"
+    )
+    what = "they hold" if len(named) > 1 else "it holds"
     # Read off the targets rather than asserted, which is the same correction
     # :func:`verb_loss_scope` makes for the row this sits beside and for the
     # same measured reason: a directory outside the checkout is one no capture
@@ -709,8 +721,8 @@ def asks_before_removing_a_directory(
     # the paths settled `rm -rf /etc/ssl` as "captured and restorable".
     return KernelDecision(
         "ask",
-        f"{taken} a whole directory requires approval: nothing in the command"
-        " bounds what it holds",
+        f"{taken} {directory} requires approval: nothing in the command"
+        f" bounds what {what}",
         checkpoint=(
             "unrecoverable"
             if any(
@@ -799,7 +811,7 @@ def protected_write_target(
             None,
         )
         if matched is not None:
-            return KernelDecision("ask", matched["reason"])
+            return KernelDecision("ask", protected_path_reason(word, matched))
     return None
 
 
@@ -951,6 +963,24 @@ def dangerous_env_name(name: str) -> bool:
     """Recognize an environment variable that can redirect a command's execution."""
     return name in DANGEROUS_ENV_NAMES or any(
         name.startswith(prefix) for prefix in DANGEROUS_ENV_PREFIXES
+    )
+
+
+def dangerous_assignment_reason(verb: str, names: list[str]) -> str:
+    """The question a security-sensitive binding earns, naming every name it binds.
+
+    The variable is the fact the classifier matched on, so the reason says it:
+    a reviewer reads this sentence and nothing else, and "an environment
+    assignment" told them only that some sentence could have been printed for
+    any call. Every name is listed rather than the first, since approving is
+    one decision over the whole segment.
+    """
+    spelled = ", ".join(names)
+    variables = f"variables {spelled}" if len(names) > 1 else f"variable {spelled}"
+    subject = "they" if len(names) > 1 else "it"
+    return (
+        f"{verb} the security-sensitive {variables} requires approval"
+        f" — {subject} can redirect how commands execute"
     )
 
 

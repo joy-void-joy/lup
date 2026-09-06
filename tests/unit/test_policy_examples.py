@@ -146,4 +146,6 @@ async def test_shell_example_asks_before_a_destructive_command() -> None:
         semantic_policy_shell.session_config(), "Bash", {"command": "rm -rf build"}
     )
 
-    assert decision == permission("ask", "deleting files requires approval")
+    assert decision == permission(
+        "ask", "deleting files requires approval — `rm -rf build`"
+    )

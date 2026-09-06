@@ -28,6 +28,7 @@ from .words import (
     INTERPRETERS,
     asks_before_removing_a_directory,
     command_words,
+    dangerous_assignment_reason,
     dangerous_env_name,
     effective_command,
     is_help_probe,
@@ -242,11 +243,14 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
         ):
             return KernelDecision("allow", "native-managed skill script")
         return KernelDecision(
-            "deny", "bare interpreters and inline code are not allowed"
+            "deny", f"{executable}: bare interpreters and inline code are not allowed"
         )
     if executable == "git" and any("ext::" in word for word in words):
+        transport = next(word for word in words if "ext::" in word)
         return KernelDecision(
-            "ask", "the git ext transport can execute commands — requires approval"
+            "ask",
+            f"the git ext transport in {transport!r} can execute commands"
+            " — requires approval",
         )
     if executable == "git":
         recognized = (
@@ -315,7 +319,7 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
         return decide_awk_words(words)
     if executable == "uvx":
         if len(words) > 1 and posixpath.basename(words[1]) in INTERPRETERS:
-            return KernelDecision("deny", "inline code is not allowed")
+            return KernelDecision("deny", f"uvx {words[1]}: inline code is not allowed")
         return unjudged("uvx command is not classified")
     if executable == "uv" and len(words) > 1:
         return decide_uv(
@@ -355,7 +359,7 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     dangerous = effective["dangerous"]
     if dangerous:
         return KernelDecision(
-            "ask", "a security-sensitive environment assignment requires approval"
+            "ask", dangerous_assignment_reason("assigning", dangerous)
         )
     if not words:
         return unjudged("shell segment has no command")
@@ -545,11 +549,10 @@ def read_bindings(
         if not word.isidentifier():
             return unjudged("read target is not a plain variable")
         names.append(word)
+    dangerous = [name for name in names or ["REPLY"] if dangerous_env_name(name)]
+    if dangerous:
+        return KernelDecision("ask", dangerous_assignment_reason("binding", dangerous))
     for name in names or ["REPLY"]:
-        if dangerous_env_name(name):
-            return KernelDecision(
-                "ask", "binding a security-sensitive variable requires approval"
-            )
         bindings = bind_name(bindings, name, None)
     return bindings
 
@@ -601,10 +604,7 @@ def decide_for_body(
     """
     if dangerous_env_name(name):
         return [
-            KernelDecision(
-                "ask",
-                "a security-sensitive environment assignment requires approval",
-            )
+            KernelDecision("ask", dangerous_assignment_reason("looping over", [name]))
         ]
     if len(loop_words) > 16:
         return [unjudged("loop word list is too long to instantiate")]
@@ -855,11 +855,13 @@ def decide_segment_list(
             continue
         assignments = pure_assignment_names(segment)
         if assignments is not None:
-            if any(dangerous_env_name(pair["name"]) for pair in assignments):
+            dangerous = [
+                pair["name"] for pair in assignments if dangerous_env_name(pair["name"])
+            ]
+            if dangerous:
                 decisions.append(
                     KernelDecision(
-                        "ask",
-                        "a security-sensitive environment assignment requires approval",
+                        "ask", dangerous_assignment_reason("assigning", dangerous)
                     )
                 )
                 index += 1

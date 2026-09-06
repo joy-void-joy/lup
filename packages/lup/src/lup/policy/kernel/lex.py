@@ -289,8 +289,9 @@ def read_heredoc_bodies(
             if "`" in body or "$(" in body:
                 return KernelDecision(
                     "deny",
-                    "an unquoted heredoc substitutes commands — quote the"
-                    " delimiter (<<'EOF') to make the body literal",
+                    f"the unquoted heredoc <<{delimiter} substitutes commands"
+                    f" — quote the delimiter (<<'{delimiter}') to make the"
+                    " body literal",
                 )
             continue
         # A trailing newline per line, because that is what the shell feeds:
@@ -417,8 +418,12 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             position = substitution["end"]
             continue
         if character == ">" and position + 1 < length and command[position + 1] == "(":
+            written = read_process_substitution(command, position + 2)["text"]
+            substitution = f">({written})" if written is not None else ">(...)"
             return KernelDecision(
-                "ask", "writing process substitution is never auto-allowed"
+                "ask",
+                f"writing into the process substitution {substitution} requires"
+                " approval — the receiving command runs unjudged",
             )
         if character == "<" and position + 1 < length and command[position + 1] == "(":
             if started:
@@ -1064,7 +1069,11 @@ def resolve_redirection(
     target = index + 1
     if target >= len(tokens) or tokens[target].kind != "word":
         return Redirection(
-            decision=KernelDecision("ask", "file redirection is never auto-allowed"),
+            decision=KernelDecision(
+                "ask",
+                f"file redirection {operator} requires approval — it names no"
+                " target word, so where the write lands cannot be judged",
+            ),
             resume=index + 1,
         )
     if "<" in operator:
@@ -1092,7 +1101,9 @@ def resolve_redirection(
         return Redirection(
             decision=KernelDecision(
                 "ask",
-                "file redirection is never auto-allowed",
+                f"file redirection to {spelled} requires approval — the"
+                " expansion spells no path, so where the write lands cannot"
+                " be judged",
                 checkpoint="targeted",
                 purpose="unrecovered_local_mutation",
             ),
@@ -1119,10 +1130,14 @@ def resolve_redirection(
     )
     if decided == "allow":
         return Redirection(decision=None, resume=target + 1)
+    written = "overwrites" if existing else "creates"
+    reason = f"the redirection {written} {spelled}, a {scope} path"
+    if decided == "ask":
+        reason += " — requires approval"
     return Redirection(
         decision=KernelDecision(
             decided,
-            "file redirection is never auto-allowed",
+            reason,
             checkpoint=write_checkpoint(scope),
             purpose="unrecovered_local_mutation",
         ),

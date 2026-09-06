@@ -35,6 +35,19 @@ def url_matches_scope(
     )
 
 
+def scope_text(scope: UrlScopeRow) -> str:
+    """One declared scope, spelled the way a URL it would admit is spelled.
+
+    Rendered into the reason a fetch outside every scope carries, so the
+    reviewer reads what was checked without opening the declaration: the URL
+    on one side of the sentence and each scope it missed on the other is the
+    whole comparison the classifier just made.
+    """
+    host = ("*." if scope["include_subdomains"] else "") + scope["host"]
+    port = "" if scope["any_port"] or scope["port"] is None else f":{scope['port']}"
+    return f"{scope['scheme']}://{host}{port}{scope['path_prefix']}"
+
+
 def decide_fetch(
     url: str,
     allowed_scopes: list[UrlScopeRow],
@@ -65,10 +78,15 @@ def decide_fetch(
         parsed = urllib.parse.urlsplit(url)
         hostname = parsed.hostname
         port = parsed.port
-    except ValueError:
-        return KernelDecision("ask", "malformed URL requires approval")
+    except ValueError as error:
+        return KernelDecision(
+            "ask", f"the URL {url!r} does not parse ({error}) — requires approval"
+        )
     if not parsed.scheme or hostname is None:
-        return KernelDecision("ask", "malformed URL requires approval")
+        missing = "scheme" if not parsed.scheme else "host"
+        return KernelDecision(
+            "ask", f"the URL {url!r} names no {missing} — requires approval"
+        )
     denied = next(
         (
             scope
@@ -89,7 +107,9 @@ def decide_fetch(
     )
     if allowed is not None:
         return KernelDecision("allow", allowed["reason"])
-    outside = "URL is outside the declared documentation scopes"
+    checked = ", ".join(scope_text(scope) for scope in allowed_scopes)
+    against = f" ({checked})" if checked else " (none are declared)"
+    outside = f"{url} is outside the declared documentation scopes{against}"
     if unjudged_ambient == "defer":
         return KernelDecision("defer", outside, abstention="provider_native")
     return KernelDecision("ask", outside)

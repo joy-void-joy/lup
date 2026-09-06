@@ -80,8 +80,17 @@ def row_verdict(
     reason: str,
     checkpoint: CheckpointRequirement | None = None,
     effects: list[EffectRow] | None = None,
+    arguments: list[str] | None = None,
 ) -> KernelDecision:
     """One row's verdict, carrying every fact the row states about itself.
+
+    ``arguments`` are the operand words the row was matched against, and an
+    ask or a deny appends the invocation they spell to the reason. A row's
+    sentence states the category — "deleting files requires approval" — and
+    the reviewer reads the reason and nothing else, so the words that tripped
+    the row travel with it: in a compound command they are what says *which*
+    segment the question is about. Composed here once rather than templated
+    into each of the hundred-odd rows that ask.
 
     The purpose comes from the effect that decided, because the effect is the
     thing being weighed. It used to be inferred from two other columns -- an
@@ -113,6 +122,9 @@ def row_verdict(
     settled = row["checkpoint"] if checkpoint is None else checkpoint
     declared = row["effects"] if effects is None else effects
     purpose = purpose_of(declared, EffectEvidence()) if effect == "ask" else None
+    if arguments is not None and effect in ("ask", "deny"):
+        prefix = [row["command"]] + ([row["subcommand"]] if row["subcommand"] else [])
+        reason = f"{reason} — `{' '.join([*prefix, *arguments])}`"
     return KernelDecision(
         effect,
         reason,
@@ -210,7 +222,12 @@ def flag_write_verdict(
     """
     targets = flag_write_targets([row["command"], *arguments], row["write_flags"])
     if not targets:
-        return row_verdict(row, "ask", row["reason"] or "this flag writes a file")
+        return row_verdict(
+            row,
+            "ask",
+            row["reason"] or "this flag writes a file",
+            arguments=arguments,
+        )
 
     def judged(target: str) -> WriteAnswer:
         """What one named path earns, beside the scope that earned it.
@@ -266,6 +283,7 @@ def flag_write_verdict(
         answered["effect"],
         row["reason"] or "this flag writes a file",
         write_checkpoint(answered["scope"]),
+        arguments=arguments,
     )
 
 
@@ -468,6 +486,7 @@ def apply_command_row(
                 "ask",
                 row["reason"] or f"{guarded} requires approval",
                 effects=[*row["effects"], *row["flag_effects"]],
+                arguments=arguments,
             )
         # After the ask-flags, so a command carrying both keeps the stronger
         # question: `sort --compress-program=x -o out.txt` runs a program
@@ -514,6 +533,7 @@ def apply_command_row(
                 row,
                 "ask",
                 row["reason"] or f"{carried[0]} would {carried[1]} a ref",
+                arguments=arguments,
             )
     # Read after every de-escalation above and before the row's own answer,
     # because it changes what the loss *is* rather than whether the row asks:
@@ -527,8 +547,9 @@ def apply_command_row(
             row["reason"],
             checkpoint=loss,
             effects=[declare("destroys_uncaptured", scope=loss)],
+            arguments=arguments,
         )
-    return row_verdict(row, stated, row["reason"])
+    return row_verdict(row, stated, row["reason"], arguments=arguments)
 
 
 class Subcommand(TypedDict):
@@ -1427,7 +1448,17 @@ def decide_uv(
         if run_command in ("-c", "-m", "--script") or (
             interpreted and (inline or not named)
         ):
-            return KernelDecision("deny", "inline code is not allowed")
+            if run_command in ("-c", "-m", "--script"):
+                subject = f"uv run {run_command}"
+            elif inline:
+                subject = f"uv run {run_command} {inline[0]}"
+            else:
+                subject = f"the bare interpreter uv run {run_command}"
+            return KernelDecision(
+                "deny",
+                f"{subject}: inline code is not allowed — a named script"
+                " file can be reviewed and run again",
+            )
         # Between the refusal above and the target's own verdict below, which
         # is where the lattice would put it anyway: a deny outranks an ask,
         # and an ask outranks whatever the target says about itself. These

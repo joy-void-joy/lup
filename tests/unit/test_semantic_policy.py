@@ -2971,7 +2971,9 @@ def test_a_creation_names_the_suppressions_it_arrives_carrying() -> None:
         "line 3 silences any-type: value: Any = 1  # lup: ignore[any-type]"
         in decision.reason
     )
-    assert policy.decide(plain).reason == "full-file writes require approval"
+    assert policy.decide(plain).reason == (
+        "full-file writes require approval — src/new.py arrives whole, 1 line at once"
+    )
 
 
 def test_a_creation_names_only_the_suppressions_that_silence_something() -> None:
