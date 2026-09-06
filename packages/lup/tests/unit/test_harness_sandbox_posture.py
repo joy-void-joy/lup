@@ -347,8 +347,18 @@ def test_the_image_carries_every_runtime_a_contained_launch_can_open() -> None:
     """
     installed = " ".join(item.requested() for item in Image().agent_clis)
 
-    assert "@anthropic-ai/claude-code@" in installed
-    assert "@openai/codex@" in installed
+    assert "@anthropic-ai/claude-code" in installed
+    assert "@openai/codex" in installed
+
+
+def test_the_declared_runtimes_leave_their_version_to_the_launch() -> None:
+    """An empty version is a per-launch resolution, not a declaration.
+
+    The launch pins each one to the registry's current release before
+    rendering, so the pin lives in the rendered Dockerfile rather than
+    here -- a version declared here would freeze it instead.
+    """
+    assert all(not item.version for item in Image().agent_clis)
 
 
 def test_a_client_and_the_engine_behind_it_are_read_separately() -> None:
