@@ -1,5 +1,5 @@
 {
-  "revision": "93ab1f777ad9984b7857f3f4b55353ccad4c2fef",
+  "revision": "07480ee210dd70a94974602fea030a45c9b4e63c",
   "roots": [
     "lup",
     "lup_template"
@@ -1195,6 +1195,7 @@
         "inline_notes_lines",
         "guidance_bytes",
         "budget_reports",
+        "roster_budget_report",
         "budget_report",
         "guidance_budget_report",
         "scaffold_budget_report",
@@ -3098,6 +3099,7 @@
         "DevProject.subapps",
         "DevProject.trackers",
         "DevProject.modules",
+        "DevProject.declined_guidance",
         "DevProject.coverage",
         "DevProject.roots",
         "DevProject.catalog",
@@ -13870,6 +13872,7 @@
         "NATIVE_RUNTIMES",
         "application_roots",
         "declared_coverage",
+        "declined_guidance",
         "dev_project",
         "portable_harness"
       ]

@@ -20,6 +20,7 @@ from lup.harness.coverage import coverage_gaps
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     TEMPLATE_GUIDANCE_HEADROOM,
+    GuidanceSection,
     HookSet,
     document_byte_size,
 )
@@ -453,17 +454,44 @@ def guidance_bytes(compositions: list[NativeHarnessComposition]) -> int:
     return max(sizes)
 
 
-def budget_reports(used: int, scaffold: bool) -> list[CheckReport]:
+def budget_reports(
+    used: int, scaffold: bool, declined: list[GuidanceSection] | None = None
+) -> list[CheckReport]:
     """Every verdict the guidance's weight earns, given what this repository is.
 
     The runtime ceiling always; the scaffold's share of it only while this
     repository is still the template, because only then is the document one
-    somebody else inherits and only then is there a reservation to keep.
+    somebody else inherits and only then is there a reservation to keep. The
+    all-on row whenever there is prose this tree declines, because that is the
+    only condition under which the number differs from the one above it.
     """
     return [
         guidance_budget_report(used),
         *([scaffold_budget_report(used)] if scaffold else []),
+        *([roster_budget_report(used, declined)] if declined else []),
     ]
+
+
+def roster_budget_report(used: int, declined: list[GuidanceSection]) -> CheckReport:
+    """Whether a project taking every module could load every module's prose.
+
+    The row the two above it cannot stand in for. Both weigh the document this
+    tree renders, and this tree is the lightest interesting composition of its
+    own roster — a scaffold takes every module and loads the prose of only the
+    ones it offers. So a module off by default can grow its section without
+    either row moving, and the project that turns it on finds a document the
+    runtime truncates.
+
+    Measured as the tree's own weight plus the sections it declines, rather
+    than by recomposing: the compiled artifact carries a banner the parts do
+    not, and a recomposed measurement reads light by exactly that much.
+    """
+    return budget_report(
+        "roster budget",
+        used + sum(document_byte_size(section.text) for section in declined),
+        GUIDANCE_BYTE_BUDGET,
+        f"every module's prose loaded, {len(declined)} section(s) this tree declines",
+    )
 
 
 def budget_report(name: str, used: int, ceiling: int, note: str) -> CheckReport:
@@ -856,7 +884,9 @@ def scan_reports(
             else ["roster parity: ok"],
         )
 
-        yield from budget_reports(guidance_bytes(compositions), scaffold)
+        yield from budget_reports(
+            guidance_bytes(compositions), scaffold, project.declined_guidance
+        )
 
         # advisory — the environment is the operator's arrangement rather than
         # this branch's, so a borrowed one is worth reading and not worth

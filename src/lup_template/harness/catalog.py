@@ -19,6 +19,7 @@ from pathlib import Path
 from pydantic import AnyHttpUrl
 
 from lup.harness.models import (
+    GuidanceSection,
     Harness,
     HookPathRole,
     HookSandbox,
@@ -50,6 +51,7 @@ from lup_template.devtools.subapps import APPLICATION_ROSTER
 from lup_template.harness.content.catalog import (
     AGENTS,
     GUIDANCE,
+    GUIDANCE_SECTIONS,
     LAYOUT,
     MODULE_SELECTION,
     SKILLS,
@@ -314,6 +316,33 @@ def declared_coverage() -> ModuleCoverage:
     )
 
 
+def declined_guidance() -> list[GuidanceSection]:
+    """The prose this repository's modules offer that its own document omits.
+
+    Every section any module has, less the ones this tree renders. That is the
+    distance between what this repository pays and what bounds an adopter: it
+    takes every module it ships and loads the prose of only the ones it offers,
+    so a module off by default can grow a section that no row weighing this
+    tree would ever notice.
+
+    Each module's own sections *with this project's overrides applied* and its
+    ``loads_guidance`` answer ignored, because those are two different silences
+    and only one of them is being asked about here. A module whose prose the
+    project declined is emptied by the time the selection is through with it,
+    and emptied along with it is whatever this project wrote about that
+    subject — which is prose an adopter turning the module on would carry.
+    """
+    loaded = {section.id for section in GUIDANCE_SECTIONS}
+    return [
+        section
+        for entry in entries()
+        for section in MODULE_SELECTION.adoption(entry.spec.id).guidance.over(
+            entry.build().guidance
+        )
+        if section.id not in loaded
+    ]
+
+
 def dev_project() -> DevProject:
     """What this project tells the shared development tooling about itself.
 
@@ -357,6 +386,7 @@ def dev_project() -> DevProject:
         ],
         modules=MODULE_SELECTION,
         coverage=declared_coverage(),
+        declined_guidance=declined_guidance(),
         path_roles=declared_role_rows(list(hooks.path_roles)),
         # This file: what this repository settled about itself is written
         # here, so `dev seams` reads and edits it rather than looking
