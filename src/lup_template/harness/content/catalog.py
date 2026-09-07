@@ -75,18 +75,24 @@ PROJECT_SKILLS = project_skills(LAYOUT)
 PROJECT_AGENTS: list[models.Agent] = []
 """No agent here is about being a template; the whole roster is the library's."""
 
-RETIRED = models.ContentSelection()
-"""Which of lup's own skills and agents this repository does not ship.
-
-Empty, because lup authors them: a template retiring its own declaration
-should delete it rather than carry one it declines to ship. The seat is here
-so a project adopting this scaffold states its delta in one line instead of
-restating the roster it inherits — and so `dev check` can name what it
-declined, which a rewritten list could never surface."""
-
-CONTENT = (
-    library_content(LAYOUT).selected(RETIRED).extended(PROJECT_SKILLS, PROJECT_AGENTS)
+CONTENT_SELECTION = models.ContentSelection(
+    skills=PROJECT_SKILLS, agents=PROJECT_AGENTS
 )
+"""What this repository changed about the roster lup ships.
+
+``retired`` is empty, because lup authors those declarations: a template
+retiring its own should delete it rather than carry one it declines to ship.
+The seat is here so a project adopting this scaffold states its delta in one
+line instead of restating the roster it inherits — and so `dev check` can name
+what it declined, which a rewritten list could never surface.
+
+Its own skills arrive as overrides rather than as a second list appended
+afterwards. Nothing here shares an id with a library declaration today, so the
+resolved roster is the same one either shape produces; what changes is that a
+project which *does* want to replace one says so by declaring it, in the place
+it would have added it anyway."""
+
+CONTENT = library_content(LAYOUT).selected(CONTENT_SELECTION)
 """Everything this repository's plugin ships, inherited half first."""
 
 SKILLS = CONTENT.skills

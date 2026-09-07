@@ -25,10 +25,25 @@ from lup.devtools.roster import (
     DevtoolsDeclarations,
 )
 from lup.devtools.subapps import SubApp, SubAppSelection, subapp
+import lup.harness.models as models
 from lup.harness.models import ContentSelection
 from lup.workspace.paths import project_root
 from lup_template.harness.content.catalog import project_skills
 from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION, SUBAPP_SPECS
+
+SKILL_ADDED = models.Skill(
+    id="skill.worked-example",
+    name="worked-example",
+    description="A skill no library ships, for the additive half of the algebra.",
+    prompt=models.PromptDocument(
+        source=__name__, parts=[models.TextPart(text="Do the worked example.")]
+    ),
+)
+"""One declaration a project has and the library does not.
+
+Built here rather than borrowed from either roster because what it exercises
+is arrival: a skill taken from the library's own list would resolve as a
+replacement of itself and prove nothing about the additive half."""
 
 LIBRARY_CONTENT = library_content(ApplicationLayout(package="worked_example"))
 """The whole library roster, under a package name that is nobody's real one.
@@ -116,10 +131,48 @@ def test_selecting_nothing_ships_every_declaration_the_library_has() -> None:
     assert whole == LIBRARY_CONTENT
 
 
-def test_extending_keeps_the_inherited_half_first() -> None:
-    extended = LIBRARY_CONTENT.selected(ContentSelection()).extended([], [])
+def test_a_declared_skill_follows_the_inherited_half() -> None:
+    """Additive after subtractive, which is what makes the order readable."""
+    added = SKILL_ADDED
+    extended = LIBRARY_CONTENT.selected(ContentSelection(skills=[added]))
 
-    assert extended.skills == LIBRARY_CONTENT.skills
+    assert extended.skills == [*LIBRARY_CONTENT.skills, added]
+
+
+def test_a_declared_skill_replaces_the_library_one_of_its_id_in_place() -> None:
+    """The capability a retire-then-re-add could not express.
+
+    Two declarations under one name is the ambiguity the algebra exists to
+    remove: whichever a walk reached first would be the one that shipped, and
+    which that is would depend on the order a composition happened to build.
+    So a project's own declaration takes the library's seat rather than
+    following it, and the roster is one shorter than a concatenation.
+    """
+    mine = SKILL_ADDED.model_copy(update={"id": "skill.commit", "name": "commit"})
+
+    resolved = LIBRARY_CONTENT.selected(ContentSelection(skills=[mine]))
+
+    assert len(resolved.skills) == len(LIBRARY_CONTENT.skills)
+    assert [skill for skill in resolved.skills if skill.id == "skill.commit"] == [mine]
+
+
+def test_the_older_retire_then_re_add_idiom_still_ships_the_projects_own() -> None:
+    """``retired`` names the library's declarations, never the project's own.
+
+    Before overrides existed, replacing a skill meant retiring the id and
+    adding a whole declaration back — and a project that wrote it that way
+    should get the same roster afterwards, not an empty seat. So the two
+    halves read in one direction: the retirement takes the library's out, the
+    declaration puts the project's in, and a project that no longer wants the
+    id at all deletes its own declaration rather than retiring around it.
+    """
+    mine = SKILL_ADDED.model_copy(update={"id": "skill.commit", "name": "commit"})
+
+    resolved = LIBRARY_CONTENT.selected(
+        ContentSelection(retired=["skill.commit"], skills=[mine])
+    )
+
+    assert [skill for skill in resolved.skills if skill.id == "skill.commit"] == [mine]
 
 
 def test_no_library_declaration_names_the_template_package() -> None:

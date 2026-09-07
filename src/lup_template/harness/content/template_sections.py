@@ -393,10 +393,10 @@ WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
 
 """
     ),
-    *conventions.MERGE_CONFLICT_RESOLUTION,
-    *conventions.COMMIT_GUIDELINES,
+    *conventions.MERGE_CONFLICT_RESOLUTION.parts,
+    *conventions.COMMIT_GUIDELINES.parts,
     models.TextPart(text="**Types:**\n\n"),
-    *conventions.COMMIT_TYPES,
+    *conventions.COMMIT_TYPES.parts,
     models.TextPart(
         text=r"""**Examples:**
 
@@ -687,7 +687,7 @@ See [The Bitter Lesson](#the-bitter-lesson) and [Tool Design Philosophy](#tool-d
 
 """
     ),
-    *conventions.FAILURE_ANALYSIS,
+    *conventions.FAILURE_ANALYSIS.parts,
     models.TextPart(
         text=r"""### Diagnosing Failures
 

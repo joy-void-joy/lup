@@ -15,8 +15,10 @@ beside its own app has neither problem.
 import typer
 from pydantic import BaseModel
 
+from lup.seams import SelectableRule, Selection
 
-class SubAppSpec(BaseModel, frozen=True):
+
+class SubAppSpec(SelectableRule, frozen=True):
     """What a sub-app is called and what it is for.
 
     Separate from the app it names because prose about the CLI is generated
@@ -28,12 +30,18 @@ class SubAppSpec(BaseModel, frozen=True):
     name: str
     help: str
 
+    def selection_id(self) -> str:
+        return self.name
 
-class SubApp(BaseModel, frozen=True, arbitrary_types_allowed=True):
+
+class SubApp(SelectableRule, frozen=True, arbitrary_types_allowed=True):
     """One sub-app: what it is called, and the Typer app that answers to it."""
 
     spec: SubAppSpec
     app: typer.Typer
+
+    def selection_id(self) -> str:
+        return self.spec.name
 
 
 def subapp(name: str, help: str, app: typer.Typer) -> SubApp:
@@ -69,6 +77,15 @@ class SubAppSelection(BaseModel, frozen=True):
     documents describe :class:`SubAppSpec` values that construct nothing while
     the CLI composes the apps — and one selection over both is what keeps a
     retired sub-app from being documented as served.
+
+    What a project adds arrives as an argument rather than as a field, which is
+    the one way this differs from every other selection in the repository. It
+    is forced: the same declaration exists here in two materials — a spec that
+    executes nothing and an entry carrying a live Typer app — and a field would
+    have to hold one of them, leaving the other reading a roster resolved
+    against declarations it does not have. So the *algebra* is shared and only
+    the seat for the additions is not; :meth:`over` and :meth:`specs` are one
+    :class:`~lup.seams.Selection` applied to each material in turn.
     """
 
     retired: list[str] = []
@@ -77,24 +94,27 @@ class SubAppSelection(BaseModel, frozen=True):
     def over(self, defaults: list[SubApp], added: list[SubApp]) -> list[SubApp]:
         """This project's roster: the defaults it kept, and its own.
 
-        An added entry naming a default replaces it — :func:`resolved` gives
-        last-declaration-wins — so a project keeping its own `trace` says so by
-        declaring one rather than by retiring and re-adding the name.
+        An added entry naming a default replaces it in place, so a project
+        keeping its own `trace` says so by declaring one rather than by
+        retiring and re-adding the name.
 
         Sorted by name because the result is a ``--help`` listing and that is
-        the order a reader scans, where :func:`resolved` preserves declaration
-        order for a caller composing one by hand.
+        the order a reader scans, where the algebra preserves declaration order
+        for a caller composing one by hand.
         """
-        kept = [entry for entry in defaults if entry.spec.name not in self.retired]
-        return sorted(resolved([*kept, *added]), key=lambda entry: entry.spec.name)
+        return sorted(
+            Selection(retired=self.retired, overrides=added).over(defaults),
+            key=lambda entry: entry.spec.name,
+        )
 
     def specs(
         self, defaults: list[SubAppSpec], added: list[SubAppSpec]
     ) -> list[SubAppSpec]:
         """The same roster as the documents name it, constructing no app."""
-        kept = [spec for spec in defaults if spec.name not in self.retired]
-        latest = {spec.name: spec for spec in [*kept, *added]}
-        return sorted(latest.values(), key=lambda spec: spec.name)
+        return sorted(
+            Selection(retired=self.retired, overrides=added).over(defaults),
+            key=lambda spec: spec.name,
+        )
 
 
 def compose(root: typer.Typer, subapps: list[SubApp]) -> None:

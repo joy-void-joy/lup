@@ -44,7 +44,7 @@ from lup.policy.boundary import depends_on
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
-from lup_template.harness.content.catalog import AGENTS, RETIRED, SKILLS
+from lup_template.harness.content.catalog import AGENTS, CONTENT_SELECTION, SKILLS
 from lup_template.devtools.subapps import SELECTION
 from lup_template.harness.content.guidance import document as guidance_document
 from lup_template.harness.content.image import agent_image
@@ -307,7 +307,7 @@ def dev_project() -> DevProject:
                 components=["lup"],
             )
         ],
-        content=RETIRED,
+        content=CONTENT_SELECTION,
         path_roles=declared_role_rows(list(hooks.path_roles)),
         # This file: what this repository settled about itself is written
         # here, so `dev seams` reads and edits it rather than looking

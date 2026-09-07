@@ -38,7 +38,7 @@ from lup.policy.edit_rules import EditRule
 from lup.policy.everyday import CommandFamily
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
-from lup.seams import Selection
+from lup.seams import SelectableRule, Selection
 from lup.types import JsonValue, ToolGrant, ToolName
 
 if TYPE_CHECKING:
@@ -630,7 +630,7 @@ class BashGrant(BaseModel, frozen=True):
         return cls(prefixes=[scope.strip().removesuffix(":*") for scope in specifiers])
 
 
-class Skill(BaseModel, frozen=True):
+class Skill(SelectableRule, frozen=True):
     id: str
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
@@ -638,6 +638,9 @@ class Skill(BaseModel, frozen=True):
     tools: list[ToolGrant] = []
     argument_hint: PortableText | None = None
     prompt: PromptDocument
+
+    def selection_id(self) -> str:
+        return self.id
 
     @model_validator(mode="after")
     def coherent_arguments(self) -> "Skill":
@@ -703,7 +706,7 @@ need and each adapter spells whichever tier it can honor — or omits the choice
 where it has no proven vocabulary to spell it in."""
 
 
-class Agent(BaseModel, frozen=True):
+class Agent(SelectableRule, frozen=True):
     id: str
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
@@ -712,24 +715,97 @@ class Agent(BaseModel, frozen=True):
     model: ModelTier | None = None
     color: AgentColor | None = None
 
+    def selection_id(self) -> str:
+        return self.id
+
 
 class ContentSelection(BaseModel, frozen=True):
     """Which of the skills and agents a library ships a project's plugin carries.
 
-    Subtractive for the reason ``RuleSelection`` and ``SubAppSelection`` are: a
-    project declining two should name those two, because a restated roster is
-    re-copied on every addition and the copy that fell behind looks like a
-    decision. Skills and agents share one selection because they share one
-    namespace of stable ids, and a project retiring a skill that a retired
-    agent existed to serve should not have to say so in two places.
+    Subtractive first and additive second, which is :class:`~lup.seams.Selection`
+    read over two lists rather than one. A project declining two should name
+    those two, because a restated roster is re-copied on every addition and the
+    copy that fell behind looks like a decision — and a project that wants one
+    skill's prose to read differently declares a skill under that id, which
+    *replaces* the library's in place instead of sitting beside it.
+
+    Skills and agents share one ``retired`` because they share one namespace of
+    stable ids: a project retiring a skill that a retired agent existed to serve
+    should not have to say so in two places. They do not share one override
+    list, because a roster is a pair everywhere else and folding them into a
+    discriminated union would buy one field at the price of taking the pair
+    apart again at every reader.
     """
 
     retired: list[str] = []
     """Declaration ids this project's plugin does not ship."""
 
+    skills: list[Skill] = []
+    """Skills this project declares — replacing a library skill of the same id."""
+
+    agents: list[Agent] = []
+    """Agents this project declares — replacing a library agent of the same id."""
+
     def keeps(self, declaration_id: str) -> bool:
         """Whether a declaration is live here, for a roster composing itself."""
         return declaration_id not in self.retired
+
+    def over_skills(self) -> Selection[Skill]:
+        """This selection as the skill half of the algebra resolves it."""
+        return Selection(retired=self.retired, overrides=self.skills)
+
+    def over_agents(self) -> Selection[Agent]:
+        """This selection as the agent half of the algebra resolves it."""
+        return Selection(retired=self.retired, overrides=self.agents)
+
+    def declared(self) -> list[str]:
+        """Every id this project declares itself, whether replacing or adding."""
+        return [declaration.id for declaration in [*self.skills, *self.agents]]
+
+
+class GuidanceSection(SelectableRule, frozen=True):
+    """One identified stretch of the always-loaded document.
+
+    The document was a hand-ordered splice of twenty constants across two
+    packages, and that shape cost three things at once. A section had no name,
+    so nothing could retire or replace one; a section had no owner, so a
+    subject split across four constants at opposite ends read as four
+    unrelated paragraphs; and the order was a literal list nobody could
+    compose two of. Naming each and resolving the order from a declaration
+    answers all three with the algebra every other table here already uses.
+
+    The parts are a rendered stretch rather than a heading and a body, because
+    that is what a section actually is: several of them open no heading at all
+    (a pointer paragraph folded under the heading above it), and forcing one
+    would put a heading in the document that nobody wrote.
+    """
+
+    id: str
+    """The name this section is retired, replaced, or reported under."""
+
+    parts: list[PromptPart]
+    """What it contributes, in the order it contributes it."""
+
+    def selection_id(self) -> str:
+        return self.id
+
+    @property
+    def text(self) -> str:
+        """The portable prose this section carries, for a weigher or a search."""
+        return "".join(
+            payload for part in self.parts if (payload := part.text_payload) is not None
+        )
+
+
+def sectioned(sections: list[GuidanceSection]) -> list[PromptPart]:
+    """One document's parts, in the order its sections were resolved.
+
+    The flattening is here rather than at each composition root so that a
+    reader wanting the sections and a reader wanting the parts take the same
+    list through one function, instead of one of them re-deriving what the
+    other already had.
+    """
+    return [part for section in sections for part in section.parts]
 
 
 class ContentRoster(BaseModel, frozen=True):
@@ -745,22 +821,22 @@ class ContentRoster(BaseModel, frozen=True):
     agents: list[Agent] = []
 
     def selected(self, selection: ContentSelection) -> "ContentRoster":
-        """This roster with what a project retired taken out of both lists.
+        """This roster as one project resolved it: retired, replaced, extended.
 
         Narrowing the roster rather than filtering at each surface is what
         keeps a retired declaration from reaching any of them: it is not
         compiled, not rendered into the documents that say what the plugin
         ships, and not named by prose describing a skill nobody can invoke.
+
+        One call rather than a narrowing followed by an extension, because the
+        two were never independent: a project replacing a skill had to retire
+        the id and re-add the declaration, and forgetting the retirement left
+        two declarations answering to one name. The algebra resolves that by
+        id in one pass, so the second step cannot be the one that was skipped.
         """
         return ContentRoster(
-            skills=[skill for skill in self.skills if selection.keeps(skill.id)],
-            agents=[agent for agent in self.agents if selection.keeps(agent.id)],
-        )
-
-    def extended(self, skills: list[Skill], agents: list[Agent]) -> "ContentRoster":
-        """This roster followed by what only one project has."""
-        return ContentRoster(
-            skills=[*self.skills, *skills], agents=[*self.agents, *agents]
+            skills=selection.over_skills().over(self.skills),
+            agents=selection.over_agents().over(self.agents),
         )
 
 

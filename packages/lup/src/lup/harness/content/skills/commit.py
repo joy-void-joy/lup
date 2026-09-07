@@ -70,7 +70,7 @@ are the whole vocabulary; neither needs an escape hatch.
 
 """
             ),
-            *conventions.COMMIT_TYPES,
+            *conventions.COMMIT_TYPES.parts,
             models.TextPart(
                 text=r"""
 ### Examples

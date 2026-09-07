@@ -27,8 +27,14 @@ from lup.devtools.harness.generate import NativeHarnessComposition
 parser = MarkdownIt()
 
 
-class GuidanceSection(BaseModel, frozen=True):
-    """One heading of the rendered document, and what it costs a session."""
+class HeadingSection(BaseModel, frozen=True):
+    """One heading of the rendered document, and what it costs a session.
+
+    Named for the heading rather than for the section because that is what it
+    is measured against: a :class:`~lup.harness.models.GuidanceSection` is the
+    declaration, and the two do not have to line up — several declared
+    sections open no heading at all, and one can open two.
+    """
 
     heading: str
     level: int
@@ -40,7 +46,7 @@ class GuidanceSection(BaseModel, frozen=True):
         return f"{self.used:{widest}d}  {indent}{self.heading}"
 
 
-def guidance_sections(document: str) -> list[GuidanceSection]:
+def heading_sections(document: str) -> list[HeadingSection]:
     """Split a rendered document into its headings, with the bytes under each.
 
     Parsed rather than scanned for lines starting with ``#``: a fenced code
@@ -57,13 +63,13 @@ def guidance_sections(document: str) -> list[GuidanceSection]:
         if token.type == "heading_open" and token.map is not None
     ]
     bounds = [start for start, _, _ in starts] + [len(lines)]
-    preamble = GuidanceSection(
+    preamble = HeadingSection(
         heading="(banner)",
         level=1,
         used=document_byte_size("".join(lines[: bounds[0]])),
     )
     sections = [
-        GuidanceSection(
+        HeadingSection(
             heading=content,
             level=int(tag.removeprefix("h")),
             used=document_byte_size("".join(lines[start : bounds[index + 1]])),
@@ -88,7 +94,7 @@ def report(
     ceiling = GUIDANCE_BYTE_BUDGET - headroom if scaffold else GUIDANCE_BYTE_BUDGET
     for composition in compositions:
         for artifact in guidance_artifacts(composition.recipe.desired):
-            sections = guidance_sections(artifact.content)
+            sections = heading_sections(artifact.content)
             used = document_byte_size(artifact.content)
             widest = len(str(max(section.used for section in sections)))
             ordered = (

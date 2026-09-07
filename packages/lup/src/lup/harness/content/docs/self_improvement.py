@@ -25,7 +25,7 @@ Philosophy** (the tool description is the contract) — are written out in
 
 """
         ),
-        *conventions.FAILURE_ANALYSIS,
+        *conventions.FAILURE_ANALYSIS.parts,
         models.TextPart(
             text=r"""## Diagnosing Failures
 

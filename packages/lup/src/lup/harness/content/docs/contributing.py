@@ -215,7 +215,7 @@ Commit early, commit often, and keep commits atomic — if the message needs an
 
 """
             ),
-            *conventions.COMMIT_TYPES,
+            *conventions.COMMIT_TYPES.parts,
             models.TextPart(
                 text=r"""
 A `data` commit of generated outputs may go straight to `dev`; code never
