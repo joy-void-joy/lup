@@ -109,8 +109,8 @@ clipboard, including live changes, text copies, image reads, payload limits,
 and private-display authentication. Isolated Codex 0.153.4 TUI probes attached
 a synthetic PNG through its actual paste shortcut on the host and in the built
 image, without a model request or real credentials; the container probe had no
-network. This proves the native clipboard path; it does not prove
-the separate `codex_apps` authentication path. Host-broker discovery reports
+network. This proves the native clipboard path, independently of authentication.
+Host-broker discovery reports
 only its own result, and private-display startup is checked inside the session.
 
 Host login handoff fingerprints the selected credential fields. A changed host
@@ -119,6 +119,14 @@ container's renewed tokens. Claude's shared credentials file retains unrelated
 MCP credentials, and Codex's dedicated auth file is replaced as a unit. A
 fingerprint is bookkeeping, not authentication evidence: the owning runtime
 must still validate or renew its credential in the session's actual boundary.
+
+A separate Codex 0.153.4 outer-container probe successfully forced managed
+login renewal through `account/read(refreshToken=true)`. An ephemeral thread
+using that saved login then observed `codex_apps` startup go from `starting`
+to `ready`. No model turn or app tool call ran. This checks the implicit
+service's own authentication path, not merely the primary account response;
+it is evidence for the selected account and runtime, not a promise of future
+remote-service availability.
 
 ## What portable prose may name
 
