@@ -1440,7 +1440,10 @@ def session_argv(
         plugin, sandbox, measured_here, sentinels, environment, banner, accessible
     )
     say_opening(cleared, measured_here, transcript)
-    return [*opening, cli, *arguments]
+    native = harness.image.clipboard.wrap(
+        [cli, *arguments], composition.clipboard_transport
+    )
+    return [*opening, *native]
 
 
 def say_opening(

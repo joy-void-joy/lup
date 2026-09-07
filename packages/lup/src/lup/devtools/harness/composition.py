@@ -146,6 +146,7 @@ class ClaudeComposer(NativeComposer):
             recipe=claude_generation_recipe(root, content, guidance),
             readiness=readiness,
             invocation_renderer=ClaudeSpellings(),
+            clipboard_transport="commands",
         )
 
 
@@ -165,6 +166,7 @@ class CodexComposer(NativeComposer):
             recipe=codex_generation_recipe(root, content, guidance),
             readiness=readiness,
             invocation_renderer=CodexSpellings(),
+            clipboard_transport="x11",
         )
 
 

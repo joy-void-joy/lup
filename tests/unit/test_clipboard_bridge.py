@@ -90,6 +90,7 @@ def test_a_type_the_bridge_does_not_carry_is_refused(held: dict[str, str]) -> No
     reply = request(endpoint, {"op": "typed", "media_type": "text/x-secret"})
     assert not reply["ok"]
     assert "not carried" in reply["error"]
+    assert reply["code"] == "unsupported_type"
 
 
 def test_an_oversized_clipboard_is_refused_rather_than_cut(

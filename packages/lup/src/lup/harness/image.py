@@ -517,8 +517,8 @@ class Image(BaseModel, frozen=True):
     clipboard: ClipboardBridge = Field(
         default=ClipboardBridge(),
         description=(
-            "How the operator's clipboard reaches a session that has no "
-            "display, no compositor and no clipboard client of its own. "
+            "How the operator's clipboard reaches a contained session without "
+            "connecting to the host's display or compositor. "
             "Declared beside the browser bridge because it is the same kind "
             "of thing -- one narrow channel through the boundary, named "
             "rather than buried. The alternative it replaces is mounting the "
@@ -695,6 +695,7 @@ class Image(BaseModel, frozen=True):
                     *(Package(name=name) for name in self.baseline),
                     *(Package(name=name) for name in self.inner_sandbox),
                     *self.terminal.packages(),
+                    *self.clipboard.packages(),
                     *self.tooling,
                     *manifest.packages(),
                 ]
@@ -924,13 +925,19 @@ RUN chmod +x {self.browser.opener}
 # to the broker in the launcher. The socket is mounted per launch; with none
 # mounted each shim exits non-zero, which is what "this machine has no
 # clipboard" already looked like to every caller.
-COPY <<'CLIP' /usr/local/bin/lup-clipboard
+COPY <<'CLIP' /usr/local/bin/clipboard_shim.py
 {clipping}
 CLIP
-RUN chmod +x /usr/local/bin/lup-clipboard \\
+RUN chmod +x /usr/local/bin/clipboard_shim.py \\
+    && ln -sf /usr/local/bin/clipboard_shim.py /usr/local/bin/lup-clipboard \\
     && for name in {shim_names}; do \\
         ln -sf /usr/local/bin/lup-clipboard "/usr/local/bin/$name"; \\
     done
+
+COPY <<'X11' /usr/local/bin/lup-clipboard-x11
+{self.clipboard.native_program()}
+X11
+RUN chmod +x /usr/local/bin/lup-clipboard-x11
 
 # The identity the session runs as. Supplied at build time from the host's own
 # uid/gid, because a bind mount carries numbers rather than names: a container

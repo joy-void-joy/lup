@@ -8,6 +8,7 @@ import sh
 import typer
 
 import lup.devtools.harness.launch as launch
+from lup.harness.clipboard import ClipboardBridge, ClipboardTransport
 from lup.providers.codex.account import CodexAccountState
 from lup.providers.codex.app_server import AppServerError, RpcError
 from lup.providers.codex.login import CODEX_LOGIN
@@ -146,14 +147,18 @@ def test_named_profile_is_not_verified_against_an_unselected_base_configuration(
 
 
 @pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
+@pytest.mark.parametrize("transport", ["commands", "x11"])
 def test_session_authentication_uses_the_same_execution_boundary(
     sandbox: launch.LaunchSandbox,
+    transport: ClipboardTransport,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     composition = Mock()
     composition.recipe.source.image.config_home = "/cfg"
     composition.recipe.source.image.forge.sourced.return_value = ""
+    composition.recipe.source.image.clipboard = ClipboardBridge()
+    composition.clipboard_transport = transport
     plugin = Mock(hooks=None)
     authenticate = Mock()
     monkeypatch.setattr(launch, "accessible_roots", lambda *args: [])
@@ -181,7 +186,13 @@ def test_session_authentication_uses_the_same_execution_boundary(
         authenticate.assert_called_once_with(
             ["podman", "run", "-i", "image", "codex"], Path("/cfg")
         )
-        assert argv == ["podman", "run", "-it", "image", "codex", "resume", "session"]
+        assert argv == [
+            "podman",
+            "run",
+            "-it",
+            "image",
+            *ClipboardBridge().wrap(["codex", "resume", "session"], transport),
+        ]
     else:
         authenticate.assert_called_once_with(["codex"], tmp_path)
         assert argv == ["codex", "resume", "session"]

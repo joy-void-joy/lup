@@ -1,10 +1,9 @@
 """Handing the operator's clipboard into the container, and nothing else.
 
-A contained session has no display, no compositor and no clipboard client,
-because the image is built without one on purpose -- the terminal handoff
-picks ``emacs-nox`` over ``emacs`` for exactly that reason. So copying a
-command out of a session, and pasting a screenshot into one, both do nothing,
-and nothing says why.
+A contained session has no access to the operator's display or compositor.
+Command-based clients use broker-backed shims. Native X11 clients use an
+authenticated private virtual display and a selection bridge to that same
+broker, never a connection to the operator's desktop server.
 
 The obvious fix is to mount the host's display socket, and it is the wrong
 one twice over. On X11 there is no isolation between clients: anything that
@@ -51,9 +50,12 @@ from lup.devtools.clipboard import (
     readable_backends,
 )
 from lup.harness.notice import Notice
+from lup.harness.requirements import Package
 from lup.types import EnvVars
 
 logger = logging.getLogger(__name__)
+
+type ClipboardTransport = Literal["commands", "x11"]
 
 
 class ClipboardReply(BaseModel, frozen=True):
@@ -69,6 +71,7 @@ class ClipboardReply(BaseModel, frozen=True):
     types: list[str] = []
     data: str = Field(default="", description="Base64, because JSON carries no bytes")
     error: str = ""
+    code: Literal["unsupported_type"] | None = None
 
     def rendered(self) -> bytes:
         """The reply as one line on the wire."""
@@ -150,7 +153,9 @@ class TypedAsk(ClipboardAsk, frozen=True):
             return self.encoded((clipboard_text() or "").encode("utf-8"), limit)
         if self.media_type not in media_types:
             return ClipboardReply(
-                ok=False, error=f"{self.media_type} is not carried by this bridge"
+                ok=False,
+                code="unsupported_type",
+                error=f"{self.media_type} is not carried by this bridge",
             )
         offered = clipboard_image((self.media_type,))
         return self.encoded(offered.data, limit) if offered else ClipboardReply()
@@ -338,13 +343,9 @@ class ClipboardBridge(BaseModel, frozen=True):
     display: str = Field(
         default="lup-bridge:0",
         description=(
-            "What that variable is set to. Not a display: this image has "
-            "none, and mounting the operator's is the design this module's "
-            "header rejects. It is a marker that makes the shims findable, "
-            "so the value is chosen to name itself -- anything that does "
-            "try to connect reports `cannot open display lup-bridge:0` and "
-            "says where the variable came from, where `:0` would have read "
-            "as a display that was really there"
+            "Discovery marker for command-based clipboard clients. It is not "
+            "an X11 endpoint. The private-display wrapper replaces it with "
+            "an authenticated local endpoint for native X11 clients"
         ),
     )
     media_types: list[str] = Field(
@@ -366,9 +367,29 @@ class ClipboardBridge(BaseModel, frozen=True):
         ),
     )
 
+    native_packages: list[str] = ["xorg-server-xvfb", "xorg-xauth", "python-xlib"]
+
     def path(self) -> str:
         """The socket, spelled as the container sees it."""
         return f"{self.inside}/{self.channel}"
+
+    def packages(self) -> list[Package]:
+        """Native compatibility dependencies; command clients start no display."""
+        return [Package(name=name) for name in self.native_packages]
+
+    def wrap(self, command: list[str], transport: ClipboardTransport) -> list[str]:
+        """Open the native clipboard transport declared by this CLI's adapter."""
+        match transport:
+            case "commands":
+                return command
+            case "x11":
+                return ["lup-clipboard-x11", "--limit", str(self.limit), "--", *command]
+
+    def native_program(self) -> str:
+        """The independently checked program installed in the image."""
+        return (Path(__file__).parent / "assets" / "clipboard_x11.py").read_text(
+            encoding="utf-8"
+        )
 
     def environment(self) -> EnvVars:
         """What tells the shims inside where to reach this broker, and what finds them.
@@ -478,10 +499,11 @@ class ClipboardBridge(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    "Clipboard: this session can read and replace what you have "
-                    f"copied, through {answering}, including "
-                    f"{len(self.media_types)} image types; it reaches nothing "
-                    "else on your desktop."
+                    f"Clipboard broker: {answering} answered on the host; "
+                    f"{len(self.media_types)} image types are allowed. "
+                    "Command clients use its shims; native X11 clients require "
+                    "the private display checked at CLI startup. Neither "
+                    "transport reaches the rest of your desktop."
                 ),
                 urgency="boundary",
             )
