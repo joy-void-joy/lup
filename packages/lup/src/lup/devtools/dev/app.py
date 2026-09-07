@@ -35,6 +35,7 @@ import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.questions as questions_mod
 import lup.devtools.dev.preservation as preservation
+import lup.devtools.dev.modules as modules
 import lup.devtools.dev.seams as seams
 import lup.devtools.dev.pr as pr
 import lup.devtools.dev.relocate as relocate_mod
@@ -1316,6 +1317,24 @@ def create_dev_app(
             raise typer.Exit(1) from error
         verb = "verified" if check_only else "written"
         typer.echo(f"Lup rule reference {verb}: {destination}")
+
+    @app.command("modules")
+    def modules_cmd(
+        verbose: Annotated[
+            bool,
+            typer.Option("--verbose", "-v", help="What each module is and contributes"),
+        ] = False,
+    ) -> None:
+        """Report which modules this project takes, and what each one's prose costs.
+
+        The roster is the one selection with no surface of its own: a retired
+        sub-app is missing from `--help` and a retired rule from the rule
+        reference, but a module is five surfaces at once, so what a project
+        settled is otherwise readable only out of its catalog against defaults
+        held in the reader's head.
+        """
+        project = declared().project
+        modules.report(project.coverage.modules, project.modules, verbose)
 
     @app.command("guidance")
     def guidance_cmd(

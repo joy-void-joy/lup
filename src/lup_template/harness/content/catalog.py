@@ -193,7 +193,7 @@ SKILLS = CONTENT.skills
 AGENTS = CONTENT.agents
 """Every agent this repository's plugin ships."""
 
-GUIDANCE_SECTIONS = composed_guidance(MODULES)
+GUIDANCE_SECTIONS = composed_guidance(MODULES, MODULE_SELECTION)
 """The always-loaded document's sections, chapter by chapter and module by module."""
 
 GUIDANCE = guidance.document(GUIDANCE_SECTIONS)

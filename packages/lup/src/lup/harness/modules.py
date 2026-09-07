@@ -298,6 +298,15 @@ class ModuleSelection(BaseModel, frozen=True):
         taken = self.adoption(spec.id).taken
         return spec.default_on if taken is None else taken
 
+    def loads(self, spec: ModuleSpec) -> bool:
+        """Whether a module's prose reaches this project's always-loaded document.
+
+        Two answers, and a module has to pass both. One it never took says
+        nothing about any subject; one it took for the code and declined the
+        prose of contributes every other surface and no words.
+        """
+        return self.takes(spec) and self.adoption(spec.id).loads_guidance is not False
+
     def resolved(self, module: Module) -> Module:
         """One module as this project takes it, every surface narrowed.
 
@@ -305,18 +314,20 @@ class ModuleSelection(BaseModel, frozen=True):
         result readable: whatever walks the composition sees the same type it
         would have seen with no selection at all, and a reader asking what a
         project actually ships reads it off one value.
+
+        ``loads_guidance`` is deliberately *not* applied here. It answers where
+        the prose goes rather than what the module has, and the difference is
+        load-bearing: a budget asking what an adopter turning this module on
+        would carry, and a listing saying what each module's paragraph costs,
+        both need the prose of a module this project keeps quiet. So the
+        silence is applied by :func:`composed_guidance`, which is the one place
+        the document is assembled.
         """
         entry = self.adoption(module.spec.id)
-        # `loads_guidance` is the coarse answer and it is coarse on purpose: a
-        # module whose prose the project declined contributes none, including
-        # the sections the project itself wrote about that subject. Resolving
-        # the project's overrides against an emptied list would keep those,
-        # which reads as a module speaking after being told not to.
-        silent = entry.loads_guidance is False
         return Module(
             spec=module.spec,
             content=module.content.selected(entry.content),
-            guidance=[] if silent else entry.guidance.over(module.guidance),
+            guidance=entry.guidance.over(module.guidance),
             documents=entry.documents.over(module.documents),
         )
 
@@ -458,7 +469,9 @@ def composed_documents(
 
 
 def composed_guidance(
-    modules: list[Module], chapters: list[models.GuidanceChapter] | None = None
+    modules: list[Module],
+    selection: ModuleSelection | None = None,
+    chapters: list[models.GuidanceChapter] | None = None,
 ) -> list[models.GuidanceSection]:
     """The always-loaded document, chapter by chapter and module by module.
 
@@ -469,12 +482,39 @@ def composed_guidance(
     edit in every project that adopts it. A section names only its chapter;
     where it sits inside one is where its module sits, which is declared
     already.
+
+    This is where a module kept for its code and declined its prose falls
+    silent, because this is where the document exists. A module told not to
+    speak contributes none of its sections, including the ones this project
+    itself wrote about that subject — keeping those would read as a module
+    going on talking after being asked to stop.
     """
     order = models.default_chapters() if chapters is None else chapters
+    resolved = selection or ModuleSelection()
     return [
         section
         for chapter in order
         for module in modules
+        if resolved.loads(module.spec)
         for section in module.guidance
         if section.chapter == chapter
+    ]
+
+
+def unloaded_guidance(
+    modules: list[Module], selection: ModuleSelection | None = None
+) -> list[models.GuidanceSection]:
+    """Every section this roster offers that this project's document omits.
+
+    The distance between what a tree pays and what bounds a project taking
+    everything. A module declined outright and one kept quiet contribute the
+    same nothing to the document and the same weight to that bound, so both
+    answer here.
+    """
+    resolved = selection or ModuleSelection()
+    return [
+        section
+        for module in modules
+        if not resolved.loads(module.spec)
+        for section in module.guidance
     ]

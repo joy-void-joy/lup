@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from lup.providers.harness import guidance_artifacts
 from lup.harness.codescan.markers import find_feedback
 from lup.harness.coverage import coverage_gaps
+from lup.harness.modules import unloaded_guidance
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     TEMPLATE_GUIDANCE_HEADROOM,
@@ -885,7 +886,9 @@ def scan_reports(
         )
 
         yield from budget_reports(
-            guidance_bytes(compositions), scaffold, project.declined_guidance
+            guidance_bytes(compositions),
+            scaffold,
+            unloaded_guidance(project.coverage.modules, project.modules),
         )
 
         # advisory — the environment is the operator's arrangement rather than

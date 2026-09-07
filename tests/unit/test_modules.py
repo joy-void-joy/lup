@@ -221,15 +221,23 @@ def test_a_module_can_be_taken_for_its_tools_and_none_of_its_prose() -> None:
     Guidance is spent in every session whether the subject comes up or not, so
     declining it is one word — and a module that grows a section afterwards
     does not quietly reintroduce the cost.
-    """
-    taken = modules.adopted(
-        ENTRIES,
-        modules.ModuleSelection(
-            adoptions=[modules.Adoption(module="alpha", loads_guidance=False)]
-        ),
-    )
 
-    assert [one.id for one in modules.composed_guidance(taken)] == ["beta-tooling"]
+    The module keeps its sections through resolution and falls silent where the
+    document is composed, which is what lets the budget ask what a project
+    turning it back on would carry: the prose is not gone, it is unspent.
+    """
+    selection = modules.ModuleSelection(
+        adoptions=[modules.Adoption(module="alpha", loads_guidance=False)]
+    )
+    taken = modules.adopted(ENTRIES, selection)
+
+    assert [one.id for one in modules.composed_guidance(taken, selection)] == [
+        "beta-tooling"
+    ]
+    assert [one.id for one in modules.unloaded_guidance(taken, selection)] == [
+        "alpha-code",
+        "alpha-process",
+    ]
     assert skill_ids(modules.composed_content(taken)) == [
         "skill.a1",
         "skill.a2",

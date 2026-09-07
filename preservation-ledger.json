@@ -1,5 +1,5 @@
 {
-  "revision": "07480ee210dd70a94974602fea030a45c9b4e63c",
+  "revision": "075089cb2770fdfc4b0bd2bcd7369a40a1bf9031",
   "roots": [
     "lup",
     "lup_template"
@@ -38,6 +38,7 @@
     "dev history",
     "dev issues",
     "dev rules",
+    "dev modules",
     "dev guidance",
     "dev relocate",
     "dev policy",
@@ -900,6 +901,7 @@
         "create_dev_app.history_cmd",
         "create_dev_app.issues_cmd",
         "create_dev_app.rules_cmd",
+        "create_dev_app.modules_cmd",
         "create_dev_app.guidance_cmd",
         "create_dev_app.relocate_cmd",
         "create_dev_app.relocate_cmd.parsed",
@@ -1617,6 +1619,30 @@
         "create_model_config_app.snapshot_command",
         "create_model_config_app.snapshot_at_command",
         "create_model_config_app.compare_command"
+      ]
+    },
+    {
+      "module": "lup.devtools.dev.modules",
+      "declares": [
+        "ModuleRow",
+        "ModuleRow.identity",
+        "ModuleRow.title",
+        "ModuleRow.summary",
+        "ModuleRow.offered",
+        "ModuleRow.taken",
+        "ModuleRow.loads",
+        "ModuleRow.default_on",
+        "ModuleRow.requires",
+        "ModuleRow.guidance_used",
+        "ModuleRow.skills",
+        "ModuleRow.agents",
+        "ModuleRow.pages",
+        "ModuleRow.subapps",
+        "ModuleRow.tool_groups",
+        "ModuleRow.standing",
+        "ModuleRow.surfaces",
+        "rows",
+        "report"
       ]
     },
     {
@@ -3099,7 +3125,6 @@
         "DevProject.subapps",
         "DevProject.trackers",
         "DevProject.modules",
-        "DevProject.declined_guidance",
         "DevProject.coverage",
         "DevProject.roots",
         "DevProject.catalog",
@@ -5809,6 +5834,7 @@
         "ModuleSelection.adoption",
         "ModuleSelection.declined",
         "ModuleSelection.takes",
+        "ModuleSelection.loads",
         "ModuleSelection.resolved",
         "ModuleSelection.subapps",
         "ModuleSelection.tool_groups",
@@ -5820,7 +5846,8 @@
         "adopted",
         "composed_content",
         "composed_documents",
-        "composed_guidance"
+        "composed_guidance",
+        "unloaded_guidance"
       ]
     },
     {
@@ -13872,7 +13899,6 @@
         "NATIVE_RUNTIMES",
         "application_roots",
         "declared_coverage",
-        "declined_guidance",
         "dev_project",
         "portable_harness"
       ]

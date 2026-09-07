@@ -18,7 +18,6 @@ from lup.harness.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.subapps import SubAppSelection
 from lup.harness.coverage import ModuleCoverage
-from lup.harness.models import GuidanceSection
 from lup.harness.modules import ModuleSelection
 from lup.policy.kernel.rows import PathRoleRow
 
@@ -163,19 +162,6 @@ class DevProject(BaseModel, frozen=True):
     kept at four is the failure this replaced: the skills went and the page,
     the sub-app, the tool group and the paragraph stayed, each looking like a
     decision somebody made."""
-
-    declined_guidance: list[GuidanceSection] = []
-    """Prose this project's modules offer that its own document does not carry.
-
-    The other half of what the guidance budget has to know. This repository's
-    document is one composition of the roster and the lightest interesting one,
-    because a scaffold takes every module and loads the prose of only the ones
-    it offers — so weighing it answers what *this* tree costs and says nothing
-    about the ceiling an adopter is bounded by. These are the sections between
-    the two: what the same roster weighs with every module's prose loaded is
-    this plus what the tree already carries, and that is the number a module
-    growing a paragraph has to stay under.
-    """
 
     coverage: ModuleCoverage = ModuleCoverage()
     """Everything this checkout declares, beside the modules that could claim it.
