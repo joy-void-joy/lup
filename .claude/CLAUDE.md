@@ -111,6 +111,12 @@ To **read** code use the `py` group or `codeintel`, which resolves a name throug
 
 ---
 
+## Long-Running Work
+
+Work outliving its tool call is launched to survive its launcher — never from a delegated agent's shell — and declared as a `lup.runs` `Pipeline` rather than scripted, so it is resumable and watchable by construction. Follow it with `dev monitor <dir> --events`, a line per landing, failure and stall, and name it in the launch report; `docs/runs.md` carries the rest.
+
+---
+
 ## Configuration
 
 Configuration loads through pydantic-settings in `src/lup_template/agent/config.py`, the only module that reads the environment. `docs/template.md` lists the variables and how gitignored `.env.local` overrides `.env`.

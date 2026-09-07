@@ -127,7 +127,16 @@ RUNS = ModuleSpec(
         "Work that outlives its tool call, declared as a resumable pipeline "
         "rather than scripted, and watchable while it runs."
     ),
+    default_on=True,
 )
+"""On, unlike the other three that carry no skills.
+
+Its section is the argument. Nothing fires when a long-running job is scripted
+rather than declared — the failure is a job nobody can resume, discovered when
+somebody needs to resume it — so the rule has to reach a session before it
+launches anything, and 401 bytes is what that costs. The subjects that are off
+either cost a great deal more or announce themselves when wanted.
+"""
 
 REALTIME = ModuleSpec(
     id="realtime",
