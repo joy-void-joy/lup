@@ -7075,7 +7075,6 @@
       "declares": [
         "bash_decision",
         "unconfined_by_declaration",
-        "undo_point",
         "fetch_decision",
         "refused_tool_decision",
         "placed_document",

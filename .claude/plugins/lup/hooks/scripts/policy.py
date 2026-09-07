@@ -1777,18 +1777,17 @@ def bash_decision(
     # it is not written down anywhere.
     if verdict.effect == "defer":
         record_deferral(cwd, command, verdict.reason, verdict.checkpoint != "nothing")
-    pointed = undo_point(verdict, reference)
-    if pointed.effect != "allow":
-        return pointed
+    if verdict.effect != "allow":
+        return verdict
     nudge = script_run_nudge(python_script_targets(command, INTERPRETERS), cwd)
     if not nudge:
-        return pointed
+        return verdict
     return KernelDecision(
-        pointed.effect,
-        pointed.reason + nudge,
-        pointed.sandbox,
-        pointed.escalated,
-        checkpoint=pointed.checkpoint,
+        verdict.effect,
+        verdict.reason + nudge,
+        verdict.sandbox,
+        verdict.escalated,
+        checkpoint=verdict.checkpoint,
     )
 
 
@@ -1801,32 +1800,6 @@ def unconfined_by_declaration(command: str) -> bool:
     a runtime cannot answer it differently from the classifier.
     """
     return sandbox_excluded(command, SANDBOX_EXCLUDED_COMMANDS)
-
-
-def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
-    """Say the tree was snapshotted, on the one verdict that changes for it.
-
-    The snapshot itself is taken above, before the verdict, because the
-    verdict reads it. What is left here is what the human is told.
-
-    On an approval question, which is the one moment the information changes
-    an answer: somebody deciding whether to permit something destructive is
-    weighing exactly whether it can be undone. On an allowed command the
-    snapshot is silent, because a line appended to every mutating command is
-    one nobody reads by the third time — and ``dev undo`` is where a snapshot
-    is looked for anyway. On a deferral the reason reaches no human at all;
-    it reaches the record, which is where the relaxation is reviewed.
-    """
-    if not reference or verdict.effect != "ask":
-        return verdict
-    return KernelDecision(
-        verdict.effect,
-        f"{verdict.reason} — the tree was snapshotted first; "
-        f"`lup-devtools dev undo` lists it as {reference}",
-        verdict.sandbox,
-        verdict.escalated,
-        checkpoint=verdict.checkpoint,
-    )
 
 
 def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:

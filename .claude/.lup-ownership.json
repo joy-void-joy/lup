@@ -436,7 +436,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "80b22aaaf3b4dc1e2156a32ed445798dd59110c5c90fb978d562678284bafa03",
+      "sha256": "a0396578dbf3a7c76407039f8abe1b4aa63c9e91d4e9eee8978e87ab26bc542d",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

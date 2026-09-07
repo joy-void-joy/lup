@@ -475,21 +475,21 @@ def test_a_command_that_could_destroy_work_is_snapshotted_first(
     assert undo_refs(delete_repo) == ["lup undo: rm untracked.py"]
 
 
-def test_a_question_a_capture_cannot_settle_still_says_it_was_taken(
+def test_a_question_a_capture_cannot_settle_stays_silent_about_it(
     delete_repo: Path,
 ) -> None:
-    """The one moment the information changes an answer.
+    """The question asks its question; the snapshot is looked up, not narrated.
 
-    A person deciding whether to permit something destructive is weighing
-    exactly whether it can be undone, so a question that survives the
-    capture carries the ref. A permitted command stays silent, because a
-    line appended to every mutating command is one nobody reads by the
-    third time — and where the capture settled the question there is no
-    longer anybody being asked.
+    A ref appended to every approval prompt is a line nobody reads by the
+    third time, in the one place reading matters — and `dev undo` is where a
+    snapshot is looked for anyway. So the question carries only its reason,
+    while the capture it stays silent about is still on disk for the moment
+    somebody reaches for it.
     """
     _effect, reason = snapshotting_effect("git clean -fdx", delete_repo)
 
-    assert "snapshotted" in reason and "refs/lup/undo/" in reason
+    assert "snapshotted" not in reason and "refs/lup/undo/" not in reason
+    assert undo_refs(delete_repo) == ["lup undo: git clean -fdx"]
 
 
 def test_a_command_whose_writes_are_not_in_its_argv_is_snapshotted(
