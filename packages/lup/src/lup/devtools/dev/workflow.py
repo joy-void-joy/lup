@@ -88,6 +88,8 @@ jobs:
         with:
           enable-cache: true
 {self.install_step()}      - run: uv sync {" ".join(self.sync_flags)}
+      - name: Merge driver
+        run: uv run lup-devtools dev merge-driver
       - name: Generated artifact drift
         run: {DRIFT_COMMAND}
       - name: Quality gate
