@@ -514,7 +514,7 @@ def create(
     branch on a different base then meets that ref as a non-fast-forward —
     an obstacle to the work, on a remote where it read as noise. The branch
     is given its remote by the first push that carries something, which is
-    `dev pr push` and which the pre-push guard judges.
+    `git pr push` and which the pre-push guard judges.
     """
     refuse_a_blocked_registration()
     refuse_a_blocked_arming(guards)

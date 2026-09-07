@@ -282,7 +282,7 @@ def assembly_question(
     )
     stale = (
         f"\n  this base is {behind} commit(s) behind {branch}; "
-        "`harness resolve refresh --apply` moves it before you approve"
+        "`resolve refresh --apply` moves it before you approve"
         if behind and branch
         else ""
     )

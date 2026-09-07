@@ -194,12 +194,12 @@ def answer_recipe(adapter: str, run_id: str, questions: list[MaterialQuestion]) 
 
     One definition, because this is the CLI's own interface restated as
     text: the page prints it and the parked run prints it, and a change to
-    `harness resolve`'s flags that reached only one of them would have the
+    `resolve`'s flags that reached only one of them would have the
     other teaching a command that no longer exists.
     """
     return " ".join(
         [
-            "uv run lup-devtools harness resolve",
+            "uv run lup-devtools resolve",
             f"--adapter {adapter}",
             f"--run-id {run_id}",
             *(f"--answer {question.id}=<value>" for question in questions),

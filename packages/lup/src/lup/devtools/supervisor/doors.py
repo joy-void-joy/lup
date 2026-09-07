@@ -191,7 +191,7 @@ def answer_questions(
         if identifier not in known:
             raise typer.BadParameter(
                 f"{identifier!r} names no question this run asked; "
-                f"run `harness resolve questions --run-id {run_id}`"
+                f"run `resolve questions --run-id {run_id}`"
             )
         question = known[identifier].question
         if question.closed_choices and value not in question.choices:

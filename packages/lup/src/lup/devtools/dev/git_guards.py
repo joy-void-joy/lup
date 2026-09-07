@@ -56,7 +56,7 @@ steps, so the pipeline and the hook lup arms name the same commands.
 
 # lup: ignore[constant-declaration] — the command a reader types, whose words
 # are the CLI's own rather than a preference this module holds
-INSTALL_COMMAND = "uv run lup-devtools dev git-hooks install"
+INSTALL_COMMAND = "uv run lup-devtools git hooks install"
 """How a checkout arms its guards, named in each hook it writes."""
 
 # lup: ignore[constant-declaration] — the marker this command writes into a

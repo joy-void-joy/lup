@@ -626,10 +626,10 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     command = claude[Path(".claude/plugins/lup/commands/resolve.md")]
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
-    assert "uv run lup-devtools harness resolve --adapter claude --detach" in command
+    assert "uv run lup-devtools resolve --adapter claude --detach" in command
     assert "Triage into concerns" not in command
     assert "Workflow(" not in command
-    assert "uv run lup-devtools harness resolve --adapter codex --detach" in skill
+    assert "uv run lup-devtools resolve --adapter codex --detach" in skill
     assert "scheduling" not in skill
     for entry in (command, skill):
         assert "exactly one watch" in entry
@@ -730,7 +730,7 @@ PART_CONTRACT: dict[str, PartExpectation] = {
         part=RelocateSession(path="the path step 1 prints"), diverges=True
     ),
     "WatchOutput": PartExpectation(
-        part=WatchOutput(command="lup-devtools harness resolve status --watch"),
+        part=WatchOutput(command="lup-devtools resolve status --watch"),
         diverges=True,
     ),
     "ResolverEntry": PartExpectation(part=ResolverEntry(), diverges=True),
@@ -1805,7 +1805,7 @@ def test_generated_codex_pretool_accepts_a_safe_requested_escape() -> None:
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
         "tool_input": {
-            "command": "uv run lup-devtools harness resolve intake",
+            "command": "uv run lup-devtools resolve intake",
             "sandbox_permissions": "require_escalated",
         },
     }
@@ -1838,7 +1838,7 @@ def test_generated_codex_pretool_accepts_a_safe_automatic_escape() -> None:
     body: JsonObject = {
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": "uv run lup-devtools harness resolve intake"},
+        "tool_input": {"command": "uv run lup-devtools resolve intake"},
     }
     assert codex_hook_result(body, sandboxed=True).exit_code == 0
 
@@ -1867,7 +1867,7 @@ def test_generated_codex_pretool_refuses_an_ambient_escape() -> None:
 @pytest.mark.parametrize(
     "command",
     [
-        "UV_CACHE_DIR=/tmp/lup-uv-cache uv run lup-devtools harness resolve --adapter codex",
+        "UV_CACHE_DIR=/tmp/lup-uv-cache uv run lup-devtools resolve --adapter codex",
         "ENV_VAR=constant git status",
     ],
 )
@@ -2911,9 +2911,9 @@ def test_declared_exclusions_cover_the_commands_the_boundary_cannot_carry() -> N
     # where `dev worktree create` could not take the lock its config write
     # needs while the identical `git config --local` succeeded one call away.
     for driving in (
-        "uv run lup-devtools dev worktree create feat-x",
-        "uv run lup-devtools dev pr push",
-        "uv run lup-devtools harness resolve intake",
+        "uv run lup-devtools git worktree create feat-x",
+        "uv run lup-devtools git pr push",
+        "uv run lup-devtools resolve intake",
     ):
         assert sandbox_excluded(driving, excluded), driving
     assert not sandbox_excluded("uv run pytest -q", excluded)

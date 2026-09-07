@@ -153,7 +153,7 @@ class ClaudeSpellings(NativeSpellings):
         is what keeps the reflex from reaching for it.
 
         What it reaches is stated beside the refusal, because escalating past
-        one wall meets another. `dev worktree create` cuts under a sibling
+        one wall meets another. `git worktree create` cuts under a sibling
         `tree/`, and this runtime switches into a path outside its own
         `.claude/worktrees/` only as a session's first entry from the
         directory it launched in -- so a second switch is refused by the tool
@@ -207,8 +207,8 @@ class ClaudeSpellings(NativeSpellings):
     def resolver_entry(self) -> Instruction:
         return Instruction(
             sentences(
-                "Run `uv run lup-devtools harness resolve --adapter claude --detach`. "
-                "`uv run lup-devtools harness resolve intake` first prints what a "
+                "Run `uv run lup-devtools resolve --adapter claude --detach`. "
+                "`uv run lup-devtools resolve intake` first prints what a "
                 "run started now would plan from — every actionable note at its "
                 "file and line, the deferred ones it would carry, and the ones it "
                 "would leave to their generator — creating no run and leasing no "

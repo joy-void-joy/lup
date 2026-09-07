@@ -19,7 +19,7 @@ import lup.devtools.dev.check as check
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.library as library
 import lup_template.harness.catalog as catalog
-from lup.devtools.dev.app import DevDeclarations
+from lup.devtools.dev.declarations import DevDeclarations
 from lup.workspace.paths import project_root
 
 

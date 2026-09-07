@@ -7,8 +7,8 @@ only what is read here is Anthropic's.
 
 Examples::
 
-    $ uv run lup-devtools usage claude
-    $ uv run lup-devtools usage claude --no-detail
-    $ uv run lup-devtools usage claude --json
-    $ uv run lup-devtools usage claude --watch --interval 300
+    $ uv run lup-devtools dev usageclaude
+    $ uv run lup-devtools dev usageclaude --no-detail
+    $ uv run lup-devtools dev usageclaude --json
+    $ uv run lup-devtools dev usageclaude --watch --interval 300
 """

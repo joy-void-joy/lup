@@ -28,22 +28,24 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.dev.app import DevDeclarations, create_dev_app
+from lup.devtools.dev.app import create_dev_app
+from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.feedback.app import create_feedback_app
 from lup.devtools.feedback.models import AgentPrompt
+from lup.devtools.git.app import create_git_app
 from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.launch import LaunchCheckpoint, LaunchMode
 from lup.devtools.harness.resolve import ConfiguredModel
-from lup.devtools.hooks.app import create_hooks_app
-from lup.devtools.report.app import create_report_app
+from lup.devtools.resolve.app import create_resolve_app
+from lup.devtools.run.app import create_run_app
 from lup.devtools.setup import Integration, create_setup_app
 from lup.devtools.subapps import SubApp, SubAppSpec
+from lup.devtools.trace.app import create_trace_app
 from lup.providers.profiles import ProfileDirectory
-from lup.observability.usage.app import UsageEntry, create_usage_app
+from lup.observability.usage.app import UsageEntry
 
-import lup.devtools.py.app as py
 import lup.devtools.sync as sync
 import lup.devtools.trace.app as trace
 import lup.devtools.version as version
@@ -151,17 +153,6 @@ def conversation_app(declared: "DevtoolsDeclarations") -> typer.Typer:
     return create_conversation_app(declared.profiles)
 
 
-def dashboard_app(declared: "DevtoolsDeclarations") -> typer.Typer:
-    """The dashboard sub-app, imported where it is built.
-
-    Deferred for the same reason as :func:`conversation_app`: it serves the
-    setup wizard over HTTP, which is the ``web`` extra.
-    """
-    from lup.devtools.dashboard.app import create_dashboard_app
-
-    return create_dashboard_app(declared.integrations)
-
-
 # lup: ignore[library-default] — the sub-apps this library authors, so the table
 # is what it ships rather than a choice made for an adopter
 LIBRARY_ROSTER = [
@@ -172,21 +163,26 @@ LIBRARY_ROSTER = [
         build=lambda declared: conversation_app(declared),
     ),
     RosterEntry(
-        spec=SubAppSpec(name="dashboard", help="Host the local setup dashboard"),
-        build=lambda declared: dashboard_app(declared),
-    ),
-    RosterEntry(
-        spec=SubAppSpec(name="dev", help="Worktrees, branches, and pre-flight checks"),
+        spec=SubAppSpec(
+            name="dev", help="Read this repository, and hold it to what it settled"
+        ),
         build=lambda declared: create_dev_app(
             declared=declared.dev,
             native_targets=declared.targets,
             repository_writers=declared.repository_writers,
             relocate_roots=declared.relocate_roots,
+            usage_entries=declared.usage_entries,
         ),
     ),
     RosterEntry(
         spec=SubAppSpec(name="feedback", help="Feedback state, metrics, and commits"),
         build=lambda declared: create_feedback_app(declared.prompt),
+    ),
+    RosterEntry(
+        spec=SubAppSpec(
+            name="git", help="Branches, worktrees, pull requests, and conflicts"
+        ),
+        build=lambda declared: create_git_app(declared.dev),
     ),
     RosterEntry(
         spec=SubAppSpec(
@@ -202,33 +198,38 @@ LIBRARY_ROSTER = [
         ),
     ),
     RosterEntry(
-        spec=SubAppSpec(name="hooks", help="Query the permission policy"),
-        build=lambda declared: create_hooks_app(lambda: declared.dev().hooks),
-    ),
-    RosterEntry(spec=py.SUBAPP.spec, build=lambda _: py.SUBAPP.app),
-    RosterEntry(
         spec=SubAppSpec(
-            name="report", help="Everything left to implement, in one place"
+            name="resolve", help="Drive a resolver run, and watch or answer it"
         ),
-        build=lambda declared: create_report_app(
-            declared.targets, declared.repository_writers
+        build=lambda declared: create_resolve_app(
+            declared.dev, declared.targets, declared.model, declared.profiles
         ),
     ),
     RosterEntry(
-        spec=SubAppSpec(name="setup", help="Interactive setup wizard"),
+        spec=SubAppSpec(name="run", help="Follow work that outlives its tool call"),
+        build=lambda _: create_run_app(),
+    ),
+    RosterEntry(
+        spec=SubAppSpec(name="setup", help="Interactive setup wizard, and its page"),
         build=lambda declared: create_setup_app(
             declared.integrations, declared.profiles
         ),
     ),
     RosterEntry(spec=sync.SUBAPP.spec, build=lambda _: sync.SUBAPP.app),
-    RosterEntry(spec=trace.SUBAPP.spec, build=lambda _: trace.SUBAPP.app),
-    RosterEntry(
-        spec=SubAppSpec(name="usage", help="Runtime usage display"),
-        build=lambda declared: create_usage_app(declared.usage_entries),
-    ),
+    RosterEntry(spec=trace.SUBAPP_SPEC, build=lambda _: create_trace_app()),
     RosterEntry(spec=version.SUBAPP.spec, build=lambda _: version.SUBAPP.app),
 ]
-"""Every sub-app lup ships, in the order `--help` lists them."""
+"""Every sub-app lup ships, in the order `--help` lists them.
+
+Eleven names, each owned by exactly one module, which is the property this list
+is arranged for rather than a count it happened to reach. A module claims a
+top-level name and a project declining the module stops being served everything
+beneath it — so a command sitting under a name some other module owns is a
+command no project can decline, and there were about forty of them. `dev` is
+the core module's rather than a place for whatever had nowhere to go; the git
+loop, the resolver, a background run and a session's records each have their
+own, and the three trees that were top-level and core's anyway sit inside it.
+"""
 
 LIBRARY_SPECS = [entry.spec for entry in LIBRARY_ROSTER]
 """The roster as a document names it, reachable without constructing an app.

@@ -4,13 +4,13 @@ Mechanical helpers for ``/lup:close`` and ``/lup:rebase``.
 
 Examples::
 
-    $ uv run lup-devtools dev pr status --json
-    $ uv run lup-devtools dev pr merge 42
-    $ uv run lup-devtools dev pr sync-base --json
-    $ uv run lup-devtools dev pr push --force --json
-    $ uv run lup-devtools dev pr create --base dev --title "feat: search" --body "..."
-    $ uv run lup-devtools dev pr create --base dev --title "feat: search" --body-file body.md
-    $ uv run lup-devtools dev pr update 42 --body-file body.md
+    $ uv run lup-devtools git pr status --json
+    $ uv run lup-devtools git pr merge 42
+    $ uv run lup-devtools git pr sync-base --json
+    $ uv run lup-devtools git pr push --force --json
+    $ uv run lup-devtools git pr create --base dev --title "feat: search" --body "..."
+    $ uv run lup-devtools git pr create --base dev --title "feat: search" --body-file body.md
+    $ uv run lup-devtools git pr update 42 --body-file body.md
 """
 
 import json

@@ -99,7 +99,7 @@ each platform's native format — never byte parity.
             models.SpellingExample(
                 text=(
                     "| Resolver entry | `/lup:resolve` instructs `uv run "
-                    "lup-devtools harness resolve --adapter claude` | "
+                    "lup-devtools resolve --adapter claude` | "
                     "`$lup:resolve` instructs the same command with "
                     "`--adapter codex` |"
                 )
@@ -128,7 +128,7 @@ Every family in `.claude/` vs `.codex/`/`.agents/`, with an explicit decision.
 | Guidance | `.claude/CLAUDE.md` | `AGENTS.md` + `.codex/config.toml` | Parity — one document, native locations. |
 | Ownership proof | `.claude/.lup-ownership.json` | `.codex/.lup-ownership.json` | Parity — same mechanism per tree. |
 | Template guidance | `TEMPLATE_CLAUDE.md` | `TEMPLATE_AGENTS.md` | Parity — shared portable sections, platform slices per flavor. |
-| Resolver entry | skill instructs the CLI directly | skill instructs the CLI directly | Parity — neither tree generates a launcher artifact; the shared `harness resolve --adapter <runtime>` CLI is the entry on both sides. |
+| Resolver entry | skill instructs the CLI directly | skill instructs the CLI directly | Parity — neither tree generates a launcher artifact; the shared `resolve --adapter <runtime>` CLI is the entry on both sides. |
 | `docs/` | rendered by the Claude recipe | none | Intentional single copy — repository documentation at a neutral location, which neither runtime reads from its own tree. Each page renders identically under both prompt renderers, so a second copy would be a byte duplicate and would additionally give two ownership manifests the same paths to manage. The set is declared once in `content/docs/catalog.py`. |
 | `settings.json` | `.claude/settings.json` | none | Intentional — Claude-native project settings (plugin enablement, marketplace, permissions, file suggestion). The Codex counterparts are the generated `.codex/config.toml` plus uncommitted personal `config.local.toml`. |
 | `scripts/file_suggest.sh` | `.claude/plugins/lup/scripts/file_suggest.sh` | none | Intentional — wired to Claude's native `fileSuggestion` setting; Codex has no equivalent feature. |

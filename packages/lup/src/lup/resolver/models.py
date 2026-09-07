@@ -602,7 +602,7 @@ class HeldLease(BaseModel, frozen=True):
             )
         return (
             f"lease of run {self.run_id} ({self.standing}); resume it with "
-            f"`lup-devtools harness resolve --adapter <a> --run-id {self.run_id}`, "
+            f"`lup-devtools resolve --adapter <a> --run-id {self.run_id}`, "
             f"or release every lease with `--abort <reason>`"
         )
 

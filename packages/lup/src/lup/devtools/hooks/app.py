@@ -165,11 +165,11 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
 
         Examples::
 
-            $ uv run lup-devtools hooks classify 'gh api /repos/o/r/pulls/1'
-            $ uv run lup-devtools hooks classify 'rm build/out' --json
-            $ uv run lup-devtools hooks classify 'uv run lup-devtools dev check' --trapped
-            $ uv run lup-devtools hooks classify --file tmp/escalated.sh
-            $ some-writer | uv run lup-devtools hooks classify --file -
+            $ uv run lup-devtools dev hooksclassify 'gh api /repos/o/r/pulls/1'
+            $ uv run lup-devtools dev hooksclassify 'rm build/out' --json
+            $ uv run lup-devtools dev hooksclassify 'uv run lup-devtools dev check' --trapped
+            $ uv run lup-devtools dev hooksclassify --file tmp/escalated.sh
+            $ some-writer | uv run lup-devtools dev hooksclassify --file -
         """
         asked = command_text(command, file)
         report(
@@ -237,10 +237,10 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
 
         Examples::
 
-            $ uv run lup-devtools hooks sweep
-            $ uv run lup-devtools hooks sweep --autonomous --headless
-            $ uv run lup-devtools hooks sweep tmp/recorded_asks.txt
-            $ some-writer | uv run lup-devtools hooks sweep -
+            $ uv run lup-devtools dev hookssweep
+            $ uv run lup-devtools dev hookssweep --autonomous --headless
+            $ uv run lup-devtools dev hookssweep tmp/recorded_asks.txt
+            $ some-writer | uv run lup-devtools dev hookssweep -
         """
         commands = (
             [

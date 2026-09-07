@@ -28,7 +28,7 @@ and stops, because an adopter's stored login is scoped to whatever they signed
 in with and taking it uninvited is not a library's call. This repository is
 developed on machines that authenticate `gh` by signing in rather than by
 exporting a token, and the cost of leaving it was not a missing convenience:
-`dev pr create`, `dev issues` and `dev report-friction` are how this repository
+`git pr create`, `dev issues` and `dev report-friction` are how this repository
 says work is finished and how it records that its own tooling misbehaved, and
 inside the boundary none of them could reach the API. The friction-reporting
 loop in particular could not report its own breakage.

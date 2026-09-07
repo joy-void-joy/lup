@@ -18,7 +18,7 @@ jobs:
           enable-cache: true
       - run: uv sync --all-extras
       - name: Merge driver
-        run: uv run lup-devtools dev merge-driver
+        run: uv run lup-devtools git merge-driver
       - name: Generated artifact drift
         run: uv run lup-devtools harness check all
       - name: Quality gate

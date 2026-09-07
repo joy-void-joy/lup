@@ -196,8 +196,8 @@ verbatim, so rewording a comment in one of them drifted both without
 changing anything either does — and a path pattern deciding when to check is
 one more belief that can be wrong about which commits matter.
 
-Decision: A git `pre-commit` hook, written by `dev git-hooks install` and
-armed by `dev worktree create`, whose body is `harness check all`. The
+Decision: A git `pre-commit` hook, written by `git hooks install` and
+armed by `git worktree create`, whose body is `harness check all`. The
 pipeline runs that same command as its own step, spelled from the same
 constant, and `dev check` reads the same `DriftVerdict` that command reads.
 The `pre-commit` framework config is dropped: it named a framework nothing

@@ -134,8 +134,8 @@ def test_351_the_verbs_that_drive_git_are_excluded_like_git() -> None:
     assert hooks is not None
     excluded = hooks.excluded_commands()
 
-    assert sandbox_excluded("uv run lup-devtools dev worktree create feat-x", excluded)
-    assert not sandbox_excluded("uv run lup-devtools py info lup.policy", excluded)
+    assert sandbox_excluded("uv run lup-devtools git worktree create feat-x", excluded)
+    assert not sandbox_excluded("uv run lup-devtools dev py info lup.policy", excluded)
 
 
 def test_191_a_read_only_builtin_is_not_refused() -> None:

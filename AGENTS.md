@@ -44,7 +44,7 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** about the co
 
 ## Development Workflow
 
-Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev worktree create feat-name`, then start a session rooted at <the path it prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Already running, address files there by absolute path, where that tree is writable, which reaches the same branch. — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused words a late relocation meets, and the merge loop.
+Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools git worktree create feat-name`, then start a session rooted at <the path it prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Already running, address files there by absolute path, where that tree is writable, which reaches the same branch. — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused words a late relocation meets, and the merge loop.
 
 ### Merge Conflict Resolution
 
@@ -101,7 +101,7 @@ An operation that genuinely needs the launcher's host is resubmitted with a lead
 
 `lup-devtools` is the development CLI, composed from `packages/lup/` and this repository's `src/lup_template/`. **Use it instead of ad-hoc commands**, and running the same one repeatedly means **add a command** to the half that would reuse it. Inline Python (`-c`, `-m`, a REPL, or bare `python`) is denied; `uv run python <script.py>` is allowed because a file can be reviewed. Sandbox-masked dotfiles can look untracked to Git — read the real tree with `dev pending`, and a persisted result is read rather than `cat`-ed, which re-persists it.
 
-To **read** code use the `py` group or `codeintel`, which resolves a name through a language server rather than matching text: **prefer either for anything about a name**, `rename_symbol` over `replace_all`, which cannot tell one scope from another, `py text` for literal text in scoped Python source, and grep for characters in non-Python files. To **compute once**, write a script under gitignored `tmp/` and run it; to reuse it, add a command. `docs/contributing.md` carries the rest of that reviewability ladder, `docs/commands.md` every command the CLI serves — walked from the wired app, so read it to find one you did not know to look for, and `--help` for its options.
+To **read** code use the `dev py` group or `codeintel`, which resolves a name through a language server rather than matching text: **prefer either for anything about a name**, `rename_symbol` over `replace_all`, which cannot tell one scope from another, `dev py text` for literal text in scoped Python source, and grep for characters in non-Python files. To **compute once**, write a script under gitignored `tmp/` and run it; to reuse it, add a command. `docs/contributing.md` carries the rest of that reviewability ladder, `docs/commands.md` every command the CLI serves — walked from the wired app, so read it to find one you did not know to look for, and `--help` for its options.
 
 ### Generated Trees
 
@@ -113,7 +113,7 @@ To **read** code use the `py` group or `codeintel`, which resolves a name throug
 
 ## Long-Running Work
 
-Work outliving its tool call is launched to survive its launcher — never from a delegated agent's shell — and declared as a `lup.runs` `Pipeline` rather than scripted, so it is resumable and watchable by construction. Follow it with `dev monitor <dir> --events`, a line per landing, failure and stall, and name it in the launch report; `docs/runs.md` carries the rest.
+Work outliving its tool call is launched to survive its launcher — never from a delegated agent's shell — and declared as a `lup.runs` `Pipeline` rather than scripted, so it is resumable and watchable by construction. Follow it with `run monitor <dir> --events`, a line per landing, failure and stall, and name it in the launch report; `docs/runs.md` carries the rest.
 
 ---
 

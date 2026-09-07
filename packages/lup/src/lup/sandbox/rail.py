@@ -71,7 +71,7 @@ written `config`, and does not: those facts live beside the branch instead.
 Two writes are left, one per path, and both are host-side once-per-clone
 acts. A clone registers the `merge.lup-ownership` driver once, because git
 resolves a driver name from config alone and no repository can ship it; and a
-clone arms its declared guards once, with `dev git-hooks install`. Each has a
+clone arms its declared guards once, with `git hooks install`. Each has a
 pre-flight in front of it that fires only where that write is outstanding, so
 a clone that has made it cuts worktrees with both paths held, and one that
 has not meets a refusal naming the act and the command before its first

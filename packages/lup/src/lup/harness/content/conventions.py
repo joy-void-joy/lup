@@ -221,7 +221,7 @@ LONG_RUNNING_WORK = models.GuidanceSection(
 
 ## Long-Running Work
 
-Work outliving its tool call is launched to survive its launcher — never from a delegated agent's shell — and declared as a `lup.runs` `Pipeline` rather than scripted, so it is resumable and watchable by construction. Follow it with `dev monitor <dir> --events`, a line per landing, failure and stall, and name it in the launch report; `docs/runs.md` carries the rest.
+Work outliving its tool call is launched to survive its launcher — never from a delegated agent's shell — and declared as a `lup.runs` `Pipeline` rather than scripted, so it is resumable and watchable by construction. Follow it with `run monitor <dir> --events`, a line per landing, failure and stall, and name it in the launch report; `docs/runs.md` carries the rest.
 
 """
         ),

@@ -11,7 +11,7 @@ Nothing here files anything. Publishing under an account belongs to whoever owns
 Measured against **Claude Code 2.1.237**. Goes to `anthropics/claude-code`; currently **not filed**.
 
 ```bash
-uv run lup-devtools dev upstream worktree-token-wall | gh issue create --repo anthropics/claude-code --title 'Worktree isolation refuses fifteen shell words in any argv position, including in read-only commands containing no git' --body-file -
+uv run lup-devtools sync upstream worktree-token-wall | gh issue create --repo anthropics/claude-code --title 'Worktree isolation refuses fifteen shell words in any argv position, including in read-only commands containing no git' --body-file -
 ```
 
 **What happens.** In a session isolated by `EnterWorktree`, a command is

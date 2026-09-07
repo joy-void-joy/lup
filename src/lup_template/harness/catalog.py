@@ -94,17 +94,22 @@ EXCLUDED_COMMANDS = [
     # than like a boundary: one planning run finished that way and looked
     # normal.
     "uv run lup-devtools harness *",
+    # A resolver run opens native sessions, which is the same requirement the
+    # line above states — it sat inside `harness *` until the resolver got a
+    # sub-app of its own, and the exclusion has to follow the commands rather
+    # than the name they used to be nested under.
+    "uv run lup-devtools resolve *",
     # The verbs that drive git rather than read it. `git *` is excluded above
     # and a child of a confined command is confined too, so leaving these
-    # inside moves the same failure one call deeper: measured, `dev worktree
+    # inside moves the same failure one call deeper: measured, `git worktree
     # create` cannot take the lock its config write needs while the identical
     # `git config --local` succeeds one call away. Named verb by verb because
     # most of the toolchain reads a repository, and confining that costs
     # nothing at all.
-    "uv run lup-devtools dev worktree *",
-    "uv run lup-devtools dev pr *",
-    "uv run lup-devtools dev conflict *",
-    "uv run lup-devtools dev git-hooks *",
+    "uv run lup-devtools git worktree *",
+    "uv run lup-devtools git pr *",
+    "uv run lup-devtools git conflict *",
+    "uv run lup-devtools git hooks *",
     "uv run lup-devtools dev undo *",
 ]
 """Commands this project runs with no OS boundary beneath them.
@@ -134,7 +139,7 @@ WORKTREE_ENTRY_REFUSAL = (
     " trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and"
     " let in any argv position — including in read-only commands with no git in"
     " them, so `grep -c hash file.py` stops working. Measured: the tool call is"
-    " what arms it, not where the session is. `dev worktree create` already made"
+    " what arms it, not where the session is. `git worktree create` already made"
     " the tree — launch a session rooted in it, or address its files by absolute"
     " path from here"
 )
