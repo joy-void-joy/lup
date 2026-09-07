@@ -50,21 +50,21 @@ The run parks rather than guessing, so every material question is a decision tha
 
 ## Watching a run, and what silence means
 
-A run is built to be left alone, so "is it still going, or did it stop?" is the question you will ask most. Ask it with `uv run lup-devtools harness resolve status --run-id <id>`, which answers from the run directory alone: the phase, the concerns per status, **how many questions are waiting on you**, and the last journal event with its age. Liveness comes from the run's own lock rather than the process table, because under a sandbox `/proc` is PID-isolated — `ps` and `pgrep` list nothing outside the current shell, so a healthy run and a dead one look identical there.
+A run is built to be left alone, so "is it still going, or did it stop?" is the question you will ask most. Ask it with `uv run lup-devtools resolve status --run-id <id>`, which answers from the run directory alone: the phase, the concerns per status, **how many questions are waiting on you**, and the last journal event with its age. Liveness comes from the run's own lock rather than the process table, because under a sandbox `/proc` is PID-isolated — `ps` and `pgrep` list nothing outside the current shell, so a healthy run and a dead one look identical there.
 
 **Do not watch a run by tailing its log.** Two things a log cannot tell you, and both have been missed that way. A worker that queues a question blocks on it while its siblings keep working, so the run does not park and prints nothing — a question can wait on you indefinitely with the log silent. And a tail started mid-run begins at the end of the file, so every event before it is skipped without a trace.
 
 **Immediately after the detached entry prints its run id, start exactly one watch over the run and stay on it.** """
             ),
             models.WatchOutput(
-                command="uv run lup-devtools harness resolve status --run-id <id> --watch"
+                command="uv run lup-devtools resolve status --run-id <id> --watch"
             ),
             models.TextPart(
                 text=r""". The watch emits on every change and ends when the run parks or finishes, so that one invocation covers both "tell me when something moves" and "tell me when it is over". Do not reach for anything that only reports on exit, because a queued question does not stop the run. A question that arrives is printed whole, with the notes it was raised from and the concern's criteria, so you can start measuring it without fetching anything; `--line` narrows the status half to one line and leaves the question intact.
 
 Read the verdict rather than the quiet. A held lock is the fact and the last-event age is context on top of it: a run can legitimately record nothing for tens of minutes while a planner works, and judging by silence has produced a confident wrong "it crashed" about a run that was mid-turn. A growing age against a held lock is the shape of a wedged run; silence on its own is not evidence of anything.
 
-`harness resolve supervise` serves the same projection as a live page for a human to sit in front of, and takes answers. It is server-sent events to a browser, so it is the human's surface and not the one to reach for when what you need is a signal you can act on.
+`resolve supervise` serves the same projection as a live page for a human to sit in front of, and takes answers. It is server-sent events to a browser, so it is the human's surface and not the one to reach for when what you need is a signal you can act on.
 
 ## Work discovered while a run is parked
 

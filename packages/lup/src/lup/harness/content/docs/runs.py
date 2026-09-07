@@ -42,11 +42,11 @@ long job most often runs on.
 
 ## Watching one
 
-`dev monitor <run-dir>` redraws a reading in place: the units landed against
+`run monitor <run-dir>` redraws a reading in place: the units landed against
 the units scheduled, where each step stands, and what is being worked on. That
 is for a person at a second terminal.
 
-`dev monitor <run-dir> --events` emits one line per landing, step change,
+`run monitor <run-dir> --events` emits one line per landing, step change,
 failure and stall, and exits when the run ends. That is for a watcher, which
 sees lines rather than a screen — it is how an agent follows a job instead of
 asking whether it is done. The first line is a baseline rather than a replay:
@@ -166,7 +166,7 @@ items is the shape to watch.
 
 A project with its own runner does not need `Pipeline`. Writing
 `manifest.json`, a result per unit under `units/`, and a heartbeat line makes
-that runner followable by the same `dev monitor`, because the monitor reads
+that runner followable by the same `run monitor`, because the monitor reads
 the layout rather than the runtime. `lup.runs.ledger.RunDirectory` is where
 every path is spelled, so both ends meet there instead of drifting.
 """

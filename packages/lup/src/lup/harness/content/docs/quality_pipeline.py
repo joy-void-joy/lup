@@ -13,7 +13,7 @@ catches a class of problem the others cannot.
 
 ## Commit time: the git guard
 
-`uv run lup-devtools dev git-hooks install` writes one hook per moment a
+`uv run lup-devtools git hooks install` writes one hook per moment a
 project declares. One comes declared: a `pre-commit` hook running
 `uv run lup-devtools harness check all`, so a commit is refused while any
 generated artifact differs from what its source renders. It reads back in
@@ -30,9 +30,9 @@ Which hooks a project arms is its own declaration, so one that guards a
 second moment — or runs its gate under another name — says so instead of
 forking the module that writes them.
 
-`dev worktree create` arms them, re-running install refreshes a body left by
+`git worktree create` arms them, re-running install refreshes a body left by
 an older library and clears any this wrote at a moment nothing declares any
-more, `dev git-hooks status` says what a clone would run at each moment, and
+more, `git hooks status` says what a clone would run at each moment, and
 `uninstall` removes them. A hook written by anything else is reported rather
 than replaced.
 
@@ -106,7 +106,7 @@ repository does, buys a faster and more specific refusal of the one failure
 a contributor can produce without running anything; it reads the same verdict
 either way.
 
-`uv run lup-devtools dev git-hooks install` is the local half, and it is
+`uv run lup-devtools git hooks install` is the local half, and it is
 the project's to arm rather than the framework's to impose: it writes into
 `.git`, which is the contributor's, not the repository's.
 

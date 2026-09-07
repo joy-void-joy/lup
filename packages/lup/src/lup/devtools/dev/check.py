@@ -580,7 +580,7 @@ def branch_record_reports(pending: list[str]) -> list[CheckReport]:
                 f"branch records: {len(pending)} branch(es) still recorded in "
                 "the shared git config (advisory)",
                 "  every read falls back to those keys, so nothing is broken",
-                "  `lup-devtools dev worktree adopt-records` moves them, "
+                "  `lup-devtools git worktree adopt-records` moves them, "
                 "once per clone",
                 f"  it writes the shared git directory's `{destination}/`, "
                 "so it runs on the host",
@@ -793,7 +793,7 @@ def scan_reports(
                     if registered
                     else [
                         "  the generated trees text-merge and can conflict",
-                        "  register it with `lup-devtools dev merge-driver`",
+                        "  register it with `lup-devtools git merge-driver`",
                     ]
                 ),
             ],

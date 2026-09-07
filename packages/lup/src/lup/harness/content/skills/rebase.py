@@ -47,7 +47,7 @@ That is also the answer when you were about to put a branch name in the argument
 
 ### Base branch (`<base>`)
 
-Run `uv run lup-devtools dev pr sync-base --json` (step 1 below) -- it reports the base branch and a `base_source`. `recorded` (from worktree creation) and `explicit` are authoritative. `guessed` means topology alone picked it: the command merges nothing and exits non-zero. """
+Run `uv run lup-devtools git pr sync-base --json` (step 1 below) -- it reports the base branch and a `base_source`. `recorded` (from worktree creation) and `explicit` are authoritative. `guessed` means topology alone picked it: the command merges nothing and exits non-zero. """
             ),
             models.AskUser(question="which branch is the true base"),
             models.TextPart(
@@ -76,7 +76,7 @@ Invoke `"""
 ### 2. Sync and merge base
 
 ```bash
-uv run lup-devtools dev pr sync-base --json
+uv run lup-devtools git pr sync-base --json
 ```
 
 A `guessed` base exits non-zero having merged nothing -- settle the base as above and rerun with `--base <branch>`. If conflicts are reported, resolve with `"""
@@ -156,13 +156,13 @@ Fix any failure this branch introduced. A failure the base already carries is no
 Open the PR **now, before the history is rebuilt** -- never after. The force-push in step 9 lands in the PR timeline as a force-push event, so the PR carries both the history as it was actually worked and the cleaned sequence that replaced it. Creating it after the rebuild saves one body update and throws that whole trace away.
 
 ```bash
-uv run lup-devtools dev pr push --json
+uv run lup-devtools git pr push --json
 ```
 
 **If no existing PR** (first run), draft a title and summary, then:
 
 ```bash
-uv run lup-devtools dev pr create --base "<target>" --title "<title>" --body-file "<path>"
+uv run lup-devtools git pr create --base "<target>" --title "<title>" --body-file "<path>"
 ```
 
 Write the body to a file and pass `--body-file`. A body worth reading has headings, code spans and prose, and prose has apostrophes: as a `--body` argument every one of them is yours to escape, and a missed one truncates the document into a shell parse error naming an offset rather than the body. `--body` stays for a one-liner.
@@ -211,13 +211,13 @@ this -- the mark is the only copy of what the branch used to hold.
 ### 9. Force push and update PR
 
 ```bash
-uv run lup-devtools dev pr push --force --json
+uv run lup-devtools git pr push --force --json
 ```
 
 Update the PR body with a commit list:
 
 ```bash
-uv run lup-devtools dev pr update <PR_NUMBER> --body-file "<path>"
+uv run lup-devtools git pr update <PR_NUMBER> --body-file "<path>"
 ```
 
 Return the PR URL to the user.

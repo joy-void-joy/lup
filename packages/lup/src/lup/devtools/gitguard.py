@@ -5,7 +5,7 @@
 A test that forgets to bind git to its throwaway repository inherits the
 process working directory instead, and nothing fails — git finds a repository,
 commits succeed, and the suite passes green while the developer's branch has
-moved. Found the slow way, by a `dev pr sync-base` merging a `dev` whose tip
+moved. Found the slow way, by a `git pr sync-base` merging a `dev` whose tip
 had become a fixture's commit deleting the application source. The suite cannot
 be trusted to notice, because noticing is exactly what it failed at, so the
 refs are read around it.
@@ -15,7 +15,7 @@ and one that forgets inherits the process working directory instead, which
 during a test run is a real checkout. Nothing about that fails: git finds a
 repository, commits succeed, and the suite passes green while the branch the
 developer is standing on has moved. It was found here the slow way, by a
-`dev pr sync-base` merging a `dev` whose tip had become a fixture's `chore:
+`git pr sync-base` merging a `dev` whose tip had become a fixture's `chore:
 base` commit deleting the entire application source, an hour after the fixture
 ran.
 
@@ -367,7 +367,7 @@ class ForeignCheckouts(BaseModel, frozen=True):
         Two relations answer that, because neither covers the other. A branch
         already tracking one names it in `upstream`, which is exact even where
         the two are named differently. A branch whose remote lives in lup's
-        own records names nothing here -- `dev pr push` states its destination
+        own records names nothing here -- `git pr push` states its destination
         as a refspec and writes no tracking config, and a first push has not
         reached even that when this reads -- so the ref such a push creates is
         also claimed under each configured remote, which is the correspondence

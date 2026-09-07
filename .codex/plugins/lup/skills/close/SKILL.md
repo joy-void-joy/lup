@@ -16,7 +16,7 @@ Invoke `$lup:commit` to commit any uncommitted work before proceeding.
 ### 2. Get PR status
 
 ```bash
-uv run lup-devtools dev pr status --json
+uv run lup-devtools git pr status --json
 ```
 
 If no PR is found, check if the user passed a PR number as an argument. If still nothing, report the error and stop.
@@ -41,7 +41,7 @@ If no PR is found, check if the user passed a PR number as an argument. If still
 ### 4. Merge the PR
 
 ```bash
-uv run lup-devtools dev pr merge <PR_NUMBER>
+uv run lup-devtools git pr merge <PR_NUMBER>
 ```
 
 ### 5. Clean up
@@ -49,7 +49,7 @@ uv run lup-devtools dev pr merge <PR_NUMBER>
 Delete the merged branch:
 
 ```bash
-uv run lup-devtools dev delete <BRANCH_NAME>
+uv run lup-devtools git delete <BRANCH_NAME>
 ```
 
 ### 6. Report

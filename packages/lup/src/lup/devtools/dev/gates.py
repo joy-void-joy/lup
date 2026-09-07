@@ -143,7 +143,7 @@ class BranchInPlay(Gate, frozen=True):
 
     Which left one branch silent forever: landed, deleted in the same sweep,
     and asked about afterwards. The answer is not to read absence harder but
-    to have written the answer down while it was still readable — `dev delete`
+    to have written the answer down while it was still readable — `git delete`
     judges containment off the ref it is about to remove, and records the
     verdict beside the branch. So a missing ref is asked of that record, and
     fires only where something in this clone once watched the branch land. A

@@ -105,7 +105,7 @@ for the notes naming the branch in hand. Write one where you are, aimed at the
 branch that has to act, and it reaches them without waiting for a merge.
 
 Landing wakes it even where the branch was deleted in the same sweep, because
-`dev delete` judges containment off the ref it is about to remove and records
+`git delete` judges containment off the ref it is about to remove and records
 that verdict beside the branch. A checkout that never deleted it holds no such
 record and stays quiet — which is what keeps a clone that merely never fetched
 the branch, every CI job among them, from waking every gate in the repository.
@@ -129,7 +129,7 @@ Development happens in **worktrees**, not branches switched in place, so
 several changes can be in flight at once:
 
 ```bash
-uv run lup-devtools dev worktree create feat-name
+uv run lup-devtools git worktree create feat-name
 ```
 
 The worktree is created as a sibling under `tree/`. Never nest one inside
@@ -184,7 +184,7 @@ none of them is gated on the command being a git command. So an isolated
 session loses `grep -c hash` and `rg complete src/` — read-only commands with
 no git in them — for as long as it lasts, and no approval marker reaches the
 refusal.
-Relocation is bounded as well as expensive: `dev worktree create` cuts under
+Relocation is bounded as well as expensive: `git worktree create` cuts under
 a sibling `tree/`, outside the `.claude/worktrees/` a relocating tool
 switches within, so such a path is taken only as a session's first entry from
 the directory it launched in. A session already sitting in one worktree is
@@ -232,7 +232,7 @@ was removed deliberately rather than lost to a conflict side.
 Generated artifacts are regenerated, never hand-merged. Every file in a
 generated tree conflicts on parallel branches because every line is derived,
 so `.gitattributes` declares those trees under a driver that keeps one side,
-and `lup-devtools dev merge-driver` registers that driver in a clone that has
+and `lup-devtools git merge-driver` registers that driver in a clone that has
 not run `worktree create`. Reconciling such a file hunk by hunk produces an
 artifact matching neither tree: take either side, run
 `lup-devtools harness generate all`, and let `harness check all` confirm it
@@ -258,7 +258,7 @@ uv run lup-devtools dev rules --check      # the generated rule reference
 ```
 
 [quality-pipeline.md](quality-pipeline.md) explains which of the three
-automated layers catches what. The short version: `dev git-hooks install`
+automated layers catches what. The short version: `git hooks install`
 refuses a commit whose generated artifacts are behind their source and a
 push whose branch fails the gate, the per-push CI workflow runs those same
 commands and binds whether or not anyone armed the hooks, and the nightly

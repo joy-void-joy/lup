@@ -27,7 +27,7 @@ def test_every_wired_sub_app_reaches_the_page() -> None:
     """No group is left out, including the ones a session rarely types."""
     groups = [group.name for group in CommandGroup.over(served())]
 
-    assert {"agent", "dev", "feedback", "harness", "hooks", "py", "setup"} <= set(
+    assert {"agent", "dev", "feedback", "git", "harness", "resolve", "setup"} <= set(
         groups
     )
 
@@ -39,18 +39,18 @@ def test_the_commands_a_hand_written_list_had_dropped_are_present() -> None:
     assert {
         "dev refutations",
         "agent capabilities",
-        "hooks sweep",
+        "dev hooks sweep",
         "feedback trends",
         "feedback costs",
-        "dev pr-body",
+        "git pr-body",
     } <= spelled
 
 
 def test_nested_sub_apps_are_reached_at_the_depth_a_reader_types() -> None:
-    """`dev pr create` is three words on the page because it is three to run."""
+    """`git pr create` is three words on the page because it is three to run."""
     spelled = {entry.spelled() for entry in served()}
 
-    assert "dev pr create" in spelled
+    assert "git pr create" in spelled
     assert "dev library status" in spelled
     assert "dev init rename-package" in spelled
 

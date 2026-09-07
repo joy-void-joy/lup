@@ -362,7 +362,7 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 
 1. **Create a worktree** (if the user hasn't already created one):
    ```bash
-   uv run lup-devtools dev worktree create feat-name
+   uv run lup-devtools git worktree create feat-name
    ```
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/main`) and syncs dependencies; """
     ),

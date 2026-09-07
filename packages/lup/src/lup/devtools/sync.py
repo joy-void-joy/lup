@@ -72,6 +72,7 @@ import typer
 from pydantic import BaseModel, ConfigDict, TypeAdapter, with_config
 
 from lup.workspace.paths import project_root
+import lup.harness.content.docs.upstream_reports as upstream_reports
 from lup.devtools.harness.preflight import reopened
 from lup.devtools.subapps import subapp
 from lup.devtools.utils import decode_stderr, format_table, short_sha
@@ -80,8 +81,47 @@ from lup.policy.assets.host import launched, measured_boundary
 from lup.sandbox.rail import AccessibleRoot
 
 app = typer.Typer(no_args_is_help=True)
-SUBAPP = subapp("sync", "Track sync.json repos and review their commits", app)
+SUBAPP = subapp(
+    "sync", "Stay in step with upstream: tracked repos, and what they owe", app
+)
 logger = logging.getLogger(__name__)
+
+
+@app.command("upstream")
+def upstream_cmd(
+    slug: Annotated[
+        str,
+        typer.Argument(help="Which report to print; omit to list what is declared"),
+    ] = "",
+) -> None:
+    """Print a measured upstream defect, or list the ones declared.
+
+    Beneath `sync` rather than `dev` because staying in step with a dependency
+    and reporting what that dependency got wrong are one subject: both are what
+    this project owes to, and is owed by, code it does not own.
+
+    The body goes to stdout alone so it pipes: each report's own section in
+    `docs/upstream-reports.md` carries the `gh issue create` line that consumes
+    it. Filing is deliberately not done here — an account is the person's, not
+    the tooling's.
+    """
+    roster = upstream_reports.ROSTER
+    if not slug:
+        for report in roster.reports:
+            typer.echo(
+                f"{report.slug}  ({report.component} {report.version}, "
+                f"{report.status()})"
+            )
+            typer.echo(f"    {report.title}")
+        return
+    report = roster.named(slug)
+    if report is None:
+        typer.echo(
+            f"No upstream report named {slug!r}; declared: {roster.handles()}",
+            err=True,
+        )
+        raise typer.Exit(1)
+    typer.echo(report.body)
 
 
 @with_config(ConfigDict(extra="allow"))
@@ -274,7 +314,7 @@ def bare_path(name: str) -> Path:
     """Where this project's own bare repository sits inside the cache.
 
     Spelled ``<name>.git`` with a ``tree/`` of worktrees inside it, which is
-    the layout ``dev worktree`` already assumes and ``get_tree_dir`` already
+    the layout ``git worktree`` already assumes and ``get_tree_dir`` already
     finds — so a session opening one of these clones cuts a worktree in it
     with the same command it uses at home.
     """
@@ -506,7 +546,7 @@ def attach_worktree(
     as commits — so the clone is only half made until one is attached. Cut at
     ``tree/<branch>`` rather than anywhere else because that is where
     ``get_tree_dir`` looks, which is what lets a session inside the clone
-    reach for ``dev worktree create`` and have the next one land beside this.
+    reach for ``git worktree create`` and have the next one land beside this.
 
     ``worktree prune`` first, because a directory somebody removed leaves its
     administrative entry behind and ``worktree add`` refuses the path while

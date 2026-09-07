@@ -25,7 +25,7 @@ Before writing anything, understand what this investigator needs to do:
 1. **Read existing investigator declarations** as reference. `debug` is the worked example — it traces errors through logs, and it is the library's, so read it through the package rather than through a path that only resolves when lup is vendored:
 
    ```bash
-   uv run lup-devtools py source lup.harness.content.skills.debug
+   uv run lup-devtools dev pysource lup.harness.content.skills.debug
    ```
 
 2. **Explore the codebase** to understand the domain. Based on the description, identify:

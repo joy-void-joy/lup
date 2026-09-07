@@ -311,7 +311,7 @@ def parse_branches() -> list[ParsedBranch]:
     def published(branch: ParsedBranch) -> ParsedBranch:
         """The row with the remote lup recorded, where git's config names none.
 
-        A branch `dev pr push` published carries no tracking configuration,
+        A branch `git pr push` published carries no tracking configuration,
         because the push states its destination instead of asking git to
         write one. Read from git alone the row says the branch answers to
         nothing, which is the report for a branch nobody ever sent anywhere.
@@ -1278,7 +1278,7 @@ def remote_of(launcher: ProcessLauncher, root: Path, branch: str) -> str:
 
     Git's own tracking configuration is asked first and settles it wherever a
     branch has one, since a person who set it meant it. A branch published by
-    `dev pr push` has none: the push names its destination as a refspec and
+    `git pr push` has none: the push names its destination as a refspec and
     records it here instead, so that git's shared configuration holds nothing
     lup put there. Without either, the branch has never been published.
     """
@@ -1889,7 +1889,7 @@ def survey(as_json: bool) -> None:
                 typer.echo(
                     f"\nrun {hold.run_id} is not running and holds "
                     f"{len(hold.branches)} branch(es): nothing will retire them.\n"
-                    f"  uv run lup-devtools harness resolve status "
+                    f"  uv run lup-devtools resolve status "
                     f"--run-id {hold.run_id}"
                 )
 
@@ -2029,7 +2029,7 @@ def upstream_ref(name: str) -> str | None:
     """The remote-tracking ref this branch follows, if anything says it has one.
 
     Git's own tracking configuration answers first, and lup's record answers
-    where there is none — a branch published by `dev pr push` has no tracking
+    where there is none — a branch published by `git pr push` has no tracking
     configuration at all, because the push names its destination rather than
     asking git to write one into the shared config.
 
@@ -2430,7 +2430,7 @@ def delete_branch(
     written for.
 
     ``name`` need not be a local branch: a name origin alone carries is what
-    ``dev survey`` reports under its own heading and hands a disposition, and
+    ``git survey`` reports under its own heading and hands a disposition, and
     this is the verb that disposition names.
     """
     cur = git.out("branch", "--show-current")
@@ -2462,7 +2462,7 @@ def delete_branch(
         typer.echo(
             f"Warning: {name} holds commits {integration} does not, and origin/{name} "
             "is going with it — after this the work is in no branch. To keep "
-            f"it, `dev retire {name} --reason ...` closes a pull request over "
+            f"it, `git retire {name} --reason ...` closes a pull request over "
             "it first, which preserves the commits past the deletion.",
             err=True,
         )
@@ -2485,7 +2485,7 @@ class RetirementPlan(BaseModel):
     the work. The two are usually the same act and must not be: a branch the
     integration branch never absorbed, deleted with no copy on the remote,
     leaves its commits reachable from nothing and a collector free to take
-    them. `dev delete` says so at the moment it happens, which is too late to
+    them. `git delete` says so at the moment it happens, which is too late to
     be a choice.
 
     A pull request is the durable copy. GitHub writes the head of every one
@@ -2551,7 +2551,7 @@ def unique_subjects(branch: str, integration: str) -> list[str]:
     because the two are wrong in opposite directions and only one of them is
     survivable here. This decides whether there is anything to preserve, so
     a false *yes* costs a pull request nobody needed and a false *no* sends
-    the caller to `dev delete` over work that had no other copy.
+    the caller to `git delete` over work that had no other copy.
     """
     return [
         line
@@ -2708,7 +2708,7 @@ def retire_branch(
 
     if not plan.unique_commits:
         typer.echo(
-            f"{name} holds nothing {target} lacks — `dev delete` is enough, and "
+            f"{name} holds nothing {target} lacks — `git delete` is enough, and "
             "no request is needed to preserve it.",
             err=True,
         )

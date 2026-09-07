@@ -319,7 +319,7 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 
 1. **Create a worktree** (if the user hasn't already created one):
    ```bash
-   uv run lup-devtools dev worktree create feat-name
+   uv run lup-devtools git worktree create feat-name
    ```
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/main`) and syncs dependencies; `lup-devtools harness codex` regenerates the artifacts and installs the digest-verified plugin copy, so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
 2. **Relocate this session into the worktree** -- start a session rooted at <the absolute path step 1 prints> and continue there — this runtime cannot move a running session, so work carried on here would land in the checkout it started from. Already running, address files there by absolute path, where that tree is writable, which reaches the same branch.. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale.
@@ -566,8 +566,8 @@ Run `uv run lup-devtools --help` for the full command tree.
 installs an immutable content-addressed copy of the plugin after a digest check, and
 launches the Codex CLI in a persistent per-worktree home seeded from personal
 Codex authentication and settings.
-`lup-devtools usage codex` reports this backend's usage and
-`lup-devtools usage claude` the other's; profiles are managed with
+`lup-devtools dev usagecodex` reports this backend's usage and
+`lup-devtools dev usageclaude` the other's; profiles are managed with
 `lup-devtools setup profile`.
 `--codex-home` or an inherited `CODEX_HOME` selects an explicit home instead.
 

@@ -21,16 +21,16 @@ Examples::
 
     $ uv run lup-devtools --help
     $ uv run lup-devtools agent inspect --json
-    $ uv run lup-devtools py info requests
+    $ uv run lup-devtools dev py info requests
     $ uv run lup-devtools trace show <session_id>
     $ uv run lup-devtools feedback status
-    $ uv run lup-devtools dev branches
-    $ uv run lup-devtools dev worktree create feat-name
+    $ uv run lup-devtools git branches
+    $ uv run lup-devtools git worktree create feat-name
     $ uv run lup-devtools dev check --no-test
-    $ uv run lup-devtools report
+    $ uv run lup-devtools dev report
     $ uv run lup-devtools version
     $ uv run lup-devtools sync status
-    $ uv run lup-devtools usage claude --no-detail
+    $ uv run lup-devtools dev usage claude --no-detail
 """
 
 from pathlib import Path

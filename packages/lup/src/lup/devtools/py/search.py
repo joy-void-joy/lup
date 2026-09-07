@@ -1,4 +1,4 @@
-"""Helpers for ``py search`` — find symbols across packages and project source."""
+"""Helpers for ``dev py search`` — find symbols across packages and project source."""
 
 import ast
 import importlib

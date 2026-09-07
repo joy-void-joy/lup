@@ -22,8 +22,8 @@ reachable — and answerable — through the same page.
 ## Opening it
 
 ```text
-uv run lup-devtools harness resolve supervise
-uv run lup-devtools harness resolve supervise --run-id resolve-a45d2cd2c321
+uv run lup-devtools resolve supervise
+uv run lup-devtools resolve supervise --run-id resolve-a45d2cd2c321
 ```
 
 Without a run id the page opens on the runs rail alone, which reports an
@@ -32,8 +32,8 @@ its record, puts its open questions first — grouped by concern, groups still
 waiting sorted ahead of settled ones, settled ones folded to one-line records
 — and takes the accept/reject decision on its review branch.
 
-`harness resolve --supervise` is sugar for a long `--wait` plus a spawned
-`harness resolve supervise`, terminated when the run exits unless
+`resolve --supervise` is sugar for a long `--wait` plus a spawned
+`resolve supervise`, terminated when the run exits unless
 `--supervise-linger`. It is a convenience, not a mode — the same page answers
 the same run started any other way.
 
@@ -48,7 +48,7 @@ mistyped free-text value correctable until it counts.
 | --- | --- |
 | the page | answer form, *Park run* |
 | a rerun | `--answer <question-id>=<value>` |
-| another shell | `harness resolve answer --run-id <id> q=value`, `harness resolve questions`, `harness resolve park` |
+| another shell | `resolve answer --run-id <id> q=value`, `resolve questions`, `resolve park` |
 | a worker | its own `queue_questions` / `await_answers` tools |
 
 Partial answers are legal. A question is answered by whoever knows that
@@ -86,7 +86,7 @@ does not catch it.
 A worker inside a model turn waits on nothing, so park never reached one and
 killing was the only way to end a busy run — which discards the uncommitted
 edits of each interrupted round along with its reviewer feedback and round
-counter. `harness resolve drain` is observed at the top of a round, after the
+counter. `resolve drain` is observed at the top of a round, after the
 previous one is committed, and at the boundary between dependency batches.
 Nothing is failed and nothing is written off, so resuming costs only the turns
 that had not finished. A satisfied drain is cleared on resume the way a stale
@@ -97,7 +97,7 @@ answered it.
 
 Offers only become answers when a promoter takes them, and the promoter lives
 inside a run. A parked run therefore needs something to start it again — the
-page's *Resume run* button spawns `harness resolve --run-id <id>`, so the
+page's *Resume run* button spawns `resolve --run-id <id>`, so the
 surface that collected the decisions is also what spends them.
 
 ## Reading state

@@ -189,7 +189,7 @@ def test_pull_request_workflow_runs_the_same_gate_a_checkout_runs() -> None:
 
     assert commands == [
         "uv sync --all-extras",
-        "uv run lup-devtools dev merge-driver",
+        "uv run lup-devtools git merge-driver",
         DRIFT_COMMAND,
         CHECK_COMMAND,
     ]

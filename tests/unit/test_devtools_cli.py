@@ -63,8 +63,8 @@ COMMAND_PATHS = sorted(iter_command_paths(app))
 def test_command_tree_is_walked() -> None:
     flattened = {" ".join(path) for path in COMMAND_PATHS}
     assert "trace list" in flattened
-    assert "dev pr merge" in flattened
-    assert "dev worktree create" in flattened
+    assert "git pr merge" in flattened
+    assert "git worktree create" in flattened
 
 
 @pytest.mark.parametrize("launch_only", [False, True])
@@ -277,12 +277,12 @@ def test_ending_a_run_needs_no_adapter_but_driving_one_still_does() -> None:
     run in trouble most needs.
     """
     ended = runner.invoke(
-        app, ["harness", "resolve", "--abort", "reason", "--run-id", "absent-run"]
+        app, ["resolve", "--abort", "reason", "--run-id", "absent-run"]
     )
     assert "--adapter is required" not in ended.output
     assert "no resolver run 'absent-run' to abort" in ended.output
 
-    driven = runner.invoke(app, ["harness", "resolve", "--run-id", "absent-run"])
+    driven = runner.invoke(app, ["resolve", "--run-id", "absent-run"])
     assert "--adapter is required" in driven.output
 
 

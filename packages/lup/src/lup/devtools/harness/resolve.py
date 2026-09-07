@@ -291,7 +291,7 @@ class FeatureWorktreePreparer(WorktreePreparer):
     """Prepare leased resolver worktrees exactly like feature worktrees.
 
     Copies the same gitignored extras and runs the same dependency sync as
-    ``dev worktree create``, so verification and tests inside a lease bind
+    ``git worktree create``, so verification and tests inside a lease bind
     to the leased checkout instead of the source tree's environment.
     """
 
@@ -564,7 +564,6 @@ async def spawned_supervisor(
         "uv",
         "run",
         "lup-devtools",
-        "harness",
         "resolve",
         "supervise",
         "--run-id",
@@ -724,7 +723,7 @@ def report_environment_fault(
     )
     typer.echo("Fix the host, then continue with:")
     typer.echo(
-        f"  uv run lup-devtools harness resolve --adapter {adapter} "
+        f"  uv run lup-devtools resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config"
     )
     # Naming what resuming already does, because the fix that unblocks a run
@@ -732,7 +731,7 @@ def report_environment_fault(
     # forward on its own reaches for `refresh` or resumes onto a stale tree.
     typer.echo(
         "That takes whatever landed on the branch meanwhile. Leases already "
-        "holding work stay put; `harness resolve refresh --apply` moves those."
+        "holding work stay put; `resolve refresh --apply` moves those."
     )
 
 
@@ -746,9 +745,7 @@ def report_drained(drained: ResolverDrained, adapter: str, run_id: str) -> None:
         typer.echo(f"  stopped before a turn: {', '.join(drained.concerns)}")
     typer.echo("No concern failed and every committed round stands.")
     typer.echo("Continue with:")
-    typer.echo(
-        f"  uv run lup-devtools harness resolve --adapter {adapter} --run-id {run_id}"
-    )
+    typer.echo(f"  uv run lup-devtools resolve --adapter {adapter} --run-id {run_id}")
 
 
 def report_deferred_assembly(
@@ -766,7 +763,7 @@ def report_deferred_assembly(
         typer.echo(f"  would be excluded: {', '.join(deferred.excluded)}")
     typer.echo("Every lease, branch and outcome is intact. Assemble later with:")
     typer.echo(
-        f"  uv run lup-devtools harness resolve --adapter {adapter} "
+        f"  uv run lup-devtools resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config "
         f"--answer {ASSEMBLY_QUESTION_ID}=approve"
     )
@@ -790,7 +787,7 @@ def report_regression(
     typer.echo("The review branch was not completed. Every lease and branch is intact.")
     typer.echo("Repair the merged tree, then continue with:")
     typer.echo(
-        f"  uv run lup-devtools harness resolve --adapter {adapter} "
+        f"  uv run lup-devtools resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config"
     )
 
@@ -1068,7 +1065,6 @@ class DetachedRun(BaseModel, frozen=True):
             "uv",
             "run",
             "lup-devtools",
-            "harness",
             "resolve",
             "--adapter",
             self.adapter,
@@ -1154,8 +1150,7 @@ def detach_resolve(detached: DetachedRun) -> None:
     typer.echo(f"Run {resolved} started detached.")
     typer.echo(f"Its output: {log}")
     typer.echo(
-        f"Follow it: uv run lup-devtools harness resolve status "
-        f"--run-id {resolved} --watch"
+        f"Follow it: uv run lup-devtools resolve status --run-id {resolved} --watch"
     )
 
 
@@ -1841,8 +1836,8 @@ def run_resolve(
                                 args=[
                                     "run",
                                     "lup-devtools",
-                                    "harness",
-                                    "serve-resolver-tools",
+                                    "resolve",
+                                    "serve-tools",
                                 ],
                                 env={
                                     **session_environment,
@@ -1919,8 +1914,8 @@ def run_resolve(
                             args=[
                                 "run",
                                 "lup-devtools",
-                                "harness",
-                                "serve-resolver-tools",
+                                "resolve",
+                                "serve-tools",
                             ],
                             env={**session_environment, **tool_context.to_env()},
                         )

@@ -186,7 +186,7 @@ customizing. These are the files that matter:
 - `src/lup_template/agent/tool_policy.py` — conditional tool availability
 - `src/lup_template/agent/prompts.py` — system prompt templates
 
-`uv run lup-devtools py source <module>` reads any of them, and
+`uv run lup-devtools dev pysource <module>` reads any of them, and
 `docs/library.md` and `docs/architecture.md` carry the runtime in full.
 
 ### Runtime and SDK documentation

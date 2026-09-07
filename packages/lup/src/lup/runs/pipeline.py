@@ -16,7 +16,7 @@ everything downstream of it, and nothing else, without anybody having to
 remember what rested on what.
 
 What the runtime writes is :mod:`lup.runs.models`, so every run built here is
-followable by ``dev monitor`` with no cooperation from the step bodies.
+followable by ``run monitor`` with no cooperation from the step bodies.
 """
 
 import hashlib
@@ -756,7 +756,7 @@ class Pipeline(BaseModel, frozen=True):
             )
             typer.echo(
                 f"{summary.landed} landed, {summary.failed} failed; "
-                f"follow with: uv run lup-devtools dev monitor {directory}"
+                f"follow with: uv run lup-devtools run monitor {directory}"
             )
             if not summary.ok:
                 raise typer.Exit(1)

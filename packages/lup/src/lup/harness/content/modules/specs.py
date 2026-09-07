@@ -31,7 +31,7 @@ CORE = ModuleSpec(
         "the permission policy, with the reference pages behind them."
     ),
     default_on=True,
-    subapps=["dev", "hooks", "py", "report"],
+    subapps=["dev"],
     tool_groups=["codeintel"],
 )
 
@@ -43,6 +43,7 @@ GIT_WORKFLOW = ModuleSpec(
         "that says what has to be green before one does."
     ),
     default_on=True,
+    subapps=["git"],
 )
 
 META = ModuleSpec(
@@ -65,6 +66,7 @@ RESOLVER = ModuleSpec(
     ),
     default_on=True,
     requires=["git-workflow"],
+    subapps=["resolve"],
 )
 
 VERSION = ModuleSpec(
@@ -82,11 +84,11 @@ OBSERVABILITY = ModuleSpec(
     id="observability",
     title="Observability",
     summary=(
-        "What a session left behind: its trace, what it cost, and the archive "
-        "a worktree's records are kept in."
+        "What a session left behind: its trace, and the archive a worktree's "
+        "records are kept in once the worktree is gone."
     ),
     default_on=True,
-    subapps=["trace", "usage"],
+    subapps=["trace"],
 )
 
 SANDBOX = ModuleSpec(
@@ -108,7 +110,7 @@ SETUP = ModuleSpec(
         "wizard, and the local page that is the same thing in a browser."
     ),
     default_on=True,
-    subapps=["setup", "dashboard"],
+    subapps=["setup"],
 )
 
 CONVERSATION = ModuleSpec(
@@ -137,6 +139,7 @@ RUNS = ModuleSpec(
         "rather than scripted, and watchable while it runs."
     ),
     default_on=True,
+    subapps=["run"],
 )
 """On, unlike the other three that carry no skills.
 

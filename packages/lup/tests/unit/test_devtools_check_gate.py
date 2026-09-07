@@ -29,7 +29,7 @@ def test_a_pending_move_names_the_command_and_counts_the_branches() -> None:
     printed = "\n".join(report.lines)
 
     assert "branch records: 2 branch(es)" in printed
-    assert "`lup-devtools dev worktree adopt-records`" in printed
+    assert "`lup-devtools git worktree adopt-records`" in printed
     assert "once per clone" in printed
     assert "on the host" in printed
 

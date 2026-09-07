@@ -319,7 +319,7 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 
 1. **Create a worktree** (if the user hasn't already created one):
    ```bash
-   uv run lup-devtools dev worktree create feat-name
+   uv run lup-devtools git worktree create feat-name
    ```
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/main`) and syncs dependencies; `lup-devtools harness claude` regenerates and launches the verified local plugin, so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
 2. **Relocate this session into the worktree** -- work in <the absolute path step 1 prints> by whichever of these you can reach: launch a session rooted there; or, already running, address its files by absolute path, where that tree is writable. `EnterWorktree` is refused, and takes a `tree/` path only as a session's first switch: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you must, and leave with `ExitWorktree(action="keep")`. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale.
@@ -568,8 +568,8 @@ Run `uv run lup-devtools --help` for the full command tree.
 
 `lup-devtools harness claude` regenerates, verifies, and runs Claude Code with
 the local Lup plugin and the active profile's account (`CLAUDE_CONFIG_DIR`).
-`lup-devtools usage claude` reports usage for the chosen profile, and
-`lup-devtools usage codex` reports the other backend's. This repository keeps
+`lup-devtools dev usageclaude` reports usage for the chosen profile, and
+`lup-devtools dev usagecodex` reports the other backend's. This repository keeps
 its accounts as directories under `.lup/profiles/`, curated with either
 `lup-devtools harness profile` or `lup-devtools setup profile` — the same
 roster through both.

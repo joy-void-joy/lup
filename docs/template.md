@@ -163,17 +163,15 @@ display around the readers it names.
 
 - `agent` — Agent introspection and debugging
 - `conversation` — Retain authenticated AI conversations
-- `dashboard` — Host the local setup dashboard
-- `dev` — Worktrees, branches, and pre-flight checks
+- `dev` — Read this repository, and hold it to what it settled
 - `feedback` — Feedback state, metrics, and commits
+- `git` — Branches, worktrees, pull requests, and conflicts
 - `harness` — Generate and launch the native harnesses
-- `hooks` — Query the permission policy
-- `py` — Python source and module inspection
-- `report` — Everything left to implement, in one place
-- `setup` — Interactive setup wizard
-- `sync` — Track sync.json repos and review their commits
-- `trace` — Trace display, search, and analysis
-- `usage` — Runtime usage display
+- `resolve` — Drive a resolver run, and watch or answer it
+- `run` — Follow work that outlives its tool call
+- `setup` — Interactive setup wizard, and its page
+- `sync` — Stay in step with upstream: tracked repos, and what they owe
+- `trace` — What a session left behind: its trace and its records
 - `version` — Agent version, changelog, and bump
 
 Run `uv run lup-devtools --help` for the full command tree. The three you will
@@ -275,7 +273,7 @@ A registration that names only a URL is materialized under
 `~/.cache/lup/sync/<name>.git` in the layout one naming a local path already
 points at: a full bare clone — every branch, whole history — with a worktree
 attached at `tree/<branch>`. What is mounted is that worktree, so a session
-opens either kind of registration on the same terms, and `dev worktree
+opens either kind of registration on the same terms, and `git worktree
 create` inside one lands its next checkout beside the first. The cache sits
 outside the project deliberately. A clone under the checkout is inside the
 session's own writable mount, which makes a `"ro"` registration silently

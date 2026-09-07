@@ -17713,7 +17713,7 @@ REFUSED_TOOLS: list[RefusedToolRow] = [
     {
         "tool": "EnterWorktree",
         "specifier": "",
-        "reason": "entering a worktree with this tool arms Claude Code's worktree isolation for the rest of the session, which then refuses eval, source, fc, coproc, trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and let in any argv position \u2014 including in read-only commands with no git in them, so `grep -c hash file.py` stops working. Measured: the tool call is what arms it, not where the session is. `dev worktree create` already made the tree \u2014 launch a session rooted in it, or address its files by absolute path from here",
+        "reason": "entering a worktree with this tool arms Claude Code's worktree isolation for the rest of the session, which then refuses eval, source, fc, coproc, trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and let in any argv position \u2014 including in read-only commands with no git in them, so `grep -c hash file.py` stops working. Measured: the tool call is what arms it, not where the session is. `git worktree create` already made the tree \u2014 launch a session rooted in it, or address its files by absolute path from here",
     },
 ]
 
@@ -17805,10 +17805,11 @@ SANDBOX_EXCLUDED_COMMANDS: list[str] = [
     "git *",
     "gh *",
     "uv run lup-devtools harness *",
-    "uv run lup-devtools dev worktree *",
-    "uv run lup-devtools dev pr *",
-    "uv run lup-devtools dev conflict *",
-    "uv run lup-devtools dev git-hooks *",
+    "uv run lup-devtools resolve *",
+    "uv run lup-devtools git worktree *",
+    "uv run lup-devtools git pr *",
+    "uv run lup-devtools git conflict *",
+    "uv run lup-devtools git hooks *",
     "uv run lup-devtools dev undo *",
 ]
 

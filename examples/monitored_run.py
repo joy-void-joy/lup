@@ -6,7 +6,7 @@ model, so it runs anywhere.
 
     uv run -m examples.monitored_run plan
     uv run -m examples.monitored_run run
-    uv run lup-devtools dev monitor tmp/runs/monitored-run --events
+    uv run lup-devtools run monitor tmp/runs/monitored-run --events
 
 Run it twice and the second run does nothing: every step's fingerprint still
 matches what landed. Edit ``measure`` and run it again, and ``measure`` and

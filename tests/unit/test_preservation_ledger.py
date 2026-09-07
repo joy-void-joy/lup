@@ -49,4 +49,9 @@ def test_the_capture_holds_the_operations_a_reader_types(
     """The operation catalog is half of what the ledger is for."""
     captured = {*Ledger.read(LEDGER_FILE).commands}
 
-    assert {"dev check", "dev relocate", "harness generate", "py search"} <= captured
+    assert {
+        "dev check",
+        "dev relocate",
+        "harness generate",
+        "dev py search",
+    } <= captured

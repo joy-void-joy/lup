@@ -5,7 +5,7 @@ editor's summary, the verifier's verdict, and per-note findings. This module
 joins that manifest with each branch's diff against the snapshot base and
 renders a single self-contained page (inline CSS, no external assets), so the
 human gate can read every concern's implementation before approving merges.
-Exposed as ``lup-devtools dev resolve-review``.
+Exposed as ``lup-devtools resolve review``.
 """
 
 import html

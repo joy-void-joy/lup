@@ -1,4 +1,4 @@
-"""Helpers for ``py source`` — package file trees."""
+"""Helpers for ``dev py source`` — package file trees."""
 
 from pathlib import Path
 

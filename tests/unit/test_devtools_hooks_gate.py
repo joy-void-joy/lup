@@ -101,7 +101,7 @@ def test_an_unarmed_clone_meets_the_diagnosis_up_front(
     reported = capsys.readouterr().err
     assert raised.value.exit_code == 1
     assert "guard not installed" in reported
-    assert "dev git-hooks install" in reported
+    assert "git hooks install" in reported
 
 
 @needs_a_mode_that_refuses

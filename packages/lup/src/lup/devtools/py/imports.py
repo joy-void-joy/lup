@@ -1,4 +1,4 @@
-"""Helpers for ``py imports`` — import graph exploration."""
+"""Helpers for ``dev py imports`` — import graph exploration."""
 
 import ast
 import typing

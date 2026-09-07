@@ -2,7 +2,7 @@
 
 Every other surface here answers one question — `dev comments` what is still
 being asked, `harness check` whether the generated trees are current, `dev
-branches` what has not landed, `harness resolve supervise` what one run is
+branches` what has not landed, `resolve supervise` what one run is
 doing. None of them answers "what is left", which is the question a session
 ends on and the one a report is written to record.
 
@@ -12,9 +12,9 @@ this can see, into the same file, rewritten whole.
 
 Examples::
 
-    $ uv run lup-devtools report
-    $ uv run lup-devtools report --json
-    $ uv run lup-devtools report --write tmp/resolver_remaining.md
+    $ uv run lup-devtools dev report
+    $ uv run lup-devtools dev report --json
+    $ uv run lup-devtools dev report --write tmp/resolver_remaining.md
 """
 
 from pathlib import Path
