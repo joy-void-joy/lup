@@ -18,7 +18,7 @@ from lup.providers.harness import guidance_artifacts
 from lup.harness.codescan.markers import find_feedback
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
-    TEMPLATE_GUIDANCE_HEADROOM,
+    TemplateGuidanceBudget,
     HookSet,
     document_byte_size,
 )
@@ -494,7 +494,7 @@ def guidance_budget_report(used: int) -> CheckReport:
 
 
 def scaffold_budget_report(
-    used: int, headroom: int = TEMPLATE_GUIDANCE_HEADROOM
+    used: int, headroom: int = TemplateGuidanceBudget().headroom
 ) -> CheckReport:
     """Whether a scaffold has left its adopter room inside the runtime ceiling.
 

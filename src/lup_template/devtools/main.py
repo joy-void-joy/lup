@@ -47,7 +47,7 @@ from lup.devtools.harness.resolve import ConfiguredModel
 from lup.devtools.roster import DevtoolsDeclarations
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
-from lup_template.agent.config import engine_for_model, settings
+from lup_template.agent.config import engine_for_settings, settings
 from lup_template.devtools.agent import app as agent_app
 import lup_template.devtools.dev.app as dev
 from lup_template.devtools.harness.composition import (
@@ -103,8 +103,10 @@ DECLARATIONS = DevtoolsDeclarations(
     ],
     integrations=INTEGRATIONS,
     usage_entries=[claude_usage_entry(), codex_usage_entry()],
-    model=ConfiguredModel(
-        name=settings.model, adapter=engine_for_model(settings.model)
+    model=(
+        ConfiguredModel(name=settings.model, adapter=engine_for_settings())
+        if settings.model is not None
+        else None
     ),
     profiles=profile_directory(),
 )

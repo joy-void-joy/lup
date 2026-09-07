@@ -22,7 +22,7 @@ from lup_template.agent.prompts import get_system_prompt
 from lup_template.agent.subagents import get_subagent_specs
 from lup_template.devtools.agent.serve import collect_registry_tools
 from lup.tools.mcp import LupMcpTool
-from lup.types import JsonObject
+from lup.types import JsonObject, SubagentCapability
 
 # lup: ignore[constant-declaration] — how much of a prompt the default view
 # opens with is this command's own presentation, and `--full` is the whole
@@ -114,12 +114,13 @@ class SubagentDict(TypedDict):
     description: str
     model: str | None
     tools: list[str]
+    capabilities: list[SubagentCapability]
 
 
 class InspectPayload(TypedDict):
     """The full agent configuration as one JSON-serializable document."""
 
-    model: str
+    model: str | None
     max_thinking_tokens: int | None
     tools: list[ToolDict]
     dynamic_tools: dict[str, list[str]]
@@ -167,6 +168,7 @@ def run_inspect(as_json: bool, full: bool) -> None:
                     "description": agent.description,
                     "model": agent.model,
                     "tools": agent.tools,
+                    "capabilities": agent.capabilities,
                 }
                 for name, agent in subagents.items()
             },
@@ -183,7 +185,7 @@ def run_inspect(as_json: bool, full: bool) -> None:
     out.write("=" * 60 + "\n")
 
     # Model
-    out.write(f"\nModel: {settings.model}\n")
+    out.write(f"\nModel: {settings.model or 'strongest (engine-native)'}\n")
     out.write(f"Max thinking tokens: {settings.max_thinking_tokens}\n")
 
     # Tools grouped by server
@@ -220,6 +222,8 @@ def run_inspect(as_json: bool, full: bool) -> None:
             out.write(f"    {agent.description}\n")
         if agent.tools:
             out.write(f"    Tools: {', '.join(agent.tools)}\n")
+        if agent.capabilities:
+            out.write(f"    Capabilities: {', '.join(agent.capabilities)}\n")
 
     # System prompt
     out.write(f"\n{'─' * 60}\n")

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "7a2c2d085ac3c2dc7ff19389dcce891d972ab1de5362d334f1a269d140b44bef",
+  "source_digest": "f580cd9f089c2b933f38b5f0fd899c8f8eaccd1a90787e9ae0f75686ce27f6e5",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -16,35 +16,35 @@
     {
       "path": ".codex/agents/tdd-implementer.toml",
       "category": "generated",
-      "sha256": "2f04f7a3821405c4d854b843ab374398fdf8709492231d91cf75094dce17da8f",
+      "sha256": "e11c2897843a2df45994f3e02540d26efa6e3981d6b0bb49026139c0108bafc7",
       "semantic_id": "agent.tdd-implementer",
       "executable": false
     },
     {
       "path": ".codex/agents/trace-explorer.toml",
       "category": "generated",
-      "sha256": "6b8c86fed28e9e5453bc224f53784c0e1403d25baefd04cd676cf3168a1b16ff",
+      "sha256": "0d59e4d3a58a6cac6c5a52b22460f7a5851b04d5357c1bd62fcb54b0b8200e21",
       "semantic_id": "agent.trace-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-explorer.toml",
       "category": "generated",
-      "sha256": "209e1ae2f5e9d00e0fcb5ff7832d324b1f9dd093987e2f0a2ed4e32fe6176d70",
+      "sha256": "ce8abe0173258a9db3b0d3aca67e435944bffaaed185018c790bdff95ed777c1",
       "semantic_id": "agent.version-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-reviewer.toml",
       "category": "generated",
-      "sha256": "3af7399b3f02b73d701195b0773a098b53d8cc6dadbcd43e590d2665d16ce472",
+      "sha256": "5f5edf87773afd384938ddc1a30b97769f842675ea21c0ff3777796e83aea616",
       "semantic_id": "agent.version-reviewer",
       "executable": false
     },
     {
       "path": ".codex/config.toml",
       "category": "generated",
-      "sha256": "237f4bf7ca0cad99e437f5642f5e15f3f4a00ce744d139783b0651190d90a23c",
+      "sha256": "d75775050ac9a88dcfb63f4929af12256c6777fb13d5e22b9ddd98d96224e501",
       "semantic_id": "harness.project-config",
       "executable": false
     },

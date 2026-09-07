@@ -349,21 +349,29 @@ alone would rebuild every block as a base instance and drop its payload.
 # Subagent specification
 # ---------------------------------------------------------------------------
 
+type ModelTier = Literal["inherit", "strongest", "balanced", "fast"]
+"""Portable model preference whose concrete spelling belongs to an adapter."""
 
-class SubagentSpec(BaseModel):
+type SubagentCapability = Literal["workspace-read", "web-search"]
+"""A provider-neutral facility a delegated role may use."""
+
+
+class SubagentSpec(BaseModel, extra="forbid"):
     """Provider-neutral subagent definition used by injected factory recipes."""
 
     name: str
     description: str
     prompt: str
-    tools: list[str] = []
-    model: str | None = Field(
-        default=None,
-        description="Model for this subagent; None inherits the session's "
-        "main model on every backend",
+    capabilities: list[SubagentCapability] = []
+    tools: list[ToolGrant] = []
+    model: ModelTier = Field(
+        default="inherit",
+        description="Portable model tier for this subagent; inherit reuses the "
+        "session's main model on every backend",
     )
     max_turns: int | None = Field(
         default=None,
+        gt=0,
         description="Turn cap for delegated one-shot runs (None = backend default)",
     )
 

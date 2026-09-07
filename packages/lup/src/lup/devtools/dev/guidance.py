@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from lup.providers.harness import guidance_artifacts
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
-    TEMPLATE_GUIDANCE_HEADROOM,
+    TemplateGuidanceBudget,
     document_byte_size,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
@@ -77,7 +77,7 @@ def report(
     compositions: list[NativeHarnessComposition],
     scaffold: bool,
     by_size: bool,
-    headroom: int = TEMPLATE_GUIDANCE_HEADROOM,
+    headroom: int = TemplateGuidanceBudget().headroom,
 ) -> None:
     """Print every guidance artifact's sections against the budget it answers to.
 

@@ -18,6 +18,7 @@ from lup.providers.codex.hooks import (
 )
 from lup.providers.codex.home import install_declared_policy
 from lup.providers.codex.login import CODEX_HOME
+from lup.providers.codex.subagents import CodexSubagentTools
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
@@ -77,6 +78,7 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     submission_gate_resolver: SubmissionGateResolver | None = None
     mcp_servers: dict[str, "CodexMcpServerConfig"] = {}
     writable_roots: list[Path] = []
+    delegated_tools: CodexSubagentTools | None = None
 
     @model_validator(mode="after")
     def reject_unanswerable_approvals(self) -> "CodexSessionConfig":
@@ -88,6 +90,18 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
         the turn on its first command — so the combination is rejected at
         construction instead of at the first act.
         """
+        if self.delegated_tools is not None and (
+            self.sandbox != "read-only" or self.approval_policy != "never"
+        ):
+            raise ValueError(
+                "delegated tools require read-only sandbox and never approvals"
+            )
+        if self.delegated_tools is not None and (
+            self.mcp_servers or self.writable_roots
+        ):
+            raise ValueError(
+                "delegated tool capabilities do not grant MCP servers or writable roots"
+            )
         if self.approval_policy not in {None, "never"} and self.hooks is None:
             raise ValueError(
                 f"approval_policy {self.approval_policy!r} makes the app-server "
@@ -107,6 +121,16 @@ class CodexMcpServerConfig(BaseModel, frozen=True):
 
 class CodexThreadRef(BaseModel, frozen=True):
     id: str
+
+
+class CodexInheritedConfig(BaseModel, frozen=True):
+    """Only the inherited MCP roster is needed to restrict a delegated role."""
+
+    mcp_servers: dict[str, JsonValue] = {}
+
+
+class CodexConfigReadResponse(BaseModel, frozen=True):
+    config: CodexInheritedConfig
 
 
 class CodexTurnRef(BaseModel, frozen=True):
@@ -391,6 +415,7 @@ class CodexConversationState:
         self.submission: TurnSubmission | None = None
         self.schema_digest: str | None = None
         self.channel: CodexTurnChannel | None = None
+        self.inherited_servers: list[str] = []
         self.server.server_request_handler = self.handle_server_request
         self.server.notification_handler = self.handle_notification
         self.server.disconnect_handler = self.handle_disconnect
@@ -398,6 +423,17 @@ class CodexConversationState:
     async def ensure_thread(self) -> str:
         if self.thread_id is not None:
             return self.thread_id
+        if self.config.delegated_tools is not None:
+            if self.resume is not None:
+                raise ValueError(
+                    "a delegated role cannot resume a thread with inherited tools"
+                )
+            inherited = CodexConfigReadResponse.model_validate(
+                await self.server.request(
+                    "config/read", {"cwd": str(self.config.cwd), "includeLayers": False}
+                )
+            )
+            self.inherited_servers = list(inherited.config.mcp_servers)
         if self.resume is not None:
             # Codex persists dynamic tools in the thread's rollout metadata and
             # restores them on resume when none are supplied, so a resumed
@@ -428,6 +464,11 @@ class CodexConversationState:
         if self.config.model_provider is not None:
             params["modelProvider"] = self.config.model_provider
         configuration = dict(self.config.provider_config or {})
+        if self.config.delegated_tools is not None:
+            configuration.update(self.config.delegated_tools.configuration())
+            configuration["mcp_servers"] = {
+                name: {"enabled": False} for name in self.inherited_servers
+            }
         if self.config.mcp_servers:
             configuration["mcp_servers"] = {
                 name: server.model_dump(mode="json")

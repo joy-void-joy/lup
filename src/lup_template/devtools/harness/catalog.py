@@ -28,6 +28,7 @@ from lup.harness.models import (
     McpServer,
     Plugin,
     ProjectRootWord,
+    RuntimeWord,
     ResolveSpec,
     SkillInvocation,
 )
@@ -195,6 +196,8 @@ def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer
                 LiteralWord(text="lup-devtools"),
                 LiteralWord(text="agent"),
                 LiteralWord(text="serve-tools"),
+                LiteralWord(text="--runtime"),
+                RuntimeWord(),
                 LiteralWord(text="--server"),
                 LiteralWord(text=name),
                 LiteralWord(text="--session"),

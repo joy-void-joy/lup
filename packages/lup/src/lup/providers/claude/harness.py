@@ -28,7 +28,6 @@ from lup.harness.models import (
     ArtifactTree,
     Harness,
     HookSet,
-    ModelTier,
     Plugin,
     PluginLocation,
     QualifiedAgentName,
@@ -50,17 +49,8 @@ from lup.policy.dispatcher import (
 )
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import routed_for
-
-
-# lup: ignore[constant-declaration] — each value is Claude Code's own alias for
-# the tier beside it, over a tier vocabulary this library closes
-CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
-    "inherit": "inherit",
-    "strongest": "opus",
-    "balanced": "sonnet",
-    "fast": "haiku",
-}
-"""Claude's own name for each portable tier, as agent frontmatter accepts it."""
+from lup.providers.claude.subagents import model_alias
+from lup.types import ModelTier
 
 
 class ClaudeSpellings(NativeSpellings):
@@ -250,6 +240,9 @@ class ClaudeSpellings(NativeSpellings):
             "https://docs.claude.com/ and https://code.claude.com/"
         )
 
+    def runtime_key(self) -> str:
+        return "claude"
+
     def project_root(self) -> str:
         # Claude Code substitutes this into a plugin-provided MCP command
         # without needing a default, so a server reaches the repository it
@@ -258,7 +251,7 @@ class ClaudeSpellings(NativeSpellings):
         return "${CLAUDE_PROJECT_DIR}"
 
     def model_alias(self, tier: ModelTier) -> str | None:
-        return CLAUDE_MODEL_ALIASES[tier]
+        return model_alias(tier)
 
     def tree(self, location: TreeLocation) -> Atom:
         match location:

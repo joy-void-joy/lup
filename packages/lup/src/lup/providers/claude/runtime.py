@@ -976,6 +976,7 @@ def build_claude_options(
     import claude_agent_sdk as claude
     from claude_agent_sdk import types as claude_types
     from lup.providers.claude.hooks import lup_hooks_to_claude
+    from lup.providers.claude.subagents import model_alias, subagent_tools
 
     servers = dict(config.tool_servers)
     allowed = list(config.allowed_tools)
@@ -994,7 +995,7 @@ def build_claude_options(
         subprocess shape.
         """
         match server:
-            case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam
+            case LupMcpServerConfig():
                 return claude_types.McpSdkServerConfig(
                     type="sdk", name=server.name, instance=server.server
                 )
@@ -1036,8 +1037,9 @@ def build_claude_options(
             spec.name: claude_types.AgentDefinition(
                 description=spec.description,
                 prompt=spec.prompt,
-                tools=spec.tools,
-                model=spec.model,
+                tools=subagent_tools(spec),
+                model=model_alias(spec.model),
+                maxTurns=spec.max_turns,
             )
             for spec in config.subagents
         }

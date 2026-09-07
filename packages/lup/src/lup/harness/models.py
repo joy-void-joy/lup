@@ -39,7 +39,7 @@ from lup.policy.everyday import CommandFamily
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
 from lup.seams import Selection
-from lup.types import JsonValue, ToolGrant, ToolName
+from lup.types import JsonValue, ModelTier, ToolGrant, ToolName
 
 if TYPE_CHECKING:
     from lup.harness.contracts import NativeSpellings, PromptRenderer
@@ -564,27 +564,17 @@ however little literal text the declaration holds. Reference material that a
 skill or a denial message surfaces at the right moment belongs in a generated
 document under ``docs/`` instead, reached by a file-path pointer."""
 
-TEMPLATE_GUIDANCE_HEADROOM = 11_776
-"""Bytes a scaffold holds back, out of the budget above, for its adopter.
 
-The ceiling above is what a *runtime* will load. This is what a **template**
-may spend of it, and the difference is the whole point: a repository that is
-still the scaffold is writing guidance every domain built on it inherits, and
-that domain then has to describe its own architecture, conventions and
-workflow inside whatever is left. A scaffold that fills the runtime's ceiling
-has not passed its budget on, it has spent it — and the adopter discovers this
-by writing three paragraphs about its own project and being refused.
+class TemplateGuidanceBudget(BaseModel, frozen=True):
+    """The scaffold's reserve for its adopter, independent of a runtime ceiling.
 
-11.5 KiB, half a kilobyte under what this repository's own architecture,
-conventions and tooling sections cost together: a scaffold that also has to
-tell every domain how to answer its runtime's ambient instructions spends
-that much of the reserve on their behalf. Enough for a domain to say the
-equivalent about itself, rather than a round number that sounds generous.
+    A template spends part of the guidance budget on shared conventions; its
+    adopter needs the rest for domain architecture and workflow. This reserve
+    is checked only while ``[tool.lup] template = true``. It never constrains
+    what a native runtime is told to load.
+    """
 
-Only ``dev check`` weighs this, and only while ``[tool.lup] template = true``.
-It must never reach ``budget`` on the checks above: those decide what a real
-runtime is told to load, and a scaffold's self-restraint is not a fact about
-any runtime's ceiling."""
+    headroom: int = Field(default=11_776, ge=0)
 
 
 def document_byte_size(text: str) -> int:
@@ -695,14 +685,6 @@ type AgentColor = Literal[
 """The closed agent accent-color palette native runtimes accept."""
 
 
-type ModelTier = Literal["inherit", "strongest", "balanced", "fast"]
-"""Portable model preference for one role.
-
-Runtimes name and version their own model lineups, so a declaration states the
-need and each adapter spells whichever tier it can honor — or omits the choice
-where it has no proven vocabulary to spell it in."""
-
-
 class Agent(BaseModel, frozen=True):
     id: str
     name: NativeName
@@ -798,7 +780,18 @@ class ProjectRootWord(McpWord, frozen=True):
         return runtime.project_root()
 
 
-type McpCommandWord = Annotated[LiteralWord | ProjectRootWord, Discriminator("type")]
+class RuntimeWord(McpWord, frozen=True):
+    """The engine that owns the tool server, independent of ambient settings."""
+
+    type: Literal["runtime"] = "runtime"
+
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        return runtime.runtime_key()
+
+
+type McpCommandWord = Annotated[
+    LiteralWord | ProjectRootWord | RuntimeWord, Discriminator("type")
+]
 
 
 class McpServer(BaseModel, frozen=True):

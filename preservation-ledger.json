@@ -1,5 +1,5 @@
 {
-  "revision": "05df780385d5ff763461c75a25d61ff6efe9a9a4",
+  "revision": "b42787c9f9027afe78d86a7332b7d8edbdcb1f41",
   "roots": [
     "lup",
     "lup_template"
@@ -26,6 +26,7 @@
     "dev resolve-review",
     "dev resolve-summary",
     "dev check",
+    "dev test",
     "dev comments",
     "dev todos",
     "dev seams",
@@ -34,6 +35,7 @@
     "dev report-friction",
     "dev upstream",
     "dev undo",
+    "dev history",
     "dev issues",
     "dev rules",
     "dev guidance",
@@ -57,6 +59,10 @@
     "dev conflict audit",
     "dev conflict complete",
     "dev plugin name",
+    "dev tracker comment",
+    "dev tracker close",
+    "dev tracker reopen",
+    "dev tracker list",
     "dev git-hooks install",
     "dev git-hooks status",
     "dev git-hooks uninstall",
@@ -806,6 +812,7 @@
         "AntiPatternScan.findings",
         "AntiPatternScan.refuted",
         "within_scope",
+        "within_scope.scoped",
         "declared_rules",
         "scanned_files",
         "scanned_files.found",
@@ -851,6 +858,12 @@
         "DevDeclarations.test_roots",
         "DevDeclarations.git_guards",
         "create_dev_app",
+        "create_dev_app.tracker_routes",
+        "create_dev_app.answer",
+        "create_dev_app.tracker_comment_cmd",
+        "create_dev_app.tracker_close_cmd",
+        "create_dev_app.tracker_reopen_cmd",
+        "create_dev_app.tracker_list_cmd",
         "create_dev_app.env_status_cmd",
         "create_dev_app.env_sync_cmd",
         "create_dev_app.worktree_create_cmd",
@@ -875,6 +888,7 @@
         "create_dev_app.guard_status_cmd",
         "create_dev_app.guard_uninstall_cmd",
         "create_dev_app.check_cmd",
+        "create_dev_app.test_cmd",
         "create_dev_app.comments_cmd",
         "create_dev_app.todos_cmd",
         "create_dev_app.seams_cmd",
@@ -883,6 +897,7 @@
         "create_dev_app.report_friction_cmd",
         "create_dev_app.upstream_cmd",
         "create_dev_app.undo_cmd",
+        "create_dev_app.history_cmd",
         "create_dev_app.issues_cmd",
         "create_dev_app.rules_cmd",
         "create_dev_app.guidance_cmd",
@@ -1003,6 +1018,7 @@
         "ParsedBranch.is_current",
         "parse_branches",
         "parse_branches.parse",
+        "parse_branches.published",
         "parse_worktrees",
         "ParsedRemoteBranch",
         "ParsedRemoteBranch.remote",
@@ -1119,6 +1135,7 @@
         "worktree_changes",
         "locked_worktrees",
         "remote_branch_exists",
+        "resolvable",
         "upstream_ref",
         "outgrew_upstream",
         "plan_worktree_step",
@@ -1162,15 +1179,26 @@
         "ruff_lint_check",
         "pyright_base_configuration",
         "pyright_check",
+        "parallel_arguments",
+        "ignored_arguments",
         "TestRoot",
         "TestRoot.name",
         "TestRoot.directory",
+        "TestRoot.absent",
         "TestRoot.checked",
+        "RootSelection",
+        "RootSelection.root",
+        "RootSelection.paths",
+        "owning_index",
+        "group_by_root",
+        "run_selected",
         "inline_notes_lines",
         "guidance_bytes",
         "budget_reports",
+        "budget_report",
         "guidance_budget_report",
         "scaffold_budget_report",
+        "branch_record_reports",
         "changed_paths",
         "owned_comments",
         "scan_reports",
@@ -1315,6 +1343,7 @@
         "BranchInPlay",
         "BranchInPlay.keyword",
         "BranchInPlay.visible",
+        "BranchInPlay.recorded",
         "BranchInPlay.asked",
         "PathGone",
         "PathGone.keyword",
@@ -1386,6 +1415,9 @@
         "HooksReading.orphaned",
         "HooksReading.unarmed",
         "read_hooks",
+        "outstanding_arming",
+        "arming_is_refused",
+        "blocked_arming",
         "install_script",
         "install_guards",
         "uninstall_script",
@@ -1409,11 +1441,37 @@
       ]
     },
     {
+      "module": "lup.devtools.dev.history",
+      "declares": [
+        "SNAPSHOT_REFS",
+        "HIT_FIELDS",
+        "HistoryHit",
+        "HistoryHit.commit",
+        "HistoryHit.committed_at",
+        "HistoryHit.author",
+        "HistoryHit.subject",
+        "HistoryHit.line",
+        "HistoryHit.parse",
+        "commits_matching"
+      ]
+    },
+    {
       "module": "lup.devtools.dev.issues",
       "declares": [
         "logger",
         "EXCLUDED_LABEL",
         "ISSUE_FIELDS",
+        "TrackerVerb",
+        "DISABLED_ISSUES",
+        "TrackerRoutes",
+        "TrackerRoutes.own",
+        "TrackerRoutes.declared",
+        "TrackerRoutes.owning",
+        "TrackerRoutes.chosen",
+        "TrackerRoutes.refusal",
+        "issue_arguments",
+        "act_on_issue",
+        "disabled_issues_advice",
         "FrictionReport",
         "FrictionReport.summary",
         "FrictionReport.component",
@@ -1686,6 +1744,7 @@
         "GhPrDetail.mergeable",
         "GhPrDetail.state",
         "GhPrDetail.head_ref",
+        "GhPrDetail.base_ref",
         "GhPrRef",
         "GhPrRef.number",
         "GhPrRef.title",
@@ -1728,6 +1787,7 @@
         "PushResult.force",
         "PushResult.existing_pr",
         "PushResult.push_complaint",
+        "PushResult.upstream",
         "CreateResult",
         "CreateResult.number",
         "CreateResult.url",
@@ -1739,6 +1799,7 @@
         "status",
         "pr_merged",
         "pr_head_ref",
+        "pr_base_ref",
         "cleanup_merged_branch",
         "merge",
         "sync_base",
@@ -1882,6 +1943,7 @@
         "BranchRecord.base",
         "BranchRecord.base_commit",
         "BranchRecord.upstream",
+        "BranchRecord.landed_in",
         "BranchRecord.merged",
         "LegacyFact",
         "LegacyFact.BASE",
@@ -1891,16 +1953,20 @@
         "LegacyFact.addition",
         "carrier_of",
         "at",
+        "shared_directory_of",
         "shared_directory",
         "record_location",
         "record_path",
         "read_record",
         "remember",
+        "record_landing",
         "legacy_value",
         "recorded_base",
         "recorded_reservation",
         "recorded_upstream",
         "legacy_keys",
+        "branches_awaiting_adoption",
+        "branches_awaiting_adoption.named",
         "adopt_legacy_records"
       ]
     },
@@ -2167,6 +2233,9 @@
         "adopt_records",
         "OWNERSHIP_MERGE_DRIVER",
         "register_merge_driver",
+        "merge_driver_registered",
+        "refuse_a_blocked_registration",
+        "refuse_a_blocked_arming",
         "SetupStep",
         "SetupStep.label",
         "SetupStep.satisfied",
@@ -2652,6 +2721,7 @@
         "SANCTIONED_EXCEPTIONS",
         "FAILURE_ANALYSIS",
         "LONG_RUNNING_WORK",
+        "DEFECT_DISPOSITION",
         "MERGE_CONFLICT_RESOLUTION",
         "COMMIT_TYPES",
         "COMMIT_GUIDELINES"
@@ -3213,6 +3283,7 @@
         "LaunchSentinels.outside",
         "ledger_path",
         "record_preflight",
+        "reopened",
         "retire_mount_table",
         "release_ledger",
         "sweep_ledgers"
@@ -3360,6 +3431,7 @@
       "declares": [
         "Settings",
         "Settings.base",
+        "Settings.env",
         "Settings.official_plugins",
         "Settings.allowed",
         "Settings.denied",
@@ -3377,6 +3449,8 @@
     {
       "module": "lup.devtools.hooks.app",
       "declares": [
+        "input_text",
+        "command_text",
         "report",
         "create_hooks_app",
         "create_hooks_app.shell_decision",
@@ -3435,12 +3509,19 @@
     {
       "module": "lup.devtools.project",
       "declares": [
+        "Tracker",
+        "Tracker.repository",
+        "Tracker.what",
+        "Tracker.components",
+        "Tracker.claims",
+        "Tracker.claims.continues",
         "DevProject",
         "DevProject.package",
         "DevProject.path_roles",
         "DevProject.rules",
         "DevProject.anti_patterns",
         "DevProject.subapps",
+        "DevProject.trackers",
         "DevProject.content",
         "DevProject.roots",
         "DevProject.catalog",
@@ -3469,9 +3550,11 @@
         "ResolvedObject",
         "ResolvedObject.value",
         "ResolvedObject.leaf_name",
+        "leaf_name",
         "resolve_object",
         "find_module_path",
         "fail",
+        "fail_unresolved",
         "categorize_import"
       ]
     },
@@ -3526,6 +3609,7 @@
         "scan_source_symbols.add_target",
         "scan_source_symbols.collect",
         "scan_project_symbols",
+        "name_candidates",
         "scan_module_symbols",
         "scan_module_symbols.match_of",
         "get_top_level_packages"
@@ -4004,6 +4088,9 @@
         "SHORT_SHA_LENGTH",
         "gh",
         "uv",
+        "repository_segments",
+        "repository_reference",
+        "names_same_repository",
         "slug_from_remote",
         "repository_slug",
         "repository_arguments",
@@ -4907,6 +4994,7 @@
         "NativeSpellings.read_document",
         "NativeSpellings.resolver_entry",
         "NativeSpellings.runtime_docs",
+        "NativeSpellings.runtime_key",
         "NativeSpellings.project_root",
         "NativeSpellings.model_alias",
         "PromptRenderer",
@@ -5131,6 +5219,7 @@
         "Registry",
         "Registry.manager",
         "Registry.command",
+        "Registry.release_url",
         "ContainerEngine",
         "ContainerEngine.binary",
         "ContainerEngine.identity_arguments",
@@ -5328,7 +5417,8 @@
         "Document.source",
         "Document.document",
         "GUIDANCE_BYTE_BUDGET",
-        "TEMPLATE_GUIDANCE_HEADROOM",
+        "TemplateGuidanceBudget",
+        "TemplateGuidanceBudget.headroom",
         "document_byte_size",
         "Argument",
         "Argument.name",
@@ -5349,7 +5439,6 @@
         "Skill.coherent_arguments",
         "Skill.commands_it_names_are_commands_it_may_run",
         "AgentColor",
-        "ModelTier",
         "Agent",
         "Agent.id",
         "Agent.name",
@@ -5375,6 +5464,9 @@
         "ProjectRootWord",
         "ProjectRootWord.type",
         "ProjectRootWord.spell_in",
+        "RuntimeWord",
+        "RuntimeWord.type",
+        "RuntimeWord.spell_in",
         "McpCommandWord",
         "McpServer",
         "McpServer.id",
@@ -5416,6 +5508,7 @@
         "HookSet.edit_rules",
         "HookSet.diagnostics_command",
         "HookSet.resolution_command",
+        "HookSet.repair_command",
         "HookSet.refused_tools",
         "HookSet.runner_targets",
         "HookSet.everyday_commands",
@@ -5653,6 +5746,28 @@
       ]
     },
     {
+      "module": "lup.harness.releases",
+      "declares": [
+        "CurrentRelease",
+        "CurrentRelease.version",
+        "ReleaseRecord",
+        "ReleaseRecord.name",
+        "ReleaseRecord.version",
+        "ReleaseRecord.resolved_at",
+        "ReleaseLedger",
+        "ReleaseLedger.records",
+        "ReleaseLedger.held",
+        "ReleaseLedger.noted",
+        "ResolvedReleases",
+        "ResolvedReleases.image",
+        "ResolvedReleases.said",
+        "ledger_path",
+        "loaded_ledger",
+        "current_release",
+        "resolved_agent_clis"
+      ]
+    },
+    {
       "module": "lup.harness.requirements",
       "declares": [
         "PackageManager",
@@ -5678,6 +5793,13 @@
         "LostCapability.refuses",
         "LostCapability.costly",
         "LostCapability.consequence",
+        "MisleadingAbsence",
+        "MisleadingAbsence.kind",
+        "MisleadingAbsence.capability",
+        "MisleadingAbsence.mistaken_for",
+        "MisleadingAbsence.refuses",
+        "MisleadingAbsence.costly",
+        "MisleadingAbsence.consequence",
         "RefusedLaunch",
         "RefusedLaunch.kind",
         "RefusedLaunch.because",
@@ -5747,7 +5869,18 @@
         "SentinelProbe.behind",
         "SentinelProbe.given",
         "SentinelProbe.run",
+        "VocabularyProbe",
+        "VocabularyProbe.kind",
+        "VocabularyProbe.vocabulary",
+        "VocabularyProbe.marker",
+        "VocabularyProbe.resolved",
+        "VocabularyProbe.programs",
+        "VocabularyProbe.pointed_at",
+        "VocabularyProbe.behind",
+        "VocabularyProbe.given",
+        "VocabularyProbe.run",
         "Exercise",
+        "Location",
         "Side",
         "Requirement",
         "Requirement.capability",
@@ -5757,6 +5890,8 @@
         "Requirement.at_launch",
         "Requirement.exercise",
         "Requirement.absence",
+        "Requirement.recovery",
+        "Requirement.recovery_by_location",
         "Requirement.diagnoses",
         "Requirement.install",
         "Requirement.by_client",
@@ -5767,6 +5902,7 @@
         "Finding.exercised",
         "Finding.detail",
         "Finding.causes",
+        "Finding.location",
         "Finding.refuses",
         "Finding.notices",
         "Finding.alarms",
@@ -5864,6 +6000,7 @@
         "host_placement_requirement",
         "question_relay_requirement",
         "checkpoint_store_requirement",
+        "shell_vocabulary_requirement",
         "default_manifest"
       ]
     },
@@ -7091,8 +7228,10 @@
         "measured_boundary",
         "contained",
         "delivers",
+        "launched",
         "defers_unjudged",
         "append_hook_evidence",
+        "fetch_origin",
         "record_hook_evidence",
         "script_run_nudge",
         "record_question",
@@ -7105,12 +7244,14 @@
         "boundary_description",
         "unquoted_path",
         "boundary_refusal",
+        "outside_this_project",
         "foreign_repository",
         "publish_edition",
         "project_environment",
         "declared_program",
         "conflicted",
         "file_diagnostics",
+        "repaired_directives",
         "resolved_refutations",
         "existing_write_targets",
         "git_answers",
@@ -7311,6 +7452,7 @@
     {
       "module": "lup.policy.coordinator",
       "declares": [
+        "changed_clause",
         "Stage",
         "CoordinatorResult",
         "CoordinatorResult.stage",
@@ -7746,6 +7888,7 @@
         "KernelDecision.__init__",
         "KernelDecision.revised",
         "KernelDecision.placed",
+        "KernelDecision.stated_whole",
         "unjudged",
         "unlisted",
         "handed_over",
@@ -7947,7 +8090,9 @@
         "antipattern_decision",
         "antipattern_decision.guarded_hits",
         "antipattern_decision.sites_at",
+        "antipattern_decision.silences_nothing",
         "path_rule_matches",
+        "protected_path_reason",
         "PACKAGE_MARKER_FILES",
         "documentation_only",
         "acceptance_guard_decision",
@@ -8099,6 +8244,7 @@
       "declares": [
         "host_matches_scope",
         "url_matches_scope",
+        "scope_text",
         "decide_fetch"
       ]
     },
@@ -8243,12 +8389,14 @@
         "ShellRuleRow.effects",
         "ShellRuleRow.effects_source",
         "ShellRuleRow.refuses",
+        "ShellRuleRow.ask_destinations",
         "ShellRuleRow.ask_refspecs",
         "ShellRuleRow.ask_flags",
         "ShellRuleRow.flag_effects",
         "ShellRuleRow.write_flags",
         "ShellRuleRow.allow_flags",
         "ShellRuleRow.read_verbs",
+        "ShellRuleRow.probe_flags",
         "ShellRuleRow.write_markers",
         "ShellRuleRow.guarded_keys",
         "ShellRuleRow.setting_flags",
@@ -8258,6 +8406,7 @@
         "ShellRuleRow.reason",
         "ShellRowField",
         "shell_row_values",
+        "DestinationForm",
         "RefspecEffect",
         "EditOperation",
         "EditRuleRow",
@@ -8485,6 +8634,7 @@
         "confined_to_recoverable_roots",
         "archive_lands_on_nothing",
         "dangerous_env_name",
+        "dangerous_assignment_reason",
         "flag_matches",
         "CarriedSetting",
         "CarriedSetting.value",
@@ -8495,7 +8645,8 @@
         "HELP_UNSAFE",
         "is_help_probe",
         "xargs_payload",
-        "refspec_effects"
+        "refspec_effects",
+        "destination_form"
       ]
     },
     {
@@ -8576,6 +8727,8 @@
         "Decision.rule",
         "Decision.evaluator",
         "Decision.escalated",
+        "Decision.hard",
+        "Decision.findings",
         "Decision.reached",
         "Decision.placed",
         "Decision.of",
@@ -8643,6 +8796,7 @@
         "Operation.escalation_raw",
         "Operation.escalation_normalized",
         "Operation.provider",
+        "Operation.fingerprint_parts",
         "Operation.fingerprint",
         "Operation.matches",
         "Operation.summary"
@@ -8823,11 +8977,13 @@
         "ShellSubcommandRule.name",
         "ShellSubcommandRule.effects",
         "ShellSubcommandRule.refuses",
+        "ShellSubcommandRule.ask_destinations",
         "ShellSubcommandRule.ask_refspecs",
         "ShellSubcommandRule.ask_flags",
         "ShellSubcommandRule.flag_effects",
         "ShellSubcommandRule.write_flags",
         "ShellSubcommandRule.read_verbs",
+        "ShellSubcommandRule.probe_flags",
         "ShellSubcommandRule.guarded_keys",
         "ShellSubcommandRule.operations",
         "ShellSubcommandRule.sandbox",
@@ -8845,6 +9001,7 @@
         "ShellCommandRule.write_flags",
         "ShellCommandRule.allow_flags",
         "ShellCommandRule.read_verbs",
+        "ShellCommandRule.probe_flags",
         "ShellCommandRule.write_markers",
         "ShellCommandRule.guarded_keys",
         "ShellCommandRule.setting_flags",
@@ -8891,7 +9048,8 @@
         "rule_forms",
         "shell_forms",
         "classify_forms",
-        "classify_forms.classified"
+        "classify_forms.classified",
+        "allowed_programs"
       ]
     },
     {
@@ -8905,6 +9063,7 @@
         "JudgedCommand.read_verbs",
         "JudgedCommand.write_markers",
         "JudgedCommand.bare_reads",
+        "JudgedCommand.write_flags",
         "read_only_rules",
         "judged_ask_rules",
         "redirected_rules",
@@ -8914,6 +9073,7 @@
         "GIT_READ_ONLY_SUBCOMMANDS",
         "GIT_REVERSIBLE_SUBCOMMANDS",
         "GIT_CONFIG_EXECUTING_KEYS",
+        "GIT_CONFIG_RETARGETING_KEYS",
         "git_rule",
         "gh_rule",
         "gh_rule.reads",
@@ -8954,6 +9114,7 @@
     {
       "module": "lup.providers.claude.assets.policy_dispatcher",
       "declares": [
+        "announced",
         "plugin_data_root",
         "managed_root",
         "edit_documents",
@@ -8961,6 +9122,7 @@
         "placed_input",
         "dispatch",
         "rendered",
+        "rendered.surfaced",
         "observe",
         "main"
       ]
@@ -9043,7 +9205,6 @@
     {
       "module": "lup.providers.claude.harness",
       "declares": [
-        "CLAUDE_MODEL_ALIASES",
         "ClaudeSpellings",
         "ClaudeSpellings.runtime_name",
         "ClaudeSpellings.native_identifiers",
@@ -9059,6 +9220,7 @@
         "ClaudeSpellings.resolver_entry",
         "ClaudeSpellings.arguments_ref",
         "ClaudeSpellings.runtime_docs",
+        "ClaudeSpellings.runtime_key",
         "ClaudeSpellings.project_root",
         "ClaudeSpellings.model_alias",
         "ClaudeSpellings.tree",
@@ -9305,6 +9467,14 @@
       ]
     },
     {
+      "module": "lup.providers.claude.subagents",
+      "declares": [
+        "model_alias",
+        "subagent_tools",
+        "subagent_tools.native_tools"
+      ]
+    },
+    {
       "module": "lup.providers.claude.transcripts",
       "declares": [
         "CLAUDE_BLOCK_SPELLINGS",
@@ -9433,6 +9603,18 @@
       "declares": []
     },
     {
+      "module": "lup.providers.codex.account",
+      "declares": [
+        "CodexAccountIdentity",
+        "CodexAccountIdentity.type",
+        "CodexAccountState",
+        "CodexAccountState.account",
+        "CodexAccountState.requires_openai_auth",
+        "CodexAccountState.ready",
+        "read_account"
+      ]
+    },
+    {
       "module": "lup.providers.codex.app_server",
       "declares": [
         "RpcError",
@@ -9557,6 +9739,7 @@
         "CodexSpellings.resolver_entry",
         "CodexSpellings.arguments_ref",
         "CodexSpellings.runtime_docs",
+        "CodexSpellings.runtime_key",
         "CodexSpellings.project_root",
         "CodexSpellings.model_alias",
         "CodexSpellings.tree",
@@ -9672,6 +9855,7 @@
     {
       "module": "lup.providers.codex.hooks",
       "declares": [
+        "logger",
         "COMMAND_APPROVAL",
         "FILE_CHANGE_APPROVAL",
         "APPROVAL_METHODS",
@@ -9822,6 +10006,7 @@
         "CodexSessionConfig.submission_gate_resolver",
         "CodexSessionConfig.mcp_servers",
         "CodexSessionConfig.writable_roots",
+        "CodexSessionConfig.delegated_tools",
         "CodexSessionConfig.reject_unanswerable_approvals",
         "CodexMcpServerConfig",
         "CodexMcpServerConfig.command",
@@ -9829,6 +10014,10 @@
         "CodexMcpServerConfig.env",
         "CodexThreadRef",
         "CodexThreadRef.id",
+        "CodexInheritedConfig",
+        "CodexInheritedConfig.mcp_servers",
+        "CodexConfigReadResponse",
+        "CodexConfigReadResponse.config",
         "CodexTurnRef",
         "CodexTurnRef.id",
         "CodexTurnRef.status",
@@ -9919,6 +10108,21 @@
         "codex_session",
         "codex_workspace_home",
         "CODEX_RUNTIME"
+      ]
+    },
+    {
+      "module": "lup.providers.codex.subagents",
+      "declares": [
+        "CodexModelTiers",
+        "CodexModelTiers.strongest",
+        "CodexModelTiers.balanced",
+        "CodexModelTiers.fast",
+        "CodexModelTiers.resolve",
+        "CodexSubagentTools",
+        "CodexSubagentTools.workspace_read",
+        "CodexSubagentTools.web_search",
+        "CodexSubagentTools.configuration",
+        "subagent_tools"
       ]
     },
     {
@@ -10053,6 +10257,7 @@
         "reject_oversized_guidance",
         "reject_native_prose",
         "compile_claude",
+        "startup_deadline_settings",
         "compile_codex"
       ]
     },
@@ -12591,10 +12796,13 @@
         "LupToolResultBlock.result_payload",
         "LupToolResultBlock.log_summary",
         "MessageContentBlock",
+        "ModelTier",
+        "SubagentCapability",
         "SubagentSpec",
         "SubagentSpec.name",
         "SubagentSpec.description",
         "SubagentSpec.prompt",
+        "SubagentSpec.capabilities",
         "SubagentSpec.tools",
         "SubagentSpec.model",
         "SubagentSpec.max_turns",
@@ -12987,6 +13195,7 @@
         "decorate_factory.trace_result",
         "build_session_factory",
         "build_auxiliary_factory",
+        "build_subagent_factory",
         "resolve_resume_token",
         "result_text",
         "ConsultedSource",
@@ -13030,8 +13239,6 @@
     {
       "module": "lup_template.agent.subagents",
       "declares": [
-        "research_tools",
-        "analysis_tools",
         "RESEARCHER_PROMPT",
         "researcher",
         "ANALYZER_PROMPT",
@@ -13163,9 +13370,6 @@
         "ReviewOutput.reviewer_verdict",
         "ReviewOutput.gate_open",
         "ReviewOutput.reviewer_critique",
-        "REVIEWER_TOOLS",
-        "REVIEWER_THINKING_BUDGET",
-        "REVIEWER_MAX_TURNS",
         "run_reviewer",
         "ReflectToolKit",
         "ReflectToolKit.tools",
@@ -13224,6 +13428,7 @@
         "SubagentDict.description",
         "SubagentDict.model",
         "SubagentDict.tools",
+        "SubagentDict.capabilities",
         "InspectPayload",
         "InspectPayload.model",
         "InspectPayload.max_thinking_tokens",
@@ -13264,7 +13469,6 @@
       "module": "lup_template.devtools.agent.serve",
       "declares": [
         "collect_tools_by_server",
-        "collect_tools_by_server.subagent_factory",
         "collect_registry_tools",
         "harness_session_context",
         "serve_tools"
@@ -13530,6 +13734,7 @@
     {
       "module": "lup_template.devtools.harness.content.requirements",
       "declares": [
+        "carried_vocabulary",
         "manifest"
       ]
     },
@@ -13557,6 +13762,24 @@
       "module": "lup_template.devtools.harness.content.skills.brainstorm",
       "declares": [
         "skill"
+      ]
+    },
+    {
+      "module": "lup_template.devtools.harness.content.skills.deciding",
+      "declares": [
+        "deciding_parts"
+      ]
+    },
+    {
+      "module": "lup_template.devtools.harness.content.skills.discovery",
+      "declares": [
+        "discovery_parts"
+      ]
+    },
+    {
+      "module": "lup_template.devtools.harness.content.skills.distill",
+      "declares": [
+        "SKILL"
       ]
     },
     {

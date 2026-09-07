@@ -62,7 +62,7 @@ is the only nudge this page gives about writing one.
 | `prompts.py` | The system prompt composed from named sections. | Editing `PURPOSE` and `GUIDELINES`. Leave `output_format()` alone — it reads the schema. |
 | `toolsets.py` | The MCP tool groups a session gets, as one registry. | Adding a group to `build_session_toolset()` and to the `ServerGroup` literal beside it. |
 | `tools/` | The tool implementations. `example.py` is placeholder search/fetch/read/glob; `reflect.py`, `realtime.py`, and `nested.py` are working patterns. | Replacing `example.py` with your domain's tools. |
-| `subagents.py` | Portable `SubagentSpec` declarations and their tool lists. | Adding specs to `ALL_SPECS`. |
+| `subagents.py` | Portable `SubagentSpec` declarations: capabilities, exact tool grants, model tiers. | Adding specs to `ALL_SPECS`. |
 | `tool_policy.py` | Which tools are available given the configuration — a missing API key bans its tools rather than failing at call time. | Adding an exclusion for each new conditional dependency. |
 | `config.py` | Pydantic settings from `.env` and `.env.local`: model, budget, turn cap, sandbox, paths. | Adding settings, never reading the environment directly elsewhere. |
 | `core.py` | `provider_factory()` — the **one** place a concrete adapter is named. | Rarely. Everything downstream takes the portable `Client` it returns. |
