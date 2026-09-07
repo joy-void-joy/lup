@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "42c81721bb8b82076485d97a08ab92f06c828541a1d5ff5b6480eaa74f88227c",
+  "source_digest": "c155bd29ba998b90a4b36d00a116e6a19d15fb90670ac7a0f5f3c1f74e8bf90a",
   "target_requirements": [
     "claude-code"
   ],
@@ -450,7 +450,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "1d0d9cc6ea7b6bc953225879ced23e5313b16ec27ac449b48fb88ffc8da83bce",
+      "sha256": "7bd6e6b28273d3079b418ec80950df76bf7d35288e6aa6d0ade4130ef05f0213",
       "semantic_id": "harness.project-settings",
       "executable": false
     },

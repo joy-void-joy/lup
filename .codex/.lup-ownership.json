@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "42c81721bb8b82076485d97a08ab92f06c828541a1d5ff5b6480eaa74f88227c",
+  "source_digest": "c155bd29ba998b90a4b36d00a116e6a19d15fb90670ac7a0f5f3c1f74e8bf90a",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -44,7 +44,7 @@
     {
       "path": ".codex/config.toml",
       "category": "generated",
-      "sha256": "02c880b5e8f728c1442b481fd83cb8a41ed3bd85063d8a647cfde935bd657622",
+      "sha256": "237f4bf7ca0cad99e437f5642f5e15f3f4a00ce744d139783b0651190d90a23c",
       "semantic_id": "harness.project-config",
       "executable": false
     },
