@@ -190,6 +190,11 @@ def remember(branch: str, addition: BranchRecord, cwd: Path | None = None) -> No
     publish_atomic(record_path(branch, cwd), read_record(branch, cwd).merged(addition))
 
 
+# lup: defer[branch:fix-config-free-bookkeeping]: run `uv run lup-devtools dev
+# worktree adopt-records` on the host, once for this clone, so this fallback
+# stops being what a branch's base is read through. Not before that branch
+# lands: a worktree still on older code reads the shared config alone, and
+# emptying it takes that worktree's base away with nothing underneath it.
 def legacy_value(branch: str, fact: LegacyFact, cwd: Path | None = None) -> str:
     """What ``config`` still holds for one fact, empty where it holds nothing.
 
