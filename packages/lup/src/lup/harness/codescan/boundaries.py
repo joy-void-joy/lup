@@ -46,6 +46,8 @@ from lup.policy.kernel.edit import (
 from lup.harness.contracts import NativeSpellings
 from lup.harness.models import PluginLocation, TreeLocation
 from lup.policy.kernel.decision import KERNEL_IMPORT_ALLOWLIST
+from lup.policy.imports import ImportBoundary
+from lup.policy.kernel.imports import import_violations as native_import_violations
 
 # lup: ignore[constant-declaration] — a rule id is the rule's own identity: it is
 # what a typed directive, a deny message, and the reference all name it by, so a
@@ -66,6 +68,14 @@ KERNEL_ROOT = f"{LIBRARY_ROOT}policy/kernel/"
 """Where the decision kernel ships, derived so it cannot drift from the root."""
 # lup: ignore[library-default] — the adapter packages this library ships, so the value follows lup.providers
 NATIVE_PREFIXES = ("lup.providers.claude", "lup.providers.codex")
+# lup: ignore[library-default] — published provider SDK import namespaces
+SDK_PREFIXES = ("claude_agent_sdk", "anthropic", "openai")
+# lup: ignore[constant-declaration] — the diagnostic for the seam-boundary rule
+IMPORT_BOUNDARY_MESSAGE = (
+    "Concrete adapter imports belong in providers or declared composition roots; "
+    "provider SDK imports belong in adapter implementations. Use Lup contracts "
+    "in shared code; canonical tool grants and provider mentions remain valid."
+)
 # lup: ignore[library-default] — each key is literally what the provider calls the thing
 NATIVE_SPELLINGS = {
     "/lup:": "Claude skill invocation",
@@ -140,6 +150,12 @@ class ApplicationRoots(BaseModel, frozen=True):
     compiled from, which is both where the rule can report it and the only
     place a fix survives the next generation."""
 
+    native_dependencies: list[str] = []
+    """Additional owners of provider SDK imports, such as integration fixtures."""
+
+    source_roots: list[str] = []
+    """Python source directories used to resolve relative imports statically."""
+
     def sanctions(self, rel_path: Path) -> bool:
         """Whether this application composes natively at that path."""
         posix = rel_path.as_posix()
@@ -161,6 +177,35 @@ class ApplicationRoots(BaseModel, frozen=True):
 
 NO_APPLICATION = ApplicationRoots()
 """What an adopter sanctions before it says so: nothing beyond the library."""
+
+
+def native_import_boundaries(
+    application: ApplicationRoots = NO_APPLICATION,
+) -> list[ImportBoundary]:
+    """Compile one ownership declaration for audits and both native hooks."""
+    providers = f"{LIBRARY_ROOT}providers/"
+    sources = [f"{Path(LIBRARY_ROOT).parent.as_posix()}/", *application.source_roots]
+    return [
+        ImportBoundary(
+            modules=list(NATIVE_PREFIXES),
+            owners=[providers, *LIBRARY_COMPOSITION, *application.composition],
+            source_roots=sources,
+            rule_id=RULE_ID,
+            message=IMPORT_BOUNDARY_MESSAGE,
+        ),
+        ImportBoundary(
+            modules=list(SDK_PREFIXES),
+            owners=[
+                providers,
+                *application.generated,
+                *application.native_dependencies,
+            ],
+            source_roots=sources,
+            rule_id=RULE_ID,
+            message=IMPORT_BOUNDARY_MESSAGE,
+        ),
+    ]
+
 
 # lup: ignore[library-default] — files of this library, which no adopter relocates
 LIBRARY_COMPOSITION = (
@@ -333,33 +378,34 @@ def native_module(name: str) -> bool:
     )
 
 
-def import_violations(text: str) -> list[SourceViolation]:
+def import_violations(
+    text: str,
+    rel_path: Path = Path(""),
+    application: ApplicationRoots = NO_APPLICATION,
+    boundaries: list[ImportBoundary] | None = None,
+) -> list[SourceViolation]:
     """Find native adapter imports through Python syntax before suppression."""
-    tree = python_tree(text)
-    if tree is None:
-        return []
     lines = text.splitlines()
-    violations: list[SourceViolation] = []  # lup: ignore[empty-collection]
-    for node in python_nodes(tree):
-        modules: list[str]
-        match node:
-            case ast.Import(names=names):
-                modules = [item.name for item in names if native_module(item.name)]
-            case ast.ImportFrom(module=str(module)) if native_module(module):
-                modules = [module]
-            case _:
-                continue
-        line = lines[node.lineno - 1] if node.lineno <= len(lines) else ""
-        violations.extend(
-            SourceViolation(
-                line=node.lineno,
-                subject=module,
-                text=line.strip(),
-                message=f"neutral module imports native adapter {module}",
-            )
-            for module in modules
+    return [
+        SourceViolation(
+            line=violation["line"],
+            subject=violation["module"],
+            text=lines[violation["line"] - 1].strip(),
+            message=f"{violation['module']}: {violation['message']}",
         )
-    return violations
+        for violation in native_import_violations(
+            rel_path.as_posix(),
+            text,
+            [
+                boundary.erased()
+                for boundary in (
+                    native_import_boundaries(application)
+                    if boundaries is None
+                    else boundaries
+                )
+            ],
+        )
+    ]
 
 
 def kernel_import_violations(text: str) -> list[SourceViolation]:
@@ -865,12 +911,29 @@ def audit_boundaries(text: str) -> list[BoundaryAuditFinding]:
 
 
 def audit_path_boundaries(
-    rel_path: Path, text: str, application: ApplicationRoots = NO_APPLICATION
+    rel_path: Path,
+    text: str,
+    application: ApplicationRoots = NO_APPLICATION,
+    boundaries: list[ImportBoundary] | None = None,
 ) -> list[BoundaryAuditFinding]:
     """Audit only the boundary rules that apply at one repository path."""
-    findings: list[BoundaryAuditFinding] = []
-    if not path_is_sanctioned(rel_path, application):
-        findings.extend(audit_rule(text, RULE_ID, import_violations(text)))
+    declared = (
+        native_import_boundaries(application) if boundaries is None else boundaries
+    )
+    findings = [
+        finding
+        for rule_id in dict.fromkeys(boundary.rule_id for boundary in declared)
+        for finding in audit_rule(
+            text,
+            rule_id,
+            import_violations(
+                text,
+                rel_path,
+                application,
+                [boundary for boundary in declared if boundary.rule_id == rule_id],
+            ),
+        )
+    ]
     if not native_spelling_path_is_sanctioned(rel_path, application):
         findings.extend(
             audit_rule(

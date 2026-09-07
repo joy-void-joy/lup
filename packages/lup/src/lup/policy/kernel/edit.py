@@ -14,6 +14,7 @@ from functools import cache
 from typing import NotRequired, TypedDict
 
 from .decision import KernelDecision, handed_over
+from .imports import ResolvedImportRule, resolved_import_rules
 from .roles import (
     FOREIGN_REPOSITORY_REFERRAL,
     GENERATED_PLUGIN_REFUSAL,
@@ -26,6 +27,7 @@ from .rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
     EditRuleRow,
+    ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
 )
@@ -2812,6 +2814,7 @@ def antipattern_decision(
     python_source: bool,
     allowances: list[str] | None = None,
     refuted: dict[str, list[int]] | None = None,
+    resolved: list[ResolvedImportRule] | None = None,
 ) -> KernelDecision | None:
     """Reject newly added unsuppressed anti-patterns and ask on suppressions.
 
@@ -2851,6 +2854,13 @@ def antipattern_decision(
     code_lines = python_code_lines(after) if python_source else original_lines
     exempt: dict[str, set[int]] = {}
     matched = matched_lines(after, rows) if python_source else {}
+    rows = [*rows, *(selection["row"] for selection in resolved or [])]
+    matched.update(
+        {
+            selection["row"]["id"]: set(selection["spans"])
+            for selection in resolved or []
+        }
+    )
     for rule_id, lines in (refuted or {}).items():
         exempt[rule_id] = (
             exempt[rule_id] | set(lines) if rule_id in exempt else set(lines)
@@ -2859,6 +2869,23 @@ def antipattern_decision(
     file_level = file_ignore(after)
     has_file_ignore = file_level["present"]
     disabled_ids = file_level["ids"]
+    changed = set(added)
+    for selection in resolved or []:
+        rule_id = selection["row"]["id"]
+        for line, end_line in selection["spans"].items():
+            holder = covering_suppression_line(original_lines, line)
+            directive = IGNORE_RE.search(original_lines[holder - 1]) if holder else None
+            covered_ids = ignore_rule_ids(directive) if directive is not None else []
+            covered = (
+                has_file_ignore and (disabled_ids is None or rule_id in disabled_ids)
+            ) or (
+                directive is not None
+                and (covered_ids is None or rule_id in covered_ids)
+            )
+            if not covered or any(
+                number in changed for number in range(line, end_line + 1)
+            ):
+                added[line] = True
     gone = removed_lines(before, after)
     declared: list[int] = []
     for number in added:
@@ -3225,6 +3252,7 @@ def decide_edit(
     edit_rules: list[EditRuleRow] | None = None,
     foreign: bool = False,
     outside_project: bool = False,
+    import_boundaries: list[ImportBoundaryRow] | None = None,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
 
@@ -3343,7 +3371,15 @@ def decide_edit(
     # neither is judged against them.
     if after is not None and role == "production":
         antipattern = antipattern_decision(
-            before, after, antipattern_rows, python_source, granted, refuted
+            before,
+            after,
+            antipattern_rows,
+            python_source,
+            granted,
+            refuted,
+            resolved_import_rules(path, after, import_boundaries or [])
+            if python_source and not outside_project
+            else None,
         )
         # A granted suppression answers this gate and no other, so an allow
         # falls through to the rest of the lattice rather than ending it.

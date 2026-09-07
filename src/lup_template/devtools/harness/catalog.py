@@ -34,7 +34,11 @@ from lup.harness.models import (
 )
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.codex.harness import CodexSpellings
-from lup.harness.codescan.boundaries import ApplicationRoots, generated_tree_paths
+from lup.harness.codescan.boundaries import (
+    ApplicationRoots,
+    generated_tree_paths,
+    native_import_boundaries,
+)
 from lup.harness.codescan.common import RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import WorkflowSpec
@@ -43,7 +47,7 @@ from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
 from lup.policy.boundary import depends_on
 from lup.policy.refused_tools import RefusedTool
-from lup.workspace.paths import project_root, read_project_name
+from lup.workspace.paths import declared_project_root, project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
 from lup_template.devtools.harness.content.catalog import AGENTS, RETIRED, SKILLS
 from lup_template.devtools.subapps import SELECTION
@@ -237,7 +241,7 @@ NATIVE_RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
 """Every runtime this project generates a tree for."""
 
 
-def application_roots() -> ApplicationRoots:
+def application_roots(plugin_names: list[str] | None = None) -> ApplicationRoots:
     """Where this project composes concrete native implementations.
 
     The generated trees are asked of the runtimes rather than written down, so
@@ -246,9 +250,17 @@ def application_roots() -> ApplicationRoots:
     renaming it during initialization moves them instead of leaving the rule
     pointing at a package that is gone.
     """
-    package = Path(__file__).resolve().parents[2].relative_to(project_root()).as_posix()
+    package_path = Path(__file__).resolve().parents[2]
+    package_root = declared_project_root(package_path)
+    if package_root is None:
+        raise ValueError(f"No project declaration encloses {package_path}")
+    package = package_path.relative_to(package_root).as_posix()
     harness = f"{package}/devtools/harness/"
-    plugins = [plugin.name for plugin in portable_harness().plugins]
+    plugins = (
+        [plugin.name for plugin in portable_harness().plugins]
+        if plugin_names is None
+        else plugin_names
+    )
     generated = generated_tree_paths(NATIVE_RUNTIMES, plugins)
     return ApplicationRoots(
         generated=generated,
@@ -266,6 +278,8 @@ def application_roots() -> ApplicationRoots:
             f"{package}/devtools/setup.py",
         ],
         portable_prose=[f"{harness}content/"],
+        native_dependencies=["tests/", "packages/lup/tests/", "examples/"],
+        source_roots=[f"{Path(package).parent.as_posix()}/"],
     )
 
 
@@ -288,6 +302,7 @@ def dev_project() -> DevProject:
         package=Path(__file__).resolve().parents[2].name,
         roots=application_roots(),
         rules=hooks.rules,
+        import_boundaries=hooks.import_boundaries,
         subapps=SELECTION,
         # lup: template: which trackers beyond this checkout this project may
         # report to. What is here is lup's own, and an adopted scaffold
@@ -342,9 +357,10 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
     Per-platform declarations overriding a shared default were rejected
     because they would let semantic content fork silently.
     """
+    plugin_name = "lup"
     plugin = Plugin(
         id="plugin.lup",
-        name="lup",
+        name=plugin_name,
         marketplace=f"{read_project_name(root or project_root())}-repository",
         version=version,
         description=(
@@ -364,6 +380,9 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # family outright with `--retire-all`, which is one answer here
             # instead of thirty retirements one denial at a time.
             rules=RuleSelection(retired=[]),
+            import_boundaries=native_import_boundaries(
+                application_roots([plugin_name])
+            ),
             allowed_fetch=[
                 HookUrlScope(origin=AnyHttpUrl("https://docs.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://docs.claude.com")),

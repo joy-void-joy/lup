@@ -35,6 +35,7 @@ from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
+from lup.policy.imports import ImportBoundary
 from lup.policy.everyday import CommandFamily
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
@@ -984,6 +985,7 @@ class HookSet(BaseModel, frozen=True):
     allowed_fetch: list[HookUrlScope] = []
     denied_fetch: list[HookUrlScope] = []
     protected_edit_roots: list[Path] = []
+    import_boundaries: list[ImportBoundary] = []
     path_roles: list[HookPathRole] = Field(
         default=[],
         description=(
@@ -1212,6 +1214,14 @@ class HookSet(BaseModel, frozen=True):
         one out from under the project that never asked to.
         """
         return self.edit_rules.over([])
+
+    def resolved_import_boundaries(self) -> list[ImportBoundary]:
+        """The dependency rules retained by the same selection as the auditor."""
+        return [
+            boundary
+            for boundary in self.import_boundaries
+            if self.rules.keeps(boundary.rule_id)
+        ]
 
 
 class ResolveSpec(BaseModel, frozen=True):

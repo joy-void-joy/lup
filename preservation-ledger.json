@@ -1,5 +1,5 @@
 {
-  "revision": "b42787c9f9027afe78d86a7332b7d8edbdcb1f41",
+  "revision": "3020d170835937d5fc0b70b321caa152f18f4e17",
   "roots": [
     "lup",
     "lup_template"
@@ -3524,6 +3524,8 @@
         "DevProject.trackers",
         "DevProject.content",
         "DevProject.roots",
+        "DevProject.import_boundaries",
+        "DevProject.resolved_import_boundaries",
         "DevProject.catalog",
         "DevProject.seams"
       ]
@@ -4533,16 +4535,21 @@
         "LIBRARY_ROOT",
         "KERNEL_ROOT",
         "NATIVE_PREFIXES",
+        "SDK_PREFIXES",
+        "IMPORT_BOUNDARY_MESSAGE",
         "NATIVE_SPELLINGS",
         "generated_tree_paths",
         "ApplicationRoots",
         "ApplicationRoots.composition",
         "ApplicationRoots.portable_prose",
         "ApplicationRoots.generated",
+        "ApplicationRoots.native_dependencies",
+        "ApplicationRoots.source_roots",
         "ApplicationRoots.sanctions",
         "ApplicationRoots.renders",
         "ApplicationRoots.sanctions_spelling",
         "NO_APPLICATION",
+        "native_import_boundaries",
         "LIBRARY_COMPOSITION",
         "composes_natively",
         "path_is_sanctioned",
@@ -5501,6 +5508,7 @@
         "HookSet.allowed_fetch",
         "HookSet.denied_fetch",
         "HookSet.protected_edit_roots",
+        "HookSet.import_boundaries",
         "HookSet.path_roles",
         "HookSet.human_owned_files",
         "HookSet.acceptance_guard",
@@ -5522,6 +5530,7 @@
         "HookSet.excluded_commands",
         "HookSet.resolved_shell_rules",
         "HookSet.resolved_edit_rules",
+        "HookSet.resolved_import_boundaries",
         "ResolveSpec",
         "ResolveSpec.id",
         "ResolveSpec.worker_identity",
@@ -7379,6 +7388,7 @@
         "shell_rule_rows_literal",
         "edit_rule_rows_literal",
         "POLICY_DATA_BANNER",
+        "import_boundary_rows_literal",
         "render_policy_data"
       ]
     },
@@ -7754,6 +7764,21 @@
         "ConcernAllowance.NEW_DEVTOOLS_MODULE",
         "ConcernAllowance.ANTIPATTERN_SUPPRESSION",
         "agent_identity_environment"
+      ]
+    },
+    {
+      "module": "lup.policy.imports",
+      "declares": [
+        "ImportBoundary",
+        "ImportBoundary.modules",
+        "ImportBoundary.owners",
+        "ImportBoundary.source_roots",
+        "ImportBoundary.rule_id",
+        "ImportBoundary.message",
+        "ImportBoundary.module_names",
+        "ImportBoundary.repository_roots",
+        "ImportBoundary.repository_roots.normalized",
+        "ImportBoundary.erased"
       ]
     },
     {
@@ -8249,6 +8274,26 @@
       ]
     },
     {
+      "module": "lup.policy.kernel.imports",
+      "declares": [
+        "ImportReference",
+        "ImportReference.line",
+        "ImportReference.end_line",
+        "ImportReference.module",
+        "ImportViolation",
+        "ImportViolation.rule_id",
+        "ImportViolation.message",
+        "ResolvedImportRule",
+        "ResolvedImportRule.row",
+        "ResolvedImportRule.spans",
+        "owns_path",
+        "package_name",
+        "import_references",
+        "import_violations",
+        "resolved_import_rules"
+      ]
+    },
+    {
       "module": "lup.policy.kernel.lex",
       "declares": [
         "Scan",
@@ -8356,6 +8401,12 @@
         "AcceptanceGuardRow",
         "AcceptanceGuardRow.ask_reason",
         "AcceptanceGuardRow.autonomous_reason",
+        "ImportBoundaryRow",
+        "ImportBoundaryRow.modules",
+        "ImportBoundaryRow.owners",
+        "ImportBoundaryRow.source_roots",
+        "ImportBoundaryRow.rule_id",
+        "ImportBoundaryRow.message",
         "AntiPatternRow",
         "AntiPatternRow.id",
         "AntiPatternRow.pattern",

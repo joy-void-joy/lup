@@ -291,7 +291,10 @@ def scan_antipatterns(
             (source.path, finding)
             for source in sources
             for finding in audit_path_boundaries(
-                source.path, source.text, project.roots
+                source.path,
+                source.text,
+                project.roots,
+                project.resolved_import_boundaries(),
             )
         ]
         refuted = resolving.result()

@@ -15,7 +15,7 @@ from lup.sessions.events import TurnTextBlock
 from lup.types import SubagentSpec
 from lup.workspace.context import SessionContext
 from lup_template.agent import core
-from lup_template.agent.config import settings
+from lup_template.agent.config import Settings, settings
 from lup_template.agent.subagents import get_subagent_specs
 from lup_template.agent.tools import reflect
 from lup_template.devtools.agent.inspect_agent import InspectPayload, run_inspect
@@ -137,6 +137,26 @@ def test_explicit_engine_without_model_selects_native_strongest(
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", engine)
     core.provider_factory(model=None, system_prompt="", cwd=tmp_path)
+    assert configured[0].model == expected
+
+
+@pytest.mark.parametrize(
+    "engine,expected", [("claude", "opus"), ("codex", "gpt-6-astra")]
+)
+def test_unconfigured_model_default_cannot_pin_another_provider(
+    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    engine: str,
+    expected: str,
+) -> None:
+    class DefaultSettings(Settings, env_file=None):
+        """The shipped defaults without repository-local environment files."""
+
+    monkeypatch.delenv("AGENT_MODEL", raising=False)
+    monkeypatch.setattr(settings, "model", DefaultSettings().model)
+    monkeypatch.setattr(settings, "agent_sdk", engine)
+    core.provider_factory(model=settings.model, system_prompt="", cwd=tmp_path)
     assert configured[0].model == expected
 
 

@@ -27,6 +27,7 @@ from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
     EditRuleRow,
+    ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
     RefusedToolRow,
@@ -37,6 +38,7 @@ from lup.policy.kernel.rows import (
     shell_row_values,
 )
 from lup.policy.edit_rules import EditRule, erase_edit_rules
+from lup.policy.imports import ImportBoundary
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -472,6 +474,31 @@ POLICY_DATA_BANNER = GeneratedBanner(source=__name__, command=REGENERATE_COMMAND
 """Provenance every adapter's rendered policy-data module opens with."""
 
 
+def import_boundary_rows_literal(rows: list[ImportBoundaryRow]) -> str:
+    """Render the dependency ownership read by both native edit gates."""
+    if not rows:
+        return "[]"
+    lines = ["["]
+    for row in rows:
+        lines.append("    {")
+        for name, values in (
+            ("modules", row["modules"]),
+            ("owners", row["owners"]),
+            ("source_roots", row["source_roots"]),
+        ):
+            if values:
+                lines.append(f'        "{name}": [')
+                lines.extend(f"            {json.dumps(value)}," for value in values)
+                lines.append("        ],")
+            else:
+                lines.append(f'        "{name}": [],')
+        lines.append(f'        "rule_id": {json.dumps(row["rule_id"])},')
+        lines.append(f'        "message": {json.dumps(row["message"])},')
+        lines.append("    },")
+    lines.append("]")
+    return "\n".join(lines)
+
+
 def render_policy_data(
     *,
     allowed_fetch_scopes: list[UrlScopeRow],
@@ -492,6 +519,7 @@ def render_policy_data(
     resolution_command: list[str],
     repair_command: list[str],
     rules: AntiPatternSet | None = None,
+    import_boundaries: list[ImportBoundary] | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
 
@@ -518,6 +546,10 @@ def render_policy_data(
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
             "EDIT_RULES: list[EditRuleRow] = "
             + edit_rule_rows_literal(erase_edit_rules(edit_rules)),
+            "IMPORT_BOUNDARIES: list[ImportBoundaryRow] = "
+            + import_boundary_rows_literal(
+                [boundary.erased() for boundary in import_boundaries or []]
+            ),
             "REFUSED_TOOLS: list[RefusedToolRow] = "
             + refused_tool_rows_literal(erase_refused_tools(refused_tools)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
@@ -548,6 +580,7 @@ def render_policy_data(
         "    AcceptanceGuardRow,\n"
         "    AntiPatternRow,\n"
         "    EditRuleRow,\n"
+        "    ImportBoundaryRow,\n"
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
         "    RefusedToolRow,\n"
