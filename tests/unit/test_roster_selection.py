@@ -18,12 +18,12 @@ import typer
 
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.content.application import ApplicationLayout
-from lup.harness.content.catalog import library_content
 from lup.harness.content.modules.catalog import library_modules
 from lup.harness.content.modules.specs import LIBRARY_SPECS as LIBRARY_MODULE_SPECS
 from lup.harness.modules import (
     DocumentContext,
     adopted,
+    composed_content,
     composed_documents,
     scaffold_selection,
 )
@@ -57,13 +57,19 @@ Built here rather than borrowed from either roster because what it exercises
 is arrival: a skill taken from the library's own list would resolve as a
 replacement of itself and prove nothing about the additive half."""
 
-LIBRARY_CONTENT = library_content(ApplicationLayout(package="worked_example"))
-"""The whole library roster, under a package name that is nobody's real one.
+LIBRARY_MODULES = adopted(
+    library_modules(ApplicationLayout(package="worked_example"), RuleSelection()),
+    scaffold_selection(LIBRARY_MODULE_SPECS),
+)
+"""Every module lup ships, under a package name that is nobody's real one.
 
 Selection is what these exercise, and it does not read a path — so naming a
 package here that no checkout has keeps a roster assertion from passing only
 because the layout happened to match this repository's own.
 """
+
+LIBRARY_CONTENT = composed_content(LIBRARY_MODULES)
+"""The whole library roster, read through the modules that declare it."""
 
 RETIRED = SubAppSelection(retired=["dashboard", "report"])
 
@@ -222,10 +228,7 @@ def test_no_published_page_names_the_template_package() -> None:
     """
     layout = ApplicationLayout(package="worked_example")
     pages = composed_documents(
-        adopted(
-            library_modules(layout, RuleSelection(retired=[])),
-            scaffold_selection(LIBRARY_MODULE_SPECS),
-        ),
+        LIBRARY_MODULES,
         DocumentContext(
             layout=layout,
             root=project_root(),

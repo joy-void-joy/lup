@@ -144,14 +144,19 @@ through the reviewable ladder in
 [contributing.md](contributing.md) rather than a script in `tmp/`, which is
 gitignored and so reaches no diff and no reviewer.
 
-### `devtools/harness/` — the declaration graph
+### `harness/` — the declaration graph
 
-The harness lives under devtools because generating it is a development
-activity. `catalog.py` is the root: it assembles the skills and agents from
-`content/` with the application-owned `HookSet` and the resolver spec into one
-`Harness`. `content/` holds the leaves — one module per skill, per agent, per
-document — and `generate.py` compiles them. [harness.md](harness.md) is the
-guide; this is only where the files are.
+Declaration content sits above the tooling that compiles it, so the harness is
+its own package rather than a corner of `devtools/`. `catalog.py` is the root:
+it assembles the skills and agents this project composes with the
+application-owned `HookSet` and the resolver spec into one `Harness`.
+`content/` holds the leaves — one module per skill, per agent, per document —
+and `content/modules/` groups them by subject: a module carries its content,
+its page, its paragraph in the always-loaded document, its command tree and
+its tool group, and `content/catalog.py` states which of them this project
+takes. What the plugin ships, what `docs/` publishes, what the CLI serves and
+what a session is offered are all derived from that one answer.
+[harness.md](harness.md) is the guide; this is only where the files are.
 
 ### The setup dashboard
 

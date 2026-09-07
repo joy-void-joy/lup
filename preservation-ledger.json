@@ -1,5 +1,5 @@
 {
-  "revision": "3553870cdbdf1ffb1ecad47a8b76a71555b191f3",
+  "revision": "87885cbe11110b3b8139af600bc2a5c0f80663ba",
   "roots": [
     "lup",
     "lup_template"
@@ -4604,9 +4604,6 @@
     {
       "module": "lup.harness.content.catalog",
       "declares": [
-        "library_skills",
-        "library_agents",
-        "library_content",
         "skill_roster_parts",
         "agent_roster_text"
       ]

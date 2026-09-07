@@ -70,7 +70,7 @@ Build `parts` from `models.TextPart(text=r'...')` for the prose, splicing in `mo
 
 A skill whose prose names a path inside this project's package exports a builder instead — `def skill(layout: ApplicationLayout) -> models.Skill` — and spells the path as `{layout.path("agent", "prompts.py")}` in an `rf` string. Writing the literal instead is correct in exactly one repository and misdirects every project built on it, which is why the library takes the package name rather than assuming it.
 
-2. Register it in the `content/catalog.py` of that same half: import it alongside its siblings, then add it to that half's roster — `library_skills` (library) or `PROJECT_SKILLS` (this project). Both are alphabetical, and the project catalog composes them into the `SKILLS` the plugin ships.
+2. Add it to the **module whose subject it serves**, under `content/modules/` in that same half: import it there and name it in the module's `ContentRoster`. There is no roster beside those modules to also register it in — a skill reaches a project because its module does, so the module is the whole of the registration. `dev modules --verbose` says what each module is; if none of them is about your skill's subject, that is a new module rather than a stretched one. `dev check` refuses a declaration file no module claims, so a skill left out of every module fails the gate rather than shipping unnoticed.
 
 3. Regenerate both native plugins:
 
