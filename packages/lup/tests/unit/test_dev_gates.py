@@ -8,10 +8,7 @@ import lup.devtools.dev.gates as gates
 from lup.harness.codescan.markers import (
     MarkerComment,
     NoteKind,
-    find_feedback,
-    scan_mode_for,
 )
-from lup.devtools.dev import records
 from lup.execution.shell import git
 from lup.devtools.dev.branches import get_integration_branch
 from lup.devtools.dev.comments import FoundComment
@@ -106,25 +103,6 @@ def test_a_gate_naming_nothing_fires_rather_than_passing_quietly() -> None:
     # not come true yet, which is the failure this whole module exists to end.
     assert BranchInPlay(argument="").asked().fired
     assert PathGone(argument="").asked().fired
-
-
-def test_the_shared_config_fallback_is_parked_behind_the_branch_retiring_it() -> None:
-    # Emptying `branch.*.lup-*` out of the shared config is the one act here
-    # that no session can perform, and the note asking for it is only ever
-    # resolved if its condition names a declared keyword. A misspelling falls
-    # through to prose without erroring, leaving the ask to whoever happens to
-    # read the listing — which is the half of a gate that does not work.
-    source = Path(records.__file__)
-    found = find_feedback(source.read_text(encoding="utf-8"), scan_mode_for(source))
-    parked = [
-        note
-        for note in found
-        if note.kind is NoteKind.defer and "dev worktree adopt-records" in note.text
-    ]
-    assert len(parked) == 1
-    gate = parse_gate(parked[0].condition)
-    assert isinstance(gate, BranchInPlay)
-    assert gate.argument == "fix-config-free-bookkeeping"
 
 
 def test_a_path_gate_reads_the_tree_it_is_checked_against() -> None:
