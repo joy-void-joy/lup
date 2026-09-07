@@ -219,11 +219,11 @@ def scan_antipatterns(
     ``paths`` narrows the sweep to the files under the given repository-relative
     prefixes, for the fix-one-file loop where a whole-repository resolve is the
     dominant cost, and for a caller answerable only for what it changed. It
-    only decides which files are read: each one still audits against the same
-    tables, and the oracle still resolves them against the whole project, so a
-    scoped verdict matches the sweep's verdict for that file. ``None`` is the
-    whole repository; naming no path scopes the sweep to nothing, which is
-    what a tree that changed nothing is answerable for.
+    decides which files are reported and type-checked. Declaration-based rules
+    retain the whole project's class index, and the oracle resolves against
+    the whole project, so a scoped verdict matches the sweep's verdict for that
+    file. ``None`` is the whole repository; naming no path scopes the sweep to
+    nothing, which is what a tree that changed nothing is answerable for.
 
     The audit reads the same declared path roles the edit hook does, so a rule
     the hook never enforces in a test or scratch tree is not reported there
@@ -237,15 +237,23 @@ def scan_antipatterns(
     it every run; where the checker is absent the grammar refutes nothing and
     every broad regex verdict stands.
     """
-    scanned = scanned_files(project, paths)
-    sources = [
+    if paths is not None and not paths:
+        return AntiPatternScan(findings=[], refuted=[])
+    all_scanned = scanned_files(project)
+    scanned = [item for item in all_scanned if within_scope(item.rel, paths)]
+    declaration_sources = [
         PythonSource(
             path=item.path,
             module=module_name(item.path, scanned_roots(project)),
             text=item.text,
         )
-        for item in scanned
+        for item in all_scanned
         if item.path.suffix.lower() in {".py", ".pyi"}
+    ]
+    sources = [
+        source
+        for source in declaration_sources
+        if within_scope(source.path.as_posix(), paths)
     ]
     # A whole-repository sweep remembers what the checker said, because it
     # holds every module a refutation could resolve through and can therefore
@@ -273,11 +281,11 @@ def scan_antipatterns(
     with ThreadPoolExecutor(max_workers=1) as pool:
         resolving = pool.submit(resolving_refutations)
         declared = [
-            *audit_capabilities(sources),
-            *audit_abstract_declarations(sources),
-            *audit_own_model_dispatch(sources),
-            *audit_isinstance_chains(sources),
-            *audit_constant_declarations(sources, project.roots),
+            *audit_capabilities(declaration_sources),
+            *audit_abstract_declarations(declaration_sources),
+            *audit_own_model_dispatch(declaration_sources),
+            *audit_isinstance_chains(declaration_sources),
+            *audit_constant_declarations(declaration_sources, project.roots),
         ]
         boundary_findings = [
             (source.path, finding)
@@ -307,6 +315,7 @@ def scan_antipatterns(
             rule_id=finding.rule_id,
         )
         for finding in declared
+        if within_scope(finding.path.as_posix(), paths)
     )
     foreign_untyped = {
         (path.as_posix(), finding.line)

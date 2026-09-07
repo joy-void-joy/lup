@@ -995,6 +995,7 @@ def build_claude_options(
         subprocess shape.
         """
         match server:
+            # lup: ignore[own-model-dispatch] — SDK projection belongs in this adapter, not the neutral entry
             case LupMcpServerConfig():
                 return claude_types.McpSdkServerConfig(
                     type="sdk", name=server.name, instance=server.server
