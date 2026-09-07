@@ -12,9 +12,9 @@ this exists to make visible.
 """
 
 from lup.harness.content.docs import upstream_reports
-from lup.harness.content.docs.catalog import LIBRARY_DOCS_ROOT, published
+from lup.harness.content.docs.catalog import page
 from lup.harness.models import ContentRoster
-from lup.harness.modules import DocumentEntry, Module
+from lup.harness.modules import Module
 from lup_template.harness.content.modules.specs import UPSTREAM
 from lup_template.harness.content.skills.import_skill import SKILL as SKILL_IMPORT
 from lup_template.harness.content.skills.update import SKILL as SKILL_UPDATE
@@ -26,14 +26,10 @@ def module() -> Module:
         spec=UPSTREAM,
         content=ContentRoster(skills=[SKILL_IMPORT, SKILL_UPDATE]),
         documents=[
-            DocumentEntry(
-                semantic_id="docs.upstream-reports",
-                build=lambda _: published(
-                    "upstream_reports",
-                    "upstream-reports.md",
-                    upstream_reports.document(),
-                    LIBRARY_DOCS_ROOT,
-                ),
+            page(
+                "upstream_reports",
+                "upstream-reports.md",
+                lambda _: upstream_reports.document(),
             )
         ],
     )

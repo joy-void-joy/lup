@@ -20,7 +20,7 @@ part of what it describes.
 
 from lup.harness.content.application import ApplicationLayout
 from lup.harness.content.docs import harness, platform_differentiation
-from lup.harness.content.docs.catalog import LIBRARY_DOCS_ROOT, published
+from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import META
 from lup.harness.content.skills.add_command import skill as build_add_command
 from lup.harness.content.skills.create_investigator import (
@@ -31,7 +31,7 @@ from lup.harness.content.skills.principle import skill as build_principle
 from lup.harness.content.skills.refactor import SKILL as SKILL_REFACTOR
 from lup.harness.content.skills.refactor_tools import skill as build_refactor_tools
 from lup.harness.models import ContentRoster
-from lup.harness.modules import DocumentEntry, Module
+from lup.harness.modules import Module
 
 
 def module(layout: ApplicationLayout) -> Module:
@@ -49,33 +49,22 @@ def module(layout: ApplicationLayout) -> Module:
             ]
         ),
         documents=[
-            DocumentEntry(
-                semantic_id="docs.harness",
-                build=lambda context: published(
-                    "harness",
-                    "harness.md",
-                    harness.document(
-                        context.skills,
-                        context.agents,
-                        context.plugin,
-                        context.layout,
-                    ),
-                    LIBRARY_DOCS_ROOT,
+            page(
+                "harness",
+                "harness.md",
+                lambda context: harness.document(
+                    context.skills, context.agents, context.plugin, context.layout
                 ),
             ),
-            DocumentEntry(
-                semantic_id="docs.platform-differentiation",
-                build=lambda context: published(
-                    "platform_differentiation",
-                    "platform-differentiation.md",
-                    platform_differentiation.document(
-                        context.skills,
-                        context.agents,
-                        context.claude_decodes,
-                        context.codex_decodes,
-                        context.layout,
-                    ),
-                    LIBRARY_DOCS_ROOT,
+            page(
+                "platform_differentiation",
+                "platform-differentiation.md",
+                lambda context: platform_differentiation.document(
+                    context.skills,
+                    context.agents,
+                    context.claude_decodes,
+                    context.codex_decodes,
+                    context.layout,
                 ),
             ),
         ],

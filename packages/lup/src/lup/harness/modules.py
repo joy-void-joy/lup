@@ -163,6 +163,14 @@ class DocumentEntry(SelectableRule, frozen=True, arbitrary_types_allowed=True):
     semantic_id: str
     """The name ownership records it under, and a project retires it by."""
 
+    source: str
+    """The module this page is written in, as a path in the declaring checkout.
+
+    Carried rather than read off the rendered page, because knowing who
+    publishes a page must not require the context that renders one — which is
+    what the coverage sweep asks, over a tree it is deliberately not composing.
+    """
+
     build: Callable[[DocumentContext], models.Document]
     """How the page is rendered, once there is a composition to render it from."""
 

@@ -26,7 +26,7 @@ from lup.harness.content.docs import (
     permissions,
     quality_pipeline,
 )
-from lup.harness.content.docs.catalog import LIBRARY_DOCS_ROOT, published
+from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import CORE
 from lup.harness.content.skills.analyze import SKILL as SKILL_ANALYZE
 from lup.harness.content.skills.debug import skill as build_debug
@@ -45,74 +45,25 @@ def documents() -> list[DocumentEntry]:
     resolver's page, and no project stops publishing how an edit is judged.
     """
     return [
-        DocumentEntry(
-            semantic_id="docs.library",
-            build=lambda context: published(
-                "library",
-                "library.md",
-                library.document(context.layout),
-                LIBRARY_DOCS_ROOT,
-            ),
+        page("library", "library.md", lambda context: library.document(context.layout)),
+        page("architecture", "architecture.md", lambda _: architecture.DOCUMENT),
+        page("permissions", "permissions.md", lambda _: permissions.DOCUMENT),
+        page(
+            "native_capabilities",
+            "native-capabilities.md",
+            lambda context: native_capabilities.document(context.library_checkout),
         ),
-        DocumentEntry(
-            semantic_id="docs.architecture",
-            build=lambda _: published(
-                "architecture",
-                "architecture.md",
-                architecture.DOCUMENT,
-                LIBRARY_DOCS_ROOT,
-            ),
+        page("conventions", "conventions.md", lambda _: conventions_page.DOCUMENT),
+        page(
+            "quality_pipeline",
+            "quality-pipeline.md",
+            lambda _: quality_pipeline.DOCUMENT,
         ),
-        DocumentEntry(
-            semantic_id="docs.permissions",
-            build=lambda _: published(
-                "permissions",
-                "permissions.md",
-                permissions.DOCUMENT,
-                LIBRARY_DOCS_ROOT,
-            ),
-        ),
-        DocumentEntry(
-            semantic_id="docs.native-capabilities",
-            build=lambda context: published(
-                "native_capabilities",
-                "native-capabilities.md",
-                native_capabilities.document(context.library_checkout),
-                LIBRARY_DOCS_ROOT,
-            ),
-        ),
-        DocumentEntry(
-            semantic_id="docs.conventions",
-            build=lambda _: published(
-                "conventions",
-                "conventions.md",
-                conventions_page.DOCUMENT,
-                LIBRARY_DOCS_ROOT,
-            ),
-        ),
-        DocumentEntry(
-            semantic_id="docs.quality-pipeline",
-            build=lambda _: published(
-                "quality_pipeline",
-                "quality-pipeline.md",
-                quality_pipeline.DOCUMENT,
-                LIBRARY_DOCS_ROOT,
-            ),
-        ),
-        DocumentEntry(
-            semantic_id="docs.patterns",
-            build=lambda _: published(
-                "patterns", "patterns.md", patterns.DOCUMENT, LIBRARY_DOCS_ROOT
-            ),
-        ),
-        DocumentEntry(
-            semantic_id="docs.orchestration",
-            build=lambda context: published(
-                "orchestration",
-                "orchestration.md",
-                orchestration.document(context.layout),
-                LIBRARY_DOCS_ROOT,
-            ),
+        page("patterns", "patterns.md", lambda _: patterns.DOCUMENT),
+        page(
+            "orchestration",
+            "orchestration.md",
+            lambda context: orchestration.document(context.layout),
         ),
     ]
 

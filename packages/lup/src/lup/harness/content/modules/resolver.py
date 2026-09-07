@@ -16,7 +16,7 @@ them. Expressing a nested claim is a shape of its own and does not gate this.
 """
 
 from lup.harness.content.docs import resolver, supervisor
-from lup.harness.content.docs.catalog import LIBRARY_DOCS_ROOT, published
+from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import RESOLVER
 from lup.harness.content.skills.implementer import SKILL as SKILL_IMPLEMENTER
 from lup.harness.content.skills.resolve import SKILL as SKILL_RESOLVE
@@ -24,7 +24,7 @@ from lup.harness.content.skills.resolve_reviewer import (
     SKILL as SKILL_RESOLVE_REVIEWER,
 )
 from lup.harness.models import ContentRoster
-from lup.harness.modules import DocumentEntry, Module
+from lup.harness.modules import Module
 
 
 def module() -> Module:
@@ -35,20 +35,7 @@ def module() -> Module:
             skills=[SKILL_IMPLEMENTER, SKILL_RESOLVE, SKILL_RESOLVE_REVIEWER]
         ),
         documents=[
-            DocumentEntry(
-                semantic_id="docs.resolver",
-                build=lambda _: published(
-                    "resolver", "resolver.md", resolver.DOCUMENT, LIBRARY_DOCS_ROOT
-                ),
-            ),
-            DocumentEntry(
-                semantic_id="docs.supervisor",
-                build=lambda _: published(
-                    "supervisor",
-                    "supervisor.md",
-                    supervisor.DOCUMENT,
-                    LIBRARY_DOCS_ROOT,
-                ),
-            ),
+            page("resolver", "resolver.md", lambda _: resolver.DOCUMENT),
+            page("supervisor", "supervisor.md", lambda _: supervisor.DOCUMENT),
         ],
     )

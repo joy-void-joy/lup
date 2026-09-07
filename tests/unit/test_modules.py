@@ -42,6 +42,7 @@ def page(semantic_id: str) -> modules.DocumentEntry:
     """One published page, named by the id ownership records it under."""
     return modules.DocumentEntry(
         semantic_id=semantic_id,
+        source=f"worked_example.docs.{semantic_id}",
         build=lambda _: models.Document(
             path=Path("docs") / f"{semantic_id}.md",
             semantic_id=semantic_id,

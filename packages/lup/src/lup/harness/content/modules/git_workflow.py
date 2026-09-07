@@ -13,7 +13,7 @@ the vocabulary they decided in.
 
 import lup.harness.content.conventions as conventions
 from lup.harness.content.docs import contributing
-from lup.harness.content.docs.catalog import LIBRARY_DOCS_ROOT, published
+from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import GIT_WORKFLOW
 from lup.harness.content.skills.close import SKILL as SKILL_CLOSE
 from lup.harness.content.skills.commit import SKILL as SKILL_COMMIT
@@ -21,7 +21,7 @@ from lup.harness.content.skills.land import SKILL as SKILL_LAND
 from lup.harness.content.skills.merge import SKILL as SKILL_MERGE
 from lup.harness.content.skills.rebase import SKILL as SKILL_REBASE
 from lup.harness.models import ContentRoster
-from lup.harness.modules import DocumentEntry, Module
+from lup.harness.modules import Module
 
 
 def module() -> Module:
@@ -47,14 +47,10 @@ def module() -> Module:
             conventions.COMMIT_GUIDELINES,
         ],
         documents=[
-            DocumentEntry(
-                semantic_id="docs.contributing",
-                build=lambda context: published(
-                    "contributing",
-                    "contributing.md",
-                    contributing.document(context.layout),
-                    LIBRARY_DOCS_ROOT,
-                ),
+            page(
+                "contributing",
+                "contributing.md",
+                lambda context: contributing.document(context.layout),
             )
         ],
     )

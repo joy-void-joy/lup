@@ -32,7 +32,7 @@ from lup_template.harness.content.catalog import (
 )
 from lup_template.harness.content.docs import index
 
-DOCS_ROOT = LAYOUT.path("harness", "content", "docs")
+DOCS_ROOT = LAYOUT.docs().path
 """Directory this repository's own page modules live in, for their banners."""
 
 

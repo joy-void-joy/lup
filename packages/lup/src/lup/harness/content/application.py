@@ -24,6 +24,21 @@ by the project and handed down to the content that renders it.
 from pydantic import BaseModel, Field
 
 
+class DocsRoot(BaseModel, frozen=True):
+    """Where one half's page modules live: the directory, and the import root.
+
+    Both, because a page is named twice and neither naming is spare. The
+    directory is what a generated banner points a reader at; the dotted package
+    is what the coverage sweep matches a claim against, beside the prompts that
+    carry their own ``__name__``. A root holding one of them would leave the
+    other to be reconstructed by string surgery over a path, which is a parser
+    nobody wrote.
+    """
+
+    path: str
+    package: str
+
+
 class ApplicationLayout(BaseModel, frozen=True):
     """The import root a project publishes, and the paths that follow from it.
 
@@ -38,6 +53,19 @@ class ApplicationLayout(BaseModel, frozen=True):
     def path(self, *members: str) -> str:
         """One file inside the application, as prose names it."""
         return "/".join(["src", self.package, *members])
+
+    def docs(self) -> DocsRoot:
+        """Where this application's own page modules live, both ways round.
+
+        A page names its directory for the reader a banner sends there and its
+        package for the sweep that asks which module claims it. Assembling both
+        is the layout's business rather than each declaring module's, because
+        the layout is the one value that knows the name they are built from.
+        """
+        return DocsRoot(
+            path=self.path("harness", "content", "docs"),
+            package=f"{self.package}.harness.content.docs",
+        )
 
     def directory(self, *members: str) -> str:
         """One directory inside the application, trailing separator included.

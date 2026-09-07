@@ -17,9 +17,9 @@ and that is a persistent agent controlling its own attention forever.
 
 import lup.harness.content.conventions as conventions
 from lup.harness.content.docs import runs
-from lup.harness.content.docs.catalog import LIBRARY_DOCS_ROOT, published
+from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import RUNS
-from lup.harness.modules import DocumentEntry, Module
+from lup.harness.modules import Module
 
 
 def module() -> Module:
@@ -27,12 +27,5 @@ def module() -> Module:
     return Module(
         spec=RUNS,
         guidance=[conventions.LONG_RUNNING_WORK],
-        documents=[
-            DocumentEntry(
-                semantic_id="docs.runs",
-                build=lambda _: published(
-                    "runs", "runs.md", runs.DOCUMENT, LIBRARY_DOCS_ROOT
-                ),
-            )
-        ],
+        documents=[page("runs", "runs.md", lambda _: runs.DOCUMENT)],
     )

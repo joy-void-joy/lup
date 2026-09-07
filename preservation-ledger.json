@@ -1,5 +1,5 @@
 {
-  "revision": "78872cbd55691e9343abec627188379a803aa65a",
+  "revision": "93ab1f777ad9984b7857f3f4b55353ccad4c2fef",
   "roots": [
     "lup",
     "lup_template"
@@ -3098,6 +3098,7 @@
         "DevProject.subapps",
         "DevProject.trackers",
         "DevProject.modules",
+        "DevProject.coverage",
         "DevProject.roots",
         "DevProject.catalog",
         "DevProject.seams"
@@ -4563,9 +4564,13 @@
     {
       "module": "lup.harness.content.application",
       "declares": [
+        "DocsRoot",
+        "DocsRoot.path",
+        "DocsRoot.package",
         "ApplicationLayout",
         "ApplicationLayout.package",
         "ApplicationLayout.path",
+        "ApplicationLayout.docs",
         "ApplicationLayout.directory"
       ]
     },
@@ -4606,8 +4611,10 @@
     {
       "module": "lup.harness.content.docs.catalog",
       "declares": [
+        "LIBRARY_DOCS",
         "LIBRARY_DOCS_ROOT",
-        "published"
+        "published",
+        "page"
       ]
     },
     {
@@ -5095,6 +5102,41 @@
         "Materializer.apply",
         "CapabilityProbe",
         "CapabilityProbe.probe"
+      ]
+    },
+    {
+      "module": "lup.harness.coverage",
+      "declares": [
+        "ContentFamily",
+        "ContentFamily.directory",
+        "ContentFamily.names",
+        "CONTENT_FAMILIES",
+        "ContentRoot",
+        "ContentRoot.directory",
+        "ContentRoot.package",
+        "Claim",
+        "Claim.declaration",
+        "Claim.module",
+        "CoverageGap",
+        "CoverageGap.surface",
+        "CoverageGap.name",
+        "CoverageGap.owners",
+        "CoverageGap.describe",
+        "ModuleCoverage",
+        "ModuleCoverage.modules",
+        "ModuleCoverage.roots",
+        "ModuleCoverage.composed",
+        "ModuleCoverage.subapps",
+        "ModuleCoverage.tool_groups",
+        "bound",
+        "declares",
+        "declaring_modules",
+        "content_claims",
+        "page_claims",
+        "subapp_claims",
+        "tool_group_claims",
+        "gaps",
+        "coverage_gaps"
       ]
     },
     {
@@ -5743,6 +5785,7 @@
         "DocumentContext.library_checkout",
         "DocumentEntry",
         "DocumentEntry.semantic_id",
+        "DocumentEntry.source",
         "DocumentEntry.build",
         "DocumentEntry.selection_id",
         "Module",
@@ -13826,6 +13869,7 @@
         "WORKFLOW",
         "NATIVE_RUNTIMES",
         "application_roots",
+        "declared_coverage",
         "dev_project",
         "portable_harness"
       ]

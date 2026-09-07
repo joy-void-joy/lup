@@ -17,14 +17,20 @@ them: the seat is the point, not the words in it.
 """
 
 import lup_template.harness.content.guidance as guidance
-from lup.harness.content.docs.catalog import published
-from lup.harness.modules import DocumentEntry, Module
+from lup.harness.content.application import ApplicationLayout
+from lup.harness.content.docs.catalog import page
+from lup.harness.modules import Module
 from lup_template.harness.content.docs import decisions
 from lup_template.harness.content.modules.specs import PROJECT
 
 
-def module() -> Module:
-    """This repository's own framing as one value."""
+def module(layout: ApplicationLayout) -> Module:
+    """This repository's own framing as one value, against its own layout.
+
+    The layout is here for the page rather than for the prose: a page declares
+    where it is written, and where this project's pages are written is inside
+    this project's package — which only the project knows the name of.
+    """
     return Module(
         spec=PROJECT,
         guidance=[
@@ -37,14 +43,11 @@ def module() -> Module:
             guidance.EXTERNAL_RESOURCES,
         ],
         documents=[
-            DocumentEntry(
-                semantic_id="docs.dev-tooling-decisions",
-                build=lambda context: published(
-                    "decisions",
-                    "dev-tooling-decisions.md",
-                    decisions.DOCUMENT,
-                    context.layout.path("harness", "content", "docs"),
-                ),
+            page(
+                "decisions",
+                "dev-tooling-decisions.md",
+                lambda _: decisions.DOCUMENT,
+                layout.docs(),
             )
         ],
     )

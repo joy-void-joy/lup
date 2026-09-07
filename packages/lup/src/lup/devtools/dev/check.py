@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from lup.providers.harness import guidance_artifacts
 from lup.harness.codescan.markers import find_feedback
+from lup.harness.coverage import coverage_gaps
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     TEMPLATE_GUIDANCE_HEADROOM,
@@ -818,6 +819,26 @@ def scan_reports(
             lines=["harness drift: ok"]
             if drift.clean
             else [f"harness drift: FAIL ({len(drift.stale_trees)} tree(s))"],
+        )
+
+        # Beside parity because both ask whether the roster arrived whole, one
+        # turn further out: parity reads a declaration against the trees, and
+        # this reads the checkout against the modules that were meant to
+        # declare it. A subject nobody claims reaches neither of the others —
+        # it renders into every tree, identically, forever.
+        unclaimed = coverage_gaps(project_root(), project.coverage)
+        yield CheckReport(
+            name="module coverage",
+            passed=not unclaimed,
+            lines=[
+                f"module coverage: FAIL ({len(unclaimed)} unclaimed)",
+                *(f"  {gap.describe()}" for gap in unclaimed),
+            ]
+            if unclaimed
+            else [
+                "module coverage: ok, "
+                f"{len(project.coverage.modules)} module(s) claim everything declared"
+            ],
         )
 
         # Beside drift because a tree can be perfectly current against a source

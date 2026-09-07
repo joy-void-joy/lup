@@ -19,10 +19,10 @@ from lup.harness.modules import Module, ModuleEntry
 from lup_template.harness.content.modules import specs
 
 
-def project_module() -> Module:
+def project_module(layout: ApplicationLayout) -> Module:
     from lup_template.harness.content.modules.project import module
 
-    return module()
+    return module(layout)
 
 
 def template_init_module(layout: ApplicationLayout) -> Module:
@@ -43,7 +43,7 @@ def examples_module() -> Module:
     return module()
 
 
-def opening_modules() -> list[ModuleEntry]:
+def opening_modules(layout: ApplicationLayout) -> list[ModuleEntry]:
     """What this repository says before the library says anything.
 
     Split from the closing half because a roster's order is a document's
@@ -51,7 +51,7 @@ def opening_modules() -> list[ModuleEntry]:
     general statement of the same subject follows, which is expressible only
     by sitting ahead of every library module rather than after them.
     """
-    return [ModuleEntry(spec=specs.PROJECT, build=project_module)]
+    return [ModuleEntry(spec=specs.PROJECT, build=lambda: project_module(layout))]
 
 
 def closing_modules(layout: ApplicationLayout) -> list[ModuleEntry]:
@@ -83,7 +83,7 @@ def composed_entries(
     describes them.
     """
     return [
-        *opening_modules(),
+        *opening_modules(layout),
         *library_modules(layout, rules),
         *closing_modules(layout),
     ]

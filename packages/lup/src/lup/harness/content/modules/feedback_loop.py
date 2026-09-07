@@ -15,7 +15,7 @@ the loop's own section.
 from lup.harness.content.agents.trace_explorer import agent as build_trace_explorer
 from lup.harness.content.application import ApplicationLayout
 from lup.harness.content.docs import self_improvement
-from lup.harness.content.docs.catalog import LIBRARY_DOCS_ROOT, published
+from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import FEEDBACK_LOOP
 from lup.harness.content.skills.fb_analyze import SKILL as SKILL_FB_ANALYZE
 from lup.harness.content.skills.fb_implement import SKILL as SKILL_FB_IMPLEMENT
@@ -25,7 +25,7 @@ from lup.harness.content.skills.fb_status import SKILL as SKILL_FB_STATUS
 from lup.harness.content.skills.feedback_loop import SKILL as SKILL_FEEDBACK_LOOP
 from lup.harness.content.skills.review import skill as build_review
 from lup.harness.models import ContentRoster
-from lup.harness.modules import DocumentEntry, Module
+from lup.harness.modules import Module
 
 
 def module(layout: ApplicationLayout) -> Module:
@@ -45,14 +45,10 @@ def module(layout: ApplicationLayout) -> Module:
             agents=[build_trace_explorer(layout)],
         ),
         documents=[
-            DocumentEntry(
-                semantic_id="docs.self-improvement",
-                build=lambda _: published(
-                    "self_improvement",
-                    "self-improvement.md",
-                    self_improvement.DOCUMENT,
-                    LIBRARY_DOCS_ROOT,
-                ),
+            page(
+                "self_improvement",
+                "self-improvement.md",
+                lambda _: self_improvement.DOCUMENT,
             )
         ],
     )

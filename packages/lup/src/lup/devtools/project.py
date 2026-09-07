@@ -17,6 +17,7 @@ from lup.harness.codescan.boundaries import ApplicationRoots
 from lup.harness.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.subapps import SubAppSelection
+from lup.harness.coverage import ModuleCoverage
 from lup.harness.modules import ModuleSelection
 from lup.policy.kernel.rows import PathRoleRow
 
@@ -161,6 +162,17 @@ class DevProject(BaseModel, frozen=True):
     kept at four is the failure this replaced: the skills went and the page,
     the sub-app, the tool group and the paragraph stayed, each looking like a
     decision somebody made."""
+
+    coverage: ModuleCoverage = ModuleCoverage()
+    """Everything this checkout declares, beside the modules that could claim it.
+
+    Empty is a real answer and a weak one: a project declaring nothing here has
+    a roster nothing audits, which is safe exactly as long as every subject
+    happens to be claimed. Filling it in costs four facts the composition root
+    already holds, and buys the one failure the module system cannot see from
+    inside itself — a declaration owned by nothing, which reaches every project
+    including the ones that declined its subject and says nothing while it does.
+    """
 
     roots: ApplicationRoots = ApplicationRoots()
     """Where this application is allowed to name a concrete implementation.

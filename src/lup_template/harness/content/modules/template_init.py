@@ -18,8 +18,8 @@ work, which is the ordering this module's position in the roster produces.
 """
 
 import lup_template.harness.content.guidance as guidance
-from lup.harness.content.docs.catalog import published
-from lup.harness.modules import DocumentEntry, Module
+from lup.harness.content.docs.catalog import page
+from lup.harness.modules import Module
 from lup.harness.content.application import ApplicationLayout
 from lup.harness.models import ContentRoster
 from lup_template.harness.content.docs import template
@@ -44,14 +44,11 @@ def module(layout: ApplicationLayout) -> Module:
         ),
         guidance=[guidance.CONFIGURATION],
         documents=[
-            DocumentEntry(
-                semantic_id="docs.template",
-                build=lambda context: published(
-                    "template",
-                    "template.md",
-                    template.document(context.root, context.subapps),
-                    context.layout.path("harness", "content", "docs"),
-                ),
+            page(
+                "template",
+                "template.md",
+                lambda context: template.document(context.root, context.subapps),
+                layout.docs(),
             )
         ],
     )
