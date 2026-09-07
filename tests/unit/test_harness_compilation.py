@@ -3285,15 +3285,22 @@ def test_a_declared_startup_deadline_reaches_the_runtime_that_waits_on_one() -> 
     the symptom is a group simply absent from a session that otherwise
     works, which reads as flakiness rather than as a configured limit.
     """
+    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    for name in ("notes", "codeintel", "sandbox"):
+        assert parsed["mcp_servers"][name]["startup_timeout_sec"] == 60.0
+
+
+def undeadlined_harness() -> Harness:
+    """The declared harness with every server's deadline stripped."""
     source = portable_harness()
     plugin = source.plugins[0]
-    deadlined = source.model_copy(
+    return source.model_copy(
         update={
             "plugins": [
                 plugin.model_copy(
                     update={
                         "mcp_servers": [
-                            server.model_copy(update={"startup_timeout_seconds": 60.0})
+                            server.model_copy(update={"startup_timeout_seconds": None})
                             for server in plugin.mcp_servers
                         ]
                     }
@@ -3301,14 +3308,37 @@ def test_a_declared_startup_deadline_reaches_the_runtime_that_waits_on_one() -> 
             ]
         }
     )
-    parsed = tomllib.loads(codex_project_config(deadlined, CodexSpellings()))
-    assert parsed["mcp_servers"]["notes"]["startup_timeout_sec"] == 60.0
 
 
 def test_a_server_naming_no_deadline_keeps_the_runtimes_own() -> None:
     """Declaring nothing leaves the default, rather than this file's opinion."""
-    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    parsed = tomllib.loads(
+        codex_project_config(undeadlined_harness(), CodexSpellings())
+    )
     assert "startup_timeout_sec" not in parsed["mcp_servers"]["notes"]
+
+
+def test_the_widest_declared_deadline_lands_in_the_settings_env() -> None:
+    """The runtime without a per-server spelling reads one global variable.
+
+    ``MCP_TIMEOUT`` is milliseconds and covers every server the session
+    starts, so the settings artifact renders the widest declared deadline —
+    and renders the project's own env block over it, since a repository
+    spelling the variable itself has made the judgement directly.
+    """
+    settings = project_settings(portable_harness().plugins[0])
+    env = settings["env"]
+    assert isinstance(env, dict)
+    assert env["MCP_TIMEOUT"] == "60000"
+    assert env["CLAUDE_CODE_THISTLE_GREBE"] == "default"
+
+
+def test_no_declared_deadline_leaves_the_settings_env_alone() -> None:
+    """Stripped declarations render no opinion into the runtime's env."""
+    settings = project_settings(undeadlined_harness().plugins[0])
+    env = settings["env"]
+    assert isinstance(env, dict)
+    assert "MCP_TIMEOUT" not in env
 
 
 def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:

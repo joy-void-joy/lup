@@ -164,7 +164,7 @@ One name per worktree, shared by every group's process, so the tools of one
 native session write where the next one will find them."""
 
 
-def agent_tool_servers() -> list[McpServer]:
+def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer]:
     """Offer this project's own agent tools to whichever runtime is reading.
 
     The groups come from the same registry the in-process and subprocess
@@ -172,6 +172,15 @@ def agent_tool_servers() -> list[McpServer]:
     too rather than only the ones this program launches itself. Realtime is
     the relay mode of a persistent run and belongs to no interactive session,
     so its group is not among them.
+
+    The deadline is sized to a cold first boot rather than a warm one. Every
+    server here starts through ``uv run``, which on a checkout without an
+    environment resolves, downloads, and builds one before the process can
+    speak — while its siblings, spawned in the same instant, block on the
+    same environment lock. A runtime default chosen for an installed server
+    (Codex gives ten seconds) drops the losers of that race, and what the
+    session sees is two tool groups simply missing on the boot that built
+    the environment and present on every boot after.
     """
     return [
         McpServer(
@@ -191,6 +200,7 @@ def agent_tool_servers() -> list[McpServer]:
                 LiteralWord(text="--session"),
                 LiteralWord(text=HARNESS_SESSION),
             ],
+            startup_timeout_seconds=startup_deadline_seconds,
         )
         for name in tool_group_names(realtime=False)
     ]

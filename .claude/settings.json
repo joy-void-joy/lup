@@ -9,7 +9,8 @@
   },
   "env": {
     "CLAUDE_CODE_THISTLE_GREBE": "default",
-    "ENABLE_TOOL_SEARCH": "false"
+    "ENABLE_TOOL_SEARCH": "false",
+    "MCP_TIMEOUT": "60000"
   },
   "extraKnownMarketplaces": {
     "lup-template-repository": {
