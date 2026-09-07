@@ -2,11 +2,13 @@
 
 import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import sh
 
 from lup.providers.codex import harness_runtime
+from lup.types import EnvVars
 from lup.providers.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
@@ -111,7 +113,11 @@ def test_ensure_never_removes_a_revision_an_active_session_may_use(
     calls: list[tuple[str, ...]] = []
 
     def command(executable: str):
-        def run(*arguments: str, **_kwargs: object) -> str:
+        assert executable == "codex"
+
+        def run(*arguments: str, _env: EnvVars, **_kwargs: object) -> str:
+            assert Path(_env["CODEX_HOME"]) != installer.config.codex_home
+            assert Path(_env["CODEX_HOME"]).is_relative_to(installer.config.codex_home)
             calls.append(arguments)
             return ""
 
@@ -122,7 +128,9 @@ def test_ensure_never_removes_a_revision_an_active_session_may_use(
         PluginCacheConfig(codex_home=tmp_path / "home", marketplace="lup-test")
     )
     monkeypatch.setattr(installer, "plugin_environment", lambda: {})
+    monkeypatch.setattr(installer, "publish", Mock())
 
     installer.ensure(source, tmp_path / "project")
 
-    assert not any(arguments[:2] == ("plugin", "remove") for arguments in calls)
+    assert len(calls) == 2
+    assert all("remove" not in arguments for arguments in calls)
