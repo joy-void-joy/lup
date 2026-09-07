@@ -128,6 +128,8 @@ A `KEEP` branch an open PR is driving is not finished work — it is work whose 
 
 **They share step 6's queue.** Every merge moves the integration branch, so open-PR branches and `LAND` branches form one ordered sequence rather than two independent passes. Take them one at a time, and re-derive the next one's base after each.
 
+**A stacked PR is retargeted before anything lands, or it never reads as merged.** A PR whose base is its stack parent merges into that parent, and the forge marks a request merged only when a push to *its own base* carries its head — so landing the stack's work in the integration branch leaves every child PR open, and retargeting afterwards is refused with "no new commits" once the head is contained, closable forever but never merged. Read each open PR's base before its group's first merge, and where it names another feature branch, point it at the integration branch while the head still holds commits the integration branch lacks — `uv run lup-devtools dev pr merge <number> --retarget` does both in one move, and `gh pr edit <number> --base <integration>` is the half by itself. Bottom-up over the stack, so each PR's diff collapses to its own commits as its parent lands.
+
 **Order by what the branches touch, not by when they started.** Branches cut from the same tip have no divergence to sort by, so compare their file sets — `git diff --name-only <integration>...<branch>` for each — and read the intersection:
 
 - **Disjoint.** Any order serves. Take the smallest first, so the larger rebases onto a base that has stopped moving.
