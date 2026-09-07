@@ -820,21 +820,25 @@ def spent_notes(
     """Every note this edit dropped while its subject stands.
 
     A note leaves a file honestly three ways: it is still open under the same
-    words, it was converted into a claim this edit added, or the code it
-    annotated went with it. Anything else is feedback stripped off code that
-    is still there, which is the one act the gate exists to refuse. All of
-    them are returned rather than the first, because the denial quotes what
-    was lost and a reader repairing the edit repairs it once.
+    words, its words stand as a `solved:` claim in the revision, or the code
+    it annotated went with it. Anything else is feedback stripped off code
+    that is still there, which is the one act the gate exists to refuse. All
+    of them are returned rather than the first, because the denial quotes
+    what was lost and a reader repairing the edit repairs it once.
 
     Survival is asked of the words, not of each copy of them. A file holding
     the same note twice holds one piece of feedback written in two places, so
     a reader who finds either has it — and counting copies would make tidying
-    a duplicate read as a deletion, freezing the code that carried it.
+    a duplicate read as a deletion, freezing the code that carried it. The
+    same reading spans the lifecycle: a merge conflict can hold one note as
+    `defer:` on one side and `solved:` on the other, and resolving it keeps
+    one spelling of the same words — the verify pass still finds the claim
+    to check, so nothing a reader needs has left the file.
     """
-    added_claims = note_bodies(
+    standing_claims = note_bodies(
         notes_in_prose(updated, SOLVED_NOTE_RE, python_source) or []
-    ) - note_bodies(notes_in_prose(previous, SOLVED_NOTE_RE, python_source) or [])
-    survived = note_bodies(is_open) + added_claims
+    )
+    survived = note_bodies(is_open) + standing_claims
     lines = previous.splitlines()
     removed = deleted_lines(previous, updated)
     lost: list[str] = []
@@ -942,8 +946,11 @@ def marker_decision(
     # Asked of the words, as survival is for open notes: a claim is lost when
     # nothing in the revision still carries it. A second copy tidied away
     # retires nothing, because the review pass still finds the claim standing
-    # and can still check it against what was asked.
-    surviving_claims = note_bodies(claimed_now)
+    # and can still check it against what was asked. An open note with the
+    # same words counts too — dropping the claim then is not retiring the
+    # ask but re-opening it, which is the stronger obligation and the other
+    # honest way out of a conflict holding one note in two lifecycle states.
+    surviving_claims = note_bodies(claimed_now) + note_bodies(is_open)
     dropped_claims = [
         note["text"]
         for note in claimed_before

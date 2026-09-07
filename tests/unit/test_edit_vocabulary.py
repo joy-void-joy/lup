@@ -258,6 +258,40 @@ def test_stripping_the_note_off_standing_code_is_still_denied() -> None:
     assert verdict("src/a.py", before, "first = 1\nsecond = 2\n") == "deny"
 
 
+SOLVED = "# lup: solved: this note names work somebody owes\n"
+DEFERRED = "# lup: defer[branch:feat-x]: this note names work somebody owes\n"
+
+
+def test_a_conflict_holding_one_note_in_two_states_resolves_to_either() -> None:
+    """A merge can hold the same words as `defer:` on one side and `solved:`
+    on the other, and resolving it keeps one spelling of one note.
+
+    Measured before this ruling: both directions were denied — dropping the
+    `defer:` spelling read as feedback removed, dropping the `solved:` one as
+    a claim retired outside the review pass — so the completing edit of the
+    merge could not land at all. Either resolution keeps the words in the
+    file: as a claim the verify pass still checks, or as open feedback, which
+    is the stronger obligation.
+    """
+    conflicted = SOLVED + DEFERRED + "first = 1\n"
+
+    assert verdict("src/a.py", conflicted, SOLVED + "first = 1\n") == "allow"
+    assert verdict("src/a.py", conflicted, DEFERRED + "first = 1\n") == "allow"
+
+
+def test_dropping_both_spellings_of_a_note_is_still_denied() -> None:
+    """The ruling above spans lifecycle states, never the words themselves."""
+    conflicted = SOLVED + DEFERRED + "first = 1\n"
+
+    assert verdict("src/a.py", conflicted, "first = 1\n") == "deny"
+
+
+def test_converting_a_deferral_to_a_claim_is_the_sanctioned_resolve() -> None:
+    before = DEFERRED + "first = 1\n"
+
+    assert verdict("src/a.py", before, SOLVED + "first = 1\n") == "allow"
+
+
 def test_a_production_full_write_is_a_quality_review_a_supervisor_may_answer() -> None:
     """What is being reviewed is how the code reads, and a supervisor reads code.
 
