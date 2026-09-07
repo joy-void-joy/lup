@@ -33,6 +33,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 import lup.harness.models as models
+from lup.devtools.subapps import SubAppSpec
 from lup.harness.content.application import ApplicationLayout
 from lup.seams import SelectableRule, Selection
 
@@ -62,6 +63,30 @@ class ModuleSpec(SelectableRule, frozen=True):
 
     requires: list[str] = []
     """Modules this one's declarations reach into, by id."""
+
+    subapps: list[str] = []
+    """Top-level CLI groups this module owns, by name.
+
+    Here rather than on the module for the reason everything else here is: a
+    name is not a declaration, and reading which commands a project serves must
+    not build the subject that serves them. It is stronger than convenience —
+    a skill that names the CLI roster is content, and content is what a module
+    builder builds, so a roster read off built modules would be a roster that
+    could not be handed to the declarations describing it.
+
+    Top-level only: a command group nested inside another module's sub-app is
+    not claimable here, so the resolver's commands under ``harness`` stay where
+    they are and this names none of them. Nesting is a shape of its own and
+    does not gate this one.
+    """
+
+    tool_groups: list[str] = []
+    """MCP tool groups served to a session while this module is adopted.
+
+    Beside :attr:`subapps` and for the same reason: a session composing its
+    servers reads names, and building a module to learn them would make every
+    launch import every subject the project happens to hold.
+    """
 
     scaffold_only: bool = False
     """Whether only the repository shipping the scaffold is offered this.
@@ -101,7 +126,13 @@ class DocumentContext(BaseModel, frozen=True):
 
     skills: list[models.Skill] = []
     agents: list[models.Agent] = []
-    """The composed roster, for the pages whose subject is the roster itself."""
+    subapps: list[SubAppSpec] = []
+    """The composed roster, for the pages whose subject is the roster itself.
+
+    The sub-apps are here for the same reason, one turn further round: which
+    commands a CLI serves follows from which modules were adopted, so a page
+    listing them describes a composition it is itself part of.
+    """
 
     plugin: models.NativeName = "lup"
     """What the composed plugin is called, for an invocation a page renders."""
@@ -140,13 +171,17 @@ class DocumentEntry(SelectableRule, frozen=True, arbitrary_types_allowed=True):
 
 
 class Module(BaseModel, frozen=True):
-    """One module as adopted: what it is, and everything it contributes.
+    """One module as adopted: what it is, and everything it *declares*.
 
     Every surface defaults to nothing, because carrying only some of them is
-    the ordinary case: a module can be tools and policy with no content at
-    all, or one document and one sub-app. Defaulting them lets a declaration
-    say what a subject has by naming it, rather than by an emptiness a reader
-    has to infer.
+    the ordinary case: a module can be one document and no skills, or policy
+    and no prose at all. Defaulting them lets a declaration say what a subject
+    has by naming it, rather than by an emptiness a reader has to infer.
+
+    The two surfaces that are only names — sub-apps and tool groups — are on
+    :class:`ModuleSpec` rather than here, so that reading which commands a CLI
+    serves and which servers a session opens never builds a subject. What is
+    left here is what has to be built to be known.
     """
 
     spec: ModuleSpec
@@ -159,18 +194,6 @@ class Module(BaseModel, frozen=True):
 
     documents: list[DocumentEntry] = []
     """Pages under ``docs/`` whose subject is this module's, unrendered."""
-
-    tool_groups: list[str] = []
-    """MCP tool groups served to a session while this module is adopted."""
-
-    subapps: list[str] = []
-    """Top-level CLI groups this module owns, by name.
-
-    Top-level only: a command group nested inside another module's sub-app is
-    not claimable here, so the resolver's commands under ``harness`` stay
-    where they are and this names none of them. Nesting is a shape of its own
-    and does not gate this one.
-    """
 
 
 class Adoption(BaseModel, frozen=True):
@@ -287,11 +310,33 @@ class ModuleSelection(BaseModel, frozen=True):
             content=module.content.selected(entry.content),
             guidance=[] if silent else entry.guidance.over(module.guidance),
             documents=entry.documents.over(module.documents),
-            tool_groups=[
-                group for group in module.tool_groups if group not in entry.tool_groups
-            ],
-            subapps=[name for name in module.subapps if name not in entry.subapps],
         )
+
+    def subapps(self, specs: list[ModuleSpec]) -> list[str]:
+        """Every top-level CLI group the adopted modules own, in roster order.
+
+        Read off the specs rather than off built modules, which is what lets a
+        skill that names the CLI roster be handed one: the roster is known
+        before the first builder runs, and every builder runs to produce the
+        content that would otherwise have had to describe it.
+        """
+        return [
+            name
+            for spec in specs
+            if self.takes(spec)
+            for name in spec.subapps
+            if name not in self.adoption(spec.id).subapps
+        ]
+
+    def tool_groups(self, specs: list[ModuleSpec]) -> list[str]:
+        """Every MCP tool group an adopted module offers a session, in roster order."""
+        return [
+            group
+            for spec in specs
+            if self.takes(spec)
+            for group in spec.tool_groups
+            if group not in self.adoption(spec.id).tool_groups
+        ]
 
 
 class ModuleEntry(BaseModel, frozen=True, arbitrary_types_allowed=True):

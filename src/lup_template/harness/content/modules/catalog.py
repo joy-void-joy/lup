@@ -12,7 +12,9 @@ subject it shares instead of forking the module to hold it. That is the shape
 an adopting project uses for every change it makes to what lup ships.
 """
 
+from lup.harness.codescan.common import RuleSelection
 from lup.harness.content.application import ApplicationLayout
+from lup.harness.content.modules.catalog import library_modules
 from lup.harness.modules import Module, ModuleEntry
 from lup_template.harness.content.modules import specs
 
@@ -65,4 +67,23 @@ def closing_modules(layout: ApplicationLayout) -> list[ModuleEntry]:
         ),
         ModuleEntry(spec=specs.UPSTREAM, build=upstream_module),
         ModuleEntry(spec=specs.EXAMPLES, build=examples_module),
+    ]
+
+
+def composed_entries(
+    layout: ApplicationLayout, rules: RuleSelection
+) -> list[ModuleEntry]:
+    """Every module this repository could take, in the order it lays them out.
+
+    Nothing is built by this call, which is the property the rest depends on.
+    Every entry closes over its arguments and opens its subject only when a
+    project that took the module asks for it — so the roster's *names* are
+    known before any subject is imported, and the sub-apps and tool groups a
+    project serves can be read off the specs and handed to the content that
+    describes them.
+    """
+    return [
+        *opening_modules(),
+        *library_modules(layout, rules),
+        *closing_modules(layout),
     ]

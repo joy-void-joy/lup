@@ -145,6 +145,4 @@ def module(layout: ApplicationLayout, rules: RuleSelection) -> Module:
             conventions.DEFECT_DISPOSITION,
         ],
         documents=documents(),
-        subapps=["dev", "hooks", "py", "report"],
-        tool_groups=["codeintel"],
     )

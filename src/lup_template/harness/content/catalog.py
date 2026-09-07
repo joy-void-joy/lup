@@ -21,13 +21,14 @@ from pathlib import Path
 
 import lup.harness.models as models
 import lup_template.harness.content.guidance as guidance
+from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
+from lup.devtools.subapps import unowned
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.content.application import ApplicationLayout
-from lup.harness.content.modules.catalog import library_modules
-from lup.harness.content.modules.specs import LIBRARY_SPECS
 from lup.harness.modules import (
     Adoption,
     Module,
+    ModuleEntry,
     ModuleSelection,
     adopted,
     composed_content,
@@ -35,11 +36,8 @@ from lup.harness.modules import (
     scaffold_selection,
 )
 from lup.seams import Selection
-from lup_template.harness.content.modules.catalog import (
-    closing_modules,
-    opening_modules,
-)
-from lup_template.harness.content.modules.specs import PROJECT_SPECS
+from lup_template.devtools.subapps import APPLICATION_ROSTER
+from lup_template.harness.content.modules.catalog import composed_entries
 from lup_template.harness.content.skills.meta import skill as build_meta
 
 LAYOUT = ApplicationLayout(package=Path(__file__).resolve().parents[2].name)
@@ -113,23 +111,66 @@ def adoptions(layout: ApplicationLayout) -> list[Adoption]:
     ]
 
 
+def entries(layout: ApplicationLayout = LAYOUT) -> list[ModuleEntry]:
+    """Every module this repository could take, each beside its builder."""
+    return composed_entries(layout, RULES)
+
+
 def selection(layout: ApplicationLayout = LAYOUT) -> ModuleSelection:
     """Every module taken, only the offered ones' prose loaded, plus the delta."""
-    return scaffold_selection([*PROJECT_SPECS, *LIBRARY_SPECS], adoptions(layout))
+    return scaffold_selection(
+        [entry.spec for entry in entries(layout)], adoptions(layout)
+    )
 
+
+MODULE_SPECS = [entry.spec for entry in entries()]
+"""Every module this repository could take, in the order it lays them out.
+
+The roster read through the half that costs nothing. This repository's own
+framing opens it and what it says about its own tooling closes it, with the
+library's modules in between — a statement about the document rather than about
+importance, since guidance renders as the chapter spine crossed with this order.
+
+Projected from the entries rather than listed again, so the order cannot be
+stated twice and come out differently the second time.
+"""
 
 MODULE_SELECTION = selection()
 """What this repository settled, under its own package name."""
 
+SUBAPPS = MODULE_SELECTION.subapps(MODULE_SPECS)
+"""Every top-level CLI group the adopted modules own.
+
+Read before anything is built, which is what makes it usable: the CLI has to
+know which command trees it serves in order to compose them, and a name is
+known from the spec while a skill is not. What the CLI serves is the
+intersection of this and what the library ships, so a module nobody took takes
+its commands with it rather than leaving them answering for machinery the
+project does not have.
+"""
+
+TOOL_GROUPS = MODULE_SELECTION.tool_groups(MODULE_SPECS)
+"""Every MCP tool group a session is offered, by adopted module."""
+
+SUBAPP_SELECTION = unowned(SUBAPPS, LIBRARY_SUBAPPS)
+"""Which of lup's own sub-apps this CLI declines, as the roster decided it.
+
+Empty for this repository, which takes every module it ships — and that is the
+derivation working rather than a statement about lup.
+"""
+
+APPLICATION_SPECS = [spec for spec in APPLICATION_ROSTER if spec.name in SUBAPPS]
+"""The sub-apps only this application has, narrowed the same way.
+
+``agent`` is served because this project took ``project``, whose subject it is.
+"""
+
+SUBAPP_SPECS = SUBAPP_SELECTION.specs(LIBRARY_SUBAPPS, APPLICATION_SPECS)
+"""Every sub-app this CLI serves, in the order `--help` lists them."""
+
 
 def modules(layout: ApplicationLayout = LAYOUT) -> list[Module]:
     """The modules this repository composes, in reading order.
-
-    This repository's own framing opens the roster and what it says about its
-    own tooling closes it, with the library's modules in between. That is a
-    statement about the document rather than about importance: guidance renders
-    as the chapter spine crossed with this order, so a section's place inside
-    its chapter is its module's place here.
 
     The layout is a parameter so the roster can be resolved under a package
     name that is not this one. Under this repository's own name a declaration
@@ -137,14 +178,7 @@ def modules(layout: ApplicationLayout = LAYOUT) -> list[Module]:
     same string, so only a roster built as some other project can tell them
     apart — which is the one thing an adopter needs to be true.
     """
-    return adopted(
-        [
-            *opening_modules(),
-            *library_modules(layout, RULES),
-            *closing_modules(layout),
-        ],
-        selection(layout),
-    )
+    return adopted(entries(layout), selection(layout))
 
 
 MODULES = modules()
@@ -164,17 +198,6 @@ GUIDANCE_SECTIONS = composed_guidance(MODULES)
 
 GUIDANCE = guidance.document(GUIDANCE_SECTIONS)
 """The always-loaded document itself."""
-
-SUBAPPS = [name for module in MODULES for name in module.subapps]
-"""Every top-level CLI group the adopted modules own.
-
-What the CLI serves is the intersection of this and what the library ships, so
-a module nobody took takes its commands with it rather than leaving them
-answering for machinery the project does not have.
-"""
-
-TOOL_GROUPS = [group for module in MODULES for group in module.tool_groups]
-"""Every MCP tool group a session is offered, by adopted module."""
 
 PLUGIN_NAME: models.NativeName = "lup"
 """The plugin every declared skill is invoked through.

@@ -56,7 +56,7 @@ from lup_template.harness.composition import (
     profile_directory,
 )
 from lup_template.devtools.setup import INTEGRATIONS
-from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION
+from lup_template.harness.content.catalog import APPLICATION_SPECS, SUBAPP_SELECTION
 
 
 def assembled_prompt() -> AgentPrompt:
@@ -137,8 +137,8 @@ app = typer.Typer(
 
 ROSTER = {
     entry.spec.name: entry
-    for entry in SELECTION.over(
-        DECLARATIONS.roster(SELECTION.retired),
+    for entry in SUBAPP_SELECTION.over(
+        DECLARATIONS.roster(SUBAPP_SELECTION.retired),
         [
             SubApp(spec=spec, app=APPLICATION_APPS[spec.name])
             for spec in APPLICATION_SPECS

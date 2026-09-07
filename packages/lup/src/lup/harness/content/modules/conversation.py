@@ -12,4 +12,4 @@ from lup.harness.modules import Module
 
 def module() -> Module:
     """Conversation retention as one value."""
-    return Module(spec=CONVERSATION, subapps=["conversation"])
+    return Module(spec=CONVERSATION)

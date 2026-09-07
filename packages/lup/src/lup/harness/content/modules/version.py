@@ -24,5 +24,4 @@ def module(layout: ApplicationLayout) -> Module:
             skills=[SKILL_BUMP],
             agents=[build_version_explorer(layout), build_version_reviewer(layout)],
         ),
-        subapps=["version"],
     )

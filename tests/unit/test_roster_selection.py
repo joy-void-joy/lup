@@ -37,7 +37,11 @@ import lup.harness.models as models
 from lup.harness.models import ContentSelection
 from lup.workspace.paths import project_root
 from lup_template.harness.content.catalog import modules as composed_modules
-from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION, SUBAPP_SPECS
+from lup_template.harness.content.catalog import (
+    APPLICATION_SPECS,
+    SUBAPP_SELECTION,
+    SUBAPP_SPECS,
+)
 
 SKILL_ADDED = models.Skill(
     id="skill.worked-example",
@@ -262,8 +266,14 @@ def test_only_the_skills_about_renaming_name_the_template_package() -> None:
 
 
 def test_this_repository_declines_nothing_without_saying_so() -> None:
-    """lup authors these, so retiring one would mean it should not exist."""
-    assert SELECTION.retired == []
+    """Every sub-app is owned by a module this repository takes.
+
+    The retirement is derived from the module roster rather than written down,
+    so an empty one is the claim that every command tree lup ships answers to a
+    subject this repository adopted — and a sub-app that fell out of every
+    module's ownership would show up here as a retirement nobody decided.
+    """
+    assert SUBAPP_SELECTION.retired == []
     assert {spec.name for spec in SUBAPP_SPECS} == {
         *(spec.name for spec in LIBRARY_SPECS),
         *(spec.name for spec in APPLICATION_SPECS),

@@ -20,4 +20,4 @@ from lup_template.harness.content.modules.specs import EXAMPLES
 
 def module() -> Module:
     """The scaffold's self-demonstration as one value."""
-    return Module(spec=EXAMPLES, tool_groups=["example"])
+    return Module(spec=EXAMPLES)

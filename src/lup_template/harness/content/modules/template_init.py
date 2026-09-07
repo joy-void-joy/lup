@@ -49,7 +49,7 @@ def module(layout: ApplicationLayout) -> Module:
                 build=lambda context: published(
                     "template",
                     "template.md",
-                    template.document(context.root),
+                    template.document(context.root, context.subapps),
                     context.layout.path("harness", "content", "docs"),
                 ),
             )

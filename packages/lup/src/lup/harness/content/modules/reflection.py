@@ -22,4 +22,4 @@ from lup.harness.modules import Module
 
 def module() -> Module:
     """Self-review as one value."""
-    return Module(spec=REFLECTION, tool_groups=["notes"])
+    return Module(spec=REFLECTION)

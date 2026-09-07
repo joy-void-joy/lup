@@ -16,4 +16,4 @@ from lup.harness.modules import Module
 
 def module() -> Module:
     """Session records as one value."""
-    return Module(spec=OBSERVABILITY, subapps=["trace", "usage"])
+    return Module(spec=OBSERVABILITY)

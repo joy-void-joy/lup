@@ -14,4 +14,4 @@ from lup.harness.modules import Module
 
 def module() -> Module:
     """Confined execution as one value."""
-    return Module(spec=SANDBOX, tool_groups=["sandbox"])
+    return Module(spec=SANDBOX)

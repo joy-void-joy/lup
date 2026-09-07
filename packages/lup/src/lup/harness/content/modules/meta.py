@@ -79,5 +79,4 @@ def module(layout: ApplicationLayout) -> Module:
                 ),
             ),
         ],
-        subapps=["harness"],
     )

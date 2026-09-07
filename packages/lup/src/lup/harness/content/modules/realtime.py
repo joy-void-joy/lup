@@ -24,4 +24,4 @@ from lup.harness.modules import Module
 
 def module() -> Module:
     """The persistent-agent relay as one value."""
-    return Module(spec=REALTIME, tool_groups=["session"])
+    return Module(spec=REALTIME)

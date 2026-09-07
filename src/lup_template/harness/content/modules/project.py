@@ -47,5 +47,4 @@ def module() -> Module:
                 ),
             )
         ],
-        subapps=["agent"],
     )

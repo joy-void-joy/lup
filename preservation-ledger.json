@@ -1,5 +1,5 @@
 {
-  "revision": "a6596bbc392a56d7659abd0bd7f5a61c48859dc4",
+  "revision": "78872cbd55691e9343abec627188379a803aa65a",
   "roots": [
     "lup",
     "lup_template"
@@ -3348,6 +3348,7 @@
         "SubAppSelection.retired",
         "SubAppSelection.over",
         "SubAppSelection.specs",
+        "unowned",
         "compose",
         "subapp_summary",
         "subapp_bullets"
@@ -5726,6 +5727,8 @@
         "ModuleSpec.summary",
         "ModuleSpec.default_on",
         "ModuleSpec.requires",
+        "ModuleSpec.subapps",
+        "ModuleSpec.tool_groups",
         "ModuleSpec.scaffold_only",
         "ModuleSpec.selection_id",
         "DocumentContext",
@@ -5733,6 +5736,7 @@
         "DocumentContext.root",
         "DocumentContext.skills",
         "DocumentContext.agents",
+        "DocumentContext.subapps",
         "DocumentContext.plugin",
         "DocumentContext.claude_decodes",
         "DocumentContext.codex_decodes",
@@ -5746,8 +5750,6 @@
         "Module.content",
         "Module.guidance",
         "Module.documents",
-        "Module.tool_groups",
-        "Module.subapps",
         "Adoption",
         "Adoption.module",
         "Adoption.taken",
@@ -5763,6 +5765,8 @@
         "ModuleSelection.declined",
         "ModuleSelection.takes",
         "ModuleSelection.resolved",
+        "ModuleSelection.subapps",
+        "ModuleSelection.tool_groups",
         "ModuleEntry",
         "ModuleEntry.spec",
         "ModuleEntry.build",
@@ -13780,9 +13784,7 @@
     {
       "module": "lup_template.devtools.subapps",
       "declares": [
-        "SELECTION",
-        "APPLICATION_SPECS",
-        "SUBAPP_SPECS"
+        "APPLICATION_ROSTER"
       ]
     },
     {
@@ -13854,8 +13856,15 @@
         "LAYOUT",
         "RULES",
         "adoptions",
+        "entries",
         "selection",
+        "MODULE_SPECS",
         "MODULE_SELECTION",
+        "SUBAPPS",
+        "TOOL_GROUPS",
+        "SUBAPP_SELECTION",
+        "APPLICATION_SPECS",
+        "SUBAPP_SPECS",
         "modules",
         "MODULES",
         "CONTENT",
@@ -13863,8 +13872,6 @@
         "AGENTS",
         "GUIDANCE_SECTIONS",
         "GUIDANCE",
-        "SUBAPPS",
-        "TOOL_GROUPS",
         "PLUGIN_NAME"
       ]
     },
@@ -13901,7 +13908,8 @@
       "module": "lup_template.harness.content.docs.template",
       "declares": [
         "HEAD_PARTS",
-        "TAIL_PARTS",
+        "CLI_PARTS",
+        "CLOSING_PARTS",
         "document"
       ]
     },
@@ -13938,7 +13946,8 @@
         "upstream_module",
         "examples_module",
         "opening_modules",
-        "closing_modules"
+        "closing_modules",
+        "composed_entries"
       ]
     },
     {
@@ -14054,6 +14063,7 @@
     {
       "module": "lup_template.harness.content.skills.install",
       "declares": [
+        "INSTALLABLE",
         "SPELLING",
         "SKILL"
       ]

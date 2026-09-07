@@ -28,6 +28,7 @@ from lup_template.harness.content.catalog import (
     MODULES,
     PLUGIN_NAME,
     SKILLS,
+    SUBAPP_SPECS,
 )
 from lup_template.harness.content.docs import index
 
@@ -61,6 +62,7 @@ def context(root: Path) -> DocumentContext:
         root=root,
         skills=SKILLS,
         agents=AGENTS,
+        subapps=SUBAPP_SPECS,
         plugin=PLUGIN_NAME,
         claude_decodes=CLAUDE_DISPATCHER.routed_tools,
         codex_decodes=CODEX_DISPATCHER.routed_tools,

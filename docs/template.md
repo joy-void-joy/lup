@@ -148,9 +148,12 @@ the SDK; everything else is loaded through pydantic-settings in
 workflow sub-apps live in `lup.devtools` and are *inherited*: an upgrade
 brings their improvements without a merge, which is the point — they are
 development tooling, not this domain, and a fork of them goes stale the day
-it is taken. `devtools/subapps.py` names the ones this project takes and
-declares the ones only it has; `devtools/main.py` is where each name meets
-the app answering to it.
+it is taken. Which of them this project serves is not written down anywhere: a
+sub-app is one surface of a subject, so the roster follows the modules this
+project adopted and is derived beside them in `harness/content/catalog.py`.
+`devtools/subapps.py` declares the one thing that cannot be derived — what a
+sub-app of this project's own is called — and `devtools/main.py` is where each
+name meets the app answering to it.
 
 That is also where `usage` is decided, twice over: whether to serve it, and
 which backends' accounts it reads. The display, the pacing bars, and the

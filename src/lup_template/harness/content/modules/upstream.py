@@ -36,5 +36,4 @@ def module() -> Module:
                 ),
             )
         ],
-        subapps=["sync"],
     )

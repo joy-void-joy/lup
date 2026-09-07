@@ -31,6 +31,8 @@ CORE = ModuleSpec(
         "the permission policy, with the reference pages behind them."
     ),
     default_on=True,
+    subapps=["dev", "hooks", "py", "report"],
+    tool_groups=["codeintel"],
 )
 
 GIT_WORKFLOW = ModuleSpec(
@@ -51,6 +53,7 @@ META = ModuleSpec(
         "session runs under, and the walks that move code without losing it."
     ),
     default_on=True,
+    subapps=["harness"],
 )
 
 RESOLVER = ModuleSpec(
@@ -72,6 +75,7 @@ VERSION = ModuleSpec(
         "gather the evidence and review the proposal independently."
     ),
     default_on=True,
+    subapps=["version"],
 )
 
 OBSERVABILITY = ModuleSpec(
@@ -82,6 +86,7 @@ OBSERVABILITY = ModuleSpec(
         "a worktree's records are kept in."
     ),
     default_on=True,
+    subapps=["trace", "usage"],
 )
 
 SANDBOX = ModuleSpec(
@@ -92,6 +97,7 @@ SANDBOX = ModuleSpec(
         "what may leave it."
     ),
     default_on=True,
+    tool_groups=["sandbox"],
 )
 
 SETUP = ModuleSpec(
@@ -102,6 +108,7 @@ SETUP = ModuleSpec(
         "wizard, and the local page that is the same thing in a browser."
     ),
     default_on=True,
+    subapps=["setup", "dashboard"],
 )
 
 CONVERSATION = ModuleSpec(
@@ -109,6 +116,7 @@ CONVERSATION = ModuleSpec(
     title="Conversation",
     summary="Retaining authenticated AI conversations for later reading.",
     default_on=True,
+    subapps=["conversation"],
 )
 
 FEEDBACK_LOOP = ModuleSpec(
@@ -118,6 +126,7 @@ FEEDBACK_LOOP = ModuleSpec(
         "Turning an observed agent failure into a durable capability change: "
         "the fb- phases, the review pass, and the trace explorer."
     ),
+    subapps=["feedback"],
 )
 
 RUNS = ModuleSpec(
@@ -145,6 +154,7 @@ REALTIME = ModuleSpec(
         "Persistent agents that control their own attention: the sleep/wake "
         "loop, and the relay that spells it for subprocess backends."
     ),
+    tool_groups=["session"],
 )
 
 REFLECTION = ModuleSpec(
@@ -154,6 +164,7 @@ REFLECTION = ModuleSpec(
         "The gate an agent meets on its own output: an independent reviewer "
         "between finishing the work and submitting it."
     ),
+    tool_groups=["notes"],
 )
 
 # lup: ignore[library-default] — the modules this library authors, so the

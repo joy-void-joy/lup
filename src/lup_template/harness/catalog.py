@@ -49,8 +49,8 @@ from lup_template.harness.content.catalog import (
     GUIDANCE,
     MODULE_SELECTION,
     SKILLS,
+    SUBAPP_SELECTION,
 )
-from lup_template.devtools.subapps import SELECTION
 from lup_template.harness.content.image import agent_image
 from lup_template.harness.content.requirements import manifest
 from lup_template.harness.content.shell_vocabulary import (
@@ -289,7 +289,7 @@ def dev_project() -> DevProject:
         package=Path(__file__).resolve().parents[1].name,
         roots=application_roots(),
         rules=hooks.rules,
-        subapps=SELECTION,
+        subapps=SUBAPP_SELECTION,
         # lup: template: which trackers beyond this checkout this project may
         # report to. What is here is lup's own, and an adopted scaffold
         # inheriting it is the point rather than a leak: a project built on

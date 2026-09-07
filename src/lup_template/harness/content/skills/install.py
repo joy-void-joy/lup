@@ -3,8 +3,17 @@
 import lup.harness.models as models
 import lup_template.harness.content.provenance as provenance
 
+from lup.devtools.roster import LIBRARY_SPECS
 from lup.devtools.subapps import subapp_bullets, subapp_summary
-from lup_template.devtools.subapps import SUBAPP_SPECS
+
+INSTALLABLE = LIBRARY_SPECS
+"""Every sub-app lup ships, whichever of them this checkout happens to serve.
+
+This skill installs lup's scaffolding into somebody else's repository, so what
+it lists is what is there to be ported. A target is not owed a narrower CLI
+because the project installing from declined a module — and the sub-apps only
+*this* project has are its domain's, which a target has no use for either way.
+"""
 
 SPELLING = provenance.Provenance(
     library_git="git -C <source>",
@@ -165,7 +174,7 @@ The `lup-devtools` CLI (`src/lup_template/devtools/`) gives the meta-agent struc
 - `src/lup_template/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
 """
             ),
-            models.TextPart(text=subapp_bullets(SUBAPP_SPECS, indent="  ")),
+            models.TextPart(text=subapp_bullets(INSTALLABLE, indent="  ")),
             models.TextPart(
                 text=r"""
 ### Configuration Patterns
@@ -271,7 +280,7 @@ If the target repo builds (or will build) a tool-using SDK agent, the **self-imp
 - **Session management**: CLI with `run` + `loop` commands, auto-commit, session storage
 - **DevTools**: The full `lup-devtools` CLI ("""
             ),
-            models.TextPart(text=subapp_summary(SUBAPP_SPECS)),
+            models.TextPart(text=subapp_summary(INSTALLABLE)),
             models.TextPart(
                 text=r""")
 - **Version tracking**: `[tool.lup] agent_version` in pyproject.toml + `lup-devtools version bump` for tracking agent behavior changes

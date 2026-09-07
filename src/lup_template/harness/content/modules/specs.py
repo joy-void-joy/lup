@@ -29,6 +29,7 @@ PROJECT = ModuleSpec(
         "expects of a session working in it."
     ),
     default_on=True,
+    subapps=["agent"],
 )
 
 TEMPLATE_INIT = ModuleSpec(
@@ -49,6 +50,7 @@ UPSTREAM = ModuleSpec(
         "tracked repository rather than rewriting it."
     ),
     default_on=True,
+    subapps=["sync"],
 )
 
 EXAMPLES = ModuleSpec(
@@ -57,6 +59,7 @@ EXAMPLES = ModuleSpec(
     summary="The scaffold's demonstrations of itself, which no adopter runs.",
     default_on=True,
     scaffold_only=True,
+    tool_groups=["example"],
 )
 
 PROJECT_SPECS = [PROJECT, TEMPLATE_INIT, UPSTREAM, EXAMPLES]

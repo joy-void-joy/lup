@@ -10,9 +10,8 @@ from pathlib import Path
 import lup.harness.models as models
 
 from lup.harness.content.tree import annotated_tree
-from lup.devtools.subapps import subapp_bullets
+from lup.devtools.subapps import SubAppSpec, subapp_bullets
 from lup_template.harness.content.catalog import LAYOUT
-from lup_template.devtools.subapps import SUBAPP_SPECS
 
 
 HEAD_PARTS: list[models.PromptPart] = [
@@ -42,7 +41,7 @@ reason about where a session came from.
 ]
 """Everything before the layout diagram, which is drawn rather than declared."""
 
-TAIL_PARTS: list[models.PromptPart] = [
+CLI_PARTS: list[models.PromptPart] = [
     models.TextPart(
         text=r"""
 ```
@@ -107,9 +106,12 @@ the SDK; everything else is loaded through pydantic-settings in
 workflow sub-apps live in `lup.devtools` and are *inherited*: an upgrade
 brings their improvements without a merge, which is the point — they are
 development tooling, not this domain, and a fork of them goes stale the day
-it is taken. `devtools/subapps.py` names the ones this project takes and
-declares the ones only it has; `devtools/main.py` is where each name meets
-the app answering to it.
+it is taken. Which of them this project serves is not written down anywhere: a
+sub-app is one surface of a subject, so the roster follows the modules this
+project adopted and is derived beside them in `harness/content/catalog.py`.
+`devtools/subapps.py` declares the one thing that cannot be derived — what a
+sub-app of this project's own is called — and `devtools/main.py` is where each
+name meets the app answering to it.
 
 That is also where `usage` is decided, twice over: whether to serve it, and
 which backends' accounts it reads. The display, the pacing bars, and the
@@ -119,7 +121,10 @@ display around the readers it names.
 
 """
     ),
-    models.TextPart(text=subapp_bullets(SUBAPP_SPECS)),
+]
+"""Everything between the diagram and the CLI roster, which is composed."""
+
+CLOSING_PARTS: list[models.PromptPart] = [
     models.TextPart(
         text=r"""
 Run `uv run lup-devtools --help` for the full command tree. The three you will
@@ -257,19 +262,26 @@ either half is immediately live in the other.
 """Everything after the diagram, from the per-package guide onward."""
 
 
-def document(root: Path) -> models.PromptDocument:
+def document(root: Path, subapps: list[SubAppSpec]) -> models.PromptDocument:
     """This page, with its layout diagram walked from ``root``.
 
     Takes the checkout rather than finding one. A document that resolved its
     own root would read the filesystem at import, which makes importing this
     module — and so every CLI command that composes it — fail anywhere but
     inside a lup project.
+
+    Takes the roster for a sharper reason. Which sub-apps a CLI serves follows
+    from which modules the project adopted, and this page is declared by one of
+    those modules — so reading the roster here would have the composition
+    import a page that is part of it. The composition passes it down instead.
     """
     return models.PromptDocument(
         source=__name__,
         parts=[
             *HEAD_PARTS,
             models.TextPart(text=annotated_tree(root, LAYOUT.path())),
-            *TAIL_PARTS,
+            *CLI_PARTS,
+            models.TextPart(text=subapp_bullets(subapps)),
+            *CLOSING_PARTS,
         ],
     )

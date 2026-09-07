@@ -18,4 +18,4 @@ from lup.harness.modules import Module
 
 def module() -> Module:
     """Interactive configuration as one value."""
-    return Module(spec=SETUP, subapps=["setup", "dashboard"])
+    return Module(spec=SETUP)
