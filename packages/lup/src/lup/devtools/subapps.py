@@ -117,6 +117,26 @@ class SubAppSelection(BaseModel, frozen=True):
         )
 
 
+def unowned(owned: list[str], defaults: list[SubAppSpec]) -> SubAppSelection:
+    """Retire every sub-app among ``defaults`` that no adopted module claims.
+
+    A sub-app is one surface of a subject rather than a thing on its own, so
+    which ones a CLI serves is not a list a project keeps beside its module
+    roster — it is that roster read through one field. Declining a module
+    stops serving its commands, and does so without the names being written
+    down a second time somewhere that can fall out of step.
+
+    Retirement rather than a kept list, because retirement is what
+    :meth:`~lup.devtools.roster.DevtoolsDeclarations.roster` takes and what
+    keeps a declined sub-app from being *built*: a builder may import an
+    optional extra, so a project that dropped the module holding it must never
+    construct its app.
+    """
+    return SubAppSelection(
+        retired=[spec.name for spec in defaults if spec.name not in owned]
+    )
+
+
 def compose(root: typer.Typer, subapps: list[SubApp]) -> None:
     """Wire every resolved sub-app into one root Typer application."""
     for entry in resolved(subapps):

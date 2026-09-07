@@ -44,9 +44,19 @@ from lup.policy.boundary import depends_on
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
-from lup_template.harness.content.catalog import AGENTS, CONTENT_SELECTION, SKILLS
-from lup_template.devtools.subapps import SELECTION
-from lup_template.harness.content.guidance import document as guidance_document
+from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
+from lup.harness.coverage import ContentRoot, ModuleCoverage
+from lup_template.devtools.subapps import APPLICATION_ROSTER
+from lup_template.harness.content.catalog import (
+    AGENTS,
+    GUIDANCE,
+    LAYOUT,
+    MODULE_SELECTION,
+    SKILLS,
+    SUBAPP_SELECTION,
+    TOOL_GROUPS,
+    entries,
+)
 from lup_template.harness.content.image import agent_image
 from lup_template.harness.content.requirements import manifest
 from lup_template.harness.content.shell_vocabulary import (
@@ -266,6 +276,44 @@ def application_roots() -> ApplicationRoots:
     )
 
 
+def declared_coverage() -> ModuleCoverage:
+    """Everything this checkout declares, for the sweep that asks who claims it.
+
+    Every module is built and every one is *resolved*, but none is filtered.
+    The three are separate answers and the sweep needs exactly this pairing: a
+    module nobody took still owns its declarations, so filtering would hide the
+    failure by removing the module that was meant to answer for it — while a
+    skill this project added to a module it did not write reaches the plugin
+    through the selection, so leaving the roster unresolved would report that
+    skill as owned by nobody when it is owned by the module it was added to.
+    Building them all costs this gate the imports the roster reaches, and costs
+    nothing anywhere else.
+
+    Only the index is the composition's own. Its subject is what every other
+    module contributed, so no module can see enough to declare it; everything
+    else under ``docs/`` belongs to the subject it describes. The three pages
+    with no module at all — the rule reference, the command reference, the
+    generated-path table — are not declaration modules and never reach this
+    census: each renders from a registry, the wired CLI, or the compiled trees.
+    """
+    return ModuleCoverage(
+        modules=[MODULE_SELECTION.resolved(entry.build()) for entry in entries()],
+        roots=[
+            ContentRoot(
+                directory=Path("packages/lup/src/lup/harness/content"),
+                package="lup.harness.content",
+            ),
+            ContentRoot(
+                directory=Path(LAYOUT.path("harness", "content")),
+                package=f"{LAYOUT.package}.harness.content",
+            ),
+        ],
+        composed=[f"{LAYOUT.docs().package}.index"],
+        subapps=[*LIBRARY_SUBAPPS, *APPLICATION_ROSTER],
+        tool_groups=TOOL_GROUPS,
+    )
+
+
 def dev_project() -> DevProject:
     """What this project tells the shared development tooling about itself.
 
@@ -285,7 +333,7 @@ def dev_project() -> DevProject:
         package=Path(__file__).resolve().parents[1].name,
         roots=application_roots(),
         rules=hooks.rules,
-        subapps=SELECTION,
+        subapps=SUBAPP_SELECTION,
         # lup: template: which trackers beyond this checkout this project may
         # report to. What is here is lup's own, and an adopted scaffold
         # inheriting it is the point rather than a leak: a project built on
@@ -307,7 +355,8 @@ def dev_project() -> DevProject:
                 components=["lup"],
             )
         ],
-        content=CONTENT_SELECTION,
+        modules=MODULE_SELECTION,
+        coverage=declared_coverage(),
         path_roles=declared_role_rows(list(hooks.path_roles)),
         # This file: what this repository settled about itself is written
         # here, so `dev seams` reads and edits it rather than looking
@@ -613,7 +662,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         requirements=manifest(),
         image=agent_image(),
         plugins=[plugin],
-        guidance=guidance_document(plugin.hooks.rules if plugin.hooks else None),
+        guidance=GUIDANCE,
         resolver=ResolveSpec(
             id="resolver.lup",
             worker_identity="resolver-worker",

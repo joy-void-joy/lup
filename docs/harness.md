@@ -190,12 +190,17 @@ because its whole job is to be this project's own harness:
 
 ## What the plugin ships
 
-Both rosters are rendered from the typed declarations: the ones about agent
-work in `lup.harness.content.catalog`, the ones
-about being a template in
-`src/lup_template/harness/content/catalog.py`, which composes both
-into what the plugin ships. Change the catalog that owns the subject, then
-regenerate.
+Both rosters are rendered from the typed declarations, and neither is a list.
+Every skill and agent belongs to a **module** — one subject as one value,
+carrying its content, its page under `docs/`, its paragraph in the
+always-loaded document, its command tree and its tool group — declared under
+`lup.harness.content.modules` for the subjects lup ships and under
+`src/lup_template/harness/content/modules` for the ones only this
+repository has. `src/lup_template/harness/content/catalog.py` composes
+both and states which modules this project takes; everything below is derived
+from that rather than declared beside it, so declining a subject removes all
+five surfaces at once. `dev modules` prints the roster. Change the module that
+owns the subject, then regenerate.
 
 **Skills:**
 
@@ -281,9 +286,14 @@ Report:
 )
 ```
 
-Import it explicitly in `harness/content/catalog.py` and append it to
-`SKILLS`. Explicit imports make a misspelled or missing module a type-checking
-error; there is no dynamic registry and no barrel file.
+Import it into the module whose subject it serves, under `content/modules/`,
+and name it in that module's `ContentRoster`. That is the whole registration:
+a skill reaches a project because its module does, and there is no second
+roster to add it to as well. Explicit imports make a misspelled or missing
+module a type-checking error; there is no dynamic registry and no barrel file.
+A declaration file no module claims fails `dev check`'s module-coverage sweep
+rather than shipping unnoticed — and where no existing module is about the
+skill's subject, that is a new module rather than a stretched one.
 
 Then run the authoring loop:
 

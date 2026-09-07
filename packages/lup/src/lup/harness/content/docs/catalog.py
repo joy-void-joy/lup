@@ -1,51 +1,51 @@
-"""The documents lup publishes about its own machinery, as a declared roster.
+"""How one page under ``docs/`` is declared, wherever its module declares it.
 
-One entry per document, each naming the path it renders to, the semantic id
-ownership records it under, and the typed module it renders from. A project
-composes these with its own and hands the result to generation, so a page
-that is not declared does not exist and a file under ``docs/`` produced from
-nowhere is deleted as unowned.
-
-Explicit imports rather than a dynamic scan: a misspelled or missing module
-is a type-checking error rather than a page that quietly stopped publishing.
+There is no roster here. A page belongs to the subject it describes, so each
+is declared by the module owning that subject and reaches a project only
+because the project took the module — which is what lets a declined subject
+stop publishing its page rather than leave one describing machinery nobody
+has. What is left is the shape every such declaration shares: where a page
+renders, the identity ownership records it under, and the module it renders
+from.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import lup.harness.models as models
-from lup.harness.content.application import ApplicationLayout
-from lup.harness.content.docs import (
-    architecture,
-    contributing,
-    conventions,
-    harness,
-    library,
-    native_capabilities,
-    orchestration,
-    patterns,
-    permissions,
-    platform_differentiation,
-    quality_pipeline,
-    resolver,
-    runs,
-    self_improvement,
-    supervisor,
-    upstream_reports,
-)
+from lup.harness.content.application import DocsRoot
+from lup.harness.modules import DocumentContext, DocumentEntry
 
-LIBRARY_DOCS_ROOT = "packages/lup/src/lup/harness/content/docs"
-"""Where a checkout of this repository holds the modules below.
+LIBRARY_DOCS = DocsRoot(
+    path="packages/lup/src/lup/harness/content/docs",
+    package=__package__ or "lup.harness.content.docs",
+)
+"""Where a checkout of this repository holds the library's own page modules.
 
 A default rather than a constant: the path is only ever read as provenance in
 a generated banner, and an adopter vendoring lup somewhere else wants the
-banner to point at where the module actually is for them.
+banner to point at where the module actually is for them. The package is read
+off this module's own position rather than written down, so a vendoring that
+moves the tree cannot leave it naming an import root that is gone.
 """
+
+LIBRARY_DOCS_ROOT = LIBRARY_DOCS.path
+"""The library's page directory alone, for prose that only names the path."""
 
 
 def published(
-    module: str, filename: str, document: models.PromptDocument, root: str
+    module: str,
+    filename: str,
+    document: models.PromptDocument,
+    root: str = LIBRARY_DOCS_ROOT,
 ) -> models.Document:
-    """Declare one document rendered from its like-named content module."""
+    """Declare one document rendered from its like-named content module.
+
+    The root defaults to the library's own, because most pages are the
+    library's and a module naming it at every call is a module repeating the
+    one fact its location already states. A project's own page passes where
+    its modules live, which is the only thing this cannot know.
+    """
     return models.Document(
         path=Path("docs") / filename,
         semantic_id=f"docs.{Path(filename).stem}",
@@ -54,77 +54,22 @@ def published(
     )
 
 
-def library_documents(
-    skills: list[models.Skill],
-    agents: list[models.Agent],
-    plugin: models.NativeName,
-    claude_decodes: list[str],
-    codex_decodes: list[str],
-    layout: ApplicationLayout,
-    library_checkout: Path | None,
-    root: str = LIBRARY_DOCS_ROOT,
-) -> list[models.Document]:
-    """Every page lup publishes, in the order the index teaches them.
+def page(
+    module: str,
+    filename: str,
+    prose: Callable[[DocumentContext], models.PromptDocument],
+    docs: DocsRoot = LIBRARY_DOCS,
+) -> DocumentEntry:
+    """Declare one page a module publishes: where it lives, and how it renders.
 
-    The two that audit the plugin's own roster take it, so their counts and
-    their bullet lists describe the harness a project actually composed
-    rather than the half of it this library happens to ship. The parity audit
-    additionally takes what each runtime's hook decodes, which only a root
-    composing the concrete runtimes may name — reading it here would put a
-    native implementation behind every page this module publishes.
-
-    ``library_checkout`` is the tree holding lup's own suite: lup's checkout
-    where these pages are generated from it, and ``None`` for a project that
-    took lup as a distribution and has none of its fixtures. Every page here
-    describes the library, so the reading project's own tree is not among
-    what any of them needs — and passing one was what made two of these pages
-    demand paths only lup's repository has.
+    The identity and the declaring module are derived from the same two strings
+    the rendering derives them from, so a module cannot record a page under one
+    id and publish it under another — a divergence nothing else would catch,
+    since the id is what a project retires a page by and the rendered document
+    is what the index links to.
     """
-    return [
-        published("library", "library.md", library.document(layout), root),
-        published(
-            "harness",
-            "harness.md",
-            harness.document(skills, agents, plugin, layout),
-            root,
-        ),
-        published("architecture", "architecture.md", architecture.DOCUMENT, root),
-        published("permissions", "permissions.md", permissions.DOCUMENT, root),
-        published("resolver", "resolver.md", resolver.DOCUMENT, root),
-        published("runs", "runs.md", runs.DOCUMENT, root),
-        published("supervisor", "supervisor.md", supervisor.DOCUMENT, root),
-        published(
-            "platform_differentiation",
-            "platform-differentiation.md",
-            platform_differentiation.document(
-                skills, agents, claude_decodes, codex_decodes, layout
-            ),
-            root,
-        ),
-        published(
-            "native_capabilities",
-            "native-capabilities.md",
-            native_capabilities.document(library_checkout),
-            root,
-        ),
-        published(
-            "upstream_reports",
-            "upstream-reports.md",
-            upstream_reports.document(),
-            root,
-        ),
-        published(
-            "self_improvement", "self-improvement.md", self_improvement.DOCUMENT, root
-        ),
-        published(
-            "contributing", "contributing.md", contributing.document(layout), root
-        ),
-        published("conventions", "conventions.md", conventions.DOCUMENT, root),
-        published(
-            "quality_pipeline", "quality-pipeline.md", quality_pipeline.DOCUMENT, root
-        ),
-        published(
-            "orchestration", "orchestration.md", orchestration.document(layout), root
-        ),
-        published("patterns", "patterns.md", patterns.DOCUMENT, root),
-    ]
+    return DocumentEntry(
+        semantic_id=f"docs.{Path(filename).stem}",
+        source=f"{docs.package}.{module}",
+        build=lambda context: published(module, filename, prose(context), docs.path),
+    )

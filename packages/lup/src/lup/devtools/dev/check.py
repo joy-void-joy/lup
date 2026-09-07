@@ -16,9 +16,12 @@ from pydantic import BaseModel
 
 from lup.providers.harness import guidance_artifacts
 from lup.harness.codescan.markers import find_feedback
+from lup.harness.coverage import coverage_gaps
+from lup.harness.modules import unloaded_guidance
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
     TEMPLATE_GUIDANCE_HEADROOM,
+    GuidanceSection,
     HookSet,
     document_byte_size,
 )
@@ -452,17 +455,44 @@ def guidance_bytes(compositions: list[NativeHarnessComposition]) -> int:
     return max(sizes)
 
 
-def budget_reports(used: int, scaffold: bool) -> list[CheckReport]:
+def budget_reports(
+    used: int, scaffold: bool, declined: list[GuidanceSection] | None = None
+) -> list[CheckReport]:
     """Every verdict the guidance's weight earns, given what this repository is.
 
     The runtime ceiling always; the scaffold's share of it only while this
     repository is still the template, because only then is the document one
-    somebody else inherits and only then is there a reservation to keep.
+    somebody else inherits and only then is there a reservation to keep. The
+    all-on row whenever there is prose this tree declines, because that is the
+    only condition under which the number differs from the one above it.
     """
     return [
         guidance_budget_report(used),
         *([scaffold_budget_report(used)] if scaffold else []),
+        *([roster_budget_report(used, declined)] if declined else []),
     ]
+
+
+def roster_budget_report(used: int, declined: list[GuidanceSection]) -> CheckReport:
+    """Whether a project taking every module could load every module's prose.
+
+    The row the two above it cannot stand in for. Both weigh the document this
+    tree renders, and this tree is the lightest interesting composition of its
+    own roster — a scaffold takes every module and loads the prose of only the
+    ones it offers. So a module off by default can grow its section without
+    either row moving, and the project that turns it on finds a document the
+    runtime truncates.
+
+    Measured as the tree's own weight plus the sections it declines, rather
+    than by recomposing: the compiled artifact carries a banner the parts do
+    not, and a recomposed measurement reads light by exactly that much.
+    """
+    return budget_report(
+        "roster budget",
+        used + sum(document_byte_size(section.text) for section in declined),
+        GUIDANCE_BYTE_BUDGET,
+        f"every module's prose loaded, {len(declined)} section(s) this tree declines",
+    )
 
 
 def budget_report(name: str, used: int, ceiling: int, note: str) -> CheckReport:
@@ -699,7 +729,7 @@ def scan_reports(
             f"{roster}: {name}"
             for roster, names in (
                 ("sub-app", project.subapps.retired),
-                ("skill or agent", project.content.retired),
+                ("module", project.modules.declined()),
                 ("rule", project.rules.retired),
             )
             for name in names
@@ -820,6 +850,26 @@ def scan_reports(
             else [f"harness drift: FAIL ({len(drift.stale_trees)} tree(s))"],
         )
 
+        # Beside parity because both ask whether the roster arrived whole, one
+        # turn further out: parity reads a declaration against the trees, and
+        # this reads the checkout against the modules that were meant to
+        # declare it. A subject nobody claims reaches neither of the others —
+        # it renders into every tree, identically, forever.
+        unclaimed = coverage_gaps(project_root(), project.coverage)
+        yield CheckReport(
+            name="module coverage",
+            passed=not unclaimed,
+            lines=[
+                f"module coverage: FAIL ({len(unclaimed)} unclaimed)",
+                *(f"  {gap.describe()}" for gap in unclaimed),
+            ]
+            if unclaimed
+            else [
+                "module coverage: ok, "
+                f"{len(project.coverage.modules)} module(s) claim everything declared"
+            ],
+        )
+
         # Beside drift because a tree can be perfectly current against a source
         # that renders one target a skill short, and drift reads every tree as
         # clean while the two rosters have parted.
@@ -835,7 +885,11 @@ def scan_reports(
             else ["roster parity: ok"],
         )
 
-        yield from budget_reports(guidance_bytes(compositions), scaffold)
+        yield from budget_reports(
+            guidance_bytes(compositions),
+            scaffold,
+            unloaded_guidance(project.coverage.modules, project.modules),
+        )
 
         # advisory — the environment is the operator's arrangement rather than
         # this branch's, so a borrowed one is worth reading and not worth

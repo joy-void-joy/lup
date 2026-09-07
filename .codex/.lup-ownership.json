@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "ceb6835df83b7d6d4c19140179c95691aaf016cdc7f6e430b8e99bbdd620db1c",
+  "source_digest": "1929e69721092ef5d2d171e95bcbfca6a7ffaa8daa7658a19e274ce04037eb9b",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "ba294dffc69463e26e0b8223dfbe437d208d719d1f67f0eed773d30f2d600c90",
+      "sha256": "f743b7c5e16b035a9ccaa92abb2920b5a3c886bc8bb206a62e24c891984d492b",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -219,7 +219,7 @@
     {
       "path": ".codex/plugins/lup/skills/add-command/SKILL.md",
       "category": "generated",
-      "sha256": "5e06522a217007ff904cdea6f7699438f668eda382445e6a6ec0dfa593234d87",
+      "sha256": "1488633d735e44666ac813ebc0714b9d4d496d6b350a7365a3bb6cf76b1e11ca",
       "semantic_id": "skill.add-command",
       "executable": false
     },
@@ -345,14 +345,14 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "6f8ec0b44820d707dcccbbcbf6f823df9a7a1ea1038ccbb8bce2b441d0d072ef",
+      "sha256": "a31aa11228da84316a556a0f52eaf9e86dce2a7d9b0736d211d0c9bca5ce286e",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "3c6531f99cb875e26dacbbf21b24dab33a24863941eca4a82be29ab55606814d",
+      "sha256": "441dd62bb61059439d5f16dea9a49608a7219afa366be72fd417ac803f005888",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -464,7 +464,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "f8750bf2e76de9721cb80441510d6be30ee80c811acabd8fb3e949bd18437ca7",
+      "sha256": "e5b212b470aa5e84fa051933ded8f24e0420f6a38f90ad96cd7cab9bfe075051",
       "semantic_id": "harness.guidance",
       "executable": false
     }

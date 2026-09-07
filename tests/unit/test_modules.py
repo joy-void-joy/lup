@@ -13,6 +13,7 @@ import pytest
 
 import lup.harness.models as models
 import lup.harness.modules as modules
+from lup.harness.content.application import ApplicationLayout
 from lup.seams import Selection
 
 
@@ -37,29 +38,44 @@ def section(identity: str, chapter: models.GuidanceChapter) -> models.GuidanceSe
     )
 
 
-def page(semantic_id: str) -> models.Document:
+def page(semantic_id: str) -> modules.DocumentEntry:
     """One published page, named by the id ownership records it under."""
-    return models.Document(
-        path=Path("docs") / f"{semantic_id}.md",
+    return modules.DocumentEntry(
         semantic_id=semantic_id,
-        source="tmp/worked_example.py",
-        document=models.PromptDocument(
-            source=__name__, parts=[models.TextPart(text="A page.\n")]
+        source=f"worked_example.docs.{semantic_id}",
+        build=lambda _: models.Document(
+            path=Path("docs") / f"{semantic_id}.md",
+            semantic_id=semantic_id,
+            source="tmp/worked_example.py",
+            document=models.PromptDocument(
+                source=__name__, parts=[models.TextPart(text="A page.\n")]
+            ),
         ),
     )
 
 
+CONTEXT = modules.DocumentContext(
+    layout=ApplicationLayout(package="worked_example"), root=Path("/worked-example")
+)
+"""What a page is rendered against, where no page here reads any of it."""
+
+
+ALPHA_SPEC = modules.ModuleSpec(
+    id="alpha",
+    title="Alpha",
+    summary="The first subject.",
+    default_on=True,
+    subapps=["alpha"],
+    tool_groups=["alpha-tools"],
+)
+
 ALPHA = modules.Module(
-    spec=modules.ModuleSpec(
-        id="alpha", title="Alpha", summary="The first subject.", default_on=True
-    ),
+    spec=ALPHA_SPEC,
     content=models.ContentRoster(
         skills=[skill("skill.a1", "a1"), skill("skill.a2", "a2")]
     ),
     guidance=[section("alpha-code", "code"), section("alpha-process", "process")],
     documents=[page("docs.alpha")],
-    tool_groups=["alpha-tools"],
-    subapps=["alpha"],
 )
 
 BETA = modules.Module(
@@ -205,15 +221,23 @@ def test_a_module_can_be_taken_for_its_tools_and_none_of_its_prose() -> None:
     Guidance is spent in every session whether the subject comes up or not, so
     declining it is one word — and a module that grows a section afterwards
     does not quietly reintroduce the cost.
-    """
-    taken = modules.adopted(
-        ENTRIES,
-        modules.ModuleSelection(
-            adoptions=[modules.Adoption(module="alpha", loads_guidance=False)]
-        ),
-    )
 
-    assert [one.id for one in modules.composed_guidance(taken)] == ["beta-tooling"]
+    The module keeps its sections through resolution and falls silent where the
+    document is composed, which is what lets the budget ask what a project
+    turning it back on would carry: the prose is not gone, it is unspent.
+    """
+    selection = modules.ModuleSelection(
+        adoptions=[modules.Adoption(module="alpha", loads_guidance=False)]
+    )
+    taken = modules.adopted(ENTRIES, selection)
+
+    assert [one.id for one in modules.composed_guidance(taken, selection)] == [
+        "beta-tooling"
+    ]
+    assert [one.id for one in modules.unloaded_guidance(taken, selection)] == [
+        "alpha-code",
+        "alpha-process",
+    ]
     assert skill_ids(modules.composed_content(taken)) == [
         "skill.a1",
         "skill.a2",
@@ -223,24 +247,27 @@ def test_a_module_can_be_taken_for_its_tools_and_none_of_its_prose() -> None:
 
 
 def test_documents_subapps_and_tool_groups_each_narrow_on_their_own() -> None:
-    taken = modules.adopted(
-        ENTRIES,
-        modules.ModuleSelection(
-            adoptions=[
-                modules.Adoption(
-                    module="alpha",
-                    documents=Selection(retired=["docs.alpha"]),
-                    subapps=["alpha"],
-                    tool_groups=["alpha-tools"],
-                )
-            ]
-        ),
-    )
-    alpha = taken[0]
+    """The three surfaces answer separately, two of them without building.
 
-    assert modules.composed_documents(taken) == []
-    assert alpha.subapps == []
-    assert alpha.tool_groups == []
+    Sub-apps and tool groups are names on the spec, so they narrow against the
+    selection alone — which is the property the CLI depends on: it has to know
+    which command trees it serves before it composes them.
+    """
+    selection = modules.ModuleSelection(
+        adoptions=[
+            modules.Adoption(
+                module="alpha",
+                documents=Selection(retired=["docs.alpha"]),
+                subapps=["alpha"],
+                tool_groups=["alpha-tools"],
+            )
+        ]
+    )
+    taken = modules.adopted(ENTRIES, selection)
+
+    assert modules.composed_documents(taken, CONTEXT) == []
+    assert selection.subapps([ALPHA_SPEC]) == []
+    assert selection.tool_groups([ALPHA_SPEC]) == []
 
 
 def test_the_spine_orders_the_document_across_modules() -> None:

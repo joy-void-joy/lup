@@ -142,9 +142,3 @@ Verify claims against **what was actually asked** — the note or issue itself, 
 ### External Resources
 
 When a question is about the harness you run under, its agent SDK, or its model API, read that runtime's own documentation rather than answering from memory — delegate to the documentation subagent your harness ships, or fetch the vendor's docs at the Claude Code and Agent SDK documentation at https://docs.claude.com/ and https://code.claude.com/. The fetch scopes the policy admits are declared in `harness/catalog.py`. When the user provides documentation links, fold what they teach into the guidance source or the relevant skill.
-
----
-
-## Self-Improvement Loop
-
-`docs/self-improvement.md` carries the full loop — what to ask of a failure, and what to change in answer — and the feedback-loop, review, and meta skills each work from it. The durable fix is a capability, not a rule: trace the failure to the missing input or the workflow step where the wrong decision entered, and change that — a prompt rule coexists peacefully with the failure it warns about.

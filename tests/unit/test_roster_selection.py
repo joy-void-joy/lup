@@ -16,9 +16,17 @@ from unittest import mock
 
 import typer
 
+from lup.harness.codescan.common import RuleSelection
 from lup.harness.content.application import ApplicationLayout
-from lup.harness.content.catalog import library_content
-from lup.harness.content.docs.catalog import library_documents
+from lup.harness.content.modules.catalog import library_modules
+from lup.harness.content.modules.specs import LIBRARY_SPECS as LIBRARY_MODULE_SPECS
+from lup.harness.modules import (
+    DocumentContext,
+    adopted,
+    composed_content,
+    composed_documents,
+    scaffold_selection,
+)
 from lup.devtools.roster import (
     LIBRARY_ROSTER,
     LIBRARY_SPECS,
@@ -28,8 +36,12 @@ from lup.devtools.subapps import SubApp, SubAppSelection, subapp
 import lup.harness.models as models
 from lup.harness.models import ContentSelection
 from lup.workspace.paths import project_root
-from lup_template.harness.content.catalog import project_skills
-from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION, SUBAPP_SPECS
+from lup_template.harness.content.catalog import modules as composed_modules
+from lup_template.harness.content.catalog import (
+    APPLICATION_SPECS,
+    SUBAPP_SELECTION,
+    SUBAPP_SPECS,
+)
 
 SKILL_ADDED = models.Skill(
     id="skill.worked-example",
@@ -45,13 +57,19 @@ Built here rather than borrowed from either roster because what it exercises
 is arrival: a skill taken from the library's own list would resolve as a
 replacement of itself and prove nothing about the additive half."""
 
-LIBRARY_CONTENT = library_content(ApplicationLayout(package="worked_example"))
-"""The whole library roster, under a package name that is nobody's real one.
+LIBRARY_MODULES = adopted(
+    library_modules(ApplicationLayout(package="worked_example"), RuleSelection()),
+    scaffold_selection(LIBRARY_MODULE_SPECS),
+)
+"""Every module lup ships, under a package name that is nobody's real one.
 
 Selection is what these exercise, and it does not read a path — so naming a
 package here that no checkout has keeps a roster assertion from passing only
 because the layout happened to match this repository's own.
 """
+
+LIBRARY_CONTENT = composed_content(LIBRARY_MODULES)
+"""The whole library roster, read through the modules that declare it."""
 
 RETIRED = SubAppSelection(retired=["dashboard", "report"])
 
@@ -208,14 +226,16 @@ def test_no_published_page_names_the_template_package() -> None:
     that is not theirs — the same defect as in a skill, and invisible in this
     repository for the same reason.
     """
-    pages = library_documents(
-        LIBRARY_CONTENT.skills,
-        LIBRARY_CONTENT.agents,
-        "lup",
-        [],
-        [],
-        ApplicationLayout(package="worked_example"),
-        project_root(),
+    layout = ApplicationLayout(package="worked_example")
+    pages = composed_documents(
+        LIBRARY_MODULES,
+        DocumentContext(
+            layout=layout,
+            root=project_root(),
+            skills=LIBRARY_CONTENT.skills,
+            agents=LIBRARY_CONTENT.agents,
+            library_checkout=project_root(),
+        ),
     )
     leaked = {
         page.semantic_id
@@ -239,7 +259,8 @@ def test_only_the_skills_about_renaming_name_the_template_package() -> None:
     allowed = {"skill.init", "skill.install"}
     named = {
         skill.id
-        for skill in project_skills(ApplicationLayout(package="worked_example"))
+        for module in composed_modules(ApplicationLayout(package="worked_example"))
+        for skill in module.content.skills
         for part in skill.prompt.parts
         if "lup_template" in (part.text_payload or "")
     }
@@ -248,8 +269,14 @@ def test_only_the_skills_about_renaming_name_the_template_package() -> None:
 
 
 def test_this_repository_declines_nothing_without_saying_so() -> None:
-    """lup authors these, so retiring one would mean it should not exist."""
-    assert SELECTION.retired == []
+    """Every sub-app is owned by a module this repository takes.
+
+    The retirement is derived from the module roster rather than written down,
+    so an empty one is the claim that every command tree lup ships answers to a
+    subject this repository adopted — and a sub-app that fell out of every
+    module's ownership would show up here as a retirement nobody decided.
+    """
+    assert SUBAPP_SELECTION.retired == []
     assert {spec.name for spec in SUBAPP_SPECS} == {
         *(spec.name for spec in LIBRARY_SPECS),
         *(spec.name for spec in APPLICATION_SPECS),

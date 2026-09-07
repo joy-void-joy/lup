@@ -1,99 +1,76 @@
-# lup: ignore[constant-declaration]
-# Every constant here is this repository's own composition — which documents it
-# publishes and where their sources live. A composition root is where a
-# judgement is finally made rather than passed on, so there is no caller above
-# it to take these from.
 """Every document this repository publishes under ``docs/``.
 
-The pages about lup's own machinery come from the library; declared here are
-the two whose subject is this repository — what the template half is, and the
-decisions behind its development tooling — plus the index that lists both.
-Generation turns the roster into artifacts, so a document that is not
-declared here does not exist and a file under ``docs/`` that is not produced
-from here is deleted as unowned. Nothing beneath ``docs/`` is hand-written.
+There is no roster of pages here, because a page belongs to the subject it
+describes and every subject is a module. What this root does instead is supply
+what a page may need and its own module cannot know — the reading project's
+layout, the checkout being described, the composed roster three pages audit,
+and what each runtime's hook decodes — and then compose whatever the adopted
+modules published.
+
+The index is added last and separately, because its subject is the result: it
+is the one page no module can declare, since no module can see what the others
+contributed. Generation turns the composed list into artifacts, so a page no
+adopted module declares does not exist and a file under ``docs/`` produced from
+nowhere is deleted as unowned. Nothing beneath ``docs/`` is hand-written.
 """
 
 from pathlib import Path
 
 import lup.harness.models as models
+from lup.harness.content.docs.catalog import published
+from lup.harness.modules import DocumentContext, composed_documents
 from lup.providers.claude.harness import CLAUDE_DISPATCHER
 from lup.providers.codex.harness import CODEX_DISPATCHER
-from lup.harness.content.docs.catalog import library_documents, published
 from lup_template.devtools.dev.library import LibraryMode, read_mode
 from lup_template.harness.content.catalog import (
     AGENTS,
     LAYOUT,
+    MODULES,
     PLUGIN_NAME,
     SKILLS,
+    SUBAPP_SPECS,
 )
-from lup_template.harness.content.docs import decisions, index, template
+from lup_template.harness.content.docs import index
 
-CONTENT_ROOT = LAYOUT.path("devtools", "harness", "content")
-"""Directory every content module this repository authors lives beneath."""
-
-DOCS_ROOT = f"{CONTENT_ROOT}/docs"
-"""Directory every project-owned document's canonical module lives in."""
-
-GENERATED_GUIDE = "docs/harness.md"
-"""Document that explains what generated output is and how to change it."""
+DOCS_ROOT = LAYOUT.docs().path
+"""Directory this repository's own page modules live in, for their banners."""
 
 
-def reference_pages(root: Path) -> list[models.Document]:
-    """The pages lup publishes about the machinery this repository is built on.
+def context(root: Path) -> DocumentContext:
+    """What the adopted modules' pages render against, for one checkout.
 
-    The parity audit reads what each runtime decodes from the runtime itself,
-    so composing them is what this root is for: the pages stay portable while
-    the table they publish cannot claim a decoded set that stopped being true.
+    Built against a checkout rather than declared, because two of the pages
+    read one: the template page draws the application's layout by walking it,
+    and the capability page resolves its fixture citations against lup's own
+    suite. Importing this module therefore reads no filesystem and building a
+    page does — which is what lets the CLI be imported from a directory that is
+    not this repository at all.
 
-    Takes the checkout because *this* repository is the tree holding lup's own
-    suite, which the capability page resolves its fixture citations against —
-    the same reason :func:`project_pages` takes one, and the same reason
-    neither is a module-level constant.
-
-    Whether that suite is in this tree is what the library mode declares, so
+    Whether lup's suite is in this tree is what the library mode declares, so
     the mode is what decides it. ``local`` wires ``packages/lup`` in as a
     workspace member and is refused unless the package is there; the other
     three resolve lup as a distribution, which ships the code those fixtures
     pin and none of the fixtures themselves. The citation names where the
     evidence lives in *lup's* repository, which is true read from anywhere —
-    only its existence is checked, and only against the one mode whose tree
-    is required to hold it. Asking the mode rather than testing for the
-    directory is what keeps a copy left behind by ``--keep-vendored`` from
-    voting on a page that describes the lup actually being resolved.
+    only its existence is checked, and only against the one mode whose tree is
+    required to hold it. Asking the mode rather than testing for the directory
+    is what keeps a copy left behind by ``--keep-vendored`` from voting on a
+    page describing the lup actually being resolved.
     """
-    return library_documents(
-        SKILLS,
-        AGENTS,
-        PLUGIN_NAME,
-        CLAUDE_DISPATCHER.routed_tools,
-        CODEX_DISPATCHER.routed_tools,
-        LAYOUT,
-        root if read_mode(root) is LibraryMode.LOCAL else None,
+    return DocumentContext(
+        layout=LAYOUT,
+        root=root,
+        skills=SKILLS,
+        agents=AGENTS,
+        subapps=SUBAPP_SPECS,
+        plugin=PLUGIN_NAME,
+        claude_decodes=CLAUDE_DISPATCHER.routed_tools,
+        codex_decodes=CODEX_DISPATCHER.routed_tools,
+        library_checkout=root if read_mode(root) is LibraryMode.LOCAL else None,
     )
-
-
-def project_pages(root: Path) -> list[models.Document]:
-    """The pages only this repository has, because only it has their subject.
-
-    Built against a checkout rather than declared, because one of them draws
-    the application's layout by walking it. Importing this module therefore
-    reads no filesystem — which is what lets the CLI be imported from a
-    directory that is not this repository at all.
-    """
-    return [
-        published("template", "template.md", template.document(root), DOCS_ROOT),
-        published(
-            "decisions", "dev-tooling-decisions.md", decisions.DOCUMENT, DOCS_ROOT
-        ),
-    ]
 
 
 def documents(root: Path) -> list[models.Document]:
     """Every document under ``docs/``, the index first because it teaches the rest."""
-    reference = reference_pages(root)
-    project = project_pages(root)
-    return [
-        published("index", "README.md", index.document(reference, project), DOCS_ROOT),
-        *reference,
-        *project,
-    ]
+    pages = composed_documents(MODULES, context(root))
+    return [published("index", "README.md", index.document(pages), DOCS_ROOT), *pages]

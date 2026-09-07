@@ -54,7 +54,7 @@ src/lup_template/
     ├── composition.py       # What this project publishes through each native target, and what writes it.
     └── content/             # Declaration leaves of the harness graph.
         ├── assets/          # Typed harness content declarations.
-        ├── catalog.py       # This repository's harness content: what it inherits, and what only it has.
+        ├── catalog.py       # Which modules this repository takes, and what it changed about each.
         ├── docs/            # Typed source for every document under ``docs/``.
         │   ├── catalog.py   # Every document this repository publishes under ``docs/``.
         │   ├── decisions.py # Architectural decisions behind the development tooling.
@@ -62,6 +62,13 @@ src/lup_template/
         │   └── template.py  # Guide to ``src/lup_template``, the application built on the library.
         ├── guidance.py      # Canonical repository guidance.
         ├── image.py         # The container this repository's agent sessions run in.
+        ├── modules/
+        │   ├── catalog.py   # The modules only this repository has, each spec beside its builder.
+        │   ├── examples.py  # The scaffold demonstrating itself, which no adopter runs.
+        │   ├── project.py   # What this repository is, and what it expects of a session working in it.
+        │   ├── specs.py     # What the modules only this repository has are called, and what they are for.
+        │   ├── template_init.py # Standing a lup project up, and keeping it configured once it is standing.
+        │   └── upstream.py  # Keeping a project in step with what it was built from.
         ├── provenance.py    # What a project settles about where its lup came from.
         ├── requirements.py  # The external programs this repository needs, and what going without costs.
         ├── settings.py      # What this repository grants, refuses, and enables for itself.
@@ -141,9 +148,12 @@ the SDK; everything else is loaded through pydantic-settings in
 workflow sub-apps live in `lup.devtools` and are *inherited*: an upgrade
 brings their improvements without a merge, which is the point — they are
 development tooling, not this domain, and a fork of them goes stale the day
-it is taken. `devtools/subapps.py` names the ones this project takes and
-declares the ones only it has; `devtools/main.py` is where each name meets
-the app answering to it.
+it is taken. Which of them this project serves is not written down anywhere: a
+sub-app is one surface of a subject, so the roster follows the modules this
+project adopted and is derived beside them in `harness/content/catalog.py`.
+`devtools/subapps.py` declares the one thing that cannot be derived — what a
+sub-app of this project's own is called — and `devtools/main.py` is where each
+name meets the app answering to it.
 
 That is also where `usage` is decided, twice over: whether to serve it, and
 which backends' accounts it reads. The display, the pacing bars, and the
@@ -183,14 +193,19 @@ through the reviewable ladder in
 [contributing.md](contributing.md) rather than a script in `tmp/`, which is
 gitignored and so reaches no diff and no reviewer.
 
-### `devtools/harness/` — the declaration graph
+### `harness/` — the declaration graph
 
-The harness lives under devtools because generating it is a development
-activity. `catalog.py` is the root: it assembles the skills and agents from
-`content/` with the application-owned `HookSet` and the resolver spec into one
-`Harness`. `content/` holds the leaves — one module per skill, per agent, per
-document — and `generate.py` compiles them. [harness.md](harness.md) is the
-guide; this is only where the files are.
+Declaration content sits above the tooling that compiles it, so the harness is
+its own package rather than a corner of `devtools/`. `catalog.py` is the root:
+it assembles the skills and agents this project composes with the
+application-owned `HookSet` and the resolver spec into one `Harness`.
+`content/` holds the leaves — one module per skill, per agent, per document —
+and `content/modules/` groups them by subject: a module carries its content,
+its page, its paragraph in the always-loaded document, its command tree and
+its tool group, and `content/catalog.py` states which of them this project
+takes. What the plugin ships, what `docs/` publishes, what the CLI serves and
+what a session is offered are all derived from that one answer.
+[harness.md](harness.md) is the guide; this is only where the files are.
 
 ### The setup dashboard
 
