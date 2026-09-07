@@ -16,9 +16,17 @@ from unittest import mock
 
 import typer
 
+from lup.harness.codescan.common import RuleSelection
 from lup.harness.content.application import ApplicationLayout
 from lup.harness.content.catalog import library_content
-from lup.harness.content.docs.catalog import library_documents
+from lup.harness.content.modules.catalog import library_modules
+from lup.harness.content.modules.specs import LIBRARY_SPECS as LIBRARY_MODULE_SPECS
+from lup.harness.modules import (
+    DocumentContext,
+    adopted,
+    composed_documents,
+    scaffold_selection,
+)
 from lup.devtools.roster import (
     LIBRARY_ROSTER,
     LIBRARY_SPECS,
@@ -208,14 +216,19 @@ def test_no_published_page_names_the_template_package() -> None:
     that is not theirs — the same defect as in a skill, and invisible in this
     repository for the same reason.
     """
-    pages = library_documents(
-        LIBRARY_CONTENT.skills,
-        LIBRARY_CONTENT.agents,
-        "lup",
-        [],
-        [],
-        ApplicationLayout(package="worked_example"),
-        project_root(),
+    layout = ApplicationLayout(package="worked_example")
+    pages = composed_documents(
+        adopted(
+            library_modules(layout, RuleSelection(retired=[])),
+            scaffold_selection(LIBRARY_MODULE_SPECS),
+        ),
+        DocumentContext(
+            layout=layout,
+            root=project_root(),
+            skills=LIBRARY_CONTENT.skills,
+            agents=LIBRARY_CONTENT.agents,
+            library_checkout=project_root(),
+        ),
     )
     leaked = {
         page.semantic_id

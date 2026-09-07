@@ -25,12 +25,20 @@ GIT_SOURCE = '{ git = "https://github.com/example/lup", branch = "main" }'
 
 
 def project_resolving_lup(root: Path, source: str) -> Path:
-    """A checkout whose only declaration is where its ``lup`` comes from."""
+    """A checkout whose only declaration is where its ``lup`` comes from.
+
+    The package directory is there because one page draws the application's
+    layout by walking it, and a tree with nothing to walk is not a checkout
+    these pages describe. Nothing here reads its contents.
+    """
     root.mkdir(parents=True, exist_ok=True)
     (root / "pyproject.toml").write_text(
         f'[project]\nname = "demo"\n\n[tool.uv.sources]\nlup = {source}\n',
         encoding="utf-8",
     )
+    package = root / "src" / "lup_template" / "agent"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "__init__.py").touch()
     return root
 
 
@@ -48,7 +56,7 @@ def test_a_vendored_tree_left_behind_does_not_make_a_git_mode_local(
     project = project_resolving_lup(tmp_path, GIT_SOURCE)
     (project / "packages" / "lup" / "tests").mkdir(parents=True)
 
-    assert catalog.reference_pages(project)
+    assert catalog.documents(project)
 
 
 def test_the_mode_decides_whether_a_citation_is_checked_not_what_is_published(
@@ -59,9 +67,9 @@ def test_the_mode_decides_whether_a_citation_is_checked_not_what_is_published(
     vendored = project_resolving_lup(tmp_path / "lup", "{ workspace = true }")
     cited_fixtures(vendored, RUNTIME_FIXTURES, DISPATCHER_FIXTURES)
 
-    published = [page.semantic_id for page in catalog.reference_pages(distribution)]
+    published = [page.semantic_id for page in catalog.documents(distribution)]
 
-    assert published == [page.semantic_id for page in catalog.reference_pages(vendored)]
+    assert published == [page.semantic_id for page in catalog.documents(vendored)]
 
 
 def test_a_local_mode_still_fails_on_a_citation_that_moved(tmp_path: Path) -> None:
@@ -70,4 +78,4 @@ def test_a_local_mode_still_fails_on_a_citation_that_moved(tmp_path: Path) -> No
     cited_fixtures(vendored, DISPATCHER_FIXTURES)
 
     with pytest.raises(ValueError, match="test_adapter_runtime.py"):
-        catalog.reference_pages(vendored)
+        catalog.documents(vendored)

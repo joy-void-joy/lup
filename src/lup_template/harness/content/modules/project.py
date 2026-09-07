@@ -38,7 +38,7 @@ def module() -> Module:
         ],
         documents=[
             DocumentEntry(
-                semantic_id="docs.decisions",
+                semantic_id="docs.dev-tooling-decisions",
                 build=lambda context: published(
                     "decisions",
                     "dev-tooling-decisions.md",

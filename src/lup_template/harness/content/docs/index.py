@@ -14,7 +14,7 @@ from lup.harness.content.docs.index import (
     IndexEntry,
     IndexGroup,
     document_index,
-    entry,
+    page_index,
 )
 
 PREAMBLE = r"""# Lup documentation
@@ -69,16 +69,20 @@ GENERATED_PATHS = IndexEntry(
 """The third page no module declares: it renders from the compiled trees."""
 
 
-def document(
-    reference: list[models.Document], project: list[models.Document]
-) -> models.PromptDocument:
-    """Compose the index over the pages both halves declare.
+def document(pages: list[models.Document]) -> models.PromptDocument:
+    """Compose the index over the pages the adopted modules published.
 
-    A page is looked up by the identity ownership already records it under, so
-    a document that stopped being published fails generation here rather than
-    leaving a link that resolves to nothing.
+    A row is looked up by the identity ownership already records a page under,
+    and a lookup that finds nothing renders nothing. That is the whole of what
+    modules changed here: a page is absent because its subject is a module this
+    project declined, so the index says less rather than linking to a file
+    generation was never asked to write.
+
+    Three rows name no page at all, because three pages are declared by no
+    module — they render from the rule registry, the wired CLI, and the
+    compiled trees, none of which is a subject a project can decline.
     """
-    page = {item.semantic_id: item for item in [*reference, *project]}
+    page = page_index(pages)
     return document_index(
         preamble=[models.TextPart(text=PREAMBLE)],
         groups=[
@@ -89,52 +93,52 @@ def document(
                     "large enough to own a page."
                 ),
                 entries=[
-                    entry(
-                        page["docs.architecture"],
+                    *page.rows(
+                        "docs.architecture",
                         "Why the seams are where they are: one capability per "
                         "ABC, adapters at the edge, structured output with one "
                         "mechanism.",
                     ),
-                    entry(
-                        page["docs.patterns"],
+                    *page.rows(
+                        "docs.patterns",
                         "The recurring code shapes: declaration-plus-renderer, "
                         "closed-by-construction, the typed-matcher router, and "
                         "the engine-versus-surface split.",
                     ),
-                    entry(
-                        page["docs.orchestration"],
+                    *page.rows(
+                        "docs.orchestration",
                         "The delegation catalog: subagent, nested, background, "
                         "and deferred tools, and when to reach for each.",
                     ),
-                    entry(
-                        page["docs.permissions"],
+                    *page.rows(
+                        "docs.permissions",
                         "How a shell command, fetch, or edit becomes allow, "
                         "ask, defer, or deny — and how the generated hooks "
                         "decide identically without importing the library.",
                     ),
                     RULES_REFERENCE,
-                    entry(
-                        page["docs.resolver"],
+                    *page.rows(
+                        "docs.resolver",
                         "How reviewed feedback becomes concerns, worktrees, "
                         "workers, and an accepted integration branch.",
                     ),
-                    entry(
-                        page["docs.supervisor"],
+                    *page.rows(
+                        "docs.supervisor",
                         "The local page that watches a resolver run and "
                         "answers its questions.",
                     ),
-                    entry(
-                        page["docs.platform-differentiation"],
+                    *page.rows(
+                        "docs.platform-differentiation",
                         "Every intended Claude/Codex difference, and the "
                         "parity decision for each generated artifact family.",
                     ),
-                    entry(
-                        page["docs.native-capabilities"],
+                    *page.rows(
+                        "docs.native-capabilities",
                         "The evidence ledger: which native contracts are "
                         "proven, at which versions, and the release gaps.",
                     ),
-                    entry(
-                        page["docs.self-improvement"],
+                    *page.rows(
+                        "docs.self-improvement",
                         "How to turn an observed agent failure into a durable "
                         "capability change.",
                     ),
@@ -143,25 +147,25 @@ def document(
             IndexGroup(
                 title="Working in this repository",
                 entries=[
-                    entry(
-                        page["docs.contributing"],
+                    *page.rows(
+                        "docs.contributing",
                         "How to get set up, where a change of each kind "
                         "belongs, and what has to be green before it lands.",
                     ),
-                    entry(
-                        page["docs.conventions"],
+                    *page.rows(
+                        "docs.conventions",
                         "The lookup behind each code-convention rule: which "
                         "library, which typed stand-in for a dict, which "
                         "parser, which resolver tool.",
                     ),
                     COMMAND_REFERENCE,
                     GENERATED_PATHS,
-                    entry(
-                        page["docs.quality-pipeline"],
+                    *page.rows(
+                        "docs.quality-pipeline",
                         "The three check layers, and what each one uniquely catches.",
                     ),
-                    entry(
-                        page["docs.dev-tooling-decisions"],
+                    *page.rows(
+                        "docs.dev-tooling-decisions",
                         "The architectural decisions behind the development "
                         "tooling, each stated against the current system.",
                     ),

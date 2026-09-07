@@ -1,5 +1,5 @@
 {
-  "revision": "fc34711496b970f9d6e9ec93c31448b537347429",
+  "revision": "a6596bbc392a56d7659abd0bd7f5a61c48859dc4",
   "roots": [
     "lup",
     "lup_template"
@@ -4606,8 +4606,7 @@
       "module": "lup.harness.content.docs.catalog",
       "declares": [
         "LIBRARY_DOCS_ROOT",
-        "published",
-        "library_documents"
+        "published"
       ]
     },
     {
@@ -4641,6 +4640,10 @@
         "IndexGroup.blurb",
         "IndexGroup.parts",
         "entry",
+        "PageIndex",
+        "PageIndex.pages",
+        "PageIndex.rows",
+        "page_index",
         "document_index"
       ]
     },
@@ -13872,11 +13875,8 @@
     {
       "module": "lup_template.harness.content.docs.catalog",
       "declares": [
-        "CONTENT_ROOT",
         "DOCS_ROOT",
-        "GENERATED_GUIDE",
-        "reference_pages",
-        "project_pages",
+        "context",
         "documents"
       ]
     },
