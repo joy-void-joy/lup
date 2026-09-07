@@ -15,9 +15,19 @@ import pytest
 import sh
 import typer
 
-from lup.devtools.dev import worktree
+from lup.devtools.dev import records, worktree
 from lup.devtools.harness.launch import relocation_hint
 from tests.unit.repos import commit_file, initialized_repo
+
+
+def recorded_base(repo: Path, branch: str) -> str:
+    """The base lup records for a branch, read where that record lives."""
+    return records.recorded_base(branch, repo)
+
+
+def record_base(repo: Path, branch: str, base: str) -> None:
+    """Write a base as creation does, without running creation."""
+    records.remember(branch, records.BranchRecord(base=base), repo)
 
 
 @pytest.fixture
@@ -139,7 +149,8 @@ def test_a_half_made_worktree_is_finished_by_re_running(
     """The failure the success message used to hide: setup that never ran.
 
     The base is the observable half — `uv sync` is not run in tests — and it
-    is exactly the record whose config write fails under a held lock.
+    is the record an interruption between `worktree add` and the rest of
+    setup leaves unwritten.
     """
     path = interrupted_creation(repo, tree_dir, "topic")
     monkeypatch.chdir(repo)
@@ -147,8 +158,7 @@ def test_a_half_made_worktree_is_finished_by_re_running(
 
     create("topic")
 
-    recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
-    assert str(recorded).strip() == "main"
+    assert recorded_base(repo, "topic") == "main"
     assert "setup never finished" in capsys.readouterr().out
 
 
@@ -232,13 +242,12 @@ def test_a_recorded_base_is_left_as_it_was(
 ) -> None:
     """Finishing a worktree completes what is missing and rewrites nothing."""
     interrupted_creation(repo, tree_dir, "topic")
-    repo_git(repo)("config", "branch.topic.lup-base", "deliberate")
+    record_base(repo, "topic", "deliberate")
     monkeypatch.chdir(repo)
 
     create("topic")
 
-    recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
-    assert str(recorded).strip() == "deliberate"
+    assert recorded_base(repo, "topic") == "deliberate"
 
 
 def test_the_gitignored_extras_are_finished_too(
@@ -375,10 +384,7 @@ def test_a_base_nobody_can_name_is_created_anyway_when_asked_deliberately(
     )
 
     assert (tree_dir / "topic").is_dir()
-    recorded = repo_git(repo)(
-        "config", "--get", "branch.topic.lup-base", _ok_code=[0, 1]
-    )
-    assert str(recorded).strip() == ""
+    assert recorded_base(repo, "topic") == ""
 
 
 def test_a_named_base_is_recorded_from_a_detached_head(
@@ -398,8 +404,7 @@ def test_a_named_base_is_recorded_from_a_detached_head(
         launcher=relocation_hint,
     )
 
-    recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
-    assert str(recorded).strip() == "main"
+    assert recorded_base(repo, "topic") == "main"
 
 
 def on_a_feature_branch(repo: Path) -> str:
@@ -429,8 +434,7 @@ def test_a_fresh_branch_is_cut_from_where_work_lands(
 
     tip = str(repo_git(repo)("rev-parse", "topic")).strip()
     assert tip == landing
-    recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
-    assert str(recorded).strip() == "main"
+    assert recorded_base(repo, "topic") == "main"
 
 
 def test_the_base_a_feature_checkout_did_not_get_is_said_out_loud(

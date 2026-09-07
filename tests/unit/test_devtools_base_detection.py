@@ -1,7 +1,10 @@
 """Behavior tests for base-branch recording and detection.
 
-Worktree creation records its base in ``branch.<name>.lup-base``; detection
-prefers that record over topological guessing. Topology alone cannot recover
+Worktree creation records its base in ``<common>/lup/branches/<name>.json``,
+and the ``branch.<name>.lup-base`` config key it was written under before
+still answers; detection prefers either over topological guessing. Both
+spellings are exercised here, because a clone whose records were never
+adopted has to keep behaving as it did. Topology alone cannot recover
 the creation point — once branches share tips or the parent merges on, every
 candidate looks alike and the nearest one wins regardless of where the branch
 was really cut.
@@ -14,6 +17,7 @@ import sh
 import typer
 
 from lup.devtools.dev import branches
+from lup.devtools.dev import records
 from lup.devtools.dev import worktree
 from lup.devtools.harness.launch import relocation_hint
 from tests.unit.repos import commit_file, initialized_repo
@@ -96,8 +100,7 @@ def test_worktree_create_records_the_base(
         launcher=relocation_hint,
     )
 
-    recorded = repo_git(repo)("config", "--get", "branch.wt-topic.lup-base")
-    assert str(recorded).strip() == "main"
+    assert records.recorded_base("wt-topic", repo) == "main"
     candidate = branches.detect_base_branch("wt-topic")
     assert candidate.name == "main"
     assert candidate.source == "recorded"

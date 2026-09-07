@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, ProcessLauncher
+import lup.devtools.dev.records as records
 import lup.devtools.dev.traces as traces
 from lup.devtools.dev.remote_auth import (
     check_remote_auth,
@@ -307,8 +308,21 @@ def parse_branches() -> list[ParsedBranch]:
             "is_current": head == "*",
         }
 
+    def published(branch: ParsedBranch) -> ParsedBranch:
+        """The row with the remote lup recorded, where git's config names none.
+
+        A branch `dev pr push` published carries no tracking configuration,
+        because the push states its destination instead of asking git to
+        write one. Read from git alone the row says the branch answers to
+        nothing, which is the report for a branch nobody ever sent anywhere.
+        """
+        if branch["tracking"]:
+            return branch
+        recorded = records.recorded_upstream(branch["name"])
+        return {**branch, "tracking": recorded or None}
+
     return [
-        parse(row)
+        published(parse(row))
         for row in git.lines(
             "for-each-ref",
             "refs/heads",
@@ -543,15 +557,6 @@ def shares_history(branch: str, integration: str) -> bool:
         return False
 
 
-def reservation_config_key(branch: str) -> str:
-    """Where the commit a workspace was reserved at is recorded, for one branch.
-
-    Written at creation beside the base branch name and read here, so the key
-    is named once instead of spelled at each end.
-    """
-    return f"branch.{branch}.lup-base-commit"
-
-
 def still_at_reservation(branch: str) -> bool:
     """Whether this branch stands exactly where its workspace was reserved.
 
@@ -582,10 +587,8 @@ def still_at_reservation(branch: str) -> bool:
     before the record existed — and neither is somebody's held session, while
     a spent branch read as reserved is one nothing offers to clear again.
     """
+    reserved_at = records.recorded_reservation(branch)
     try:
-        reserved_at = git.out(
-            "config", "--get", reservation_config_key(branch), _ok_code=[0]
-        ).strip()
         return bool(reserved_at) and git.out("rev-parse", branch).strip() == reserved_at
     except sh.ErrorReturnCode:
         return False
@@ -929,22 +932,13 @@ class BaseCandidate(BaseModel):
     source: Literal["recorded", "guessed"] = "guessed"
 
 
-def base_config_key(branch: str) -> str:
-    """Where the base a worktree was cut from is recorded, for one branch.
-
-    Written at creation and read wherever a branch's origin has to be
-    recovered, so the key is named once instead of spelled at each end.
-    """
-    return f"branch.{branch}.lup-base"
-
-
 def recorded_base(branch: str) -> str | None:
-    """The base recorded at worktree creation, when one was written."""
-    try:
-        value = git.out("config", "--get", base_config_key(branch), _ok_code=[0])
-    except sh.ErrorReturnCode:
-        return None
-    return value or None
+    """The base recorded at worktree creation, when one was written.
+
+    ``None`` rather than an empty name, because detection branches on whether
+    a record exists at all and an empty string is a name nothing carries.
+    """
+    return records.recorded_base(branch) or None
 
 
 def decayed_base_complaint(branch: str, recorded: str, *, present: bool) -> str:
@@ -972,15 +966,16 @@ def decayed_base_complaint(branch: str, recorded: str, *, present: bool) -> str:
         "Guessing from topology instead, which is what a branch carrying no "
         "record does — so whatever reads this cannot tell the two apart, and "
         "a command that refuses a guessed base will refuse this one.\n"
-        f"Name the base with --base <branch> to settle it, or re-record it as "
-        f"`git config {base_config_key(branch)} <branch>`."
+        f"Name the base with --base <branch> to settle it, or write "
+        f'{{"base": "<branch>"}} into {records.record_location(branch)}, '
+        "beneath the git directory every worktree of this repository shares."
     )
 
 
 def detect_base_branch(branch: str | None = None) -> BaseCandidate:
     """Detect the base branch for the given (or current) branch.
 
-    A base recorded at worktree creation (``branch.<name>.lup-base``) wins
+    A base recorded at worktree creation (:mod:`lup.devtools.dev.records`) wins
     outright — topology cannot recover the creation point once the parent
     has merged on. Without a record, prefers ancestor branches (the natural
     parent in a two-tier model) over siblings. Among ancestors, picks the
@@ -1278,17 +1273,27 @@ class TrackedRemotes(BaseModel, frozen=True):
         )
 
 
-def tracked_remotes(launcher: ProcessLauncher, root: Path) -> TrackedRemotes:
-    """Ask git which remote branches this checkout answers to."""
-    branch = git_line(launcher, root, ["branch", "--show-current"])
-    recorded = (
-        git_line(launcher, root, ["config", "--get", base_config_key(branch)])
-        if branch
-        else ""
+def remote_of(launcher: ProcessLauncher, root: Path, branch: str) -> str:
+    """Which remote branch this one answers to, however it came to be known.
+
+    Git's own tracking configuration is asked first and settles it wherever a
+    branch has one, since a person who set it meant it. A branch published by
+    `dev pr push` has none: the push names its destination as a refspec and
+    records it here instead, so that git's shared configuration holds nothing
+    lup put there. Without either, the branch has never been published.
+    """
+    return upstream_of(launcher, root, branch) or records.recorded_upstream(
+        branch, root
     )
+
+
+def tracked_remotes(launcher: ProcessLauncher, root: Path) -> TrackedRemotes:
+    """Ask git and lup's own records which remotes this checkout answers to."""
+    branch = git_line(launcher, root, ["branch", "--show-current"])
+    recorded = records.recorded_base(branch, root) if branch else ""
     return TrackedRemotes(
-        upstream=upstream_of(launcher, root, ""),
-        base=upstream_of(launcher, root, recorded) if recorded else "",
+        upstream=remote_of(launcher, root, branch) if branch else "",
+        base=remote_of(launcher, root, recorded) if recorded else "",
     )
 
 
@@ -2011,15 +2016,37 @@ def remote_branch_exists(name: str) -> bool:
         return False
 
 
-def upstream_ref(name: str) -> str | None:
-    """The remote-tracking ref this branch is set to follow, if it has one."""
+def resolvable(ref: str) -> bool:
+    """Whether this checkout still carries the ref, as a commit."""
     try:
-        return (
-            git.out("rev-parse", "--symbolic-full-name", f"{name}@{{upstream}}").strip()
-            or None
-        )
+        git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+        return True
     except sh.ErrorReturnCode:
-        return None
+        return False
+
+
+def upstream_ref(name: str) -> str | None:
+    """The remote-tracking ref this branch follows, if anything says it has one.
+
+    Git's own tracking configuration answers first, and lup's record answers
+    where there is none — a branch published by `dev pr push` has no tracking
+    configuration at all, because the push names its destination rather than
+    asking git to write one into the shared config.
+
+    The recorded name is checked against the refs actually here before it is
+    handed back, since the caller compares against it and a comparison
+    against a ref nothing carries answers no — which reads as a branch ahead
+    of a remote it never fell behind, and turns an ordinary delete into one
+    reported as discarding work.
+    """
+    try:
+        tracked = git.out(
+            "rev-parse", "--symbolic-full-name", f"{name}@{{upstream}}"
+        ).strip()
+    except sh.ErrorReturnCode:
+        tracked = ""
+    recorded = records.recorded_upstream(name)
+    return tracked or (recorded if recorded and resolvable(recorded) else None)
 
 
 def outgrew_upstream(name: str) -> bool:
@@ -2027,8 +2054,8 @@ def outgrew_upstream(name: str) -> bool:
 
     The question ``git branch -d`` actually asks of a tracking branch, and
     the reason it refuses one every commit of which is already in HEAD. A
-    worktree is given an upstream the moment it is created, so this is the
-    ordinary shape of a branch that landed by a merge into the integration
+    branch has a remote from the first push that carried something, so this
+    is the ordinary shape of one that landed by a merge into the integration
     branch rather than by a push of its own: the work is in, and the remote
     copy is simply behind.
     """

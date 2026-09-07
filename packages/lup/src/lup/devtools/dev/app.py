@@ -348,6 +348,15 @@ def create_dev_app(
         """Remove a git worktree."""
         worktree.remove(name, force)
 
+    @worktree_app.command("adopt-records")
+    def worktree_adopt_records_cmd() -> None:
+        """Move lup's `branch.*.lup-*` config keys into the shared `lup/` directory.
+
+        Once per clone, and on the host: it is the one step that writes the
+        shared config, and reads answer from either place until it has run.
+        """
+        worktree.adopt_records()
+
     # -- branch commands --
 
     @app.command("branches")
