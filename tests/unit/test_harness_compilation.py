@@ -37,7 +37,11 @@ from lup.providers.harness import (
     compile_codex,
     guidance_artifacts,
 )
-from lup.devtools.dev.check import budget_reports, scaffold_budget_report
+from lup.devtools.dev.check import (
+    budget_reports,
+    guidance_budget_report,
+    scaffold_budget_report,
+)
 from lup.workspace.paths import is_template_scaffold
 from lup.harness.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
@@ -443,6 +447,41 @@ def test_the_scaffold_row_reports_the_reservation_it_withholds() -> None:
     assert not over.passed
     assert "over by 1" in over.lines[0]
     assert str(TEMPLATE_GUIDANCE_HEADROOM) in fits.lines[0]
+
+
+def test_the_scaffold_row_reports_the_room_a_session_may_still_spend() -> None:
+    """A green row tells a writer how much it may add, not only that it fit.
+
+    The reservation is a constant, so a row printing only that says the same
+    thing at 23 bytes free as at 11 KiB, and a session learns the ceiling
+    exists from the gate refusing writing it has already done. Both rows
+    report the room left, in one shape, so either one answers before it does.
+    """
+    ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+
+    fits = scaffold_budget_report(ceiling - 23)
+    runtime = guidance_budget_report(GUIDANCE_BYTE_BUDGET - 23)
+
+    assert fits.lines == [
+        f"scaffold budget: ok — {ceiling - 23}/{ceiling} bytes, 23 free, "
+        f"{TEMPLATE_GUIDANCE_HEADROOM} reserved for the adopting domain"
+    ]
+    assert runtime.lines == [
+        f"guidance budget: ok — {GUIDANCE_BYTE_BUDGET - 23}/"
+        f"{GUIDANCE_BYTE_BUDGET} bytes, 23 free"
+    ]
+
+
+def test_the_scaffold_row_over_budget_names_the_overage_and_not_the_room() -> None:
+    """Room left is what a passing row adds; a failing one has none to state."""
+    ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+
+    over = scaffold_budget_report(ceiling + 1_078)
+
+    assert over.lines == [
+        f"scaffold budget: FAIL (over by 1078) — {ceiling + 1_078}/{ceiling} "
+        f"bytes, {TEMPLATE_GUIDANCE_HEADROOM} reserved for the adopting domain"
+    ]
 
 
 def test_a_project_may_reserve_a_different_share_than_this_one() -> None:
