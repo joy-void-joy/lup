@@ -839,12 +839,34 @@ name the middle segment. `credential.*.helper` is listed beside
 spelling of the same one, and it runs a program just as readily.
 """
 
+GIT_CONFIG_RETARGETING_KEYS = (
+    "remote.*.url",
+    "remote.*.pushurl",
+)
+"""The git settings that name which repository a later command talks to.
+
+A second class beside the executing keys, guarded by the same absence test
+because it answers the same question about a write: is what this sets read
+back by something that then acts on the caller's behalf. `remote.<name>.url`
+is where a push lands and where a fetch comes from, and it is also how `gh`
+resolves which repository an issue comment, a close, or a pull request is
+about — so a write here moves the whole compensable band of forge operations
+onto a repository nobody approved, without touching one of them.
+
+Only the keys that name a destination outright. `remote.pushdefault` and
+`branch.<name>.pushremote` choose among the remotes the table already holds,
+and every way of putting one there — `git remote add`, `git remote rename`,
+`git remote set-url` and these keys — asks, so choosing between destinations
+somebody approved is not the retarget.
+"""
+
 
 def git_rule(
     guard_force_push: bool = True,
     redirect_checkout: bool = False,
     sandbox: SandboxPlacement = "ambient",
     config_executing_keys: tuple[str, ...] = GIT_CONFIG_EXECUTING_KEYS,
+    config_retargeting_keys: tuple[str, ...] = GIT_CONFIG_RETARGETING_KEYS,
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
 
@@ -892,7 +914,17 @@ def git_rule(
     other means can pass fewer. Passing none makes every config write allow,
     which is a coherent answer for a project whose config is not writable
     from where the agent runs; it is not the default, because it usually is.
+
+    ``config_retargeting_keys`` are the settings that decide which repository
+    a later command talks to, guarded through the same absence test and kept
+    separate because the two classes are separate claims: one is about what
+    runs, the other about where the work goes. A project whose forge access
+    is scoped elsewhere -- a token that reaches one repository and no other --
+    can pass none of them and lose nothing.
     """
+    # One statement of which settings are worth a question, read by both
+    # spellings that reach them: the `config` verb and the `-c` global.
+    guarded_config = [*config_executing_keys, *config_retargeting_keys]
     leaf = [
         *[
             ShellSubcommandRule(
@@ -1083,8 +1115,11 @@ def git_rule(
             # Where the write lands, when the key says nothing about it. The
             # guarded keys below judge a write to this repository's own
             # configuration; these flags aim the same write at a file the
-            # caller names, so a key that reads as ordinary is not.
-            ask_flags=["--file", "-f", "--blob"],
+            # caller names, so a key that reads as ordinary is not. `--edit`
+            # defeats the same test from the other side: it opens every key
+            # in the file while naming none, so absence of a guarded word is
+            # not absence of a guarded write.
+            ask_flags=["--file", "-f", "--blob", "--edit", "-e"],
             read_verbs=[
                 "--get",
                 "--get-all",
@@ -1095,10 +1130,11 @@ def git_rule(
                 "--list",
                 "-l",
             ],
-            guarded_keys=list(config_executing_keys),
+            guarded_keys=guarded_config,
             reason=(
-                "git config can set what program git runs — this names such a"
-                " key, redirects the write to a named file, or cannot be read"
+                "git config can set what program git runs or which repository"
+                " it talks to — this names such a key, redirects the write to"
+                " a named file, or cannot be read"
             ),
         ),
         ShellSubcommandRule(
@@ -1350,8 +1386,27 @@ def git_rule(
                     effects=[declare("destroys_uncaptured", scope="targeted")],
                     reason="removing a remote requires approval",
                 ),
-                # Destroys nothing and changes where every later push lands,
-                # which is the configured-path question rather than the loss.
+                # Destroys nothing and decides where a later command sends
+                # this repository, which is the configured-path question
+                # rather than the loss. `add` puts a destination in the table
+                # that was not there — `git push <name>` at a named remote
+                # allows, so the approval a repository-wide copy needs is
+                # this one — and `rename` moves which destination answers to
+                # `origin`, which is the name `gh` follows.
+                ShellOperationRule(
+                    name="add",
+                    effects=[
+                        declare("writes_path", scope="protected", write="overwrite")
+                    ],
+                    reason="adding a remote requires approval",
+                ),
+                ShellOperationRule(
+                    name="rename",
+                    effects=[
+                        declare("writes_path", scope="protected", write="overwrite")
+                    ],
+                    reason="renaming a remote requires approval",
+                ),
                 ShellOperationRule(
                     name="set-url",
                     effects=[
@@ -1410,11 +1465,11 @@ def git_rule(
         value_flags=directory_flags,
         # The two globals that set a setting, judged by the same keys the
         # `config` verb is judged by — one statement about which settings hand
-        # over execution, answering for both spellings that reach them. Only
+        # over execution or a destination, answering both spellings. Only
         # `-c` and `--config-env` are here: the directory flags carry a path,
         # and `--exec-path` and `--super-prefix` carry one too.
         setting_flags=["-c", "--config-env"],
-        guarded_settings=list(config_executing_keys),
+        guarded_settings=guarded_config,
         sandbox=sandbox,
         subcommands=[*leaf, *guarded],
         reason="this git subcommand is not classified as read-only or reversible",
