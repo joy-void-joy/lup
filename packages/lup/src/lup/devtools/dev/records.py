@@ -51,6 +51,16 @@ class BranchRecord(BaseModel, frozen=True):
     upstream: str = ""
     """The remote-tracking ref this branch publishes to, once it has."""
 
+    landed_in: str = ""
+    """The branch this one's ref was contained in when it was deleted.
+
+    The one fact about a branch that stops being observable at the instant it
+    becomes interesting: containment is read off a ref, and the deletion takes
+    the ref. Blank says two things a reader must not run together — nobody
+    deleted this branch through lup, or lup deleted it while it held commits
+    the integration branch lacked — and neither of them is a landing.
+    """
+
     def merged(self, addition: "BranchRecord") -> "BranchRecord":
         """This record with every field the addition names, and the rest kept.
 
@@ -63,6 +73,7 @@ class BranchRecord(BaseModel, frozen=True):
             base=addition.base or self.base,
             base_commit=addition.base_commit or self.base_commit,
             upstream=addition.upstream or self.upstream,
+            landed_in=addition.landed_in or self.landed_in,
         )
 
 
@@ -188,6 +199,20 @@ def read_record(branch: str, cwd: Path | None = None) -> BranchRecord:
 def remember(branch: str, addition: BranchRecord, cwd: Path | None = None) -> None:
     """Fold what is known now into this branch's record, keeping the rest."""
     publish_atomic(record_path(branch, cwd), read_record(branch, cwd).merged(addition))
+
+
+def record_landing(branch: str, integration: str, cwd: Path | None = None) -> None:
+    """Settle where this branch stood as its ref went, the empty answer included.
+
+    The one write here that replaces rather than folds in. Every other field
+    is a fact somebody established once, so a blank addition means "not mine
+    to say"; this one is a verdict a deletion reaches in full, and the verdict
+    "it held work the integration branch lacked" is spelled blank. Folding
+    that in would leave an earlier branch of the same name still claiming a
+    landing that belonged to the branch before it.
+    """
+    landing = read_record(branch, cwd).model_copy(update={"landed_in": integration})
+    publish_atomic(record_path(branch, cwd), landing)
 
 
 # lup: solved: run `uv run lup-devtools dev
