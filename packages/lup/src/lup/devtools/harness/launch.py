@@ -212,6 +212,7 @@ def ready_to_open(
     sentinels: LaunchSentinels,
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
+    contained: bool = True,
 ) -> LaunchOpening | None:
     """Generate this target's artifacts and clear every gate standing before a session.
 
@@ -256,7 +257,7 @@ def ready_to_open(
     # exactly the one that did not get to tidy up after itself.
     sweep_ledgers(project_root())
     opening = LaunchOpening()
-    opening.findings = runtime_preflight(composition, sentinels, opening)
+    opening.findings = runtime_preflight(composition, sentinels, opening, contained)
     settle_base_freshness(LocalProcessLauncher(), project_root())
     return opening
 
@@ -573,6 +574,7 @@ def runtime_preflight(
     composition: NativeHarnessComposition,
     sentinels: LaunchSentinels,
     opening: LaunchOpening,
+    contained: bool = True,
 ) -> list[Finding]:
     """Verify each claimed native requirement immediately before launch.
 
@@ -596,15 +598,21 @@ def runtime_preflight(
         if item.supported:
             continue
         Notice(
-            text=f"{target} {item.capability}: missing ({item.version})",
+            text=f"{target} {item.version}: required capability unavailable: {item.capability}",
             urgency="refusal",
         ).say()
     if any(not item.supported for item in evidence):
-        raise typer.BadParameter(f"{target} runtime preflight failed")
+        raise typer.BadParameter(
+            f"Cannot launch {target}: required runtime checks failed. "
+            "Run `uv run lup-devtools harness doctor` for details."
+        )
     versions = ", ".join(sorted({item.version for item in evidence}))
     opening.runtime = f"{target} {versions}" if versions else target
     return report_requirements(
-        composition.recipe.source.requirements, sentinels=sentinels, in_passing=True
+        composition.recipe.source.requirements,
+        sentinels=sentinels,
+        in_passing=True,
+        contained=contained,
     )
 
 
@@ -613,6 +621,7 @@ def report_requirements(
     setting_up: bool = False,
     sentinels: LaunchSentinels = LaunchSentinels(),
     in_passing: bool = False,
+    contained: bool = False,
 ) -> list[Finding]:
     """Exercise the host-side requirements, printing what each one found.
 
@@ -651,7 +660,7 @@ def report_requirements(
         project_root(),
         inside_sentinel=sentinels.inside,
         host_sentinel=sentinels.host,
-    ).check(environ, setting_up=setting_up)
+    ).check(environ, setting_up=setting_up, contained=contained)
     return reported(findings, in_passing)
 
 
@@ -680,9 +689,9 @@ def reported(findings: list[Finding], in_passing: bool = False) -> list[Finding]
     stopping = refused(findings)
     if stopping:
         raise typer.BadParameter(
-            f"{len(stopping)} of these refuse a session: "
+            f"Cannot launch: {len(stopping)} required checks failed: "
             + ", ".join(item.requirement.capability for item in stopping)
-            + ". Each is reported above with its cause and what answers it."
+            + ". See the errors above."
         )
     return findings
 
@@ -728,6 +737,7 @@ def report_inside_requirements(
     config_home: Path,
     login: ProviderLogin,
     sentinels: LaunchSentinels = LaunchSentinels(),
+    setting_up: bool = True,
 ) -> list[Finding]:
     """Exercise the image-side requirements inside the container a session opens.
 
@@ -773,7 +783,9 @@ def report_inside_requirements(
     # roster below: aimed with one and opened with the other, the probe would
     # look for a value nothing had set and report the boundary broken on a
     # machine whose boundary was fine.
-    return verify_inside(harness.requirements, opening, sentinels=sentinels)
+    return verify_inside(
+        harness.requirements, opening, setting_up=setting_up, sentinels=sentinels
+    )
 
 
 def codex_login_preflight(home: Path, environment: EnvVars) -> None:
@@ -862,21 +874,17 @@ def apply_sandbox_environment(
     unusable = [finding for finding in findings if not finding.working]
     if unusable:
         for finding in unusable:
-            Notice(
-                text=(
-                    f"{label} sandbox: {finding.requirement.capability} — "
-                    f"{finding.detail}"
-                ),
-                urgency="warning",
-            ).say()
+            for notice in finding.alarms():
+                notice.say()
         Notice(
-            text=f"{label} sandbox: deny lattice stays active", urgency="warning"
+            text=f"{label} sandbox could not be verified. Command permission checks remain active.",
+            urgency="warning",
         ).say()
         return False
     environment["LUP_SANDBOX_ACTIVE"] = "1"
     if announce:
         Notice(
-            text=f"{label} sandbox: active — unjudged shell defers to the OS boundary",
+            text=f"{label} sandbox: verified; it also restricts commands not covered by the policy.",
             urgency="boundary",
         ).say()
     return True
@@ -1250,10 +1258,7 @@ def settle_boundary(
         raise typer.BadParameter(
             f"{boundary.name}: "
             + ", ".join(entry.capability for entry in preflight.missing_required())
-            + " required and not delivered. Each is reported above with what "
-            "was tried; `--sandbox inner` opens on the host under the "
-            "runtime's own sandbox, and `--sandbox none` under the semantic "
-            "policy alone -- the degraded posture stated rather than assumed."
+            + " could not be verified. Launch stopped. See the failed checks above."
         )
     if said:
         banner.add([Notice(text=said, urgency="boundary")])
@@ -1458,7 +1463,12 @@ def launch_claude(
     announce_relaxed_rules(relaxed, plugin)
     sentinels = LaunchSentinels()
     cleared = ready_to_open(
-        composition, generate_only, sentinels, companions, repository_writers
+        composition,
+        generate_only,
+        sentinels,
+        companions,
+        repository_writers,
+        contained=sandbox.contained(),
     )
     if cleared is None:
         return
@@ -1549,7 +1559,9 @@ def launch_claude(
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
     except sh.CommandNotFound as error:
-        raise typer.BadParameter("Claude Code CLI is not installed") from error
+        raise typer.BadParameter(
+            f"Cannot launch Claude Code: executable {error} was not found. Check PATH."
+        ) from error
     except sh.ErrorReturnCode as error:
         raise typer.Exit(error.exit_code) from error
     finally:
@@ -1594,7 +1606,12 @@ def launch_codex(
     announce_relaxed_rules(relaxed, plugin)
     sentinels = LaunchSentinels()
     cleared = ready_to_open(
-        composition, generate_only, sentinels, companions, repository_writers
+        composition,
+        generate_only,
+        sentinels,
+        companions,
+        repository_writers,
+        contained=sandbox.contained(),
     )
     if cleared is None:
         return
@@ -1673,7 +1690,9 @@ def launch_codex(
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
     except sh.CommandNotFound as error:
-        raise typer.BadParameter("Codex CLI is not installed") from error
+        raise typer.BadParameter(
+            f"Cannot launch Codex: executable {error} was not found. Check PATH."
+        ) from error
     except sh.ErrorReturnCode as error:
         raise typer.Exit(error.exit_code) from error
     finally:

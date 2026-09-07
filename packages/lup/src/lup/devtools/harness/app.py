@@ -156,7 +156,7 @@ def create_harness_app(
             bool,
             typer.Option(
                 "--launch-only",
-                help="Skip the conveniences, exactly as a launch does",
+                help="Run only startup checks; omit setup-only checks",
             ),
         ] = False,
         inside: Annotated[
@@ -164,34 +164,24 @@ def create_harness_app(
             typer.Option(
                 "--inside",
                 help=(
-                    "Exercise the image half instead, inside the container a "
-                    "session opens — builds the image and starts the egress "
-                    "boundary if they are not up"
+                    "Check inside the session container. Build its image and "
+                    "start its network if needed"
                 ),
             ),
         ] = False,
     ) -> None:
-        """Exercise the external programs this project expects on this machine.
+        """Check dependencies on the host, or in the session container with --inside.
 
-        The roster a launch runs, plus the conveniences it stays quiet about
-        -- so somebody setting a machine up hears everything once, where they
-        can act on it, and every session afterwards hears only what it lost.
+        Host checks include the commands an agent needs when running on the
+        host. A normal container launch checks those commands inside instead.
+        Every result names the environment checked.
 
-        Host-side by default. ``--inside`` asks the other half, behind the
-        argv a session opens with: the image's toolchain, the egress proxy
-        taken component by component, and whether the operator's terminal
-        arrived. That half was declared and unexercised for as long as it had
-        nowhere to run, which is how a preflight reported a healthy machine
-        while the first contained session could not resolve its own proxy.
+        --inside uses the session's image, mounts, credentials and network.
+        It builds the image if needed. Full checks include a test model turn;
+        add --launch-only to run only the checks used at startup.
 
-        The two are separate flags rather than one roster because their costs
-        are not comparable. The host half asks programs their versions; the
-        image half builds an image, starts a proxy, opens a container per
-        requirement, and spends a model call on the last of them.
-
-        Exits nonzero when something whose absence costs a capability is not
-        working. An advisory alone never fails this: it is advice, and a
-        machine that declines it is finished being set up.
+        Exits nonzero if a needed capability fails a check. Optional
+        conveniences alone do not cause failure.
         """
         compositions = targets.resolve(target, project_root())
         # The two halves span the targets differently, because they answer
@@ -211,6 +201,7 @@ def create_harness_app(
                         directory.login, Path.home() / ".claude"
                     ),
                     directory.login,
+                    setting_up=not launch_only,
                 )
             ]
             if inside
@@ -225,7 +216,11 @@ def create_harness_app(
             )
         )
         if not findings:
-            typer.echo("No host requirements declared.")
+            typer.echo(
+                "No container requirements selected."
+                if inside
+                else "No host requirements selected."
+            )
             return
         if any(
             not finding.working and finding.requirement.absence.costly()

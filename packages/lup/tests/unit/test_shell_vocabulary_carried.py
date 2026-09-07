@@ -9,6 +9,11 @@ assertions below are about what gets *said*, and only incidentally about what
 gets installed.
 """
 
+from os import defpath
+from pathlib import Path
+
+import pytest
+
 from lup.harness.requirements import (
     HostFacts,
     Manifest,
@@ -98,7 +103,7 @@ def test_the_requirement_reports_the_absent_program_by_name() -> None:
     assert not found.refuses()
     spoken = " ".join(notice.text for notice in found.alarms())
     assert ABSENT in spoken
-    assert "127" in spoken
+    assert "shell fallbacks hide a missing-command error" in spoken
 
 
 def test_a_carried_vocabulary_says_nothing_at_a_launch() -> None:
@@ -115,7 +120,78 @@ def test_what_the_probe_asks_for_is_what_the_image_installs() -> None:
 
 
 def test_the_vocabulary_is_verified_where_a_session_runs() -> None:
-    """Both sides, because an uncontained session inverts its answers too."""
+    """The launch selects the session's environment."""
     entry = shell_vocabulary_requirement(vocabulary=["diff"])
-    assert entry.where == "both"
+    assert entry.where == "session"
     assert entry.at_launch
+
+
+def test_host_absence_does_not_warn_when_the_container_has_the_command(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / ABSENT
+    program.write_text("#!/bin/sh\nexit 0\n")
+    program.chmod(0o755)
+
+    roster = Manifest(requirements=[shell_vocabulary_requirement(vocabulary=[ABSENT])])
+    host = roster.check({})
+    assert not host[0].working
+
+    assert roster.check({}, contained=True) == []
+    inside = roster.check_inside(
+        {}, ["env", f"PATH={tmp_path}:{defpath}"], setting_up=False
+    )
+    assert inside[0].working
+
+    assert inside[0].location == "image"
+    assert inside[0].alarms() == []
+
+
+def test_missing_host_commands_get_host_installation_advice() -> None:
+    roster = Manifest(requirements=[shell_vocabulary_requirement(vocabulary=[ABSENT])])
+    finding = roster.check({})[0]
+    spoken = "\n".join(notice.text for notice in finding.alarms())
+
+    assert "shell commands (host): check failed" in spoken
+    assert f"Missing commands: {ABSENT}" in spoken
+    assert "Install the missing commands on the host" in spoken
+
+    assert "image" not in spoken
+    assert "Rebuild" not in spoken
+
+
+def test_missing_container_commands_get_image_advice() -> None:
+    roster = Manifest(requirements=[shell_vocabulary_requirement(vocabulary=[ABSENT])])
+    finding = roster.check_inside({}, ["env"], setting_up=False)[0]
+    spoken = "\n".join(notice.text for notice in finding.alarms())
+
+    assert "shell commands (container): check failed" in spoken
+    assert f"Missing commands: {ABSENT}" in spoken
+    assert "launcher already builds changed images" in spoken
+
+    assert "Install the missing commands on the host" not in spoken
+    assert not finding.refuses()
+
+
+def test_explicit_host_requirement_is_checked_for_contained_launches() -> None:
+    roster = Manifest(
+        requirements=[shell_vocabulary_requirement(vocabulary=[ABSENT], where="both")]
+    )
+    assert not roster.check({}, contained=True)[0].working
+
+
+@pytest.mark.parametrize(
+    "opening", [["sh", "-c", "exit 125", "probe"], ["lup-no-such-container-engine"]]
+)
+def test_container_start_failure_does_not_prescribe_installing_commands(
+    opening: list[str],
+) -> None:
+    roster = Manifest(requirements=[shell_vocabulary_requirement(vocabulary=[ABSENT])])
+    finding = roster.check_inside({}, opening, setting_up=False)[0]
+    spoken = "\n".join(notice.text for notice in finding.alarms())
+
+    assert "shell commands (container): check could not run" in spoken
+    assert "Result unknown" in spoken
+    assert "Missing commands:" not in spoken
+
+    assert "Fix:" not in spoken

@@ -463,7 +463,7 @@ def test_a_reachable_proxy_that_reaches_nothing_is_not_called_working() -> None:
 
     assert standing.addressable()
     assert not any(item.urgency == "ready" for item in standing.verdict())
-    assert any("cannot reach the world" in item.text for item in standing.verdict())
+    assert any("public DNS lookup failed" in item.text for item in standing.verdict())
 
 
 def test_a_proxy_with_no_gateway_anywhere_is_told_so_plainly() -> None:
@@ -477,9 +477,7 @@ def test_a_proxy_with_no_gateway_anywhere_is_told_so_plainly() -> None:
     stranded = working_proxy(route="", reached=False)
 
     assert not stranded.routes()
-    assert any(
-        "reaches only its own networks" in item.text for item in stranded.verdict()
-    )
+    assert any("no default route" in item.text for item in stranded.verdict())
 
 
 def test_a_recorded_gateway_is_not_taken_for_a_route() -> None:
@@ -582,17 +580,15 @@ def working_proxy(**differing: object) -> "contained.EgressState":
     )
 
 
-def test_a_chain_that_answers_locally_and_not_publicly_is_named_as_shadowing() -> None:
-    """The one explanation those facts leave, said rather than left to infer.
-
-    A route out, a working nameserver in the list, its own network's names
-    resolving, and a public name not. glibc takes the first authoritative
-    answer and stops, so a resolver refusing everything outside its network
-    hides every server after it — including the one that would have answered.
-    """
+def test_internal_dns_success_does_not_identify_the_public_lookup_failure() -> None:
+    """A failed public lookup does not establish which resolver caused it."""
     shadowed = working_proxy(reached=False)
 
-    assert any("stopping early" in item.text for item in shadowed.verdict())
+    assert any(
+        "Test the listed nameservers individually" in item.text
+        for item in shadowed.verdict()
+    )
+    assert not any("authoritatively" in item.text for item in shadowed.verdict())
 
 
 def test_a_proxy_that_resolves_nothing_at_all_is_not_called_shadowed() -> None:
@@ -613,7 +609,7 @@ def test_a_proxy_with_no_route_is_not_called_shadowed_either() -> None:
     stranded = working_proxy(reached=False, route="")
 
     assert not stranded.shadowed()
-    assert any("reaches only its own networks" in i.text for i in stranded.verdict())
+    assert any("no default route" in i.text for i in stranded.verdict())
 
 
 def test_squid_s_own_errors_are_kept_above_the_traffic_that_drowns_them() -> None:

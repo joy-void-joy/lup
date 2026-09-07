@@ -14,6 +14,7 @@ print its MergeResult even when the tree-dir lookup raises ``typer.Exit``.
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import sh
@@ -21,6 +22,7 @@ import typer
 from typer.testing import CliRunner
 
 from lup.devtools.dev import policy_explain, pr
+from lup.devtools.harness import launch
 from lup.harness.enforcement import MeasuredContainment
 from lup_template.devtools.harness.catalog import declared_hook_set
 from lup_template.devtools.main import app
@@ -63,6 +65,25 @@ def test_command_tree_is_walked() -> None:
     assert "trace list" in flattened
     assert "dev pr merge" in flattened
     assert "dev worktree create" in flattened
+
+
+@pytest.mark.parametrize("launch_only", [False, True])
+def test_container_requirements_respect_launch_only(
+    monkeypatch: pytest.MonkeyPatch, launch_only: bool
+) -> None:
+    checks = Mock(return_value=[])
+    monkeypatch.setattr(launch, "report_inside_requirements", checks)
+    arguments = ["harness", "requirements", "claude", "--inside"]
+
+    if launch_only:
+        arguments.append("--launch-only")
+    result = runner.invoke(app, arguments)
+
+    assert result.exit_code == 0, result.output
+    checks.assert_called_once()
+    assert checks.call_args.kwargs["setting_up"] == (not launch_only)
+
+    assert "No container requirements selected." in result.output
 
 
 @pytest.mark.parametrize(

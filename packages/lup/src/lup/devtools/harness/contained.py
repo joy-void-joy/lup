@@ -642,11 +642,8 @@ def start_egress(
     ):
         Notice(
             text=(
-                f"{network} was created under an older declaration of this "
-                "boundary — a network keeps the posture it was created with, "
-                "so its resolver, its isolation and everything a container "
-                "inherits by joining it are that older answer. Rebuilding it "
-                "and the proxy on it."
+                f"Rebuilding {network} and its proxy because the network "
+                "configuration changed."
             ),
             urgency="progress",
         ).say()
@@ -670,14 +667,10 @@ def start_egress(
             client(*egress.connect_arguments(project))
         except sh.ErrorReturnCode as error:
             raise typer.BadParameter(
-                f"{egress.proxy_name(project)} is running but is not on "
-                f"{egress.network_name(project)}, and joining it failed: "
-                f"{error.stderr.decode('utf-8', 'replace').strip()}. A session "
-                "opened now would have no address to send to — the proxy is "
-                "reached at the address it holds on that network, and it "
-                "holds none. Remove the pair with `harness egress --down` and "
-                "let the next launch rebuild them, or open the session with "
-                "`--sandbox inner`."
+                f"Could not attach proxy {egress.proxy_name(project)} to network "
+                f"{egress.network_name(project)}. Launch stopped.\n"
+                f"Error: {error.stderr.decode('utf-8', 'replace').strip()}\n"
+                "Inspect `uv run lup-devtools harness egress` before retrying."
             ) from error
         return proxy_address(egress, project, engine)
     # A proxy that is here and not being kept is one this has to account for
@@ -702,12 +695,11 @@ def start_egress(
         client(*egress.connect_arguments(project))
     except sh.ErrorReturnCode as error:
         raise typer.BadParameter(
-            f"Could not start {egress.proxy_name(project)}, so this session "
-            "would open on an internal network with no way out of it. The "
-            "policy it was given is at "
-            f"{configuration}; open the session with `--sandbox inner`, or "
-            "declare `mode='bridge'` on the image's egress to run without "
-            "an egress boundary."
+            f"Could not start or connect proxy {egress.proxy_name(project)}. "
+            "Launch stopped.\n"
+            f"Error: {error.stderr.decode('utf-8', 'replace').strip()}\n"
+            f"Proxy configuration: {configuration}\n"
+            "Inspect `uv run lup-devtools harness egress` before retrying."
         ) from error
     settled(egress, project, engine, configuration)
     return proxy_address(egress, project, engine)
@@ -741,10 +733,9 @@ def settled(
         return
     spoken = proxy_log(name, engine)
     raise typer.BadParameter(
-        f"{name} started and then stopped within {grace:g}s, so this session "
-        "would open on an internal network with nothing bridged out of it. "
-        f"The configuration it was given is at {configuration}. What it said "
-        "before it stopped:\n" + (spoken or "nothing at all")
+        f"Proxy {name} exited within {grace:g}s of starting. Launch stopped.\n"
+        f"Check its configuration: {configuration}\n"
+        "Proxy log:\n" + (spoken or "No log output was available.")
     )
 
 
@@ -970,7 +961,7 @@ class EgressState(BaseModel, frozen=True):
             Notice(text=f"network {self.network}", urgency="detail"),
             Notice(
                 text=f"exists: {self.network_exists}, dns: {self.dns_enabled}",
-                urgency="ready" if self.dns_enabled else "refusal",
+                urgency="ready" if self.network_exists else "refusal",
                 indent=1,
             ),
             Notice(text=f"proxy {self.proxy}", urgency="detail"),
@@ -1015,20 +1006,17 @@ class EgressState(BaseModel, frozen=True):
             *(
                 [
                     Notice(
-                        text=(
-                            "default route: "
-                            + (self.route or "none — it reaches only its own networks")
-                        ),
+                        text=("default route: " + (self.route or "none")),
                         urgency="ready" if self.route else "refusal",
                         indent=1,
                     ),
                     Notice(
-                        text=f"resolving through: {self.resolver or 'nothing it names'}",
+                        text=f"DNS resolvers: {self.resolver or 'none reported'}",
                         urgency="detail",
                         indent=1,
                     ),
                     Notice(
-                        text=f"a public name resolves to: {self.upstream}",
+                        text=f"public DNS lookup: {self.upstream}",
                         urgency="ready" if self.reached else "refusal",
                         indent=1,
                     ),
@@ -1056,7 +1044,7 @@ class EgressState(BaseModel, frozen=True):
                 else []
             ),
             *(
-                [Notice(text="what it last said:", urgency="detail", indent=1)]
+                [Notice(text="proxy log:", urgency="detail", indent=1)]
                 if self.log
                 else []
             ),
@@ -1081,29 +1069,15 @@ class EgressState(BaseModel, frozen=True):
         return bool(self.route)
 
     def shadowed(self) -> list[Notice]:
-        """Name the one fault the facts above single out, when they do.
-
-        A route out, a resolver list holding a working server, names of its
-        own network resolving, and a public name not: that combination has
-        one explanation. glibc takes the first authoritative answer it gets
-        and stops, so a resolver that says NXDOMAIN for everything outside
-        its own network hides every server listed after it — including the
-        one that would have answered.
-
-        Said only when every clause holds. A verdict that guessed from two of
-        them would be the sixth theory this boundary has produced by reading,
-        and the previous five were all refuted by measuring.
-        """
+        """Suggest checking resolver responses when only internal DNS succeeds."""
         if not (self.route and self.answers_locally and self.resolver):
             return []
         return [
             Notice(
                 text=(
-                    "It has a route out and a working nameserver in its list, "
-                    "and it resolves its own network's names — so the chain is "
-                    "answering and stopping early. The first resolver refuses "
-                    "public names authoritatively, which hides every server "
-                    "after it."
+                    "The proxy resolves internal names but its public DNS "
+                    "lookup failed. Test the listed nameservers individually "
+                    "to identify which one cannot resolve the public name."
                 ),
                 urgency="detail",
                 indent=1,
@@ -1122,8 +1096,8 @@ class EgressState(BaseModel, frozen=True):
         """
         recovery = Notice(
             text=(
-                "`harness egress --down` removes both pieces so the next "
-                "launch rebuilds them; `--sandbox inner` opens on the host."
+                "To recreate the proxy and network, run "
+                "`uv run lup-devtools harness egress --down`, then rerun the launcher."
             ),
             urgency="detail",
             indent=1,
@@ -1132,10 +1106,8 @@ class EgressState(BaseModel, frozen=True):
             return [
                 Notice(
                     text=(
-                        "A session has no address for the proxy on this "
-                        "network, so every request in it fails before it is "
-                        "sent — which the runtime reports as the operator's "
-                        "own internet or DNS being down."
+                        f"No running proxy with an address was found on {self.network}. "
+                        "Check the network and proxy status above."
                     ),
                     urgency="refusal",
                 ),
@@ -1145,11 +1117,8 @@ class EgressState(BaseModel, frozen=True):
             return [
                 Notice(
                     text=(
-                        f"A session can reach the proxy at {self.address}, "
-                        "and the proxy cannot reach the world — so requests "
-                        "arrive and are "
-                        "answered 503 rather than refused. The boundary is "
-                        "standing; what is behind it is not."
+                        f"Proxy {self.proxy} has address {self.address}, "
+                        "but its public DNS lookup failed."
                     ),
                     urgency="refusal",
                 ),
@@ -1158,14 +1127,11 @@ class EgressState(BaseModel, frozen=True):
                     or [
                         Notice(
                             text=(
-                                "It holds no default route, so it reaches only "
-                                "its own networks — which is why it resolves "
-                                "nothing: every nameserver it lists is "
-                                "unreachable."
+                                "The proxy has no default route. Check its "
+                                "external network attachment."
                                 if not self.routes()
-                                else "That is the proxy's own resolution or "
-                                "its route out, not the session's network. "
-                                "Its log above and its networks say which."
+                                else "Check the proxy's DNS error, resolver "
+                                "settings and log above."
                             ),
                             urgency="detail",
                             indent=1,
@@ -1176,8 +1142,7 @@ class EgressState(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    f"A session reaches the proxy at {self.address} and is "
-                    "carried out through it."
+                    f"Proxy address: {self.address}; its public DNS lookup succeeded."
                 ),
                 urgency="ready",
             )
@@ -1338,7 +1303,7 @@ def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
     client = detected_client()
     if client is None:
         Notice(
-            text="No container client answered, so nothing of this is running.",
+            text="No working Docker or Podman client was found. Network status is unknown.",
             urgency="warning",
         ).say()
         return
@@ -1444,7 +1409,7 @@ def build_image(
         str(scratch),
     ]
     Notice(text=f"Building {tag} from {dockerfile}", urgency="progress").say()
-    Notice(text=f"Its output: {log}", urgency="artifact").say()
+    Notice(text=f"Build log: {log}", urgency="artifact").say()
     console = Console()
     recent: deque[str] = deque(maxlen=shown)
     with log.open("w", encoding="utf-8") as handle:
@@ -1473,9 +1438,9 @@ def build_image(
             for line in recent:
                 typer.echo(line)
             raise typer.BadParameter(
-                f"Could not build {tag} from {dockerfile}. The declaration is "
-                f"in the project's Image; {log} holds every line of the build, "
-                "and its last ones say which layer failed."
+                f"Image build failed: {tag} (exit code {error.exit_code}).\n"
+                f"Dockerfile: {dockerfile}\nFull build log: {log}\n"
+                "Fix the error in the build log, then rerun the launcher."
             ) from error
 
 
@@ -1626,10 +1591,9 @@ def contained_argv(
         found = detected_client()
         if found is None:
             raise typer.BadParameter(
-                "No container client answered, so this session cannot be "
-                "contained. Install docker or podman, or open the session "
-                "with `--sandbox inner` to run on the host under the "
-                "runtime's own sandbox and the semantic policy."
+                "No working Docker or Podman client was found. Install one to "
+                "launch in a container. To run on the host using the runtime's "
+                "sandbox, choose `--sandbox inner`."
             )
         if not found.drives_its_server():
             raise typer.BadParameter(found.consequence())

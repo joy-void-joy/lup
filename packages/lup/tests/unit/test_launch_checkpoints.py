@@ -41,16 +41,20 @@ def checkpoint(events: list[str]) -> launch.LaunchCheckpoint:
     return record
 
 
+@pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
 def test_claude_checkpoints_before_preflight_and_after_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: launch.LaunchSandbox
 ) -> None:
     events: list[str] = []
     profiles = Mock()
     profiles.launch_home.return_value = None
+    preflight = Mock(
+        side_effect=lambda *a, **k: events.append("ready") or launch.LaunchOpening()
+    )
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda *_args: events.append("ready") or launch.LaunchOpening(),
+        preflight,
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
@@ -65,6 +69,7 @@ def test_claude_checkpoints_before_preflight_and_after_close(
         launch, "apply_sandbox_environment", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(launch, "ClaudeTranscripts", lambda _home: Mock())
+    monkeypatch.setattr(launch, "accessible_roots", lambda: [])
     monkeypatch.setattr(
         launch,
         "start_harness_transcript",
@@ -77,9 +82,19 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     )
 
     launch.launch_claude(
-        composition(), [], profiles, None, None, False, checkpoint=checkpoint(events)
+        composition(),
+        [],
+        profiles,
+        None,
+        None,
+        False,
+        checkpoint=checkpoint(events),
+        sandbox=sandbox,
     )
 
+    assert preflight.call_args.kwargs["contained"] == (
+        sandbox is launch.LaunchSandbox.OUTER
+    )
     assert events == [
         "checkpoint:claude",
         "ready",
@@ -89,18 +104,22 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     ]
 
 
+@pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
 def test_codex_checkpoints_before_preflight_and_after_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: launch.LaunchSandbox
 ) -> None:
     events: list[str] = []
     home = Mock(path=tmp_path / "home", isolated=False)
     installer = Mock()
     installer.temporary.return_value = nullcontext(Mock(installed_root=tmp_path))
     store = Mock()
+    preflight = Mock(
+        side_effect=lambda *a, **k: events.append("ready") or launch.LaunchOpening()
+    )
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda *_args: events.append("ready") or launch.LaunchOpening(),
+        preflight,
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
@@ -116,6 +135,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(launch, "codex_login_preflight", lambda *args: None)
     monkeypatch.setattr(launch, "CodexPluginInstaller", lambda _config: installer)
     monkeypatch.setattr(launch, "CodexTranscripts", lambda _home: Mock())
+    monkeypatch.setattr(launch, "accessible_roots", lambda: [])
     monkeypatch.setattr(
         launch,
         "start_harness_transcript",
@@ -136,8 +156,12 @@ def test_codex_checkpoints_before_preflight_and_after_close(
         False,
         False,
         checkpoint=checkpoint(events),
+        sandbox=sandbox,
     )
 
+    assert preflight.call_args.kwargs["contained"] == (
+        sandbox is launch.LaunchSandbox.OUTER
+    )
     assert events == [
         "checkpoint:codex",
         "ready",
@@ -152,7 +176,7 @@ def test_generate_only_never_checkpoints(
     provider: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     events: list[str] = []
-    monkeypatch.setattr(launch, "ready_to_open", lambda *args: None)
+    monkeypatch.setattr(launch, "ready_to_open", lambda *args, **kwargs: None)
     if provider == "claude":
         launch.launch_claude(
             composition(),

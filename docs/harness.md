@@ -20,11 +20,44 @@ uv run lup-devtools harness generate all   # render both trees from source
 uv run lup-devtools harness check all      # read-only drift check; what CI runs
 ```
 
-`harness claude` and `harness codex` regenerate one target and launch it;
+`harness claude` and `harness codex` regenerate the declared targets and launch the selected runtime;
 `--generate-only` stops before launching. `dev git-hooks install` installs
 the drift check as a git pre-commit hook, so omitted generated output is
 refused before the commit exists rather than minutes later in CI.
 [quality-pipeline.md](quality-pipeline.md) maps all three layers.
+
+## Startup checks and container images
+
+Both launchers build a container image when no image matches the rendered
+Dockerfile. They reuse a matching image. Package declarations feed that
+Dockerfile, so changing the declared packages triggers a build on the next
+launch. Building an image installs packages inside it, not on the host.
+`uv run lup-devtools harness image` prints the Dockerfile; it does not build it.
+
+Requirements declare where they are needed:
+
+| Location | Checked where |
+| --- | --- |
+| `host` | On the machine running the launcher |
+| `image` | Inside the session container |
+| `both` | In both environments |
+| `session` | Inside the container for a normal launch; on the host with `--sandbox inner` or `--sandbox none` |
+
+The allowed shell commands are a `session` requirement. Missing `tree` or
+`yq` on the host does not warn during a container launch when the image
+provides them. The container is checked after its image is built or reused.
+If a command is missing there, check that the image's declared packages
+actually provide it; repeating an unchanged build is not a general repair.
+
+Run `uv run lup-devtools harness requirements` to check host dependencies,
+including tools for sessions running on the host. Add `--inside` to check
+the container, or `--inside --launch-only` to run just its startup checks.
+Full container checks include a test model turn.
+
+Reports name the environment and show the failed operation, its impact and
+the next step separately. A check that could not run reports an unknown
+result. A missing command can produce misleading shell results: exit code
+127 takes the fallback in `command || fallback`, just like other failures.
 
 ## Generated output is never hand-edited
 

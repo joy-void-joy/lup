@@ -47,12 +47,14 @@ WORKING = Run(command=["echo", "hello"])
 
 def requirement(name: str, exercise: Run | AnyOf, **rest: object) -> Requirement:
     """One requirement with the fields a test does not care about filled in."""
-    return Requirement(
-        capability=name,
-        purpose=f"whatever {name} is for",
-        exercise=exercise,
-        absence=LostCapability(capability=f"the {name} capability"),
-        **rest,  # pyright: ignore[reportArgumentType]
+    return Requirement.model_validate(
+        {
+            "capability": name,
+            "purpose": f"whatever {name} is for",
+            "exercise": exercise,
+            "absence": LostCapability(capability=f"the {name} capability"),
+            **rest,
+        }
     )
 
 
@@ -60,7 +62,7 @@ def test_a_clean_exit_proves_a_requirement() -> None:
     found = requirement("echo", WORKING).check({})
     assert found.working
     assert [(item.text, item.urgency) for item in found.notices()] == [
-        ("echo: working", "ready")
+        ("echo (host): working", "ready")
     ]
 
 
@@ -96,7 +98,8 @@ def test_a_program_that_runs_without_working_is_not_counted_as_working() -> None
     found = requirement("wrong", Run(command=["echo", "nothing"], expect="banana"))
     checked = found.check({})
     assert not checked.working
-    assert "installed without working" in checked.detail
+    assert "output did not contain 'banana'" in checked.detail
+    assert "Output: 'nothing'" in checked.detail
 
 
 def test_any_of_takes_the_first_spelling_that_works() -> None:
@@ -153,6 +156,14 @@ def test_an_environment_redirect_is_silent_when_the_target_is_there() -> None:
     outcome = ExerciseOutcome(proved=False, detail="cannot connect")
     assert redirect.cause({"DOCKER_HOST": "unix:///"}, outcome) == ""
     assert redirect.cause({}, outcome) == ""
+
+
+def test_a_remote_endpoint_is_not_diagnosed_as_a_missing_local_socket() -> None:
+    redirect = EnvironmentRedirect(variable="DOCKER_HOST")
+    outcome = ExerciseOutcome(proved=False, detail="connection failed")
+    assert (
+        redirect.cause({"DOCKER_HOST": "tcp://container.example:2376"}, outcome) == ""
+    )
 
 
 def test_a_group_diagnosis_stays_quiet_about_a_failure_it_cannot_explain() -> None:
@@ -258,7 +269,7 @@ def test_a_failing_finding_says_what_was_lost_and_what_needed_it() -> None:
     lines = requirement("clipboard", Run(command=["lup-no-such-program"])).check({})
     rendered = "\n".join(item.text for item in lines.notices())
     assert "the clipboard capability is unavailable" in rendered
-    assert "needed for whatever clipboard is for" in rendered
+    assert "clipboard (host): check failed" in rendered
 
 
 def test_a_container_that_never_started_is_not_read_as_an_absent_capability() -> None:
@@ -278,9 +289,9 @@ def test_a_container_that_never_started_is_not_read_as_an_absent_capability() ->
     assert not found.working
     assert not found.exercised
     rendered = "\n".join(item.text for item in found.notices())
-    assert "proxy: not established" in rendered
+    assert "proxy (host): check could not run" in rendered
     assert "the proxy capability is unavailable" not in rendered
-    assert "nothing here is a verdict on whatever proxy is for" in rendered
+    assert "Result unknown" in rendered
 
 
 def test_a_probe_that_ran_and_failed_is_still_the_capabilitys_own_answer() -> None:
@@ -563,7 +574,7 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
     assert at_launch == {
         "session reaches the model endpoint",
         "inside placement",
-        "shell vocabulary",
+        "shell commands",
     }
     assert "contained agent session" in at_setup - at_launch
 
@@ -716,9 +727,7 @@ def test_the_comparison_tools_are_promised_and_installed() -> None:
 def test_the_vocabulary_probe_reads_the_policy_rather_than_a_copy() -> None:
     """A word joins the probe by joining the table, not by being copied here."""
     entry = next(
-        item
-        for item in manifest().requirements
-        if item.capability == "shell vocabulary"
+        item for item in manifest().requirements if item.capability == "shell commands"
     )
 
     assert entry.exercise.programs() == carried_vocabulary()

@@ -64,12 +64,9 @@ def uv_requirement(
         where=where,
         exercise=Run(command=["uv", "--version"]),
         absence=RefusedLaunch(
-            because=(
-                "nothing in this project runs without uv, so a session opened "
-                "here would fail at its first command with a message about "
-                "that command rather than about the toolchain"
-            )
+            because="Project commands require a working uv installation."
         ),
+        recovery="Install uv or fix the uv error above, then rerun the launcher.",
         install=install,
     )
 
@@ -179,7 +176,7 @@ def container_requirement(
     install: list[Package] = [],
     socket_variable: str = "DOCKER_HOST",
     socket_group: str = "docker",
-    lost: str = "sandboxed evaluation and multi-worker resolve",
+    lost: str = "container sessions and parallel resolver workers",
     client: str = "docker",
 ) -> Requirement:
     """A reachable container daemon, exercised by asking it its own version.
@@ -217,6 +214,7 @@ def container_requirement(
         # daemon is unreachable, which is the whole of what this asks.
         exercise=Run(command=[client, "info"]),
         absence=LostCapability(capability=lost),
+        recovery="Check that Docker or Podman is installed and its service is reachable.",
         diagnoses=[
             EnvironmentRedirect(variable=socket_variable),
             SupplementaryGroup(group=socket_group),
@@ -276,9 +274,8 @@ def same_path_mount_requirement(
         where=where,
         checked="setup",
         exercise=MountProbe(image=image, witness=witness),
-        absence=LostCapability(
-            capability="the worktree rail, and so multi-worker resolve"
-        ),
+        absence=LostCapability(capability="mounting worktrees in worker containers"),
+        recovery="Check the mount error above and the container service's access to the checkout.",
         install=install,
     )
 
@@ -318,9 +315,8 @@ def git_requirement(
         purpose="the checkouts, worktree leases and commit attribution a session needs",
         where=where,
         exercise=Run(command=["git", "rev-parse", "--git-dir"]),
-        absence=LostCapability(
-            capability="every checkout, worktree lease and commit a session makes"
-        ),
+        absence=LostCapability(capability="Git access"),
+        recovery="Check that git is installed and this directory is a Git checkout.",
         install=install,
     )
 
@@ -340,9 +336,12 @@ def github_requirement(
         purpose="pull requests, issues, and the friction reports the loop files",
         where=where,
         exercise=Run(command=["gh", "auth", "status"]),
-        absence=LostCapability(
-            capability="opening pull requests and filing issues from a session"
-        ),
+        absence=LostCapability(capability="GitHub access for pull requests and issues"),
+        recovery="Check the gh authentication error above.",
+        recovery_by_location={
+            "host": "Run `gh auth login` on the host, then rerun the launcher.",
+            "image": "Check the GitHub credentials passed to the container by the launcher.",
+        },
         install=install,
     )
 
@@ -365,6 +364,7 @@ def bubblewrap_requirement(
         where=where,
         exercise=Run(command=["bwrap", "--version"]),
         absence=LostCapability(capability="OS confinement"),
+        recovery="Install bubblewrap and check the bwrap error above.",
         install=install,
     )
 
@@ -543,11 +543,9 @@ def agent_session_requirement(
             expect="SESSION_OK",
         ),
         absence=RefusedLaunch(
-            because=(
-                "the boundary is claimed but no session can run behind it, so "
-                "the work would silently proceed on the host instead"
-            )
+            because="The agent did not complete the test turn inside the container."
         ),
+        recovery="Check the runtime error above, including sign-in and network access.",
         install=install,
     )
 
@@ -599,14 +597,11 @@ def proxy_reachable_requirement(
             ]
         ),
         absence=RefusedLaunch(
-            because=(
-                "a filtered session sends everything to the proxy it was "
-                "pointed at, so nothing in it can reach the network — and the "
-                "runtime reports that as the operator's own internet being "
-                "down. `harness egress --down` removes the network and the "
-                "proxy so the next launch rebuilds the pair; `--sandbox "
-                "inner` opens on the host, outside the egress boundary"
-            )
+            because="The container cannot connect to its configured network proxy."
+        ),
+        recovery=(
+            "Run `uv run lup-devtools harness egress` to inspect the proxy and network. "
+            "Check the connection error above before changing their configuration."
         ),
         install=install,
     )
@@ -665,14 +660,11 @@ def proxy_tunnels_requirement(
             ]
         ),
         absence=RefusedLaunch(
-            because=(
-                "the session is on a network with no gateway and the one "
-                "process bridged out of it is not carrying its traffic, so "
-                "every model call fails. The rendered policy is at "
-                "`tmp/egress.conf` and the proxy's own log says which rule "
-                "refused; `harness egress --down` rebuilds the pair, and "
-                "`--sandbox inner` opens without an egress boundary at all"
-            )
+            because=f"The container could not reach {destination} through the proxy."
+        ),
+        recovery=(
+            "Run `uv run lup-devtools harness egress` and inspect `tmp/egress.conf` "
+            "for the proxy or connection error above."
         ),
         install=install,
     )
@@ -726,15 +718,12 @@ def endpoint_reachable_requirement(
             ]
         ),
         absence=RefusedLaunch(
-            because=(
-                "this session's network does not reach the model endpoint, so "
-                "every call fails and the runtime reports it as the "
-                "operator's own internet being down. Nothing stands between "
-                "this container and the world to be misconfigured, so what is "
-                "wrong is the host's own route or its resolver — `harness "
-                "image` renders the network this session was declared to "
-                "run on"
-            )
+            because=f"The container could not reach the model endpoint at {destination}."
+        ),
+        recovery=(
+            "Check the connection error above and compare access from the host. "
+            "This check alone does not identify whether DNS, routing, TLS, "
+            "or the endpoint caused the failure."
         ),
         install=install,
     )
@@ -786,14 +775,11 @@ def metadata_refused_requirement(
             expect=status,
         ),
         absence=RefusedLaunch(
-            because=(
-                "the egress boundary is not refusing the cloud metadata "
-                "endpoint, so a session in this container can read whatever "
-                "credentials the host's instance role holds. This one is not "
-                "answered by widening anything: the denials are compiled "
-                "from `EgressPolicy` into `tmp/egress.conf`, and a proxy "
-                "running an older render of it is the likeliest cause"
-            )
+            because="Blocking access to cloud metadata could not be verified."
+        ),
+        recovery=(
+            f"Check the error above and the metadata deny rules in `tmp/egress.conf`. "
+            f"The request to {endpoint} must return HTTP {status}."
         ),
         install=install,
     )
@@ -836,13 +822,13 @@ def terminal_handoff_requirement(
                 'printf "TERM=%s COLORTERM=%s EDITOR=%s LANG=%s\n" '
                 '"$TERM" "$COLORTERM" "$EDITOR" "$LANG"; '
                 '[ -n "$COLORTERM" ] || { '
-                'echo "COLORTERM did not cross, so colour is 16 not 16m" >&2; '
+                'echo "COLORTERM is unset; true-color support could not be verified" >&2; '
                 "exit 1; }; "
                 'command -v "$EDITOR" >/dev/null || { '
-                'echo "EDITOR=$EDITOR names nothing runnable here" >&2; '
+                'echo "EDITOR=$EDITOR is not an available command" >&2; '
                 "exit 1; }; "
                 'LC_ALL="$LANG" locale >/dev/null 2>&1 || { '
-                'echo "LANG=$LANG was never generated in this image" >&2; '
+                'echo "LANG=$LANG could not be loaded" >&2; '
                 "exit 1; }",
             ]
         ),
@@ -909,21 +895,15 @@ def reaped_orphans_requirement(
                 "reaper=$(cat /proc/1/comm); "
                 'printf "pid1=%s zombies=%s\n" "$reaper" "$zombies"; '
                 '[ "$zombies" = "0" ] || { '
-                'echo "pid 1 is $reaper, which left $zombies zombie(s) behind '
-                "after one abandoned child — nothing here reaps, so this "
-                "session's process table only fills\" >&2; "
+                'echo "Found $zombies zombie process(es) after the cleanup test; '
+                'PID 1 is $reaper" >&2; '
                 "exit 1; }",
             ]
         ),
         absence=LostCapability(
-            capability=(
-                "a session that stays healthy for its whole length — this one "
-                "accumulates a zombie per abandoned child until it cannot fork, "
-                "and reports that as whatever work was running being broken. "
-                "`--init` on the run argv is the whole fix, and both engines "
-                "take it"
-            )
+            capability="automatic cleanup of exited child processes"
         ),
+        recovery="Check that the container starts with `--init` to reap exited children.",
         install=install,
     )
 
@@ -980,10 +960,7 @@ def codex_envelope_requirement(
             expect="envelope-holds",
         ),
         absence=LostCapability(
-            capability=(
-                "vouching for the Codex envelope — unjudged shell keeps the "
-                "deny lattice instead of deferring to an OS boundary"
-            )
+            capability="verification of the Codex filesystem sandbox"
         ),
         install=install,
     )
@@ -1022,14 +999,9 @@ def inside_placement_requirement(
         where=where,
         exercise=SentinelProbe(variable=variable, side="inside", witness=witness),
         absence=RefusedLaunch(
-            because=(
-                "this profile's operations are placed by a boundary the launch "
-                "could not observe, so `inside` would name wherever the session "
-                "happened to land. `--sandbox inner` opens on the host under "
-                "the runtime's own sandbox, which is the same posture stated "
-                "rather than assumed"
-            )
+            because="The check could not verify the container marker and checkout mount."
         ),
+        recovery="Check the container or mount error above, then rerun the launcher.",
         install=install,
     )
 
@@ -1098,13 +1070,9 @@ def question_relay_requirement(
             expect="relay-ok",
         ),
         absence=RefusedLaunch(
-            because=(
-                "every operation this policy sends to a reviewer is written "
-                "here first, so a session that cannot write it is one where "
-                "each of those refuses instead — naming the operation, which "
-                "was never the problem"
-            )
+            because="Approval requests cannot be saved for a reviewer to answer."
         ),
+        recovery=f"Check that the launcher can write to `{directory}` in this checkout.",
         install=install,
     )
 
@@ -1144,18 +1112,16 @@ def checkpoint_store_requirement(
             expect="store-ok",
         ),
         absence=LostCapability(
-            capability=(
-                "recovery-backed permission — destructive local work asks "
-                "instead of being allowed against a capture"
-            )
+            capability="saving recovery checkpoints before destructive changes"
         ),
+        recovery="Check write access to the Git directory and that HEAD resolves to a commit.",
         install=install,
     )
 
 
 def shell_vocabulary_requirement(
     vocabulary: list[str],
-    where: Side = "both",
+    where: Side = "session",
     at_launch: bool = True,
     install: list[Package] = [
         Package(name="diffutils"),
@@ -1166,60 +1132,39 @@ def shell_vocabulary_requirement(
         Package(name="go-yq"),
     ],
 ) -> Requirement:
-    """Every program the permission policy promised, asked of the environment.
+    """Check the policy's command list where the agent runs.
 
-    The requirement with no program of its own. What it holds is the seam
-    between two declarations that had never been compared: a shell vocabulary
-    saying which commands an agent may run without asking, and an image
-    saying which packages it installs. Both were right and the pair was not,
-    which is a shape this module already has a name for -- a list written
-    twice comes apart in the direction hardest to see -- except that here the
-    lists were never even the same kind of thing, so nothing was written
-    twice and nothing could notice.
+    ``session`` checks the container for a contained launch and the host
+    otherwise. A contained launch does not require these tools on the host.
+    ``install`` supplies their image packages; another base can override it.
 
-    What that cost is measured and specific. ``diff`` and ``cmp`` were
-    declared safe and absent from the image, and an agent comparing two files
-    with ``cmp -s A B && echo IDENTICAL || echo DIFFERS`` was told ``DIFFERS``
-    about two byte-identical files. That is worse than a missing convenience:
-    this project's guidance tells an agent to verify rather than assume, and
-    the tool it verifies with inverted its answer without saying anything.
-
-    *vocabulary* has no default because it is not lup's to guess -- it comes
-    off the composing project's own table, through
-    :func:`~lup.policy.survey.allowed_programs`, so the promise measured here
-    is the promise that project made rather than one this module invented.
-
-    *install* is the pacman answer for the words an agent's triage vocabulary
-    turns on: comparison, location, listing, sockets, this host's name, and
-    the YAML counterpart to the ``jq`` the baseline already carries. A
-    project on another base passes its own.
-
-    *at_launch* is on, which buys one container start per contained launch,
-    and it is the one this roster's own criterion asks for: a failure
-    invisible from outside. Every other image entry announces itself by
-    something failing, and this one announces itself by an answer that looks
-    fine.
+    The check runs at launch because shell fallbacks can hide command-not-found
+    errors. For example, ``cmp -s A B && echo same || echo differs`` prints
+    ``differs`` when ``cmp`` is missing, even if the files are identical.
     """
     return Requirement(
-        capability="shell vocabulary",
+        capability="shell commands",
         purpose=(
-            "answering the commands this project's permission policy declares "
-            "safe for an agent to run unattended"
+            "running the shell commands allowed by this project's permission policy"
         ),
         where=where,
         at_launch=at_launch,
         exercise=VocabularyProbe(vocabulary=vocabulary),
         absence=MisleadingAbsence(
-            capability="part of the shell vocabulary the policy declares safe",
+            capability="Support for some allowed shell commands",
             mistaken_for=(
-                "an ordinary answer: a program that is not there exits 127, "
-                "so `cmp -s A B && echo same || echo differs` reports two "
-                "identical files as differing, and any `command || fallback` "
-                "takes the fallback for a reason nobody measured. Rebuild the "
-                "image to install what the declaration asks for, or stop "
-                "declaring the words it does not carry"
+                "normal results when shell fallbacks hide a missing-command error"
             ),
         ),
+        recovery_by_location={
+            "host": "Install the missing commands on the host or add them to PATH.",
+            "image": (
+                "Check the image's package declarations with "
+                "`uv run lup-devtools harness image`. The launcher already builds "
+                "changed images; ensure the declared packages provide these commands, "
+                "then rerun the launcher."
+            ),
+        },
         install=install,
     )
 

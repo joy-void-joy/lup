@@ -274,13 +274,10 @@ class ContainerClient(BaseModel, frozen=True):
     def consequence(self) -> str:
         """What a session started through this client would lose, for a refusal."""
         return (
-            f"`{self.binary}` is a Docker client driving a podman engine, which "
-            "podman needs `--userns=keep-id` to do without remapping uids -- and "
-            "a Docker client rejects that flag before the daemon sees it, so the "
-            "session's own checkout would be read-only to it. Install podman's "
-            "own CLI, or unset DOCKER_HOST to reach a Docker daemon, or open the "
-            "session with `--sandbox inner` to run on the host under the "
-            "runtime's own sandbox and the semantic policy."
+            f"`{self.binary}` is a Docker client connected to a Podman server. "
+            "It cannot pass `--userns=keep-id`, which Lup needs for writable "
+            "checkout mounts. Use the Podman CLI, or unset DOCKER_HOST to "
+            "connect the Docker client to a Docker server."
         )
 
 
