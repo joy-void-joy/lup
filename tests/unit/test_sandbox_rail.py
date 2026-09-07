@@ -89,6 +89,23 @@ def read_only_here(leased: Lease, found: Path) -> bool:
     return deepest is not None and not deepest[1]
 
 
+def holes(withheld: list[Path]) -> list[Path]:
+    """The paths a lease names read-only, without what merely sits inside them.
+
+    A hole over a directory withholds everything beneath it, so a walk
+    reports the directory and every sample hook git's own template left in
+    it. Those are the hole rather than a second contract, and their names
+    are git's version to change — so what a contract is asserted against is
+    the paths somebody wrote down, sorted, and the walk stays the thing that
+    finds a hole nobody meant to punch.
+    """
+    return sorted(
+        path
+        for path in withheld
+        if not any(other in path.parents for other in withheld)
+    )
+
+
 def test_no_path_is_leased_writable_and_read_only_at_once(
     bare_repository: Path,
 ) -> None:
@@ -201,11 +218,11 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
         for found in [layout.common, *layout.common.rglob("*")]
         if read_only_here(leased, found)
     ]
-    # `config` alone, and asserting the whole list rather than a membership
-    # is the point: this is the contract the lease states, so a path
-    # appearing here is a change somebody has to mean rather than one that
-    # slips in.
-    assert withheld == [layout.common / "config"]
+    # `config` and `hooks/`, and asserting the whole list rather than a
+    # membership is the point: this is the contract the lease states, so a
+    # path appearing here is a change somebody has to mean rather than one
+    # that slips in.
+    assert holes(withheld) == [layout.common / "config", layout.common / "hooks"]
     restored = {entry: entry.stat().st_mode for entry in withheld}
     before = (layout.common / "config").read_bytes()
     try:
@@ -456,9 +473,10 @@ def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
     the checkout's own commit test models it: withhold write permission from
     exactly what the lease calls read-only, then run the real command.
 
-    A declared root gets the same `config` hole the checkout's own lease
-    gets, and asserting the whole list says so: a repository reached across
-    the boundary is one whose config keys run on the same host.
+    A declared root gets the same `config` and `hooks/` holes the checkout's
+    own lease gets, and asserting the whole list says so: a repository
+    reached across the boundary is one whose config keys and hook scripts run
+    on the same host.
     """
     side = other_repository.parent / "side"
     leased = fleet_lease(repository / "mine", accessible=[AccessibleRoot(path=side)])
@@ -468,7 +486,7 @@ def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
         for found in [layout.common, *layout.common.rglob("*"), other_repository]
         if read_only_here(leased, found)
     ]
-    assert withheld == [layout.common / "config"]
+    assert holes(withheld) == [layout.common / "config", layout.common / "hooks"]
 
     restored = {entry: entry.stat().st_mode for entry in withheld}
     before = (layout.common / "config").read_bytes()
@@ -632,6 +650,32 @@ def test_a_worker_lease_holds_the_shared_config_read_only(
     leased = worker_lease(repository / "mine")
     assert layout.common / "config" in leased.read_only
     assert layout.common / "config" not in leased.writable
+
+
+def test_both_leases_hold_the_shared_hooks_read_only_in_either_layout(
+    repository: Path, tmp_path: Path
+) -> None:
+    """The same door `config` opens, with no key in between.
+
+    A `pre-commit` written into `<common>/hooks/` runs on the host at the
+    operator's next commit in any worktree, and no config key is involved in
+    arranging it. Held in both leases and in either layout, because the
+    shared directory *is* `.git` in a plain checkout rather than absent from
+    it, and a hole punched only where a worktree happens to be linked leaves
+    the door open on every plain clone.
+
+    Costing nothing is what lets it be held: hooks resolve through that same
+    shared directory from every worktree, so a guard armed once on the host
+    is inherited by each one cut afterwards rather than rewritten by it.
+    """
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    git("-C", str(plain), "init", "-q", "-b", "main")
+    for worktree in (repository / "mine", plain):
+        hooks = repository_layout(worktree).common / "hooks"
+        for leased in (lease_for(worktree), worker_lease(worktree)):
+            assert hooks in leased.read_only
+            assert hooks not in leased.writable
 
 
 def test_a_reviewer_lease_is_the_worker_lease_with_nothing_writable(

@@ -39,6 +39,7 @@ from pydantic import BaseModel
 from lup.devtools.gitguard import GIT_ENVIRONMENT
 from lup.formats.banner import REGENERATE_COMMAND
 from lup.execution.shell import git
+from lup.execution.writability import on_read_only_mount, refuses_a_new_file
 
 DRIFT_COMMAND = "uv run lup-devtools harness check all"
 """The read-only drift check every path that refuses stale output runs."""
@@ -476,6 +477,67 @@ def read_hooks(guards: list[GitGuard], root: Path) -> HooksReading:
         reachable=directory.is_dir(),
         guards=[guard_state(script, directory) for script in hook_scripts(guards)],
         orphaned=orphaned_guards(guards, directory),
+    )
+
+
+def outstanding_arming(guards: list[GitGuard], root: Path) -> list[GuardState]:
+    """Every moment an install would still have to write a file for.
+
+    Both halves of what installing does, because either one is a write: a
+    declared moment whose hook is missing, is an older body, or is somebody
+    else's, and a hook this command wrote at a moment the declaration has
+    since dropped. A checkout where this is empty arms nothing and opens the
+    hooks directory not at all, which is the whole of why that directory can
+    be held read-only around it.
+    """
+    reading = read_hooks(guards, root)
+    return [*reading.unarmed(), *reading.orphaned]
+
+
+def arming_is_refused(directory: Path) -> bool:
+    """Whether the hooks directory would refuse the file an install writes.
+
+    Asked of the nearest ancestor that is there, because installing creates
+    the directory where it is missing: a path nothing holds refuses nothing,
+    and the write that would actually be refused is the `mkdir` beside it.
+    """
+    holder = next(path for path in (directory, *directory.parents) if path.exists())
+    return on_read_only_mount(holder) or refuses_a_new_file(
+        holder, probe_prefix=".lup-hook-probe"
+    )
+
+
+def blocked_arming(guards: list[GitGuard], root: Path) -> str:
+    """Why this checkout cannot arm its guards, empty where it can or need not.
+
+    Conditional on an arming being outstanding, which is what makes holding
+    `<common>/hooks/` read-only cost nothing. Hooks resolve through the
+    shared directory from every worktree of a clone — `git rev-parse
+    --git-path hooks` in a linked worktree names `<common>/hooks` — so a
+    guard armed once on the host is armed for every worktree cut afterwards,
+    whenever it is cut, and a confined run that finds each declared moment
+    current writes nothing here.
+
+    Where one is outstanding it is named rather than waved through. A hook
+    holding an older body is the case a softer answer misses: the file is
+    there and git runs it, so the moment reads as guarded while the script
+    executing is not the one the declaration describes.
+    """
+    outstanding = outstanding_arming(guards, root)
+    if not outstanding:
+        return ""
+    directory = hooks_directory(root)
+    if not arming_is_refused(directory):
+        return ""
+    return "\n".join(
+        [
+            f"{directory} is held read-only and these guards are not armed in it:",
+            *(f"  - {state.describe()}" for state in outstanding),
+            f"Run `{INSTALL_COMMAND}` on the host, outside the sandbox. Hooks "
+            "resolve through the shared directory from every worktree of this "
+            "clone, so arming them once there covers this checkout and every "
+            "worktree cut after it.",
+        ]
     )
 
 
