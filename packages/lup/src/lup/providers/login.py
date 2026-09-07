@@ -27,6 +27,9 @@ class ProviderLogin(BaseModel, frozen=True):
     credentials_file: str
     """What this runtime writes a completed login into, inside that home."""
 
+    credential_fields: list[str] = []
+    """Top-level login fields to replace; empty means a dedicated login file."""
+
     renewable: str = ""
     """A jq filter answering whether a stored login can still reach an account.
 
@@ -40,8 +43,9 @@ class ProviderLogin(BaseModel, frozen=True):
 
     The word is the runtime's own, like the others here. A runtime whose
     stored login states no such deadline declares nothing here, and an empty
-    filter means "cannot be asked" rather than "expired" — every consumer
-    treats a login it cannot interrogate as one to leave alone.
+    filter means "cannot be asked" rather than "expired". An unchanged host
+    login leaves private renewals alone; a changed host login is applied
+    independently of whether the previous login can still renew.
     """
 
     home_subdir: str

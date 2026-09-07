@@ -530,15 +530,9 @@ class Image(BaseModel, frozen=True):
     credential_seed: str = Field(
         default="/opt/lup/credential-seed",
         description=(
-            "Where the host's stored login is offered to the entrypoint, "
-            "outside the config home rather than over it. The host file used "
-            "to be bind-mounted read-only at the exact path the CLI keeps a "
-            "login, which read as working -- a session started signed in -- "
-            "and was not: that file is written back to, both when a login "
-            "completes and when an expiring token is renewed, and a "
-            "read-only mount refused both. It also shadowed whatever the "
-            "config volume held, so a login made inside was invisible the "
-            "next launch. Offered here instead, and copied in once"
+            "Read-only host login offered outside the writable config home. "
+            "A login fingerprint applies each host change once, retaining "
+            "private container renewals and unrelated authorization records"
         ),
     )
     registry_root: str = Field(
@@ -801,6 +795,9 @@ class Image(BaseModel, frozen=True):
         agent_clis = " ".join(item.requested() for item in self.agent_clis)
         opening = self.browser.script(self.egress.shares_host_loopback())
         clipping = shim_program()
+        seeding = (Path(__file__).parent / "assets" / "credential_seed.py").read_text(
+            encoding="utf-8"
+        )
         shim_names = " ".join(self.clipboard.shims)
         # Quoted, because `ENV name=value` takes whitespace as separating
         # *more* pairs: an unquoted `GIT_SSH_COMMAND=ssh -o BatchMode=yes`
@@ -890,62 +887,11 @@ if [ ! -f "$config/.claude.json" ]; then
      '.projects[$here] = {{"hasTrustDialogAccepted": true}}' \\
      /opt/lup/trust-seed.json > "$config/.claude.json"
 fi
-# The stored login, copied in rather than mounted over the path it lives at.
-# Only when the config home holds none that could still reach an account,
-# which is what keeps the two directions from fighting: a login usable in here
-# is never overwritten by the host's, and the host's file is never written by
-# anything in here. After the copy this container owns its credential
-# outright, so `/login` completes and an expiring token renews -- neither of
-# which a read-only mount allowed.
-#
-# "Usable" rather than "present" because the config home outlives the
-# credential in it. The volume is keyed on the repository and kept, the copy
-# ages on its own schedule, and a home left alone past the refresh
-# credential's life holds a file that is a login by every test except the one
-# that matters. Read as present, it suppresses the seed and the session opens
-# demanding a sign-in -- and a sign-in is the one thing this boundary cannot
-# finish, because the callback comes back to a loopback address that only
-# exists inside. So the seed answers the question the failure actually turns
-# on, and nothing is lost by replacing a credential no request will be
-# answered for: it is not a login for its own account either.
-#
-# What decides that is the runtime's, and arrives per launch beside the
-# filename. A runtime declaring no test is taken at its word rather than
-# guessed at -- it keeps the older present-or-absent rule, and a launch that
-# cannot renew what it holds falls back to the printed URL.
-#
-# The copy replaces the file whole, which is the unit it always was, so
-# whatever else the runtime keeps beside the login in there goes with it --
-# Claude Code stores its MCP authorizations in this same file, and they come
-# back as the host's rather than surviving as this home's. That is the price
-# of the seed being a copy, and it is paid only for a home whose login had
-# already stopped working.
-#
-# The filename is the runtime's own word and arrives per launch, because one
-# image starts every runtime the harness declares and they do not agree on it.
-# `-s` rather than `-f`, and a removal before the copy, because every config
-# home that predates this holds an empty file at exactly this path: it was the
-# mount point the old read-only bind needed, so the engine created it, and it
-# belongs to the remapped uid that created it. A presence test would read that
-# as a login and seed nothing, and a copy over it would be refused for the
-# ownership -- the directory is ours and the file is not, so it is removed
-# rather than written through. An empty credential is not a login by anyone's
-# definition, so nothing is lost by replacing one.
-usable() {{
-  [ -s "$1" ] || return 1
-  [ -n "$LUP_CREDENTIAL_RENEWABLE" ] || return 0
-  jq -e "$LUP_CREDENTIAL_RENEWABLE" "$1" >/dev/null 2>&1
-}}
-seed={self.credential_seed}
-stored="$config/$LUP_CREDENTIAL_NAME"
-if [ -n "$LUP_CREDENTIAL_NAME" ] && usable "$seed" && ! usable "$stored"; then
-  if [ -s "$stored" ]; then
-    echo "lup: the login in this config home can no longer be renewed," >&2
-    echo "lup: so it was replaced by the host's, which still can." >&2
-  fi
-  rm -f "$stored"
-  cp "$seed" "$stored"
-  chmod 600 "$stored"
+# A selected host login is applied once per change. Native renewal remains
+# container-private, and unrelated records in a shared credential file survive.
+if [ -n "${{LUP_CREDENTIAL_NAME:-}}" ]; then
+  python3 /opt/lup/credential-seed.py {self.credential_seed} "$config/$LUP_CREDENTIAL_NAME" \\
+    --keys "${{LUP_CREDENTIAL_KEYS:-[]}}" --renewable "${{LUP_CREDENTIAL_RENEWABLE:-}}"
 fi
 
 # One credential, two consumers. The token crosses the boundary by name --
@@ -961,6 +907,10 @@ exec "$@"
 ENTRY
 RUN chmod +x /usr/local/bin/lup-entrypoint
 ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
+
+COPY <<'CREDENTIAL' /opt/lup/credential-seed.py
+{seeding}
+CREDENTIAL
 
 # What `BROWSER` names, so a sign-in inside can reach a browser outside. The
 # pipe it writes to is mounted per launch; with nothing mounted the script
@@ -1177,6 +1127,7 @@ USER $UID:$GID
         config_home_env: str,
         credential_file: str = ".credentials.json",
         credential_renewable: str = "",
+        credential_fields: list[str] | None = None,
         credential: Path | None = None,
         host_config_home: Path | None = None,
         engine: ContainerEngine = Docker(),
@@ -1208,23 +1159,19 @@ USER $UID:$GID
         policy would be off with nothing having failed.
 
         ``credential`` is offered read-only at :attr:`credential_seed` and
-        copied into the config home by the entrypoint when that home holds
-        none that could still be renewed -- ``credential_renewable`` is the
-        runtime's own test for that, and an empty one keeps the older rule of
-        seeding only an absent login. It used to be mounted read-only at the
-        path the CLI keeps a login, which looked right and was not: the CLI writes that file back
-        both when a login completes and when it renews an expiring token, so
-        a read-only mount meant `/login` could not finish inside the boundary
-        and a long session could not renew what it started with. The mount
-        also shadowed the config volume's own copy, so a login made in here
-        was gone by the next launch.
+        applied once per host-login change, including the first adoption of
+        fingerprinted handoff. An unchanged seed preserves private renewals;
+        a missing or unrenewable saved login may be recovered from the seed.
+        ``credential_renewable`` is the provider's own test, never an inferred
+        access-token expiry. ``credential_fields`` selects login records in
+        a shared file, preserving unrelated container authorizations.
 
         The agent can read the credential either way, which is not a leak
         this could close: an agent that can open a session can reach whatever
         opens one. The scope is the boundary, not the secrecy. What the copy
         does close is the other direction -- nothing in here writes the
-        host's file -- at the cost of the two diverging, which is what makes
-        signing in as somebody else inside possible at all.
+        host's file. A container login remains private until the selected host
+        login changes, at which point the explicit host selection takes effect.
 
         ``terminal`` is what :meth:`TerminalHandoff.for_host` answered on this
         machine, passed rather than resolved here for the reason every host
@@ -1265,6 +1212,8 @@ USER $UID:$GID
                 f"LUP_CREDENTIAL_NAME={credential_file}",
                 "-e",
                 f"LUP_CREDENTIAL_RENEWABLE={credential_renewable}",
+                "-e",
+                f"LUP_CREDENTIAL_KEYS={json.dumps(credential_fields or [])}",
             ]
             if credential is not None
             else []
