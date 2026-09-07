@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "fe73e2f3cb74a45bfb7e5e7b42f87effdd3e24cf8c47f7381791c2240c2a4e39",
+  "source_digest": "49d0750db9d64c38406023fafefaddce9aeed553f51b81abb47568d6c9d93292",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "7a3086cb296fbee2d0b494a5d657ddeb9bc23f0feb6b8cdee715be8af509309c",
+      "sha256": "3c90f56f93180a982b60e2c27345908da2668bf437c242ed57789cc3063ac3de",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "4be670fcc626d49a5167f4aaf1538fd19320b7677dab251a51175df69ce59f51",
+      "sha256": "608db8d4884ce6442a84ec710787e4263297a1c15dd2b0331f46ac17e8067e2c",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -205,7 +205,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "c73984f5facfb21daa86f74836d0db0965ab75b5d6a03cb8295b8c7f9adbed20",
+      "sha256": "600f462904baca84f7db26beb46a32256c53e13b2e55ac2e2da7350874acf11c",
       "semantic_id": "skill.land",
       "executable": false
     },
@@ -275,7 +275,7 @@
     {
       "path": ".claude/plugins/lup/commands/resolve.md",
       "category": "generated",
-      "sha256": "b1eca0c5d010a238621d625afe5a872ef1c008d3510544dc7995dd4625e0c899",
+      "sha256": "dbad8d26c47b372d5791786f8477ae24e7c50257449ba5fb7b35c41cffff5ccd",
       "semantic_id": "skill.resolve",
       "executable": false
     },
@@ -471,7 +471,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "16986e990dc4a22fa259d2c0109184471f1213074f0ee125d3e266bf15a4687a",
+      "sha256": "bf012da79a751bee969d317bb442e8d390a14a7cae521cdd473dfaa9879ca06e",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -506,7 +506,7 @@
     {
       "path": "docs/native-capabilities.md",
       "category": "generated",
-      "sha256": "dcaa65ccc1363f172faeaaf153ee0d0b18c4c0fe03762d751dd84ccc0eaeae30",
+      "sha256": "55a2b0f5b713cfd58b6ef34c1e84e394a3ecb7ed4b662eab5c9cda3d8daafba7",
       "semantic_id": "docs.native-capabilities",
       "executable": false
     },
@@ -548,7 +548,7 @@
     {
       "path": "docs/resolver.md",
       "category": "generated",
-      "sha256": "ba31e957916dad725a159d39254ac4a8c3f55c5d5274240bb5c08dff4c3c9537",
+      "sha256": "c59ba68eccb33bbdb33fa973cd71eeb7a3e339b29715d75529407dfae625bd85",
       "semantic_id": "docs.resolver",
       "executable": false
     },
