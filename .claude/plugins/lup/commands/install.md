@@ -244,7 +244,7 @@ If the target repo builds (or will build) a tool-using SDK agent, the **self-imp
 
 When the target has SDK agent code, adapt the scaffolding to wrap their existing agent — don't replace it. The lup patterns (trace logging, scoring, feedback collection) layer on top of whatever agent they already have.
 
-These patterns are **opt-in, not a bundle**: reflection, realtime/persistent mode, the feedback loop, and the commit loop each port only if the target actually needs them (see the guidance file's § Scaffolding Is a Menu, Not a Mandate). Don't install a pattern the target won't use — dead scaffolding is worse than a capability you can add later.
+These patterns are **opt-in, not a bundle**: `reflection`, `realtime` and `feedback-loop` are modules the target names in `DECLINED` or leaves to their defaults, and the commit loop is one file's wiring (see the guidance file's § Scaffolding Is a Menu, Not a Mandate). Don't install a pattern the target won't use — dead scaffolding is worse than a capability you can add later.
 
 ### Skip (never port)
 

@@ -116,10 +116,46 @@ def entries(layout: ApplicationLayout = LAYOUT) -> list[ModuleEntry]:
     return composed_entries(layout, RULES)
 
 
+DECLINED: list[str] = []
+"""Modules this project does not have, by id.
+
+# lup: template: which of lup's modules this domain has no subject for.
+Empty here and spelled anyway, because a default nobody was shown is not a
+decision. This repository takes every module it ships — a scaffold is the
+demonstration of its own machinery, so a subject nobody composes is a subject
+nobody would notice breaking — and that is a statement about *this* repository
+rather than advice to a project built from it.
+
+A domain names what it declines here and gets none of it: no skill, no page, no
+paragraph, no command tree, no tool group. `dev modules` prints the roster with
+each module's summary and what its prose costs, which is the reading this list
+is written against; `/lup:init` walks it once with the user. Every module left
+unnamed arrives under its own default, including the ones lup grows after this
+line was last edited — which is the whole reason this is a list of refusals
+rather than a list of what is kept.
+"""
+
+
 def selection(layout: ApplicationLayout = LAYOUT) -> ModuleSelection:
-    """Every module taken, only the offered ones' prose loaded, plus the delta."""
-    return scaffold_selection(
+    """What this project has: the derived answers, less what it declined.
+
+    :func:`~lup.harness.modules.scaffold_selection` settles the two answers a
+    scaffold should not be making module by module — whether a module is taken,
+    and whether its prose loads — and the refusals are applied over that. There
+    is no contradiction between the two: naming a module you do not have *is*
+    the decision the derivation stands in for, so a stated refusal wins over a
+    rule that exists because nobody had stated anything.
+    """
+    derived = scaffold_selection(
         [entry.spec for entry in entries(layout)], adoptions(layout)
+    )
+    return ModuleSelection(
+        adoptions=[
+            entry.model_copy(update={"taken": False})
+            if entry.module in DECLINED
+            else entry
+            for entry in derived.adoptions
+        ]
     )
 
 

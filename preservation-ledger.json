@@ -1,5 +1,5 @@
 {
-  "revision": "075089cb2770fdfc4b0bd2bcd7369a40a1bf9031",
+  "revision": "3553870cdbdf1ffb1ecad47a8b76a71555b191f3",
   "roots": [
     "lup",
     "lup_template"
@@ -13930,6 +13930,7 @@
         "RULES",
         "adoptions",
         "entries",
+        "DECLINED",
         "selection",
         "MODULE_SPECS",
         "MODULE_SELECTION",
