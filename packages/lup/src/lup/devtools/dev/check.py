@@ -6,6 +6,7 @@ import tomllib
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from importlib.util import find_spec
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -78,12 +79,30 @@ class CheckReport(BaseModel):
 
 
 def ran(name: str, command: Callable[[], object], ok: str = "ok") -> CheckReport:
-    """One external tool's verdict, carrying what it printed when it failed."""
+    """One external tool's verdict, carrying what it printed when it failed.
+
+    A tool that never started is a verdict too. `sh` prepares the child before
+    exec — the working directory among it — and what fails there arrives as a
+    fork exception rather than an exit status, so it is a sibling of the class
+    a caller catches rather than a kind of it. Escaping here takes the whole
+    gate down: the checks that had already passed go unreported, and a
+    condition of the environment reads as a crash in the checker. So the two
+    are reported the same way and told apart by what the row says.
+    """
     try:
         command()
     except sh.ErrorReturnCode as error:
         printed = [error.stdout.decode().rstrip()] if error.stdout else []
         return CheckReport(name=name, passed=False, lines=[f"{name}: FAIL", *printed])
+    except sh.ForkException as error:
+        return CheckReport(
+            name=name,
+            passed=False,
+            lines=[
+                f"{name}: FAIL (never started)",
+                *(f"  {line}" for line in str(error).strip().splitlines()),
+            ],
+        )
     return CheckReport(name=name, lines=[f"{name}: {ok}"])
 
 
@@ -176,11 +195,63 @@ def pyright_check(excluded_roots: list[str]) -> CheckReport:
         configuration.unlink(missing_ok=True)
 
 
+def parallel_arguments(workers: int) -> list[str]:
+    """The flag that spreads a suite over processes, where one answers for it.
+
+    `-n` belongs to pytest-xdist, and a project building on this library has
+    no reason to hold it: a package declares what it needs to run, and a
+    dependency group installs for the project that writes it rather than for
+    anyone depending on that project. Declaring the plugin would therefore
+    either reach this library's own developers alone or push test parallelism
+    into every adopter's runtime install, so the flag is offered where it is
+    importable and dropped where it is not. Pytest rejects an unrecognized
+    argument before collecting anything, and a gate that failed on that would
+    be reporting on its own speed rather than on the suite.
+
+    Fewer than two workers spells serial, so the count descends into running
+    the same tests behind a single interpreter rather than needing a second
+    way of saying nothing.
+    """
+    if workers < 2 or find_spec("xdist") is None:
+        return []
+    return ["-n", str(workers)]
+
+
+def ignored_arguments(excluded_roots: list[str]) -> list[str]:
+    """The globs that keep collection out of retained data and scratch."""
+    return option_arguments(
+        "--ignore-glob",
+        [pattern for root in excluded_roots for pattern in (root, f"{root}/**")],
+    )
+
+
 class TestRoot(BaseModel):
     """One independently installed test suite the project asks the gate to run."""
 
     name: str
     directory: Path
+
+    def absent(self) -> CheckReport:
+        """The verdict a root naming a directory this checkout lacks earns.
+
+        A different fact from a suite that failed, and the reader's next move
+        differs: the declaration is wrong, or the tree it named is somewhere
+        else. It is answered before the run rather than caught after it,
+        because `sh` changes directory in the forked child — where the failure
+        arrives as a fork exception rather than an exit status, escapes the
+        handler that reads exit statuses, and takes the whole gate down with a
+        traceback while the checks that had already passed go unreported.
+        """
+        return CheckReport(
+            name=self.name,
+            passed=False,
+            lines=[
+                f"{self.name}: FAIL (no directory at {self.directory})",
+                f"  the '{self.name}' test root names a path this checkout does "
+                "not hold — drop it from the project's declared `test_roots`, "
+                "or point it at the suite it meant",
+            ],
+        )
 
     def checked(self, workers: int, excluded_roots: list[str]) -> CheckReport:
         """Whether this suite passes, run from its own root.
@@ -190,24 +261,126 @@ class TestRoot(BaseModel):
         a library test reaching for a template fixture passes at the root and
         fails there, which is the only place that difference shows.
         """
+        if not self.directory.is_dir():
+            return self.absent()
         return ran(
             self.name,
             lambda: uv(
                 "run",
                 "pytest",
-                "-n",
-                str(workers),
-                *option_arguments(
-                    "--ignore-glob",
-                    [
-                        pattern
-                        for root in excluded_roots
-                        for pattern in (root, f"{root}/**")
-                    ],
-                ),
+                *parallel_arguments(workers),
+                *ignored_arguments(excluded_roots),
                 _cwd=str(self.directory),
             ),
         )
+
+
+class RootSelection(BaseModel):
+    """One suite's share of what a caller named, spelled from inside that suite.
+
+    Empty *paths* asks for everything the suite declares, which is what the
+    root's own `testpaths` already says — so a caller who named nothing gets
+    each suite whole rather than a selection of none.
+    """
+
+    root: TestRoot
+    paths: list[str]
+
+
+def owning_index(test_roots: list[TestRoot], selection: Path) -> int | None:
+    """Which declared suite holds a named path, deepest root winning.
+
+    A workspace root contains the package roots under it, so the outermost
+    suite would claim every path if the roots were read in the order they
+    were declared. The deepest one containing the path is the suite that
+    installs it.
+    """
+    named = selection.resolve()
+    deepest = sorted(
+        range(len(test_roots)),
+        key=lambda index: len(test_roots[index].directory.resolve().parts),
+        reverse=True,
+    )
+    return next(
+        (
+            index
+            for index in deepest
+            if named.is_relative_to(test_roots[index].directory.resolve())
+        ),
+        None,
+    )
+
+
+def group_by_root(
+    test_roots: list[TestRoot], selections: list[str]
+) -> list[RootSelection]:
+    """Split what a caller named into one invocation per suite that owns part.
+
+    Two independently installed suites each own a top-level `tests` package,
+    and one interpreter has one meaning for that name: a run naming a path
+    from each has both suites claiming `tests.conftest`, and collection dies
+    before a test runs. No import mode settles it, because the collision is in
+    what the suites are rather than in how pytest finds them — the isolation
+    that makes them separate installs is the same isolation that stops them
+    sharing an interpreter. So the narrowing move a caller reaches for — run
+    the suites I touched — is served by one run per suite instead.
+    """
+    owned: list[list[str]] = [[] for _ in test_roots]
+    for selection in selections:
+        index = owning_index(test_roots, Path(selection))
+        if index is None:
+            declared = ", ".join(str(root.directory) for root in test_roots)
+            raise typer.BadParameter(
+                f"{selection} sits under no declared test root ({declared})"
+            )
+        installed = test_roots[index].directory.resolve()
+        owned[index].append(str(Path(selection).resolve().relative_to(installed)))
+    return [
+        RootSelection(root=root, paths=paths)
+        for root, paths in zip(test_roots, owned, strict=True)
+        if paths or not selections
+    ]
+
+
+def run_selected(
+    test_roots: list[TestRoot],
+    selections: list[str],
+    excluded_roots: list[str],
+    workers: int = TEST_WORKERS,
+) -> None:
+    """Run each named path in the suite that installs it, reporting per suite.
+
+    Output reaches the terminal as it arrives rather than being carried back
+    the way the gate carries it: a caller who named one file wants pytest's
+    own failure report, and the gate's ordered summary exists for a run whose
+    checks finish out of order.
+    """
+    failed: list[str] = []
+    for group in group_by_root(test_roots, selections):
+        if not group.root.directory.is_dir():
+            for line in group.root.absent().lines:
+                typer.echo(line)
+            failed.append(group.root.name)
+            continue
+        typer.echo(f"\n{group.root.name}  ({group.root.directory})")
+        try:
+            uv(
+                "run",
+                "pytest",
+                *group.paths,
+                *parallel_arguments(workers),
+                *ignored_arguments(excluded_roots),
+                _cwd=str(group.root.directory),
+                _fg=True,
+            )
+        except sh.ErrorReturnCode:
+            failed.append(group.root.name)
+        except sh.ForkException as error:
+            typer.echo(f"{group.root.name}: never started\n{str(error).strip()}")
+            failed.append(group.root.name)
+    if failed:
+        typer.echo(f"\nFailed: {', '.join(failed)}")
+        raise typer.Exit(1)
 
 
 def inline_notes_lines(found: list[FoundComment], scaffold: bool = False) -> list[str]:
