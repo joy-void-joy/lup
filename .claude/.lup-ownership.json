@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "db5807c312dfb15dd47dfe3c8c47d17d3b89b15cd8b7c3857e80dc2847d41bd9",
+  "source_digest": "1904be3df5fdeb93392b26bb16a276824f7c77ee778d8d8ed359a08160dd19c2",
   "target_requirements": [
     "claude-code"
   ],
@@ -345,7 +345,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "261256aefc5807e934079925fe41c43da1284ed7319332cb6f4e90b5e76bb87d",
+      "sha256": "40fccf0cfa7fed09a5ffc03eb3652440d15fe2ab135083abc1cba551e9bafd32",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -401,7 +401,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/settlement.py",
       "category": "generated",
-      "sha256": "4430b0499934cbcce74df63bbaa4649fd4e3183bd4bbf49948e465f13fa8c355",
+      "sha256": "d059d1912530fcafb25af1cf3e8bbd038366f04387491ac76222fb6075b6980f",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -429,14 +429,14 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "ab8c36c7890052dc8105080d2aa9cd0af902b8fc590825161e86cd82097f9389",
+      "sha256": "f7cebbc8933d324e3955fc2a0a989eff6eb370a40544ee717c8802e871e1868d",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "5cea8b909109ad12cd54b5d77e24be439c06e1bd6222bee4ff871b25cfbbb697",
+      "sha256": "9aeaef3736520b0f48ee4020f58fac7df4618325fab8459fa1b080a3cc69666c",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -534,7 +534,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "c69b38d800e9befc829f0249cdf3485ec5c59e4e926b7bbf09542f33fe24f55b",
+      "sha256": "df2f57b5bc2a3e40872844306e34c5a6344c21351a017feb4c614e60deff75ef",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
