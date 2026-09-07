@@ -24,9 +24,8 @@ The `id_token` is a JWT and does carry an `exp`, and using it would be worse
 than declaring nothing — that claim is the id token's own hour, so every launch
 past the first would read a perfectly good login as dead and re-seed over it.
 
-So Codex keeps the behaviour every runtime had before the field existed: a
-stored login is replaced only when there is none. The cost is the one this
-field exists to remove — a Codex config home whose login has aged out asks for
-a sign-in the container cannot finish — and the way out of it is the fallback
-the launch prints, until Codex publishes a deadline worth reading.
+Host-login fingerprints decide whether an explicit host change is applied;
+unchanged host credentials leave container renewals intact. The launcher asks
+Codex's account API to validate or renew the selected login inside the session
+boundary, and offers device authentication there when a fresh login is needed.
 """

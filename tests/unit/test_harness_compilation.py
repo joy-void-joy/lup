@@ -21,6 +21,7 @@ from lup.tools.lsp.tools import CODEINTEL_TOOL_DECLARATIONS
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
 from lup.providers.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
+from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.harness import (
     CODEX_DISPATCHER,
     CodexSpellings,
@@ -3443,6 +3444,8 @@ def test_a_target_that_renders_one_declaration_short_is_named_with_it(
     full = compile_claude(harness)
     dropped = harness.plugins[0].skills[0].id
     composition = NativeHarnessComposition(
+        login=CLAUDE_LOGIN,
+        default_config_home=tmp_path,
         recipe=GenerationRecipe(
             label="claude",
             root=tmp_path,
@@ -3481,6 +3484,8 @@ def test_a_tree_generated_on_the_way_to_something_else_says_nothing(
     generate(third_recipe(tmp_path, None))
     settled = manifest_of(third_recipe(tmp_path, None))
     composed = NativeHarnessComposition(
+        login=CLAUDE_LOGIN,
+        default_config_home=tmp_path,
         recipe=third_recipe(tmp_path, settled),
         readiness=lambda: [],
         invocation_renderer=ClaudeSpellings(),

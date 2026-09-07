@@ -28,6 +28,8 @@ from lup.providers.claude.profile_store import (
 )
 from lup.harness.codescan.common import RuleSelection
 from lup.providers.codex.harness import CodexSpellings
+from lup.providers.codex.home import CodexWorktreeHomeStore
+from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.harness_runtime import (
     CodexCliEvidence,
     codex_capability_probes,
@@ -146,6 +148,8 @@ class ClaudeComposer(NativeComposer):
             recipe=claude_generation_recipe(root, content, guidance),
             readiness=readiness,
             invocation_renderer=ClaudeSpellings(),
+            login=CLAUDE_LOGIN,
+            default_config_home=Path.home() / ".claude",
             clipboard_transport="commands",
         )
 
@@ -166,6 +170,8 @@ class CodexComposer(NativeComposer):
             recipe=codex_generation_recipe(root, content, guidance),
             readiness=readiness,
             invocation_renderer=CodexSpellings(),
+            login=CODEX_LOGIN,
+            default_config_home=CodexWorktreeHomeStore().home_for(root),
             clipboard_transport="x11",
         )
 
