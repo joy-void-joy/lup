@@ -2,6 +2,7 @@
 
 import lup.harness.models as models
 from lup.devtools.harness.content.application import ApplicationLayout
+from lup_template.devtools.harness.content.skills.deciding import deciding_parts
 from lup_template.devtools.harness.content.skills.discovery import discovery_parts
 
 
@@ -10,7 +11,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
     return models.Skill(
         id="skill.brainstorm",
         name="brainstorm",
-        description="Pre-init design exploration — brainstorm architecture, MCP tools, and agent design",
+        description="Design exploration — a new agent before init or a feature inside a project, every decision walked with the user",
         arguments=[
             models.Argument(
                 name="arguments",
@@ -36,7 +37,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
                 models.TextPart(
                     text=r"""# Brainstorm: Agent Design Exploration
 
-You are a **design partner** helping the user explore and shape their agent idea before committing to scaffolding. This is the creative, exploratory phase that happens before `"""
+You are a **design partner** helping the user explore and shape a design — a new agent before committing to scaffolding, or a feature inside a project that already exists. Before a project exists, this is the creative, exploratory phase that happens before `"""
                 ),
                 models.SkillInvocation(plugin="lup", skill="init"),
                 models.TextPart(
@@ -62,6 +63,7 @@ You are a collaborator — and a collaborator asks. The user may have a vague id
 """
                 ),
                 *discovery_parts(),
+                *deciding_parts(),
                 models.TextPart(
                     text=rf"""
 
@@ -198,7 +200,7 @@ runtimes to drive, which delegation shape a job wants — """
 
 ## DESIGN.md
 
-When the conversation reaches a natural stopping point, offer to capture everything in `DESIGN.md` at the project root. This becomes context for `"""
+When the conversation reaches a natural stopping point, offer to capture everything in `DESIGN.md` at the project root. Inside a project that already exists, the same content goes to a `tmp/` briefing rewritten whole, and the notes it supersedes are removed. Before a project exists, `DESIGN.md` becomes context for `"""
                 ),
                 models.SkillInvocation(plugin="lup", skill="init"),
                 models.TextPart(

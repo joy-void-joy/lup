@@ -199,7 +199,7 @@ regenerate.
 
 - /lup:add-command — Create a new slash command in the lup plugin
 - /lup:analyze — Retain a ChatGPT or Claude conversation and answer from its files
-- /lup:brainstorm — Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
+- /lup:brainstorm — Design exploration — a new agent before init or a feature inside a project, every decision walked with the user
 - /lup:bump — Review changes since last bump and bump agent version
 - /lup:close — Check PR review status, merge if approved, and clean up branches
 - /lup:commit — Review all diffs and create atomic commits

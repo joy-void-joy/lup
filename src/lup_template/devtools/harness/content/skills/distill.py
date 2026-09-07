@@ -1,6 +1,7 @@
 """Canonical declaration for the distill skill."""
 
 import lup.harness.models as models
+from lup_template.devtools.harness.content.skills.deciding import deciding_parts
 from lup_template.devtools.harness.content.skills.discovery import discovery_parts
 
 SKILL = models.Skill(
@@ -115,6 +116,7 @@ you.
 """
             ),
             *discovery_parts(),
+            *deciding_parts(),
             models.TextPart(
                 text=r"""
 Then the questions only a restart has: """

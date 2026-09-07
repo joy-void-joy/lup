@@ -2,6 +2,7 @@
 
 import lup.harness.models as models
 from lup.devtools.harness.content.application import ApplicationLayout
+from lup_template.devtools.harness.content.skills.deciding import deciding_parts
 
 
 def skill(layout: ApplicationLayout) -> models.Skill:
@@ -113,15 +114,11 @@ Each tree lays the same declarations out its own way, and `docs/platform-differe
 - **Hooks**: Permission rules in the canonical policy — auto-allow, deny, or quality gates
 - **Agents**: Subagent definitions for specialized tasks
 - **Devtools**: Python CLI tools go in `{layout.directory("devtools")}` (exposed as `lup-devtools`), not in the plugin
-
-## Brainstorming Principles
-
-- **Propose, don't assume**: put the change to the user as a question before making it
-- **Show context**: When proposing changes, show the relevant current state first
-- **Group related changes**: Batch related improvements into single proposals
-- **Explain rationale**: Every suggestion should include why it would help
-- **Offer alternatives**: When there are multiple valid approaches, present options
-
+"""
+                ),
+                *deciding_parts(),
+                models.TextPart(
+                    text=r"""
 ## First Principles Design
 
 When considering changes, ask:
