@@ -238,6 +238,69 @@ def test_a_marker_added_where_the_edit_removed_none_still_asks() -> None:
     assert decision.effect == "ask"
 
 
+def test_taking_a_directive_away_is_denied_while_its_violation_stands() -> None:
+    """The added-line scan is blind to a violation the edit does not retype.
+
+    Removing a directive adds no line, so the line it was covering is
+    byte-identical across the edit and every scan keyed on added lines misses
+    it. The write landed clean and `dev check` then reported the rule missing
+    — the gate and the audit disagreeing about the same file, which is the one
+    outcome this pair exists to rule out.
+    """
+    decision = antipattern_decision(
+        "value: Any = 1  # lup: ignore[any-type]\n",
+        "value: Any = 1\n",
+        suppression_rows(),
+        python_source=True,
+    )
+
+    assert decision is not None
+    assert decision.effect == "deny"
+    assert "any-type" in decision.reason
+
+
+def test_a_directive_taken_off_a_line_that_stopped_tripping_is_fine() -> None:
+    """Clearing the violation is the other half of the fix, and costs nothing.
+
+    The denial names two remedies and this is the second: the directive goes
+    because what it was silencing went with it. Denying here would demand a
+    marker guarding nothing, which the spurious refusal then takes back out.
+    """
+    decision = antipattern_decision(
+        "value: Any = 1  # lup: ignore[any-type]\n",
+        "value: int = 1\n",
+        suppression_rows(),
+        python_source=True,
+    )
+
+    assert decision is None or decision.effect != "deny"
+
+
+def test_debt_the_edit_did_not_uncover_is_left_to_the_audit() -> None:
+    """A rescan sees lines the edit never proposed, so it is scoped to two.
+
+    Only rules a withdrawn directive named, and within those only the lines
+    that directive was covering. The second line here trips the same rule and
+    was never suppressed, so it is the file's standing debt rather than
+    anything this edit did — charging it to whoever next touches the file
+    would make the gate impossible to get past without unrelated repairs.
+    """
+    before = (
+        "first: Any = 1  # lup: ignore[any-type]\n"
+        "second: Any = 2\n"
+        "third: Any = 3  # lup: ignore[any-type]\n"
+    )
+    after = "first: Any = 1  # lup: ignore[any-type]\nsecond: Any = 2\nthird: Any = 3\n"
+
+    decision = antipattern_decision(
+        before, after, suppression_rows(), python_source=True
+    )
+
+    assert decision is not None
+    assert decision.effect == "deny"
+    assert "line 3" in decision.reason
+
+
 def test_rule_ids_are_unique_kebab_case() -> None:
     """Every rule id is a distinct kebab-case token a typed ignore can target."""
     for table in (PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS):
