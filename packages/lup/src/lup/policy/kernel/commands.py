@@ -4,6 +4,7 @@
 
 import posixpath
 import re
+from collections.abc import Sequence
 from typing import TypedDict
 
 from .decision import (
@@ -269,7 +270,7 @@ def flag_write_verdict(
 
 
 def verb_loss_scope(
-    words: list[str], facts: WriteFacts
+    words: list[str], facts: WriteFacts, write_flags: Sequence[str] = ()
 ) -> CheckpointRequirement | None:
     """What a verb's own targets say the loss is, read one target at a time.
 
@@ -289,17 +290,20 @@ def verb_loss_scope(
     reads is an ordinary read however far outside it sits.
 
     Which verbs those are is :func:`written_targets`' question rather than
-    this one's, and it answers for the archives too. They read their targets
+    this one's, and the row's declared ``write_flags`` go with the words so a
+    command naming its destination in an option is read from the column that
+    already states it rather than from a second table saying the same thing.
+
+    It answers for the archives too. They read their targets
     already -- to grant an extraction that lands on nothing -- and where the
     grant did not apply the row's own claim stood: ``gzip /etc/hosts`` and
     ``tar -xf a.tgz -C /etc`` were settled by a capture that has never held
     either path, which is the same defect the delete verbs were fixed for.
 
-    ``None`` leaves the row's own scope standing -- an unmodelled verb, a line
-    whose flags could move which paths are touched, or targets that are all
-    inside the checkout, where the row was already right.
+    ``None`` leaves the row's own scope standing -- an unmodelled verb, or
+    targets that are all inside the checkout, where the row was already right.
     """
-    targets = written_targets(words)
+    targets = written_targets(words, write_flags)
     if targets is None:
         return None
     if any(
@@ -515,7 +519,7 @@ def apply_command_row(
     # because it changes what the loss *is* rather than whether the row asks:
     # a scratch grant is still a scratch grant, and a delete reaching outside
     # the checkout is a loss no capture of this session holds.
-    loss = verb_loss_scope([row["command"], *arguments], measured)
+    loss = verb_loss_scope([row["command"], *arguments], measured, row["write_flags"])
     if loss is not None:
         return row_verdict(
             row,

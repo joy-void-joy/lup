@@ -4898,7 +4898,9 @@ SHELL_RULES: list[ShellRuleRow] = [
         "ask_refspecs": [],
         "ask_flags": [],
         "flag_effects": [],
-        "write_flags": [],
+        "write_flags": [
+            "of",
+        ],
         "allow_flags": [],
         "read_verbs": [],
         "write_markers": [
@@ -4990,13 +4992,13 @@ SHELL_RULES: list[ShellRuleRow] = [
         "operation": "",
         "sandbox": "ambient",
         "sandbox_source": "root",
-        "checkpoint": "boundary_wide",
+        "checkpoint": "unrecoverable",
         "checkpoint_source": "command",
         "reviewer": "human_only",
         "effects": [
             {
                 "kind": "destroys_uncaptured",
-                "scope": "boundary_wide",
+                "scope": "unrecoverable",
                 "write": "",
                 "reviewed": False,
                 "reason": "",
@@ -5026,13 +5028,13 @@ SHELL_RULES: list[ShellRuleRow] = [
         "operation": "",
         "sandbox": "ambient",
         "sandbox_source": "root",
-        "checkpoint": "boundary_wide",
+        "checkpoint": "unrecoverable",
         "checkpoint_source": "command",
         "reviewer": "human_only",
         "effects": [
             {
                 "kind": "destroys_uncaptured",
-                "scope": "boundary_wide",
+                "scope": "unrecoverable",
                 "write": "",
                 "reviewed": False,
                 "reason": "",
@@ -5681,13 +5683,13 @@ SHELL_RULES: list[ShellRuleRow] = [
         "operation": "",
         "sandbox": "ambient",
         "sandbox_source": "root",
-        "checkpoint": "boundary_wide",
+        "checkpoint": "unrecoverable",
         "checkpoint_source": "command",
         "reviewer": "human_only",
         "effects": [
             {
                 "kind": "destroys_uncaptured",
-                "scope": "boundary_wide",
+                "scope": "unrecoverable",
                 "write": "",
                 "reviewed": False,
                 "reason": "",
@@ -5717,13 +5719,13 @@ SHELL_RULES: list[ShellRuleRow] = [
         "operation": "",
         "sandbox": "ambient",
         "sandbox_source": "root",
-        "checkpoint": "boundary_wide",
+        "checkpoint": "unrecoverable",
         "checkpoint_source": "command",
         "reviewer": "human_only",
         "effects": [
             {
                 "kind": "destroys_uncaptured",
-                "scope": "boundary_wide",
+                "scope": "unrecoverable",
                 "write": "",
                 "reviewed": False,
                 "reason": "",
@@ -5753,13 +5755,13 @@ SHELL_RULES: list[ShellRuleRow] = [
         "operation": "",
         "sandbox": "ambient",
         "sandbox_source": "root",
-        "checkpoint": "boundary_wide",
+        "checkpoint": "unrecoverable",
         "checkpoint_source": "command",
         "reviewer": "human_only",
         "effects": [
             {
                 "kind": "destroys_uncaptured",
-                "scope": "boundary_wide",
+                "scope": "unrecoverable",
                 "write": "",
                 "reviewed": False,
                 "reason": "",
@@ -5789,13 +5791,13 @@ SHELL_RULES: list[ShellRuleRow] = [
         "operation": "",
         "sandbox": "ambient",
         "sandbox_source": "root",
-        "checkpoint": "boundary_wide",
+        "checkpoint": "unrecoverable",
         "checkpoint_source": "command",
         "reviewer": "human_only",
         "effects": [
             {
                 "kind": "destroys_uncaptured",
-                "scope": "boundary_wide",
+                "scope": "unrecoverable",
                 "write": "",
                 "reviewed": False,
                 "reason": "",
@@ -5825,13 +5827,13 @@ SHELL_RULES: list[ShellRuleRow] = [
         "operation": "",
         "sandbox": "ambient",
         "sandbox_source": "root",
-        "checkpoint": "boundary_wide",
+        "checkpoint": "unrecoverable",
         "checkpoint_source": "command",
         "reviewer": "human_only",
         "effects": [
             {
                 "kind": "destroys_uncaptured",
-                "scope": "boundary_wide",
+                "scope": "unrecoverable",
                 "write": "",
                 "reviewed": False,
                 "reason": "",
@@ -5861,13 +5863,13 @@ SHELL_RULES: list[ShellRuleRow] = [
         "operation": "",
         "sandbox": "ambient",
         "sandbox_source": "root",
-        "checkpoint": "boundary_wide",
+        "checkpoint": "unrecoverable",
         "checkpoint_source": "command",
         "reviewer": "human_only",
         "effects": [
             {
                 "kind": "destroys_uncaptured",
-                "scope": "boundary_wide",
+                "scope": "unrecoverable",
                 "write": "",
                 "reviewed": False,
                 "reason": "",

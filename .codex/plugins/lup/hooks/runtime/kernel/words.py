@@ -3,6 +3,7 @@
 """Word-level shell helpers: expansion safety, flags, and payloads."""
 
 import posixpath
+from collections.abc import Sequence
 from fnmatch import fnmatchcase
 from typing import TypedDict
 
@@ -166,7 +167,14 @@ def uv_run_words(words: list[str]) -> list[str]:
 # cluster falls through to the verb's own effect. Membership is about taking
 # paths, not about asking: `mkdir` and `touch` are allowed and still listed,
 # because the refusals that read this map — a write inside a generated plugin
-# tree, above all — are owed by every verb that names a path.
+# tree, above all — are owed by every verb that names a path. A verb that
+# overwrites one in place belongs here for the same reason a verb that removes
+# one does: what is at the path afterwards is not what was there before.
+#
+# A flag that consumes the following word is left out rather than modelled, so
+# `truncate -s 0 f` reads as non-inert. Callers widen to every operand there,
+# which names the size as a target — harmless, since no size spells a path any
+# scope reading grades beyond this checkout.
 # lup: ignore[library-default] — each verb's own POSIX flags, fixed by what the utility does rather than by who is asking
 SCRATCH_VERB_FLAGS = {
     "rm": "rfv",
@@ -175,6 +183,9 @@ SCRATCH_VERB_FLAGS = {
     "cp": "aprRvL",
     "mkdir": "pv",
     "touch": "acm",
+    "ln": "sfnvrihTPL",
+    "tee": "aip",
+    "truncate": "co",
 }
 
 
@@ -255,6 +266,16 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     question exists for. Nothing declares this, because a checkout that did
     not hold it would not be a checkout.
 
+    Read as a segment anywhere rather than as a leading ``.git``, because a
+    linked worktree has no leading one: its ``.git`` is a *file* pointing at
+    ``<somewhere>/repo.git/worktrees/<name>``, and the config and hooks it
+    shares live under that ``repo.git`` directory. So the repository these
+    sessions run out of was reachable by absolute path and graded ``outside``,
+    where a contained placement writes freely — and the measured rule that
+    catches an unleased write cannot hold it either, since a launch mounts the
+    shared administrative directory writable on purpose. A hook written there
+    runs on the operator's next Git command, outside whatever granted it.
+
     A declared role is read before either spelling, because a role is somebody
     saying where a path belongs and a spelling is only this reading guessing.
     The session scratchpad is the case that settles it: it is absolute, so the
@@ -263,7 +284,7 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     """
     if path_role(path_text, path_roles) == "scratch":
         return "scratch"
-    if path_text == ".git" or path_text.startswith(".git/"):
+    if any(segment.endswith(".git") for segment in path_text.split("/")):
         return "protected"
     if leaves_the_checkout(path_text):
         return "outside"
@@ -499,29 +520,48 @@ def written_operands(executable: str, operands: list[str]) -> list[str]:
     """The operands a path verb modifies, as opposed to the ones it reads.
 
     Copying reads every source and writes only the destination, so a path
-    named as a source is an ordinary read however protected it is. Every other
-    verb here removes or creates each path it is given.
+    named as a source is an ordinary read however protected it is. Linking
+    reads its source the same way -- the link stands where the last operand
+    does. Every other verb here removes or creates each path it is given.
     """
-    if executable == "cp" and len(operands) > 1:
+    if executable in ("cp", "ln") and len(operands) > 1:
         return operands[-1:]
     return operands
 
 
-def written_targets(words: list[str]) -> list[str] | None:
+def written_targets(
+    words: list[str], write_flags: Sequence[str] = ()
+) -> list[str] | None:
     """Every path this line would write over, or ``None`` where none can be named.
 
-    Two grammars answer one question. A path verb takes paths and nothing
-    else, so its operands are its targets; an archive verb states separately
-    where it authors, what it consumes and which directory it unpacks into.
-    What a caller wants of either is the same list, because what it asks of
-    that list is the same question -- where the loss lands.
+    Three grammars answer one question. A row that names the options carrying
+    its destination has already said where it writes, so that column is read
+    before anything here guesses; a path verb takes paths and nothing else, so
+    its operands are its targets; an archive verb states separately where it
+    authors, what it consumes and which directory it unpacks into. What a
+    caller wants of any of them is the same list, because what it asks of that
+    list is the same question -- where the loss lands.
 
-    ``None`` for an unmodelled line and for a verb whose flags could move
-    which paths are touched, which leaves every caller with the answer it had
-    before it asked.
+    The declared column wins outright rather than adding to the others: a row
+    saying ``of=`` is where ``dd`` lands is also saying its remaining words are
+    not paths, and reading them as operands would name ``if=/dev/zero`` as a
+    write. A row that declares nothing there falls through, which is every row
+    whose destination is positional.
+
+    A flag this cannot read could move which paths are touched, so the
+    positions stop meaning what they read and every operand is named instead.
+    Widening is the reading a caller that *refuses* something owes, and every
+    caller here is one: ``rm --interactive=never /etc/hosts`` names a path no
+    capture of this checkout holds whatever the flag turns out to do, and
+    declining to answer would have left the row claiming otherwise.
+
+    ``None`` only for an unmodelled line, which leaves every caller with the
+    answer it had before it asked.
     """
     if not words:
         return None
+    if write_flags:
+        return flag_write_targets(words, list(write_flags))
     archived = archive_write(words)
     if archived is not None:
         return archive_targets(archived)
@@ -530,7 +570,7 @@ def written_targets(words: list[str]) -> list[str] | None:
         return None
     verb = path_verb_operands(words)
     if not verb["inert"]:
-        return None
+        return verb["operands"]
     return written_operands(executable, verb["operands"])
 
 
