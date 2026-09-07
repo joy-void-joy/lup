@@ -524,19 +524,26 @@ class PromptDocument(BaseModel, frozen=True):
         return sum(document_byte_size(text) for text in self.prose())
 
 
-class Document(BaseModel, frozen=True):
+class Document(SelectableRule, frozen=True):
     """One generated repository document and where it renders.
 
     Separate from the roster that lists them: which documents a project
     publishes is its own decision, but that each is a prompt document with a
     path, an identity, and a declaring module is what makes the roster
     renderable by machinery no project writes.
+
+    Selectable under its semantic id, which is the name ownership records it
+    under — so a project declining a page, and the manifest saying no file
+    there is owned, answer to one string.
     """
 
     path: Path
     semantic_id: str
     source: str
     document: PromptDocument
+
+    def selection_id(self) -> str:
+        return self.semantic_id
 
 
 GUIDANCE_BYTE_BUDGET = 32_768
@@ -763,25 +770,63 @@ class ContentSelection(BaseModel, frozen=True):
         return [declaration.id for declaration in [*self.skills, *self.agents]]
 
 
+type GuidanceChapter = Literal[
+    "orientation",
+    "gates",
+    "workflow",
+    "code",
+    "tooling",
+    "process",
+    "meta",
+]
+"""Where in the always-loaded document one section belongs.
+
+The document has a spine — orient the reader, tell them what will stop them,
+the change loop, how to write code, what to run, how to report, and the loop
+over all of it — and that spine crosses ownership constantly: what to run is
+three subjects in a row. Naming the chapter is what lets a subject place its
+own prose without reading the whole document or asking anyone to sequence it.
+"""
+
+
+def default_chapters() -> list[GuidanceChapter]:
+    """The spine in reading order — the batteries-included sequence.
+
+    Offered rather than imposed: which part of a document an agent should meet
+    first is a judgement, and a project whose reader needs its domain before
+    its gates is answering a question this library had no standing to close.
+    A project with no opinion composes this; one that has an opinion passes
+    its own order to the composition rather than editing this call.
+    """
+    return [
+        "orientation",
+        "gates",
+        "workflow",
+        "code",
+        "tooling",
+        "process",
+        "meta",
+    ]
+
+
 class GuidanceSection(SelectableRule, frozen=True):
     """One identified stretch of the always-loaded document.
 
-    The document was a hand-ordered splice of twenty constants across two
-    packages, and that shape cost three things at once. A section had no name,
-    so nothing could retire or replace one; a section had no owner, so a
-    subject split across four constants at opposite ends read as four
-    unrelated paragraphs; and the order was a literal list nobody could
-    compose two of. Naming each and resolving the order from a declaration
-    answers all three with the algebra every other table here already uses.
+    Named, so a project can retire one, replace one, or add its own beside
+    them through the same algebra every other table here resolves through, and
+    so a report can attribute bytes to something a reader can act on.
 
     The parts are a rendered stretch rather than a heading and a body, because
-    that is what a section actually is: several of them open no heading at all
-    (a pointer paragraph folded under the heading above it), and forcing one
-    would put a heading in the document that nobody wrote.
+    that is what a section is: several open no heading at all — a pointer
+    paragraph folded under the heading above — and requiring one would put a
+    heading in the document that nobody wrote.
     """
 
     id: str
     """The name this section is retired, replaced, or reported under."""
+
+    chapter: GuidanceChapter
+    """Which part of the spine it belongs to, which is where it renders."""
 
     parts: list[PromptPart]
     """What it contributes, in the order it contributes it."""

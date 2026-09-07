@@ -12,10 +12,10 @@ and to the generated reference behind it — a second copy in always-loaded
 prose can only fall behind the registry that actually runs, and is redundant
 for as long as it agrees.
 
-One constant per section, spliced in reading order by ``guidance_parts``.
-The document is held to a byte ceiling it sits close to, and a single
-returned list gave nobody a place to see which section was spending it —
-``dev guidance`` reports per heading, and these are the pieces that answer.
+One named section per stretch, each declaring the chapter of the spine it
+renders into. The document is held to a byte ceiling it sits close to, so a
+section is also the unit somebody condensing works in: what ``dev guidance``
+reports against, and what a project retires or rewrites by name.
 """
 
 import lup.harness.content.conventions as conventions
@@ -24,6 +24,7 @@ from lup.harness.codescan.common import RuleSelection
 
 HEADER = models.GuidanceSection(
     id="header",
+    chapter="orientation",
     parts=[
         models.TextPart(
             text=r"""# Lup repository guidance
@@ -37,6 +38,7 @@ Lup is a reusable framework and template for autonomous, tool-using agents: keep
 
 CHANGING_THE_POLICY = models.GuidanceSection(
     id="changing-the-policy",
+    chapter="gates",
     parts=[
         models.TextPart(text=r"""Change the policy those gates enforce with """),
         models.SkillInvocation(plugin="lup", skill="hooks"),
@@ -54,6 +56,7 @@ CHANGING_THE_POLICY = models.GuidanceSection(
 
 MARKER_VOCABULARY = models.GuidanceSection(
     id="marker-vocabulary",
+    chapter="gates",
     parts=[
         models.TextPart(
             text=r"""### The `# lup:` Marker Vocabulary
@@ -71,6 +74,7 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** about the co
 
 DEFERRED_WORK = models.GuidanceSection(
     id="deferred-work",
+    chapter="gates",
     parts=[
         models.TextPart(
             text=r"""### Deferred Work
@@ -86,6 +90,7 @@ DEFERRED_WORK = models.GuidanceSection(
 
 DEVELOPMENT_WORKFLOW = models.GuidanceSection(
     id="development-workflow",
+    chapter="workflow",
     parts=[
         models.TextPart(
             text=r"""## Development Workflow
@@ -103,6 +108,7 @@ Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev
 
 COMMIT_TYPE_POINTER = models.GuidanceSection(
     id="commit-type-pointer",
+    chapter="workflow",
     parts=[
         models.TextPart(
             text=r"""The type comes from `docs/contributing.md`'s table, which the commit skill renders when one is chosen.
@@ -114,6 +120,7 @@ COMMIT_TYPE_POINTER = models.GuidanceSection(
 
 CODE_CONVENTIONS = models.GuidanceSection(
     id="code-conventions",
+    chapter="code",
     parts=[
         models.TextPart(
             text=r"""---
@@ -135,6 +142,7 @@ Build on `lup` and pydantic; prefer an existing PyPI library to raw HTTP or a re
 
 TOOLING = models.GuidanceSection(
     id="tooling",
+    chapter="tooling",
     parts=[
         models.TextPart(
             text=r"""---
@@ -164,6 +172,7 @@ To **read** code use the `py` group or `codeintel`, which resolves a name throug
 
 CONFIGURATION = models.GuidanceSection(
     id="configuration",
+    chapter="tooling",
     parts=[
         models.TextPart(
             text=r"""---
@@ -179,6 +188,7 @@ Configuration loads through pydantic-settings in `src/lup_template/agent/config.
 
 PROCESS_AND_COMMUNICATION = models.GuidanceSection(
     id="process-and-communication",
+    chapter="process",
     parts=[
         models.TextPart(
             text=r"""---
@@ -200,6 +210,7 @@ Verify claims against **what was actually asked** — the note or issue itself, 
 
 REPORTING_FRICTION = models.GuidanceSection(
     id="reporting-friction",
+    chapter="process",
     parts=[
         models.TextPart(
             text=r"""### Reporting Friction
@@ -213,6 +224,7 @@ REPORTING_FRICTION = models.GuidanceSection(
 
 EXTERNAL_RESOURCES = models.GuidanceSection(
     id="external-resources",
+    chapter="meta",
     parts=[
         models.TextPart(
             text=r"""### External Resources
@@ -230,6 +242,7 @@ When a question is about the harness you run under, its agent SDK, or its model 
 
 SELF_IMPROVEMENT = models.GuidanceSection(
     id="self-improvement",
+    chapter="meta",
     parts=[
         models.TextPart(
             text=r"""---

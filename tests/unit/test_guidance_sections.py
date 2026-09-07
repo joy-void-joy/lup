@@ -58,6 +58,7 @@ def test_a_declared_section_replaces_the_one_of_its_id_in_place() -> None:
     """A project rewriting one section says so where it would have added it."""
     mine = models.GuidanceSection(
         id="configuration",
+        chapter="tooling",
         parts=[models.TextPart(text="## Configuration\n\nSomewhere else.\n")],
     )
 
@@ -71,6 +72,7 @@ def test_a_sections_text_is_the_prose_it_carries() -> None:
     """What a weigher reads, without knowing which kinds of part hold words."""
     section = models.GuidanceSection(
         id="worked-example",
+        chapter="code",
         parts=[
             models.TextPart(text="before "),
             models.SkillInvocation(plugin="lup", skill="commit"),

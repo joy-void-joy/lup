@@ -35,6 +35,7 @@ from lup.formats.markdown import CodeCell, PlainCell
 
 PLAN_AT_AGENT_SPEED = models.GuidanceSection(
     id="plan-at-agent-speed",
+    chapter="orientation",
     parts=[
         models.TextPart(
             text=r"""## Plan at Agent Speed
@@ -50,6 +51,7 @@ Your instincts about how long software takes were learned from human teams, whos
 
 AGENT_VOCABULARY = models.GuidanceSection(
     id="agent-vocabulary",
+    chapter="orientation",
     parts=[
         models.TextPart(
             text=r"""## Agent Vocabulary
@@ -65,6 +67,7 @@ Two kinds of delegated agent look alike and must not be conflated: the **native 
 
 THE_GATES = models.GuidanceSection(
     id="the-gates",
+    chapter="gates",
     parts=[
         models.TextPart(
             text=r"""## The Gates You Will Meet
@@ -141,6 +144,7 @@ def design_principles(
     """
     return models.GuidanceSection(
         id="design-principles",
+        chapter="code",
         parts=[
             models.TextPart(
                 text=r"""### Design Principles
@@ -163,6 +167,7 @@ def design_principles(
 
 SANCTIONED_EXCEPTIONS = models.GuidanceSection(
     id="sanctioned-exceptions",
+    chapter="code",
     parts=[
         models.TextPart(
             text=r"""### Exceptions No Rule Can See
@@ -184,6 +189,7 @@ linting convention. They stay because nothing else carries them.
 
 FAILURE_ANALYSIS = models.GuidanceSection(
     id="failure-analysis",
+    chapter="meta",
     parts=[
         models.TextPart(
             text=r"""**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" Instead of a prompt line about the decision that went wrong: does the agent have enough context? The right tools? A strong enough model?
@@ -208,6 +214,7 @@ sentence, where the pair is two paragraphs a reader pays for every turn.
 
 LONG_RUNNING_WORK = models.GuidanceSection(
     id="long-running-work",
+    chapter="tooling",
     parts=[
         models.TextPart(
             text=r"""---
@@ -223,6 +230,7 @@ Work outliving its tool call is launched to survive its launcher — never from 
 
 DEFECT_DISPOSITION = models.GuidanceSection(
     id="defect-disposition",
+    chapter="process",
     parts=[
         models.TextPart(
             text=r"""**"Pre-existing" is not a disposition.** Naming a defect and disclaiming it by age leaves the repository as you found it. A fault you can see takes one of three: fixed here, when it sits inside what this change already touches; fixed on its own branch, when it does not; or recorded where a workflow surfaces it — a `# lup: defer:` note at the site, an issue where the tooling is at fault. Report which it took.
@@ -242,6 +250,7 @@ age a decision — belongs to how agents report, not to any one repository.
 
 MERGE_CONFLICT_RESOLUTION = models.GuidanceSection(
     id="merge-conflict-resolution",
+    chapter="workflow",
     parts=[
         models.TextPart(
             text=r"""### Merge Conflict Resolution
@@ -259,6 +268,7 @@ MERGE_CONFLICT_RESOLUTION = models.GuidanceSection(
 
 COMMIT_TYPES = models.GuidanceSection(
     id="commit-types",
+    chapter="workflow",
     parts=[
         models.MarkdownTable(
             headers=["Type", "Use"],
@@ -301,6 +311,7 @@ once.
 
 COMMIT_GUIDELINES = models.GuidanceSection(
     id="commit-guidelines",
+    chapter="workflow",
     parts=[
         models.TextPart(
             text=r"""### Commit Guidelines
