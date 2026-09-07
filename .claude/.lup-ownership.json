@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "370196aea712e33d27c987a2772b5a9f30813b5eaf07752697aeec08ff7e9b40",
+  "source_digest": "d7d1dea4c0297b219b61ec26ab4b6b487ecc122298eff4ec7d9cefd2a078296d",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "3c90f56f93180a982b60e2c27345908da2668bf437c242ed57789cc3063ac3de",
+      "sha256": "3ac4ad5a1837123ea17fd2177596c638d964d2119c09a6efe837b12485b9b375",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -86,7 +86,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "41a5d3ff9beeb96baf1d7e5dc2fc047af6dfe477a7ef8c8a92e7ada06b5461fd",
+      "sha256": "805c871ca67dd913739097eedb9c51e1c7d63915ddf46c2521238ce69f0d34f1",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -128,7 +128,7 @@
     {
       "path": ".claude/plugins/lup/commands/distill.md",
       "category": "generated",
-      "sha256": "1d8ed6efde73bc5b32c98d1b3b34d3ebe58caac19c4d21cf35e18ebdc18d6275",
+      "sha256": "af2546e334d5975535ecdf15571611cd0d7b3397bfe46374ab22d46b70161081",
       "semantic_id": "skill.distill",
       "executable": false
     },
@@ -226,7 +226,7 @@
     {
       "path": ".claude/plugins/lup/commands/meta.md",
       "category": "generated",
-      "sha256": "0564ad81bccaa64ca1ab97b66d698832bc1639bb7bec396e9768e3bca2b6d0c0",
+      "sha256": "37b75f4144ae55bd7b4bc5eee5796c15cfb2901af46748e2446340f38a12b83f",
       "semantic_id": "skill.meta",
       "executable": false
     },
@@ -499,7 +499,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "64c9e5b6bbb4f6c2c0b3be8e2eaa35366d80f5191b7e6768a404982a78e6e3ee",
+      "sha256": "3934d2511fcdc7592d719661a9f0fec273053e40a0519fe2bcaf697d70e2b193",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -583,7 +583,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "dbf0b9459c7ecb5869562307f730b31c9ee5423faac56f425545e8b35678bdba",
+      "sha256": "979bde7a9b549088b69af5936eace146eb1a921341057d4fd6533496d92634b5",
       "semantic_id": "docs.template",
       "executable": false
     },
