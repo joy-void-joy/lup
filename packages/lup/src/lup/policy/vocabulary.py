@@ -45,6 +45,7 @@ from pydantic import BaseModel
 
 from lup.policy.kernel.decision import CheckpointRequirement, SandboxPlacement
 from lup.policy.kernel.effects import EffectRow, declare
+from lup.policy.kernel.rows import DestinationForm
 from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -867,10 +868,11 @@ def git_rule(
     sandbox: SandboxPlacement = "ambient",
     config_executing_keys: tuple[str, ...] = GIT_CONFIG_EXECUTING_KEYS,
     config_retargeting_keys: tuple[str, ...] = GIT_CONFIG_RETARGETING_KEYS,
+    push_destinations: tuple[DestinationForm, ...] = ("url", "path"),
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
 
-    Three judgements a project can reasonably differ on are parameters rather
+    The judgements a project can reasonably differ on are parameters rather
     than a reason to fork the table.
 
     ``guard_force_push`` decides whether replacing what a remote ref points
@@ -921,6 +923,22 @@ def git_rule(
     runs, the other about where the work goes. A project whose forge access
     is scoped elsewhere -- a token that reaches one repository and no other --
     can pass none of them and lose nothing.
+
+    ``push_destinations`` are the ways of naming a repository inline that a
+    push has to ask about. `git push <url> main` needs no remote and writes
+    no configuration, so every guard over the remote table looks straight
+    past it -- and the table is worth trusting precisely because putting a
+    destination in it asks. Both forms are guarded by default. A project that
+    mirrors into a bare repository beside its checkout drops ``path`` and
+    keeps the one that leaves the machine; a project whose network is closed
+    to everything but its forge can drop ``url`` on the same reasoning, and
+    one that passes neither is saying its push has nowhere unapproved to go.
+
+    Structural, and only structural: whether a bare word is a remote this
+    repository holds is a question for `git remote`, which the kernel reading
+    this is hermetic in order not to run. A bare name that is not configured
+    reaches nothing -- git fails before any object moves -- so the forms that
+    do reach somewhere are the whole of what is left to guard.
     """
     # One statement of which settings are worth a question, read by both
     # spellings that reach them: the `config` verb and the `-c` global.
@@ -946,7 +964,13 @@ def git_rule(
             reason="merging puts work on a branch other people build on",
         ),
     ]
-    push_flags = ["--delete", "--mirror", "--prune"]
+    # `--repo` is the one spelling of a destination the operand reading below
+    # cannot reach: it carries the repository as a flag value, and a flag is
+    # exactly what that reading skips. It asks whatever it names, because the
+    # flag is legacy — git documents it as relevant only when no repository
+    # operand is passed — and a question on an invocation nobody writes costs
+    # less than a second reader for one word.
+    push_flags = ["--delete", "--mirror", "--prune", "--repo"]
     guarded = [
         *[
             ShellSubcommandRule(
@@ -1033,6 +1057,7 @@ def git_rule(
         ShellSubcommandRule(
             name="push",
             effects=[declare("publishes", scope="branch")],
+            ask_destinations=list(push_destinations),
             ask_refspecs=(["delete", "force"] if guard_force_push else ["delete"]),
             ask_flags=(
                 [*push_flags, "-f", "--force", "--force-with-lease"]
@@ -1040,9 +1065,11 @@ def git_rule(
                 else push_flags
             ),
             reason=(
-                "rewriting or removing a remote ref requires approval"
+                "rewriting or removing a remote ref, or aiming the push"
+                " elsewhere, requires approval"
                 if guard_force_push
-                else "removing a remote ref requires approval"
+                else "removing a remote ref, or aiming the push elsewhere,"
+                " requires approval"
             ),
         ),
         # The same arrival `gh repo clone` is, reached by the other spelling:

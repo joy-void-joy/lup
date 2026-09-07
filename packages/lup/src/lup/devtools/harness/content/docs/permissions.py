@@ -151,6 +151,7 @@ question the row alone cannot:
 | `allow_flags`, `read_verbs`, `write_markers`, `bare_reads`, `guarded_keys` | the de-escalations: a pure read-only form, a verb that pins the query action, a marker whose absence means it only reads, the argument-less form, a setting that redirects neither execution nor the repository this checkout talks to |
 | `setting_flags`, `guarded_settings` | the same absence test about a global that carries a setting — `git -c color.ui=false` turns off colour, `git -c core.pager=x` runs a program and `git -c remote.origin.url=x` aims the next push somewhere else, and only the last two are worth interrupting about |
 | `ask_refspecs` | the effects an operand's *grammar* carries, for a push that spells force and delete twice |
+| `ask_destinations` | the forms of repository named inline that the first non-flag operand may carry — a URL or a path reaches one the remote table never heard of, where a bare remote name is one somebody approved putting there |
 
 A rule declaring `reviewed` on a write says the route it takes has gates that
 read what it wrote. It is declared rather than measured: which gates a

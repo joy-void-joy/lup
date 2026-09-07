@@ -73,6 +73,7 @@ from lup.policy.kernel.decision import (
     SandboxPlacement,
 )
 from lup.policy.kernel.rows import (
+    DestinationForm,
     RefspecEffect,
     RunnerTargetRow,
     RuleLevel,
@@ -359,12 +360,16 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     effect is kept only for the settings that redirect how commands execute.
     ``ask_refspecs`` states the ``ask_flags`` downgrade about an operand's
     grammar instead of a word's spelling, for a subcommand whose refspecs
-    carry the same effects its flags do.
+    carry the same effects its flags do. ``ask_destinations`` states the same
+    downgrade about the first operand that is not a flag, for a subcommand
+    that takes a repository there and accepts one spelled out inline as
+    readily as one the remote table holds.
     """
 
     name: str
     effects: list[EffectRow] = []
     refuses: str = ""
+    ask_destinations: list[DestinationForm] = []
     ask_refspecs: list[RefspecEffect] = []
     ask_flags: list[str] = []
     flag_effects: list[EffectRow] = []
@@ -633,6 +638,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 command=command_name,
                 subcommand=subcommand.name,
                 operation=operation.name,
+                ask_destinations=[],
                 ask_refspecs=[],
                 ask_flags=list(operation.ask_flags),
                 flag_effects=list(operation.flag_effects),
@@ -655,6 +661,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command_name,
             subcommand=subcommand.name,
             operation="",
+            ask_destinations=list(subcommand.ask_destinations),
             ask_refspecs=list(subcommand.ask_refspecs),
             ask_flags=list(subcommand.ask_flags),
             flag_effects=list(subcommand.flag_effects),
@@ -679,6 +686,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command.name,
             subcommand="",
             operation="",
+            ask_destinations=[],
             ask_refspecs=[],
             ask_flags=list(command.ask_flags),
             flag_effects=list(command.flag_effects),
