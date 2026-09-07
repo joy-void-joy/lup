@@ -49,6 +49,20 @@ Review any digest change together with the typed app-server models, captured
 fixtures, capability matrix, and this ledger. Do not update the user's CLI as
 part of probing.
 
+## Launcher regression evidence
+
+- `packages/lup/tests/unit/test_codex_plugin_publication.py` uses the installed native Codex CLI in a credential-free
+  home. Installing a second plugin revision must preserve the first revision's
+  bytes, retain unrelated configuration, and let native plugin listing find the
+  selected revision. A mock that merely copies files does not prove this:
+  native installation prunes earlier versions in its target home. Lup confines
+  that installation to a staging home and publishes verified output separately.
+- `packages/lup/tests/unit/test_codex_launch_auth.py` covers account refresh, post-login verification,
+  redacted failures, explicit unverified continuation, and the same host/container
+  command boundary used for the session. These fixtures do not prove a live
+  model request or implicit MCP handshake. Named-profile account checks are
+  explicitly unavailable, not substituted with checks of the base configuration.
+
 ## Explicit release gaps
 
 - Codex 0.148.0 cannot pass the persistent typed-schema transition acceptance

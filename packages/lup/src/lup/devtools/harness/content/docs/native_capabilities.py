@@ -48,6 +48,8 @@ def document(
     library: Path | None,
     runtime_fixtures_at: str = LIBRARY_RUNTIME_FIXTURES,
     dispatcher_fixtures_at: str = LIBRARY_DISPATCHER_FIXTURES,
+    publication_fixtures_at: str = "packages/lup/tests/unit/test_codex_plugin_publication.py",
+    authentication_fixtures_at: str = "packages/lup/tests/unit/test_codex_launch_auth.py",
 ) -> models.PromptDocument:
     """This page, with every version read from the ledger the doctor uses.
 
@@ -67,6 +69,8 @@ def document(
     codex_cli = accepted_version("codex-cli")
     runtime_fixtures = cited_library_fixture(library, runtime_fixtures_at)
     dispatcher_fixtures = cited_library_fixture(library, dispatcher_fixtures_at)
+    publication_fixture = cited_library_fixture(library, publication_fixtures_at)
+    authentication_fixture = cited_library_fixture(library, authentication_fixtures_at)
     return models.PromptDocument(
         source=__name__,
         parts=[
@@ -122,6 +126,20 @@ found by the doctor rather than by a reader comparing this table by eye.
 Review any digest change together with the typed app-server models, captured
 fixtures, capability matrix, and this ledger. Do not update the user's CLI as
 part of probing.
+
+## Launcher regression evidence
+
+- `{publication_fixture}` uses the installed native Codex CLI in a credential-free
+  home. Installing a second plugin revision must preserve the first revision's
+  bytes, retain unrelated configuration, and let native plugin listing find the
+  selected revision. A mock that merely copies files does not prove this:
+  native installation prunes earlier versions in its target home. Lup confines
+  that installation to a staging home and publishes verified output separately.
+- `{authentication_fixture}` covers account refresh, post-login verification,
+  redacted failures, explicit unverified continuation, and the same host/container
+  command boundary used for the session. These fixtures do not prove a live
+  model request or implicit MCP handshake. Named-profile account checks are
+  explicitly unavailable, not substituted with checks of the base configuration.
 
 ## Explicit release gaps
 

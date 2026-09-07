@@ -57,7 +57,13 @@ def test_the_mode_decides_whether_a_citation_is_checked_not_what_is_published(
     """Both modes publish the same roster; only one of them resolves paths."""
     distribution = project_resolving_lup(tmp_path / "adopter", GIT_SOURCE)
     vendored = project_resolving_lup(tmp_path / "lup", "{ workspace = true }")
-    cited_fixtures(vendored, RUNTIME_FIXTURES, DISPATCHER_FIXTURES)
+    cited_fixtures(
+        vendored,
+        RUNTIME_FIXTURES,
+        DISPATCHER_FIXTURES,
+        "packages/lup/tests/unit/test_codex_plugin_publication.py",
+        "packages/lup/tests/unit/test_codex_launch_auth.py",
+    )
 
     published = [page.semantic_id for page in catalog.reference_pages(distribution)]
 
