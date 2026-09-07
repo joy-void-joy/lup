@@ -375,6 +375,7 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     flag_effects: list[EffectRow] = []
     write_flags: list[str] = []
     read_verbs: list[str] = []
+    probe_flags: list[str] = []
     guarded_keys: list[str] = []
     operations: list[ShellOperationRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
@@ -471,6 +472,18 @@ class ShellCommandRule(SelectableRule, frozen=True):
     """
     allow_flags: list[str] = []
     read_verbs: list[str] = []
+    probe_flags: list[str] = []
+    """Flags after which this command performs nothing — its dry-run spelling.
+
+    A read verb pins a many-actioned command to its query action, and is
+    honored only among unguarded words, because a guarded flag beside it
+    would still act. A probe flag is stronger: `git push --dry-run --force`
+    replaces no ref however the rest of the line reads, so its literal
+    presence stands down the flag- and refspec-earned questions along with
+    the row's own effects. What it does not stand down is destination
+    grammar — a probe still contacts the repository it names, so where the
+    work would go stays guarded as a place rather than as a write.
+    """
     write_markers: list[str] = []
     """Argument prefixes whose *absence* makes this command read-only.
 
@@ -645,6 +658,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 write_flags=list(operation.write_flags),
                 allow_flags=[],
                 read_verbs=[],
+                probe_flags=[],
                 write_markers=[],
                 guarded_keys=[],
                 setting_flags=[],
@@ -668,6 +682,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             write_flags=list(subcommand.write_flags),
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
+            probe_flags=list(subcommand.probe_flags),
             write_markers=[],
             guarded_keys=list(subcommand.guarded_keys),
             setting_flags=[],
@@ -693,6 +708,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             write_flags=list(command.write_flags),
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
+            probe_flags=list(command.probe_flags),
             write_markers=list(command.write_markers),
             guarded_keys=list(command.guarded_keys),
             setting_flags=list(command.setting_flags),
