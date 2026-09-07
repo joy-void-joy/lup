@@ -429,15 +429,48 @@ class KernelDecision:
         :class:`~lup.policy.kernel.settlement.TrappedPlacement` is what refuses
         the one case where that substitution would be wrong.
 
+        The reason is composed with the contributing verdicts here, because
+        this is the last seam every renderer funnels through and the reason is
+        the only text a reviewer reads. A composed verdict keeps the one
+        reason its join picked; the others were computed, stamped into
+        ``findings``, and rendered by nothing — so a compound command asking
+        for three things put one question to the person answering all three.
+
         An approval question over an operation that also leaves asks the
         person two things, so the reason says both. Neither reaches a refusal
         or a deferral: those arrive with the placement already collapsed.
         """
+        # The findings go when their reasons do: rendered into the reason,
+        # keeping them would compose the same sentences again on a second
+        # rendering pass.
+        composed = self.revised(reason=self.stated_whole(), findings=())
         if not escapable:
-            return self.revised(sandbox="ambient")
+            return composed.revised(sandbox="ambient")
         if self.effect == "ask" and self.sandbox == "outside":
-            return self.revised(reason=self.reason + SANDBOX_ESCAPE_NOTICE)
-        return self
+            return composed.revised(reason=composed.reason + SANDBOX_ESCAPE_NOTICE)
+        return composed
+
+    def stated_whole(self) -> str:
+        """The reason, joined with every contributing reason it does not say.
+
+        Only the parts that reached this verdict's own effect are listed: an
+        ask beside a surviving ask is a second question the same approval
+        answers, while an allow travelling in a refused command decides
+        nothing a reviewer needs to weigh. Every survivor is listed rather
+        than the first, since answering is one decision over the whole
+        operation.
+        """
+        peers = [
+            part.reason
+            for part in self.findings
+            if part.effect == self.effect
+            and part.reason
+            and part.reason not in self.reason
+        ]
+        if not peers:
+            return self.reason
+        distinct = dict.fromkeys(peers)
+        return "\n".join([self.reason, *(f"also: {reason}" for reason in distinct)])
 
 
 def unjudged(reason: str) -> KernelDecision:

@@ -36,6 +36,7 @@ from host import (
     foreign_repository,
     granted_allowances,
     managed_script_roots,
+    outside_this_project,
     patch_write_targets,
     recoverable_write_targets,
     record_deferral,
@@ -273,18 +274,17 @@ def bash_decision(
     # it is not written down anywhere.
     if verdict.effect == "defer":
         record_deferral(cwd, command, verdict.reason, verdict.checkpoint != "nothing")
-    pointed = undo_point(verdict, reference)
-    if pointed.effect != "allow":
-        return pointed
+    if verdict.effect != "allow":
+        return verdict
     nudge = script_run_nudge(python_script_targets(command, INTERPRETERS), cwd)
     if not nudge:
-        return pointed
+        return verdict
     return KernelDecision(
-        pointed.effect,
-        pointed.reason + nudge,
-        pointed.sandbox,
-        pointed.escalated,
-        checkpoint=pointed.checkpoint,
+        verdict.effect,
+        verdict.reason + nudge,
+        verdict.sandbox,
+        verdict.escalated,
+        checkpoint=verdict.checkpoint,
     )
 
 
@@ -297,32 +297,6 @@ def unconfined_by_declaration(command: str) -> bool:
     a runtime cannot answer it differently from the classifier.
     """
     return sandbox_excluded(command, SANDBOX_EXCLUDED_COMMANDS)
-
-
-def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
-    """Say the tree was snapshotted, on the one verdict that changes for it.
-
-    The snapshot itself is taken above, before the verdict, because the
-    verdict reads it. What is left here is what the human is told.
-
-    On an approval question, which is the one moment the information changes
-    an answer: somebody deciding whether to permit something destructive is
-    weighing exactly whether it can be undone. On an allowed command the
-    snapshot is silent, because a line appended to every mutating command is
-    one nobody reads by the third time — and ``dev undo`` is where a snapshot
-    is looked for anyway. On a deferral the reason reaches no human at all;
-    it reaches the record, which is where the relaxation is reviewed.
-    """
-    if not reference or verdict.effect != "ask":
-        return verdict
-    return KernelDecision(
-        verdict.effect,
-        f"{verdict.reason} — the tree was snapshotted first; "
-        f"`lup-devtools dev undo` lists it as {reference}",
-        verdict.sandbox,
-        verdict.escalated,
-        checkpoint=verdict.checkpoint,
-    )
 
 
 def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
@@ -385,6 +359,12 @@ def edit_decision(
     directory the runtime started in, because every repo-relative rule matches
     on that answer and a session may be launched anywhere.
 
+    Two facts about where the file sits are read here rather than in the
+    kernel, which sees a path and no filesystem. Another repository's file
+    answers to that repository's conventions and gets the referral; a file in
+    no repository of ours is not this project's code either, which is all the
+    gates about this project's own review notes need to decline it.
+
     The gates this lease holds are read here, per call, rather than resolved
     when the session started: a grant is answered by a human while the session
     that asked for it is still running, and one resolved at launch could not
@@ -398,6 +378,7 @@ def edit_decision(
     edit and one that costs a second on the edits that need it.
     """
     outside_this_repository = foreign_repository(path_text, cwd)
+    beyond_this_project = outside_this_project(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
@@ -430,6 +411,7 @@ def edit_decision(
         operation=operation,
         edit_rules=EDIT_RULES,
         foreign=outside_this_repository,
+        outside_project=beyond_this_project,
     )
 
 

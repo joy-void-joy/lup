@@ -24,6 +24,7 @@ import sh
 import typer
 from pydantic import BaseModel, Field
 
+import lup.devtools.dev.records as records
 from lup.devtools.dev.branches import (
     delete_branch,
     detect_base_branch,
@@ -61,6 +62,32 @@ class MergeMethod(StrEnum):
     rebase = "rebase"
 
 
+class ChecksState(StrEnum):
+    """Where a PR's checks stand, in the three answers they can give.
+
+    A check that has not finished is neither passing nor failing, and two
+    names force it under one of them: filtering to the completed checks and
+    asking ``all()`` answers "passing" for a PR whose only check is still
+    running, because nothing is left to disagree. That is how a run that
+    concluded as a failure was presented as the one clean branch of three.
+    The third name is what lets a reader wait rather than decide.
+    """
+
+    passing = "passing"
+    failing = "failing"
+    running = "running"
+
+    def marker(self) -> str:
+        """The character this state prints beside a check's name."""
+        match self:
+            case ChecksState.passing:
+                return "✓"
+            case ChecksState.failing:
+                return "✗"
+            case ChecksState.running:
+                return "…"
+
+
 def current_branch() -> str:
     return git.out("branch", "--show-current")
 
@@ -75,6 +102,47 @@ class CheckInfo(BaseModel):
     name: str
     status: str
     conclusion: str
+
+
+def check_state(
+    check: CheckInfo,
+    # Which conclusions a finished check may report without being a failure
+    # is a judgement about the forge's vocabulary, so a project reading it
+    # differently passes its own rather than editing this.
+    passing: tuple[str, ...] = ("SUCCESS", "NEUTRAL", "SKIPPED"),
+) -> ChecksState:
+    """Where one check stands, reading its status before its conclusion.
+
+    A check reports a conclusion only once it has one, so an unfinished
+    check's empty conclusion is not a verdict to compare — asking anyway
+    reads "not a success" off a run that has not said anything yet.
+    """
+    if check.status.upper() != "COMPLETED":
+        return ChecksState.running
+    return (
+        ChecksState.passing
+        if check.conclusion.upper() in passing
+        else ChecksState.failing
+    )
+
+
+def rollup_state(checks: list[CheckInfo]) -> ChecksState:
+    """The one answer a PR's checks give together, worst first.
+
+    A check that concluded as a failure settles the run whatever else is
+    still going; short of one, anything unfinished holds the answer open.
+    Passing is what is left — every check finished, none of them failing —
+    which is also what an empty list says, having nothing to wait for.
+    """
+    states = [check_state(check) for check in checks]
+    return next(
+        (
+            state
+            for state in (ChecksState.failing, ChecksState.running)
+            if state in states
+        ),
+        ChecksState.passing,
+    )
 
 
 class GhAuthor(BaseModel):
@@ -126,7 +194,7 @@ class PRInfo(BaseModel):
     url: str
     review_decision: str
     mergeable: str
-    checks_passing: bool
+    checks_state: ChecksState
     reviews: list[ReviewInfo]
     checks: list[CheckInfo]
 
@@ -144,19 +212,9 @@ class PRInfo(BaseModel):
                 typer.echo(f"    {r.author:<{author_width}} {r.state}")
 
         if self.checks:
-            typer.echo(f"\n  Checks ({len(self.checks)}):")
-            passed = sum(
-                1
-                for c in self.checks
-                if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
-            )
-            typer.echo(f"    {passed}/{len(self.checks)} passing")
+            typer.echo(f"\n  Checks ({len(self.checks)}): {self.checks_state}")
             for c in self.checks:
-                marker = (
-                    "✓"
-                    if c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
-                    else "✗"
-                )
+                marker = check_state(c).marker()
                 typer.echo(f"    {marker} {c.name}: {c.conclusion or c.status}")
 
 
@@ -244,6 +302,26 @@ class PushResult(PRResult):
     pushed: bool
     force: bool
     existing_pr: ExistingPR | None
+
+    push_complaint: str = ""
+    """Why the branch did not reach the remote, empty when it did.
+
+    ``pushed: false`` on its own is a verdict with no case behind it: git's
+    own message went to stderr, which is not where a reader of the JSON
+    looks, and this transport fails intermittently — a plain retry clears
+    it — so the message is what says whether to retry or to go and fix
+    something. It is a field rather than a log line for the same reason the
+    flag is.
+    """
+
+    upstream: str = ""
+    """The remote branch this one was recorded as publishing to, or none.
+
+    Reported because the record is the thing `-u` claimed to write and did
+    not: a push that says it set up tracking and recorded nothing looks
+    exactly like one that recorded everything, and a reader had no field to
+    tell them apart by.
+    """
 
 
 class CreateResult(PRResult):
@@ -346,23 +424,13 @@ def status(
         for c in detail.checks
     ]
 
-    checks_passing = (
-        all(
-            c.conclusion.upper() in ("SUCCESS", "NEUTRAL", "SKIPPED")
-            for c in checks
-            if c.status.upper() == "COMPLETED"
-        )
-        if checks
-        else True
-    )
-
     pr_info = PRInfo(
         number=pr_number,
         title=pr_data.title,
         url=pr_data.url,
         review_decision=detail.review_decision,
         mergeable=detail.mergeable,
-        checks_passing=checks_passing,
+        checks_state=rollup_state(checks),
         reviews=reviews,
         checks=checks,
     )
@@ -622,18 +690,35 @@ def push(
     force: bool,
     as_json: bool,
 ) -> None:
-    """Push the current branch and report any existing PR."""
-    branch_name = current_branch()
+    """Push the current branch and report any existing PR.
 
+    Both spellings state the destination as a full refspec, because a
+    checkout reaches this with no upstream: creation publishes nothing, so
+    the first push of either kind is what gives the branch a remote. A bare
+    `push --force` would have nothing to resolve the destination from, and
+    where it did resolve one it took whatever `push.default` offered.
+
+    Stated rather than asked for with `-u`, which records the relationship by
+    writing `branch.<name>.remote` and `branch.<name>.merge` into the shared
+    config. Where that file cannot be written the flag fails *mendaciously*:
+    the push happens, git prints `set up to track`, and the command exits 0
+    having recorded nothing — so every reader of the tracking configuration
+    sees a branch that was never published. The refspec needs no such write,
+    and what the flag was for is recorded beside the branch's other facts.
+    """
+    branch_name = current_branch()
+    destination = f"refs/heads/{branch_name}:refs/heads/{branch_name}"
+
+    complaint = ""
     try:
-        if force:
-            git("push", "--force")
-        else:
-            git("push", "-u", "origin", branch_name)
-        pushed = True
+        forced = ["--force"] if force else []
+        git("push", *forced, "origin", destination)
+        records.remember(
+            branch_name, records.BranchRecord(upstream=f"origin/{branch_name}")
+        )
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Push failed: {decode_stderr(e)}", err=True)
-        pushed = False
+        complaint = decode_stderr(e)
+        typer.echo(f"Push failed: {complaint}", err=True)
 
     existing_pr = None
     try:
@@ -657,13 +742,71 @@ def push(
 
     result = PushResult(
         branch=branch_name,
-        pushed=pushed,
+        pushed=not complaint,
         force=force,
         existing_pr=existing_pr,
+        push_complaint=complaint,
+        upstream=records.recorded_upstream(branch_name),
     )
     output_result(result, as_json)
-    if not pushed:
+    if complaint:
         raise typer.Exit(1)
+
+
+class HeadOnRemote(StrEnum):
+    """Whether the remote carries the branch a request would be opened over."""
+
+    present = "present"
+    absent = "absent"
+    unknown = "unknown"
+
+
+def head_on_remote(branch: str, remote: str = "origin") -> HeadOnRemote:
+    """Ask the remote whether it holds this branch, rather than assume it does.
+
+    The remote is asked rather than the remote-tracking ref read, because a
+    push that failed leaves that ref exactly as a fetch nobody ran does, and
+    the whole question here is which of those happened.
+    """
+    try:
+        listed = git.out("ls-remote", "--heads", remote, branch).strip()
+    except sh.ErrorReturnCode:
+        logger.exception("could not ask %s whether it holds %s", remote, branch)
+        return HeadOnRemote.unknown
+    return HeadOnRemote.present if listed else HeadOnRemote.absent
+
+
+def creation_diagnosis(branch: str, base: str, complaint: str) -> str:
+    """What "no commits between" is saying, which is one of two things.
+
+    GitHub refuses a request over a branch the remote never received with
+    the same sentence it refuses one holding nothing its base lacks, and the
+    two are opposite: the first is a push to retry, and the sentence points
+    away from it by describing a branch with nothing to merge. Only the
+    remote separates them, so it is asked and the answer said out loud.
+
+    Empty for every other refusal, which says what it means already.
+    """
+    if "No commits between" not in complaint:
+        return ""
+    match head_on_remote(branch):
+        case HeadOnRemote.absent:
+            return (
+                f"The remote has no {branch}. Nothing is wrong with the request:"
+                f" the push that would have put the branch there did not land."
+                f" Push it again and retry."
+            )
+        case HeadOnRemote.present:
+            return (
+                f"The remote's {branch} holds nothing {base} lacks, so there is"
+                f" no change for a request to describe."
+            )
+        case HeadOnRemote.unknown:
+            return (
+                f"Whether the remote holds {branch} could not be established,"
+                f" and that is what separates a branch that never arrived from"
+                f" one identical to {base}."
+            )
 
 
 def parse_pr_url(stdout: str) -> str:
@@ -721,6 +864,7 @@ def create(
     """
     if not check_forge_api():
         raise typer.Exit(1)
+    head = current_branch()
     try:
         raw = gh.out(
             "pr",
@@ -729,14 +873,17 @@ def create(
             "--base",
             base,
             "--head",
-            current_branch(),
+            head,
             "--title",
             title,
             "--body",
             body,
         )
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Failed to create PR: {decode_stderr(e)}", err=True)
+        complaint = decode_stderr(e)
+        typer.echo(f"Failed to create PR: {complaint}", err=True)
+        if diagnosis := creation_diagnosis(head, base, complaint):
+            typer.echo(diagnosis, err=True)
         raise typer.Exit(1)
 
     url = parse_pr_url(raw)

@@ -1558,6 +1558,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             auto_escape_prefixes=[],
             diagnostics_command=[],
             resolution_command=[],
+            repair_command=[],
         ),
         encoding="utf-8",
     )
@@ -1886,6 +1887,54 @@ def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
         ).effect
         == "ask"
     )
+
+
+def test_the_declared_scopes_admit_the_host_a_documentation_route_starts_at() -> None:
+    """The origin an agent types is judged, not the one it lands on.
+
+    docs.anthropic.com answers the Claude Code paths with a 301 to
+    code.claude.com and the API paths with one to platform.claude.com, both
+    declared. Undeclared, it puts an approval question on the first hop of a
+    route whose destination this project already reads, and the reader has
+    no way to tell that from an origin nobody vetted.
+
+    What that admits is the redirecting host itself. A lookalike
+    registration under it and the marketing site beside it are outside, so
+    the egress this table also grants stays the documentation surface rather
+    than the domain.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("https://docs.anthropic.com/en/docs/claude-code/settings") == "allow"
+    assert effect("https://docs.anthropic.com/en/api/messages") == "allow"
+    assert effect("https://docs.anthropic.com.evil.test/en/api/messages") == "ask"
+    assert effect("https://www.anthropic.com/news") == "ask"
+
+
+def test_the_declared_scopes_carry_the_product_pages_no_manual_answers() -> None:
+    """What the product is and costs is declared as itself, not as a redirect.
+
+    A reference manual answers how a thing is called and what it returns. What
+    it is, what it costs and what it claims are answered on the product's own
+    pages and nowhere in the scopes beside them, so a question about the
+    product rather than the API otherwise buys an approval prompt on every
+    hop. Both spellings are named because a site that redirects apex to www,
+    or the reverse, would put the ask back on the redirect.
+
+    This one widens rather than tidies: the origin is admitted for its own
+    content, and the same table grants it egress.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("https://claude.com/product/overview") == "allow"
+    assert effect("https://www.claude.com/pricing") == "allow"
+    assert effect("https://claude.com.evil.test/pricing") == "ask"
 
 
 def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) -> None:
@@ -2922,7 +2971,33 @@ def test_a_creation_names_the_suppressions_it_arrives_carrying() -> None:
         "line 3 silences any-type: value: Any = 1  # lup: ignore[any-type]"
         in decision.reason
     )
-    assert policy.decide(plain).reason == "full-file writes require approval"
+    assert policy.decide(plain).reason == (
+        "full-file writes require approval — src/new.py arrives whole, 1 line at once"
+    )
+
+
+def test_a_creation_names_only_the_suppressions_that_silence_something() -> None:
+    """A directive guarding no rule is not part of what is being approved.
+
+    Naming one spends the reader's attention on a line the audit deletes
+    unread, and a listing that mixes a dead directive in with a live one
+    teaches that the listing is noise — which costs the live one its reader.
+    """
+    policy = EditPolicy(protected=[])
+    mixed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("src/new.py"),
+                after='"""Doc."""\n\n'
+                "value: Any = 1  # lup: ignore[any-type]\n"
+                'other: str = "x"  # lup: ignore\n',
+            )
+        ]
+    )
+    decision = policy.decide(mixed)
+
+    assert "line 3 silences any-type" in decision.reason
+    assert "line 4" not in decision.reason
 
 
 def test_dropping_one_rule_from_a_suppression_needs_no_approval() -> None:
@@ -2976,18 +3051,28 @@ def test_widening_a_suppression_still_asks() -> None:
 
 
 def test_a_named_suppression_going_bare_still_asks() -> None:
-    """Dropping the names widens the directive to every rule."""
+    """Dropping the names widens the directive to every rule.
+
+    Over something, or over nothing. A bare directive standing above a line
+    that trips no rule silences no rule, and the audit reports that one
+    spurious — so the gate leaves it to the sweep that deletes it rather than
+    spending an approval on a directive that is about to go.
+    """
     policy = EditPolicy(protected=[])
-    widened = EditBatch(
-        changes=[
-            EditChange(
-                path=Path("a.py"),
-                before="# lup: ignore[any-type]\nvalue = 1\n",
-                after="# lup: ignore\nvalue = 1\n",
-            )
-        ]
-    )
-    assert policy.decide(widened).effect == "ask"
+
+    def widened(guarded: str) -> EditBatch:
+        return EditBatch(
+            changes=[
+                EditChange(
+                    path=Path("a.py"),
+                    before=f"# lup: ignore[any-type]\n{guarded}\n",
+                    after=f"# lup: ignore\n{guarded}\n",
+                )
+            ]
+        )
+
+    assert policy.decide(widened("value: Any = 1")).effect == "ask"
+    assert policy.decide(widened("value = 1")).effect == "allow"
 
 
 def test_prose_mentioning_a_suppression_is_not_declaring_one() -> None:

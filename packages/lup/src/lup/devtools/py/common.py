@@ -11,6 +11,7 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel
 
+from lup.devtools.py.search import name_candidates
 from lup.workspace.paths import find_nearest_pyproject
 
 # ---------------------------------------------------------------------------
@@ -25,6 +26,18 @@ class ResolvedObject(BaseModel):
     leaf_name: str
 
 
+def leaf_name(path: str) -> str:
+    """The name a dotted or colon path ends in, resolved or not.
+
+    Spelled once because both readings need it: the resolver reports which
+    name it reached, and the failure reports which name it went looking for.
+    """
+    module_part, _, attr_part = path.partition(":")  # lup: ignore[string-split]
+    tail = attr_part or module_part
+    # lup's resolve grammar: the leaf is the last dotted segment.
+    return tail.rpartition(".")[2]  # lup: ignore[string-split] — dotted-path leaf
+
+
 def resolve_object(path: str) -> ResolvedObject:
     """Resolve a dotted or colon path to a Python object, returning (object, leaf_name).
 
@@ -37,11 +50,7 @@ def resolve_object(path: str) -> ResolvedObject:
         value = pkgutil.resolve_name(path)
     except (ImportError, AttributeError, ValueError) as e:
         raise ValueError(f"Could not resolve '{path}': {e}") from e
-    module_part, _, attr_part = path.partition(":")  # lup: ignore[string-split]
-    tail = attr_part or module_part
-    # lup's resolve grammar: the leaf is the last dotted segment.
-    leaf = tail.rpartition(".")[2]  # lup: ignore[string-split] — dotted-path leaf
-    return ResolvedObject(value=value, leaf_name=leaf)
+    return ResolvedObject(value=value, leaf_name=leaf_name(path))
 
 
 def find_module_path(module_name: str) -> Path | None:
@@ -63,6 +72,30 @@ def find_module_path(module_name: str) -> Path | None:
 
 def fail(msg: str) -> typing.NoReturn:
     typer.echo(f"Error: {msg}", err=True)
+    raise typer.Exit(1)
+
+
+def fail_unresolved(path: str, reason: str) -> typing.NoReturn:
+    """Report what a dotted path could not reach, and where its name lives.
+
+    Such a path is two guesses in one string -- which module, and which name
+    -- and the refusal alone says only that the pair did not resolve. The
+    name is the half the reader is sure of, so it is searched for and every
+    module defining it is named beside the refusal. Without that, locating a
+    symbol costs one invocation per module guessed at.
+
+    Whether the module resolved and the attribute did not, or nothing
+    resolved at all, is not distinguished: the answer a reader needs is the
+    same sentence either way.
+    """
+    name = leaf_name(path)
+    found = name_candidates(name, find_nearest_pyproject())
+    if not found:
+        fail(reason)
+    typer.echo(f"Error: {reason}", err=True)
+    typer.echo(f"'{name}' is defined at:", err=True)
+    for match in sorted(found, key=lambda match: match["import_path"]):
+        typer.echo(f"  {match['kind']:10s}  {match['import_path']}", err=True)
     raise typer.Exit(1)
 
 

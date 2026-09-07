@@ -34,6 +34,7 @@ from lup.harness.image import detected_client
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
+from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
@@ -259,7 +260,16 @@ def create_harness_app(
         """
         for composition in targets.resolve(target, project_root()):
             source = composition.recipe.source
-            rendered = source.image.dockerfile(source.requirements)
+            # Everything resolution says goes to stderr: stdout is the
+            # Dockerfile a build reads, and a progress line in the pipe is a
+            # parse error inside `docker build -f -`.
+            resolution = resolved_agent_clis(
+                source.image,
+                say=lambda notice: typer.echo(notice.painted(), err=True),
+            )
+            for notice in resolution.said:
+                typer.echo(notice.painted(), err=True)
+            rendered = resolution.image.dockerfile(source.requirements)
             if not prune:
                 typer.echo(rendered)
                 continue

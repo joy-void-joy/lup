@@ -838,11 +838,13 @@ class McpServer(BaseModel, frozen=True):
     own default is chosen for a server already installed. Unset leaves that
     default in force, which is right for a server whose start costs nothing.
 
-    Only a runtime that spawns under a deadline reads it; one that waits
-    renders nothing. What makes the deadline worth declaring is the shape of
-    missing it — the server is dropped and the session keeps the rest, so it
-    arrives as a group that is simply absent rather than as an error naming a
-    limit.
+    Both runtimes spawn under a deadline; what differs is the spelling. One
+    offers it per server and receives this number as written; the other reads
+    a single environment variable covering every server it starts, so its
+    settings artifact renders the widest declared deadline and nothing per
+    server. What makes the deadline worth declaring is the shape of missing
+    it — the server is dropped and the session keeps the rest, so it arrives
+    as a group that is simply absent rather than as an error naming a limit.
     """
 
     def command_line(self, runtime: "NativeSpellings") -> list[str]:
@@ -1052,6 +1054,16 @@ class HookSet(BaseModel, frozen=True):
             "turns on a declaration then asks rather than refusing"
         ),
     )
+    repair_command: list[str] = Field(
+        default=[],
+        description=(
+            "How to take the dead suppression directives out of one written "
+            "file, run from the checkout that holds it with the file named by "
+            "--path and its report on stdout as JSON. Empty declares no "
+            "repair, and a directive that silences nothing is left standing "
+            "for the audit to report instead"
+        ),
+    )
     refused_tools: list[RefusedTool] = Field(
         default=[],
         description=(
@@ -1168,6 +1180,7 @@ class HookSet(BaseModel, frozen=True):
         for field, command in (
             ("diagnostics_command", self.diagnostics_command),
             ("resolution_command", self.resolution_command),
+            ("repair_command", self.repair_command),
         ):
             program = PurePosixPath(command[0] if command else "")
             if DEFAULT_ENVIRONMENT in program.parts:

@@ -319,7 +319,7 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
    uv run lup-devtools dev worktree create feat-name
    ```
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/main`) and syncs dependencies; `lup-devtools harness claude` regenerates and launches the verified local plugin, so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
-2. **Relocate this session into the worktree** -- work in <the absolute path step 1 prints> by whichever of these you can reach: launch a session rooted there; or, already running, address files under <the absolute path step 1 prints> by absolute path, where that tree is writable. `EnterWorktree(path=<the absolute path step 1 prints>)` reaches any worktree from anywhere and is refused for it: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you truly need it, and leave with `ExitWorktree(action="keep")`. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale.
+2. **Relocate this session into the worktree** -- work in <the absolute path step 1 prints> by whichever of these you can reach: launch a session rooted there; or, already running, address its files by absolute path, where that tree is writable. `EnterWorktree` is refused, and takes a `tree/` path only as a session's first switch: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you must, and leave with `ExitWorktree(action="keep")`. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale.
 3. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
 4. Push the branch when the feature is complete (or periodically for backup)
 5. **`/lup:rebase`** -- Pushes the branch, opens a PR, then cleans up the commit history with `git reset --soft main` and force-pushes.
@@ -328,15 +328,13 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 
 ### Merge Conflict Resolution
 
-**Never silently drop code during conflict resolution.** Keeping both sides is safer than losing features, and a rename on one side must not swallow an addition on the other. Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command went deliberately, not as a side effect of choosing one side.
-
-Use `/lup:merge` for guided conflict resolution; the command carries the decision tree.
+**Never silently drop code during conflict resolution** — keeping both sides is safer than losing features, and a rename on one side must not swallow an addition on the other. Before completing any merge, **audit for deletions**: compare the result against both parents and verify every removed function, parameter, or command went deliberately, not as a side effect of choosing one side. `/lup:merge` carries the decision tree.
 
 ### Commit Guidelines
 
 - **Commit before responding**, and often — frequent commits are checkpoints
 - **Keep commits atomic** — if you need "and" in the message, it is two commits
-- **History will be rebased**, so a message need not be perfect while developing; after rebasing, each commit should tell what changed and why
+- **History will be rebased**, so a message need not be perfect while developing; after rebasing, each should tell what changed and why
 
 **Format:** `type(scope): description`
 

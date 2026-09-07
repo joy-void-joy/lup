@@ -72,9 +72,11 @@ import typer
 from pydantic import BaseModel, ConfigDict, TypeAdapter, with_config
 
 from lup.workspace.paths import project_root
+from lup.devtools.harness.preflight import reopened
 from lup.devtools.subapps import subapp
 from lup.devtools.utils import decode_stderr, format_table, short_sha
 from lup.execution.shell import git
+from lup.policy.assets.host import launched, measured_boundary
 from lup.sandbox.rail import AccessibleRoot
 
 app = typer.Typer(no_args_is_help=True)
@@ -903,5 +905,12 @@ def setup_project(
             f"  Reachable from a session {'read-write' if mount == 'rw' else 'read-only'}"
             " — takes effect at the next launch, which is when mounts are built"
         )
+        # The launch that opened this session recorded its own invocation, so
+        # the registration can say which launch to repeat rather than leaving
+        # the reader to reconstruct profile, sandbox, and flags from memory.
+        launch = launched(measured_boundary(project_root()))
+        if launch:
+            spelled = " ".join(["uv", "run", "lup-devtools", *reopened(launch)])
+            typer.echo(f"  Reopen this conversation to mount it: {spelled}")
     if synced:
         typer.echo(f"  Marked as synced at {short_sha(head)}")

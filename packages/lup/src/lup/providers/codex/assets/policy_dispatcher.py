@@ -46,7 +46,7 @@ from host import (
     record_hook_evidence,
     sandbox_active,
 )
-from kernel.decision import KernelDecision, SANDBOX_TRAPPED_REASON
+from kernel.decision import KernelDecision
 from kernel.shell import auto_escape_matches
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
@@ -230,7 +230,7 @@ def dispatch(payload, permission_request=False):
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
         # same policy can judge the requested escape instead of preempting it.
-        if not permission_request and decision.reason == SANDBOX_TRAPPED_REASON:
+        if not permission_request and decision.capability == "host_executor":
             return KernelDecision("defer", decision.reason)
         if (
             requested_escape
@@ -396,8 +396,10 @@ def main():
     # read identically without this, which is how #180 reads as the first
     # when it is the second.
     detail = decision.reason + uncorrelated(payload)
+    # The journal is metadata-only: the reason names the refused input, which
+    # for a fetch is the full URL, so only the correlation diagnosis is kept.
     record_hook_evidence(
-        plugin_data_root(), payload, "completed", decision.effect, detail
+        plugin_data_root(), payload, "completed", decision.effect, uncorrelated(payload)
     )
     sys.stderr.write(detail)
     raise SystemExit(2)

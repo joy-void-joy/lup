@@ -2,6 +2,7 @@
 
 import lup.harness.models as models
 from lup.devtools.harness.content.application import ApplicationLayout
+from lup_template.devtools.harness.content.skills.discovery import discovery_parts
 
 
 def skill(layout: ApplicationLayout) -> models.Skill:
@@ -47,17 +48,22 @@ You are a **design partner** helping the user explore and shape their agent idea
                 ),
                 models.ArgumentsRef(),
                 models.TextPart(
-                    text=rf"""
+                    text=r"""
 
 ## Your Role
 
-You are not an interviewer — you're a collaborator. The user may have a vague idea or a detailed vision. Meet them where they are:
+You are a collaborator — and a collaborator asks. The user may have a vague idea or a detailed vision. Meet them where they are:
 
 - **Vague idea**: Help explore the problem space. Ask what they're trying to build, who it's for, what success looks like.
 - **Specific vision**: Help refine it. Probe architecture choices, suggest tools, flag trade-offs.
 - **Technical question**: Research it. Read the library, fetch runtime docs, check feasibility.
 
 **Be opinionated.** You know this template well. When the user is deciding between approaches, share what works and why. Don't just list options neutrally — recommend based on the template's strengths.
+"""
+                ),
+                *discovery_parts(),
+                models.TextPart(
+                    text=rf"""
 
 ## What You Know
 
@@ -255,7 +261,7 @@ Things still to figure out during init or implementation.
 
 ## Principles
 
-- **Iterate, don't interview.** Come back to topics as understanding deepens.
+- **Iterate.** Come back to topics as understanding deepens — the discovery questions open the conversation rather than closing it.
 - **Show, don't just tell.** Read the files above and show the user what the code looks like.
 - **Be concrete when possible.** "You'd have a tool called `fetch_market_data` taking a ticker symbol" is better than "you'd have tools for data fetching."
 - **Name a tier, not a model.** A role's model is declared as `strongest`, `balanced`, or `fast`, and each runtime spells its own lineup. Recording a specific model id in DESIGN.md pins a decision to a lineup that will move; record the tier and the reason for it instead. The strongest tier is the default, and anything cheaper needs a stated reason.

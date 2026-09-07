@@ -80,6 +80,7 @@ DISPATCHER_STDLIB = (
     "datetime",
     "hashlib",
     "csv",
+    "urllib.parse",
 )
 """The standard library a compiled dispatcher may reach.
 
@@ -115,6 +116,12 @@ conventions refuse to take a structured format apart with ``split`` -- so the
 choice is the reader for that format or a hand-rolled one, and a hand-rolled
 one inside a hook is the parser nobody maintains. Nothing already pinned here
 reads delimited text.
+
+``urllib.parse`` earns its place the same way. The evidence journal names a
+fetch by its origin and by nothing else, which means splitting a URL into
+the scheme, host and port a scope is written against and dropping the path,
+the query and any userinfo -- taking that apart by hand is how the userinfo
+ends up in the record. Nothing already pinned here parses a URL.
 """
 
 ROUTER = "dispatch"

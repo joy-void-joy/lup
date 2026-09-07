@@ -355,6 +355,75 @@ def test_a_sibling_worktree_of_this_repository_is_not_foreign() -> None:
     assert effect == "deny"
 
 
+NOTE_SITE = "packages/lup/src/lup/devtools/dev/antipatterns.py"
+"""A production file of this repository carrying one unique preimage."""
+
+NOTE_PREIMAGE = "from lup.policy.kernel.roles import path_role"
+
+ADDED_NOTE = "# lup: write down what this leaves open"
+"""The note these cases put to the gate.
+
+A string literal rather than a comment, which is what keeps it a subject
+under test instead of an open note this file owes work on.
+"""
+
+
+def note_verdict(path: str, cwd: Path) -> tuple[str, str]:
+    """One edit that leaves a review note on *path*, judged from a session cwd."""
+    payload = {
+        **edit_payload(path, NOTE_PREIMAGE, f"{NOTE_PREIMAGE}\n{ADDED_NOTE}", False),
+        "cwd": str(cwd),
+    }
+    specific = decide_from(payload, cwd)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"]), str(
+        specific["permissionDecisionReason"]
+    )
+
+
+@pytest.fixture
+def unversioned_directory(tmp_path: Path) -> Path:
+    """A tree belonging to no repository at all, holding one ordinary file."""
+    work = tmp_path / "notes"
+    work.mkdir()
+    (work / "scratch.py").write_text(f"{NOTE_PREIMAGE}\n", encoding="utf-8")
+    return work
+
+
+def test_a_note_written_outside_every_repository_is_not_this_projects_feedback(
+    unversioned_directory: Path,
+) -> None:
+    """A `# lup:` marker is this project's review instrument, not a syntax.
+
+    Nothing of ours walks a tree outside the repository — `dev check` and
+    `dev comments` read this checkout — so a note left there has no reader to
+    protect and no pass that could ever check a claim against it. Judging it
+    means an agent cannot write down a probe *of* this policy anywhere the
+    policy is not, which is the one place such a probe belongs.
+    """
+    effect, reason = note_verdict(str(unversioned_directory / "scratch.py"), Path.cwd())
+
+    assert effect == "allow"
+    assert "feedback" not in reason
+
+
+def test_a_note_in_this_repositorys_own_file_is_judged_however_it_is_spelled() -> None:
+    """The half that must not move, in both spellings a session sends.
+
+    A session names files absolutely and a shell command names them relative
+    to where it runs, and the same file has to answer the same way through
+    either — otherwise the scoping above is an evasion: address a governed
+    file by the spelling that misses, and the gate goes quiet on this
+    repository's own code.
+    """
+    absolute = note_verdict(str(Path.cwd().resolve() / NOTE_SITE), Path.cwd())
+    relative = note_verdict(NOTE_SITE, Path.cwd())
+
+    assert absolute == relative
+    assert absolute[0] == "ask"
+    assert "inline review feedback" in absolute[1]
+
+
 def undo_refs(work: Path) -> list[str]:
     """Every snapshot this checkout holds, read the way a human would find them."""
     return [
@@ -406,21 +475,21 @@ def test_a_command_that_could_destroy_work_is_snapshotted_first(
     assert undo_refs(delete_repo) == ["lup undo: rm untracked.py"]
 
 
-def test_a_question_a_capture_cannot_settle_still_says_it_was_taken(
+def test_a_question_a_capture_cannot_settle_stays_silent_about_it(
     delete_repo: Path,
 ) -> None:
-    """The one moment the information changes an answer.
+    """The question asks its question; the snapshot is looked up, not narrated.
 
-    A person deciding whether to permit something destructive is weighing
-    exactly whether it can be undone, so a question that survives the
-    capture carries the ref. A permitted command stays silent, because a
-    line appended to every mutating command is one nobody reads by the
-    third time — and where the capture settled the question there is no
-    longer anybody being asked.
+    A ref appended to every approval prompt is a line nobody reads by the
+    third time, in the one place reading matters — and `dev undo` is where a
+    snapshot is looked for anyway. So the question carries only its reason,
+    while the capture it stays silent about is still on disk for the moment
+    somebody reaches for it.
     """
     _effect, reason = snapshotting_effect("git clean -fdx", delete_repo)
 
-    assert "snapshotted" in reason and "refs/lup/undo/" in reason
+    assert "snapshotted" not in reason and "refs/lup/undo/" not in reason
+    assert undo_refs(delete_repo) == ["lup undo: git clean -fdx"]
 
 
 def test_a_command_whose_writes_are_not_in_its_argv_is_snapshotted(
@@ -1016,3 +1085,44 @@ def test_a_container_whose_placement_went_unmeasured_still_asks(
     unmeasured = {**CONTAINED_LEDGER, "delivered": ["question_relay"]}
 
     assert unjudged_effect_under(unmeasured, tmp_path, monkeypatch) == "ask"
+
+
+def created(path: str, content: str) -> JsonObject:
+    return {"tool_name": "Write", "tool_input": {"file_path": path, "content": content}}
+
+
+def test_a_write_announces_what_its_own_prompt_will_not_show() -> None:
+    """This runtime's create-file dialog takes nothing from a hook.
+
+    Measured: a `Write` ask renders as that dialog's own path, preview and two
+    answers, and the reason handed alongside it is dropped — where the same
+    field is shown for a shell command. So a verdict that enumerated something
+    the approver cannot otherwise see says it through the one field this
+    runtime displays to a person from every hook.
+    """
+    carrying = "value: Any = 1  # lup: ignore[any-type]\n"
+    decision = decide(created("src/lup_template/zz_probe.py", carrying))
+    announcement = decision["systemMessage"]
+
+    assert isinstance(announcement, str)
+    assert "arrives carrying antipattern suppressions" in announcement
+    assert "line 1 silences any-type" in announcement
+
+
+def test_a_reason_naming_only_its_category_announces_nothing() -> None:
+    """The dialog already shows the file and its content.
+
+    Repeating that a whole file is being written adds a line telling the
+    reader what they are looking at, which is how a channel that exists to
+    carry evidence becomes one nobody reads.
+    """
+    decision = decide(created("src/lup_template/zz_plain.py", "value = 1\n"))
+
+    assert "systemMessage" not in decision
+
+
+def test_a_shell_prompt_is_not_told_twice() -> None:
+    """A command's prompt renders the reason itself, so announcing it repeats it."""
+    decision = decide({"tool_name": "Bash", "tool_input": {"command": "rm -rf src"}})
+
+    assert "systemMessage" not in decision

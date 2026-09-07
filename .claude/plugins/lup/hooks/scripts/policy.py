@@ -24,6 +24,7 @@ from policy_data import (
     AGENT_IDENTITY_ENV,
     AUTONOMOUS_AGENT_IDENTITIES,
     DIAGNOSTICS_COMMAND,
+    REPAIR_COMMAND,
 )
 import csv
 from hashlib import sha256
@@ -31,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
+from urllib.parse import urlsplit
 from kernel.edit import (
     awaits_resolution,
     decide_edit,
@@ -141,6 +143,18 @@ def delivers(measured: dict[str, list[str]], capability: str) -> bool:
     return capability in (measured["delivered"] if "delivered" in measured else [])
 
 
+def launched(measured: dict[str, list[str]]) -> list[str]:
+    """The invocation the launch that opened this session recorded for itself.
+
+    What lets a session spell its own reopening — a mount registered
+    mid-session takes effect only at the next launch, and this record is the
+    only thing that remembers which launch that is. Empty wherever nothing
+    was recorded (an older launcher, or no measurement at all), and every
+    caller reads empty as "no reopening can be spelled".
+    """
+    return measured["launch"] if "launch" in measured else []
+
+
 def defers_unjudged(measured: dict[str, list[str]]) -> bool:
     """Whether this profile hands legible work nothing judged to the runtime.
 
@@ -163,6 +177,41 @@ def append_hook_evidence(path: Path, encoded: str) -> None:
         stream.write(encoded + "\n")
 
 
+def fetch_origin(payload: dict) -> str:
+    """The scheme, host and port a fetch names, with the path left behind.
+
+    A journal that omits tool input entirely leaves a refused fetch
+    unattributable: the record says a URL was outside the declared scopes,
+    and which URL has to be inferred from whatever the session did next.
+    The origin closes that without reopening what the omission protects. It
+    is the coarse half of a URL and the one a scope is written against,
+    while the path and the query are where a token, a document id or a
+    search phrase ride -- so those are read to parse the origin out and are
+    never written. Userinfo goes the same way: the hostname and port come
+    from the parse rather than the netloc, which would carry a credential
+    spelled into the URL.
+
+    Empty for a tool whose input names no URL, which is what keeps the
+    omission whole everywhere but the fetch surface, and empty for a URL no
+    scope could have matched either -- an unparseable one reaches its
+    verdict on being unparseable, not on an origin.
+    """
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    named = isinstance(tool_input, dict) and "url" in tool_input
+    url = tool_input["url"] if named else ""
+    if not isinstance(url, str):
+        return ""
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return ""
+    if not parsed.scheme or hostname is None:
+        return ""
+    return f"{parsed.scheme}://{hostname}" + (f":{port}" if port else "")
+
+
 def record_hook_evidence(
     data_root: Path | None,
     payload: dict,
@@ -170,7 +219,13 @@ def record_hook_evidence(
     outcome: str | None = None,
     detail: str | None = None,
 ) -> None:
-    """Append hook metadata without retaining a tool's input or output."""
+    """Append hook metadata, keeping of a tool's input only a fetch origin.
+
+    Input and output stay out of a record because they carry commands,
+    patches and credentials. A fetch's origin is the one part that does not:
+    it is what the verdict was reached against, and :func:`fetch_origin`
+    bounds it to the scheme, host and port.
+    """
     if data_root is None:
         return
     record = {
@@ -191,6 +246,8 @@ def record_hook_evidence(
             if field in payload and isinstance(payload[field], str)
         }
     )
+    origin = fetch_origin(payload)
+    record.update({"fetch_origin": origin} if origin else {})
     record.update({"outcome": outcome} if outcome is not None else {})
     record.update({"detail": detail} if detail is not None else {})
     encoded = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
@@ -632,6 +689,37 @@ def boundary_refusal(failure: str, described: dict[str, list[str]]) -> str:
     )
 
 
+def outside_this_project(path_text: str, root: Path | None) -> bool:
+    """Whether this path sits outside the repository the session is working in.
+
+    Wider than :func:`foreign_repository` by exactly the case that needs no
+    second repository to be decidable: a path belonging to no checkout at all.
+    Where the session's own repository is known, a file in somebody's home
+    directory or under a runtime's scratch root is known not to be in it, and
+    is no more this project's code than another checkout's is.
+
+    The undecidable half stays undecidable. A session in no repository and an
+    unreadable ``.git`` leave this end blank, and nothing can be established
+    to be outside a boundary that could not be read, so both say no.
+
+    A relative path is anchored on the session's own directory before it is
+    asked about, which is where the tool that carried it will resolve it. Any
+    other reading answers "outside" for the ordinary spelling of a file in
+    this repository — the one every gate here exists for — and a ``..`` that
+    genuinely climbs out is settled by the same anchoring rather than by a
+    separate rule.
+
+    What this settles is deliberately narrow: whose code a file is, and never
+    what may be done to it. Only the gates whose subject is this project's own
+    conventions read it; everything about the act itself -- a protected path,
+    a whole-file write, the size of the change -- is answered without it.
+    """
+    if root is None:
+        return False
+    here = shared_git_directory(str(root))
+    return bool(here) and here != shared_git_directory(str(root / path_text))
+
+
 def foreign_repository(path_text: str, root: Path | None) -> bool:
     """Whether this path belongs to a repository other than the session's.
 
@@ -642,17 +730,18 @@ def foreign_repository(path_text: str, root: Path | None) -> bool:
     this project is worked on. :func:`shared_git_directory` is the answer both
     ends can name alike, whichever worktree either of them is sitting in.
 
-    Undecidable answers say no. A path in no repository, a session in no
-    repository, and an unreadable ``.git`` all leave one side blank, and the
-    honest reading of "cannot tell" is that this project's rules still apply:
-    lifting them on a guess would silence the gates on this repository's own
-    files, where keeping them costs friction somewhere that is not ours.
+    A path in no repository says no, because the question here is which
+    *other* repository owns the file and there is none for the referral to
+    name; whether it is this project's code at all is the wider
+    :func:`outside_this_project`. A session in no repository and an unreadable
+    ``.git`` say no because nothing was established, and the honest reading of
+    "cannot tell" is that this project's rules still apply: lifting them on a
+    guess would silence the gates on this repository's own files, where
+    keeping them costs friction somewhere that is not ours.
     """
-    if root is None:
-        return False
-    here = shared_git_directory(str(root))
-    there = shared_git_directory(path_text)
-    return bool(here) and bool(there) and here != there
+    return bool(shared_git_directory(path_text)) and outside_this_project(
+        path_text, root
+    )
 
 
 def publish_edition(path_text: str) -> None:
@@ -756,16 +845,24 @@ def declared_program(root: str, declared: str) -> str:
     POSIX, ``Scripts`` on Windows — because that is a property of how Python
     is installed rather than of any project, and reading it is what keeps
     this from being a second layout assumption behind the one it replaces.
+    It is read as a candidate rather than as the answer: a hook runs under
+    whichever ``python3`` the runtime found, and one installed in ``sbin``
+    names a directory no environment has, which resolved every declared
+    program to a bare name and left the gate silent on a machine where it
+    was installed all along. The conventional pair follows it, so the
+    interpreter still decides where it can and never decides alone.
     """
     located = Path(root) / declared
     if located.is_file():
         return str(located)
     if "/" in declared or "\\" in declared:
         return ""
-    installed = (
-        project_environment(Path(root)) / Path(sys.executable).parent.name / declared
-    )
-    return str(installed) if installed.is_file() else declared
+    environment = project_environment(Path(root))
+    for scripts in dict.fromkeys([Path(sys.executable).parent.name, "bin", "Scripts"]):
+        installed = environment / scripts / declared
+        if installed.is_file():
+            return str(installed)
+    return declared
 
 
 def conflicted(path_text: str) -> bool:
@@ -877,6 +974,68 @@ def file_diagnostics(
         f"{item['severity']} {item['range']['start']['line'] + 1}: {item['message']}"
         for item in reported
         if item["file"] == edited and item["severity"] != "information"
+    ]
+
+
+def repaired_directives(
+    path_text: str,
+    command: list[str],
+    suffixes: tuple[str, ...] = (".py", ".pyi"),
+    timeout_seconds: float = 30.0,
+) -> list[str]:
+    """Take the dead `# lup: ignore` directives out of one written file.
+
+    A directive guarding nothing is the one audit finding whose fix is not a
+    judgement — there is a single correct edit and this is it — so the gate
+    ahead of the write neither refuses it nor spends an approval naming it,
+    and it goes afterwards instead. That pairing is what lets the prompt leave
+    it unmentioned: unlisted and removed is one behaviour, while unlisted and
+    kept would be a directive nobody ever reads.
+
+    Reported back rather than done in silence. The agent wrote the directive
+    believing it did something, and a line that disappears without a word is
+    one it writes again on the next file.
+
+    Anything that goes wrong is nothing repaired, exactly as an unreadable
+    checker is no diagnostics: this runs after the tool, so the alternative
+    to saying nothing is failing a write that has already happened.
+    """
+    if not command or Path(path_text).suffix.lower() not in suffixes:
+        return []
+    if conflicted(path_text):
+        return []
+    root = worktree_root(path_text)
+    if not root:
+        return []
+    located = declared_program(root, command[0])
+    if not located:
+        return []
+    # Named the way the sweep names its own files, which is how the request
+    # and the report come back in one spelling. It is also the only spelling
+    # every sweep must understand: a project declares its own program here,
+    # and one that selects by repository-relative prefix is the shape this
+    # can count on rather than one it would have to assume.
+    try:
+        named = str(Path(path_text).resolve().relative_to(Path(root).resolve()))
+    except ValueError:
+        return []
+    try:
+        finished = subprocess.run(
+            [located, *command[1:], "--path", named],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        reported = json.loads(finished.stdout)["repaired"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return []
+    return [
+        f"line {item['line']}: removed `# lup: ignore"
+        + (f"[{item['rule_id']}]" if item["rule_id"] else "")
+        + "` — it guarded no rule, so it silenced nothing"
+        for item in reported
     ]
 
 
@@ -1618,18 +1777,17 @@ def bash_decision(
     # it is not written down anywhere.
     if verdict.effect == "defer":
         record_deferral(cwd, command, verdict.reason, verdict.checkpoint != "nothing")
-    pointed = undo_point(verdict, reference)
-    if pointed.effect != "allow":
-        return pointed
+    if verdict.effect != "allow":
+        return verdict
     nudge = script_run_nudge(python_script_targets(command, INTERPRETERS), cwd)
     if not nudge:
-        return pointed
+        return verdict
     return KernelDecision(
-        pointed.effect,
-        pointed.reason + nudge,
-        pointed.sandbox,
-        pointed.escalated,
-        checkpoint=pointed.checkpoint,
+        verdict.effect,
+        verdict.reason + nudge,
+        verdict.sandbox,
+        verdict.escalated,
+        checkpoint=verdict.checkpoint,
     )
 
 
@@ -1642,32 +1800,6 @@ def unconfined_by_declaration(command: str) -> bool:
     a runtime cannot answer it differently from the classifier.
     """
     return sandbox_excluded(command, SANDBOX_EXCLUDED_COMMANDS)
-
-
-def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
-    """Say the tree was snapshotted, on the one verdict that changes for it.
-
-    The snapshot itself is taken above, before the verdict, because the
-    verdict reads it. What is left here is what the human is told.
-
-    On an approval question, which is the one moment the information changes
-    an answer: somebody deciding whether to permit something destructive is
-    weighing exactly whether it can be undone. On an allowed command the
-    snapshot is silent, because a line appended to every mutating command is
-    one nobody reads by the third time — and ``dev undo`` is where a snapshot
-    is looked for anyway. On a deferral the reason reaches no human at all;
-    it reaches the record, which is where the relaxation is reviewed.
-    """
-    if not reference or verdict.effect != "ask":
-        return verdict
-    return KernelDecision(
-        verdict.effect,
-        f"{verdict.reason} — the tree was snapshotted first; "
-        f"`lup-devtools dev undo` lists it as {reference}",
-        verdict.sandbox,
-        verdict.escalated,
-        checkpoint=verdict.checkpoint,
-    )
 
 
 def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
@@ -1730,6 +1862,12 @@ def edit_decision(
     directory the runtime started in, because every repo-relative rule matches
     on that answer and a session may be launched anywhere.
 
+    Two facts about where the file sits are read here rather than in the
+    kernel, which sees a path and no filesystem. Another repository's file
+    answers to that repository's conventions and gets the referral; a file in
+    no repository of ours is not this project's code either, which is all the
+    gates about this project's own review notes need to decline it.
+
     The gates this lease holds are read here, per call, rather than resolved
     when the session started: a grant is answered by a human while the session
     that asked for it is still running, and one resolved at launch could not
@@ -1743,6 +1881,7 @@ def edit_decision(
     edit and one that costs a second on the edits that need it.
     """
     outside_this_repository = foreign_repository(path_text, cwd)
+    beyond_this_project = outside_this_project(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
@@ -1775,6 +1914,7 @@ def edit_decision(
         operation=operation,
         edit_rules=EDIT_RULES,
         foreign=outside_this_repository,
+        outside_project=beyond_this_project,
     )
 
 
@@ -1902,6 +2042,40 @@ def written_review(command: str, cwd: Path) -> list[str]:
         if verdict.effect != "allow":
             findings.append(f"{target}: {verdict.reason}")
     return findings
+
+
+def announced(effect, tool_name, reason, dialogs=("Edit", "Write")):
+    """What a verdict has to say that its own prompt will not carry, or "".
+
+    *dialogs* names the calls whose approval prompt is this runtime's own
+    dialog. Claude Code renders a hook's ``permissionDecisionReason`` in the
+    prompt it raises for a shell command, and drops it in the one it raises
+    for a file write — that dialog shows the path, a preview and the two
+    answers, and takes nothing from a hook. Measured against 2.1.237, in both
+    directions.
+
+    Silent wherever the prompt already speaks. A shell command's prompt shows
+    the reason, so repeating it would say everything twice; a reason of one
+    line names a category and adds nothing to a dialog already showing the
+    file and its content. What is left is the case this exists for — a verdict
+    that enumerated something the approver cannot otherwise see, about a call
+    whose prompt drops it.
+
+    ``systemMessage`` is the one field this runtime displays to a person from
+    every hook, and it arrives with the tool call rather than with the prompt,
+    so this informs rather than gates. That is the whole of what is reachable:
+    the reason is dropped here, and ``PermissionRequest`` — the event that runs
+    before the prompt — belongs to the control protocol rather than to a local
+    plugin, and never fires for one.
+
+    The colour is spelled here rather than in the kernel because it is this
+    terminal's alphabet. The kernel states the sites; a runtime that shows them
+    some other way is showing the same verdict.
+    """
+    lines = reason.splitlines()
+    if effect != "ask" or tool_name not in dialogs or len(lines) < 2:
+        return ""
+    return "\n".join([lines[0], *(f"\033[33m{site}\033[0m" for site in lines[1:])])
 
 
 def plugin_data_root():
@@ -2126,19 +2300,27 @@ def rendered(decision, payload, placed):
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
+
+    def surfaced(result):
+        """The same verdict, with what this runtime will not show it said."""
+        message = announced(settled.effect, payload["tool_name"], settled.reason)
+        return {**result, "systemMessage": message} if message else result
+
     if placed is not None and settled.effect != "deny":
-        return {"hookSpecificOutput": {**answer, "updatedInput": placed}}
+        return surfaced({"hookSpecificOutput": {**answer, "updatedInput": placed}})
     if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
-        return {"hookSpecificOutput": answer}
-    return {
-        "hookSpecificOutput": {
-            **answer,
-            "updatedInput": {
-                **payload["tool_input"],
-                "dangerouslyDisableSandbox": sandbox_escaped(settled.sandbox),
-            },
+        return surfaced({"hookSpecificOutput": answer})
+    return surfaced(
+        {
+            "hookSpecificOutput": {
+                **answer,
+                "updatedInput": {
+                    **payload["tool_input"],
+                    "dangerouslyDisableSandbox": sandbox_escaped(settled.sandbox),
+                },
+            }
         }
-    }
+    )
 
 
 def observe(payload):
@@ -2160,7 +2342,13 @@ def observe(payload):
     path = tool_input["file_path"] if "file_path" in tool_input else ""
     if path:
         publish_edition(path)
-        return file_diagnostics(path, DIAGNOSTICS_COMMAND)
+        # Repaired before checked, because the repair rewrites the file: run
+        # the other way round and the diagnostics describe lines that have
+        # already moved. Both reports reach the agent together, which is the
+        # one channel this event has.
+        return repaired_directives(path, REPAIR_COMMAND) + file_diagnostics(
+            path, DIAGNOSTICS_COMMAND
+        )
     command = tool_input["command"] if "command" in tool_input else ""
     return written_review(command, Path.cwd()) if command else []
 

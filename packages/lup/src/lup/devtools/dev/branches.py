@@ -19,8 +19,13 @@ from pydantic import BaseModel, Field
 
 from lup.harness.environment import non_interactive_environment
 from lup.harness.process import LaunchRequest, ProcessLauncher
+import lup.devtools.dev.records as records
 import lup.devtools.dev.traces as traces
-from lup.devtools.dev.remote_auth import check_remote_auth, remote_auth_refusal
+from lup.devtools.dev.remote_auth import (
+    check_remote_auth,
+    origin_auth_complaint,
+    remote_auth_refusal,
+)
 from lup.resolver.models import HeldLease
 from lup.resolver.state import live_lease_branches
 from lup.types import StringMap
@@ -218,6 +223,25 @@ class SurveyResult(BaseModel):
     them.
     """
 
+    remotes_fetched: bool = True
+    """Whether the remotes were read before the rows above were derived.
+
+    An empty ``remote_branches`` has two opposite meanings — a repository
+    with nothing stranded on a remote, and a repository whose fetch never
+    answered — and the list alone spells them identically. ``/lup:land``
+    reads that list to empty the one bucket a local sweep cannot see, so a
+    failed fetch reported as an empty list skips the step silently and
+    leaves exactly the branches it exists to clear. Reported rather than
+    raised, because every local disposition here is still correct.
+    """
+
+    fetch_complaint: str = ""
+    """Why the remotes were not read, empty when they were.
+
+    Carried beside the flag rather than left on stderr, which is where the
+    fetch's own message went and where a reader of the JSON never looks.
+    """
+
 
 def runs_holding(leased: dict[str, HeldLease]) -> list[RunHold]:
     """Group every held branch under the run answerable for it."""
@@ -284,8 +308,21 @@ def parse_branches() -> list[ParsedBranch]:
             "is_current": head == "*",
         }
 
+    def published(branch: ParsedBranch) -> ParsedBranch:
+        """The row with the remote lup recorded, where git's config names none.
+
+        A branch `dev pr push` published carries no tracking configuration,
+        because the push states its destination instead of asking git to
+        write one. Read from git alone the row says the branch answers to
+        nothing, which is the report for a branch nobody ever sent anywhere.
+        """
+        if branch["tracking"]:
+            return branch
+        recorded = records.recorded_upstream(branch["name"])
+        return {**branch, "tracking": recorded or None}
+
     return [
-        parse(row)
+        published(parse(row))
         for row in git.lines(
             "for-each-ref",
             "refs/heads",
@@ -403,7 +440,7 @@ def fetch_pr_status(branch_names: list[str]) -> dict[str, PRStatus]:
                 "--limit",
                 "200",
                 "--json",
-                "number,title,headRefName,state,mergedAt",
+                "number,title,headRefName,state,mergedAt,url",
             )
         )
     except sh.ErrorReturnCode as e:
@@ -520,15 +557,6 @@ def shares_history(branch: str, integration: str) -> bool:
         return False
 
 
-def reservation_config_key(branch: str) -> str:
-    """Where the commit a workspace was reserved at is recorded, for one branch.
-
-    Written at creation beside the base branch name and read here, so the key
-    is named once instead of spelled at each end.
-    """
-    return f"branch.{branch}.lup-base-commit"
-
-
 def still_at_reservation(branch: str) -> bool:
     """Whether this branch stands exactly where its workspace was reserved.
 
@@ -559,10 +587,8 @@ def still_at_reservation(branch: str) -> bool:
     before the record existed — and neither is somebody's held session, while
     a spent branch read as reserved is one nothing offers to clear again.
     """
+    reserved_at = records.recorded_reservation(branch)
     try:
-        reserved_at = git.out(
-            "config", "--get", reservation_config_key(branch), _ok_code=[0]
-        ).strip()
         return bool(reserved_at) and git.out("rev-parse", branch).strip() == reserved_at
     except sh.ErrorReturnCode:
         return False
@@ -906,22 +932,13 @@ class BaseCandidate(BaseModel):
     source: Literal["recorded", "guessed"] = "guessed"
 
 
-def base_config_key(branch: str) -> str:
-    """Where the base a worktree was cut from is recorded, for one branch.
-
-    Written at creation and read wherever a branch's origin has to be
-    recovered, so the key is named once instead of spelled at each end.
-    """
-    return f"branch.{branch}.lup-base"
-
-
 def recorded_base(branch: str) -> str | None:
-    """The base recorded at worktree creation, when one was written."""
-    try:
-        value = git.out("config", "--get", base_config_key(branch), _ok_code=[0])
-    except sh.ErrorReturnCode:
-        return None
-    return value or None
+    """The base recorded at worktree creation, when one was written.
+
+    ``None`` rather than an empty name, because detection branches on whether
+    a record exists at all and an empty string is a name nothing carries.
+    """
+    return records.recorded_base(branch) or None
 
 
 def decayed_base_complaint(branch: str, recorded: str, *, present: bool) -> str:
@@ -949,15 +966,16 @@ def decayed_base_complaint(branch: str, recorded: str, *, present: bool) -> str:
         "Guessing from topology instead, which is what a branch carrying no "
         "record does — so whatever reads this cannot tell the two apart, and "
         "a command that refuses a guessed base will refuse this one.\n"
-        f"Name the base with --base <branch> to settle it, or re-record it as "
-        f"`git config {base_config_key(branch)} <branch>`."
+        f"Name the base with --base <branch> to settle it, or write "
+        f'{{"base": "<branch>"}} into {records.record_location(branch)}, '
+        "beneath the git directory every worktree of this repository shares."
     )
 
 
 def detect_base_branch(branch: str | None = None) -> BaseCandidate:
     """Detect the base branch for the given (or current) branch.
 
-    A base recorded at worktree creation (``branch.<name>.lup-base``) wins
+    A base recorded at worktree creation (:mod:`lup.devtools.dev.records`) wins
     outright — topology cannot recover the creation point once the parent
     has merged on. Without a record, prefers ancestor branches (the natural
     parent in a two-tier model) over siblings. Among ancestors, picks the
@@ -1255,17 +1273,27 @@ class TrackedRemotes(BaseModel, frozen=True):
         )
 
 
-def tracked_remotes(launcher: ProcessLauncher, root: Path) -> TrackedRemotes:
-    """Ask git which remote branches this checkout answers to."""
-    branch = git_line(launcher, root, ["branch", "--show-current"])
-    recorded = (
-        git_line(launcher, root, ["config", "--get", base_config_key(branch)])
-        if branch
-        else ""
+def remote_of(launcher: ProcessLauncher, root: Path, branch: str) -> str:
+    """Which remote branch this one answers to, however it came to be known.
+
+    Git's own tracking configuration is asked first and settles it wherever a
+    branch has one, since a person who set it meant it. A branch published by
+    `dev pr push` has none: the push names its destination as a refspec and
+    records it here instead, so that git's shared configuration holds nothing
+    lup put there. Without either, the branch has never been published.
+    """
+    return upstream_of(launcher, root, branch) or records.recorded_upstream(
+        branch, root
     )
+
+
+def tracked_remotes(launcher: ProcessLauncher, root: Path) -> TrackedRemotes:
+    """Ask git and lup's own records which remotes this checkout answers to."""
+    branch = git_line(launcher, root, ["branch", "--show-current"])
+    recorded = records.recorded_base(branch, root) if branch else ""
     return TrackedRemotes(
-        upstream=upstream_of(launcher, root, ""),
-        base=upstream_of(launcher, root, recorded) if recorded else "",
+        upstream=remote_of(launcher, root, branch) if branch else "",
+        base=remote_of(launcher, root, recorded) if recorded else "",
     )
 
 
@@ -1551,21 +1579,59 @@ def base_branch(branch: str | None, as_json: bool) -> None:
 
 
 COMMIT_PREFIX_LABELS = {
-    "feat": "Added",
-    "fix": "Fixed",
-    "refactor": "Refactored",
-    "docs": "Updated docs for",
-    "test": "Added tests for",
-    "chore": "Updated",
-    "meta": "Updated",
-    "data": "Added data for",
+    "feat": "Features",
+    "fix": "Fixes",
+    "refactor": "Refactoring",
+    "docs": "Documentation",
+    "test": "Tests",
+    "chore": "Chores",
+    "meta": "Meta",
+    "data": "Data",
 }
-"""How a PR body reads each commit type aloud, for a project that uses these.
+"""How a PR body heads the group of commits sharing one type.
+
+A heading over the subjects rather than a sentence opener joined to one. A
+commit subject is written in whatever voice the project writes them in, and
+a past-tense opener in front of a declarative one — "Fixed say that a
+sign-in ends on an error" — is ungrammatical for every commit written that
+way, which in a project writing them that way is all of them. A noun phrase
+stands over any of them.
 
 The types are one convention among several, and the English is a second
 choice on top: a project spelling either differently passes its own table
 rather than reading someone else's vocabulary back in its summaries.
 """
+
+
+def names_a_test(
+    path: str,
+    directories: tuple[str, ...] = ("test", "tests", "spec", "specs"),
+    affixes: tuple[str, ...] = ("test_", "_test", ".test", "spec_", "_spec", ".spec"),
+) -> bool:
+    """Whether a changed path names a test rather than what a test covers.
+
+    Read off the path, because what a project calls its tests is a naming
+    convention and a diff records no more than the names. Both halves are
+    defaults, so a project spelling either differently passes its own.
+    """
+    posix = PurePosixPath(path)
+    stem = posix.stem.lower()
+    return any(part.lower() in directories for part in posix.parent.parts) or any(
+        stem.startswith(affix) or stem.endswith(affix) for affix in affixes
+    )
+
+
+def tests_touched(base: str) -> list[str]:
+    """The test files this branch's diff touches, sorted, possibly none.
+
+    What a branch's own tests are is derivable from its diff, so the test
+    plan is derived. The alternative a fixed checklist offers is a sentence
+    nobody wrote about a change nobody read, which a reviewer meets as a
+    claim that a plan exists — and where a branch touches no test at all,
+    saying nothing is the honest form of that.
+    """
+    changed = git.lines("diff", "--name-only", f"{base}...HEAD", _ok_code=[0])
+    return sorted(path for path in changed if path and names_a_test(path))
 
 
 def pr_body(
@@ -1598,31 +1664,43 @@ def pr_body(
         prefix = head.partition(":")[0].lower()  # lup: ignore[string-split] — type
         groups[prefix].append(message)
 
-    def summarize(prefix: str, messages: list[str]) -> str:
-        fallback = prefix.capitalize()
-        label = labels.get(prefix, fallback)
-        first = messages[0].partition(":")[2]  # lup: ignore[string-split] — log line
-        desc = (first or messages[0]).lstrip()
-        more = f" (+{len(messages) - 1} more)" if len(messages) > 1 else ""
-        return f"- {label} {desc}{more}"
+    def summarize(prefix: str, messages: list[str]) -> list[str]:
+        """One heading and one bullet per commit, with none of them folded."""
+        heading = labels.get(prefix, prefix.capitalize())
+        subjects = [
+            # lup: ignore[string-split] — commit subject after its type
+            (message.partition(":")[2] or message).strip()
+            for message in messages
+        ]
+        return [f"**{heading}**", *(f"- {subject}" for subject in subjects), ""]
 
-    summary_lines = [summarize(p, msgs) for p, msgs in groups.items()]
-    body_parts = ["## Summary", *summary_lines, "", "## Commits", *log_lines]
-    body_parts.extend(["", "## Test plan", "- [ ] Verify changes work as expected"])
+    summary_lines = [
+        line for prefix, msgs in groups.items() for line in summarize(prefix, msgs)
+    ]
+    body_parts = ["## Summary", "", *summary_lines, "## Commits", *log_lines]
+    if tests := tests_touched(base):
+        body_parts.extend(["", "## Test plan", *(f"- [ ] `{path}`" for path in tests)])
 
     typer.echo("\n".join(body_parts))
 
 
 def survey(as_json: bool) -> None:
     """Collect branch, worktree, PR, and containment data."""
-    has_remote = check_remote_auth()
+    complaint = origin_auth_complaint()
+    if complaint:
+        typer.echo(complaint, err=True)
+    has_remote = not complaint
     if has_remote:
         if not as_json:
             typer.echo("Fetching and pruning remote...", err=True)
         try:
             fetch_remote_tracking()
         except sh.ErrorReturnCode as e:
-            logger.warning("Failed to fetch: %s", decode_stderr(e))
+            # The refs already here are still read, so the survey says what
+            # the last successful fetch left rather than nothing at all --
+            # which is the reading `remotes_fetched` marks as unrefreshed.
+            complaint = decode_stderr(e)
+            logger.warning("Failed to fetch: %s", complaint)
 
     integration = get_integration_branch()
     cur = git.out("branch", "--show-current")
@@ -1742,6 +1820,8 @@ def survey(as_json: bool) -> None:
         branches=branches_list,
         runs=runs_holding(leased),
         remote_branches=remote_list,
+        remotes_fetched=not complaint,
+        fetch_complaint=complaint,
     )
 
     if as_json:
@@ -1776,6 +1856,13 @@ def survey(as_json: bool) -> None:
             "Reason",
         )
         typer.echo(format_table(headers, [display_row(bi) for bi in branches_list]))
+
+        if not result.remotes_fetched:
+            typer.echo(
+                "\nThe remotes were not read for this survey, so what it says"
+                " about them is whatever the last read left, and an empty list"
+                f" means nothing here: {result.fetch_complaint}"
+            )
 
         if result.remote_branches:
             typer.echo("\nOn the remote, with no local branch:\n")
@@ -1845,6 +1932,14 @@ class DeletionPlan(BaseModel):
     branch: str
     worktree: str | None = None
     stranded: bool = False
+    has_local: bool = True
+    """Whether ``refs/heads`` carries the branch, which is what ``-D`` needs.
+
+    A branch whose local copy went when its work landed leaves origin's
+    behind, and the name then resolves to nothing git can delete locally.
+    Every containment question about it has to be asked of the ref that does
+    resolve, which :meth:`ref` names.
+    """
     has_remote: bool = False
     delete_remote: bool = False
     """Whether origin's copy goes too, which is a decision, not an observation.
@@ -1867,6 +1962,14 @@ class DeletionPlan(BaseModel):
     def forceable(self) -> bool:
         """Whether ``--force`` would change any of those answers."""
         return any(action.verdict == "blocked" for action in self.actions)
+
+    def remote_ref(self) -> str:
+        """How git names origin's copy, which is how a comparison spells it."""
+        return f"origin/{self.branch}"
+
+    def ref(self) -> str:
+        """The ref carrying these commits, which containment has to be read from."""
+        return self.branch if self.has_local else self.remote_ref()
 
 
 def worktree_changes(path: str) -> WorktreeChanges:
@@ -1913,15 +2016,37 @@ def remote_branch_exists(name: str) -> bool:
         return False
 
 
-def upstream_ref(name: str) -> str | None:
-    """The remote-tracking ref this branch is set to follow, if it has one."""
+def resolvable(ref: str) -> bool:
+    """Whether this checkout still carries the ref, as a commit."""
     try:
-        return (
-            git.out("rev-parse", "--symbolic-full-name", f"{name}@{{upstream}}").strip()
-            or None
-        )
+        git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+        return True
     except sh.ErrorReturnCode:
-        return None
+        return False
+
+
+def upstream_ref(name: str) -> str | None:
+    """The remote-tracking ref this branch follows, if anything says it has one.
+
+    Git's own tracking configuration answers first, and lup's record answers
+    where there is none — a branch published by `dev pr push` has no tracking
+    configuration at all, because the push names its destination rather than
+    asking git to write one into the shared config.
+
+    The recorded name is checked against the refs actually here before it is
+    handed back, since the caller compares against it and a comparison
+    against a ref nothing carries answers no — which reads as a branch ahead
+    of a remote it never fell behind, and turns an ordinary delete into one
+    reported as discarding work.
+    """
+    try:
+        tracked = git.out(
+            "rev-parse", "--symbolic-full-name", f"{name}@{{upstream}}"
+        ).strip()
+    except sh.ErrorReturnCode:
+        tracked = ""
+    recorded = records.recorded_upstream(name)
+    return tracked or (recorded if recorded and resolvable(recorded) else None)
 
 
 def outgrew_upstream(name: str) -> bool:
@@ -1929,8 +2054,8 @@ def outgrew_upstream(name: str) -> bool:
 
     The question ``git branch -d`` actually asks of a tracking branch, and
     the reason it refuses one every commit of which is already in HEAD. A
-    worktree is given an upstream the moment it is created, so this is the
-    ordinary shape of a branch that landed by a merge into the integration
+    branch has a remote from the first push that carried something, so this
+    is the ordinary shape of one that landed by a merge into the integration
     branch rather than by a push of its own: the work is in, and the remote
     copy is simply behind.
     """
@@ -2047,10 +2172,35 @@ def dependent_pulls(name: str) -> list[int]:
     return [PRStatus.model_validate(row).number for row in rows]
 
 
-def plan_remote_step(name: str, force: bool) -> PlannedAction:
-    """Judge deleting origin's copy by what else is still pointing at it."""
+def plan_remote_step(name: str, force: bool, contained: bool) -> PlannedAction:
+    """Judge deleting origin's copy by what it holds and what points at it.
+
+    Containment is handed in because the ref that answers it differs: where a
+    local branch exists the caller has already judged that one, and where it
+    does not, origin's copy is both the subject and the only copy — the case
+    where deleting it is the whole of the deletion and the only thing that
+    can say whether anything is discarded.
+    """
     description = f"Delete remote branch: origin/{name}"
     dependents = dependent_pulls(name)
+    if not contained:
+        integration = get_integration_branch()
+        listed = ", ".join(f"#{number}" for number in dependents)
+        closes = f", closing {listed}" if dependents else ""
+        if force:
+            return PlannedAction(
+                description=description,
+                verdict="forced",
+                detail=f"discards commits {integration} does not hold{closes}",
+            )
+        return PlannedAction(
+            description=description,
+            verdict="blocked",
+            detail=(
+                f"origin/{name} holds commits {integration} does not{closes}; "
+                "--force deletes it anyway"
+            ),
+        )
     if not dependents:
         return PlannedAction(description=description)
     listed = ", ".join(f"#{number}" for number in dependents)
@@ -2070,8 +2220,64 @@ def plan_remote_step(name: str, force: bool) -> PlannedAction:
     )
 
 
+def plan_remote_only_deletion(
+    name: str, force: bool, has_remote: bool, remote: bool | None
+) -> DeletionPlan:
+    """Plan for a name ``refs/heads`` does not carry, which origin still may.
+
+    A survey classifies these — the local copy went when the work landed and
+    origin's did not — so the verb has to be able to act on the disposition
+    its own survey hands out. Deleting origin's copy is the whole of what the
+    name can mean here, and the containment that says whether it discards
+    anything is read off that copy: judging it through a local branch that
+    was never there reported an unmerged branch where there was no branch at
+    all, and reached ``git branch -D`` before the push that was the only
+    thing left to run.
+    """
+    if not has_remote:
+        return DeletionPlan(
+            branch=name,
+            has_local=False,
+            actions=[
+                PlannedAction(
+                    description=f"Delete branch: {name}",
+                    verdict="refused",
+                    detail=f"no branch by that name, locally or as origin/{name}",
+                )
+            ],
+        )
+    if remote is False:
+        return DeletionPlan(
+            branch=name,
+            has_local=False,
+            has_remote=True,
+            actions=[
+                PlannedAction(
+                    description=f"Delete branch: {name}",
+                    verdict="refused",
+                    detail=(
+                        f"origin/{name} is the only copy and --no-remote keeps it, "
+                        "so there is nothing left to delete"
+                    ),
+                )
+            ],
+        )
+    contained = is_ancestor(f"origin/{name}", get_integration_branch())
+    return DeletionPlan(
+        branch=name,
+        has_local=False,
+        has_remote=True,
+        delete_remote=True,
+        actions=[plan_remote_step(name, force=force, contained=contained)],
+    )
+
+
 def plan_deletion(name: str, force: bool, remote: bool | None = None) -> DeletionPlan:
     """Evaluate every precondition a deletion depends on, changing nothing.
+
+    A name resolves locally, only on origin, or nowhere, and the three are
+    different deletions rather than one with steps that happen to fail:
+    :func:`plan_remote_only_deletion` carries the second and the third.
 
     A dry run and the real path both read this, so what the dry run promises
     is what the real path went on to check.
@@ -2084,6 +2290,14 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
     which is exactly what a push before deleting was for, so it stays
     unless a caller says otherwise in so many words.
     """
+    from lup.devtools.dev.worktree import branch_exists
+
+    has_remote = remote_branch_exists(name)
+    if not branch_exists(name):
+        return plan_remote_only_deletion(
+            name, force=force, has_remote=has_remote, remote=remote
+        )
+
     worktree = parse_worktrees().get(name)
     stranded = worktree is not None and not Path(worktree).exists()
     actions: list[PlannedAction] = []
@@ -2094,10 +2308,9 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
     actions.append(plan_branch_step(name, force=force))
 
     merged = is_ancestor(name, get_integration_branch())
-    has_remote = remote_branch_exists(name)
     delete_remote = has_remote and (merged if remote is None else remote)
     if delete_remote:
-        actions.append(plan_remote_step(name, force=force))
+        actions.append(plan_remote_step(name, force=force, contained=merged))
 
     return DeletionPlan(
         branch=name,
@@ -2164,19 +2377,23 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
                 plan, completed, f"worktree removal failed: {attributed_stderr(error)}"
             )
 
-    try:
-        # The preflight is what judges containment, and it judges against the
-        # integration branch. `-d` would ask git the same question again from
-        # HEAD and from the upstream, refuse on either, and refuse here — past
-        # the worktree removal above, which is the one place a refusal was
-        # promised to change nothing.
-        git("branch", "-D", plan.branch)
-        typer.echo(f"Deleted branch: {plan.branch}")
-        completed.append("deleted branch")
-    except sh.ErrorReturnCode as error:
-        abort_deletion(
-            plan, completed, f"branch deletion failed: {decode_stderr(error)}"
-        )
+    # A name origin alone carries has nothing here to delete, and asking git
+    # to delete it anyway is what stopped the run before the push that was
+    # the whole deletion.
+    if plan.has_local:
+        try:
+            # The preflight is what judges containment, and it judges against
+            # the integration branch. `-d` would ask git the same question
+            # again from HEAD and from the upstream, refuse on either, and
+            # refuse here — past the worktree removal above, which is the one
+            # place a refusal was promised to change nothing.
+            git("branch", "-D", plan.branch)
+            typer.echo(f"Deleted branch: {plan.branch}")
+            completed.append("deleted branch")
+        except sh.ErrorReturnCode as error:
+            abort_deletion(
+                plan, completed, f"branch deletion failed: {decode_stderr(error)}"
+            )
 
     if not plan.delete_remote:
         if plan.has_remote:
@@ -2190,7 +2407,12 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
         git("push", "origin", "--delete", plan.branch)
         typer.echo(f"Deleted remote branch: origin/{plan.branch}")
     except sh.ErrorReturnCode as error:
-        typer.echo(f"Warning: remote deletion failed: {decode_stderr(error)}", err=True)
+        failure = f"remote deletion failed: {decode_stderr(error)}"
+        # Where origin held the only copy this push was the deletion, so a
+        # warning beside a zero exit would report a branch deleted that stands.
+        if not plan.has_local:
+            abort_deletion(plan, completed, failure)
+        typer.echo(f"Warning: {failure}", err=True)
 
 
 def delete_branch(
@@ -2206,6 +2428,10 @@ def delete_branch(
     for the one path — :func:`run_retirement` — that preserves them before
     deleting. Empty means nobody has, which is the case the warning below is
     written for.
+
+    ``name`` need not be a local branch: a name origin alone carries is what
+    ``dev survey`` reports under its own heading and hands a disposition, and
+    this is the verb that disposition names.
     """
     cur = git.out("branch", "--show-current")
     if name == cur:
@@ -2231,7 +2457,8 @@ def delete_branch(
         raise typer.Exit(1)
 
     integration = get_integration_branch()
-    if plan.delete_remote and not is_ancestor(name, integration) and not preserved:
+    contained = is_ancestor(plan.ref(), integration)
+    if plan.delete_remote and not contained and not preserved:
         typer.echo(
             f"Warning: {name} holds commits {integration} does not, and origin/{name} "
             "is going with it — after this the work is in no branch. To keep "
@@ -2243,6 +2470,11 @@ def delete_branch(
     # Before the worktree goes, not after: its trace store is usually the only
     # copy, and every later reader would see absence rather than loss.
     traces.keep_before_deleting(name)
+    # The same reason, one fact along. Whether this branch landed is read off
+    # the ref the next line removes, and a deferral parked on it asks that
+    # question later, when absence is all there is to read and absence is not
+    # an answer. So the verdict already reached above is written down.
+    records.record_landing(name, integration if contained else "")
     run_deletion(plan, force)
 
 

@@ -29,8 +29,6 @@ What is held here instead is the shape of the gates themselves, and the
 judgements no gate fires on.
 """
 
-from pydantic import BaseModel
-
 import lup.harness.models as models
 from lup.harness.codescan.common import RuleSelection
 from lup.formats.markdown import CodeCell, PlainCell
@@ -39,11 +37,9 @@ PLAN_AT_AGENT_SPEED: list[models.PromptPart] = [
     models.TextPart(
         text=r"""## Plan at Agent Speed
 
-Every instinct you have about how long software takes was learned from human teams, whose implementation time is scarce. Yours is not: what you would estimate as months completes in an afternoon. Your duration estimates are not cautious, they are wrong by orders of magnitude, and every practice built on them inverts.
+Your instincts about how long software takes were learned from human teams, whose implementation time is scarce. Yours is not: what you would estimate as months completes in an afternoon. Your estimates are not cautious — they are wrong by orders of magnitude, and every practice built on them inverts.
 
-**Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified. A calendar figure in a plan is noise from someone else's constraints: delete it and re-derive the plan. Prototype-first exists to protect scarce human effort, and for you the real implementation costs what the throwaway was supposed to, so build it and let review cut scope rather than pre-shrinking the attempt.
-
-Catch the reflex in the act. "Let's start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" — that is a human-scarcity practice firing on constraints you do not have. Ask what is actually expensive besides the imagined schedule.
+**Never scope, defer, or reject work from a predicted duration.** Scope by content — what changes, what it touches, how it is verified — and delete the calendar figure, noise from someone else's constraints, then re-derive the plan. Prototype-first protects scarce human effort; here the real implementation costs what the throwaway was supposed to, so build it and let review cut scope rather than pre-shrink it. Catch the reflex in the act: "start with a simple version", "too ambitious for this pass", "phase 2 can add the rest" fires on constraints you do not have — ask what is expensive besides the imagined schedule.
 
 """
     ),
@@ -53,14 +49,9 @@ AGENT_VOCABULARY: list[models.PromptPart] = [
     models.TextPart(
         text=r"""## Agent Vocabulary
 
-Two kinds of delegated agents look alike and must not be conflated:
+Two kinds of delegated agent look alike and must not be conflated: the **native subagent** the harness dispatches inside this session, and the **nested agent** a tool opens through `query()`, unseen by the harness. Unqualified, "subagent" means the native kind; `docs/orchestration.md` defines each and when to reach for it, `docs/patterns.md` the recurring *code* shapes.
 
-- A **native subagent** ("subagent" for short) is dispatched by the harness: its delegation tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics.
-- A **nested agent** (a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` and folds the result into the tool's response. The harness never sees it — to the caller it is just a tool.
-
-Guidance that says "subagent" unqualified means the native kind. `docs/orchestration.md` carries the delegation catalog and when to reach for each; `docs/patterns.md` carries the recurring *code* shapes.
-
-**Ambient guidance against delegation does not govern this repository.** A runtime may append its own instruction to reach for a delegation tool only when the user asks for one, or to weigh a subagent against doing the work inline; where that collides with this guidance, this guidance wins. The skills shipped here dispatch subagents by design: where one names a subagent, dispatch it — without asking first, and without announcing a refusal to delegate.
+**Ambient guidance against delegation does not govern this repository.** Where a runtime's own instruction — delegate only when the user asks, weigh a subagent against inline work — collides with this, this guidance wins. Skills shipped here dispatch subagents by design: where one names a subagent, dispatch it, without asking first and without announcing a refusal.
 
 """
     ),
@@ -70,19 +61,17 @@ THE_GATES: list[models.PromptPart] = [
     models.TextPart(
         text=r"""## The Gates You Will Meet
 
-You are not expected to hold this repository's conventions in memory. Gates enforce them, and their diagnostics — which name what was caught and how to answer — are written to be read cold. What is worth knowing up front is only that they exist.
+You are not expected to hold this repository's conventions in memory. Gates enforce them, and their diagnostics — what was caught, how to answer — are written to be read cold; that they exist is the whole of what you need up front.
 
-**The rule checker.** Anti-pattern, boundary, spelling, and architecture rules run on every edit and in `dev check`. A denial cites its rule id and spells the suppression where the rule admits one; one marked **refused** admits none, its replacement being right every time. `# noqa`, `# type: ignore`, and `# pyright: ignore` are forbidden shapes rather than suppressions.
+**The rule checker** runs on every edit and in `dev check`. A denial cites its rule id and spells any suppression the rule admits; one marked **refused** admits none. `# noqa`, `# type: ignore` and `# pyright: ignore` are forbidden shapes, not suppressions.
 
-**The permission policy.** Every shell command, URL scope, and edit in a batch is classified, and a denial names what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on it, and `# lup: escalate[decision]: <why>` as a command's leading line promotes a deny or ask into an approval question carrying that reason.
+**The permission policy** classifies every shell command, URL scope, and edit, naming what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on one; a leading `# lup: escalate[decision]: <why>` line promotes a deny or ask into an approval question carrying that reason, one-off — a recurring wall means widening the protected declaration.
 
-An escalation is one-off; a recurring wall means widening the protected declaration instead, which `docs/permissions.md` carries.
+**The edit budget** auto-allows a change block of at most three "real" changed lines, so split large changes: imports in one edit, logic in another. A human-owned file surfaces every change as an approval — propose the exact edit and let the user apply it.
 
-**The edit budget.** A change block of at most three "real" changed lines is auto-allowed, so split large changes — imports in one edit, logic in another. A file declared human-owned surfaces every change as an approval: propose the exact edit and let the user apply it.
+**The drift check** refuses a hand-edit or hand-merge of a generated tree: take either side of a conflict, regenerate, and let the check confirm it settled.
 
-**The drift check.** Generated trees are regenerated, never hand-edited or hand-merged: take either side of a conflict, regenerate, and let the check confirm it settled.
-
-`docs/rules.md` indexes every rule from the registry that runs, `docs/permissions.md` carries the lattice and what counts as a real changed line, and `docs/contributing.md` carries how a suppression is scoped.
+`docs/rules.md`, `docs/permissions.md`, and `docs/contributing.md` carry the rule index, the lattice with what a real changed line is, and how a suppression is scoped.
 
 """
     ),
@@ -97,52 +86,31 @@ subset a prose list happened to name, and cannot fall behind the registry.
 """
 
 
-class ShapingRule(BaseModel, frozen=True):
-    """One rule worth knowing before the fact, and the shape it steers to."""
-
-    id: str
-    steers_to: str
-
-    def named(self) -> str:
-        """This rule as the guidance spells it, id first and gloss beside it."""
-        return f"`{self.id}` ({self.steers_to})"
-
-
-SHAPING_RULES: list[ShapingRule] = [
-    ShapingRule(
-        id="own-model-dispatch",
-        steers_to=(
-            "a union answers through its members, never through `isinstance` "
-            "over our own types"
-        ),
-    ),
-    ShapingRule(
-        id="abc-capability",
-        steers_to="a capability ABC is an engine, never a surface a consumer holds",
-    ),
-    ShapingRule(
-        id="constant-declaration",
-        steers_to="a judgement reaches its caller as an overridable default",
-    ),
+SHAPING_RULES: list[str] = [
+    "own-model-dispatch",
+    "abc-capability",
+    "constant-declaration",
 ]
-"""The rules worth naming before the fact, each with the shape it steers to.
+"""The rules worth knowing by name before a shape is chosen.
 
 Held as a declaration rather than inside the sentence because the sentence
 has to name only the rules a project still enforces: one that retired a rule
 and went on being told to know it by name would be reading advice about a
 gate that cannot stop it, which is the drift this module exists to prevent.
+Ids alone, because the shape each steers to is a paragraph in the generated
+rule index, and a gloss beside the id here is a second copy of it.
 """
 
 
 def shaping_sentence(selection: RuleSelection) -> str:
     """The paragraph naming the live shaping rules, or nothing where none are."""
-    kept = [rule.named() for rule in SHAPING_RULES if selection.keeps(rule.id)]
+    kept = [f"`{rule}`" for rule in SHAPING_RULES if selection.keeps(rule)]
     if not kept:
         return ""
-    listed = kept[0] if len(kept) == 1 else f"{', '.join(kept[:-1])}, and {kept[-1]}"
     return (
-        "\nSome rules shape a design before any gate could catch it. Know these by "
-        f"name while choosing a shape rather than after being stopped: {listed}.\n"
+        "\nSome rules shape a design before any gate catches it. Know these by name "
+        "while choosing a shape, not after being stopped — `docs/rules.md` states "
+        f"each: {', '.join(kept)}.\n"
     )
 
 
@@ -161,14 +129,14 @@ def design_principles(
         models.TextPart(
             text=r"""### Design Principles
 
-A gate catches a violation once it is written. These change what gets written, so they are here rather than in the index.
-
-- **Compiling is stronger than emitting** — build an artifact from a typed declaration and it cannot diverge. Tempted to check that two things still match, ask whether one can be derived from the other (`docs/patterns.md`).
-- **Structured data, not strings** — reaching for `re`, `.replace()`, `.split()`, or slicing to process structured data means a parser was missed, and `docs/conventions.md` names one per format. Never hand-parse an agent's output either — take it through a Pydantic model.
-- **Placement decides the package** — would another project built on this library want it? Then it belongs to the library; only this application, and it stays there. The same test applies to values, not only to code.
-- **Never truncate** — the container grows to fit what it holds, not the reverse. Cut only where a format or a contract imposes a hard limit, never for printing space, log volume, or readability; where forced, save the full copy and point at it. A cut artifact looks complete: `[:200]` loses the rest with nothing said.
-- **The code is the source of truth** — it should read as though it had always been written this way. Never reference what code used to do, and never write "now", "new", "updated", "fixed", or "changed" in a comment; change history belongs in commit messages. Read prose as a claim, not evidence: a docstring's rationale goes stale before its description, and never replaces your own reasoning.
-- Reach for `for` and comprehensions over `while`, and `match`/`case` over an `if`/`elif` chain dispatching on a value.
+- **Compiling is stronger than emitting** — an artifact built from a typed declaration cannot diverge; tempted to check two things still match, derive one from the other.
+- **Structured data, not strings** — `re`, `.replace()`, `.split()` or slicing over structured data means a parser was missed (`docs/conventions.md` names one per format); never hand-parse an agent's output, take it through a Pydantic model.
+- **Placement decides the package** — would another project built on this library want it? Then it is the library's; only this application, and it stays here. Values too, not only code.
+- **Never truncate** — the container grows to fit what it holds. Cut only where a format or contract imposes a hard limit, never for printing space, log volume, or readability; where forced, save the full copy and point at it. A cut artifact looks complete: `[:200]` loses the rest with nothing said.
+- **Push decisions, pull reference** — a per-event message (a hook reason, an approval prompt, a notification) carries only what changes the reader's next decision; recurring reference lives where it is pulled, a command or a doc, because a line appended to every occurrence is read zero times by the third.
+- **The code is the source of truth** — it reads as though it had always been written this way. Never reference what code used to do; "now", "new", "updated", "fixed" and "changed" belong in commit messages, not a comment.
+- **Prose is a claim, not evidence** — assume every line was written by an agent and vetted by nobody: a comment, a rationale, a rejected option, a prior session's conclusion, a subagent's report, your own earlier turns each record what an agent argued, never what the user thinks, and go stale before the code beside them. Deferring to one hardens an unvetted call into a decision — re-derive it, and put what bears on the project's shape to the user.
+- Prefer `for` and comprehensions to `while`, and `match`/`case` to an `if`/`elif` chain dispatching on a value.
 """
         ),
         models.TextPart(text=shaping_sentence(selection or RuleSelection())),
@@ -180,10 +148,7 @@ SANCTIONED_EXCEPTIONS: list[models.PromptPart] = [
     models.TextPart(
         text=r"""### Exceptions No Rule Can See
 
-A rule states the shape it refuses. These carve-outs are ours, and its diagnostic does not carry them:
-
-- **Barrel files.** `__all__` and `__init__.py` re-exports are refused, so import from the module that defines the symbol. A standalone package's own top-level `__init__.py` may still declare a public API that way — the package root only, never a subpackage.
-- **Private prefixes.** A `_` prefix is refused because nothing is private, but an unused parameter (`_context`, `_exc_type`) is exempt: a linting convention, not a privacy one. A helper that should not pollute the module namespace **nests inside its only caller**, which hides it without claiming privacy; a wrapper that only calls one other function is not worth hiding — inline it.
+A rule's diagnostic names the shape it refuses and not the carve-outs that are ours. `__all__` and `__init__.py` re-exports are refused, so import from the module that defines the symbol — but a standalone package's own top-level `__init__.py` may declare a public API that way, the package root only. A `_` prefix is refused because nothing is private — but an unused parameter keeps its underscore, and a helper that should not pollute the module namespace **nests inside its only caller** instead, a wrapper around one other function being inlined rather than hidden. `docs/conventions.md` spells each.
 
 """
     ),
@@ -197,38 +162,25 @@ agent obeying it literally would remove a package's public API or refuse a
 linting convention. They stay because nothing else carries them.
 """
 
-FAILURE_ANALYSIS_BRIEF: list[models.PromptPart] = [
+FAILURE_ANALYSIS: list[models.PromptPart] = [
     models.TextPart(
         text=r"""**When analyzing failures:** Ask "what general principle would have prevented this?" not "what specific rule would catch this case?" Instead of a prompt line about the decision that went wrong: does the agent have enough context? The right tools? A strong enough model?
 
-"""
-    ),
-]
-"""The question to ask, without the worked example that answers it twice.
-
-The always-loaded guidance follows this with the same lesson stated as a
-principle, so a reader there gets it once. A page that teaches the loop gets
-both, because the example is what makes the principle operable.
-"""
-
-FAILURE_ANALYSIS_WORKED: list[models.PromptPart] = [
-    models.TextPart(
-        text=r"""When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
+When the principle points to a workflow failure, fix the workflow at the exact juncture where the failure enters — don't add a warning about it. A step named "Classify each commit" invites whole-commit thinking regardless of how many times the text says "decompose." Renaming the step to "Extract portable pieces" and separating reading from judging makes the failure structurally impossible. Warnings coexist peacefully with the workflows they warn against; structural changes don't.
 
 """
     ),
-]
-
-FAILURE_ANALYSIS: list[models.PromptPart] = [
-    *FAILURE_ANALYSIS_BRIEF,
-    *FAILURE_ANALYSIS_WORKED,
 ]
 """The two paragraphs every self-improvement reader needs identically.
 
-Authored in three places before this — the repository guidance, the
-downstream template, and the reference page — and already visibly drifted:
-one copy still asked "Is the model strong enough?" in the older, longer
-phrasing. Nothing but holding them once keeps three copies in step.
+The question and the worked example travel together: the question alone
+states a lesson a reader can agree with and not apply, and the example is
+what makes it operable. The page that teaches the loop and the downstream
+template both compose this block, and two copies of one lesson drift.
+
+The always-loaded guidance carries neither, and points at the page instead:
+what it keeps is the principle those paragraphs argue for, which is one
+sentence, where the pair is two paragraphs a reader pays for every turn.
 """
 
 LONG_RUNNING_WORK: list[models.PromptPart] = [
@@ -237,23 +189,37 @@ LONG_RUNNING_WORK: list[models.PromptPart] = [
 
 ## Long-Running Work
 
-Work outliving its tool call is launched to survive its launcher — never from a delegated agent's shell — and declared as a `lup.runs` `Pipeline` rather than scripted, so it is resumable and watchable by construction: it writes a manifest, an atomic result per unit, and a heartbeat. Follow it with `dev monitor <dir> --events`: a line per landing, failure and stall, ending when the run does. Name it in the launch report. `docs/runs.md` carries the rest.
+Work outliving its tool call is launched to survive its launcher — never from a delegated agent's shell — and declared as a `lup.runs` `Pipeline` rather than scripted, so it is resumable and watchable by construction. Follow it with `dev monitor <dir> --events`, a line per landing, failure and stall, and name it in the launch report; `docs/runs.md` carries the rest.
 
 """
     ),
 ]
 
+DEFECT_DISPOSITION: list[models.PromptPart] = [
+    models.TextPart(
+        text=r"""**"Pre-existing" is not a disposition.** Naming a defect and disclaiming it by age leaves the repository as you found it. A fault you can see takes one of three: fixed here, when it sits inside what this change already touches; fixed on its own branch, when it does not; or recorded where a workflow surfaces it — a `# lup: defer:` note at the site, an issue where the tooling is at fault. Report which it took.
+
+"""
+    ),
+]
+"""Where a fault nobody in this session caused is allowed to end up.
+
+Composed after the friction rules because the third disposition is theirs:
+the note and the issue are already spelled there, and this only says that
+one of them is owed. Held here rather than in a project's own guidance
+because the reflex it answers — naming a defect in a report and calling its
+age a decision — belongs to how agents report, not to any one repository.
+"""
+
 MERGE_CONFLICT_RESOLUTION: list[models.PromptPart] = [
     models.TextPart(
         text=r"""### Merge Conflict Resolution
 
-**Never silently drop code during conflict resolution.** Keeping both sides is safer than losing features, and a rename on one side must not swallow an addition on the other. Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command went deliberately, not as a side effect of choosing one side.
-
-Use `"""
+**Never silently drop code during conflict resolution** — keeping both sides is safer than losing features, and a rename on one side must not swallow an addition on the other. Before completing any merge, **audit for deletions**: compare the result against both parents and verify every removed function, parameter, or command went deliberately, not as a side effect of choosing one side. `"""
     ),
     models.SkillInvocation(plugin="lup", skill="merge"),
     models.TextPart(
-        text=r"""` for guided conflict resolution; the command carries the decision tree.
+        text=r"""` carries the decision tree.
 
 """
     ),
@@ -304,7 +270,7 @@ COMMIT_GUIDELINES: list[models.PromptPart] = [
 
 - **Commit before responding**, and often — frequent commits are checkpoints
 - **Keep commits atomic** — if you need "and" in the message, it is two commits
-- **History will be rebased**, so a message need not be perfect while developing; after rebasing, each commit should tell what changed and why
+- **History will be rebased**, so a message need not be perfect while developing; after rebasing, each should tell what changed and why
 
 **Format:** `type(scope): description`
 

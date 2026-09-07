@@ -37,7 +37,7 @@ from lup.harness.codescan.boundaries import ApplicationRoots, generated_tree_pat
 from lup.harness.codescan.common import RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import WorkflowSpec
-from lup.devtools.project import DevProject
+from lup.devtools.project import DevProject, Tracker
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
 from lup.policy.boundary import depends_on
@@ -164,7 +164,7 @@ One name per worktree, shared by every group's process, so the tools of one
 native session write where the next one will find them."""
 
 
-def agent_tool_servers() -> list[McpServer]:
+def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer]:
     """Offer this project's own agent tools to whichever runtime is reading.
 
     The groups come from the same registry the in-process and subprocess
@@ -172,6 +172,15 @@ def agent_tool_servers() -> list[McpServer]:
     too rather than only the ones this program launches itself. Realtime is
     the relay mode of a persistent run and belongs to no interactive session,
     so its group is not among them.
+
+    The deadline is sized to a cold first boot rather than a warm one. Every
+    server here starts through ``uv run``, which on a checkout without an
+    environment resolves, downloads, and builds one before the process can
+    speak — while its siblings, spawned in the same instant, block on the
+    same environment lock. A runtime default chosen for an installed server
+    (Codex gives ten seconds) drops the losers of that race, and what the
+    session sees is two tool groups simply missing on the boot that built
+    the environment and present on every boot after.
     """
     return [
         McpServer(
@@ -191,6 +200,7 @@ def agent_tool_servers() -> list[McpServer]:
                 LiteralWord(text="--session"),
                 LiteralWord(text=HARNESS_SESSION),
             ],
+            startup_timeout_seconds=startup_deadline_seconds,
         )
         for name in tool_group_names(realtime=False)
     ]
@@ -276,6 +286,27 @@ def dev_project() -> DevProject:
         roots=application_roots(),
         rules=hooks.rules,
         subapps=SELECTION,
+        # lup: template: which trackers beyond this checkout this project may
+        # report to. What is here is lup's own, and an adopted scaffold
+        # inheriting it is the point rather than a leak: a project built on
+        # lup meets most of its friction in lup's machinery — the resolver,
+        # the permission policy, the sandbox — none of which is editable from
+        # the consuming tree, and a report filed against the consuming
+        # repository becomes evidence for a run that will plan a repair it
+        # cannot make. A project that outgrows this replaces the entry; one
+        # that owns everything it runs empties the list, and `dev tracker`
+        # then reaches nowhere but here.
+        trackers=[
+            Tracker(
+                repository="joy-void-joy/lup",
+                what="the framework this project is built on",
+                # Every spelling a report has been filed under, as prefixes
+                # rather than paths: a component arrives as whatever the
+                # reporter typed — `lup/policy`, `lup.resolver.state`,
+                # `lup-devtools` — and one prefix answers for all of them.
+                components=["lup"],
+            )
+        ],
         content=RETIRED,
         path_roles=declared_role_rows(list(hooks.path_roles)),
         # This file: what this repository settled about itself is written
@@ -340,6 +371,21 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # declared scopes one hop in.
                 HookUrlScope(origin=AnyHttpUrl("https://platform.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://platform.claude.com")),
+                # docs.anthropic.com 301s both of those routes onward: the
+                # Claude Code paths to code.claude.com and the API paths to
+                # platform.claude.com, each declared above. Admitting the
+                # legacy host admits the origin a redirect starts at, not a
+                # document these scopes did not already carry.
+                HookUrlScope(origin=AnyHttpUrl("https://docs.anthropic.com")),
+                HookUrlScope(origin=AnyHttpUrl("http://docs.anthropic.com")),
+                # The product's own pages — what it is, what it costs, what it
+                # claims — which no reference manual answers and which a
+                # question about the product rather than the API lands on.
+                # Declared for what they are rather than as a redirect: this
+                # admits an origin these scopes did not already reach, and
+                # widens the egress the same table grants to it.
+                HookUrlScope(origin=AnyHttpUrl("https://claude.com")),
+                HookUrlScope(origin=AnyHttpUrl("https://www.claude.com")),
                 # Where a session publishes a settled classification for a
                 # later one to read back, so a briefing can cite the artifact
                 # rather than restate it.
@@ -470,6 +516,18 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # the layout it spelled, and gate every other one in silence.
             diagnostics_command=["pyright", "--outputjson"],
             resolution_command=["lup-devtools", "dev", "refutations"],
+            # The audit's own sweep, narrowed to the file that was just
+            # written. Declared rather than left empty because the edit gate
+            # does not name a dead directive in the prompt: what goes
+            # unmentioned has to go, or it stays in the tree unread.
+            repair_command=[
+                "lup-devtools",
+                "dev",
+                "check",
+                "--antipatterns",
+                "--fix",
+                "--json",
+            ],
             shell_rules=SHELL_RULES,
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.

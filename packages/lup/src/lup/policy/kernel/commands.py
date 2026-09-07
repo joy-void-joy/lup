@@ -4,6 +4,7 @@
 
 import posixpath
 import re
+from collections.abc import Sequence
 from typing import TypedDict
 
 from .decision import (
@@ -34,6 +35,7 @@ from .effects import (
 from .words import (
     INTERPRETERS,
     carried_setting,
+    destination_form,
     flag_matches,
     flag_write_targets,
     git_restore_operands,
@@ -78,8 +80,17 @@ def row_verdict(
     reason: str,
     checkpoint: CheckpointRequirement | None = None,
     effects: list[EffectRow] | None = None,
+    arguments: list[str] | None = None,
 ) -> KernelDecision:
     """One row's verdict, carrying every fact the row states about itself.
+
+    ``arguments`` are the operand words the row was matched against, and an
+    ask or a deny appends the invocation they spell to the reason. A row's
+    sentence states the category — "deleting files requires approval" — and
+    the reviewer reads the reason and nothing else, so the words that tripped
+    the row travel with it: in a compound command they are what says *which*
+    segment the question is about. Composed here once rather than templated
+    into each of the hundred-odd rows that ask.
 
     The purpose comes from the effect that decided, because the effect is the
     thing being weighed. It used to be inferred from two other columns -- an
@@ -111,6 +122,9 @@ def row_verdict(
     settled = row["checkpoint"] if checkpoint is None else checkpoint
     declared = row["effects"] if effects is None else effects
     purpose = purpose_of(declared, EffectEvidence()) if effect == "ask" else None
+    if arguments is not None and effect in ("ask", "deny"):
+        prefix = [row["command"]] + ([row["subcommand"]] if row["subcommand"] else [])
+        reason = f"{reason} — `{' '.join([*prefix, *arguments])}`"
     return KernelDecision(
         effect,
         reason,
@@ -208,7 +222,12 @@ def flag_write_verdict(
     """
     targets = flag_write_targets([row["command"], *arguments], row["write_flags"])
     if not targets:
-        return row_verdict(row, "ask", row["reason"] or "this flag writes a file")
+        return row_verdict(
+            row,
+            "ask",
+            row["reason"] or "this flag writes a file",
+            arguments=arguments,
+        )
 
     def judged(target: str) -> WriteAnswer:
         """What one named path earns, beside the scope that earned it.
@@ -264,11 +283,12 @@ def flag_write_verdict(
         answered["effect"],
         row["reason"] or "this flag writes a file",
         write_checkpoint(answered["scope"]),
+        arguments=arguments,
     )
 
 
 def verb_loss_scope(
-    words: list[str], facts: WriteFacts
+    words: list[str], facts: WriteFacts, write_flags: Sequence[str] = ()
 ) -> CheckpointRequirement | None:
     """What a verb's own targets say the loss is, read one target at a time.
 
@@ -288,17 +308,20 @@ def verb_loss_scope(
     reads is an ordinary read however far outside it sits.
 
     Which verbs those are is :func:`written_targets`' question rather than
-    this one's, and it answers for the archives too. They read their targets
+    this one's, and the row's declared ``write_flags`` go with the words so a
+    command naming its destination in an option is read from the column that
+    already states it rather than from a second table saying the same thing.
+
+    It answers for the archives too. They read their targets
     already -- to grant an extraction that lands on nothing -- and where the
     grant did not apply the row's own claim stood: ``gzip /etc/hosts`` and
     ``tar -xf a.tgz -C /etc`` were settled by a capture that has never held
     either path, which is the same defect the delete verbs were fixed for.
 
-    ``None`` leaves the row's own scope standing -- an unmodelled verb, a line
-    whose flags could move which paths are touched, or targets that are all
-    inside the checkout, where the row was already right.
+    ``None`` leaves the row's own scope standing -- an unmodelled verb, or
+    targets that are all inside the checkout, where the row was already right.
     """
-    targets = written_targets(words)
+    targets = written_targets(words, write_flags)
     if targets is None:
         return None
     if any(
@@ -463,6 +486,7 @@ def apply_command_row(
                 "ask",
                 row["reason"] or f"{guarded} requires approval",
                 effects=[*row["effects"], *row["flag_effects"]],
+                arguments=arguments,
             )
         # After the ask-flags, so a command carrying both keeps the stronger
         # question: `sort --compress-program=x -o out.txt` runs a program
@@ -470,6 +494,26 @@ def apply_command_row(
         if any(flag_matches(word, row["write_flags"]) for word in arguments):
             return flag_write_verdict(
                 row, arguments, no_write_facts() if facts is None else facts
+            )
+    if stated == "allow" and row["ask_destinations"]:
+        # The first word that is not a flag, which is where git reads the
+        # repository from and nowhere else: every later operand is a refspec.
+        # A flag's separate value can land here instead — `-o <option>` — and
+        # a bare option word reads as a remote name, so the miss costs a
+        # question that was not asked rather than one that was owed.
+        #
+        # No opacity test, on the same grounds as the block below: a row
+        # declaring destination forms declares flag effects too, so an
+        # unreadable word has already been bounced above.
+        named = next((word for word in arguments if not word.startswith("-")), "")
+        form = destination_form(named)
+        if form in row["ask_destinations"]:
+            return row_verdict(
+                row,
+                "ask",
+                f"{named} names the destination by {form} rather than by a"
+                " remote this repository holds — sending work there requires"
+                " approval",
             )
     if stated == "allow" and row["ask_refspecs"]:
         # No opacity test of its own: a row declaring refspec effects declares
@@ -489,12 +533,13 @@ def apply_command_row(
                 row,
                 "ask",
                 row["reason"] or f"{carried[0]} would {carried[1]} a ref",
+                arguments=arguments,
             )
     # Read after every de-escalation above and before the row's own answer,
     # because it changes what the loss *is* rather than whether the row asks:
     # a scratch grant is still a scratch grant, and a delete reaching outside
     # the checkout is a loss no capture of this session holds.
-    loss = verb_loss_scope([row["command"], *arguments], measured)
+    loss = verb_loss_scope([row["command"], *arguments], measured, row["write_flags"])
     if loss is not None:
         return row_verdict(
             row,
@@ -502,8 +547,9 @@ def apply_command_row(
             row["reason"],
             checkpoint=loss,
             effects=[declare("destroys_uncaptured", scope=loss)],
+            arguments=arguments,
         )
-    return row_verdict(row, stated, row["reason"])
+    return row_verdict(row, stated, row["reason"], arguments=arguments)
 
 
 class Subcommand(TypedDict):
@@ -1402,7 +1448,17 @@ def decide_uv(
         if run_command in ("-c", "-m", "--script") or (
             interpreted and (inline or not named)
         ):
-            return KernelDecision("deny", "inline code is not allowed")
+            if run_command in ("-c", "-m", "--script"):
+                subject = f"uv run {run_command}"
+            elif inline:
+                subject = f"uv run {run_command} {inline[0]}"
+            else:
+                subject = f"the bare interpreter uv run {run_command}"
+            return KernelDecision(
+                "deny",
+                f"{subject}: inline code is not allowed — a named script"
+                " file can be reviewed and run again",
+            )
         # Between the refusal above and the target's own verdict below, which
         # is where the lattice would put it anyway: a deny outranks an ask,
         # and an ask outranks whatever the target says about itself. These

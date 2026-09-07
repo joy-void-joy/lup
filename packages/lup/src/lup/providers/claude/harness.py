@@ -145,20 +145,29 @@ class ClaudeSpellings(NativeSpellings):
         place here are the ones that stop a wrong move, and the ones that
         explain it belong where there is room to explain.
 
-        The third is named as refused rather than merely discouraged, because
-        that is what it now is: the tool table denies it, carrying the cost as
-        its reason, and a deliberate use escalates. Prose that only called it
-        expensive was the whole of the gate before, and prose is what falls
-        out of context first.
+        The third is named as refused rather than merely discouraged: the
+        tool table denies it, carrying the cost as its reason, and a
+        deliberate use escalates. Prose that only calls a route expensive is
+        prose an agent reads once, so the gate is the table and the sentence
+        is what keeps the reflex from reaching for it.
+
+        What it reaches is stated beside the refusal, because escalating past
+        one wall meets another. `dev worktree create` cuts under a sibling
+        `tree/`, and this runtime switches into a path outside its own
+        `.claude/worktrees/` only as a session's first entry from the
+        directory it launched in -- so a second switch is refused by the tool
+        itself, whatever this project decides. An agent told the refusal
+        alone would escalate it and meet an error the prose said could not
+        happen; `docs/contributing.md` carries the measurement.
         """
         return Instruction(
             f"work in <{path}> by whichever of these you can reach: launch a "
-            f"session rooted there; or, already running, address files under "
-            f"<{path}> by absolute path, where that tree is writable. "
-            f"`EnterWorktree(path=<{path}>)` reaches any worktree from "
-            "anywhere and is refused for it: entering one arms worktree "
+            "session rooted there; or, already running, address its files by "
+            "absolute path, where that tree is writable. "
+            "`EnterWorktree` is refused, and takes a `tree/` path only as a "
+            "session's first switch: entering one arms worktree "
             "isolation, whose refusals cover ordinary read-only commands for "
-            "the rest of the session. Escalate it if you truly need it, and "
+            "the rest of the session. Escalate it if you must, and "
             'leave with `ExitWorktree(action="keep")`'
         )
 
@@ -218,7 +227,11 @@ class ClaudeSpellings(NativeSpellings):
                 "`--answer <question-id>=<value>` flag to answer them. "
                 "`--admit <text>` carries work in the human's own words: it seeds "
                 "a run that does not exist yet, beside whatever notes the tree "
-                "holds, and joins one already moving. `--admit-note <file>:<line>` "
+                "holds, and widens a parked one before its review branch is "
+                "assembled. It takes the run's lock, so a run still moving "
+                "refuses it — under `--detach` in the child, after the banner "
+                "reports the run started, which loses the admission in "
+                "silence. Admit at a park. `--admit-note <file>:<line>` "
                 "names a note written in the tree and `--admit-issue <number>` an "
                 "open issue; all three are repeatable. "
                 "Never pass `--wait` or `--supervise`; both hold a run open "
@@ -643,6 +656,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         auto_escape_prefixes=[],
                         diagnostics_command=source.diagnostics_command,
                         resolution_command=source.resolution_command,
+                        repair_command=source.repair_command,
                         rules=antipattern_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,

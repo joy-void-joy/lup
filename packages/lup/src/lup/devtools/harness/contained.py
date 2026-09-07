@@ -46,6 +46,7 @@ from lup.harness.image import (
     detected_client,
 )
 from lup.harness.notice import Banner, Notice
+from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.providers.login import ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
@@ -1633,6 +1634,12 @@ def contained_argv(
         if not found.drives_its_server():
             raise typer.BadParameter(found.consequence())
         client = found.engine()
+    # Rebound before rendering, so the tag, the build, and the session all
+    # read the same resolved copy -- and only they: the declaration the
+    # ownership digests hash never carries a resolved version.
+    resolution = resolved_agent_clis(image)
+    image = resolution.image
+    said.add(resolution.said)
     rendered = image.dockerfile(manifest)
     tag = image_tag(rendered)
     if not image_matches(tag, rendered, client):

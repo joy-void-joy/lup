@@ -816,13 +816,15 @@ def spent_notes(
     was_open: list[LocatedNote],
     is_open: list[LocatedNote],
     python_source: bool,
-) -> str | None:
-    """The first note this edit dropped while its subject stands, or `None`.
+) -> list[str]:
+    """Every note this edit dropped while its subject stands.
 
     A note leaves a file honestly three ways: it is still open under the same
     words, it was converted into a claim this edit added, or the code it
     annotated went with it. Anything else is feedback stripped off code that
-    is still there, which is the one act the gate exists to refuse.
+    is still there, which is the one act the gate exists to refuse. All of
+    them are returned rather than the first, because the denial quotes what
+    was lost and a reader repairing the edit repairs it once.
 
     Survival is asked of the words, not of each copy of them. A file holding
     the same note twice holds one piece of feedback written in two places, so
@@ -835,6 +837,7 @@ def spent_notes(
     survived = note_bodies(is_open) + added_claims
     lines = previous.splitlines()
     removed = deleted_lines(previous, updated)
+    lost: list[str] = []
     for note in was_open:
         body = note_body(note["text"])
         if survived[body] > 0:
@@ -848,8 +851,8 @@ def spent_notes(
             else note["line"] in removed and subject in removed
         )
         if not spent:
-            return note["text"]
-    return None
+            lost.append(note["text"])
+    return lost
 
 
 class MarkerVerdict(TypedDict):
@@ -916,13 +919,20 @@ def marker_decision(
     ):
         return None
     lost = spent_notes(previous, updated, was_open, is_open, python_source)
-    if lost is not None:
+    if lost:
+        spelled = "\n".join(lost)
+        removes = (
+            "this edit removes inline review feedback that still has a subject"
+            if len(lost) == 1
+            else f"this edit removes {len(lost)} pieces of inline review"
+            " feedback that still have a subject"
+        )
         return MarkerVerdict(
             gate="feedback-removed",
             decision=KernelDecision(
                 "deny",
-                "this edit removes inline review feedback that still has a "
-                f"subject — {lost}. Resolving a note means replacing `# lup:` "
+                f"{removes} — {spelled}\n"
+                "Resolving a note means replacing `# lup:` "
                 "with `# lup: solved:` and keeping its text, so the claim can be "
                 "checked against what was asked; deleting it leaves nothing to "
                 "check. Where the note was mistaken rather than answered, "
@@ -934,21 +944,42 @@ def marker_decision(
     # retires nothing, because the review pass still finds the claim standing
     # and can still check it against what was asked.
     surviving_claims = note_bodies(claimed_now)
-    if any(surviving_claims[note_body(note["text"])] == 0 for note in claimed_before):
+    dropped_claims = [
+        note["text"]
+        for note in claimed_before
+        if surviving_claims[note_body(note["text"])] == 0
+    ]
+    if dropped_claims:
+        spelled = "\n".join(dict.fromkeys(dropped_claims))
+        claims = (
+            "a `# lup: solved:` claim"
+            if len(dropped_claims) == 1
+            else (f"{len(dropped_claims)} `# lup: solved:` claims")
+        )
         return MarkerVerdict(
             gate="claim-removed",
             decision=KernelDecision(
                 "deny",
-                "this edit removes a `# lup: solved:` claim. Only the review pass "
+                f"this edit removes {claims} — {spelled}\n"
+                "Only the review pass "
                 "retires one — it either confirms the claim and removes the note "
                 "(`dev comments --retire file:line`), or restores it to open "
                 "feedback (`dev comments --restore file:line`)",
             ),
         )
-    if note_bodies(is_open) - note_bodies(was_open):
+    added_bodies = note_bodies(is_open) - note_bodies(was_open)
+    if added_bodies:
+        added = [
+            f"line {note['line']}: {note['text']}"
+            for note in is_open
+            if added_bodies[note_body(note["text"])] > 0
+        ]
         return MarkerVerdict(
             gate="feedback-added",
-            decision=KernelDecision("ask", "edit adds inline review feedback"),
+            decision=KernelDecision(
+                "ask",
+                "edit adds inline review feedback — " + "; ".join(added),
+            ),
         )
     return None
 
@@ -2594,11 +2625,17 @@ def suppression_site(number: int, line: str) -> str:
 def suppression_reason(sites: list[str], creation: bool = False) -> str:
     """Name every suppression this edit declares, not merely that it declares one.
 
-    A permission prompt carries the reason and nothing else, so a verdict
-    that said only what kind of thing happened left the reviewer to find the
-    line themselves — in a diff they were being asked to approve precisely
-    because it needed reading. Every site is listed rather than the first,
-    since approving is one decision over the whole batch.
+    A verdict that said only what kind of thing happened left the reviewer to
+    find the line themselves — in a diff they were being asked to approve
+    precisely because it needed reading. Every site is listed rather than the
+    first, since approving is one decision over the whole batch.
+
+    Where the sites are read is the runtime's to answer and not this
+    function's. One of them puts the reason in the prompt for a command and
+    drops it in the dialog for a write, so the adapter repeats what its own
+    prompt will not carry; another writes the reason out whole and needs
+    nothing. What is owed here is that the words name the sites, in terms any
+    of them can render.
 
     A creation is the case where that matters most and reads least. The whole
     file arrives at once, so its directives are approved along with everything
@@ -2946,12 +2983,37 @@ def antipattern_decision(
             suppression_site(number, original_lines[number - 1]) for number in numbers
         ]
 
+    def silences_nothing(number: int) -> bool:
+        """Whether the bare directive on this line guards no rule these rows see.
+
+        Only the untyped form is answerable here. A typed directive naming an
+        id no row owns belongs to the scanner that does own it, and the
+        refusal loop above has already taken out every typed one this table
+        can call dead — so what is left is the bare form, which the audit
+        reports spurious on exactly this test and `--fix` then deletes.
+
+        Asked only where the tree parsed, because a rule that reads the tree
+        contributes no hit when it did not: without that guard a directive
+        standing over a live violation would look dead for the gate's own
+        blindness, and be dropped from the prompt that exists to name it.
+        """
+        directive = IGNORE_RE.search(original_lines[number - 1])
+        if directive is None or ignore_rule_ids(directive) is not None:
+            return False
+        return not guarded_hits(number)
+
     # Every violation the edit added is covered, so what is left to decide is
     # the suppressions themselves: the ones this edit declares, or the standing
-    # one an added line has moved under.
-    if declared:
+    # one an added line has moved under. A directive that silences nothing is
+    # not among them: naming it would spend the reader's attention on a line
+    # the audit deletes unread, and the listing exists so that what is read
+    # there is what the approval is actually about.
+    listed = [
+        number for number in declared if not (decidable and silences_nothing(number))
+    ]
+    if listed:
         return KernelDecision(
-            suppression, suppression_reason(sites_at(declared), before is None)
+            suppression, suppression_reason(sites_at(listed), before is None)
         )
     if covering:
         return KernelDecision(suppression, suppression_reason(sites_at(list(covering))))
@@ -2993,6 +3055,22 @@ def path_rule_matches(path: str, path_exists: bool, row: PathRuleRow) -> bool:
             )
         case _:
             raise ValueError(f"invalid path rule kind {kind!r}")
+
+
+def protected_path_reason(path: str, matched: PathRuleRow) -> str:
+    """One protected-path question, naming the path and the rule it tripped.
+
+    The row's reason states the category; the path and the pattern are what
+    the evaluator matched on, and a reviewer answering from the reason alone
+    needs all three to know what they are approving. Beside
+    :func:`path_rule_matches` so the words a question uses and the match that
+    raised it come from one module, for the edit gate and the shell path
+    alike.
+    """
+    return (
+        f"{path} matches the protected-path rule {matched['value']!r}:"
+        f" {matched['reason']}"
+    )
 
 
 PACKAGE_MARKER_FILES = ("__init__.py",)
@@ -3093,7 +3171,7 @@ def edit_verdict(
     effect = decided["effect"]
     if effect not in ("allow", "ask", "deny", "defer"):
         return default
-    return KernelDecision(effect, decided["reason"] or default.reason)
+    return default.revised(effect=effect, reason=decided["reason"] or default.reason)
 
 
 def edit_threshold(
@@ -3139,6 +3217,7 @@ def decide_edit(
     operation: str = "modify",
     edit_rules: list[EditRuleRow] | None = None,
     foreign: bool = False,
+    outside_project: bool = False,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
 
@@ -3166,13 +3245,17 @@ def decide_edit(
     Each gate reaches as far as its own reason. Anti-patterns, the size gate
     and the full-write gate are all about how production code reads and how
     much of it a reviewer can hold at once, so all three stop at production;
-    the marker gate follows the feedback instead and stops only at scratch,
-    where nothing persists to be read. A full write only ever asks about
-    creating a file — an overwrite carries its predecessor as ``before`` —
-    and creating one where the conventions do not reach costs a reviewer
-    nothing, which pure deletion already assumed everywhere. ``marker_files``
-    is the other end of that same reasoning: a file whose content is nothing
-    but its own docstring costs a reviewer nothing either, wherever it sits.
+    the marker gate follows the feedback instead and stops where nobody of
+    ours reads it — at scratch, where nothing persists, and at
+    ``outside_project``, a tree this repository's review passes never walk.
+    That fact says whose code a file is and nothing about what may be done to
+    it, so the gates below answer without consulting it. A full write only
+    ever asks about creating a file — an overwrite carries its predecessor as
+    ``before`` — and creating one where the conventions do not reach costs a
+    reviewer nothing, which pure deletion already assumed everywhere.
+    ``marker_files`` is the other end of that same reasoning: a file whose
+    content is nothing but its own docstring costs a reviewer nothing either,
+    wherever it sits.
     """
     granted = allowances or []
     previous = before or ""
@@ -3281,13 +3364,23 @@ def decide_edit(
         # person the declaration names.
         return judged(
             "protected-path",
-            KernelDecision("ask", protected["reason"], purpose="quality_review"),
+            KernelDecision(
+                "ask",
+                protected_path_reason(path, protected),
+                purpose="quality_review",
+            ),
         )
     # Feedback is feedback wherever it is left, so this gate follows the file
     # rather than the conventions: a note on a test still names work somebody
-    # owes. Scratch is the exception, and only because nothing there persists
-    # to be read — a note in a disposable tree has no reader to protect.
-    if role != "scratch":
+    # owes. Two exceptions, and both are about who reads the note rather than
+    # about how the code reads. Scratch, because nothing there persists to be
+    # read. And a file outside this project, because a `# lup:` marker there
+    # sits in a tree `dev check` and `dev comments` never walk: no pass of
+    # ours will surface it, so there is no reader to protect and nothing the
+    # claim could be checked against. Held to paths settled as outside — an
+    # absolute or `..` spelling of a file in this repository relativizes back
+    # inside and is judged here like any other.
+    if role != "scratch" and not outside_project:
         marker = marker_decision(previous, updated, python_source)
         if marker is not None:
             return judged(
@@ -3317,11 +3410,14 @@ def decide_edit(
         # reads, which is what a supervisor reads. The classification is
         # semantic and independent of which native call carried the write —
         # a whole file arriving at once is what makes it a checkpoint.
+        count = len(updated.splitlines())
+        arriving = "1 line" if count == 1 else f"{count} lines"
         return judged(
             "full-write",
             KernelDecision(
                 "ask",
-                "full-file writes require approval",
+                f"full-file writes require approval — {path} arrives whole,"
+                f" {arriving} at once",
                 purpose="quality_review",
                 reviewer="supervisor_allowed",
             ),

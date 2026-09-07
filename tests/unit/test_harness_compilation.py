@@ -37,8 +37,13 @@ from lup.providers.harness import (
     compile_claude,
     compile_codex,
     guidance_artifacts,
+    startup_deadline_settings,
 )
-from lup.devtools.dev.check import budget_reports, scaffold_budget_report
+from lup.devtools.dev.check import (
+    budget_reports,
+    guidance_budget_report,
+    scaffold_budget_report,
+)
 from lup.workspace.paths import is_template_scaffold
 from lup.harness.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
@@ -444,6 +449,41 @@ def test_the_scaffold_row_reports_the_reservation_it_withholds() -> None:
     assert not over.passed
     assert "over by 1" in over.lines[0]
     assert str(TEMPLATE_GUIDANCE_HEADROOM) in fits.lines[0]
+
+
+def test_the_scaffold_row_reports_the_room_a_session_may_still_spend() -> None:
+    """A green row tells a writer how much it may add, not only that it fit.
+
+    The reservation is a constant, so a row printing only that says the same
+    thing at 23 bytes free as at 11 KiB, and a session learns the ceiling
+    exists from the gate refusing writing it has already done. Both rows
+    report the room left, in one shape, so either one answers before it does.
+    """
+    ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+
+    fits = scaffold_budget_report(ceiling - 23)
+    runtime = guidance_budget_report(GUIDANCE_BYTE_BUDGET - 23)
+
+    assert fits.lines == [
+        f"scaffold budget: ok — {ceiling - 23}/{ceiling} bytes, 23 free, "
+        f"{TEMPLATE_GUIDANCE_HEADROOM} reserved for the adopting domain"
+    ]
+    assert runtime.lines == [
+        f"guidance budget: ok — {GUIDANCE_BYTE_BUDGET - 23}/"
+        f"{GUIDANCE_BYTE_BUDGET} bytes, 23 free"
+    ]
+
+
+def test_the_scaffold_row_over_budget_names_the_overage_and_not_the_room() -> None:
+    """Room left is what a passing row adds; a failing one has none to state."""
+    ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+
+    over = scaffold_budget_report(ceiling + 1_078)
+
+    assert over.lines == [
+        f"scaffold budget: FAIL (over by 1078) — {ceiling + 1_078}/{ceiling} "
+        f"bytes, {TEMPLATE_GUIDANCE_HEADROOM} reserved for the adopting domain"
+    ]
 
 
 def test_a_project_may_reserve_a_different_share_than_this_one() -> None:
@@ -1683,6 +1723,70 @@ def test_generated_claude_hook_records_metadata_only_evidence(tmp_path: Path) ->
     ]
 
 
+def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
+    tmp_path: Path,
+) -> None:
+    """Both journals name the origin that asked, and stop there.
+
+    A refusal that carries no part of the input reads as "a URL was outside
+    the declared scopes" with no way to tell which URL, so the question the
+    journal exists to answer -- what did this session try to reach -- is
+    settled by inference. The origin is the half the scope table is written
+    against; the path and the query are where a token or a document id ride,
+    and they stay out, as does everything else in the call.
+    """
+    url = "https://docs.example.test:8443/private/page?token=do-not-record"
+    body: JsonObject = {"hook_event_name": "PreToolUse"}
+    body.update(session_id="session-four", tool_use_id="tool-four")
+    claude_data, codex_data = tmp_path / "claude", tmp_path / "codex"
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    # lup: ignore[os-environ] — test shell
+    environment = {**os.environ, "CLAUDE_PLUGIN_DATA": str(claude_data)}
+    claude = sh.Command(str(script))(
+        _in=json.dumps({**body, "tool_name": "WebFetch", "tool_input": {"url": url}}),
+        _env=environment,
+        _return_cmd=True,
+    )
+    assert isinstance(claude, sh.RunningCommand)
+    rendered = ClaudeHookOutput.model_validate_json(claude.stdout)
+    assert rendered.hook_specific_output.permission_decision == "ask"
+    codex = codex_hook_result(
+        {**body, "tool_name": "web_fetch", "tool_input": {"url": url}},
+        sandboxed=True,
+        plugin_data=codex_data,
+    )
+    assert codex.exit_code == 2
+
+    for data_root in (claude_data, codex_data):
+        written = (data_root / "hook-events.jsonl").read_text(encoding="utf-8")
+        assert "do-not-record" not in written
+        assert "/private/page" not in written
+        records = [json.loads(line) for line in written.splitlines()]
+        assert [record["phase"] for record in records] == ["started", "completed"]
+        for record in records:
+            assert record["fetch_origin"] == "https://docs.example.test:8443"
+
+
+def test_a_journal_names_no_origin_for_a_tool_that_fetches_nothing(
+    tmp_path: Path,
+) -> None:
+    """The omission stands everywhere the fetch surface does not.
+
+    A shell command names no origin and gets no key for one: what widened is
+    the fetch decision alone, rather than the journal's appetite for input.
+    """
+    body: JsonObject = {"hook_event_name": "PreToolUse", "tool_name": "Bash"}
+    body["tool_input"] = {"command": "git status", "url": ["not-a-url"]}
+    result = codex_hook_result(body, sandboxed=True, plugin_data=tmp_path)
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "hook-events.jsonl").read_text().splitlines()
+    ]
+
+    assert result.exit_code == 0
+    assert all("fetch_origin" not in record for record in records)
+
+
 def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     result = sh.Command(str(script))(
@@ -2734,6 +2838,10 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert isinstance(domains, list)
     assert "code.claude.com" in domains
     assert "github.com" in domains
+    # The redirecting documentation host, and the domain around it left out:
+    # egress reaches exactly the origins the fetch scopes name.
+    assert "docs.anthropic.com" in domains
+    assert "anthropic.com" not in domains
     assert "sandbox" not in project_settings(None)
     assert sandbox["excludedCommands"] == hooks.excluded_commands()
 
@@ -3200,15 +3308,22 @@ def test_a_declared_startup_deadline_reaches_the_runtime_that_waits_on_one() -> 
     the symptom is a group simply absent from a session that otherwise
     works, which reads as flakiness rather than as a configured limit.
     """
+    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    for name in ("notes", "codeintel", "sandbox"):
+        assert parsed["mcp_servers"][name]["startup_timeout_sec"] == 60.0
+
+
+def undeadlined_harness() -> Harness:
+    """The declared harness with every server's deadline stripped."""
     source = portable_harness()
     plugin = source.plugins[0]
-    deadlined = source.model_copy(
+    return source.model_copy(
         update={
             "plugins": [
                 plugin.model_copy(
                     update={
                         "mcp_servers": [
-                            server.model_copy(update={"startup_timeout_seconds": 60.0})
+                            server.model_copy(update={"startup_timeout_seconds": None})
                             for server in plugin.mcp_servers
                         ]
                     }
@@ -3216,14 +3331,47 @@ def test_a_declared_startup_deadline_reaches_the_runtime_that_waits_on_one() -> 
             ]
         }
     )
-    parsed = tomllib.loads(codex_project_config(deadlined, CodexSpellings()))
-    assert parsed["mcp_servers"]["notes"]["startup_timeout_sec"] == 60.0
 
 
 def test_a_server_naming_no_deadline_keeps_the_runtimes_own() -> None:
     """Declaring nothing leaves the default, rather than this file's opinion."""
-    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    parsed = tomllib.loads(
+        codex_project_config(undeadlined_harness(), CodexSpellings())
+    )
     assert "startup_timeout_sec" not in parsed["mcp_servers"]["notes"]
+
+
+def test_the_widest_declared_deadline_lands_in_the_settings_env() -> None:
+    """The runtime without a per-server spelling reads one global variable.
+
+    ``MCP_TIMEOUT`` is milliseconds and covers every server the session
+    starts, so the adapter renders the widest declared deadline — under the
+    project's own env block, since a repository spelling the variable itself
+    has made the judgement directly.
+    """
+    plugin = portable_harness().plugins[0]
+    settings = startup_deadline_settings(project_settings(plugin), plugin)
+    env = settings["env"]
+    assert isinstance(env, dict)
+    assert env["MCP_TIMEOUT"] == "60000"
+    assert env["CLAUDE_CODE_THISTLE_GREBE"] == "default"
+
+
+def test_a_project_spelling_the_timeout_itself_outranks_the_derivation() -> None:
+    plugin = portable_harness().plugins[0]
+    spelled = startup_deadline_settings({"env": {"MCP_TIMEOUT": "5000"}}, plugin)
+    env = spelled["env"]
+    assert isinstance(env, dict)
+    assert env["MCP_TIMEOUT"] == "5000"
+
+
+def test_no_declared_deadline_leaves_the_settings_env_alone() -> None:
+    """Stripped declarations render no opinion into the runtime's env."""
+    plugin = undeadlined_harness().plugins[0]
+    settings = startup_deadline_settings(project_settings(plugin), plugin)
+    env = settings["env"]
+    assert isinstance(env, dict)
+    assert "MCP_TIMEOUT" not in env
 
 
 def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:

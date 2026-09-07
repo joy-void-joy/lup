@@ -98,6 +98,18 @@ class Registry(BaseModel, frozen=True):
 
     manager: PackageManager = Field(description="Which manager this drives")
     command: str = Field(description="The install command, taking names as arguments")
+    release_url: str = Field(
+        default="",
+        description=(
+            "Where this manager's registry answers for a package's current "
+            "release, as a URL template taking ``{name}``, answering JSON "
+            "with a top-level ``version``. Empty means the registry is "
+            "never asked, and an unpinned package is left to the build -- "
+            "the right declaration for a registry whose answer has another "
+            "shape, like PyPI's nested ``info.version``, until something "
+            "needs it"
+        ),
+    )
 
 
 class ContainerEngine(BaseModel, frozen=True):
@@ -452,20 +464,23 @@ class Image(BaseModel, frozen=True):
     )
     agent_clis: list[Package] = Field(
         default=[
-            Package(name="@anthropic-ai/claude-code", manager="bun", version="2.1.237"),
-            Package(name="@openai/codex", manager="bun", version="0.149.0"),
+            Package(name="@anthropic-ai/claude-code", manager="bun"),
+            Package(name="@openai/codex", manager="bun"),
         ],
         description=(
-            "The agent runtimes this image carries, each pinned rather than "
-            "latest so a rebuild is a decision. Every runtime the harness "
-            "launches belongs here: a contained launch runs `<cli>` inside "
-            "the container, so a runtime missing from this list builds an "
-            "image, starts a proxy, and then fails with `not found` on the "
-            "one program the session existed to run -- which is what "
-            "happened to Codex while the list was one hardcoded line. The "
-            "installs land in a layer the run mounts read-only, which is "
-            "what stops a self-update from silently making the image "
-            "disagree with this declaration"
+            "The agent runtimes this image carries. Every runtime the "
+            "harness launches belongs here: a contained launch runs `<cli>` "
+            "inside the container, so a runtime missing from this list "
+            "builds an image, starts a proxy, and then fails with `not "
+            "found` on the one program the session existed to run -- which "
+            "is what happened to Codex while the list was one hardcoded "
+            "line. An empty version is resolved to the registry's current "
+            "release at each contained launch and rendered as a concrete "
+            "pin, so the image tag still content-addresses a real version "
+            "and a new release is what triggers the rebuild; declaring a "
+            "version freezes it instead. The installs land in a layer the "
+            "run mounts read-only, which is what stops a self-update from "
+            "silently making the image disagree with what was rendered"
         ),
     )
     terminal: TerminalHandoff = Field(
@@ -552,7 +567,11 @@ class Image(BaseModel, frozen=True):
 
     registries: list[Registry] = Field(
         default=[
-            Registry(manager="bun", command="bun add -g"),
+            Registry(
+                manager="bun",
+                command="bun add -g",
+                release_url="https://registry.npmjs.org/{name}/latest",
+            ),
             Registry(manager="uv", command="uv tool install"),
         ],
         description=(
@@ -827,10 +846,10 @@ RUN pacman -S --noconfirm --needed \\
 ENV BUN_INSTALL={self.registry_root}
 ENV PATH={self.registry_bin()}:$PATH
 {registry_layers}{script_layer}
-# Every agent runtime the harness launches, from the registry at a pinned
-# version rather than an install script, so what lands is what the
-# declaration names and the layer the run mounts read-only cannot be
-# rewritten by a self-update.
+# Every agent runtime the harness launches, from the registry at the version
+# the launch resolved (or the declaration pinned) rather than an install
+# script, so what lands is what was rendered and the layer the run mounts
+# read-only cannot be rewritten by a self-update.
 RUN bun add -g {agent_clis}
 
 # Trust, seeded where a fresh config home will find it. A workspace this

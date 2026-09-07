@@ -8,7 +8,12 @@ from typing import Annotated
 import typer
 
 from lup.workspace.paths import find_nearest_pyproject
-from lup.devtools.py.common import fail, find_module_path, resolve_object
+from lup.devtools.py.common import (
+    fail,
+    fail_unresolved,
+    find_module_path,
+    resolve_object,
+)
 from lup.devtools.py.imports import (
     ImportEntry,
     collect_imports_from_source,
@@ -116,7 +121,7 @@ def source_cmd(
     try:
         obj = None if file_path is not None else resolve_object(path).value
     except ValueError as e:
-        fail(str(e))
+        fail_unresolved(path, str(e))
 
     if file_path is not None or inspect.ismodule(obj):
         file_path = file_path or find_module_path(path)

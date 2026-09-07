@@ -76,9 +76,10 @@ question the row alone cannot:
 | `ask_flags` | the spellings that escalate this row |
 | `flag_effects` | what the escalation is *about* — `git reset --hard` discards working-tree content, which the bare verb never did |
 | `write_flags` | options whose value is a path this command writes, so the path is resolved and judged by the write row every other spelling reaches |
-| `allow_flags`, `read_verbs`, `write_markers`, `bare_reads`, `guarded_keys` | the de-escalations: a pure read-only form, a verb that pins the query action, a marker whose absence means it only reads, the argument-less form, a setting that does not redirect execution |
-| `setting_flags`, `guarded_settings` | the same absence test about a global that carries a setting — `git -c color.ui=false` turns off colour, `git -c core.pager=x` runs a program, and only the second is worth interrupting about |
+| `allow_flags`, `read_verbs`, `write_markers`, `bare_reads`, `guarded_keys` | the de-escalations: a pure read-only form, a verb that pins the query action, a marker whose absence means it only reads, the argument-less form, a setting that redirects neither execution nor the repository this checkout talks to |
+| `setting_flags`, `guarded_settings` | the same absence test about a global that carries a setting — `git -c color.ui=false` turns off colour, `git -c core.pager=x` runs a program and `git -c remote.origin.url=x` aims the next push somewhere else, and only the last two are worth interrupting about |
 | `ask_refspecs` | the effects an operand's *grammar* carries, for a push that spells force and delete twice |
+| `ask_destinations` | the forms of repository named inline that the first non-flag operand may carry — a URL or a path reaches one the remote table never heard of, where a bare remote name is one somebody approved putting there |
 
 A rule declaring `reviewed` on a write says the route it takes has gates that
 read what it wrote. It is declared rather than measured: which gates a
@@ -516,7 +517,15 @@ Plugin hooks receive a writable data directory: `PLUGIN_DATA` under Codex and
 then `completed` with the final policy outcome or `failed` with the exact
 dispatcher exception. Records carry the event, session, turn, tool, tool-use
 id, and UTC timestamp. They deliberately omit tool input and output, which may
-contain commands, patches, or credentials.
+contain commands, patches, or credentials — with one exception. A call whose
+input names a URL also records `fetch_origin`: the scheme, host, and port of
+that URL, and nothing else. That is the coarse half a scope is written
+against and the half the verdict turned on, so without it a refusal says a
+URL was outside the declared scopes without saying which origin asked, and
+the host has to be inferred from what the session did next. The path and
+query stay omitted because they are where a document id, a search phrase, or
+a token spelled into the URL ride; userinfo goes with them, since the host is
+read from the parse rather than from the authority that would carry it.
 
 This journal distinguishes failures whose UI is otherwise identical. A
 `failed` record is a dispatcher failure; `completed` with `deny` is an

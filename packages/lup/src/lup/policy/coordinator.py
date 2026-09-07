@@ -34,6 +34,33 @@ from lup.policy.models import Decision
 from lup.policy.operations import Operation
 from lup.policy.relay import PersistentQuestion, QuestionRelay, SupervisorChain
 
+
+def changed_clause(arrived: Operation, approved: Operation) -> str:
+    """Which approved facts this operation no longer matches, named.
+
+    The comparison the fingerprint collapses into one digest, re-run part by
+    part so the refusal says what moved: the reviewer approved an exact
+    operation, and "its targets no longer match" is answerable where "its
+    arguments, directory, targets, or placement" is a list to go check. The
+    part names are the fingerprint material's own keys, chosen to be read
+    here. The generic list survives as the fallback for the one case the
+    parts cannot explain — a stored digest from material this comparison no
+    longer reproduces.
+    """
+    ours = arrived.fingerprint_parts()
+    theirs = approved.fingerprint_parts()
+    changed = [name for name in ours if ours[name] != theirs.get(name)]
+    if not changed:
+        return (
+            "its arguments, directory, targets, or placement no longer"
+            " match what the reviewer was shown"
+        )
+    spelled = ", ".join(changed)
+    plural = len(changed) > 1 or spelled.endswith("s")
+    verb = "no longer match" if plural else "no longer matches"
+    return f"its {spelled} {verb} what the reviewer was shown"
+
+
 type Stage = Literal["settled", "parked", "prepared", "refused", "finished"]
 """Where one pass through the coordinator stopped.
 
@@ -275,10 +302,10 @@ class OperationCoordinator:
                 decision=Decision.of(
                     KernelDecision(
                         "deny",
-                        "the operation changed after it was approved — its"
-                        " arguments, directory, targets, or placement no"
-                        " longer match what the reviewer was shown, so this"
-                        " is a fresh question rather than a stale approval",
+                        "the operation changed after it was approved —"
+                        f" {changed_clause(operation, entry.operation)}, so"
+                        " this is a fresh question rather than a stale"
+                        " approval",
                         cause="deliberate",
                         rule=entry.rule,
                     )

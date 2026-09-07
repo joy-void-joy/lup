@@ -3,12 +3,13 @@
 """Word-level shell helpers: expansion safety, flags, and payloads."""
 
 import posixpath
+from collections.abc import Sequence
 from fnmatch import fnmatchcase
 from typing import TypedDict
 
 from .archives import archive_targets, archive_write
 from .decision import CheckpointRequirement, KernelDecision, SUBSTITUTION_SENTINEL
-from .edit import path_rule_matches
+from .edit import path_rule_matches, protected_path_reason
 from .roles import (
     GENERATED_PLUGIN_REFUSAL,
     is_generated_plugin_target,
@@ -18,10 +19,14 @@ from .rows import PathRoleRow, PathRuleRow
 
 
 class EffectiveCommand(TypedDict):
-    """The words the shell finally executes, and whether a binding was dangerous."""
+    """The words the shell finally executes, and the dangerous names it binds.
+
+    The names rather than a flag, because the verdict they earn has to say
+    which variable tripped it: the reviewer reads the reason and nothing else.
+    """
 
     words: list[str]
-    dangerous: bool
+    dangerous: list[str]
 
 
 class VerbOperands(TypedDict):
@@ -108,13 +113,14 @@ def effective_command(segment: list[str]) -> EffectiveCommand:
     ``env`` with nothing to wrap is itself the command, and ``command -v`` asks
     where a program is rather than running one, so it is the command too.
     """
-    dangerous = False
+    dangerous: list[str] = []
     position = 0
     while position < len(segment):
         word = segment[position]
         name, separator, _value = word.partition("=")
         if separator and name.isidentifier():
-            dangerous = dangerous or dangerous_env_name(name)
+            if dangerous_env_name(name) and name not in dangerous:
+                dangerous.append(name)
             position += 1
             continue
         executable = posixpath.basename(word)
@@ -166,7 +172,14 @@ def uv_run_words(words: list[str]) -> list[str]:
 # cluster falls through to the verb's own effect. Membership is about taking
 # paths, not about asking: `mkdir` and `touch` are allowed and still listed,
 # because the refusals that read this map — a write inside a generated plugin
-# tree, above all — are owed by every verb that names a path.
+# tree, above all — are owed by every verb that names a path. A verb that
+# overwrites one in place belongs here for the same reason a verb that removes
+# one does: what is at the path afterwards is not what was there before.
+#
+# A flag that consumes the following word is left out rather than modelled, so
+# `truncate -s 0 f` reads as non-inert. Callers widen to every operand there,
+# which names the size as a target — harmless, since no size spells a path any
+# scope reading grades beyond this checkout.
 # lup: ignore[library-default] — each verb's own POSIX flags, fixed by what the utility does rather than by who is asking
 SCRATCH_VERB_FLAGS = {
     "rm": "rfv",
@@ -175,6 +188,9 @@ SCRATCH_VERB_FLAGS = {
     "cp": "aprRvL",
     "mkdir": "pv",
     "touch": "acm",
+    "ln": "sfnvrihTPL",
+    "tee": "aip",
+    "truncate": "co",
 }
 
 
@@ -255,6 +271,16 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     question exists for. Nothing declares this, because a checkout that did
     not hold it would not be a checkout.
 
+    Read as a segment anywhere rather than as a leading ``.git``, because a
+    linked worktree has no leading one: its ``.git`` is a *file* pointing at
+    ``<somewhere>/repo.git/worktrees/<name>``, and the config and hooks it
+    shares live under that ``repo.git`` directory. So the repository these
+    sessions run out of was reachable by absolute path and graded ``outside``,
+    where a contained placement writes freely — and the measured rule that
+    catches an unleased write cannot hold it either, since a launch mounts the
+    shared administrative directory writable on purpose. A hook written there
+    runs on the operator's next Git command, outside whatever granted it.
+
     A declared role is read before either spelling, because a role is somebody
     saying where a path belongs and a spelling is only this reading guessing.
     The session scratchpad is the case that settles it: it is absolute, so the
@@ -263,7 +289,7 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     """
     if path_role(path_text, path_roles) == "scratch":
         return "scratch"
-    if path_text == ".git" or path_text.startswith(".git/"):
+    if any(segment.endswith(".git") for segment in path_text.split("/")):
         return "protected"
     if leaves_the_checkout(path_text):
         return "outside"
@@ -499,29 +525,48 @@ def written_operands(executable: str, operands: list[str]) -> list[str]:
     """The operands a path verb modifies, as opposed to the ones it reads.
 
     Copying reads every source and writes only the destination, so a path
-    named as a source is an ordinary read however protected it is. Every other
-    verb here removes or creates each path it is given.
+    named as a source is an ordinary read however protected it is. Linking
+    reads its source the same way -- the link stands where the last operand
+    does. Every other verb here removes or creates each path it is given.
     """
-    if executable == "cp" and len(operands) > 1:
+    if executable in ("cp", "ln") and len(operands) > 1:
         return operands[-1:]
     return operands
 
 
-def written_targets(words: list[str]) -> list[str] | None:
+def written_targets(
+    words: list[str], write_flags: Sequence[str] = ()
+) -> list[str] | None:
     """Every path this line would write over, or ``None`` where none can be named.
 
-    Two grammars answer one question. A path verb takes paths and nothing
-    else, so its operands are its targets; an archive verb states separately
-    where it authors, what it consumes and which directory it unpacks into.
-    What a caller wants of either is the same list, because what it asks of
-    that list is the same question -- where the loss lands.
+    Three grammars answer one question. A row that names the options carrying
+    its destination has already said where it writes, so that column is read
+    before anything here guesses; a path verb takes paths and nothing else, so
+    its operands are its targets; an archive verb states separately where it
+    authors, what it consumes and which directory it unpacks into. What a
+    caller wants of any of them is the same list, because what it asks of that
+    list is the same question -- where the loss lands.
 
-    ``None`` for an unmodelled line and for a verb whose flags could move
-    which paths are touched, which leaves every caller with the answer it had
-    before it asked.
+    The declared column wins outright rather than adding to the others: a row
+    saying ``of=`` is where ``dd`` lands is also saying its remaining words are
+    not paths, and reading them as operands would name ``if=/dev/zero`` as a
+    write. A row that declares nothing there falls through, which is every row
+    whose destination is positional.
+
+    A flag this cannot read could move which paths are touched, so the
+    positions stop meaning what they read and every operand is named instead.
+    Widening is the reading a caller that *refuses* something owes, and every
+    caller here is one: ``rm --interactive=never /etc/hosts`` names a path no
+    capture of this checkout holds whatever the flag turns out to do, and
+    declining to answer would have left the row claiming otherwise.
+
+    ``None`` only for an unmodelled line, which leaves every caller with the
+    answer it had before it asked.
     """
     if not words:
         return None
+    if write_flags:
+        return flag_write_targets(words, list(write_flags))
     archived = archive_write(words)
     if archived is not None:
         return archive_targets(archived)
@@ -530,7 +575,7 @@ def written_targets(words: list[str]) -> list[str] | None:
         return None
     verb = path_verb_operands(words)
     if not verb["inert"]:
-        return None
+        return verb["operands"]
     return written_operands(executable, verb["operands"])
 
 
@@ -662,6 +707,13 @@ def asks_before_removing_a_directory(
     # the fact worth stating, and it is the same fact `rm` states in stronger
     # words.
     taken = "deleting" if executable == "rm" else "moving"
+    spelled = ", ".join(named)
+    directory = (
+        f"the whole directories {spelled}"
+        if len(named) > 1
+        else f"the whole directory {spelled}"
+    )
+    what = "they hold" if len(named) > 1 else "it holds"
     # Read off the targets rather than asserted, which is the same correction
     # :func:`verb_loss_scope` makes for the row this sits beside and for the
     # same measured reason: a directory outside the checkout is one no capture
@@ -669,8 +721,8 @@ def asks_before_removing_a_directory(
     # the paths settled `rm -rf /etc/ssl` as "captured and restorable".
     return KernelDecision(
         "ask",
-        f"{taken} a whole directory requires approval: nothing in the command"
-        " bounds what it holds",
+        f"{taken} {directory} requires approval: nothing in the command"
+        f" bounds what {what}",
         checkpoint=(
             "unrecoverable"
             if any(
@@ -759,7 +811,7 @@ def protected_write_target(
             None,
         )
         if matched is not None:
-            return KernelDecision("ask", matched["reason"])
+            return KernelDecision("ask", protected_path_reason(word, matched))
     return None
 
 
@@ -911,6 +963,24 @@ def dangerous_env_name(name: str) -> bool:
     """Recognize an environment variable that can redirect a command's execution."""
     return name in DANGEROUS_ENV_NAMES or any(
         name.startswith(prefix) for prefix in DANGEROUS_ENV_PREFIXES
+    )
+
+
+def dangerous_assignment_reason(verb: str, names: list[str]) -> str:
+    """The question a security-sensitive binding earns, naming every name it binds.
+
+    The variable is the fact the classifier matched on, so the reason says it:
+    a reviewer reads this sentence and nothing else, and "an environment
+    assignment" told them only that some sentence could have been printed for
+    any call. Every name is listed rather than the first, since approving is
+    one decision over the whole segment.
+    """
+    spelled = ", ".join(names)
+    variables = f"variables {spelled}" if len(names) > 1 else f"variable {spelled}"
+    subject = "they" if len(names) > 1 else "it"
+    return (
+        f"{verb} the security-sensitive {variables} requires approval"
+        f" — {subject} can redirect how commands execute"
     )
 
 
@@ -1080,3 +1150,39 @@ def refspec_effects(word: str) -> list[str]:
     source = word[1:] if forced else word
     effects = ["force"] if forced else []
     return [*effects, "delete"] if source.startswith(":") else effects
+
+
+def destination_form(word: str) -> str:
+    """How one ``git push`` operand names the repository it lands in.
+
+    The destination is the first operand a push takes, and git accepts two
+    kinds of word for it: the name of a remote this repository has configured,
+    or the repository itself spelled out — a URL in any of git's transports,
+    or a path to a checkout on this machine. The first is a destination
+    somebody put in the remote table; the second names one inline and reaches
+    it without the table having heard of it, which is why the two are told
+    apart here at all.
+
+    Read structurally, and that is the whole of what this can do. Whether a
+    bare word is a remote this repository holds is a question about the
+    repository rather than about the word, and answering it means running
+    `git remote` — which this kernel is stdlib-only and hermetic in order not
+    to do. So the test is the other half: a word carrying a transport is a
+    repository named inline whatever the remote table says, and a bare name
+    that is not in the table makes git fail before it reaches anything.
+
+    The url form is every transport in one test, because they agree on where
+    the colon falls: `https://host/p`, `ssh://host/p`, `git://host/p`,
+    `file:///p` and the scp-style `git@host:p` all put a colon in the word
+    with no slash before it, and no remote name may contain a colon at all.
+    The path form is what is left that is not a bare name: a slash anywhere,
+    or a leading `.` or `~` for the checkout beside this one.
+
+    Returns the empty string for a bare name, which is the operand a push
+    normally carries and the reading that leaves `git push origin main` alone.
+    """
+    if ":" in word and "/" not in word.partition(":")[0]:
+        return "url"
+    if "/" in word or word.startswith((".", "~")):
+        return "path"
+    return ""

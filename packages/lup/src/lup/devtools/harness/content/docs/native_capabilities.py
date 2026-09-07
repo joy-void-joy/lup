@@ -167,6 +167,10 @@ part of probing.
   line, so no marker reaches it. It arms on the relocation tool, not on the
   working directory: a session launched already rooted in a worktree is not
   isolated, which is what the workflow in `docs/contributing.md` relies on.
+  Where it switches is bounded too, and observed rather than read: a path
+  outside `.claude/worktrees/` is taken only as a session's first entry from
+  its launch directory, and a second switch into a sibling `tree/` worktree
+  is refused with `is not under <repo>/.claude/worktrees`.
   Owned by Claude Code; `docs/upstream-reports.md` carries the report to send.
 """
             ),

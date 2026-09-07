@@ -31,7 +31,7 @@ HEADER: list[models.PromptPart] = [
     models.TextPart(
         text=r"""# Lup repository guidance
 
-Lup is a reusable framework and template for autonomous, tool-using agents. Keep library code provider-neutral and keep provider syntax in generated adapter artifacts.
+Lup is a reusable framework and template for autonomous, tool-using agents: keep library code provider-neutral, and provider syntax in generated adapter artifacts.
 
 """
     ),
@@ -41,13 +41,11 @@ CHANGING_THE_POLICY: list[models.PromptPart] = [
     models.TextPart(text=r"""Change the policy those gates enforce with """),
     models.SkillInvocation(plugin="lup", skill="hooks"),
     models.TextPart(
-        text=r""", which edits the canonical inputs in `lup.policy` and the `HookSet` in `devtools/harness/catalog.py`, regenerates both native plugins, and runs the shared fixture suite. Harness generation compiles one hermetic dispatcher and runtime per plugin, so never edit a generated dispatcher or runtime.
-
-Harness settings stay project-level, in the tree the harness owns ("""
+        text=r""", which edits `lup.policy` and the catalog's `HookSet`, regenerates both plugins, and runs the fixture suite; generation compiles one hermetic dispatcher and runtime per plugin, so never edit a generated one. Harness settings stay project-level, in """
     ),
     models.NativePath(location="project_settings"),
     models.TextPart(
-        text=r"""), which holds only the native settings outside that semantic policy boundary — never user-level.
+        text=r""", which holds only native settings outside that policy boundary — never user-level.
 
 """
     ),
@@ -57,13 +55,11 @@ MARKER_VOCABULARY: list[models.PromptPart] = [
     models.TextPart(
         text=r"""### The `# lup:` Marker Vocabulary
 
-A `# lup:` (or `// lup:`) comment is **actionable review feedback** left in the code for the agent to address — anything whose subject is the code and belongs at the site it concerns. Three flavors carry feedback, and **deleting one is denied**: bare `# lup: <text>` is open, `# lup: solved: <text>` claims you addressed it, `# lup: defer: <text>` parks it. Two more share the namespace without being feedback and go when what they annotate does — `# lup: ignore[<rule>]` is the suppression above, and `# lup: template: <decision>` marks a customization point the scaffold leaves to whoever adopts it.
-
-Resolve open feedback by fixing what it points at — or, for a question, by answering it definitively — then rewrite the marker as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim can be checked against what was asked; only the verify-solved pass retires one. `docs/contributing.md` carries the lifecycle, and how a customization marker reads differently in a scaffold and in a repository that adopted it (`"""
+A `# lup:` (or `// lup:`) comment is **actionable review feedback** about the code, at the site it concerns: bare is open, `solved:` claims you addressed it, `defer:` parks it, and **deleting any of the three is denied**. Resolve one by fixing what it points at, or answering a question definitively, then rewriting it as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim can be checked against what was asked; only the verify-solved pass retires one. `ignore[<rule>]` and `template: <decision>` share the namespace without being feedback, and go when what they annotate does. `docs/contributing.md` carries the lifecycle, the bracketed `defer[<gate>]` spellings `dev check` resolves rather than reads, and what a `template:` marker asks of a repository that adopted the scaffold (`"""
     ),
     models.SkillInvocation(plugin="lup", skill="resolve"),
     models.TextPart(
-        text=r"""`), and `dev todos` walks the customization points still standing.
+        text=r"""`); `dev todos` walks those standing.
 
 """
     ),
@@ -73,13 +69,7 @@ DEFERRED_WORK: list[models.PromptPart] = [
     models.TextPart(
         text=r"""### Deferred Work
 
-**Never create tracking files, and never write to the harness's persistent memory** — a file per profile, unversioned, unreviewed. A `TODO.md`, backlog, roadmap, or memory file parks a decision where no workflow will surface it again — delegation to nobody. What outlives this session goes to one of these, chosen by what it attaches to:
-
-- **A `# lup: defer: <text>` note**, when the work belongs to a site in this code, where `dev check` keeps it visible until somebody wakes it. A bracketed `defer[gone:<path>]` or `defer[branch:<name>]` states a gate `dev check` resolves rather than reads, failing the run the answer turns yes; any other gate stays prose, and prose stays advisory.
-- **A GitHub issue, milestone, or plan**, when the tooling, not the code, is misbehaving, or the repository is deciding what comes next — nothing in the tree owns that.
-- **This guidance's source**, regenerated, for a rule every future session should carry.
-- **A `tmp/` briefing**, rewritten whole, never appended, when a fresh session picks up what this one cannot finish.
-- **A question to the user**, when whether to defer at all is itself the open question.
+**Never create tracking files, and never write to the harness's persistent memory** — a file per profile, unversioned, unreviewed. A `TODO.md`, backlog, roadmap, or memory file parks a decision where no workflow will surface it again: delegation to nobody. What outlives this session goes to a `# lup: defer:` note at the site it concerns, which `dev check` keeps visible until somebody wakes it; a GitHub issue, milestone, or plan when the tooling rather than the code misbehaves, or the repository is deciding what comes next; this guidance's source, regenerated, for a rule every future session should carry; a `tmp/` briefing, rewritten whole and never appended, for what a fresh session picks up; or a question to the user, when whether to defer at all is itself the open question. `docs/contributing.md` carries which is which.
 
 ---
 
@@ -95,7 +85,7 @@ Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev
     ),
     models.RelocateSession(path="the path it prints"),
     models.TextPart(
-        text=r""" — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused-word set a late relocation meets, and the merge loop.
+        text=r""" — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused words a late relocation meets, and the merge loop.
 
 """
     ),
@@ -103,7 +93,7 @@ Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools dev
 
 COMMIT_TYPE_POINTER: list[models.PromptPart] = [
     models.TextPart(
-        text=r"""The type comes from the table in `docs/contributing.md`, which the commit skill renders at the moment one is being chosen.
+        text=r"""The type comes from `docs/contributing.md`'s table, which the commit skill renders when one is chosen.
 
 """
     ),
@@ -115,13 +105,13 @@ CODE_CONVENTIONS: list[models.PromptPart] = [
 
 ## Code Conventions
 
-Build on `lup` and pydantic. The runtime an application composes against is provider-neutral, and each provider's SDK is one adapter's dependency behind an extra rather than a framework the application talks to: no module under `src/lup_template/` imports one, and `seam-boundary` keeps adapter imports to the composition roots that name them. `docs/conventions.md` names each library and puts each typed form beside the raw dict it replaces. Prefer an existing PyPI library to raw HTTP or a rebuilt wheel.
+Build on `lup` and pydantic; prefer an existing PyPI library to raw HTTP or a rebuilt wheel. The runtime an application composes against is provider-neutral: no module under `src/lup_template/` imports a provider SDK, each being one adapter's dependency behind an extra, and `seam-boundary` holds adapter imports to the composition roots naming them. `docs/conventions.md` names each library and its typed forms.
 
-**Model selection.** Default to the **strongest** tier everywhere — main agent, subagents, reviewers, background agents. This runs on a subscription where the best model is the point: reach for **balanced** only when latency or cost provably dominates quality, and **fast** almost never. A role that warrants less declares that tier with a reason, and declarations state a tier, not a model id.
+**Model selection.** Default to the **strongest** tier everywhere — main agent, subagents, reviewers, background agents — on a subscription where the best model is the point. Reach for **balanced** only where latency or cost provably dominates quality, **fast** almost never; a role warranting less declares its tier with a reason, naming a tier rather than a model id.
 
-**Error handling.** A `@lup_tool` handler takes a validated model and returns one; raise `ToolError` to send a recoverable failure back as an MCP error saying what to do about it — the `is_error` envelope and the input-validation reply are the decorator's. Elsewhere raise for unrecoverable errors, wrap transient ones in `with_retry`, validate inputs early, and never swallow one silently. A catch-all `except Exception` is fine at a boundary that logs, handles, or re-raises — a task loop, a subagent delegation — which is why no rule refuses one.
+**Error handling.** Raise for unrecoverable errors, wrap transient ones in `with_retry`, validate inputs early, never swallow one silently. A `@lup_tool` handler takes a validated model and returns one, raising `ToolError` to send a recoverable failure back as an MCP error saying what to do about it; the `is_error` envelope and input-validation reply are the decorator's. A catch-all `except Exception` is fine at a boundary that logs, handles, or re-raises — a task loop, a subagent delegation — which is why no rule refuses one.
 
-**Placement, in this repository.** Reusable utilities belong in `packages/lup/`, what only this application needs in `src/lup_template/`, and logic already in `lup` is imported rather than copied. Deciding a module belongs on the other side is one line of judgement and a hundred of consequence, which is where the judgement gets abandoned — so the consequence is a command: `dev relocate old.module=new.module` repoints every import and reports the mentions it left you.
+**Placement, in this repository.** Reusable utilities belong in `packages/lup/`, what only this application needs in `src/lup_template/`, and logic already in `lup` is imported rather than copied. Deciding a module belongs on the other side is one line of judgement and a hundred of consequence, which is where the judgement gets abandoned — so the consequence is a command: `dev relocate old.module=new.module` repoints every import and reports the mentions it left.
 
 """
     ),
@@ -133,23 +123,19 @@ TOOLING: list[models.PromptPart] = [
 
 ## Tooling
 
-`uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green.
+`uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green. `lup` itself is the one dependency not added that way: `dev library` reads and rewrites the mode a project obtains it through, and that mode decides what upgrading means — ask `dev library status` before assuming lup's source is on disk to edit, since in three of four modes it is not.
 
-`lup` itself is the one dependency not added that way: how a project obtains it is a mode `dev library` reads and rewrites, and the mode decides what upgrading means. Ask `dev library status` before assuming lup's source is on disk to edit — in three of the four modes it is not.
-
-When an operation genuinely needs the launcher's host, resubmit it with a leading `# lup: escalate[sandbox]: <why>` line rather than starting an unconfined session. The crossing is reviewed and dispatched once; try inside first, since a missing path usually means the host was not needed.
+An operation that genuinely needs the launcher's host is resubmitted with a leading `# lup: escalate[sandbox]: <why>` line rather than run from an unconfined session; the crossing is reviewed and dispatched once, so try inside first, since a missing path usually means the host was not needed.
 
 ### lup-devtools
 
-Development tooling is the `lup-devtools` CLI, composed from the reusable commands under `packages/lup/` and this repository's under `src/lup_template/`. **Use it instead of ad-hoc commands.** Inline Python (`-c`, `-m`, a REPL, or bare `python`) is denied; `uv run python <script.py>` is allowed because a file can be reviewed. Running the same command repeatedly means **add a command** to the half that would reuse it.
-Sandbox-masked dotfiles can look untracked to Git; read the real tree with `dev pending`.
-`tmp/` is gitignored scratch. To **read** code, use `py info`/`py source`/`py search`/`py text`/`py imports` or codeintel; to **compute once**, write a script under `tmp/` and run it; to reuse the computation, add a devtools command. `docs/contributing.md` carries the rest of this reviewability ladder.
-The `codeintel` group answers questions about code by *resolving* it, through a language server. **Prefer it or `py search` for anything about a name**, and `rename_symbol` over an edit with `replace_all`, which cannot tell one scope from another. Use `py text` for literal text in explicitly scoped Python source, and grep for characters in non-Python files.
-`docs/commands.md` carries every command the CLI serves, walked from the wired app at generation time rather than listed by hand — so a command exists there by existing, and reading it is how you find one you did not know to look for. `--help` gives its options.
+`lup-devtools` is the development CLI, composed from `packages/lup/` and this repository's `src/lup_template/`. **Use it instead of ad-hoc commands**, and running the same one repeatedly means **add a command** to the half that would reuse it. Inline Python (`-c`, `-m`, a REPL, or bare `python`) is denied; `uv run python <script.py>` is allowed because a file can be reviewed. Sandbox-masked dotfiles can look untracked to Git — read the real tree with `dev pending`, and a persisted result is read rather than `cat`-ed, which re-persists it.
+
+To **read** code use the `py` group or `codeintel`, which resolves a name through a language server rather than matching text: **prefer either for anything about a name**, `rename_symbol` over `replace_all`, which cannot tell one scope from another, `py text` for literal text in scoped Python source, and grep for characters in non-Python files. To **compute once**, write a script under gitignored `tmp/` and run it; to reuse it, add a command. `docs/contributing.md` carries the rest of that reviewability ladder, `docs/commands.md` every command the CLI serves — walked from the wired app, so read it to find one you did not know to look for, and `--help` for its options.
 
 ### Generated Trees
 
-`harness generate all` regenerates every native plugin; `harness <runtime>` regenerates one and launches it. Skills and agents render from typed catalogs — one under `packages/lup/` for what is about agent work, one under `src/lup_template/` for what is about being a template, composing both. Change the catalog that owns the subject, then regenerate.
+`harness generate all` regenerates every native plugin; `harness <runtime>` regenerates one and launches it. Skills and agents render from typed catalogs, one per half, composing both — change the catalog that owns the subject, then regenerate.
 
 **Every runtime, same change.** State and build each answer to every policy, flag, hook, or artifact; name substitutes for unsupported concepts. One runtime's verdicts place no call, so it renders the plain effect. Done means `harness generate all` reconciles both; `docs/permissions.md` maps gaps.
 
@@ -163,7 +149,7 @@ CONFIGURATION: list[models.PromptPart] = [
 
 ## Configuration
 
-Configuration loads through pydantic-settings in `src/lup_template/agent/config.py`, the only module that reads the environment. `.env.local` holds secrets, is gitignored, and overrides the defaults in `.env`; `docs/template.md` lists the variables.
+Configuration loads through pydantic-settings in `src/lup_template/agent/config.py`, the only module that reads the environment. `docs/template.md` lists the variables and how gitignored `.env.local` overrides `.env`.
 
 """
     ),
@@ -175,15 +161,13 @@ PROCESS_AND_COMMUNICATION: list[models.PromptPart] = [
 
 ## Process & Communication
 
-**Wait on pushed tool output, not polls.** Keep a long-lived command's resumable call live and yield to the runtime's event-driven waiter. Repeated shell-session reads are polling, even with long timeouts.
+**Wait on pushed tool output, not polls.** Keep a long-lived command's resumable call live and yield to the runtime's event-driven waiter; repeated shell-session reads are polling, even with long timeouts.
 
-**Surface every question through the harness's structured facility**, not narration: clarifications, choices, and destructive confirmations included. Even open-ended questions need concrete options plus free-form because downstream notifications read structured answers.
+**Surface every question through the harness's structured facility**, not narration — clarifications, choices, destructive confirmations — with concrete options plus free-form even when open-ended, because downstream notifications read structured answers. **Ask what form the project should take** rather than inferring it: the shape a fix takes, how work is cut into branches or issues, what a surface looks like are the user's to settle, and picking one silently spends their decision.
 
-**Explain decisions from scratch:** the problem, relevant state, options, rationale, and your recommendation marked as yours. A verdict cannot be judged; prefer complete context over brevity.
+**Explain decisions from scratch:** the problem, relevant state, options, rationale, and your recommendation marked as yours — a verdict cannot be judged, so prefer complete context to brevity. **Say what is, not how it came to be:** an overview carries the thing as it stands and the reasoning holding it up, not what was tried or which turn found what, your path rather than the subject.
 
-Verify claims against **what was actually asked** — the note or issue itself, not a title, commit, or prior summary. State surviving claims plainly; correct failures out loud, including yours.
-
-**After every command**, compare actual use with its docs and propose any update as a question — external docs, corrections, uncovered requests, or ignored sections all say it should evolve.
+Verify claims against **what was actually asked** — the note or issue itself, not a title, commit, or prior summary; state surviving claims plainly and correct failures out loud, including yours. **After every command**, compare actual use with its docs and propose an update as a question: external docs, corrections, uncovered requests, or ignored sections all say it should evolve.
 
 """
     ),
@@ -193,12 +177,7 @@ REPORTING_FRICTION: list[models.PromptPart] = [
     models.TextPart(
         text=r"""### Reporting Friction
 
-**Fix tooling friction instead of working around it.** This repository usually owns the hook, command, or classifier that obstructed you. Repair it on its own branch so the diff stays single-purpose.
-
-**Open an issue only when this session cannot repair it**: the owner is outside this repository, a design decision is missing, or reproduction is the work. A narrated workaround teaches nobody, so what cannot be fixed is still recorded.
-
-Record the exact command, error, resulting state, recovery cost, and owning component — repair commit or issue — with `uv run lup-devtools dev report-friction`; the checkout selects the repository. Evidence beats conclusions.
-**Read the tracker first.** `dev issues` lists the open reports and closed ones are worth searching: a match is updated with `--issue NUMBER`, never split across duplicates.
+**Fix tooling friction instead of working around it.** This repository usually owns the hook, command, or classifier that obstructed you; repair it on its own branch so the diff stays single-purpose. **Open an issue only when this session cannot repair it** — the owner is outside this repository, a design decision is missing, or reproduction is the work — because a narrated workaround teaches nobody. **Read the tracker first:** `dev issues` lists the open reports, closed ones are worth searching, and a match is updated with `--issue NUMBER` rather than split across duplicates. Record the exact command, error, resulting state, recovery cost, and owning component with `dev report-friction`, whose checkout selects the repository; evidence beats conclusions.
 
 """
     ),
@@ -224,13 +203,7 @@ SELF_IMPROVEMENT: list[models.PromptPart] = [
 
 ## Self-Improvement Loop
 
-`docs/self-improvement.md` carries the full loop, and the feedback-loop, review, and meta skills each work from it.
-
-"""
-    ),
-    *conventions.FAILURE_ANALYSIS_BRIEF,
-    models.TextPart(
-        text=r"""The durable fix is a capability, not a rule: trace the failure to the missing input or the workflow step where the wrong decision entered, and change that — a prompt rule coexists peacefully with the failure it warns about.
+`docs/self-improvement.md` carries the full loop — what to ask of a failure, and what to change in answer — and the feedback-loop, review, and meta skills each work from it. The durable fix is a capability, not a rule: trace the failure to the missing input or the workflow step where the wrong decision entered, and change that — a prompt rule coexists peacefully with the failure it warns about.
 """
     ),
 ]
@@ -258,6 +231,7 @@ def guidance_parts(selection: RuleSelection) -> list[models.PromptPart]:
         *CONFIGURATION,
         *PROCESS_AND_COMMUNICATION,
         *REPORTING_FRICTION,
+        *conventions.DEFECT_DISPOSITION,
         *EXTERNAL_RESOURCES,
         *SELF_IMPROVEMENT,
     ]

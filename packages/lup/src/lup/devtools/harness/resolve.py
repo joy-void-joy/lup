@@ -109,7 +109,7 @@ from lup.devtools.sync import accessible_roots
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.devtools.supervisor.page import SUPERVISOR_PORT
-from lup.devtools.utils import refuse_blocked_config_writes
+from lup.devtools.dev.worktree import refuse_a_blocked_registration
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 from lup.devtools.supervisor.projection import PendingQuestionView, question_views
 
@@ -1481,14 +1481,17 @@ def run_resolve(
             )
         if not recorded:
             require_fresh_base(probe_base_freshness(launcher, root))
-    # A run leases a worktree per concern, and `worktree add` writes git
-    # config three times over — so a confinement that owns `config.lock` stops
-    # this run at its first lease, however many concerns it planned, with a
-    # bare `File exists` that names nothing about a sandbox. Said once here
-    # instead, before anything is planned or leased. Aborting takes no lease,
-    # so it is the one path that still runs confined.
+    # A run leases a worktree per concern, and leasing one registers the merge
+    # driver where the clone has none — so a confinement that owns
+    # `config.lock` would stop this run at its first lease, however many
+    # concerns it planned, with a bare `File exists` that names nothing about
+    # a sandbox. Said once here instead, before anything is planned or leased,
+    # and only where that registration is still outstanding: a clone that
+    # already resolves the driver leases every worktree without writing config
+    # at all. Aborting takes no lease, so it is the one path that still runs
+    # confined whatever the answer.
     if abort_reason is None:
-        refuse_blocked_config_writes(root)
+        refuse_a_blocked_registration(root)
 
     async def execute() -> None:
         from lup.providers.claude.runtime import (

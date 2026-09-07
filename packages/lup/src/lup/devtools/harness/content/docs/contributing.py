@@ -87,6 +87,12 @@ checkout it was asked about.
 The argument is reviewability, not power: an agent may already edit
 `devtools/` and run it.
 
+A result too large to return does not come back at all: the runtime persists
+it to a file and returns a short preview naming that file. Hand the file to a
+reader that takes a file whole. `cat`-ing it is another result too large to
+return, persisted to another file, and `cat`-ing that one repeats it — a
+regress whose every step looks like the command having worked.
+
 Never create a tracking file. A `TODO.md`, backlog, or roadmap parks a
 decision where no workflow surfaces it again. Deferred work lives as a
 `# lup: defer: <text>` note at the site it concerns — where `dev comments`
@@ -108,6 +114,12 @@ it concerns is on the branch it names, in a checkout that carries no copy of
 it — so the check reads the integration branch as well as the working tree,
 for the notes naming the branch in hand. Write one where you are, aimed at the
 branch that has to act, and it reaches them without waiting for a merge.
+
+Landing wakes it even where the branch was deleted in the same sweep, because
+`dev delete` judges containment off the ref it is about to remove and records
+that verdict beside the branch. A checkout that never deleted it holds no such
+record and stays quiet — which is what keeps a clone that merely never fetched
+the branch, every CI job among them, from waking every gate in the repository.
 
 A gate the checkout cannot see — "until the v2 API ships" — stays prose and
 stays advisory, which is the whole of what a stated gate ever did before.
@@ -183,6 +195,12 @@ none of them is gated on the command being a git command. So an isolated
 session loses `grep -c hash` and `rg complete src/` — read-only commands with
 no git in them — for as long as it lasts, and no approval marker reaches the
 refusal.
+Relocation is bounded as well as expensive: `dev worktree create` cuts under
+a sibling `tree/`, outside the `.claude/worktrees/` a relocating tool
+switches within, so such a path is taken only as a session's first entry from
+the directory it launched in. A session already sitting in one worktree is
+refused a second switch by the tool itself, whatever this project decides, so
+stacking a branch means a launch or absolute paths either way.
 A session launched already rooted in the worktree is never isolated and
 keeps all of them, which is why the workflow asks for a launch. Staying put
 and editing through absolute paths works too, but only into a worktree that

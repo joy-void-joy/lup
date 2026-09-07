@@ -366,10 +366,12 @@ class ForeignCheckouts(BaseModel, frozen=True):
 
         Two relations answer that, because neither covers the other. A branch
         already tracking one names it in `upstream`, which is exact even where
-        the two are named differently. A branch pushed for the first time
-        names nothing yet -- the config arrives with the push, after this has
-        read it -- so the ref it will create is also claimed under each
-        configured remote, which is the correspondence `git push` itself uses.
+        the two are named differently. A branch whose remote lives in lup's
+        own records names nothing here -- `dev pr push` states its destination
+        as a refspec and writes no tracking config, and a first push has not
+        reached even that when this reads -- so the ref such a push creates is
+        also claimed under each configured remote, which is the correspondence
+        `git push` itself uses.
 
         Claiming a ref that never appears costs nothing: only refs the run
         actually saw move are ever looked up. A remote whose branch this

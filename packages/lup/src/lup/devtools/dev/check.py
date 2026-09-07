@@ -6,6 +6,7 @@ import tomllib
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from importlib.util import find_spec
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -39,6 +40,7 @@ from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
+from lup.devtools.dev.records import branches_awaiting_adoption, record_location
 from lup.devtools.harness.drift import (
     RepositoryWriter,
     inspect_drift,
@@ -79,12 +81,30 @@ class CheckReport(BaseModel):
 
 
 def ran(name: str, command: Callable[[], object], ok: str = "ok") -> CheckReport:
-    """One external tool's verdict, carrying what it printed when it failed."""
+    """One external tool's verdict, carrying what it printed when it failed.
+
+    A tool that never started is a verdict too. `sh` prepares the child before
+    exec — the working directory among it — and what fails there arrives as a
+    fork exception rather than an exit status, so it is a sibling of the class
+    a caller catches rather than a kind of it. Escaping here takes the whole
+    gate down: the checks that had already passed go unreported, and a
+    condition of the environment reads as a crash in the checker. So the two
+    are reported the same way and told apart by what the row says.
+    """
     try:
         command()
     except sh.ErrorReturnCode as error:
         printed = [error.stdout.decode().rstrip()] if error.stdout else []
         return CheckReport(name=name, passed=False, lines=[f"{name}: FAIL", *printed])
+    except sh.ForkException as error:
+        return CheckReport(
+            name=name,
+            passed=False,
+            lines=[
+                f"{name}: FAIL (never started)",
+                *(f"  {line}" for line in str(error).strip().splitlines()),
+            ],
+        )
     return CheckReport(name=name, lines=[f"{name}: {ok}"])
 
 
@@ -177,11 +197,63 @@ def pyright_check(excluded_roots: list[str]) -> CheckReport:
         configuration.unlink(missing_ok=True)
 
 
+def parallel_arguments(workers: int) -> list[str]:
+    """The flag that spreads a suite over processes, where one answers for it.
+
+    `-n` belongs to pytest-xdist, and a project building on this library has
+    no reason to hold it: a package declares what it needs to run, and a
+    dependency group installs for the project that writes it rather than for
+    anyone depending on that project. Declaring the plugin would therefore
+    either reach this library's own developers alone or push test parallelism
+    into every adopter's runtime install, so the flag is offered where it is
+    importable and dropped where it is not. Pytest rejects an unrecognized
+    argument before collecting anything, and a gate that failed on that would
+    be reporting on its own speed rather than on the suite.
+
+    Fewer than two workers spells serial, so the count descends into running
+    the same tests behind a single interpreter rather than needing a second
+    way of saying nothing.
+    """
+    if workers < 2 or find_spec("xdist") is None:
+        return []
+    return ["-n", str(workers)]
+
+
+def ignored_arguments(excluded_roots: list[str]) -> list[str]:
+    """The globs that keep collection out of retained data and scratch."""
+    return option_arguments(
+        "--ignore-glob",
+        [pattern for root in excluded_roots for pattern in (root, f"{root}/**")],
+    )
+
+
 class TestRoot(BaseModel):
     """One independently installed test suite the project asks the gate to run."""
 
     name: str
     directory: Path
+
+    def absent(self) -> CheckReport:
+        """The verdict a root naming a directory this checkout lacks earns.
+
+        A different fact from a suite that failed, and the reader's next move
+        differs: the declaration is wrong, or the tree it named is somewhere
+        else. It is answered before the run rather than caught after it,
+        because `sh` changes directory in the forked child — where the failure
+        arrives as a fork exception rather than an exit status, escapes the
+        handler that reads exit statuses, and takes the whole gate down with a
+        traceback while the checks that had already passed go unreported.
+        """
+        return CheckReport(
+            name=self.name,
+            passed=False,
+            lines=[
+                f"{self.name}: FAIL (no directory at {self.directory})",
+                f"  the '{self.name}' test root names a path this checkout does "
+                "not hold — drop it from the project's declared `test_roots`, "
+                "or point it at the suite it meant",
+            ],
+        )
 
     def checked(self, workers: int, excluded_roots: list[str]) -> CheckReport:
         """Whether this suite passes, run from its own root.
@@ -191,24 +263,126 @@ class TestRoot(BaseModel):
         a library test reaching for a template fixture passes at the root and
         fails there, which is the only place that difference shows.
         """
+        if not self.directory.is_dir():
+            return self.absent()
         return ran(
             self.name,
             lambda: uv(
                 "run",
                 "pytest",
-                "-n",
-                str(workers),
-                *option_arguments(
-                    "--ignore-glob",
-                    [
-                        pattern
-                        for root in excluded_roots
-                        for pattern in (root, f"{root}/**")
-                    ],
-                ),
+                *parallel_arguments(workers),
+                *ignored_arguments(excluded_roots),
                 _cwd=str(self.directory),
             ),
         )
+
+
+class RootSelection(BaseModel):
+    """One suite's share of what a caller named, spelled from inside that suite.
+
+    Empty *paths* asks for everything the suite declares, which is what the
+    root's own `testpaths` already says — so a caller who named nothing gets
+    each suite whole rather than a selection of none.
+    """
+
+    root: TestRoot
+    paths: list[str]
+
+
+def owning_index(test_roots: list[TestRoot], selection: Path) -> int | None:
+    """Which declared suite holds a named path, deepest root winning.
+
+    A workspace root contains the package roots under it, so the outermost
+    suite would claim every path if the roots were read in the order they
+    were declared. The deepest one containing the path is the suite that
+    installs it.
+    """
+    named = selection.resolve()
+    deepest = sorted(
+        range(len(test_roots)),
+        key=lambda index: len(test_roots[index].directory.resolve().parts),
+        reverse=True,
+    )
+    return next(
+        (
+            index
+            for index in deepest
+            if named.is_relative_to(test_roots[index].directory.resolve())
+        ),
+        None,
+    )
+
+
+def group_by_root(
+    test_roots: list[TestRoot], selections: list[str]
+) -> list[RootSelection]:
+    """Split what a caller named into one invocation per suite that owns part.
+
+    Two independently installed suites each own a top-level `tests` package,
+    and one interpreter has one meaning for that name: a run naming a path
+    from each has both suites claiming `tests.conftest`, and collection dies
+    before a test runs. No import mode settles it, because the collision is in
+    what the suites are rather than in how pytest finds them — the isolation
+    that makes them separate installs is the same isolation that stops them
+    sharing an interpreter. So the narrowing move a caller reaches for — run
+    the suites I touched — is served by one run per suite instead.
+    """
+    owned: list[list[str]] = [[] for _ in test_roots]
+    for selection in selections:
+        index = owning_index(test_roots, Path(selection))
+        if index is None:
+            declared = ", ".join(str(root.directory) for root in test_roots)
+            raise typer.BadParameter(
+                f"{selection} sits under no declared test root ({declared})"
+            )
+        installed = test_roots[index].directory.resolve()
+        owned[index].append(str(Path(selection).resolve().relative_to(installed)))
+    return [
+        RootSelection(root=root, paths=paths)
+        for root, paths in zip(test_roots, owned, strict=True)
+        if paths or not selections
+    ]
+
+
+def run_selected(
+    test_roots: list[TestRoot],
+    selections: list[str],
+    excluded_roots: list[str],
+    workers: int = TEST_WORKERS,
+) -> None:
+    """Run each named path in the suite that installs it, reporting per suite.
+
+    Output reaches the terminal as it arrives rather than being carried back
+    the way the gate carries it: a caller who named one file wants pytest's
+    own failure report, and the gate's ordered summary exists for a run whose
+    checks finish out of order.
+    """
+    failed: list[str] = []
+    for group in group_by_root(test_roots, selections):
+        if not group.root.directory.is_dir():
+            for line in group.root.absent().lines:
+                typer.echo(line)
+            failed.append(group.root.name)
+            continue
+        typer.echo(f"\n{group.root.name}  ({group.root.directory})")
+        try:
+            uv(
+                "run",
+                "pytest",
+                *group.paths,
+                *parallel_arguments(workers),
+                *ignored_arguments(excluded_roots),
+                _cwd=str(group.root.directory),
+                _fg=True,
+            )
+        except sh.ErrorReturnCode:
+            failed.append(group.root.name)
+        except sh.ForkException as error:
+            typer.echo(f"{group.root.name}: never started\n{str(error).strip()}")
+            failed.append(group.root.name)
+    if failed:
+        typer.echo(f"\nFailed: {', '.join(failed)}")
+        raise typer.Exit(1)
 
 
 def inline_notes_lines(found: list[FoundComment], scaffold: bool = False) -> list[str]:
@@ -291,17 +465,31 @@ def budget_reports(used: int, scaffold: bool) -> list[CheckReport]:
     ]
 
 
-def guidance_budget_report(used: int) -> CheckReport:
-    """Whether a session will load the whole document or a truncated one."""
-    free = GUIDANCE_BYTE_BUDGET - used
+def budget_report(name: str, used: int, ceiling: int, note: str) -> CheckReport:
+    """One budget's verdict, in the sentence every budget row answers in.
+
+    Both rows weigh the same document against a different ceiling, so the
+    sentence is written once: what a reader learns to expect from one row
+    holds for the other, and neither can drift into reporting a different set
+    of facts than its neighbour. What differs is the note each appends, which
+    is the only part its own ceiling makes it the authority on.
+    """
+    free = ceiling - used
     state = "ok" if free >= 0 else f"FAIL (over by {-free})"
     return CheckReport(
-        name="guidance budget",
+        name=name,
         passed=free >= 0,
-        lines=[
-            f"guidance budget: {state} — {used}/{GUIDANCE_BYTE_BUDGET} bytes, "
-            f"{free} free"
-        ],
+        lines=[f"{name}: {state} — {used}/{ceiling} bytes, {note}"],
+    )
+
+
+def guidance_budget_report(used: int) -> CheckReport:
+    """Whether a session will load the whole document or a truncated one."""
+    return budget_report(
+        "guidance budget",
+        used,
+        GUIDANCE_BYTE_BUDGET,
+        f"{GUIDANCE_BYTE_BUDGET - used} free",
     )
 
 
@@ -320,18 +508,55 @@ def scaffold_budget_report(
     Gating rather than advisory: a reservation nobody has to honour is spent
     by the first section that wants the room, which is how the headroom
     disappeared before anyone declared one.
+
+    A passing row states the room left, because the number a session needs
+    before it writes is how much it may spend, and the reservation — which
+    never moves — cannot tell it that. The failing row states the overage
+    instead: a negative amount of room is what the overage already says.
     """
     ceiling = GUIDANCE_BYTE_BUDGET - headroom
-    over = used - ceiling
-    state = "ok" if over <= 0 else f"FAIL (over by {over})"
-    return CheckReport(
-        name="scaffold budget",
-        passed=over <= 0,
-        lines=[
-            f"scaffold budget: {state} — {used}/{ceiling} bytes, "
-            f"{headroom} reserved for the adopting domain"
-        ],
-    )
+    free = ceiling - used
+    reserved = f"{headroom} reserved for the adopting domain"
+    note = f"{free} free, {reserved}" if free >= 0 else reserved
+    return budget_report("scaffold budget", used, ceiling, note)
+
+
+def branch_record_reports(pending: list[str]) -> list[CheckReport]:
+    """What lup's branch bookkeeping earns while it still sits in two places.
+
+    Advisory rather than gating. Every read falls back to the shared config
+    per field, so a clone that never adopts its records answers exactly as
+    one that did: there is no defect here to refuse a branch over. The
+    command that finishes it writes the shared git directory, which is the
+    host's, so a gating row would be red in every worktree until somebody
+    stood somewhere no session reaches — and a gate whose resting colour is
+    red is a gate a reader stops reading.
+
+    Nothing at all once no branch is left, rather than a permanent ok, for
+    the same reason: this is one move with an end, and a row that can only
+    say ok from then on is a line everybody learns to skip. The gate prints
+    the lines a check hands back, so handing back no check is how a row
+    leaves — the shape the borrowed-environment and unlanded-sibling rows
+    already use.
+    """
+    if not pending:
+        return []
+    destination = record_location(pending[0]).parent
+    return [
+        CheckReport(
+            name="branch records",
+            counted=False,
+            lines=[
+                f"branch records: {len(pending)} branch(es) still recorded in "
+                "the shared git config (advisory)",
+                "  every read falls back to those keys, so nothing is broken",
+                "  `lup-devtools dev worktree adopt-records` moves them, "
+                "once per clone",
+                f"  it writes the shared git directory's `{destination}/`, "
+                "so it runs on the host",
+            ],
+        )
+    ]
 
 
 def changed_paths(since: str) -> list[str]:
@@ -543,6 +768,12 @@ def scan_reports(
                 ),
             ],
         )
+
+        # Beside the guards for the reason they are here: this is the other
+        # thing about a clone that no file in the tree can settle, and it is
+        # the only place the unfinished half of a move says so. The keys it
+        # counts answer every read, so nothing else has any reason to speak.
+        yield from branch_record_reports(branches_awaiting_adoption())
 
         # The one measurement of the shell vocabulary that reads the direction
         # a tightening shows up in. The recorded asks say which commands a

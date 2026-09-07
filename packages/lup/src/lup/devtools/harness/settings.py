@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from lup.harness.generation import plugin_served_tool
 from lup.harness.models import HookSet, HookUrlScope, Plugin
-from lup.types import JsonObject, JsonValue
+from lup.types import EnvVars, JsonObject, JsonValue
 
 
 class Settings(BaseModel, frozen=True):
@@ -29,6 +29,14 @@ class Settings(BaseModel, frozen=True):
             "Runtime settings that are neither derived from the declaration "
             "nor permissions — the editor integrations and session defaults a "
             "project chooses for itself."
+        ),
+    )
+    env: EnvVars = Field(
+        default={},
+        description=(
+            "Environment the runtime applies to the session, rendered over "
+            "what the declaration derives — a variable spelled here is the "
+            "project's own judgement and outranks a derived one."
         ),
     )
     official_plugins: JsonObject = Field(
@@ -133,6 +141,8 @@ def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     its own requirement without displacing the user's or the organization's.
     """
     settings: JsonObject = dict(declared.base)
+    if declared.env:
+        settings["env"] = dict(declared.env)
     settings["enabledPlugins"] = dict(declared.official_plugins)
     if plugin is not None:
         # Marketplace names share one global namespace, so this must be the

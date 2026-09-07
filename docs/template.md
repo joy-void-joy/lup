@@ -62,6 +62,8 @@ src/lup_template/
 │   │       ├── shell_vocabulary.py # Where this project's shell vocabulary differs from the one lup offers.
 │   │       ├── skills/      # Typed harness content declarations.
 │   │       │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
+│   │       │   ├── discovery.py # The discovery posture the design-facing skills share.
+│   │       │   ├── distill.py # Canonical declaration for the distill skill.
 │   │       │   ├── import_skill.py # Canonical declaration for the import skill.
 │   │       │   ├── init.py  # Canonical declaration for the init skill.
 │   │       │   ├── install.py # Canonical declaration for the install skill.

@@ -41,14 +41,16 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev resolve-review` | Render a resolve manifest and its branch diffs into one static HTML review. |
 | `dev resolve-summary` | Print per-concern verdicts from a resolve manifest. |
 | `dev check` | Run ruff format, ruff check, pyright, and pytest. Read-only by default. |
+| `dev test` | Run named tests in the suite that installs each, one run per suite. |
 | `dev comments` | List unresolved `# lup:` feedback comments, or act on specific ones. |
 | `dev todos` | List `# lup: template:` markers — a scaffold&#x27;s open decisions. |
 | `dev seams` | Show what this project settled about itself, or settle one of them. |
 | `dev refutations` | Resolve one file&#x27;s proposed content and report what it refutes. |
 | `dev directives` | Measure every `# lup: ignore` against the canonical inline placement. |
-| `dev report-friction` | File or correct workflow friction in this checkout&#x27;s repository. |
+| `dev report-friction` | File or correct workflow friction, on the tracker that owns the fix. |
 | `dev upstream` | Print a measured upstream defect, or list the ones declared. |
 | `dev undo` | List the recoverable snapshots of this tree, or take and expire them. |
+| `dev history` | Trace a symbol through every branch, past this tree&#x27;s own snapshots. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
@@ -58,6 +60,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev worktree create` | Create or re-attach a git worktree. |
 | `dev worktree list` | List all git worktrees with branch and status info. |
 | `dev worktree remove` | Remove a git worktree. |
+| `dev worktree adopt-records` | Move lup&#x27;s `branch.*.lup-*` config keys into the shared `lup/` directory. |
 | `dev env status` | Where this project&#x27;s environment is, and who is installed in it. |
 | `dev env sync` | Install this project&#x27;s dependencies into its own environment. |
 | `dev pr status` | Fetch PR review status, checks, and comments for a branch. |
@@ -71,6 +74,10 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev conflict audit` | Post-resolution deletion audit: check for accidentally dropped code. |
 | `dev conflict complete` | Finalize the merge/rebase/cherry-pick after all conflicts are resolved. |
 | `dev plugin name` | Name this repo&#x27;s plugin marketplace uniquely (the plugin entry is kept). |
+| `dev tracker comment` | Say something on an issue, here or on a declared tracker. |
+| `dev tracker close` | Close an issue, here or on a declared tracker. |
+| `dev tracker reopen` | Reopen an issue, here or on a declared tracker. |
+| `dev tracker list` | Which repositories this project may reach, and what each is for. |
 | `dev git-hooks install` | Install every git hook this repository declares. |
 | `dev git-hooks status` | Report what this clone refuses, at every moment a hook sits at. |
 | `dev git-hooks uninstall` | Remove them, leaving hooks written elsewhere alone. |
