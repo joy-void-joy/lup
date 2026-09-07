@@ -17,8 +17,14 @@ from lup.harness.image import Podman
 from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
 from lup.harness.ownership import source_digest
 from lup.harness.toolchain import for_host
+from lup.policy.survey import allowed_programs
+from lup.policy.vocabulary import default_vocabulary
 from lup_template.devtools.harness.catalog import portable_harness
-from lup_template.devtools.harness.content.requirements import manifest
+from lup_template.devtools.harness.content.requirements import (
+    carried_vocabulary,
+    manifest,
+)
+from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
 from lup.harness.requirements import (
     Advisory,
     AnyOf,
@@ -533,11 +539,16 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
     nothing at all, and a model call and a toolchain version are what
     somebody setting a machine up hears once.
 
-    Two entries rather than one, and they are the two kinds of nothing a
-    session can do. Without the endpoint it cannot think; without the
-    placement it cannot be said to be anywhere, and every operation after is
-    placed by a boundary nothing observed. Both ride the argv a session opens
-    with, so neither costs a container start of its own.
+    The criterion is a failure invisible from outside. Without the endpoint a
+    session cannot think; without the placement it cannot be said to be
+    anywhere, and every operation after is placed by a boundary nothing
+    observed. The third is the same criterion reached from the other
+    direction: a session missing part of its shell vocabulary is not stopped
+    by the absence and is not told about it either, because a program that is
+    not there exits 127 and a shell reads 127 as an answer -- so it works on,
+    holding conclusions it has no way to doubt. That is the one kind of
+    absence a session cannot discover for itself, which is what a launch is
+    for.
     """
     declared = manifest()
     opening = ["podman", "run", "--rm", "lup-agent:abc"]
@@ -549,7 +560,11 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
         item.requirement.capability for item in declared.check_inside({}, opening)
     }
 
-    assert at_launch == {"session reaches the model endpoint", "inside placement"}
+    assert at_launch == {
+        "session reaches the model endpoint",
+        "inside placement",
+        "shell vocabulary",
+    }
     assert "contained agent session" in at_setup - at_launch
 
 
@@ -668,3 +683,44 @@ def test_verification_is_a_property_rather_than_a_manager() -> None:
     )
     assert verified.verified()
     assert Package(name="ripgrep").verified()
+
+
+def test_every_promised_program_is_measured_or_deliberately_dropped() -> None:
+    """Nothing leaves the promise quietly, which is the whole of the defect.
+
+    What this repository met was not a package missing from an image. It was
+    that the vocabulary and the image were two lists nothing compared, so a
+    word could be declared safe for an agent to run unattended and carried
+    nowhere -- and the agent that ran it got 127, which a shell hands to `||`
+    as an ordinary answer. Measured inside the agent container:
+    `cmp -s A B && echo IDENTICAL || echo DIFFERS` printed DIFFERS for two
+    byte-identical files.
+
+    So the two lists are held against each other here, and a word may leave
+    the probe only by being named in the subtraction, where it has to give a
+    reason.
+    """
+    promised = allowed_programs(SHELL_RULES.over(default_vocabulary()))
+    carried = carried_vocabulary()
+
+    assert set(promised) - set(carried) == {"man"}
+    assert set(carried) <= set(promised)
+
+
+def test_the_comparison_tools_are_promised_and_installed() -> None:
+    """The measured pair, pinned on both sides of the seam that separated them."""
+    assert {"diff", "cmp"} <= set(carried_vocabulary())
+    assert "diffutils" in [item.name for item in manifest().packages()]
+
+
+def test_the_vocabulary_probe_reads_the_policy_rather_than_a_copy() -> None:
+    """A word joins the probe by joining the table, not by being copied here."""
+    entry = next(
+        item
+        for item in manifest().requirements
+        if item.capability == "shell vocabulary"
+    )
+
+    assert entry.exercise.programs() == carried_vocabulary()
+    assert not entry.absence.refuses()
+    assert entry.absence.costly()

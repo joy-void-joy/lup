@@ -230,6 +230,52 @@ class LostCapability(BaseModel, frozen=True):
         return f"{self.capability} is unavailable"
 
 
+class MisleadingAbsence(BaseModel, frozen=True):
+    """Absence does not read as absence: something answers, and answers wrongly.
+
+    The grade between :class:`LostCapability` and :class:`RefusedLaunch`, and
+    the one whose omission was measured. A capability lost is a session that
+    knows what it cannot do, because reaching for it raises something a
+    caller can see. This is the case where reaching for it does not: a
+    missing program exits 127, and a shell spends its exit codes on *meaning*
+    rather than on availability, so ``cmp -s A B && echo same || echo
+    differs`` prints ``differs`` for two byte-identical files on a machine
+    carrying no ``cmp``. Nothing is unavailable to whoever reads that line.
+    The answer is simply false, in the voice of a true one.
+
+    So it is said in its own words rather than folded into a degradation,
+    and what it says is what the absence is *mistaken for* -- because a
+    reader who is told a capability is missing goes without it, and a reader
+    who is not told keeps acting on what it said.
+    """
+
+    kind: Literal["misleads"] = "misleads"
+    capability: str = Field(description="What this session cannot do without it")
+    mistaken_for: str = Field(
+        description=(
+            "The answer a caller gets instead of an error, in the caller's "
+            "own terms. Stated rather than derived because only the "
+            "declaration knows which wrong answer this particular absence "
+            "produces, and a generic sentence about failure is exactly the "
+            "reading that makes it invisible"
+        )
+    )
+
+    def refuses(self) -> bool:
+        """No. A session told what it is holding can still work around it."""
+        return False
+
+    def costly(self) -> bool:
+        """Yes, and more so than a plain loss: what is spent is trust."""
+        return True
+
+    def consequence(self) -> str:
+        return (
+            f"{self.capability} is unavailable, and its absence is not an "
+            f"error any caller sees -- it reads as {self.mistaken_for}"
+        )
+
+
 class RefusedLaunch(BaseModel, frozen=True):
     """Absence makes a claimed boundary worth less than it says, so nothing opens.
 
@@ -253,7 +299,8 @@ class RefusedLaunch(BaseModel, frozen=True):
 
 
 type Absence = Annotated[
-    Advisory | LostCapability | RefusedLaunch, Discriminator("kind")
+    Advisory | LostCapability | MisleadingAbsence | RefusedLaunch,
+    Discriminator("kind"),
 ]
 
 
@@ -833,8 +880,101 @@ class SentinelProbe(BaseModel, frozen=True):
         )
 
 
+class VocabularyProbe(BaseModel, frozen=True):
+    """Ask an environment for every program a permission policy promised it.
+
+    The one requirement whose subject is a *list* rather than a capability,
+    and it is here because the two halves it joins were each correct alone
+    and wrong together. A shell vocabulary declares which commands an agent
+    may run unattended; an image declares which packages it installs. Nothing
+    compared them, so a word could be declared safe and never carried, and
+    what that produced was not a refusal an agent could read -- ``diff`` and
+    ``cmp`` were both declared and both absent, and the ordinary comparison
+    idiom answered ``DIFFERS`` for two byte-identical files, because the
+    ``||`` arm cannot tell "they differ" from "that program was never here".
+
+    Asked as one probe over the whole list rather than one requirement per
+    word, because the finding a reader wants is the *set*: eight absences
+    reported as eight lines is eight capabilities to weigh, and reported as
+    one line naming eight programs is a single fact about an image that was
+    built from a stale list.
+
+    ``command -v`` is presence, and this module argues against presence
+    everywhere else. The argument holds where a program is the visible half
+    of something larger -- a client with no daemon, a binary with no group --
+    and these words are not that: a coreutil on ``PATH`` is the whole
+    capability. What matters is *where* the question is asked, and it is
+    asked in the environment itself, through the argv a session opens with,
+    rather than by a launcher consulting its own ``PATH`` on behalf of a
+    container it is not inside.
+    """
+
+    kind: Literal["vocabulary_probe"] = "vocabulary_probe"
+    vocabulary: list[str] = Field(
+        min_length=1,
+        description=(
+            "Programs the permission policy declares safe to run unattended, "
+            "which is the promise this probe holds the environment to"
+        ),
+    )
+    marker: str = Field(
+        default="every declared program answered",
+        description="What the probe prints when nothing is missing",
+    )
+
+    def resolved(self) -> Run:
+        """This probe as the command an environment runs, in portable shell.
+
+        The absent names go to stderr and the marker to stdout, because that
+        is the split :meth:`Run.run` reads: a clean exit is proved by the
+        marker, and a failing one carries stderr into the finding's detail.
+        Printed to stdout, the one thing a reader needs -- which words were
+        missing -- would be discarded at the moment it became true.
+        """
+        words = " ".join(self.vocabulary)
+        script = (
+            'absent=""; '
+            f"for word in {words}; do "
+            'command -v "$word" >/dev/null 2>&1 || absent="$absent $word"; '
+            "done; "
+            'if [ -n "$absent" ]; then '
+            'printf "declared safe by the policy and absent here:%s" '
+            '"$absent" >&2; exit 1; fi; '
+            f'printf "{self.marker}"'
+        )
+        return Run(command=["sh", "-c", script], expect=self.marker)
+
+    def programs(self) -> list[str]:
+        """Every word this asks for, which is what a reader has to be told."""
+        return list(self.vocabulary)
+
+    def pointed_at(self, program: str) -> "VocabularyProbe":
+        """Unchanged: the shell that asks is not a fact about any machine."""
+        return self
+
+    def behind(self, opening: list[str]) -> "VocabularyProbe":
+        """Unchanged: :meth:`given` renders the ``Run`` that *opening* prefixes."""
+        return self
+
+    def given(self, facts: HostFacts) -> Run:
+        """The rendered command, which needs no host fact to be complete."""
+        return self.resolved()
+
+    def run(self) -> ExerciseOutcome:
+        """Ask here, which is a real answer -- unlike its sibling probes.
+
+        A mount and a sentinel are shapes until a launch aims them, so both
+        refuse to answer unaimed. This one is whole as declared: the words
+        come from the policy and the shell is wherever this runs, so the host
+        roster gets a true reading for free and only the image roster needs
+        the opening argv.
+        """
+        return self.resolved().run()
+
+
 type Exercise = Annotated[
-    Run | AnyOf | MountProbe | SentinelProbe, Discriminator("kind")
+    Run | AnyOf | MountProbe | SentinelProbe | VocabularyProbe,
+    Discriminator("kind"),
 ]
 
 

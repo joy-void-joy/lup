@@ -34,12 +34,41 @@ from lup.harness.toolchain import (
     question_relay_requirement,
     reaped_orphans_requirement,
     same_path_mount_requirement,
+    shell_vocabulary_requirement,
     terminal_handoff_requirement,
     typescript_requirement,
     uv_requirement,
 )
+from lup.policy.survey import allowed_programs
+from lup.policy.vocabulary import default_vocabulary
 from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
 from lup_template.devtools.harness.content.image import agent_image
+from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+
+
+def carried_vocabulary(
+    unpackaged: tuple[str, ...] = ("man",),
+) -> list[str]:
+    """The programs this project's policy declares safe *and* expects to find.
+
+    Derived from the table rather than listed beside it, which is the whole
+    point: a word added to the vocabulary joins this probe by being added,
+    and a word this environment stops carrying is reported by the next
+    session instead of by whoever it lies to first.
+
+    *unpackaged* is the subtraction, and it is a judgement rather than an
+    oversight, so it is small and each member earns its place. ``man`` is the
+    only one: the image's base strips ``/usr/share/man``, so installing
+    ``man-db`` there would put a ``man`` on ``PATH`` that finds nothing --
+    installed without working, which is the failure this whole module is
+    built to refuse to report as health. A host that has one is simply not
+    measured here; a session that wants a manual page has the web.
+    """
+    return [
+        name
+        for name in allowed_programs(SHELL_RULES.over(default_vocabulary()))
+        if name not in unpackaged
+    ]
 
 
 def manifest(boundary: SessionEgress | None = None) -> Manifest:
@@ -102,6 +131,11 @@ def manifest(boundary: SessionEgress | None = None) -> Manifest:
             same_path_mount_requirement(),
             github_requirement(),
             clipboard_requirement(),
+            # What the policy already promised an agent it could run. Placed
+            # among the defaults because it is one, and early because a
+            # session that cannot compare two files finds out by being told
+            # the wrong thing rather than by being stopped.
+            shell_vocabulary_requirement(vocabulary=carried_vocabulary()),
             # What the placement vocabulary rests on, asked rather than
             # assumed. The relay and the store are the checkout's, so the host
             # roster answers for both however the session opens; the mount
