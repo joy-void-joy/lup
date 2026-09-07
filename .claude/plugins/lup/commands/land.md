@@ -75,6 +75,8 @@ One table covering every branch, ordered `LAND` and `COMMIT` first (that is the 
 
 `remote_branches` is every branch a remote carries that no local branch corresponds to. Read it as part of the sweep, not as an appendix: a branch whose local copy went when its work landed leaves nothing in `branches` to classify, so without this list nothing mentions it again and the remote keeps it for good. That is the silent bucket this command exists to empty, one clone removed.
 
+**Read `remotes_fetched` before `remote_branches`.** Where it is false the remotes were not read for this survey — `fetch_complaint` says why — and an empty list then means nothing at all: it is what a repository with nothing stranded produces and what a fetch that never answered produces. Say so and treat the step as unperformed rather than as clean. Do not carry out any remote verb on those rows; get the fetch to work and survey again, and report that the remote bucket went unswept if it cannot be made to.
+
 Each row carries the same `disposition` the local classifier gave it, so it means what it means everywhere else. What differs is the verb — a push, not a local delete — and that a remote branch has no worktree, no lease, and no dirt to weigh:
 
 | Disposition | What it means here | Action |
@@ -122,6 +124,8 @@ Never choose a route on the user's behalf: a `LAND` branch by definition carries
 A `KEEP` branch an open PR is driving is not finished work — it is work whose intent is already on record. The question step 6 puts to the user is therefore already answered here: never *whether* to land it, only *when*, and that answer belongs to the sweep as a whole rather than to the branch alone.
 
 **Offer these. Leaving one open is a decision the user makes, not one the sweep makes on their behalf.** Present them as their own group, each with its PR's review decision and check state — `uv run lup-devtools dev pr status --branch <branch> --json` — and ask which to merge. A draft PR, a failing check, or a review still owed are all reasons to leave one standing, and each of them is the user's to weigh.
+
+**`checks_state` has three answers, and only `passing` is one.** `running` says the checks have not finished — report it as its own state, never merged into the passing group and never presented as a difference between branches, because a probe that has not reported says nothing about the branch it is probing. Where the sweep turns on it, wait for the checks and read the status again rather than reading the unfinished answer.
 
 **They share step 6's queue.** Every merge moves the integration branch, so open-PR branches and `LAND` branches form one ordered sequence rather than two independent passes. Take them one at a time, and re-derive the next one's base after each.
 
