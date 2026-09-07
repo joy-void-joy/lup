@@ -20,6 +20,9 @@ RUNTIME_FIXTURES = "packages/lup/tests/unit/test_adapter_runtime.py"
 DISPATCHER_FIXTURES = "tests/unit/test_harness_compilation.py"
 """The other one, cited against lup's repository for the same reason."""
 
+EXEC_FIXTURES = "tests/integration/test_codex_exec_governance.py"
+"""The third, which settles whether a generated tree governs a `codex exec`."""
+
 GIT_SOURCE = '{ git = "https://github.com/example/lup", branch = "main" }'
 """One of the three distribution modes, spelled as pyproject spells it."""
 
@@ -57,7 +60,7 @@ def test_the_mode_decides_whether_a_citation_is_checked_not_what_is_published(
     """Both modes publish the same roster; only one of them resolves paths."""
     distribution = project_resolving_lup(tmp_path / "adopter", GIT_SOURCE)
     vendored = project_resolving_lup(tmp_path / "lup", "{ workspace = true }")
-    cited_fixtures(vendored, RUNTIME_FIXTURES, DISPATCHER_FIXTURES)
+    cited_fixtures(vendored, RUNTIME_FIXTURES, DISPATCHER_FIXTURES, EXEC_FIXTURES)
 
     published = [page.semantic_id for page in catalog.reference_pages(distribution)]
 
@@ -67,7 +70,7 @@ def test_the_mode_decides_whether_a_citation_is_checked_not_what_is_published(
 def test_a_local_mode_still_fails_on_a_citation_that_moved(tmp_path: Path) -> None:
     """Where the fixtures are required to be, a dead citation stops generation."""
     vendored = project_resolving_lup(tmp_path, "{ workspace = true }")
-    cited_fixtures(vendored, DISPATCHER_FIXTURES)
+    cited_fixtures(vendored, DISPATCHER_FIXTURES, EXEC_FIXTURES)
 
     with pytest.raises(ValueError, match="test_adapter_runtime.py"):
         catalog.reference_pages(vendored)

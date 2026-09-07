@@ -15,7 +15,7 @@ from lup.devtools.harness.evidence import (
     SCHEMA_COMMAND,
     EvidenceEntry,
     SchemaDigest,
-    accepted_version,
+    accepted,
     cited_fixture,
     digest_drift,
     evidence_drift,
@@ -23,7 +23,9 @@ from lup.devtools.harness.evidence import (
     sdk_evidence_drift,
 )
 
-STALE_LEDGER = [EvidenceEntry(capability="codex-cli", version="0.144.4")]
+STALE_LEDGER = [
+    EvidenceEntry(capability="codex-cli", version="0.144.4", refreshed="2026-06-01")
+]
 
 
 class WorkflowStep(BaseModel, frozen=True):
@@ -75,15 +77,25 @@ def test_version_parsing_handles_real_banner_shapes() -> None:
 
 
 def test_longer_component_counts_compare_componentwise() -> None:
-    ledger = [EvidenceEntry(capability="claude-cli", version="2.1")]
+    ledger = [
+        EvidenceEntry(capability="claude-cli", version="2.1", refreshed="2026-06-01")
+    ]
 
     assert evidence_drift("claude-cli", "2.1.1", ledger) is not None
     assert evidence_drift("claude-cli", "2.1.0", ledger) is None
 
 
 def test_sdk_drift_reads_the_installed_distribution() -> None:
-    newer = [EvidenceEntry(capability="claude-agent-sdk", version="0.0.1")]
-    ancient = [EvidenceEntry(capability="claude-agent-sdk", version="999.0.0")]
+    newer = [
+        EvidenceEntry(
+            capability="claude-agent-sdk", version="0.0.1", refreshed="2026-06-01"
+        )
+    ]
+    ancient = [
+        EvidenceEntry(
+            capability="claude-agent-sdk", version="999.0.0", refreshed="2026-06-01"
+        )
+    ]
 
     drift = sdk_evidence_drift(newer)
     assert drift is not None and drift.capability == "claude-agent-sdk"
@@ -131,12 +143,31 @@ def test_the_page_and_the_probe_read_one_schema_command() -> None:
     assert all(argument in spelled for argument in SCHEMA_COMMAND.arguments)
 
 
-def test_accepted_version_refuses_a_capability_no_row_carries() -> None:
-    assert accepted_version("codex-cli") == accepted_version(
-        "codex-cli", EVIDENCE_LEDGER
-    )
+def test_accepted_refuses_a_capability_no_row_carries() -> None:
+    assert accepted("codex-cli") == accepted("codex-cli", EVIDENCE_LEDGER)
     with pytest.raises(KeyError):
-        accepted_version("gemini-cli")
+        accepted("gemini-cli")
+
+
+def test_drift_names_the_reading_date_of_the_row_it_drifted_from() -> None:
+    """One date over the ledger would move whenever any one probe ran.
+
+    The failure it prevents is a reading nobody did: a Codex re-probe that
+    also restamped Claude's row would tell an operator their Claude evidence
+    was read on a day that describes somebody else's work. So the date the
+    message quotes has to come from the row that drifted and from nowhere
+    else, which is what a ledger of two differently-dated rows can show.
+    """
+    ledger = [
+        EvidenceEntry(capability="claude-cli", version="1.0", refreshed="2026-01-01"),
+        EvidenceEntry(capability="codex-cli", version="1.0", refreshed="2026-02-02"),
+    ]
+
+    drift = evidence_drift("codex-cli", "1.1", ledger)
+
+    assert drift is not None
+    assert "2026-02-02" in drift.message
+    assert "2026-01-01" not in drift.message
 
 
 def test_a_cited_fixture_that_moved_fails_generation(tmp_path: Path) -> None:
