@@ -39,6 +39,7 @@ from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
+from lup.devtools.dev.records import branches_awaiting_adoption, record_location
 from lup.devtools.harness.drift import (
     RepositoryWriter,
     inspect_drift,
@@ -519,6 +520,44 @@ def scaffold_budget_report(
     return budget_report("scaffold budget", used, ceiling, note)
 
 
+def branch_record_reports(pending: list[str]) -> list[CheckReport]:
+    """What lup's branch bookkeeping earns while it still sits in two places.
+
+    Advisory rather than gating. Every read falls back to the shared config
+    per field, so a clone that never adopts its records answers exactly as
+    one that did: there is no defect here to refuse a branch over. The
+    command that finishes it writes the shared git directory, which is the
+    host's, so a gating row would be red in every worktree until somebody
+    stood somewhere no session reaches — and a gate whose resting colour is
+    red is a gate a reader stops reading.
+
+    Nothing at all once no branch is left, rather than a permanent ok, for
+    the same reason: this is one move with an end, and a row that can only
+    say ok from then on is a line everybody learns to skip. The gate prints
+    the lines a check hands back, so handing back no check is how a row
+    leaves — the shape the borrowed-environment and unlanded-sibling rows
+    already use.
+    """
+    if not pending:
+        return []
+    destination = record_location(pending[0]).parent
+    return [
+        CheckReport(
+            name="branch records",
+            counted=False,
+            lines=[
+                f"branch records: {len(pending)} branch(es) still recorded in "
+                "the shared git config (advisory)",
+                "  every read falls back to those keys, so nothing is broken",
+                "  `lup-devtools dev worktree adopt-records` moves them, "
+                "once per clone",
+                f"  it writes the shared git directory's `{destination}/`, "
+                "so it runs on the host",
+            ],
+        )
+    ]
+
+
 def changed_paths(since: str) -> list[str]:
     """Every tracked path this tree changed since a ref, as posix strings.
 
@@ -702,6 +741,12 @@ def scan_reports(
                 *(f"  {state.describe()}" for state in hooks.orphaned),
             ],
         )
+
+        # Beside the guards for the reason they are here: this is the other
+        # thing about a clone that no file in the tree can settle, and it is
+        # the only place the unfinished half of a move says so. The keys it
+        # counts answer every read, so nothing else has any reason to speak.
+        yield from branch_record_reports(branches_awaiting_adoption())
 
         # The one measurement of the shell vocabulary that reads the direction
         # a tightening shows up in. The recorded asks say which commands a

@@ -243,6 +243,28 @@ def legacy_keys(cwd: Path | None = None) -> list[str]:
         return []
 
 
+def branches_awaiting_adoption(cwd: Path | None = None) -> list[str]:
+    """Every branch whose facts the shared config still carries, named once.
+
+    The measurement behind saying the move is unfinished. A clone answers
+    every read either way, so without asking this nothing would ever notice
+    that half the bookkeeping still sits in the file it is meant to leave.
+
+    Named rather than counted, because a caller wanting the number takes the
+    length and one wanting the names cannot recover them from a number. One
+    branch writes two keys, and one branch left behind is one thing to report
+    rather than two, so the names are deduplicated.
+    """
+
+    def named() -> Iterator[str]:
+        for key in legacy_keys(cwd):
+            fact = carrier_of(key)
+            if fact is not None:
+                yield fact.branch_of(key)
+
+    return list(dict.fromkeys(named()))
+
+
 def adopt_legacy_records(cwd: Path | None = None) -> Iterator[str]:
     """Move every ``branch.*.lup-*`` key into ``<common>/lup/``, naming each.
 

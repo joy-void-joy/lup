@@ -160,6 +160,44 @@ def test_a_branch_name_holding_a_dot_recovers_from_its_key(repo: Path) -> None:
     assert records.recorded_base("feat.v2", repo) == "main"
 
 
+def test_a_branch_left_in_the_config_is_named_as_awaiting_adoption(
+    repo: Path,
+) -> None:
+    """The move reports itself, because nothing else about the clone would.
+
+    Both readings work, so no command fails and no branch misbehaves while
+    the keys sit there — which is exactly why the unfinished half has to be
+    asked for rather than waited for.
+    """
+    git_in(repo)("config", "branch.topic.lup-base", "main")
+
+    assert records.branches_awaiting_adoption(repo) == ["topic"]
+
+
+def test_one_branch_holding_both_keys_is_named_once(repo: Path) -> None:
+    """A count of keys would say two branches are left where one is."""
+    git_in(repo)("config", "branch.topic.lup-base", "main")
+    git_in(repo)("config", "branch.topic.lup-base-commit", "abc123")
+    git_in(repo)("config", "branch.other.lup-base", "main")
+
+    assert records.branches_awaiting_adoption(repo) == ["topic", "other"]
+
+
+def test_a_clone_that_adopted_its_records_awaits_nothing(repo: Path) -> None:
+    """How the report goes quiet: the measurement itself empties out."""
+    git_in(repo)("config", "branch.topic.lup-base", "main")
+    list(records.adopt_legacy_records(repo))
+
+    assert records.branches_awaiting_adoption(repo) == []
+
+
+def test_a_clone_that_never_carried_the_keys_awaits_nothing(repo: Path) -> None:
+    """A record written where records belong is not something to move."""
+    records.remember("topic", records.BranchRecord(base="main"), repo)
+
+    assert records.branches_awaiting_adoption(repo) == []
+
+
 def test_an_unreadable_record_reads_as_no_record(repo: Path) -> None:
     """A blank answer is an ordinary state, so a corrupt file is one too."""
     path = records.record_path("topic", repo)
