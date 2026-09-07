@@ -1927,6 +1927,14 @@ class DeletionPlan(BaseModel):
     branch: str
     worktree: str | None = None
     stranded: bool = False
+    has_local: bool = True
+    """Whether ``refs/heads`` carries the branch, which is what ``-D`` needs.
+
+    A branch whose local copy went when its work landed leaves origin's
+    behind, and the name then resolves to nothing git can delete locally.
+    Every containment question about it has to be asked of the ref that does
+    resolve, which :meth:`ref` names.
+    """
     has_remote: bool = False
     delete_remote: bool = False
     """Whether origin's copy goes too, which is a decision, not an observation.
@@ -1949,6 +1957,14 @@ class DeletionPlan(BaseModel):
     def forceable(self) -> bool:
         """Whether ``--force`` would change any of those answers."""
         return any(action.verdict == "blocked" for action in self.actions)
+
+    def remote_ref(self) -> str:
+        """How git names origin's copy, which is how a comparison spells it."""
+        return f"origin/{self.branch}"
+
+    def ref(self) -> str:
+        """The ref carrying these commits, which containment has to be read from."""
+        return self.branch if self.has_local else self.remote_ref()
 
 
 def worktree_changes(path: str) -> WorktreeChanges:
@@ -2129,10 +2145,35 @@ def dependent_pulls(name: str) -> list[int]:
     return [PRStatus.model_validate(row).number for row in rows]
 
 
-def plan_remote_step(name: str, force: bool) -> PlannedAction:
-    """Judge deleting origin's copy by what else is still pointing at it."""
+def plan_remote_step(name: str, force: bool, contained: bool) -> PlannedAction:
+    """Judge deleting origin's copy by what it holds and what points at it.
+
+    Containment is handed in because the ref that answers it differs: where a
+    local branch exists the caller has already judged that one, and where it
+    does not, origin's copy is both the subject and the only copy — the case
+    where deleting it is the whole of the deletion and the only thing that
+    can say whether anything is discarded.
+    """
     description = f"Delete remote branch: origin/{name}"
     dependents = dependent_pulls(name)
+    if not contained:
+        integration = get_integration_branch()
+        listed = ", ".join(f"#{number}" for number in dependents)
+        closes = f", closing {listed}" if dependents else ""
+        if force:
+            return PlannedAction(
+                description=description,
+                verdict="forced",
+                detail=f"discards commits {integration} does not hold{closes}",
+            )
+        return PlannedAction(
+            description=description,
+            verdict="blocked",
+            detail=(
+                f"origin/{name} holds commits {integration} does not{closes}; "
+                "--force deletes it anyway"
+            ),
+        )
     if not dependents:
         return PlannedAction(description=description)
     listed = ", ".join(f"#{number}" for number in dependents)
@@ -2152,8 +2193,64 @@ def plan_remote_step(name: str, force: bool) -> PlannedAction:
     )
 
 
+def plan_remote_only_deletion(
+    name: str, force: bool, has_remote: bool, remote: bool | None
+) -> DeletionPlan:
+    """Plan for a name ``refs/heads`` does not carry, which origin still may.
+
+    A survey classifies these — the local copy went when the work landed and
+    origin's did not — so the verb has to be able to act on the disposition
+    its own survey hands out. Deleting origin's copy is the whole of what the
+    name can mean here, and the containment that says whether it discards
+    anything is read off that copy: judging it through a local branch that
+    was never there reported an unmerged branch where there was no branch at
+    all, and reached ``git branch -D`` before the push that was the only
+    thing left to run.
+    """
+    if not has_remote:
+        return DeletionPlan(
+            branch=name,
+            has_local=False,
+            actions=[
+                PlannedAction(
+                    description=f"Delete branch: {name}",
+                    verdict="refused",
+                    detail=f"no branch by that name, locally or as origin/{name}",
+                )
+            ],
+        )
+    if remote is False:
+        return DeletionPlan(
+            branch=name,
+            has_local=False,
+            has_remote=True,
+            actions=[
+                PlannedAction(
+                    description=f"Delete branch: {name}",
+                    verdict="refused",
+                    detail=(
+                        f"origin/{name} is the only copy and --no-remote keeps it, "
+                        "so there is nothing left to delete"
+                    ),
+                )
+            ],
+        )
+    contained = is_ancestor(f"origin/{name}", get_integration_branch())
+    return DeletionPlan(
+        branch=name,
+        has_local=False,
+        has_remote=True,
+        delete_remote=True,
+        actions=[plan_remote_step(name, force=force, contained=contained)],
+    )
+
+
 def plan_deletion(name: str, force: bool, remote: bool | None = None) -> DeletionPlan:
     """Evaluate every precondition a deletion depends on, changing nothing.
+
+    A name resolves locally, only on origin, or nowhere, and the three are
+    different deletions rather than one with steps that happen to fail:
+    :func:`plan_remote_only_deletion` carries the second and the third.
 
     A dry run and the real path both read this, so what the dry run promises
     is what the real path went on to check.
@@ -2166,6 +2263,14 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
     which is exactly what a push before deleting was for, so it stays
     unless a caller says otherwise in so many words.
     """
+    from lup.devtools.dev.worktree import branch_exists
+
+    has_remote = remote_branch_exists(name)
+    if not branch_exists(name):
+        return plan_remote_only_deletion(
+            name, force=force, has_remote=has_remote, remote=remote
+        )
+
     worktree = parse_worktrees().get(name)
     stranded = worktree is not None and not Path(worktree).exists()
     actions: list[PlannedAction] = []
@@ -2176,10 +2281,9 @@ def plan_deletion(name: str, force: bool, remote: bool | None = None) -> Deletio
     actions.append(plan_branch_step(name, force=force))
 
     merged = is_ancestor(name, get_integration_branch())
-    has_remote = remote_branch_exists(name)
     delete_remote = has_remote and (merged if remote is None else remote)
     if delete_remote:
-        actions.append(plan_remote_step(name, force=force))
+        actions.append(plan_remote_step(name, force=force, contained=merged))
 
     return DeletionPlan(
         branch=name,
@@ -2246,19 +2350,23 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
                 plan, completed, f"worktree removal failed: {attributed_stderr(error)}"
             )
 
-    try:
-        # The preflight is what judges containment, and it judges against the
-        # integration branch. `-d` would ask git the same question again from
-        # HEAD and from the upstream, refuse on either, and refuse here — past
-        # the worktree removal above, which is the one place a refusal was
-        # promised to change nothing.
-        git("branch", "-D", plan.branch)
-        typer.echo(f"Deleted branch: {plan.branch}")
-        completed.append("deleted branch")
-    except sh.ErrorReturnCode as error:
-        abort_deletion(
-            plan, completed, f"branch deletion failed: {decode_stderr(error)}"
-        )
+    # A name origin alone carries has nothing here to delete, and asking git
+    # to delete it anyway is what stopped the run before the push that was
+    # the whole deletion.
+    if plan.has_local:
+        try:
+            # The preflight is what judges containment, and it judges against
+            # the integration branch. `-d` would ask git the same question
+            # again from HEAD and from the upstream, refuse on either, and
+            # refuse here — past the worktree removal above, which is the one
+            # place a refusal was promised to change nothing.
+            git("branch", "-D", plan.branch)
+            typer.echo(f"Deleted branch: {plan.branch}")
+            completed.append("deleted branch")
+        except sh.ErrorReturnCode as error:
+            abort_deletion(
+                plan, completed, f"branch deletion failed: {decode_stderr(error)}"
+            )
 
     if not plan.delete_remote:
         if plan.has_remote:
@@ -2272,7 +2380,12 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
         git("push", "origin", "--delete", plan.branch)
         typer.echo(f"Deleted remote branch: origin/{plan.branch}")
     except sh.ErrorReturnCode as error:
-        typer.echo(f"Warning: remote deletion failed: {decode_stderr(error)}", err=True)
+        failure = f"remote deletion failed: {decode_stderr(error)}"
+        # Where origin held the only copy this push was the deletion, so a
+        # warning beside a zero exit would report a branch deleted that stands.
+        if not plan.has_local:
+            abort_deletion(plan, completed, failure)
+        typer.echo(f"Warning: {failure}", err=True)
 
 
 def delete_branch(
@@ -2288,6 +2401,10 @@ def delete_branch(
     for the one path — :func:`run_retirement` — that preserves them before
     deleting. Empty means nobody has, which is the case the warning below is
     written for.
+
+    ``name`` need not be a local branch: a name origin alone carries is what
+    ``dev survey`` reports under its own heading and hands a disposition, and
+    this is the verb that disposition names.
     """
     cur = git.out("branch", "--show-current")
     if name == cur:
@@ -2313,7 +2430,11 @@ def delete_branch(
         raise typer.Exit(1)
 
     integration = get_integration_branch()
-    if plan.delete_remote and not is_ancestor(name, integration) and not preserved:
+    if (
+        plan.delete_remote
+        and not is_ancestor(plan.ref(), integration)
+        and not preserved
+    ):
         typer.echo(
             f"Warning: {name} holds commits {integration} does not, and origin/{name} "
             "is going with it — after this the work is in no branch. To keep "

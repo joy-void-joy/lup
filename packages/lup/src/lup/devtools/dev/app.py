@@ -291,7 +291,11 @@ def create_dev_app(
         ] = False,
         base_branch: Annotated[
             str | None,
-            typer.Option("--base", "-b", help="Base branch (default: current branch)"),
+            typer.Option(
+                "--base",
+                "-b",
+                help="Branch to cut from (default: the integration branch)",
+            ),
         ] = None,
         force: Annotated[
             bool,

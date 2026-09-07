@@ -680,13 +680,20 @@ def push(
     force: bool,
     as_json: bool,
 ) -> None:
-    """Push the current branch and report any existing PR."""
+    """Push the current branch and report any existing PR.
+
+    Both spellings name the branch and set it to track, because a checkout
+    reaches this with no upstream: creation publishes nothing, so the first
+    push of either kind is what gives the branch a remote. A bare `push
+    --force` would have nothing to resolve the destination from, and where
+    it did resolve one it took whatever `push.default` offered.
+    """
     branch_name = current_branch()
 
     complaint = ""
     try:
         if force:
-            git("push", "--force")
+            git("push", "--force", "-u", "origin", branch_name)
         else:
             git("push", "-u", "origin", branch_name)
     except sh.ErrorReturnCode as e:
