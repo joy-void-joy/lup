@@ -50,7 +50,7 @@ from lup.workspace.paths import find_nearest_pyproject
 from lup_template.agent.config import engine_for_model, settings
 from lup_template.devtools.agent import app as agent_app
 import lup_template.devtools.dev.app as dev
-from lup_template.devtools.harness.composition import (
+from lup_template.harness.composition import (
     REPOSITORY_WIDE,
     TARGETS,
     profile_directory,

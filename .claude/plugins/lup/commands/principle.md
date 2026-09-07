@@ -39,9 +39,9 @@ Read every relevant file and categorize findings into three buckets:
 
 ### Layer A: Documentation & Meta
 
-1. **Guidance** (`src/lup_template/devtools/harness/content/guidance.py`, plus
+1. **Guidance** (`src/lup_template/harness/content/guidance.py`, plus
    the portable blocks it composes from
-   `lup.devtools.harness.content.conventions`)
+   `lup.harness.content.conventions`)
    - Check every section: does it align with or contradict the principle?
    - A convention every reader needs identically belongs in the shared
      blocks, so fixing one there fixes the guidance, the downstream template,
@@ -49,13 +49,13 @@ Read every relevant file and categorize findings into three buckets:
    - Look for existing principles that overlap or conflict
    - .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex are generated from this module — read them for the rendered result, never edit them
 
-2. **Template guidance** (`src/lup_template/devtools/harness/content/template_sections.py`)
+2. **Template guidance** (`src/lup_template/harness/content/template_sections.py`)
    - Same checks — this is what new projects inherit; the portable sections render into every flavor of .claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex from this one source
 
 ### Layer B: Commands & Workflows
 
-3. **All skill modules** (`src/lup_template/devtools/harness/content/skills/*.py`,
-   and `lup.devtools.harness.content.skills` for the library's own — both
+3. **All skill modules** (`src/lup_template/harness/content/skills/*.py`,
+   and `lup.harness.content.skills` for the library's own — both
    halves, or the sweep misses every skill the library holds. Where lup is
    not vendored here, reach its modules with `uv run lup-devtools py source`
    rather than a path; `dev library status` says which mode this project is in)
@@ -66,7 +66,7 @@ Read every relevant file and categorize findings into three buckets:
 ### Layer C: Semantic Policy & Enforcement
 
 4. **Canonical policy** (the library's `lup.policy` plus the `HookSet` in
-   `src/lup_template/devtools/harness/catalog.py`; everything under .claude/plugins/lup/hooks/ under Claude Code, .codex/plugins/lup/hooks/ under Codex is generated from these — never edit it directly)
+   `src/lup_template/harness/catalog.py`; everything under .claude/plugins/lup/hooks/ under Claude Code, .codex/plugins/lup/hooks/ under Codex is generated from these — never edit it directly)
    - Check if any policy rule contradicts the principle
    - Consider if a new policy rule could enforce the principle mechanically
 

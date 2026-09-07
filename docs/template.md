@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.template by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup_template.harness.content.docs.template by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # The application template
 
@@ -43,42 +43,42 @@ src/lup_template/
 │   │   ├── app.py           # What only a template adds to the `dev` tree the library already builds.
 │   │   ├── init.py          # Package renaming for downstream project initialization.
 │   │   └── library.py       # How this project obtains the ``lup`` library.
-│   ├── harness/             # Canonical harness generation and native launch commands.
-│   │   ├── catalog.py       # Root of the project-owned harness declaration graph.
-│   │   ├── composition.py   # What this project publishes through each native target, and what writes it.
-│   │   └── content/         # Declaration leaves of the harness graph.
-│   │       ├── assets/      # Typed harness content declarations.
-│   │       ├── catalog.py   # This repository's harness content: what it inherits, and what only it has.
-│   │       ├── docs/        # Typed source for every document under ``docs/``.
-│   │       │   ├── catalog.py # Every document this repository publishes under ``docs/``.
-│   │       │   ├── decisions.py # Architectural decisions behind the development tooling.
-│   │       │   ├── index.py # The documentation index: what this repository is, and where each part is.
-│   │       │   └── template.py # Guide to ``src/lup_template``, the application built on the library.
-│   │       ├── guidance.py  # Canonical repository guidance.
-│   │       ├── image.py     # The container this repository's agent sessions run in.
-│   │       ├── provenance.py # What a project settles about where its lup came from.
-│   │       ├── requirements.py # The external programs this repository needs, and what going without costs.
-│   │       ├── settings.py  # What this repository grants, refuses, and enables for itself.
-│   │       ├── shell_vocabulary.py # Where this project's shell vocabulary differs from the one lup offers.
-│   │       ├── skills/      # Typed harness content declarations.
-│   │       │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
-│   │       │   ├── deciding.py # The decision walk the design-facing skills share.
-│   │       │   ├── discovery.py # The discovery posture the design-facing skills share.
-│   │       │   ├── distill.py # Canonical declaration for the distill skill.
-│   │       │   ├── import_skill.py # Canonical declaration for the import skill.
-│   │       │   ├── init.py  # Canonical declaration for the init skill.
-│   │       │   ├── install.py # Canonical declaration for the install skill.
-│   │       │   ├── meta.py  # Canonical declaration for the meta skill.
-│   │       │   └── update.py # Canonical declaration for the update skill.
-│   │       ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
-│   │       ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
-│   │       └── template_sections.py # Portable downstream-template sections shared by every guidance flavor.
 │   ├── main.py              # Root CLI app composing all devtools sub-apps.
 │   ├── setup.py             # This project's setup integrations, over the reusable wizard framework.
 │   └── subapps.py           # This application's sub-app delta: what it declines, and what only it has.
-└── environment/             # Environment harness — how the outside world reaches the agent.
-    └── cli/                 # CLI package for the environment client.
-        └── __main__.py      # Environment CLI for running agent sessions.
+├── environment/             # Environment harness — how the outside world reaches the agent.
+│   └── cli/                 # CLI package for the environment client.
+│       └── __main__.py      # Environment CLI for running agent sessions.
+└── harness/                 # What this repository declares about the harness its own sessions run under.
+    ├── catalog.py           # Root of the project-owned harness declaration graph.
+    ├── composition.py       # What this project publishes through each native target, and what writes it.
+    └── content/             # Declaration leaves of the harness graph.
+        ├── assets/          # Typed harness content declarations.
+        ├── catalog.py       # This repository's harness content: what it inherits, and what only it has.
+        ├── docs/            # Typed source for every document under ``docs/``.
+        │   ├── catalog.py   # Every document this repository publishes under ``docs/``.
+        │   ├── decisions.py # Architectural decisions behind the development tooling.
+        │   ├── index.py     # The documentation index: what this repository is, and where each part is.
+        │   └── template.py  # Guide to ``src/lup_template``, the application built on the library.
+        ├── guidance.py      # Canonical repository guidance.
+        ├── image.py         # The container this repository's agent sessions run in.
+        ├── provenance.py    # What a project settles about where its lup came from.
+        ├── requirements.py  # The external programs this repository needs, and what going without costs.
+        ├── settings.py      # What this repository grants, refuses, and enables for itself.
+        ├── shell_vocabulary.py # Where this project's shell vocabulary differs from the one lup offers.
+        ├── skills/          # Typed harness content declarations.
+        │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
+        │   ├── deciding.py  # The decision walk the design-facing skills share.
+        │   ├── discovery.py # The discovery posture the design-facing skills share.
+        │   ├── distill.py   # Canonical declaration for the distill skill.
+        │   ├── import_skill.py # Canonical declaration for the import skill.
+        │   ├── init.py      # Canonical declaration for the init skill.
+        │   ├── install.py   # Canonical declaration for the install skill.
+        │   ├── meta.py      # Canonical declaration for the meta skill.
+        │   └── update.py    # Canonical declaration for the update skill.
+        ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
+        ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
+        └── template_sections.py # Portable downstream-template sections shared by every guidance flavor.
 ```
 
 Nothing above is written down. The structure is walked from the checkout when

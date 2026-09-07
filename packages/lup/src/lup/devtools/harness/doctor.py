@@ -13,7 +13,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.devtools.harness.evidence import (
+from lup.harness.evidence import (
     SCHEMA_COMMAND,
     DigestDrift,
     EvidenceDrift,

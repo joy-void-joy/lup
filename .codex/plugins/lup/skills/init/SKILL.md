@@ -216,7 +216,7 @@ before anything reads the project's types.
 
 #### 2. Merge the guidance template into the guidance declaration
 
-The merge lands in `src/<project>/devtools/harness/content/guidance.py`, never in a tree's guidance file (.claude/CLAUDE.md under Claude Code, AGENTS.md under Codex): those are generation's outputs, and an edit made directly to one is undone the next time the harness runs. Take the sections from that tree's template flavor (.claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex), covering every tree the project commits:
+The merge lands in `src/<project>/harness/content/guidance.py`, never in a tree's guidance file (.claude/CLAUDE.md under Claude Code, AGENTS.md under Codex): those are generation's outputs, and an edit made directly to one is undone the next time the harness runs. Take the sections from that tree's template flavor (.claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex), covering every tree the project commits:
 
 1. Read the template and replace `<project>` placeholders with the actual project name
 2. Read the existing declaration
@@ -407,7 +407,7 @@ The feedback collection module (exposed via `uv run lup-devtools feedback collec
 
 ### 8. Update the guidance
 
-Edit `src/<project>/devtools/harness/content/guidance.py`, then regenerate with `uv run lup-devtools harness generate all` -- .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex are its outputs, and editing them directly is undone by the next generation.
+Edit `src/<project>/harness/content/guidance.py`, then regenerate with `uv run lup-devtools harness generate all` -- .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex are its outputs, and editing them directly is undone by the next generation.
 
 The guidance should already carry the template sections from the Phase 2 merge. Now add domain-specific content based on the interview answers:
 

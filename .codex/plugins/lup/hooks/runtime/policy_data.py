@@ -276,7 +276,7 @@ PATH_RULES: list[PathRuleRow] = [
     },
     {
         "kind": "subtree",
-        "value": "src/lup_template/devtools/harness/catalog.py",
+        "value": "src/lup_template/harness/catalog.py",
         "reason": "protected path requires approval",
         "allow_autonomous": True,
     },

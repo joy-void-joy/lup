@@ -10,7 +10,7 @@ a reflog -- and these pin that the guard steps aside there and nowhere else.
 from lup.policy.kernel.commands import redirect_stays_in_this_repository
 from lup.policy.kernel.shell import decide_shell
 from lup.policy.shell_rules import erase_shell_rules
-from lup_template.devtools.harness.catalog import declared_hook_set
+from lup_template.harness.catalog import declared_hook_set
 
 SHELL_RULES = erase_shell_rules(declared_hook_set().resolved_shell_rules())
 HERE = "/repo/tree/mine"

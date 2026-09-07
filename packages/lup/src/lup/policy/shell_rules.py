@@ -13,7 +13,7 @@ An application declares its own table and hands it to ``ShellPolicy`` and to
 ``HookSet.shell_rules``; :mod:`lup.policy.bundle` erases that same table into
 ``policy_data.py`` at generation time, so the canonical ``ShellPolicy`` and
 every generated dispatcher decide identically. This repository's table is
-``lup_template.devtools.harness.content.shell_vocabulary``.
+``lup_template.harness.content.shell_vocabulary``.
 
 Three nesting levels mirror how real tools are shaped:
 

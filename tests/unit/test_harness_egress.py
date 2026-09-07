@@ -19,7 +19,7 @@ from lup.harness.egress import AllowedHost, PROXY_LABEL, SessionEgress, Unproxie
 from lup.harness.image import Docker, Image
 from lup.harness.requirements import Manifest
 from lup.sandbox.egress import EgressPolicy
-from lup_template.devtools.harness.content.image import agent_image
+from lup_template.harness.content.image import agent_image
 
 
 def test_a_session_is_attached_to_the_internal_network_by_name() -> None:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from lup_template.devtools.harness.content.docs import catalog
+from lup_template.harness.content.docs import catalog
 
 RUNTIME_FIXTURES = "packages/lup/tests/unit/test_adapter_runtime.py"
 """The citation only a tree holding lup's own suite can resolve."""

@@ -41,7 +41,7 @@ import lup.devtools.dev.relocate as relocate_mod
 import lup.devtools.dev.resolve_review as resolve_review
 import lup.devtools.dev.rules as rules
 import lup.devtools.dev.worktree as worktree
-import lup.devtools.harness.content.docs.upstream_reports as upstream_reports
+import lup.harness.content.docs.upstream_reports as upstream_reports
 from lup.harness.codescan.markers import NoteKind
 from lup.harness.codescan.registry import all_rules
 from lup.devtools.dev.conflict_app import create_conflict_app

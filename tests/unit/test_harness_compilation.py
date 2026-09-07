@@ -137,14 +137,14 @@ from lup_template.devtools.agent.serve import (
     harness_session_context,
 )
 from lup.devtools.dev.rules import rule_reference_artifact
-from lup_template.devtools.harness.catalog import (
+from lup_template.harness.catalog import (
     HARNESS_SESSION,
     declared_hook_set,
     portable_harness,
 )
-from lup_template.devtools.harness.content.docs.catalog import documents
-from lup_template.devtools.harness.content.guidance import document as guidance_document
-from lup_template.devtools.harness.content.settings import project_settings
+from lup_template.harness.content.docs.catalog import documents
+from lup_template.harness.content.guidance import document as guidance_document
+from lup_template.harness.content.settings import project_settings
 from lup.devtools.harness import launch
 from lup.devtools.harness.launch import (
     claude_sandbox_arguments,
@@ -152,13 +152,13 @@ from lup.devtools.harness.launch import (
     companion_plugin_directories,
 )
 from lup.policy.kernel.shell import sandbox_excluded
-from lup_template.devtools.harness.content.template_claude import (
+from lup_template.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
-from lup_template.devtools.harness.content.template_codex import (
+from lup_template.harness.content.template_codex import (
     DOCUMENT as TEMPLATE_CODEX,
 )
-from lup_template.devtools.harness.composition import (
+from lup_template.harness.composition import (
     claude_target,
     codex_target,
 )
@@ -944,7 +944,7 @@ def test_every_typed_content_module_is_reachable_from_a_catalog() -> None:
     one no artifact is rendered from — a retired skill left behind, or a
     document nobody listed.
     """
-    content = Path("src/lup_template/devtools/harness/content")
+    content = Path("src/lup_template/harness/content")
     loaded = {
         Path(source).resolve()
         for source in (

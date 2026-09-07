@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.harness.content.docs.library import (
+from lup.harness.content.docs.library import (
     LIBRARY,
     LIBRARY_PACKAGE,
     Roster,

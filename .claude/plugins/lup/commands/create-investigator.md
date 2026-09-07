@@ -25,7 +25,7 @@ Before writing anything, understand what this investigator needs to do:
 1. **Read existing investigator declarations** as reference. `debug` is the worked example — it traces errors through logs, and it is the library's, so read it through the package rather than through a path that only resolves when lup is vendored:
 
    ```bash
-   uv run lup-devtools py source lup.devtools.harness.content.skills.debug
+   uv run lup-devtools py source lup.harness.content.skills.debug
    ```
 
 2. **Explore the codebase** to understand the domain. Based on the description, identify:
@@ -60,7 +60,7 @@ Based on your exploration and the user's input, design the command. Existing inv
 
 ## Step 3: Declare the skill
 
-Write the declaration to `content/skills/<command_name>.py` as a `models.Skill`. It belongs to this project — `src/lup_template/devtools/harness/` — unless the investigation is one *any* project on lup would run, in which case it belongs to the library and `docs/library.md` carries how to reach lup's own source in whichever mode this project obtains it. Register it in that half's `content/catalog.py` beside its siblings, and regenerate with `uv run lup-devtools harness generate all`.
+Write the declaration to `content/skills/<command_name>.py` as a `models.Skill`. It belongs to this project — `src/lup_template/harness/` — unless the investigation is one *any* project on lup would run, in which case it belongs to the library and `docs/library.md` carries how to reach lup's own source in whichever mode this project obtains it. Register it in that half's `content/catalog.py` beside its siblings, and regenerate with `uv run lup-devtools harness generate all`.
 
 A declaration that names a path inside this project's package exports `skill(layout)` and spells the path through the layout, rather than exporting a bare `SKILL` with the path written in — a literal is correct in exactly one repository and misdirects every other. One that names no such path exports `SKILL` directly. The artifacts under.claude/plugins/lup/commands/ under Claude Code, .codex/plugins/lup/skills/ under Codex are generated from this — never write them by hand.
 

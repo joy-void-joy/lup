@@ -24,7 +24,7 @@ from typer.testing import CliRunner
 from lup.devtools.dev import policy_explain, pr
 from lup.devtools.harness import launch
 from lup.harness.enforcement import MeasuredContainment
-from lup_template.devtools.harness.catalog import declared_hook_set
+from lup_template.harness.catalog import declared_hook_set
 from lup_template.devtools.main import app
 from lup.devtools.sync import load_json
 

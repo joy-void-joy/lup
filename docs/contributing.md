@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.contributing by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.contributing by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Contributing
 
@@ -34,7 +34,7 @@ uv run lup-devtools harness codex
 | --- | --- | --- |
 | Anything another project built on lup would want | `packages/lup/` | [library.md](library.md) |
 | Anything only this application needs | `src/lup_template/` | [template.md](template.md) |
-| A skill, agent, guidance, permission policy, or a page under `docs/` | the `devtools/harness/content/` of whichever half owns its subject | [harness.md](harness.md) |
+| A skill, agent, guidance, permission policy, or a page under `docs/` | `packages/lup/src/lup/harness/content/` where the library owns the subject, `src/lup_template/harness/content/` where only this application does | [harness.md](harness.md) |
 | Repeated shell incantations | a new `lup-devtools` command | [template.md](template.md) |
 | A one-off computation | a new `lup-devtools` command | below |
 

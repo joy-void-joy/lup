@@ -44,7 +44,7 @@ from lup.policy.models import (
 from lup.policy.grants import LeaseGrants
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.rules import EditPolicy, FetchPolicy, ShellPolicy, UrlScope
-from lup_template.devtools.harness.catalog import declared_hook_set
+from lup_template.harness.catalog import declared_hook_set
 
 SHELL_RULES = declared_hook_set().resolved_shell_rules()
 """This project's vocabulary as the runtime resolves it, not as it is declared."""

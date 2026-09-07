@@ -26,7 +26,7 @@ from lup.policy.kernel.shell import decide_shell, sandbox_excluded
 from lup.policy.kernel.rows import ShellRuleRow
 from lup.policy.shell_rules import erase_shell_rules
 from lup.policy.vocabulary import default_vocabulary
-from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.harness.catalog import portable_harness
 
 
 def rows() -> list[ShellRuleRow]:

@@ -42,7 +42,7 @@ from lup_template.agent.toolsets import (
     build_session_toolset,
     tool_group_names,
 )
-from lup_template.devtools.harness.catalog import HARNESS_SESSION
+from lup_template.harness.catalog import HARNESS_SESSION
 
 pytestmark = pytest.mark.integration
 SUBPROCESS_TIMEOUT_SECONDS = 20

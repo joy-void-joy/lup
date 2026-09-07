@@ -1,9 +1,9 @@
-<!-- Generated from lup.devtools.harness.content.docs.platform_differentiation by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.platform_differentiation by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Platform differentiation and parity
 
 One portable declaration, two native renderings. `portable_harness()` in
-`src/lup_template/devtools/harness/catalog.py` is deliberately singular: the
+`src/lup_template/harness/catalog.py` is deliberately singular: the
 settled architecture is **portable-declaration-plus-adapter-rendering**, not
 per-platform declarations with a shared default. Everything a platform does
 differently lives in exactly two places — the adapter renderers

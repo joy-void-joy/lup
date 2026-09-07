@@ -99,7 +99,7 @@ from lup.policy.rules import (
 )
 
 from lup.policy.vocabulary import runner_target_rules
-from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
+from lup_template.harness.catalog import declared_hook_set, portable_harness
 
 SHELL_RULES = declared_hook_set().resolved_shell_rules()
 """This project's vocabulary as the runtime resolves it, not as it is declared.
@@ -3501,7 +3501,7 @@ def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> N
 
 
 def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
-    path = Path("packages/lup/src/lup/devtools/harness/content/skills/commit.py")
+    path = Path("packages/lup/src/lup/harness/content/skills/commit.py")
     before = path.read_text(encoding="utf-8")
     after = before + (
         '\nPROSE_GATE_EXAMPLE = """Any and # lup: examples remain prose."""\n'

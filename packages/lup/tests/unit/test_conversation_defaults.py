@@ -1,7 +1,7 @@
 """Conversation retention is part of Lup's inherited defaults."""
 
-from lup.devtools.harness.content.application import ApplicationLayout
-from lup.devtools.harness.content.catalog import library_skills
+from lup.harness.content.application import ApplicationLayout
+from lup.harness.content.catalog import library_skills
 from lup.devtools.roster import LIBRARY_SPECS
 
 

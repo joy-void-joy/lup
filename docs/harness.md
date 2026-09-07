@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.harness by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.harness by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # The harness
 
@@ -108,9 +108,9 @@ Each row is now the artifact's own attribution, the same one its banner prints
 for a reader who opens the file, so nothing there can name a source the
 artifact does not.
 
-Canonical sources live in `lup.devtools.harness.content`
-(the declarations lup ships), `src/lup_template/devtools/harness/content/`
-(the ones only this repository has), `src/lup_template/devtools/harness/catalog.py`
+Canonical sources live in `lup.harness.content`
+(the declarations lup ships), `src/lup_template/harness/content/`
+(the ones only this repository has), `src/lup_template/harness/catalog.py`
 (plugin, hook, and resolver composition), and the `lup` package itself
 (adapter renderers and the policy bundle).
 
@@ -137,11 +137,12 @@ than anything either runtime reads from its own tree.
 `lup-devtools harness generate|check|claude|codex` walks one path from typed
 Python to a launched native plugin.
 
-1. **Typed declarations** — `devtools/harness/content/` holds the skill,
-   agent, guidance, pattern, template, and documentation declarations;
-   `devtools/harness/catalog.py` composes them with the application-owned
-   `HookSet` into one canonical `lup.harness.models.Harness`. Prompt prose is
-   stored as ordered typed parts, never as a native string.
+1. **Typed declarations** — `harness/content/` holds the skill, agent,
+   guidance, pattern, template, and documentation declarations, above the
+   tooling layer because they are what a harness is made of rather than
+   anything the CLI adds; `harness/catalog.py` composes them with the
+   application-owned `HookSet` into one canonical `lup.harness.models.Harness`.
+   Prompt prose is stored as ordered typed parts, never as a native string.
 2. **Renderers** — `lup.providers.claude.harness` and
    `lup.providers.codex.harness` implement the `ArtifactRenderer` seams from
    `lup.harness.contracts`; the compilation roots in `lup.providers.harness`
@@ -169,9 +170,10 @@ the CLI composition root maps a user-facing target name to a concrete recipe:
 adding a third target supplies another recipe rather than a branch in
 reconciliation or materialization.
 
-Each harness module owns one concern. Everything but the declaration root
-lives in `packages/lup/src/lup/devtools/harness/`; `catalog.py` is this
-repository's, because its whole job is to be this project's own harness:
+Each harness module owns one concern. The CLI half lives in
+`packages/lup/src/lup/devtools/harness/` and the declarations it compiles in
+`packages/lup/src/lup/harness/content/`; `catalog.py` is this repository's,
+because its whole job is to be this project's own harness:
 
 - `app.py` — Typer wiring only; every command body lives elsewhere
 - `catalog.py` — declaration-graph root assembling `content/` into a `Harness`
@@ -189,9 +191,9 @@ repository's, because its whole job is to be this project's own harness:
 ## What the plugin ships
 
 Both rosters are rendered from the typed declarations: the ones about agent
-work in `lup.devtools.harness.content.catalog`, the ones
+work in `lup.harness.content.catalog`, the ones
 about being a template in
-`src/lup_template/devtools/harness/content/catalog.py`, which composes both
+`src/lup_template/harness/content/catalog.py`, which composes both
 into what the plugin ships. Change the catalog that owns the subject, then
 regenerate.
 
@@ -313,7 +315,7 @@ leaving a link that resolves to nothing.
 ### Change the fetch allowlist
 
 The application-owned `HookSet` is constructed by `portable_harness()` in
-`{layout.path("devtools", "harness", "catalog.py")}`. Add the narrowest origin and
+`{layout.path("harness", "catalog.py")}`. Add the narrowest origin and
 path prefix that supports the workflow:
 
 ```python

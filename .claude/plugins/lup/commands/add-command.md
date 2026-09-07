@@ -44,7 +44,7 @@ Gather any info **not already provided via arguments**, asking the user one ques
 
 Commands are generated artifacts. Write the declaration, not the markdown.
 
-1. Decide which half owns it: a skill that automates work *inside* a project is the library's (`lup.devtools.harness.content.skills`); a skill whose subject is standing a project up or keeping it in step with upstream is this project's (`src/lup_template/devtools/harness/content/skills/`). Create `<name>.py` there, exporting a `SKILL`:
+1. Decide which half owns it: a skill that automates work *inside* a project is the library's (`lup.harness.content.skills`); a skill whose subject is standing a project up or keeping it in step with upstream is this project's (`src/lup_template/harness/content/skills/`). Create `<name>.py` there, exporting a `SKILL`:
 
 ```python
 import lup.harness.models as models

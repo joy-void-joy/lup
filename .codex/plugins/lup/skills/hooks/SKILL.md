@@ -21,12 +21,12 @@ the arguments supplied with this skill invocation
   (`antipatterns.py`), boundary/spelling seams (`boundaries.py`), capability
   architecture (`capabilities.py`) — indexed by `registry.py` and rendered
   into `docs/rules.md` by `uv run lup-devtools dev rules`.
-- `src/lup_template/devtools/harness/catalog.py` owns application URL scopes,
+- `src/lup_template/harness/catalog.py` owns application URL scopes,
   protected roots, policy IDs, and other composition inputs; the readable
   shell table it declares is `content/shell_vocabulary.py`.
 - `tests/unit/test_semantic_policy.py` is the shared canonical/bundled fixture
   suite.
-- `packages/lup/src/lup/devtools/harness/content/docs/permissions.py` renders
+- `packages/lup/src/lup/harness/content/docs/permissions.py` renders
   `docs/permissions.md`, which describes the lattice a change here moves. It
   is generated like every other page under `docs/`: edit the source module,
   never the rendered file.

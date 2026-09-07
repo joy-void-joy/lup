@@ -28,7 +28,7 @@ from pydantic import BaseModel
 
 from lup.workspace.paths import project_root
 from lup.devtools.dev.plugin import set_marketplace_name
-from lup_template.devtools.harness.catalog import declared_plugin
+from lup_template.harness.catalog import declared_plugin
 from lup.execution.shell import git
 
 PACKAGE_IMPORT_RE = re.compile(
@@ -157,7 +157,7 @@ DEFAULT_SPELT_PATHS = [
         configures="dashboard package data",
     ),
     SpeltPath(
-        spelling="lup_template.devtools.harness.content",
+        spelling="lup_template.harness.content",
         configures="harness content package data",
     ),
 ]

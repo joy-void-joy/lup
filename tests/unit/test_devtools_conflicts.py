@@ -23,7 +23,7 @@ from lup.providers.harness import claude_prompt_renderer
 from lup.types import JsonObject
 from lup.workspace import paths
 from lup.devtools.dev import conflicts
-from lup.devtools.harness.content.skills.merge import SKILL as MERGE_SKILL
+from lup.harness.content.skills.merge import SKILL as MERGE_SKILL
 from tests.unit.repos import commit_file, git_in, initialized_repo
 
 

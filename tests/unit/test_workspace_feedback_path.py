@@ -10,7 +10,7 @@ path ignores the override and that the rendered prose uses it.
 import importlib
 from pathlib import Path
 
-from lup.devtools.harness.content.skills import fb_status
+from lup.harness.content.skills import fb_status
 from lup.workspace import paths
 
 

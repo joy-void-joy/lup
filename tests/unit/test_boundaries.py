@@ -32,7 +32,7 @@ from lup.harness.codescan.boundaries import (
     path_is_sanctioned,
 )
 
-from lup_template.devtools.harness.catalog import (
+from lup_template.harness.catalog import (
     NATIVE_RUNTIMES,
     application_roots,
     dev_project,
@@ -161,7 +161,7 @@ def test_a_generated_tree_is_sanctioned_by_the_runtime_that_spells_it() -> None:
 
 
 def test_portable_content_is_scanned_for_native_spellings() -> None:
-    path = Path("src/lup_template/devtools/harness/content/skills/example.py")
+    path = Path("src/lup_template/harness/content/skills/example.py")
     text = (
         "from lup.providers.claude.runtime import ClaudeSessionFactory\n"
         'method = "turn/start"\n'
@@ -260,7 +260,7 @@ def test_a_directive_two_lines_above_a_table_stays_spurious() -> None:
     assert sorted(item.kind for item in findings) == ["missing", "spurious"]
 
 
-SHELL_VOCABULARY = Path("src/lup_template/devtools/harness/content/shell_vocabulary.py")
+SHELL_VOCABULARY = Path("src/lup_template/harness/content/shell_vocabulary.py")
 """Where this project's shell command tables live, outside the library."""
 
 MOVED_TABLES: list[str] = []

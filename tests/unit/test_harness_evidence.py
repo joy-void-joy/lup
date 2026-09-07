@@ -9,8 +9,8 @@ import yaml
 
 from lup.devtools.dev.git_guards import CHECK_COMMAND, DRIFT_COMMAND
 from lup.devtools.dev.workflow import WORKFLOW_PATH, write_workflow
-from lup_template.devtools.harness.catalog import WORKFLOW
-from lup.devtools.harness.evidence import (
+from lup_template.harness.catalog import WORKFLOW
+from lup.harness.evidence import (
     EVIDENCE_LEDGER,
     SCHEMA_COMMAND,
     EvidenceEntry,

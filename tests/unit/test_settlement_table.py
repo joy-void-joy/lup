@@ -16,7 +16,7 @@ import inspect
 
 import pytest
 
-from lup.devtools.harness.content.docs.permissions import settlement_table
+from lup.harness.content.docs.permissions import settlement_table
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.settlement import (
     SETTLEMENT_ORDER,

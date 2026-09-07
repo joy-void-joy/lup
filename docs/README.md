@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.index by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.index by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Lup documentation
 
@@ -42,9 +42,9 @@ Subjects that span the three components, or that are large enough to own a page.
 ## Every page here is generated
 
 Files under `docs/` are compiler output from typed Python — the pages about
-the library from `packages/lup/src/lup/devtools/harness/content/docs/`, the
+the library from `packages/lup/src/lup/harness/content/docs/`, the
 pages about this repository from
-`src/lup_template/devtools/harness/content/docs/` — the same way the native
+`src/lup_template/harness/content/docs/` — the same way the native
 trees are. Each opens with a banner naming its source module. Edit the module
 and regenerate; a hand-edit is preserved and reported as a conflict rather
 than silently overwritten. [harness.md](harness.md) is the whole story.

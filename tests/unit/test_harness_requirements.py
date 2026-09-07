@@ -19,12 +19,12 @@ from lup.harness.ownership import source_digest
 from lup.harness.toolchain import for_host
 from lup.policy.survey import allowed_programs
 from lup.policy.vocabulary import default_vocabulary
-from lup_template.devtools.harness.catalog import portable_harness
-from lup_template.devtools.harness.content.requirements import (
+from lup_template.harness.catalog import portable_harness
+from lup_template.harness.content.requirements import (
     carried_vocabulary,
     manifest,
 )
-from lup_template.devtools.harness.content.shell_vocabulary import SHELL_RULES
+from lup_template.harness.content.shell_vocabulary import SHELL_RULES
 from lup.harness.requirements import (
     Advisory,
     AnyOf,
@@ -327,7 +327,7 @@ def test_the_declared_manifest_names_only_programs_this_project_invokes() -> Non
     an ordinary edit, while the roster staying small stays deliberate: an
     earlier draft declared ripgrep, which this project never invokes.
     """
-    from lup_template.devtools.harness.content.requirements import manifest
+    from lup_template.harness.content.requirements import manifest
 
     MANIFEST = manifest()
 
@@ -371,7 +371,7 @@ def test_every_offered_requirement_lets_a_project_place_and_install_it() -> None
 
 def test_the_declared_manifest_asks_the_host_for_nothing_image_side() -> None:
     """bun and typescript live in the image, so a bare host is never faulted."""
-    from lup_template.devtools.harness.content.requirements import manifest
+    from lup_template.harness.content.requirements import manifest
 
     MANIFEST = manifest()
 
@@ -393,7 +393,7 @@ def test_every_declared_package_is_obtained_by_something_that_verifies_it() -> N
     reintroduces.
     """
     from lup.harness.toolchain import default_manifest
-    from lup_template.devtools.harness.content.requirements import manifest
+    from lup_template.harness.content.requirements import manifest
 
     for roster in (default_manifest(), manifest()):
         assert not [item for item in roster.packages() if not item.verified()]

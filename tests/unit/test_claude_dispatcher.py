@@ -22,7 +22,7 @@ from lup.policy.grants import allowance_grants_environment, write_allowance_gran
 from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.types import EnvVars, JsonObject
-from lup_template.devtools.harness.catalog import declared_hook_set
+from lup_template.harness.catalog import declared_hook_set
 from tests.unit.repos import commit_file, initialized_repo
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")

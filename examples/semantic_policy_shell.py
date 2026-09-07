@@ -20,7 +20,7 @@ from lup.providers.claude.runtime import ClaudeSandboxConfig, ClaudeSessionConfi
 from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
-from lup_template.devtools.harness.catalog import declared_hook_set
+from lup_template.harness.catalog import declared_hook_set
 
 from examples.common import Summary
 

@@ -16,9 +16,9 @@ from unittest import mock
 
 import typer
 
-from lup.devtools.harness.content.application import ApplicationLayout
-from lup.devtools.harness.content.catalog import library_content
-from lup.devtools.harness.content.docs.catalog import library_documents
+from lup.harness.content.application import ApplicationLayout
+from lup.harness.content.catalog import library_content
+from lup.harness.content.docs.catalog import library_documents
 from lup.devtools.roster import (
     LIBRARY_ROSTER,
     LIBRARY_SPECS,
@@ -27,7 +27,7 @@ from lup.devtools.roster import (
 from lup.devtools.subapps import SubApp, SubAppSelection, subapp
 from lup.harness.models import ContentSelection
 from lup.workspace.paths import project_root
-from lup_template.devtools.harness.content.catalog import project_skills
+from lup_template.harness.content.catalog import project_skills
 from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION, SUBAPP_SPECS
 
 LIBRARY_CONTENT = library_content(ApplicationLayout(package="worked_example"))

@@ -17,7 +17,7 @@ from lup.policy.kernel.shell import classify_shell
 from lup.policy.shell_rules import erase_shell_rules
 from lup.policy.survey import shell_forms
 from lup.policy.vocabulary import default_vocabulary
-from lup_template.devtools.harness.catalog import declared_hook_set
+from lup_template.harness.catalog import declared_hook_set
 
 
 def test_every_shell_verdict_names_the_rule_that_reached_it() -> None:

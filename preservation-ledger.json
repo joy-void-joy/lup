@@ -1,5 +1,5 @@
 {
-  "revision": "05df780385d5ff763461c75a25d61ff6efe9a9a4",
+  "revision": "f37ab4fefd7834b6c5d822c954d040845be9485b",
   "roots": [
     "lup",
     "lup_template"
@@ -26,6 +26,7 @@
     "dev resolve-review",
     "dev resolve-summary",
     "dev check",
+    "dev test",
     "dev comments",
     "dev todos",
     "dev seams",
@@ -34,6 +35,7 @@
     "dev report-friction",
     "dev upstream",
     "dev undo",
+    "dev history",
     "dev issues",
     "dev rules",
     "dev guidance",
@@ -57,6 +59,10 @@
     "dev conflict audit",
     "dev conflict complete",
     "dev plugin name",
+    "dev tracker comment",
+    "dev tracker close",
+    "dev tracker reopen",
+    "dev tracker list",
     "dev git-hooks install",
     "dev git-hooks status",
     "dev git-hooks uninstall",
@@ -806,6 +812,7 @@
         "AntiPatternScan.findings",
         "AntiPatternScan.refuted",
         "within_scope",
+        "within_scope.scoped",
         "declared_rules",
         "scanned_files",
         "scanned_files.found",
@@ -851,6 +858,12 @@
         "DevDeclarations.test_roots",
         "DevDeclarations.git_guards",
         "create_dev_app",
+        "create_dev_app.tracker_routes",
+        "create_dev_app.answer",
+        "create_dev_app.tracker_comment_cmd",
+        "create_dev_app.tracker_close_cmd",
+        "create_dev_app.tracker_reopen_cmd",
+        "create_dev_app.tracker_list_cmd",
         "create_dev_app.env_status_cmd",
         "create_dev_app.env_sync_cmd",
         "create_dev_app.worktree_create_cmd",
@@ -875,6 +888,7 @@
         "create_dev_app.guard_status_cmd",
         "create_dev_app.guard_uninstall_cmd",
         "create_dev_app.check_cmd",
+        "create_dev_app.test_cmd",
         "create_dev_app.comments_cmd",
         "create_dev_app.todos_cmd",
         "create_dev_app.seams_cmd",
@@ -883,6 +897,7 @@
         "create_dev_app.report_friction_cmd",
         "create_dev_app.upstream_cmd",
         "create_dev_app.undo_cmd",
+        "create_dev_app.history_cmd",
         "create_dev_app.issues_cmd",
         "create_dev_app.rules_cmd",
         "create_dev_app.guidance_cmd",
@@ -1003,6 +1018,7 @@
         "ParsedBranch.is_current",
         "parse_branches",
         "parse_branches.parse",
+        "parse_branches.published",
         "parse_worktrees",
         "ParsedRemoteBranch",
         "ParsedRemoteBranch.remote",
@@ -1119,6 +1135,7 @@
         "worktree_changes",
         "locked_worktrees",
         "remote_branch_exists",
+        "resolvable",
         "upstream_ref",
         "outgrew_upstream",
         "plan_worktree_step",
@@ -1162,15 +1179,26 @@
         "ruff_lint_check",
         "pyright_base_configuration",
         "pyright_check",
+        "parallel_arguments",
+        "ignored_arguments",
         "TestRoot",
         "TestRoot.name",
         "TestRoot.directory",
+        "TestRoot.absent",
         "TestRoot.checked",
+        "RootSelection",
+        "RootSelection.root",
+        "RootSelection.paths",
+        "owning_index",
+        "group_by_root",
+        "run_selected",
         "inline_notes_lines",
         "guidance_bytes",
         "budget_reports",
+        "budget_report",
         "guidance_budget_report",
         "scaffold_budget_report",
+        "branch_record_reports",
         "changed_paths",
         "owned_comments",
         "scan_reports",
@@ -1315,6 +1343,7 @@
         "BranchInPlay",
         "BranchInPlay.keyword",
         "BranchInPlay.visible",
+        "BranchInPlay.recorded",
         "BranchInPlay.asked",
         "PathGone",
         "PathGone.keyword",
@@ -1386,6 +1415,9 @@
         "HooksReading.orphaned",
         "HooksReading.unarmed",
         "read_hooks",
+        "outstanding_arming",
+        "arming_is_refused",
+        "blocked_arming",
         "install_script",
         "install_guards",
         "uninstall_script",
@@ -1409,11 +1441,37 @@
       ]
     },
     {
+      "module": "lup.devtools.dev.history",
+      "declares": [
+        "SNAPSHOT_REFS",
+        "HIT_FIELDS",
+        "HistoryHit",
+        "HistoryHit.commit",
+        "HistoryHit.committed_at",
+        "HistoryHit.author",
+        "HistoryHit.subject",
+        "HistoryHit.line",
+        "HistoryHit.parse",
+        "commits_matching"
+      ]
+    },
+    {
       "module": "lup.devtools.dev.issues",
       "declares": [
         "logger",
         "EXCLUDED_LABEL",
         "ISSUE_FIELDS",
+        "TrackerVerb",
+        "DISABLED_ISSUES",
+        "TrackerRoutes",
+        "TrackerRoutes.own",
+        "TrackerRoutes.declared",
+        "TrackerRoutes.owning",
+        "TrackerRoutes.chosen",
+        "TrackerRoutes.refusal",
+        "issue_arguments",
+        "act_on_issue",
+        "disabled_issues_advice",
         "FrictionReport",
         "FrictionReport.summary",
         "FrictionReport.component",
@@ -1686,6 +1744,7 @@
         "GhPrDetail.mergeable",
         "GhPrDetail.state",
         "GhPrDetail.head_ref",
+        "GhPrDetail.base_ref",
         "GhPrRef",
         "GhPrRef.number",
         "GhPrRef.title",
@@ -1728,6 +1787,7 @@
         "PushResult.force",
         "PushResult.existing_pr",
         "PushResult.push_complaint",
+        "PushResult.upstream",
         "CreateResult",
         "CreateResult.number",
         "CreateResult.url",
@@ -1739,6 +1799,7 @@
         "status",
         "pr_merged",
         "pr_head_ref",
+        "pr_base_ref",
         "cleanup_merged_branch",
         "merge",
         "sync_base",
@@ -1882,6 +1943,7 @@
         "BranchRecord.base",
         "BranchRecord.base_commit",
         "BranchRecord.upstream",
+        "BranchRecord.landed_in",
         "BranchRecord.merged",
         "LegacyFact",
         "LegacyFact.BASE",
@@ -1891,16 +1953,20 @@
         "LegacyFact.addition",
         "carrier_of",
         "at",
+        "shared_directory_of",
         "shared_directory",
         "record_location",
         "record_path",
         "read_record",
         "remember",
+        "record_landing",
         "legacy_value",
         "recorded_base",
         "recorded_reservation",
         "recorded_upstream",
         "legacy_keys",
+        "branches_awaiting_adoption",
+        "branches_awaiting_adoption.named",
         "adopt_legacy_records"
       ]
     },
@@ -2167,6 +2233,9 @@
         "adopt_records",
         "OWNERSHIP_MERGE_DRIVER",
         "register_merge_driver",
+        "merge_driver_registered",
+        "refuse_a_blocked_registration",
+        "refuse_a_blocked_arming",
         "SetupStep",
         "SetupStep.label",
         "SetupStep.satisfied",
@@ -2598,400 +2667,12 @@
       "declares": []
     },
     {
-      "module": "lup.devtools.harness.content.agents.tdd_implementer",
-      "declares": [
-        "AGENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.agents.trace_explorer",
-      "declares": [
-        "agent"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.agents.version_explorer",
-      "declares": [
-        "agent"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.agents.version_reviewer",
-      "declares": [
-        "agent"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.application",
-      "declares": [
-        "ApplicationLayout",
-        "ApplicationLayout.package",
-        "ApplicationLayout.path",
-        "ApplicationLayout.directory"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.catalog",
-      "declares": [
-        "library_skills",
-        "library_agents",
-        "library_content",
-        "skill_roster_parts",
-        "agent_roster_text"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.conventions",
-      "declares": [
-        "PLAN_AT_AGENT_SPEED",
-        "AGENT_VOCABULARY",
-        "THE_GATES",
-        "SHAPING_RULES",
-        "shaping_sentence",
-        "design_principles",
-        "SANCTIONED_EXCEPTIONS",
-        "FAILURE_ANALYSIS",
-        "LONG_RUNNING_WORK",
-        "MERGE_CONFLICT_RESOLUTION",
-        "COMMIT_TYPES",
-        "COMMIT_GUIDELINES"
-      ]
-    },
-    {
       "module": "lup.devtools.harness.content.docs",
       "declares": []
     },
     {
-      "module": "lup.devtools.harness.content.docs.architecture",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.catalog",
-      "declares": [
-        "LIBRARY_DOCS_ROOT",
-        "published",
-        "library_documents"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.contributing",
-      "declares": [
-        "document"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.conventions",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.harness",
-      "declares": [
-        "kernel_module_count",
-        "document"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.index",
-      "declares": [
-        "IndexEntry",
-        "IndexEntry.link",
-        "IndexEntry.answers",
-        "IndexGroup",
-        "IndexGroup.title",
-        "IndexGroup.entries",
-        "IndexGroup.blurb",
-        "IndexGroup.parts",
-        "entry",
-        "document_index"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.library",
-      "declares": [
-        "LIBRARY_PACKAGE",
-        "RosterEntry",
-        "RosterEntry.package",
-        "RosterEntry.solves",
-        "TieredEntry",
-        "TieredEntry.package",
-        "TieredEntry.section",
-        "Roster",
-        "Roster.subtree",
-        "Roster.source",
-        "Roster.tiered",
-        "Roster.owed",
-        "Roster.described",
-        "Roster.described.listed",
-        "Roster.solves",
-        "Roster.solves.opening",
-        "Roster.table",
-        "LIBRARY",
-        "document"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.native_capabilities",
-      "declares": [
-        "cited_library_fixture",
-        "LIBRARY_RUNTIME_FIXTURES",
-        "LIBRARY_DISPATCHER_FIXTURES",
-        "document"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.orchestration",
-      "declares": [
-        "document"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.patterns",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.permissions",
-      "declares": [
-        "settlement_table",
-        "settlement_table.says",
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.platform_differentiation",
-      "declares": [
-        "document"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.quality_pipeline",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.resolver",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.runs",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.self_improvement",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.supervisor",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.docs.upstream_reports",
-      "declares": [
-        "WORKTREE_TOKEN_WALL",
-        "ROSTER",
-        "document"
-      ]
-    },
-    {
       "module": "lup.devtools.harness.content.skills",
       "declares": []
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.add_command",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.analyze",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.bump",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.close",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.commit",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.create_investigator",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.debug",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.fb_analyze",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.fb_implement",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.fb_investigate",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.fb_reflect",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.fb_status",
-      "declares": [
-        "ANALYSIS_DIRECTORY",
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.feedback_loop",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.hooks",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.implementer",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.land",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.merge",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.modify_command",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.principle",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.rebase",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.refactor",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.refactor_tools",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.report",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.resolve",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.resolve_reviewer",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.review",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.skills.verify_solved",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.content.tree",
-      "declares": [
-        "DEFAULT_SKIPPED_SUFFIXES",
-        "DEFAULT_SKIPPED_NAMES",
-        "DEFAULT_NOTE_COLUMN",
-        "summary",
-        "TopLevelEntry",
-        "TopLevelEntry.name",
-        "TopLevelEntry.source",
-        "top_level_entries",
-        "top_level_entries.importable",
-        "annotated_tree",
-        "annotated_tree.caption",
-        "annotated_tree.labelled",
-        "annotated_tree.shown",
-        "annotated_tree.children",
-        "annotated_tree.render"
-      ]
     },
     {
       "module": "lup.devtools.harness.doctor",
@@ -3025,42 +2706,6 @@
         "inspect_drift",
         "report_stale",
         "check_targets"
-      ]
-    },
-    {
-      "module": "lup.devtools.harness.evidence",
-      "declares": [
-        "EVIDENCE_REFRESHED",
-        "EvidenceEntry",
-        "EvidenceEntry.capability",
-        "EvidenceEntry.version",
-        "EVIDENCE_LEDGER",
-        "accepted_version",
-        "cited_fixture",
-        "SchemaDigest",
-        "SchemaDigest.path",
-        "SchemaDigest.sha256",
-        "SCHEMA_DIGESTS",
-        "SchemaCommand",
-        "SchemaCommand.executable",
-        "SchemaCommand.arguments",
-        "SchemaCommand.spelled",
-        "SCHEMA_COMMAND",
-        "EvidenceDrift",
-        "EvidenceDrift.capability",
-        "EvidenceDrift.installed",
-        "EvidenceDrift.accepted",
-        "EvidenceDrift.message",
-        "parse_version",
-        "newer_than",
-        "DigestDrift",
-        "DigestDrift.path",
-        "DigestDrift.found",
-        "DigestDrift.accepted",
-        "DigestDrift.message",
-        "digest_drift",
-        "evidence_drift",
-        "sdk_evidence_drift"
       ]
     },
     {
@@ -3213,6 +2858,7 @@
         "LaunchSentinels.outside",
         "ledger_path",
         "record_preflight",
+        "reopened",
         "retire_mount_table",
         "release_ledger",
         "sweep_ledgers"
@@ -3360,6 +3006,7 @@
       "declares": [
         "Settings",
         "Settings.base",
+        "Settings.env",
         "Settings.official_plugins",
         "Settings.allowed",
         "Settings.denied",
@@ -3377,6 +3024,8 @@
     {
       "module": "lup.devtools.hooks.app",
       "declares": [
+        "input_text",
+        "command_text",
         "report",
         "create_hooks_app",
         "create_hooks_app.shell_decision",
@@ -3435,12 +3084,19 @@
     {
       "module": "lup.devtools.project",
       "declares": [
+        "Tracker",
+        "Tracker.repository",
+        "Tracker.what",
+        "Tracker.components",
+        "Tracker.claims",
+        "Tracker.claims.continues",
         "DevProject",
         "DevProject.package",
         "DevProject.path_roles",
         "DevProject.rules",
         "DevProject.anti_patterns",
         "DevProject.subapps",
+        "DevProject.trackers",
         "DevProject.content",
         "DevProject.roots",
         "DevProject.catalog",
@@ -3469,9 +3125,11 @@
         "ResolvedObject",
         "ResolvedObject.value",
         "ResolvedObject.leaf_name",
+        "leaf_name",
         "resolve_object",
         "find_module_path",
         "fail",
+        "fail_unresolved",
         "categorize_import"
       ]
     },
@@ -3526,6 +3184,7 @@
         "scan_source_symbols.add_target",
         "scan_source_symbols.collect",
         "scan_project_symbols",
+        "name_candidates",
         "scan_module_symbols",
         "scan_module_symbols.match_of",
         "get_top_level_packages"
@@ -4004,6 +3663,9 @@
         "SHORT_SHA_LENGTH",
         "gh",
         "uv",
+        "repository_segments",
+        "repository_reference",
+        "names_same_repository",
         "slug_from_remote",
         "repository_slug",
         "repository_arguments",
@@ -4872,6 +4534,395 @@
       ]
     },
     {
+      "module": "lup.harness.content.agents.tdd_implementer",
+      "declares": [
+        "AGENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.agents.trace_explorer",
+      "declares": [
+        "agent"
+      ]
+    },
+    {
+      "module": "lup.harness.content.agents.version_explorer",
+      "declares": [
+        "agent"
+      ]
+    },
+    {
+      "module": "lup.harness.content.agents.version_reviewer",
+      "declares": [
+        "agent"
+      ]
+    },
+    {
+      "module": "lup.harness.content.application",
+      "declares": [
+        "ApplicationLayout",
+        "ApplicationLayout.package",
+        "ApplicationLayout.path",
+        "ApplicationLayout.directory"
+      ]
+    },
+    {
+      "module": "lup.harness.content.catalog",
+      "declares": [
+        "library_skills",
+        "library_agents",
+        "library_content",
+        "skill_roster_parts",
+        "agent_roster_text"
+      ]
+    },
+    {
+      "module": "lup.harness.content.conventions",
+      "declares": [
+        "PLAN_AT_AGENT_SPEED",
+        "AGENT_VOCABULARY",
+        "THE_GATES",
+        "SHAPING_RULES",
+        "shaping_sentence",
+        "design_principles",
+        "SANCTIONED_EXCEPTIONS",
+        "FAILURE_ANALYSIS",
+        "LONG_RUNNING_WORK",
+        "DEFECT_DISPOSITION",
+        "MERGE_CONFLICT_RESOLUTION",
+        "COMMIT_TYPES",
+        "COMMIT_GUIDELINES"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.architecture",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.catalog",
+      "declares": [
+        "LIBRARY_DOCS_ROOT",
+        "published",
+        "library_documents"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.contributing",
+      "declares": [
+        "document"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.conventions",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.harness",
+      "declares": [
+        "kernel_module_count",
+        "document"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.index",
+      "declares": [
+        "IndexEntry",
+        "IndexEntry.link",
+        "IndexEntry.answers",
+        "IndexGroup",
+        "IndexGroup.title",
+        "IndexGroup.entries",
+        "IndexGroup.blurb",
+        "IndexGroup.parts",
+        "entry",
+        "document_index"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.library",
+      "declares": [
+        "LIBRARY_PACKAGE",
+        "RosterEntry",
+        "RosterEntry.package",
+        "RosterEntry.solves",
+        "TieredEntry",
+        "TieredEntry.package",
+        "TieredEntry.section",
+        "Roster",
+        "Roster.subtree",
+        "Roster.source",
+        "Roster.tiered",
+        "Roster.owed",
+        "Roster.described",
+        "Roster.described.listed",
+        "Roster.solves",
+        "Roster.solves.opening",
+        "Roster.table",
+        "LIBRARY",
+        "document"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.native_capabilities",
+      "declares": [
+        "cited_library_fixture",
+        "LIBRARY_RUNTIME_FIXTURES",
+        "LIBRARY_DISPATCHER_FIXTURES",
+        "document"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.orchestration",
+      "declares": [
+        "document"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.patterns",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.permissions",
+      "declares": [
+        "settlement_table",
+        "settlement_table.says",
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.platform_differentiation",
+      "declares": [
+        "document"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.quality_pipeline",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.resolver",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.runs",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.self_improvement",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.supervisor",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup.harness.content.docs.upstream_reports",
+      "declares": [
+        "WORKTREE_TOKEN_WALL",
+        "ROSTER",
+        "document"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.add_command",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.analyze",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.bump",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.close",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.commit",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.create_investigator",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.debug",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.fb_analyze",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.fb_implement",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.fb_investigate",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.fb_reflect",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.fb_status",
+      "declares": [
+        "ANALYSIS_DIRECTORY",
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.feedback_loop",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.hooks",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.implementer",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.land",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.merge",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.modify_command",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.principle",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.rebase",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.refactor",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.refactor_tools",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.report",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.resolve",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.resolve_reviewer",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.review",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.verify_solved",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.tree",
+      "declares": [
+        "DEFAULT_SKIPPED_SUFFIXES",
+        "DEFAULT_SKIPPED_NAMES",
+        "DEFAULT_NOTE_COLUMN",
+        "summary",
+        "TopLevelEntry",
+        "TopLevelEntry.name",
+        "TopLevelEntry.source",
+        "top_level_entries",
+        "top_level_entries.importable",
+        "annotated_tree",
+        "annotated_tree.caption",
+        "annotated_tree.labelled",
+        "annotated_tree.shown",
+        "annotated_tree.children",
+        "annotated_tree.render"
+      ]
+    },
+    {
       "module": "lup.harness.contracts",
       "declares": [
         "ArtifactRenderer",
@@ -5110,6 +5161,42 @@
       ]
     },
     {
+      "module": "lup.harness.evidence",
+      "declares": [
+        "EVIDENCE_REFRESHED",
+        "EvidenceEntry",
+        "EvidenceEntry.capability",
+        "EvidenceEntry.version",
+        "EVIDENCE_LEDGER",
+        "accepted_version",
+        "cited_fixture",
+        "SchemaDigest",
+        "SchemaDigest.path",
+        "SchemaDigest.sha256",
+        "SCHEMA_DIGESTS",
+        "SchemaCommand",
+        "SchemaCommand.executable",
+        "SchemaCommand.arguments",
+        "SchemaCommand.spelled",
+        "SCHEMA_COMMAND",
+        "EvidenceDrift",
+        "EvidenceDrift.capability",
+        "EvidenceDrift.installed",
+        "EvidenceDrift.accepted",
+        "EvidenceDrift.message",
+        "parse_version",
+        "newer_than",
+        "DigestDrift",
+        "DigestDrift.path",
+        "DigestDrift.found",
+        "DigestDrift.accepted",
+        "DigestDrift.message",
+        "digest_drift",
+        "evidence_drift",
+        "sdk_evidence_drift"
+      ]
+    },
+    {
       "module": "lup.harness.generation",
       "declares": [
         "argument_text",
@@ -5131,6 +5218,7 @@
         "Registry",
         "Registry.manager",
         "Registry.command",
+        "Registry.release_url",
         "ContainerEngine",
         "ContainerEngine.binary",
         "ContainerEngine.identity_arguments",
@@ -5416,6 +5504,7 @@
         "HookSet.edit_rules",
         "HookSet.diagnostics_command",
         "HookSet.resolution_command",
+        "HookSet.repair_command",
         "HookSet.refused_tools",
         "HookSet.runner_targets",
         "HookSet.everyday_commands",
@@ -5653,6 +5742,28 @@
       ]
     },
     {
+      "module": "lup.harness.releases",
+      "declares": [
+        "CurrentRelease",
+        "CurrentRelease.version",
+        "ReleaseRecord",
+        "ReleaseRecord.name",
+        "ReleaseRecord.version",
+        "ReleaseRecord.resolved_at",
+        "ReleaseLedger",
+        "ReleaseLedger.records",
+        "ReleaseLedger.held",
+        "ReleaseLedger.noted",
+        "ResolvedReleases",
+        "ResolvedReleases.image",
+        "ResolvedReleases.said",
+        "ledger_path",
+        "loaded_ledger",
+        "current_release",
+        "resolved_agent_clis"
+      ]
+    },
+    {
       "module": "lup.harness.requirements",
       "declares": [
         "PackageManager",
@@ -5678,6 +5789,13 @@
         "LostCapability.refuses",
         "LostCapability.costly",
         "LostCapability.consequence",
+        "MisleadingAbsence",
+        "MisleadingAbsence.kind",
+        "MisleadingAbsence.capability",
+        "MisleadingAbsence.mistaken_for",
+        "MisleadingAbsence.refuses",
+        "MisleadingAbsence.costly",
+        "MisleadingAbsence.consequence",
         "RefusedLaunch",
         "RefusedLaunch.kind",
         "RefusedLaunch.because",
@@ -5747,7 +5865,18 @@
         "SentinelProbe.behind",
         "SentinelProbe.given",
         "SentinelProbe.run",
+        "VocabularyProbe",
+        "VocabularyProbe.kind",
+        "VocabularyProbe.vocabulary",
+        "VocabularyProbe.marker",
+        "VocabularyProbe.resolved",
+        "VocabularyProbe.programs",
+        "VocabularyProbe.pointed_at",
+        "VocabularyProbe.behind",
+        "VocabularyProbe.given",
+        "VocabularyProbe.run",
         "Exercise",
+        "Location",
         "Side",
         "Requirement",
         "Requirement.capability",
@@ -5757,6 +5886,8 @@
         "Requirement.at_launch",
         "Requirement.exercise",
         "Requirement.absence",
+        "Requirement.recovery",
+        "Requirement.recovery_by_location",
         "Requirement.diagnoses",
         "Requirement.install",
         "Requirement.by_client",
@@ -5767,6 +5898,7 @@
         "Finding.exercised",
         "Finding.detail",
         "Finding.causes",
+        "Finding.location",
         "Finding.refuses",
         "Finding.notices",
         "Finding.alarms",
@@ -5864,6 +5996,7 @@
         "host_placement_requirement",
         "question_relay_requirement",
         "checkpoint_store_requirement",
+        "shell_vocabulary_requirement",
         "default_manifest"
       ]
     },
@@ -7091,8 +7224,10 @@
         "measured_boundary",
         "contained",
         "delivers",
+        "launched",
         "defers_unjudged",
         "append_hook_evidence",
+        "fetch_origin",
         "record_hook_evidence",
         "script_run_nudge",
         "record_question",
@@ -7105,12 +7240,14 @@
         "boundary_description",
         "unquoted_path",
         "boundary_refusal",
+        "outside_this_project",
         "foreign_repository",
         "publish_edition",
         "project_environment",
         "declared_program",
         "conflicted",
         "file_diagnostics",
+        "repaired_directives",
         "resolved_refutations",
         "existing_write_targets",
         "git_answers",
@@ -7311,6 +7448,7 @@
     {
       "module": "lup.policy.coordinator",
       "declares": [
+        "changed_clause",
         "Stage",
         "CoordinatorResult",
         "CoordinatorResult.stage",
@@ -7369,8 +7507,10 @@
         "SHEBANG",
         "INVOCATION",
         "DISPATCHER_SCRIPT",
+        "GUARD_SCRIPT",
         "REFUSAL_STATUS",
         "guarded_hook_command",
+        "hook_guard_artifact",
         "DispatcherFailure",
         "DispatcherDeclaration",
         "DispatcherDeclaration.runtime_name",
@@ -7746,6 +7886,7 @@
         "KernelDecision.__init__",
         "KernelDecision.revised",
         "KernelDecision.placed",
+        "KernelDecision.stated_whole",
         "unjudged",
         "unlisted",
         "handed_over",
@@ -7947,7 +8088,9 @@
         "antipattern_decision",
         "antipattern_decision.guarded_hits",
         "antipattern_decision.sites_at",
+        "antipattern_decision.silences_nothing",
         "path_rule_matches",
+        "protected_path_reason",
         "PACKAGE_MARKER_FILES",
         "documentation_only",
         "acceptance_guard_decision",
@@ -8099,6 +8242,7 @@
       "declares": [
         "host_matches_scope",
         "url_matches_scope",
+        "scope_text",
         "decide_fetch"
       ]
     },
@@ -8243,12 +8387,14 @@
         "ShellRuleRow.effects",
         "ShellRuleRow.effects_source",
         "ShellRuleRow.refuses",
+        "ShellRuleRow.ask_destinations",
         "ShellRuleRow.ask_refspecs",
         "ShellRuleRow.ask_flags",
         "ShellRuleRow.flag_effects",
         "ShellRuleRow.write_flags",
         "ShellRuleRow.allow_flags",
         "ShellRuleRow.read_verbs",
+        "ShellRuleRow.probe_flags",
         "ShellRuleRow.write_markers",
         "ShellRuleRow.guarded_keys",
         "ShellRuleRow.setting_flags",
@@ -8258,6 +8404,7 @@
         "ShellRuleRow.reason",
         "ShellRowField",
         "shell_row_values",
+        "DestinationForm",
         "RefspecEffect",
         "EditOperation",
         "EditRuleRow",
@@ -8485,6 +8632,7 @@
         "confined_to_recoverable_roots",
         "archive_lands_on_nothing",
         "dangerous_env_name",
+        "dangerous_assignment_reason",
         "flag_matches",
         "CarriedSetting",
         "CarriedSetting.value",
@@ -8495,7 +8643,8 @@
         "HELP_UNSAFE",
         "is_help_probe",
         "xargs_payload",
-        "refspec_effects"
+        "refspec_effects",
+        "destination_form"
       ]
     },
     {
@@ -8576,6 +8725,8 @@
         "Decision.rule",
         "Decision.evaluator",
         "Decision.escalated",
+        "Decision.hard",
+        "Decision.findings",
         "Decision.reached",
         "Decision.placed",
         "Decision.of",
@@ -8643,6 +8794,7 @@
         "Operation.escalation_raw",
         "Operation.escalation_normalized",
         "Operation.provider",
+        "Operation.fingerprint_parts",
         "Operation.fingerprint",
         "Operation.matches",
         "Operation.summary"
@@ -8823,11 +8975,13 @@
         "ShellSubcommandRule.name",
         "ShellSubcommandRule.effects",
         "ShellSubcommandRule.refuses",
+        "ShellSubcommandRule.ask_destinations",
         "ShellSubcommandRule.ask_refspecs",
         "ShellSubcommandRule.ask_flags",
         "ShellSubcommandRule.flag_effects",
         "ShellSubcommandRule.write_flags",
         "ShellSubcommandRule.read_verbs",
+        "ShellSubcommandRule.probe_flags",
         "ShellSubcommandRule.guarded_keys",
         "ShellSubcommandRule.operations",
         "ShellSubcommandRule.sandbox",
@@ -8845,6 +8999,7 @@
         "ShellCommandRule.write_flags",
         "ShellCommandRule.allow_flags",
         "ShellCommandRule.read_verbs",
+        "ShellCommandRule.probe_flags",
         "ShellCommandRule.write_markers",
         "ShellCommandRule.guarded_keys",
         "ShellCommandRule.setting_flags",
@@ -8891,7 +9046,8 @@
         "rule_forms",
         "shell_forms",
         "classify_forms",
-        "classify_forms.classified"
+        "classify_forms.classified",
+        "allowed_programs"
       ]
     },
     {
@@ -8905,6 +9061,7 @@
         "JudgedCommand.read_verbs",
         "JudgedCommand.write_markers",
         "JudgedCommand.bare_reads",
+        "JudgedCommand.write_flags",
         "read_only_rules",
         "judged_ask_rules",
         "redirected_rules",
@@ -8914,6 +9071,7 @@
         "GIT_READ_ONLY_SUBCOMMANDS",
         "GIT_REVERSIBLE_SUBCOMMANDS",
         "GIT_CONFIG_EXECUTING_KEYS",
+        "GIT_CONFIG_RETARGETING_KEYS",
         "git_rule",
         "gh_rule",
         "gh_rule.reads",
@@ -8954,6 +9112,7 @@
     {
       "module": "lup.providers.claude.assets.policy_dispatcher",
       "declares": [
+        "announced",
         "plugin_data_root",
         "managed_root",
         "edit_documents",
@@ -8961,6 +9120,7 @@
         "placed_input",
         "dispatch",
         "rendered",
+        "rendered.surfaced",
         "observe",
         "main"
       ]
@@ -9672,6 +9832,7 @@
     {
       "module": "lup.providers.codex.hooks",
       "declares": [
+        "logger",
         "COMMAND_APPROVAL",
         "FILE_CHANGE_APPROVAL",
         "APPROVAL_METHODS",
@@ -10053,6 +10214,7 @@
         "reject_oversized_guidance",
         "reject_native_prose",
         "compile_claude",
+        "startup_deadline_settings",
         "compile_codex"
       ]
     },
@@ -13394,235 +13556,6 @@
       ]
     },
     {
-      "module": "lup_template.devtools.harness",
-      "declares": []
-    },
-    {
-      "module": "lup_template.devtools.harness.catalog",
-      "declares": [
-        "EXCLUDED_COMMANDS",
-        "ARTIFACT_REFUSAL",
-        "WORKTREE_ENTRY_REFUSAL",
-        "REFUSED_TOOLS",
-        "HARNESS_SESSION",
-        "agent_tool_servers",
-        "declared_plugin",
-        "declared_hook_set",
-        "WORKFLOW",
-        "NATIVE_RUNTIMES",
-        "application_roots",
-        "dev_project",
-        "portable_harness"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.composition",
-      "declares": [
-        "CONTENT_ROOT",
-        "project_content",
-        "profile_directory",
-        "claude_target",
-        "codex_target",
-        "TARGETS",
-        "REPOSITORY_WIDE"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content",
-      "declares": []
-    },
-    {
-      "module": "lup_template.devtools.harness.content.assets",
-      "declares": []
-    },
-    {
-      "module": "lup_template.devtools.harness.content.catalog",
-      "declares": [
-        "LAYOUT",
-        "project_skills",
-        "PROJECT_SKILLS",
-        "PROJECT_AGENTS",
-        "RETIRED",
-        "CONTENT",
-        "SKILLS",
-        "AGENTS",
-        "PLUGIN_NAME"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.docs",
-      "declares": []
-    },
-    {
-      "module": "lup_template.devtools.harness.content.docs.catalog",
-      "declares": [
-        "CONTENT_ROOT",
-        "DOCS_ROOT",
-        "GENERATED_GUIDE",
-        "reference_pages",
-        "project_pages",
-        "documents"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.docs.decisions",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.docs.index",
-      "declares": [
-        "PREAMBLE",
-        "EPILOGUE",
-        "RULES_REFERENCE",
-        "COMMAND_REFERENCE",
-        "GENERATED_PATHS",
-        "document"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.docs.template",
-      "declares": [
-        "HEAD_PARTS",
-        "TAIL_PARTS",
-        "document"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.guidance",
-      "declares": [
-        "HEADER",
-        "CHANGING_THE_POLICY",
-        "MARKER_VOCABULARY",
-        "DEFERRED_WORK",
-        "DEVELOPMENT_WORKFLOW",
-        "COMMIT_TYPE_POINTER",
-        "CODE_CONVENTIONS",
-        "TOOLING",
-        "CONFIGURATION",
-        "PROCESS_AND_COMMUNICATION",
-        "REPORTING_FRICTION",
-        "EXTERNAL_RESOURCES",
-        "SELF_IMPROVEMENT",
-        "guidance_parts",
-        "document"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.image",
-      "declares": [
-        "agent_image"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.provenance",
-      "declares": [
-        "Provenance",
-        "Provenance.library_git",
-        "Provenance.project_devtools",
-        "Provenance.library_checkout",
-        "branch_probes",
-        "acquisition",
-        "sync_baseline"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.requirements",
-      "declares": [
-        "manifest"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.settings",
-      "declares": [
-        "DECLARED",
-        "project_settings"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.shell_vocabulary",
-      "declares": [
-        "lup_devtools_rule",
-        "RUNNER_TARGETS",
-        "EVERYDAY_COMMANDS",
-        "SHELL_RULES"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.skills",
-      "declares": []
-    },
-    {
-      "module": "lup_template.devtools.harness.content.skills.brainstorm",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.skills.import_skill",
-      "declares": [
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.skills.init",
-      "declares": [
-        "SPELLING",
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.skills.install",
-      "declares": [
-        "SPELLING",
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.skills.meta",
-      "declares": [
-        "skill"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.skills.update",
-      "declares": [
-        "SPELLING",
-        "SKILL"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.template_claude",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.template_codex",
-      "declares": [
-        "DOCUMENT"
-      ]
-    },
-    {
-      "module": "lup_template.devtools.harness.content.template_sections",
-      "declares": [
-        "CODEINTEL_TOOL_ROSTER",
-        "SETUP_THROUGH_NAMING",
-        "INNER_AGENT_BULLET",
-        "PRINCIPLES_THROUGH_PATTERN_MENU",
-        "PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP",
-        "WORKFLOW_THROUGH_COMMIT_FORMAT",
-        "DIRECTORY_STRUCTURE_THROUGH_TOOLS",
-        "TOOLING_INTRO",
-        "POLICY_JOIN",
-        "CLAUDE_POLICY_SCOPE",
-        "CODEX_POLICY_SCOPE",
-        "permission_hooks",
-        "SELF_IMPROVEMENT_THROUGH_END"
-      ]
-    },
-    {
       "module": "lup_template.devtools.main",
       "declares": [
         "assembled_prompt",
@@ -13676,6 +13609,254 @@
         "print_result",
         "run",
         "loop"
+      ]
+    },
+    {
+      "module": "lup_template.harness",
+      "declares": []
+    },
+    {
+      "module": "lup_template.harness.catalog",
+      "declares": [
+        "EXCLUDED_COMMANDS",
+        "ARTIFACT_REFUSAL",
+        "WORKTREE_ENTRY_REFUSAL",
+        "REFUSED_TOOLS",
+        "HARNESS_SESSION",
+        "agent_tool_servers",
+        "declared_plugin",
+        "declared_hook_set",
+        "WORKFLOW",
+        "NATIVE_RUNTIMES",
+        "application_roots",
+        "dev_project",
+        "portable_harness"
+      ]
+    },
+    {
+      "module": "lup_template.harness.composition",
+      "declares": [
+        "CONTENT_ROOT",
+        "project_content",
+        "profile_directory",
+        "claude_target",
+        "codex_target",
+        "TARGETS",
+        "REPOSITORY_WIDE"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content",
+      "declares": []
+    },
+    {
+      "module": "lup_template.harness.content.assets",
+      "declares": []
+    },
+    {
+      "module": "lup_template.harness.content.catalog",
+      "declares": [
+        "LAYOUT",
+        "project_skills",
+        "PROJECT_SKILLS",
+        "PROJECT_AGENTS",
+        "RETIRED",
+        "CONTENT",
+        "SKILLS",
+        "AGENTS",
+        "PLUGIN_NAME"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.docs",
+      "declares": []
+    },
+    {
+      "module": "lup_template.harness.content.docs.catalog",
+      "declares": [
+        "CONTENT_ROOT",
+        "DOCS_ROOT",
+        "GENERATED_GUIDE",
+        "reference_pages",
+        "project_pages",
+        "documents"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.docs.decisions",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.docs.index",
+      "declares": [
+        "PREAMBLE",
+        "EPILOGUE",
+        "RULES_REFERENCE",
+        "COMMAND_REFERENCE",
+        "GENERATED_PATHS",
+        "document"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.docs.template",
+      "declares": [
+        "HEAD_PARTS",
+        "TAIL_PARTS",
+        "document"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.guidance",
+      "declares": [
+        "HEADER",
+        "CHANGING_THE_POLICY",
+        "MARKER_VOCABULARY",
+        "DEFERRED_WORK",
+        "DEVELOPMENT_WORKFLOW",
+        "COMMIT_TYPE_POINTER",
+        "CODE_CONVENTIONS",
+        "TOOLING",
+        "CONFIGURATION",
+        "PROCESS_AND_COMMUNICATION",
+        "REPORTING_FRICTION",
+        "EXTERNAL_RESOURCES",
+        "SELF_IMPROVEMENT",
+        "guidance_parts",
+        "document"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.image",
+      "declares": [
+        "agent_image"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.provenance",
+      "declares": [
+        "Provenance",
+        "Provenance.library_git",
+        "Provenance.project_devtools",
+        "Provenance.library_checkout",
+        "branch_probes",
+        "acquisition",
+        "sync_baseline"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.requirements",
+      "declares": [
+        "carried_vocabulary",
+        "manifest"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.settings",
+      "declares": [
+        "DECLARED",
+        "project_settings"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.shell_vocabulary",
+      "declares": [
+        "lup_devtools_rule",
+        "RUNNER_TARGETS",
+        "EVERYDAY_COMMANDS",
+        "SHELL_RULES"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.skills",
+      "declares": []
+    },
+    {
+      "module": "lup_template.harness.content.skills.brainstorm",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.skills.deciding",
+      "declares": [
+        "deciding_parts"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.skills.discovery",
+      "declares": [
+        "discovery_parts"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.skills.distill",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.skills.import_skill",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.skills.init",
+      "declares": [
+        "SPELLING",
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.skills.install",
+      "declares": [
+        "SPELLING",
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.skills.meta",
+      "declares": [
+        "skill"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.skills.update",
+      "declares": [
+        "SPELLING",
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.template_claude",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.template_codex",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
+      "module": "lup_template.harness.content.template_sections",
+      "declares": [
+        "CODEINTEL_TOOL_ROSTER",
+        "SETUP_THROUGH_NAMING",
+        "INNER_AGENT_BULLET",
+        "PRINCIPLES_THROUGH_PATTERN_MENU",
+        "PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP",
+        "WORKFLOW_THROUGH_COMMIT_FORMAT",
+        "DIRECTORY_STRUCTURE_THROUGH_TOOLS",
+        "TOOLING_INTRO",
+        "POLICY_JOIN",
+        "CLAUDE_POLICY_SCOPE",
+        "CODEX_POLICY_SCOPE",
+        "permission_hooks",
+        "SELF_IMPROVEMENT_THROUGH_END"
       ]
     }
   ]

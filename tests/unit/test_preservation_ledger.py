@@ -17,7 +17,7 @@ from lup.devtools.dev.preservation import (
     capture,
     compare,
 )
-from lup_template.devtools.harness.catalog import dev_project
+from lup_template.harness.catalog import dev_project
 from lup_template.devtools.main import app
 
 

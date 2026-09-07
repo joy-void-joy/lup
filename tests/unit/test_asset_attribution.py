@@ -23,9 +23,9 @@ ask.
 from pathlib import Path
 
 from lup.devtools.harness.generate import ProjectContent, claude_generation_recipe
-from lup_template.devtools.harness.catalog import portable_harness
+from lup_template.harness.catalog import portable_harness
 
-ASSET = Path("src/lup_template/devtools/harness/content/assets/file_suggest.sh")
+ASSET = Path("src/lup_template/harness/content/assets/file_suggest.sh")
 """The one file copied verbatim, whose source is a path and not a module."""
 
 

@@ -14,7 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 import lup.devtools.dev.rules as rules_mod
-import lup_template.devtools.harness.catalog as catalog
+import lup_template.harness.catalog as catalog
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.harness import claude_prompt_renderer
 from lup.harness.codescan.antipatterns import (
@@ -27,7 +27,7 @@ from lup.harness.codescan.registry import all_rules
 from lup.devtools.dev.app import create_dev_app
 from lup.devtools.dev.rules import RULE_REFERENCE_PATH, rule_reference_document
 from lup_template.devtools.dev.app import declared as declared_here
-from lup_template.devtools.harness.composition import TARGETS
+from lup_template.harness.composition import TARGETS
 
 RETIRED = RuleSelection(retired=["model-config", "default-factory"])
 

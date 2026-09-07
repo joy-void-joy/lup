@@ -248,7 +248,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             )
         )
 
-    from lup_template.devtools.harness.catalog import portable_harness
+    from lup_template.harness.catalog import portable_harness
 
     core = ResolverCore(
         ResolverConfig(
@@ -321,7 +321,7 @@ def test_codex_plugin_blocks_a_forbidden_apply_patch(tmp_path: Path) -> None:
     if auth.exists():
         codex_home.mkdir(parents=True)
         shutil.copy(auth, codex_home / "auth.json")
-    from lup_template.devtools.harness.catalog import portable_harness
+    from lup_template.harness.catalog import portable_harness
 
     plugin = portable_harness().plugins[0]
     CodexPluginInstaller(

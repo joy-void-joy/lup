@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.permissions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.permissions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Permission Policy
 
@@ -9,7 +9,7 @@ carries the mechanism a denial sends you to.
 ## Sources of truth
 
 Permissions come from the canonical semantic policies in `lup.policy` and the
-application-owned `HookSet` in `devtools/harness/catalog.py`. Harness
+application-owned `HookSet` in `harness/catalog.py`. Harness
 generation compiles one hermetic dispatcher and runtime for each native
 plugin. Never edit generated dispatcher or runtime files — change the
 canonical source and regenerate.
@@ -18,7 +18,7 @@ canonical source and regenerate.
 
 The policy classifies each shell command against
 `lup.policy.vocabulary.default_vocabulary` as
-`devtools/harness/content/shell_vocabulary.py` selects it, every URL scope,
+`harness/content/shell_vocabulary.py` selects it, every URL scope,
 and each edit in a batch. `lup.policy.shell_rules` owns the shape that table
 takes and its erasure into the rows the kernel reads, never the words; the
 project states only where it differs from what the library offers — a
@@ -559,7 +559,7 @@ diagnostic but does not change the decision the hook reached.
 The generated plugins enforce permissions without importing lup, yet decide
 identically to the library.
 
-1. **Canonical sources** — the `HookSet` in `devtools/harness/catalog.py`
+1. **Canonical sources** — the `HookSet` in `harness/catalog.py`
    (protected edit roots, allowed fetch scopes, policy ids, and the shell and
    edit selections), the anti-pattern rule set in `lup.harness.codescan.antipatterns`,
    and the offered shell vocabulary in `lup.policy.vocabulary`. Each selection

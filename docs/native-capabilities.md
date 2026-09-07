@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.native_capabilities by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.native_capabilities by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Native capability evidence
 
@@ -10,7 +10,7 @@ input; it is never represented by an unsupported-operation stub.
 Evidence was refreshed on 2026-08-20 against Claude Code
 2.1.237, Claude Agent SDK 0.2.89, and Codex CLI/app-server
 0.148.0. Those three versions and the digests below are read from
-`lup.devtools.harness.evidence`, which is also what
+`lup.harness.evidence`, which is also what
 `uv run lup-devtools harness doctor all` compares an installed CLI against —
 so this page cannot come to name a version nothing was probed on.
 
