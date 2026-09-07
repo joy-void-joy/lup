@@ -13,7 +13,7 @@ from lup.types import JsonObject
 
 DECLARED = Settings(
     base={
-        "coauthorship": False,
+        "coauthorship": True,
         "fileSuggestion": {
             "command": ".claude/plugins/lup/scripts/file_suggest.sh",
             "type": "command",
@@ -23,7 +23,7 @@ DECLARED = Settings(
     # notice, and one arm appends a section arguing against delegating
     # at all. Skills here dispatch subagents by design, so the arm that
     # leaves that judgement to this guidance is pinned instead of rolled.
-    env={"CLAUDE_CODE_THISTLE_GREBE": "default", "ENABLE_TOOL_SEARCH": "false"},
+    env={"CLAUDE_CODE_THISTLE_GREBE": "default", "ENABLE_TOOL_SEARCH": "true"},
     official_plugins={
         "agent-sdk-dev@claude-plugins-official": True,
         "claude-md-management@claude-plugins-official": True,
