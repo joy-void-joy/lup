@@ -178,6 +178,7 @@ class GhPrDetail(BaseModel):
     mergeable: str = ""
     state: str = ""
     head_ref: str = Field(default="", alias="headRefName")
+    base_ref: str = Field(default="", alias="baseRefName")
 
 
 class GhPrRef(BaseModel):
@@ -486,6 +487,31 @@ def pr_head_ref(pr_number: int) -> str:
     return detail.head_ref
 
 
+def pr_base_ref(pr_number: int) -> str:
+    """Which branch the PR merges into, asked before a merge trusts it.
+
+    A stacked PR's base is its stack parent, so merging it lands the work in
+    another feature branch while the caller pulls the integration branch and
+    reads nothing arriving. The base is the PR's own fact, read from the
+    forge for the reason :func:`pr_head_ref` reads the head there.
+    """
+    try:
+        detail = GhPrDetail.model_validate_json(
+            gh.out(
+                "pr",
+                "view",
+                str(pr_number),
+                *repository_arguments(),
+                "--json",
+                "baseRefName",
+            )
+        )
+    except sh.ErrorReturnCode:
+        logger.exception("could not read PR #%s base branch", pr_number)
+        return ""
+    return detail.base_ref
+
+
 def cleanup_merged_branch(name: str) -> None:
     """Delete a merged PR's branch through the path that knows about worktrees.
 
@@ -515,6 +541,7 @@ def merge(
     as_json: bool = False,
     method: MergeMethod = MergeMethod.merge,
     gh_args: tuple[str, ...] = (),
+    retarget: bool = False,
 ) -> None:
     """Merge a PR and pull changes into the integration branch.
 
@@ -525,6 +552,7 @@ def merge(
         method: How the commits reach the base branch.
         gh_args: Further flags handed to ``gh pr merge`` untouched, for
             anything this signature does not name.
+        retarget: Point a stacked PR's base at the integration branch first.
     """
     integration = get_integration_branch()
 
@@ -532,6 +560,25 @@ def merge(
         typer.echo(f"Would merge PR #{pr_number} ({method})")
         typer.echo(f"Would pull changes into {integration}")
         return
+
+    # A stacked PR's base is its stack parent, and merging it there lands
+    # the work in another feature branch while this command pulls the
+    # integration branch and reports nothing arriving. Retargeting must
+    # happen while the head still holds commits the integration branch
+    # lacks — once it is contained, GitHub refuses the edit with "no new
+    # commits" and the PR can only ever be closed, never marked merged.
+    base_ref = pr_base_ref(pr_number)
+    if base_ref and base_ref != integration:
+        if not retarget:
+            typer.echo(
+                f"PR #{pr_number} merges into '{base_ref}', not '{integration}': "
+                f"merging now would land the work in that branch instead. "
+                f"Rerun with --retarget to point it at {integration} first.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        gh("pr", "edit", str(pr_number), *repository_arguments(), "--base", integration)
+        typer.echo(f"Retargeted PR #{pr_number}: {base_ref} -> {integration}")
 
     head_ref = pr_head_ref(pr_number)
 

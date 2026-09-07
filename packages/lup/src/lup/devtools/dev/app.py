@@ -1573,9 +1573,16 @@ def create_dev_app(
             list[str] | None,
             typer.Option("--gh", help="Further flag handed to `gh pr merge` untouched"),
         ] = None,
+        retarget: Annotated[
+            bool,
+            typer.Option(
+                "--retarget",
+                help="Point a stacked PR's base at the integration branch first",
+            ),
+        ] = False,
     ) -> None:
         """Merge a PR and pull changes into the integration branch."""
-        pr.merge(pr_number, dry_run, as_json, method, tuple(gh_args or ()))
+        pr.merge(pr_number, dry_run, as_json, method, tuple(gh_args or ()), retarget)
 
     @pr_app.command("sync-base")
     def pr_sync_base_cmd(
