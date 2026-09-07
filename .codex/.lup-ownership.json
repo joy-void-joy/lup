@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "be8136b63ff77a9bcb5ce2c4509b50beacfed29d8d0789ae626dd8e60a7b72d7",
+  "source_digest": "035ebeb22f7f275b1db2d49fba968e219db9261eb743c92cc13bd5d62986f722",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -198,7 +198,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "badc82597bede61f044e6c20e3eece885537008551708516a4fc3473090c75f1",
+      "sha256": "404863e1992fcf902d8ab1958fac578a913b64fa4fe8eb11ffd216ef8dad2e8f",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
