@@ -38,6 +38,7 @@ async def read_account(
     *,
     refresh_token: bool = False,
     timeout_seconds: float = 20,
+    arguments: list[str] | None = None,
 ) -> CodexAccountState:
     """Ask the native runtime to read, optionally refreshing its managed login.
 
@@ -46,7 +47,7 @@ async def read_account(
     refreshToken asks the credential owner to renew it before use. A failed
     refresh remains an error rather than a successful local-file check.
     """
-    server = CodexAppServer(executable, environment=environment)
+    server = CodexAppServer(executable, arguments=arguments, environment=environment)
     try:
         async with asyncio.timeout(timeout_seconds):
             await server.start()

@@ -41,13 +41,16 @@ def test_missing_account_requires_login_only_for_authenticated_endpoint() -> Non
 
 
 @pytest.mark.parametrize("refresh", [False, True])
+@pytest.mark.parametrize("arguments", [[], ["run", "-i", "image", "codex"]])
 async def test_native_account_request_and_process_cleanup(
     monkeypatch: pytest.MonkeyPatch,
     refresh: bool,
+    arguments: list[str],
 ) -> None:
     calls: list[tuple[str, JsonObject]] = []
 
-    async def start(_self: CodexAppServer) -> None:
+    async def start(self: CodexAppServer) -> None:
+        assert self.arguments == arguments
         calls.append(("start", {}))
 
     async def request(
@@ -62,7 +65,11 @@ async def test_native_account_request_and_process_cleanup(
     monkeypatch.setattr(CodexAppServer, "start", start)
     monkeypatch.setattr(CodexAppServer, "request", request)
     monkeypatch.setattr(CodexAppServer, "close", close)
-    assert (await read_account(Path("codex"), {}, refresh_token=refresh)).ready
+    assert (
+        await read_account(
+            Path("codex"), {}, refresh_token=refresh, arguments=arguments
+        )
+    ).ready
     assert calls == [
         ("start", {}),
         ("account/read", {"refreshToken": refresh}),

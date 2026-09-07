@@ -5,12 +5,13 @@ native requirement against a live probe, and hands the terminal to the
 native CLI with the non-interactive environment applied.
 """
 
+import asyncio
 import json
 import logging
 import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -29,6 +30,7 @@ from lup.providers.claude.transcripts import ClaudeTranscripts
 from lup.providers.codex.confinement import CODEX_CONFINEMENT
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.account import read_account
 from lup.providers.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
@@ -72,7 +74,6 @@ from lup.types import EnvVars, JsonObject, JsonValue
 from lup.workspace.paths import harness_runs_path, project_root
 from lup.providers.codex.home import (
     CodexWorktreeHomeStore,
-    login_state,
     select_codex_home,
 )
 from lup.devtools.harness.composition import NativeTargets
@@ -788,32 +789,73 @@ def report_inside_requirements(
     )
 
 
-def codex_login_preflight(home: Path, environment: EnvVars) -> None:
-    """Offer the sign-in a launch needs, rather than failing inside a session.
+def codex_login_preflight(
+    home: Path,
+    environment: EnvVars,
+    command: list[str] | None = None,
+    *,
+    headless: bool = False,
+    profile: str | None = None,
+) -> None:
+    """Refresh managed authentication through its native owner before launch.
 
-    An unusable login does not stop Codex from starting; it surfaces later as
-    an authentication error against whichever service is reached first, which
-    names neither the home the credential came from nor the way to fix it.
-    Declining is respected — a session can still be useful offline.
+    A local token deadline proves neither renewal nor acceptance by another
+    service. Native account/read owns renewal; its absence or failure is an
+    unverified login, never a successful local-file check. Declining sign-in
+    remains explicit so a deliberately offline session is still possible.
     """
-    state = login_state(home)
-    if state.usable_at(datetime.now(UTC)):
+    if profile is not None:
+        typer.echo(
+            f"Codex authentication for profile {profile}: not verified before launch. "
+            "The native account API cannot select named profiles; "
+            "the session will validate its selected configuration."
+        )
         return
-    reason = (
-        f"expired {state.expires_at:%Y-%m-%d}"
-        if state.expires_at is not None
-        else "not signed in"
-    )
-    typer.echo(f"Codex login in {home}: {reason}")
+    selected = {**environment, **CODEX_LOGIN.environment(home)}
+    executable, *arguments = command or ["codex"]
+
+    def verified() -> bool:
+        try:
+            state = asyncio.run(
+                read_account(
+                    Path(executable), selected, refresh_token=True, arguments=arguments
+                )
+            )
+        except (OSError, RuntimeError, ValueError, sh.CommandNotFound) as error:
+            # Native error bodies can contain credentials or account identity.
+            typer.echo(
+                f"Codex authentication in {home}: not verified; "
+                f"native account check failed ({type(error).__name__})."
+            )
+            return False
+        if state.ready:
+            return True
+        typer.echo(f"Codex authentication in {home}: not signed in.")
+        return False
+
+    if verified():
+        return
     if not typer.confirm("Sign in to Codex now?", default=True):
-        typer.echo("Continuing unauthenticated — Codex will report its own errors")
+        typer.echo(
+            "Continuing with authentication not verified — "
+            "Codex will report its own authentication errors."
+        )
         return
     try:
-        sh.Command("codex")(
-            "login", _fg=True, _env={**environment, "CODEX_HOME": str(home)}
+        sh.Command(executable)(
+            *arguments,
+            "login",
+            *(["--device-auth"] if headless else []),
+            _fg=True,
+            _env=selected,
         )
     except sh.ErrorReturnCode as error:
         raise typer.BadParameter("Codex sign-in did not complete") from error
+    if not verified():
+        raise typer.BadParameter(
+            f"Codex authentication in {home} remains unverified after sign-in; "
+            "the session was not opened."
+        )
 
 
 def apply_sandbox_environment(
@@ -1288,6 +1330,7 @@ def session_argv(
     sentinels: LaunchSentinels = LaunchSentinels(),
     cleared: LaunchOpening = LaunchOpening(),
     mounts: list[AccessibleRoot] = [],
+    authenticate: Callable[[list[str], Path], None] | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1327,6 +1370,8 @@ def session_argv(
 
     accessible = [*mounts, *accessible_roots(told)]
     if not sandbox.contained():
+        if authenticate is not None:
+            authenticate([cli], config_home)
         settle_boundary(
             plugin,
             sandbox,
@@ -1381,6 +1426,10 @@ def session_argv(
         environment=environment,
         in_passing=True,
     )
+    if authenticate is not None:
+        authenticate(
+            [*probing(opening, stdin=True), cli], Path(harness.image.config_home)
+        )
     # Both halves of one measurement, joined here because this is where the
     # second is taken. The host roster answered for the relay and the store
     # before the container existed; the inside roster answered for the
@@ -1423,7 +1472,7 @@ def say_opening(
     cleared.banner.say()
 
 
-def probing(opening: list[str]) -> list[str]:
+def probing(opening: list[str], *, stdin: bool = False) -> list[str]:
     """The session's own argv, with the interactive terminal taken back off.
 
     The same argv rather than a fresh one, because a probe assembled
@@ -1432,7 +1481,9 @@ def probing(opening: list[str]) -> list[str]:
     start. The one difference is deliberate: a probe's output is captured,
     and ``-it`` against a pipe fails on the terminal it was promised.
     """
-    return [word for word in opening if word != "-it"]
+    return [
+        "-i" if word == "-it" else word for word in opening if stdin or word != "-it"
+    ]
 
 
 def launch_claude(
@@ -1631,7 +1682,6 @@ def launch_codex(
     selected_home = home.path
     if home.isolated:
         typer.echo(f"Using worktree-scoped Codex home: {selected_home}")
-    codex_login_preflight(selected_home, environment)
     installer = CodexPluginInstaller(
         PluginCacheConfig(codex_home=selected_home, marketplace=plugin.marketplace)
     )
@@ -1664,6 +1714,18 @@ def launch_codex(
         if mode is None
         else mode.opened("codex", transcript.journal, transcribing)
     )
+
+    def authenticate(command: list[str], native_home: Path) -> None:
+        codex_login_preflight(
+            native_home,
+            environment,
+            command,
+            headless=sandbox.contained(),
+            profile=profile,
+        )
+        if home.isolated and not sandbox.contained():
+            store.publish(project_root())
+
     try:
         cache = installer.ensure(
             project_root() / ".codex" / "plugins" / plugin.name,
@@ -1686,6 +1748,7 @@ def launch_codex(
                 sentinels,
                 cleared,
                 mounts,
+                authenticate=authenticate,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
