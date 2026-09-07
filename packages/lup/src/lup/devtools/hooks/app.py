@@ -15,6 +15,7 @@ composed, the way the rest of the dev tooling takes what a repository knows
 about itself.
 """
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
@@ -32,6 +33,38 @@ from lup.policy.foreign import foreign_warnings
 from lup.policy.models import Decision, FetchUrl
 from lup.workspace.paths import project_root
 from lup.devtools.utils import output_json
+
+
+def input_text(file: Path) -> str:
+    """A named file's text, or stdin's where the path is ``-``.
+
+    The dash is the spelling every shell already reads as "the stream rather
+    than a name", so a caller holding text and a caller holding a file reach
+    the same reader without either of them learning a second option.
+    """
+    return sys.stdin.read() if str(file) == "-" else file.read_text(encoding="utf-8")
+
+
+def command_text(command: str | None, file: Path | None) -> str:
+    """One command's text, taken from an argument or from a file.
+
+    A command carrying a newline cannot arrive as an argument. An escalation
+    marker has to be the command's leading line, so asking about such a
+    command from an argument means spelling the marker inside the shell line
+    carrying the question -- where the gate in front of that line reads it and
+    answers the marker instead of the question. A path keeps the text out of
+    the asking line entirely.
+
+    Exactly one of the two, because a command supplied twice has no answer to
+    which spelling was meant, and neither leaves nothing to classify.
+    """
+    if command is not None and file is None:
+        return command
+    if file is not None and command is None:
+        return input_text(file)
+    raise typer.BadParameter(
+        "name the command once: as an argument, or with --file (`-` for stdin)"
+    )
 
 
 def report(
@@ -92,7 +125,16 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
 
     @app.command("classify")
     def classify_command(
-        command: Annotated[str, typer.Argument(help="The shell command to classify")],
+        command: Annotated[
+            str | None, typer.Argument(help="The shell command to classify")
+        ] = None,
+        file: Annotated[
+            Path | None,
+            typer.Option(
+                "--file",
+                help="Read the command from this file, or `-` for stdin",
+            ),
+        ] = None,
         autonomous: Annotated[
             bool,
             typer.Option("--autonomous", help="Judge as a reviewed worker session"),
@@ -116,18 +158,25 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         that is not — a runtime rail this project can recognise and neither
         predict nor lift. It never moves the effect or the exit code.
 
+        A command spanning more than one line is asked about with ``--file``,
+        which is the only route an escalation marker survives: the marker has
+        to lead the command, and a marker spelled inside this asking line is
+        read by the gate in front of it rather than by the policy being asked.
+
         Examples::
 
             $ uv run lup-devtools hooks classify 'gh api /repos/o/r/pulls/1'
             $ uv run lup-devtools hooks classify 'rm build/out' --json
             $ uv run lup-devtools hooks classify 'uv run lup-devtools dev check' --trapped
-            $ uv run lup-devtools hooks classify 'grep -c eval file.py'
+            $ uv run lup-devtools hooks classify --file tmp/escalated.sh
+            $ some-writer | uv run lup-devtools hooks classify --file -
         """
+        asked = command_text(command, file)
         report(
-            command,
-            shell_decision(command, autonomous, not headless, trapped),
+            asked,
+            shell_decision(asked, autonomous, not headless, trapped),
             as_json,
-            foreign_warnings(command),
+            foreign_warnings(asked),
         )
 
     @app.command("classify-fetch")
@@ -144,7 +193,10 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         file: Annotated[
             Path | None,
             typer.Argument(
-                help="A file of commands, one per line; omit for the declared corpus"
+                help=(
+                    "A file of commands, one per line, or `-` for stdin; "
+                    "omit for the declared corpus"
+                )
             ),
         ] = None,
         autonomous: Annotated[
@@ -188,6 +240,7 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
             $ uv run lup-devtools hooks sweep
             $ uv run lup-devtools hooks sweep --autonomous --headless
             $ uv run lup-devtools hooks sweep tmp/recorded_asks.txt
+            $ some-writer | uv run lup-devtools hooks sweep -
         """
         commands = (
             [
@@ -198,7 +251,7 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
             if file is None
             else [
                 line.strip()
-                for line in file.read_text(encoding="utf-8").splitlines()
+                for line in input_text(file).splitlines()
                 if line.strip() and not line.startswith("#")
             ]
         )
