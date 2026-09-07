@@ -529,3 +529,41 @@ def test_every_gh_question_says_which_rule_reached_it() -> None:
     assert asked.rule == "shell:gh.pr.merge"
     assert asked.evaluator == "shell-vocabulary"
     assert asked.purpose == "external_consequence"
+
+
+def test_a_dry_run_flag_turns_a_guarded_verb_into_a_probe() -> None:
+    """The probe form performs nothing, so the loss the row guards is not there.
+
+    Stronger than a read verb on purpose: `git push --dry-run --force`
+    replaces no ref however the rest of the line reads, so the probe stands
+    beside the guarded flag and the refspec grammar alike.
+    """
+    rules = [git_rule()]
+
+    assert verdict("git clean -n", rules).effect == "allow"
+    assert verdict("git clean --dry-run", rules).effect == "allow"
+    assert verdict("git rm -n stale.txt", rules).effect == "allow"
+    assert verdict("git push --dry-run origin main", rules).effect == "allow"
+    assert verdict("git push --dry-run --force origin main", rules).effect == "allow"
+    assert verdict("git push --dry-run origin +main:main", rules).effect == "allow"
+    # The probe changes nothing about the commands it probes for.
+    assert verdict("git clean -fd", rules).effect == "ask"
+    assert verdict("git rm stale.txt", rules).effect == "ask"
+    assert verdict("git push --force origin main", rules).effect == "ask"
+
+
+def test_a_probe_flag_inside_a_cluster_keeps_the_question() -> None:
+    # `-fdxn` carries the probe, but reading it out of a cluster means
+    # reading every cluster, and a misread here relaxes the one git verb
+    # whose losses no snapshot holds. The miss costs a question that was
+    # not owed rather than files that were.
+    assert verdict("git clean -fdxn", [git_rule()]).effect == "ask"
+
+
+def test_a_probe_still_asks_where_it_would_reach_an_inline_destination() -> None:
+    # A dry-run push still contacts the repository it names, so naming one
+    # inline stays the question it was: about a place, not a write.
+    probed = verdict(
+        "git push --dry-run https://example.test/repo.git main", [git_rule()]
+    )
+    assert probed.effect == "ask"

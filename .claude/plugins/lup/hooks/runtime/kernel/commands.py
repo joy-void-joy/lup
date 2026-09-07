@@ -369,7 +369,10 @@ def apply_command_row(
     argument is exactly one of those flags — the command's declared pure
     read-only form. One with ``read_verbs`` de-escalates when a declared
     verb appears and every word is a literal free of guarded flags — the
-    verb pins the invocation to its query action. One with ``write_markers``
+    verb pins the invocation to its query action. One with ``probe_flags``
+    de-escalates on a literal probe flag even beside guarded words, because
+    the dry-run form performs none of what they guard — destination grammar
+    alone stands, being about where the probe reaches. One with ``write_markers``
     states that de-escalation negatively, for a command whose read-only form
     is the one carrying nothing extra: it allows when no legible word carries
     a marker. One with ``bare_reads`` carries that to its limit, for a command
@@ -430,6 +433,15 @@ def apply_command_row(
             return row_verdict(
                 row, "allow", "a declared read-only verb pins the query action"
             )
+    # Unlike a read verb, a probe stands beside guarded flags: what they guard
+    # is an effect the dry-run form does not perform. Only the literal
+    # spelling counts — a cluster (`git clean -fdn`) keeps the row's effect,
+    # which costs a question rather than an unperformed loss.
+    if stated != "allow" and row["probe_flags"] and arguments:
+        if any(word in row["probe_flags"] for word in arguments):
+            return row_verdict(
+                row, "allow", "a declared dry-run flag makes this a probe"
+            )
     if stated != "allow" and row["write_markers"] and arguments:
         # Absence is the test, so every word has to be legible: one this
         # cannot read might carry the marker, and "no marker found" would
@@ -466,6 +478,11 @@ def apply_command_row(
     # naming it is what lets the write be judged where every other spelling
     # of a write is judged rather than by this row's single verdict.
     guarding = [*row["ask_flags"], *row["write_flags"]]
+    # A literal probe flag says the invocation performs nothing, so the flag-
+    # and refspec-earned questions below stand down. The opacity bounce stays:
+    # an unreadable word could name a destination, and destination grammar is
+    # about where the probe reaches rather than what it writes.
+    probing = any(word in row["probe_flags"] for word in arguments)
     if stated == "allow" and guarding:
         opaque = next(
             (word for word in arguments if opaque_argument(word)),
@@ -477,7 +494,11 @@ def apply_command_row(
                 " it to a literal value first"
             )
         guarded = next(
-            (word for word in arguments if flag_matches(word, row["ask_flags"])),
+            (
+                word
+                for word in arguments
+                if not probing and flag_matches(word, row["ask_flags"])
+            ),
             None,
         )
         if guarded is not None:
@@ -515,7 +536,7 @@ def apply_command_row(
                 " remote this repository holds — sending work there requires"
                 " approval",
             )
-    if stated == "allow" and row["ask_refspecs"]:
+    if stated == "allow" and row["ask_refspecs"] and not probing:
         # No opacity test of its own: a row declaring refspec effects declares
         # flag effects too, so the block above has already bounced every word
         # this one could not read.

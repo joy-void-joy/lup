@@ -230,7 +230,15 @@ class ShellRuleRow(TypedDict):
     action at a time (``git config --get``): a non-allow row de-escalates to
     allow when a declared verb appears among words that are all literal and
     free of guarded flags, because the verb pins the invocation to its query
-    action regardless of the other words. ``write_markers`` are the same
+    action regardless of the other words. ``probe_flags`` name the flags after
+    which the command performs nothing (``git push --dry-run``): unlike a read
+    verb, a literal probe flag stands even beside guarded flags and refspec
+    grammar, because what those guard is an effect the probe form does not
+    perform — so a non-allow row de-escalates to allow, and an allow row keeps
+    its verdict past its ``ask_flags`` and ``ask_refspecs``. Destination
+    grammar still asks: a probe still contacts the repository it names, and
+    where the work would land is guarded as a place, not as a write.
+    ``write_markers`` are the same
     de-escalation stated negatively, for a command whose read-only form is the
     one with nothing extra in it (``dd if=x`` with no ``of=``): a non-allow row
     de-escalates when no literal word carries a declared marker. Stated as
@@ -392,6 +400,7 @@ class ShellRuleRow(TypedDict):
     write_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]
+    probe_flags: list[str]
     write_markers: list[str]
     guarded_keys: list[str]
     setting_flags: list[str]
@@ -421,6 +430,7 @@ type ShellRowField = Literal[
     "write_flags",
     "allow_flags",
     "read_verbs",
+    "probe_flags",
     "write_markers",
     "guarded_keys",
     "setting_flags",
@@ -472,6 +482,7 @@ def shell_row_values(
         "write_flags": row["write_flags"],
         "allow_flags": row["allow_flags"],
         "read_verbs": row["read_verbs"],
+        "probe_flags": row["probe_flags"],
         "write_markers": row["write_markers"],
         "guarded_keys": row["guarded_keys"],
         "setting_flags": row["setting_flags"],

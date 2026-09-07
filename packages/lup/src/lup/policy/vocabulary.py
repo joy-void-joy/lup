@@ -1048,6 +1048,7 @@ def git_rule(
                 if guard_force_push
                 else push_flags
             ),
+            probe_flags=["-n", "--dry-run"],
             reason=(
                 "rewriting or removing a remote ref, or aiming the push"
                 " elsewhere, requires approval"
@@ -1103,6 +1104,7 @@ def git_rule(
         ShellSubcommandRule(
             name="rm",
             effects=[declare("destroys_uncaptured", scope="targeted")],
+            probe_flags=["-n", "--dry-run"],
             checkpoint="targeted",
             reason="removing tracked files requires approval",
         ),
@@ -1115,6 +1117,9 @@ def git_rule(
             # command whose whole purpose is destroying what nothing holds.
             name="clean",
             effects=[declare("destroys_uncaptured", scope="unrecoverable")],
+            # Only the literal spellings: `-fdxn` is a cluster this cannot
+            # read, and it keeps asking rather than trusting the `n`.
+            probe_flags=["-n", "--dry-run"],
             reason="deleting untracked files is destructive — requires approval",
         ),
         ShellSubcommandRule(
