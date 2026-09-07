@@ -190,7 +190,7 @@ def remember(branch: str, addition: BranchRecord, cwd: Path | None = None) -> No
     publish_atomic(record_path(branch, cwd), read_record(branch, cwd).merged(addition))
 
 
-# lup: defer[branch:fix-config-free-bookkeeping]: run `uv run lup-devtools dev
+# lup: solved: run `uv run lup-devtools dev
 # worktree adopt-records` on the host, once for this clone, so this fallback
 # stops being what a branch's base is read through. Not before that branch
 # lands: a worktree still on older code reads the shared config alone, and
