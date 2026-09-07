@@ -28,7 +28,7 @@ from lup.devtools.subapps import SubApp, SubAppSelection, subapp
 import lup.harness.models as models
 from lup.harness.models import ContentSelection
 from lup.workspace.paths import project_root
-from lup_template.harness.content.catalog import project_skills
+from lup_template.harness.content.catalog import modules as composed_modules
 from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION, SUBAPP_SPECS
 
 SKILL_ADDED = models.Skill(
@@ -239,7 +239,8 @@ def test_only_the_skills_about_renaming_name_the_template_package() -> None:
     allowed = {"skill.init", "skill.install"}
     named = {
         skill.id
-        for skill in project_skills(ApplicationLayout(package="worked_example"))
+        for module in composed_modules(ApplicationLayout(package="worked_example"))
+        for skill in module.content.skills
         for part in skill.prompt.parts
         if "lup_template" in (part.text_payload or "")
     }

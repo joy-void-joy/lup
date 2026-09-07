@@ -18,9 +18,7 @@ section is also the unit somebody condensing works in: what ``dev guidance``
 reports against, and what a project retires or rewrites by name.
 """
 
-import lup.harness.content.conventions as conventions
 import lup.harness.models as models
-from lup.harness.codescan.common import RuleSelection
 
 HEADER = models.GuidanceSection(
     id="header",
@@ -256,53 +254,18 @@ SELF_IMPROVEMENT = models.GuidanceSection(
 )
 
 
-def guidance_sections(selection: RuleSelection) -> list[models.GuidanceSection]:
-    """This repository's guidance, in the order a reader meets it.
+def document(sections: list[models.GuidanceSection]) -> models.PromptDocument:
+    """The composed sections as one document.
 
-    The reading order *is* this declaration, which is the whole of what the
-    function does: the sections come from two packages and several subjects
-    occupy more than one, so the sequence can be read off neither half. What it
-    is not is an assembly — every section is a named value, and this says which
-    names in what order and nothing about their contents.
+    There is no order here to read. Reading order is the chapter spine crossed
+    with the module roster, resolved where the modules are — so this takes the
+    sequence rather than declaring it, and a subject that grew a paragraph
+    places it by naming a chapter instead of by being spliced into a list
+    somebody else maintains.
+
+    What the hand-written list cost was not effort but ownership: sections
+    from two packages sat in one sequence no module could claim a stretch of,
+    so declining a subject left its prose behind and adding one meant editing
+    a file in the other half.
     """
-    return [
-        HEADER,
-        conventions.PLAN_AT_AGENT_SPEED,
-        conventions.AGENT_VOCABULARY,
-        conventions.THE_GATES,
-        CHANGING_THE_POLICY,
-        MARKER_VOCABULARY,
-        DEFERRED_WORK,
-        DEVELOPMENT_WORKFLOW,
-        conventions.MERGE_CONFLICT_RESOLUTION,
-        conventions.COMMIT_GUIDELINES,
-        COMMIT_TYPE_POINTER,
-        CODE_CONVENTIONS,
-        conventions.design_principles(selection),
-        conventions.SANCTIONED_EXCEPTIONS,
-        TOOLING,
-        conventions.LONG_RUNNING_WORK,
-        CONFIGURATION,
-        PROCESS_AND_COMMUNICATION,
-        REPORTING_FRICTION,
-        conventions.DEFECT_DISPOSITION,
-        EXTERNAL_RESOURCES,
-        SELF_IMPROVEMENT,
-    ]
-
-
-def guidance_parts(selection: RuleSelection) -> list[models.PromptPart]:
-    """The same document as the flat parts a renderer walks."""
-    return models.sectioned(guidance_sections(selection))
-
-
-def document(selection: RuleSelection | None = None) -> models.PromptDocument:
-    """The guidance as one document, built against the project's selection.
-
-    Taking the selection rather than reading one keeps the catalog free to
-    import this module: the catalog owns the declaration and hands it down,
-    so nothing here reaches back up for it.
-    """
-    return models.PromptDocument(
-        source=__name__, parts=guidance_parts(selection or RuleSelection())
-    )
+    return models.PromptDocument(source=__name__, parts=models.sectioned(sections))

@@ -139,11 +139,10 @@ from lup_template.devtools.agent.serve import (
 from lup.devtools.dev.rules import rule_reference_artifact
 from lup_template.harness.catalog import (
     HARNESS_SESSION,
-    declared_hook_set,
     portable_harness,
 )
 from lup_template.harness.content.docs.catalog import documents
-from lup_template.harness.content.guidance import document as guidance_document
+from lup_template.harness.content.catalog import GUIDANCE as COMPOSED_GUIDANCE
 from lup_template.harness.content.settings import project_settings
 from lup.devtools.harness import launch
 from lup.devtools.harness.launch import (
@@ -171,8 +170,8 @@ from lup.devtools.harness.generate import (
     inspect_generation,
 )
 
-GUIDANCE = guidance_document(declared_hook_set().rules)
-"""The guidance this repository actually ships, selection included."""
+GUIDANCE = COMPOSED_GUIDANCE
+"""The guidance this repository actually ships, module selection included."""
 
 
 class ClaudeHookDecision(BaseModel, frozen=True):

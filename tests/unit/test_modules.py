@@ -13,6 +13,7 @@ import pytest
 
 import lup.harness.models as models
 import lup.harness.modules as modules
+from lup.harness.content.application import ApplicationLayout
 from lup.seams import Selection
 
 
@@ -37,16 +38,25 @@ def section(identity: str, chapter: models.GuidanceChapter) -> models.GuidanceSe
     )
 
 
-def page(semantic_id: str) -> models.Document:
+def page(semantic_id: str) -> modules.DocumentEntry:
     """One published page, named by the id ownership records it under."""
-    return models.Document(
-        path=Path("docs") / f"{semantic_id}.md",
+    return modules.DocumentEntry(
         semantic_id=semantic_id,
-        source="tmp/worked_example.py",
-        document=models.PromptDocument(
-            source=__name__, parts=[models.TextPart(text="A page.\n")]
+        build=lambda _: models.Document(
+            path=Path("docs") / f"{semantic_id}.md",
+            semantic_id=semantic_id,
+            source="tmp/worked_example.py",
+            document=models.PromptDocument(
+                source=__name__, parts=[models.TextPart(text="A page.\n")]
+            ),
         ),
     )
+
+
+CONTEXT = modules.DocumentContext(
+    layout=ApplicationLayout(package="worked_example"), root=Path("/worked-example")
+)
+"""What a page is rendered against, where no page here reads any of it."""
 
 
 ALPHA = modules.Module(
@@ -238,7 +248,7 @@ def test_documents_subapps_and_tool_groups_each_narrow_on_their_own() -> None:
     )
     alpha = taken[0]
 
-    assert modules.composed_documents(taken) == []
+    assert modules.composed_documents(taken, CONTEXT) == []
     assert alpha.subapps == []
     assert alpha.tool_groups == []
 

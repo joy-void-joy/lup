@@ -54,7 +54,7 @@ src/lup_template/
     ├── composition.py       # What this project publishes through each native target, and what writes it.
     └── content/             # Declaration leaves of the harness graph.
         ├── assets/          # Typed harness content declarations.
-        ├── catalog.py       # This repository's harness content: what it inherits, and what only it has.
+        ├── catalog.py       # Which modules this repository takes, and what it changed about each.
         ├── docs/            # Typed source for every document under ``docs/``.
         │   ├── catalog.py   # Every document this repository publishes under ``docs/``.
         │   ├── decisions.py # Architectural decisions behind the development tooling.
@@ -62,6 +62,13 @@ src/lup_template/
         │   └── template.py  # Guide to ``src/lup_template``, the application built on the library.
         ├── guidance.py      # Canonical repository guidance.
         ├── image.py         # The container this repository's agent sessions run in.
+        ├── modules/
+        │   ├── catalog.py   # The modules only this repository has, each spec beside its builder.
+        │   ├── examples.py  # The scaffold demonstrating itself, which no adopter runs.
+        │   ├── project.py   # What this repository is, and what it expects of a session working in it.
+        │   ├── specs.py     # What the modules only this repository has are called, and what they are for.
+        │   ├── template_init.py # Standing a lup project up, and keeping it configured once it is standing.
+        │   └── upstream.py  # Keeping a project in step with what it was built from.
         ├── provenance.py    # What a project settles about where its lup came from.
         ├── requirements.py  # The external programs this repository needs, and what going without costs.
         ├── settings.py      # What this repository grants, refuses, and enables for itself.

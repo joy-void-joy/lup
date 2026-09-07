@@ -699,7 +699,7 @@ def scan_reports(
             f"{roster}: {name}"
             for roster, names in (
                 ("sub-app", project.subapps.retired),
-                ("skill or agent", project.content.retired),
+                ("module", project.modules.declined()),
                 ("rule", project.rules.retired),
             )
             for name in names

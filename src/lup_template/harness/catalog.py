@@ -44,9 +44,13 @@ from lup.policy.boundary import depends_on
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import project_root, read_project_name
 from lup_template.agent.toolsets import tool_group_names
-from lup_template.harness.content.catalog import AGENTS, CONTENT_SELECTION, SKILLS
+from lup_template.harness.content.catalog import (
+    AGENTS,
+    GUIDANCE,
+    MODULE_SELECTION,
+    SKILLS,
+)
 from lup_template.devtools.subapps import SELECTION
-from lup_template.harness.content.guidance import document as guidance_document
 from lup_template.harness.content.image import agent_image
 from lup_template.harness.content.requirements import manifest
 from lup_template.harness.content.shell_vocabulary import (
@@ -307,7 +311,7 @@ def dev_project() -> DevProject:
                 components=["lup"],
             )
         ],
-        content=CONTENT_SELECTION,
+        modules=MODULE_SELECTION,
         path_roles=declared_role_rows(list(hooks.path_roles)),
         # This file: what this repository settled about itself is written
         # here, so `dev seams` reads and edits it rather than looking
@@ -613,7 +617,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         requirements=manifest(),
         image=agent_image(),
         plugins=[plugin],
-        guidance=guidance_document(plugin.hooks.rules if plugin.hooks else None),
+        guidance=GUIDANCE,
         resolver=ResolveSpec(
             id="resolver.lup",
             worker_identity="resolver-worker",

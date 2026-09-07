@@ -17,7 +17,7 @@ from lup.harness.codescan.boundaries import ApplicationRoots
 from lup.harness.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.subapps import SubAppSelection
-from lup.harness.models import ContentSelection
+from lup.harness.modules import ModuleSelection
 from lup.policy.kernel.rows import PathRoleRow
 
 
@@ -148,14 +148,19 @@ class DevProject(BaseModel, frozen=True):
     that only says no.
     """
 
-    content: ContentSelection = ContentSelection()
-    """Which of the library's skills and agents this repository's plugin ships.
+    modules: ModuleSelection = ModuleSelection()
+    """Which of the library's modules this project takes, and what it changed.
 
     Carried beside the other two because every one of them is the same kind of
     fact — something this repository declined that the library still ships —
     and the gate reports them together. A retirement nobody can see becomes
     permanent by default: the roster it was taken from goes on growing, and
-    the project that opted out once never meets the decision again."""
+    the project that opted out once never meets the decision again.
+
+    A module rather than a skill, because a subject declined at one surface and
+    kept at four is the failure this replaced: the skills went and the page,
+    the sub-app, the tool group and the paragraph stayed, each looking like a
+    decision somebody made."""
 
     roots: ApplicationRoots = ApplicationRoots()
     """Where this application is allowed to name a concrete implementation.

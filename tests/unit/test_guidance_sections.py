@@ -13,13 +13,10 @@ import lup.harness.models as models
 from lup.harness.content import conventions
 from lup.harness.codescan.common import RuleSelection
 from lup.seams import Selection
-from lup_template.harness.content.guidance import (
-    guidance_parts,
-    guidance_sections,
-)
+from lup_template.harness.content.catalog import GUIDANCE, GUIDANCE_SECTIONS
 
-SECTIONS = guidance_sections(RuleSelection())
-"""This repository's document, resolved against a project retiring nothing."""
+SECTIONS = GUIDANCE_SECTIONS
+"""This repository's document, resolved against the modules it takes."""
 
 
 def test_every_section_is_named_once() -> None:
@@ -35,10 +32,34 @@ def test_every_section_is_named_once() -> None:
 
 
 def test_the_parts_are_the_sections_read_end_to_end() -> None:
-    """Identity is a layer over the document, never a second copy of it."""
-    assert guidance_parts(RuleSelection()) == [
-        part for section in SECTIONS for part in section.parts
-    ]
+    """Identity is a layer over the document, never a second copy of it.
+
+    One thing is not a section's to decide: how many blank lines the document
+    ends with. Each ends with the separator before the next, so the last is
+    trimmed to the one newline the artifact rule wants — which is why the tail
+    is asserted separately rather than being allowed to drift.
+    """
+    spliced = [part for section in SECTIONS for part in section.parts]
+
+    assert GUIDANCE.parts[:-1] == spliced[:-1]
+    assert (GUIDANCE.parts[-1].text_payload or "").endswith("\n")
+    assert not (GUIDANCE.parts[-1].text_payload or "").endswith("\n\n")
+
+
+def test_the_document_ends_in_one_newline_whoever_closes_it() -> None:
+    """Which section lands last is a module selection, not a formatting choice.
+
+    A project declining the subject that happened to close the document must
+    not thereby produce a malformed artifact, so the normalisation is asserted
+    against a document whose final section is one that ends in a blank line.
+    """
+    doubled = models.GuidanceSection(
+        id="doubled", chapter="meta", parts=[models.TextPart(text="Closing.\n\n")]
+    )
+
+    parts = models.sectioned([doubled])
+
+    assert [part.text_payload for part in parts] == ["Closing.\n"]
 
 
 def test_a_retired_section_leaves_the_document() -> None:

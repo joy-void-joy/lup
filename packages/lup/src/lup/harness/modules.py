@@ -28,10 +28,12 @@ the vocabulary they decided in. ``requires`` gives it, before anything builds.
 """
 
 from collections.abc import Callable
+from pathlib import Path
 
 from pydantic import BaseModel
 
 import lup.harness.models as models
+from lup.harness.content.application import ApplicationLayout
 from lup.seams import SelectableRule, Selection
 
 
@@ -61,8 +63,80 @@ class ModuleSpec(SelectableRule, frozen=True):
     requires: list[str] = []
     """Modules this one's declarations reach into, by id."""
 
+    scaffold_only: bool = False
+    """Whether only the repository shipping the scaffold is offered this.
+
+    Not a default but the absence of a choice: a module demonstrating the
+    scaffold to itself has nothing to say to a project built from it, so it is
+    left out of what ``dev modules`` offers and what ``/lup:init`` asks about
+    rather than being offered and declined. ``examples`` is the whole of it —
+    a directory composing lup's own runtime against lup's own README, which an
+    adopter inherits as a suite it must keep green and will never run.
+    """
+
     def selection_id(self) -> str:
         return self.id
+
+
+class DocumentContext(BaseModel, frozen=True):
+    """Everything a page under ``docs/`` may need that its module cannot know.
+
+    Three of these pages describe the composition rather than a subject — the
+    roster audit, the parity table, the index — so they are functions of what
+    every *other* module contributed. A module holding them as built values
+    would have to be built after the content it describes, which is the module
+    it is part of; passing the composed roster instead breaks that circle in
+    the one direction it actually runs, because content depends on no page.
+
+    The rest name a checkout: one resolves fixture citations against lup's own
+    suite and one draws the application's layout by walking it, so importing a
+    document module reads no filesystem and building one does.
+    """
+
+    layout: ApplicationLayout
+    """Where the reading project's own code sits, for prose that names it."""
+
+    root: Path
+    """The checkout being described, for the pages that walk or cite one."""
+
+    skills: list[models.Skill] = []
+    agents: list[models.Agent] = []
+    """The composed roster, for the pages whose subject is the roster itself."""
+
+    plugin: models.NativeName = "lup"
+    """What the composed plugin is called, for an invocation a page renders."""
+
+    claude_decodes: list[str] = []
+    codex_decodes: list[str] = []
+    """What each runtime's hook decodes, for the parity audit.
+
+    Only a root composing the concrete runtimes may name these, which is why
+    they arrive here rather than being read where the page is declared.
+    """
+
+    library_checkout: Path | None = None
+    """The tree holding lup's own suite, or ``None`` where lup is a distribution."""
+
+
+class DocumentEntry(SelectableRule, frozen=True, arbitrary_types_allowed=True):
+    """One page a module publishes: what it is called, and how it is rendered.
+
+    The same pairing :class:`ModuleEntry` and
+    :class:`~lup.devtools.roster.RosterEntry` use, for the same reason. A page
+    is selected, listed and recorded under its semantic id long before anything
+    renders it, and rendering needs a context a listing has no way to build —
+    so the id answers without the builder running, and a project that declined
+    a page never renders it.
+    """
+
+    semantic_id: str
+    """The name ownership records it under, and a project retires it by."""
+
+    build: Callable[[DocumentContext], models.Document]
+    """How the page is rendered, once there is a composition to render it from."""
+
+    def selection_id(self) -> str:
+        return self.semantic_id
 
 
 class Module(BaseModel, frozen=True):
@@ -83,8 +157,8 @@ class Module(BaseModel, frozen=True):
     guidance: list[models.GuidanceSection] = []
     """What it contributes to the always-loaded document, where one is taken."""
 
-    documents: list[models.Document] = []
-    """Pages under ``docs/`` whose subject is this module's."""
+    documents: list[DocumentEntry] = []
+    """Pages under ``docs/`` whose subject is this module's, unrendered."""
 
     tool_groups: list[str] = []
     """MCP tool groups served to a session while this module is adopted."""
@@ -144,7 +218,7 @@ class Adoption(BaseModel, frozen=True):
     module grew one.
     """
 
-    documents: Selection[models.Document] = Selection()
+    documents: Selection[DocumentEntry] = Selection()
     """Which pages under ``docs/`` it publishes, by semantic id, and its own."""
 
     subapps: list[str] = []
@@ -178,6 +252,16 @@ class ModuleSelection(BaseModel, frozen=True):
                 return entry
         return Adoption(module=module_id)
 
+    def declined(self) -> list[str]:
+        """Modules this project turned off outright, by id.
+
+        Only the explicit refusals: a module left to its own default said
+        nothing and is nobody's decision to meet again, while one written down
+        as ``taken=False`` is a choice somebody made once against a roster that
+        has been growing ever since.
+        """
+        return [entry.module for entry in self.adoptions if entry.taken is False]
+
     def takes(self, spec: ModuleSpec) -> bool:
         """Whether this project has a module, deferring where it stated nothing."""
         taken = self.adoption(spec.id).taken
@@ -192,11 +276,16 @@ class ModuleSelection(BaseModel, frozen=True):
         project actually ships reads it off one value.
         """
         entry = self.adoption(module.spec.id)
-        sections = [] if entry.loads_guidance is False else module.guidance
+        # `loads_guidance` is the coarse answer and it is coarse on purpose: a
+        # module whose prose the project declined contributes none, including
+        # the sections the project itself wrote about that subject. Resolving
+        # the project's overrides against an emptied list would keep those,
+        # which reads as a module speaking after being told not to.
+        silent = entry.loads_guidance is False
         return Module(
             spec=module.spec,
             content=module.content.selected(entry.content),
-            guidance=entry.guidance.over(sections),
+            guidance=[] if silent else entry.guidance.over(module.guidance),
             documents=entry.documents.over(module.documents),
             tool_groups=[
                 group for group in module.tool_groups if group not in entry.tool_groups
@@ -234,6 +323,42 @@ def unmet_requirements(specs: list[ModuleSpec]) -> list[str]:
     ]
 
 
+def scaffold_selection(
+    specs: list[ModuleSpec], adoptions: list[Adoption] | None = None
+) -> ModuleSelection:
+    """What the repository shipping the scaffold takes: everything, quietly.
+
+    A scaffold is the demonstration of its own machinery, so it takes every
+    module it ships — a subject nobody here composes is a subject nobody here
+    would notice breaking. What it does not do is carry every module's prose,
+    because taking a module for its code and being told about it in every
+    session are different questions, and the always-loaded document is the one
+    surface where the second is paid for whether or not the subject comes up.
+
+    So the rule is derived rather than written down: a module offered to
+    adopters is one this repository is presumed to work in, and its section
+    loads; a module off by default is one most projects do not have, and the
+    scaffold takes it without teaching it. Deriving matters more than the rule
+    — a hand-kept list of which modules speak would go stale the moment the
+    library grew one, and the copy that fell behind reads as a decision.
+
+    Two answers are derived and the rest is the project's. Whatever a scaffold
+    stated about a module — a skill it added, a section it rewrote, a page it
+    declined — is carried through untouched; only *taken* and *loads_guidance*
+    are answered here, because those are the two a scaffold should not be
+    settling module by module.
+    """
+    stated = {entry.module: entry for entry in adoptions or []}
+    return ModuleSelection(
+        adoptions=[
+            (stated.get(spec.id) or Adoption(module=spec.id)).model_copy(
+                update={"taken": True, "loads_guidance": spec.default_on}
+            )
+            for spec in specs
+        ]
+    )
+
+
 def adopted(
     entries: list[ModuleEntry], selection: ModuleSelection | None = None
 ) -> list[Module]:
@@ -266,9 +391,17 @@ def composed_content(modules: list[Module]) -> models.ContentRoster:
     )
 
 
-def composed_documents(modules: list[Module]) -> list[models.Document]:
-    """Every page the adopted modules publish, in module order."""
-    return [document for module in modules for document in module.documents]
+def composed_documents(
+    modules: list[Module], context: DocumentContext
+) -> list[models.Document]:
+    """Every page the adopted modules publish, rendered, in module order.
+
+    Rendering is here rather than where each module declared its pages because
+    the context is the composition's own: a module knows which pages are its
+    subject, and only the root that gathered every module knows the roster
+    three of them describe.
+    """
+    return [entry.build(context) for module in modules for entry in module.documents]
 
 
 def composed_guidance(
