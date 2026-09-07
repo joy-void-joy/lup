@@ -1888,6 +1888,54 @@ def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
     )
 
 
+def test_the_declared_scopes_admit_the_host_a_documentation_route_starts_at() -> None:
+    """The origin an agent types is judged, not the one it lands on.
+
+    docs.anthropic.com answers the Claude Code paths with a 301 to
+    code.claude.com and the API paths with one to platform.claude.com, both
+    declared. Undeclared, it puts an approval question on the first hop of a
+    route whose destination this project already reads, and the reader has
+    no way to tell that from an origin nobody vetted.
+
+    What that admits is the redirecting host itself. A lookalike
+    registration under it and the marketing site beside it are outside, so
+    the egress this table also grants stays the documentation surface rather
+    than the domain.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("https://docs.anthropic.com/en/docs/claude-code/settings") == "allow"
+    assert effect("https://docs.anthropic.com/en/api/messages") == "allow"
+    assert effect("https://docs.anthropic.com.evil.test/en/api/messages") == "ask"
+    assert effect("https://www.anthropic.com/news") == "ask"
+
+
+def test_the_declared_scopes_carry_the_product_pages_no_manual_answers() -> None:
+    """What the product is and costs is declared as itself, not as a redirect.
+
+    A reference manual answers how a thing is called and what it returns. What
+    it is, what it costs and what it claims are answered on the product's own
+    pages and nowhere in the scopes beside them, so a question about the
+    product rather than the API otherwise buys an approval prompt on every
+    hop. Both spellings are named because a site that redirects apex to www,
+    or the reverse, would put the ask back on the redirect.
+
+    This one widens rather than tidies: the origin is admitted for its own
+    content, and the same table grants it egress.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("https://claude.com/product/overview") == "allow"
+    assert effect("https://www.claude.com/pricing") == "allow"
+    assert effect("https://claude.com.evil.test/pricing") == "ask"
+
+
 def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) -> None:
     bundled = load_bundled_kernel(tmp_path, "fetch")
     scope = UrlScope(

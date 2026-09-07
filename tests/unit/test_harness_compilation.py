@@ -1700,6 +1700,70 @@ def test_generated_claude_hook_records_metadata_only_evidence(tmp_path: Path) ->
     ]
 
 
+def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
+    tmp_path: Path,
+) -> None:
+    """Both journals name the origin that asked, and stop there.
+
+    A refusal that carries no part of the input reads as "a URL was outside
+    the declared scopes" with no way to tell which URL, so the question the
+    journal exists to answer -- what did this session try to reach -- is
+    settled by inference. The origin is the half the scope table is written
+    against; the path and the query are where a token or a document id ride,
+    and they stay out, as does everything else in the call.
+    """
+    url = "https://docs.example.test:8443/private/page?token=do-not-record"
+    body: JsonObject = {"hook_event_name": "PreToolUse"}
+    body.update(session_id="session-four", tool_use_id="tool-four")
+    claude_data, codex_data = tmp_path / "claude", tmp_path / "codex"
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    # lup: ignore[os-environ] — test shell
+    environment = {**os.environ, "CLAUDE_PLUGIN_DATA": str(claude_data)}
+    claude = sh.Command(str(script))(
+        _in=json.dumps({**body, "tool_name": "WebFetch", "tool_input": {"url": url}}),
+        _env=environment,
+        _return_cmd=True,
+    )
+    assert isinstance(claude, sh.RunningCommand)
+    rendered = ClaudeHookOutput.model_validate_json(claude.stdout)
+    assert rendered.hook_specific_output.permission_decision == "ask"
+    codex = codex_hook_result(
+        {**body, "tool_name": "web_fetch", "tool_input": {"url": url}},
+        sandboxed=True,
+        plugin_data=codex_data,
+    )
+    assert codex.exit_code == 2
+
+    for data_root in (claude_data, codex_data):
+        written = (data_root / "hook-events.jsonl").read_text(encoding="utf-8")
+        assert "do-not-record" not in written
+        assert "/private/page" not in written
+        records = [json.loads(line) for line in written.splitlines()]
+        assert [record["phase"] for record in records] == ["started", "completed"]
+        for record in records:
+            assert record["fetch_origin"] == "https://docs.example.test:8443"
+
+
+def test_a_journal_names_no_origin_for_a_tool_that_fetches_nothing(
+    tmp_path: Path,
+) -> None:
+    """The omission stands everywhere the fetch surface does not.
+
+    A shell command names no origin and gets no key for one: what widened is
+    the fetch decision alone, rather than the journal's appetite for input.
+    """
+    body: JsonObject = {"hook_event_name": "PreToolUse", "tool_name": "Bash"}
+    body["tool_input"] = {"command": "git status", "url": ["not-a-url"]}
+    result = codex_hook_result(body, sandboxed=True, plugin_data=tmp_path)
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "hook-events.jsonl").read_text().splitlines()
+    ]
+
+    assert result.exit_code == 0
+    assert all("fetch_origin" not in record for record in records)
+
+
 def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     result = sh.Command(str(script))(
@@ -2751,6 +2815,10 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert isinstance(domains, list)
     assert "code.claude.com" in domains
     assert "github.com" in domains
+    # The redirecting documentation host, and the domain around it left out:
+    # egress reaches exactly the origins the fetch scopes name.
+    assert "docs.anthropic.com" in domains
+    assert "anthropic.com" not in domains
     assert "sandbox" not in project_settings(None)
     assert sandbox["excludedCommands"] == hooks.excluded_commands()
 
