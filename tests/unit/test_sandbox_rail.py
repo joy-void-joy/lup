@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from lup.execution.shell import git
+from lup.harness.image import Image
 from lup.sandbox.rail import (
     AccessibleRoot,
     Lease,
@@ -140,21 +141,25 @@ def test_a_lease_does_not_mount_the_worktree_it_is_for_as_a_sibling(
     assert repository / "mine" not in leased.read_only
 
 
-def test_the_shared_directory_is_writable_with_nothing_held_back_inside_it(
+def test_the_shared_directory_is_writable_with_only_config_held_back(
     repository: Path,
 ) -> None:
-    """`config` has to be writable to cut a worktree, and every entry to remove one.
+    """Every administrative entry writable to remove a worktree, and `config` not.
 
-    One mode rather than three nested ones. A sibling's administrative entry
+    Two modes rather than three nested ones. A sibling's administrative entry
     used to be punched read-only back over the shared directory, which kept
     it present and unwritable -- and made `git worktree remove` impossible
     from inside, since removing a worktree unlinks exactly that entry.
+    `config` is the one hole left, and it costs a session nothing: its keys
+    name programs the host runs, and no step of the workflow writes them.
     """
     layout = repository_layout(repository / "mine")
     leased = lease_for(repository / "mine")
     assert layout.common in leased.writable
     assert layout.common not in leased.read_only
     assert layout.common / "worktrees" / "other" not in leased.read_only
+    assert layout.common / "config" in leased.read_only
+    assert layout.common / "config" not in leased.writable
     assert layout.private in leased.writable
 
 
@@ -174,6 +179,13 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
     Withholding write permission from exactly what the lease calls read-only
     is the cheapest faithful model of the mount table, and it is the only
     shape of test that could have caught a path nobody thought to name.
+
+    For a withheld *file* the model is only half of one, which is why the
+    contents are compared as well. A read-only bind refuses the rename git
+    ends every config write with; a cleared write bit does not, because the
+    directory holding `config.lock` is writable and the rename replaces the
+    file rather than opening it. Permission catches a path git needs, and
+    the byte comparison catches a write git managed to land anyway.
     """
     worktree = repository / "mine"
     leased = lease_for(worktree)
@@ -189,12 +201,13 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
         for found in [layout.common, *layout.common.rglob("*")]
         if read_only_here(leased, found)
     ]
-    # Nothing under the shared directory is withheld any more, and asserting
-    # that rather than deleting the line is the point: this is the contract
-    # the lease now states, so a path reappearing here is a change somebody
-    # has to mean rather than one that slips in.
-    assert withheld == []
+    # `config` alone, and asserting the whole list rather than a membership
+    # is the point: this is the contract the lease states, so a path
+    # appearing here is a change somebody has to mean rather than one that
+    # slips in.
+    assert withheld == [layout.common / "config"]
     restored = {entry: entry.stat().st_mode for entry in withheld}
+    before = (layout.common / "config").read_bytes()
     try:
         for entry in withheld:
             entry.chmod(restored[entry] & ~0o222)
@@ -205,6 +218,7 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
         for entry, mode in restored.items():
             entry.chmod(mode)
     assert git.out("-C", str(worktree), "log", "-1", "--format=%s").strip() == "second"
+    assert (layout.common / "config").read_bytes() == before
 
 
 def test_a_new_worktree_can_be_cut_under_everything_the_lease_withholds(
@@ -230,6 +244,7 @@ def test_a_new_worktree_can_be_cut_under_everything_the_lease_withholds(
     ]
 
     restored = {entry: entry.stat().st_mode for entry in withheld}
+    before = (layout.common / "config").read_bytes()
     try:
         for entry in withheld:
             entry.chmod(restored[entry] & ~0o222)
@@ -248,6 +263,7 @@ def test_a_new_worktree_can_be_cut_under_everything_the_lease_withholds(
             entry.chmod(mode)
     assert (repository / "cut").is_dir()
     assert (layout.common / "worktrees" / "cut").is_dir()
+    assert (layout.common / "config").read_bytes() == before
 
 
 def test_a_sibling_worktree_can_be_removed_under_the_lease(
@@ -273,6 +289,7 @@ def test_a_sibling_worktree_can_be_removed_under_the_lease(
     ]
 
     restored = {entry: entry.stat().st_mode for entry in withheld}
+    before = (layout.common / "config").read_bytes()
     try:
         for entry in withheld:
             entry.chmod(restored[entry] & ~0o222)
@@ -282,6 +299,7 @@ def test_a_sibling_worktree_can_be_removed_under_the_lease(
             entry.chmod(mode)
     assert not (repository / "other").exists()
     assert not (layout.common / "worktrees" / "other").exists()
+    assert (layout.common / "config").read_bytes() == before
 
 
 def test_a_plain_checkout_leases_its_own_git_directory(tmp_path: Path) -> None:
@@ -290,6 +308,49 @@ def test_a_plain_checkout_leases_its_own_git_directory(tmp_path: Path) -> None:
     layout = repository_layout(tmp_path)
     assert not layout.linked()
     assert layout.common in lease_for(tmp_path).writable
+
+
+def test_a_plain_checkout_holds_its_config_back_too(tmp_path: Path) -> None:
+    """The keys naming host programs are the same file in either layout.
+
+    Degenerate here means the shared directory *is* `.git`, not that there
+    is no `config` under it -- so a lease that held the file back only where
+    a worktree happened to be linked would leave the same door open on every
+    plain clone.
+    """
+    git("-C", str(tmp_path), "init", "-q", "-b", "main")
+    layout = repository_layout(tmp_path)
+    assert layout.common / "config" in lease_for(tmp_path).read_only
+    assert layout.common / "config" in worker_lease(tmp_path).read_only
+
+
+def test_a_leased_config_reaches_a_session_read_only_inside_its_writable_share(
+    repository: Path,
+) -> None:
+    """The hole has to survive the argv, not only the lease that declared it.
+
+    A session's mounts are emitted writable first and read-only after, which
+    is what puts this hole behind the base it sits in. Measured on podman
+    6.1.0 the engine sorts by depth and would land it either way, and that is
+    exactly why the order is pinned: the day an engine applies the list as
+    written is the day a writable parent silently fills the hole back in, and
+    a `config` reported held would be writable with nothing saying so.
+    """
+    layout = repository_layout(repository / "mine")
+    leased = lease_for(repository / "mine")
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=repository / "mine",
+        uid=1000,
+        gid=1000,
+        writable=leased.writable,
+        read_only=leased.read_only,
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+    )
+    base = f"{layout.common}:{layout.common}:rw"
+    hole = f"{layout.common / 'config'}:{layout.common / 'config'}:ro"
+    assert started.index(base) < started.index(hole)
 
 
 def test_paths_are_mounted_at_the_names_the_host_calls_them(
@@ -394,6 +455,10 @@ def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
     that names the paths a commit needs can always miss one. Modelled the way
     the checkout's own commit test models it: withhold write permission from
     exactly what the lease calls read-only, then run the real command.
+
+    A declared root gets the same `config` hole the checkout's own lease
+    gets, and asserting the whole list says so: a repository reached across
+    the boundary is one whose config keys run on the same host.
     """
     side = other_repository.parent / "side"
     leased = fleet_lease(repository / "mine", accessible=[AccessibleRoot(path=side)])
@@ -403,9 +468,10 @@ def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
         for found in [layout.common, *layout.common.rglob("*"), other_repository]
         if read_only_here(leased, found)
     ]
-    assert withheld == []
+    assert withheld == [layout.common / "config"]
 
     restored = {entry: entry.stat().st_mode for entry in withheld}
+    before = (layout.common / "config").read_bytes()
     try:
         for entry in withheld:
             entry.chmod(restored[entry] & ~0o222)
@@ -416,6 +482,7 @@ def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
         for entry, mode in restored.items():
             entry.chmod(mode)
     assert git.out("-C", str(side), "log", "-1", "--format=%s").strip() == "second"
+    assert (layout.common / "config").read_bytes() == before
 
 
 def test_a_root_declared_read_only_has_nothing_writable_under_it(
@@ -538,10 +605,10 @@ def test_a_worker_lease_holds_each_sibling_entry_read_only_inside_a_writable_sha
 ) -> None:
     """The nesting the arrangement rests on, and the reason it is per entry.
 
-    The shared directory stays writable so `config` can be written and a
-    worktree cut at all; each sibling's own administrative entry is punched
-    read-only back over it so nothing in here can remove one. The worktree's
-    own entry is left writable, since that is the one it is entitled to move.
+    The shared directory stays writable so a worktree can be cut at all; each
+    sibling's own administrative entry is punched read-only back over it so
+    nothing in here can remove one. The worktree's own entry is left writable,
+    since that is the one it is entitled to move.
     """
     layout = repository_layout(repository / "mine")
     leased = worker_lease(repository / "mine")
@@ -549,6 +616,22 @@ def test_a_worker_lease_holds_each_sibling_entry_read_only_inside_a_writable_sha
     assert layout.common / "worktrees" / "other" in leased.read_only
     assert layout.private in leased.writable
     assert layout.private not in leased.read_only
+
+
+def test_a_worker_lease_holds_the_shared_config_read_only(
+    repository: Path,
+) -> None:
+    """The hole that guards the host rather than a sibling's bookkeeping.
+
+    `core.hooksPath`, `alias.*`, `credential.helper` and `merge.*.driver` each
+    hand git a command line the operator's next git command runs, from a write
+    that lands in no diff. A worker pays nothing to be held out of it: no step
+    of the mandated workflow writes the file.
+    """
+    layout = repository_layout(repository / "mine")
+    leased = worker_lease(repository / "mine")
+    assert layout.common / "config" in leased.read_only
+    assert layout.common / "config" not in leased.writable
 
 
 def test_a_reviewer_lease_is_the_worker_lease_with_nothing_writable(
