@@ -36,6 +36,7 @@ from lup.providers.harness import (
     compile_claude,
     compile_codex,
     guidance_artifacts,
+    startup_deadline_settings,
 )
 from lup.devtools.dev.check import (
     budget_reports,
@@ -3322,20 +3323,30 @@ def test_the_widest_declared_deadline_lands_in_the_settings_env() -> None:
     """The runtime without a per-server spelling reads one global variable.
 
     ``MCP_TIMEOUT`` is milliseconds and covers every server the session
-    starts, so the settings artifact renders the widest declared deadline —
-    and renders the project's own env block over it, since a repository
-    spelling the variable itself has made the judgement directly.
+    starts, so the adapter renders the widest declared deadline — under the
+    project's own env block, since a repository spelling the variable itself
+    has made the judgement directly.
     """
-    settings = project_settings(portable_harness().plugins[0])
+    plugin = portable_harness().plugins[0]
+    settings = startup_deadline_settings(project_settings(plugin), plugin)
     env = settings["env"]
     assert isinstance(env, dict)
     assert env["MCP_TIMEOUT"] == "60000"
     assert env["CLAUDE_CODE_THISTLE_GREBE"] == "default"
 
 
+def test_a_project_spelling_the_timeout_itself_outranks_the_derivation() -> None:
+    plugin = portable_harness().plugins[0]
+    spelled = startup_deadline_settings({"env": {"MCP_TIMEOUT": "5000"}}, plugin)
+    env = spelled["env"]
+    assert isinstance(env, dict)
+    assert env["MCP_TIMEOUT"] == "5000"
+
+
 def test_no_declared_deadline_leaves_the_settings_env_alone() -> None:
     """Stripped declarations render no opinion into the runtime's env."""
-    settings = project_settings(undeadlined_harness().plugins[0])
+    plugin = undeadlined_harness().plugins[0]
+    settings = startup_deadline_settings(project_settings(plugin), plugin)
     env = settings["env"]
     assert isinstance(env, dict)
     assert "MCP_TIMEOUT" not in env

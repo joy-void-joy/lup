@@ -130,28 +130,6 @@ def allowed_network_domains(hooks: HookSet) -> list[str]:
     return list(dict.fromkeys(merged))
 
 
-def startup_timeout_env(plugin: Plugin | None) -> EnvVars:
-    """The declared server deadlines, as the one global knob this runtime offers.
-
-    The other runtime spells a deadline per server and receives each number as
-    written; this one reads only ``MCP_TIMEOUT``, in milliseconds, applied to
-    every server it starts. One knob cannot honor several declarations, so the
-    widest declared deadline is the one that lands — a server that declared
-    nothing rides along under it, which loosens its limit and never tightens
-    one.
-    """
-    if plugin is None:
-        return {}
-    declared = [
-        server.startup_timeout_seconds
-        for server in plugin.mcp_servers
-        if server.startup_timeout_seconds is not None
-    ]
-    if not declared:
-        return {}
-    return {"MCP_TIMEOUT": str(round(max(declared) * 1000))}
-
-
 def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     """Render the settings artifact, deriving every block it can.
 
@@ -163,9 +141,8 @@ def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     its own requirement without displacing the user's or the organization's.
     """
     settings: JsonObject = dict(declared.base)
-    environment = {**startup_timeout_env(plugin), **declared.env}
-    if environment:
-        settings["env"] = dict(environment)
+    if declared.env:
+        settings["env"] = dict(declared.env)
     settings["enabledPlugins"] = dict(declared.official_plugins)
     if plugin is not None:
         # Marketplace names share one global namespace, so this must be the
