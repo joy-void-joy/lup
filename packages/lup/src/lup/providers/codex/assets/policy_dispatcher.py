@@ -396,8 +396,10 @@ def main():
     # read identically without this, which is how #180 reads as the first
     # when it is the second.
     detail = decision.reason + uncorrelated(payload)
+    # The journal is metadata-only: the reason names the refused input, which
+    # for a fetch is the full URL, so only the correlation diagnosis is kept.
     record_hook_evidence(
-        plugin_data_root(), payload, "completed", decision.effect, detail
+        plugin_data_root(), payload, "completed", decision.effect, uncorrelated(payload)
     )
     sys.stderr.write(detail)
     raise SystemExit(2)
