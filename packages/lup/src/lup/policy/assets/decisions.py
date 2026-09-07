@@ -36,6 +36,7 @@ from host import (
     foreign_repository,
     granted_allowances,
     managed_script_roots,
+    outside_this_project,
     patch_write_targets,
     recoverable_write_targets,
     record_deferral,
@@ -385,6 +386,12 @@ def edit_decision(
     directory the runtime started in, because every repo-relative rule matches
     on that answer and a session may be launched anywhere.
 
+    Two facts about where the file sits are read here rather than in the
+    kernel, which sees a path and no filesystem. Another repository's file
+    answers to that repository's conventions and gets the referral; a file in
+    no repository of ours is not this project's code either, which is all the
+    gates about this project's own review notes need to decline it.
+
     The gates this lease holds are read here, per call, rather than resolved
     when the session started: a grant is answered by a human while the session
     that asked for it is still running, and one resolved at launch could not
@@ -398,6 +405,7 @@ def edit_decision(
     edit and one that costs a second on the edits that need it.
     """
     outside_this_repository = foreign_repository(path_text, cwd)
+    beyond_this_project = outside_this_project(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
@@ -430,6 +438,7 @@ def edit_decision(
         operation=operation,
         edit_rules=EDIT_RULES,
         foreign=outside_this_repository,
+        outside_project=beyond_this_project,
     )
 
 

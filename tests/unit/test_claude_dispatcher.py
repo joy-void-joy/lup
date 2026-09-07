@@ -355,6 +355,75 @@ def test_a_sibling_worktree_of_this_repository_is_not_foreign() -> None:
     assert effect == "deny"
 
 
+NOTE_SITE = "packages/lup/src/lup/devtools/dev/antipatterns.py"
+"""A production file of this repository carrying one unique preimage."""
+
+NOTE_PREIMAGE = "from lup.policy.kernel.roles import path_role"
+
+ADDED_NOTE = "# lup: write down what this leaves open"
+"""The note these cases put to the gate.
+
+A string literal rather than a comment, which is what keeps it a subject
+under test instead of an open note this file owes work on.
+"""
+
+
+def note_verdict(path: str, cwd: Path) -> tuple[str, str]:
+    """One edit that leaves a review note on *path*, judged from a session cwd."""
+    payload = {
+        **edit_payload(path, NOTE_PREIMAGE, f"{NOTE_PREIMAGE}\n{ADDED_NOTE}", False),
+        "cwd": str(cwd),
+    }
+    specific = decide_from(payload, cwd)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"]), str(
+        specific["permissionDecisionReason"]
+    )
+
+
+@pytest.fixture
+def unversioned_directory(tmp_path: Path) -> Path:
+    """A tree belonging to no repository at all, holding one ordinary file."""
+    work = tmp_path / "notes"
+    work.mkdir()
+    (work / "scratch.py").write_text(f"{NOTE_PREIMAGE}\n", encoding="utf-8")
+    return work
+
+
+def test_a_note_written_outside_every_repository_is_not_this_projects_feedback(
+    unversioned_directory: Path,
+) -> None:
+    """A `# lup:` marker is this project's review instrument, not a syntax.
+
+    Nothing of ours walks a tree outside the repository — `dev check` and
+    `dev comments` read this checkout — so a note left there has no reader to
+    protect and no pass that could ever check a claim against it. Judging it
+    means an agent cannot write down a probe *of* this policy anywhere the
+    policy is not, which is the one place such a probe belongs.
+    """
+    effect, reason = note_verdict(str(unversioned_directory / "scratch.py"), Path.cwd())
+
+    assert effect == "allow"
+    assert "feedback" not in reason
+
+
+def test_a_note_in_this_repositorys_own_file_is_judged_however_it_is_spelled() -> None:
+    """The half that must not move, in both spellings a session sends.
+
+    A session names files absolutely and a shell command names them relative
+    to where it runs, and the same file has to answer the same way through
+    either — otherwise the scoping above is an evasion: address a governed
+    file by the spelling that misses, and the gate goes quiet on this
+    repository's own code.
+    """
+    absolute = note_verdict(str(Path.cwd().resolve() / NOTE_SITE), Path.cwd())
+    relative = note_verdict(NOTE_SITE, Path.cwd())
+
+    assert absolute == relative
+    assert absolute[0] == "ask"
+    assert "inline review feedback" in absolute[1]
+
+
 def undo_refs(work: Path) -> list[str]:
     """Every snapshot this checkout holds, read the way a human would find them."""
     return [

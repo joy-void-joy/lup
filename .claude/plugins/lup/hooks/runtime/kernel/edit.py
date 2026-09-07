@@ -3139,6 +3139,7 @@ def decide_edit(
     operation: str = "modify",
     edit_rules: list[EditRuleRow] | None = None,
     foreign: bool = False,
+    outside_project: bool = False,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
 
@@ -3166,13 +3167,17 @@ def decide_edit(
     Each gate reaches as far as its own reason. Anti-patterns, the size gate
     and the full-write gate are all about how production code reads and how
     much of it a reviewer can hold at once, so all three stop at production;
-    the marker gate follows the feedback instead and stops only at scratch,
-    where nothing persists to be read. A full write only ever asks about
-    creating a file — an overwrite carries its predecessor as ``before`` —
-    and creating one where the conventions do not reach costs a reviewer
-    nothing, which pure deletion already assumed everywhere. ``marker_files``
-    is the other end of that same reasoning: a file whose content is nothing
-    but its own docstring costs a reviewer nothing either, wherever it sits.
+    the marker gate follows the feedback instead and stops where nobody of
+    ours reads it — at scratch, where nothing persists, and at
+    ``outside_project``, a tree this repository's review passes never walk.
+    That fact says whose code a file is and nothing about what may be done to
+    it, so the gates below answer without consulting it. A full write only
+    ever asks about creating a file — an overwrite carries its predecessor as
+    ``before`` — and creating one where the conventions do not reach costs a
+    reviewer nothing, which pure deletion already assumed everywhere.
+    ``marker_files`` is the other end of that same reasoning: a file whose
+    content is nothing but its own docstring costs a reviewer nothing either,
+    wherever it sits.
     """
     granted = allowances or []
     previous = before or ""
@@ -3285,9 +3290,15 @@ def decide_edit(
         )
     # Feedback is feedback wherever it is left, so this gate follows the file
     # rather than the conventions: a note on a test still names work somebody
-    # owes. Scratch is the exception, and only because nothing there persists
-    # to be read — a note in a disposable tree has no reader to protect.
-    if role != "scratch":
+    # owes. Two exceptions, and both are about who reads the note rather than
+    # about how the code reads. Scratch, because nothing there persists to be
+    # read. And a file outside this project, because a `# lup:` marker there
+    # sits in a tree `dev check` and `dev comments` never walk: no pass of
+    # ours will surface it, so there is no reader to protect and nothing the
+    # claim could be checked against. Held to paths settled as outside — an
+    # absolute or `..` spelling of a file in this repository relativizes back
+    # inside and is judged here like any other.
+    if role != "scratch" and not outside_project:
         marker = marker_decision(previous, updated, python_source)
         if marker is not None:
             return judged(

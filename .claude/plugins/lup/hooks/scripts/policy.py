@@ -676,6 +676,37 @@ def boundary_refusal(failure: str, described: dict[str, list[str]]) -> str:
     )
 
 
+def outside_this_project(path_text: str, root: Path | None) -> bool:
+    """Whether this path sits outside the repository the session is working in.
+
+    Wider than :func:`foreign_repository` by exactly the case that needs no
+    second repository to be decidable: a path belonging to no checkout at all.
+    Where the session's own repository is known, a file in somebody's home
+    directory or under a runtime's scratch root is known not to be in it, and
+    is no more this project's code than another checkout's is.
+
+    The undecidable half stays undecidable. A session in no repository and an
+    unreadable ``.git`` leave this end blank, and nothing can be established
+    to be outside a boundary that could not be read, so both say no.
+
+    A relative path is anchored on the session's own directory before it is
+    asked about, which is where the tool that carried it will resolve it. Any
+    other reading answers "outside" for the ordinary spelling of a file in
+    this repository — the one every gate here exists for — and a ``..`` that
+    genuinely climbs out is settled by the same anchoring rather than by a
+    separate rule.
+
+    What this settles is deliberately narrow: whose code a file is, and never
+    what may be done to it. Only the gates whose subject is this project's own
+    conventions read it; everything about the act itself -- a protected path,
+    a whole-file write, the size of the change -- is answered without it.
+    """
+    if root is None:
+        return False
+    here = shared_git_directory(str(root))
+    return bool(here) and here != shared_git_directory(str(root / path_text))
+
+
 def foreign_repository(path_text: str, root: Path | None) -> bool:
     """Whether this path belongs to a repository other than the session's.
 
@@ -686,17 +717,18 @@ def foreign_repository(path_text: str, root: Path | None) -> bool:
     this project is worked on. :func:`shared_git_directory` is the answer both
     ends can name alike, whichever worktree either of them is sitting in.
 
-    Undecidable answers say no. A path in no repository, a session in no
-    repository, and an unreadable ``.git`` all leave one side blank, and the
-    honest reading of "cannot tell" is that this project's rules still apply:
-    lifting them on a guess would silence the gates on this repository's own
-    files, where keeping them costs friction somewhere that is not ours.
+    A path in no repository says no, because the question here is which
+    *other* repository owns the file and there is none for the referral to
+    name; whether it is this project's code at all is the wider
+    :func:`outside_this_project`. A session in no repository and an unreadable
+    ``.git`` say no because nothing was established, and the honest reading of
+    "cannot tell" is that this project's rules still apply: lifting them on a
+    guess would silence the gates on this repository's own files, where
+    keeping them costs friction somewhere that is not ours.
     """
-    if root is None:
-        return False
-    here = shared_git_directory(str(root))
-    there = shared_git_directory(path_text)
-    return bool(here) and bool(there) and here != there
+    return bool(shared_git_directory(path_text)) and outside_this_project(
+        path_text, root
+    )
 
 
 def publish_edition(path_text: str) -> None:
@@ -1774,6 +1806,12 @@ def edit_decision(
     directory the runtime started in, because every repo-relative rule matches
     on that answer and a session may be launched anywhere.
 
+    Two facts about where the file sits are read here rather than in the
+    kernel, which sees a path and no filesystem. Another repository's file
+    answers to that repository's conventions and gets the referral; a file in
+    no repository of ours is not this project's code either, which is all the
+    gates about this project's own review notes need to decline it.
+
     The gates this lease holds are read here, per call, rather than resolved
     when the session started: a grant is answered by a human while the session
     that asked for it is still running, and one resolved at launch could not
@@ -1787,6 +1825,7 @@ def edit_decision(
     edit and one that costs a second on the edits that need it.
     """
     outside_this_repository = foreign_repository(path_text, cwd)
+    beyond_this_project = outside_this_project(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
@@ -1819,6 +1858,7 @@ def edit_decision(
         operation=operation,
         edit_rules=EDIT_RULES,
         foreign=outside_this_repository,
+        outside_project=beyond_this_project,
     )
 
 
