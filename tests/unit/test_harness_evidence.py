@@ -187,7 +187,12 @@ def test_pull_request_workflow_runs_the_same_gate_a_checkout_runs() -> None:
     workflow = NativeWorkflow.model_validate(document)
     commands = [step.run for step in workflow.jobs["check"].steps if step.run]
 
-    assert commands == ["uv sync --all-extras", DRIFT_COMMAND, CHECK_COMMAND]
+    assert commands == [
+        "uv sync --all-extras",
+        "uv run lup-devtools dev merge-driver",
+        DRIFT_COMMAND,
+        CHECK_COMMAND,
+    ]
 
 
 def test_the_workflow_on_disk_is_the_one_the_declaration_renders() -> None:
