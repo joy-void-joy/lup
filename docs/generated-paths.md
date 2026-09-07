@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 84 artifacts
+## `claude` — 85 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -75,6 +75,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.claude/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
 | `.claude/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.providers.claude.assets.policy_dispatcher |
+| `.claude/plugins/lup/hooks/scripts/policy.sh` | lup.policy.dispatcher |
 | `.claude/plugins/lup/scripts/file_suggest.sh` | src/lup_template/devtools/harness/content/assets/file_suggest.sh |
 | `.claude/settings.json` | lup_template.devtools.harness.content.settings |
 | `docs/README.md` | lup.devtools.harness.content.docs.index |
@@ -97,7 +98,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.devtools.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.devtools.harness.content.docs.upstream_reports |
 
-## `codex` — 65 artifacts
+## `codex` — 66 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -130,6 +131,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.codex/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
 | `.codex/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.providers.codex.assets.policy_dispatcher |
+| `.codex/plugins/lup/hooks/scripts/policy.sh` | lup.policy.dispatcher |
 | `.codex/plugins/lup/skills/add-command/SKILL.md` | lup.devtools.harness.content.skills.add_command |
 | `.codex/plugins/lup/skills/analyze/SKILL.md` | lup.devtools.harness.content.skills.analyze |
 | `.codex/plugins/lup/skills/brainstorm/SKILL.md` | lup_template.devtools.harness.content.skills.brainstorm |

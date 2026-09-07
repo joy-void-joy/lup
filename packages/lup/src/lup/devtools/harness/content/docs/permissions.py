@@ -571,6 +571,24 @@ settled by adding it to a list that asserts allow.
 
 ## Hook execution evidence
 
+Claude reports post-edit diagnostics through its
+[structured post-edit feedback](https://code.claude.com/docs/en/hooks#posttooluse-decision-control):
+exit 0 with `decision: "block"` and a `reason`. This gives the agent the findings
+beside the completed edit. It does not undo the edit or report a crashed hook.
+Diagnostics name the file, line, severity, and message. Codex delivers its
+post-tool findings through stderr and exit 2; its edit events provide only
+the working directory, so per-file type checks run under Claude only.
+
+Both plugins register a short command invoking the generated
+`hooks/scripts/policy.sh`. That guard runs `policy.py`, preserves its output
+and deliberate refusals, and refuses if the dispatcher cannot start or crashes.
+Missing Python calls for installing Python or fixing PATH. Missing or broken
+generated files call for `uv run lup-devtools harness generate all` from a
+terminal outside the affected session. If a merge left conflict markers in
+generated files, settle or abort that merge before regenerating; do not repair
+the generated dispatcher by hand. Recovery instructions live in the guard,
+so the native runtime does not echo them with every diagnostic.
+
 Plugin hooks receive a writable data directory: `PLUGIN_DATA` under Codex and
 `CLAUDE_PLUGIN_DATA` under Claude Code. Each dispatcher appends
 `hook-events.jsonl` there as it runs: a `started` record after input parsing,
@@ -617,7 +635,8 @@ identically to the library.
    `lup.policy.models` events and render decisions back.
 3. **Assembly** — `lup.policy.bundle` reads the kernel source verbatim and
    renders the erased rows as data files; the adapter hook renderers emit
-   `hooks/hooks.json`, the dispatcher `hooks/scripts/policy.py`, and
+   `hooks/hooks.json`, the guard `hooks/scripts/policy.sh`, the dispatcher
+   `hooks/scripts/policy.py`, and
    `hooks/runtime/{kernel.py,policy_data.py}` into each plugin tree.
 4. **Equivalence** — the shared fixture suite runs the same cases through the
    library policies and the assembled runtime and requires identical verdicts.

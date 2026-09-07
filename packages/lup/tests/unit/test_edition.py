@@ -323,7 +323,7 @@ def test_a_diagnostic_for_the_edited_file_is_reported(tmp_path: Path) -> None:
     command = checker(work, report(file))
 
     assert file_diagnostics(str(file), command) == [
-        "error 1: something is wrong",
+        "module.py:1: error: something is wrong",
     ]
 
 
@@ -475,7 +475,7 @@ def test_a_file_quoting_one_marker_is_still_checked(tmp_path: Path) -> None:
     command = checker(work, report(file))
 
     assert file_diagnostics(str(file), command) == [
-        "error 1: something is wrong",
+        "module.py:1: error: something is wrong",
     ]
 
 
@@ -487,7 +487,7 @@ def test_the_readable_suffixes_are_the_callers_to_choose(tmp_path: Path) -> None
 
     assert file_diagnostics(str(file), command) == []
     assert file_diagnostics(str(file), command, suffixes=(".qs",)) == [
-        "error 1: something is wrong",
+        "module.qs:1: error: something is wrong",
     ]
 
 

@@ -926,7 +926,8 @@ def file_diagnostics(
     except (OSError, subprocess.SubprocessError, ValueError, KeyError):
         return []
     return [
-        f"{item['severity']} {item['range']['start']['line'] + 1}: {item['message']}"
+        f"{Path(edited).relative_to(Path(root).resolve())}:"
+        f"{item['range']['start']['line'] + 1}: {item['severity']}: {item['message']}"
         for item in reported
         if item["file"] == edited and item["severity"] != "information"
     ]

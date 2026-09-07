@@ -47,6 +47,7 @@ from lup.policy.dispatcher import (
     compile_dispatcher,
     dispatcher_banner,
     guarded_hook_command,
+    hook_guard_artifact,
 )
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import routed_for
@@ -592,6 +593,9 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     semantic_id=source.id,
                     executable=True,
                     banner=dispatcher_banner(CLAUDE_DISPATCHER),
+                ),
+                hook_guard_artifact(
+                    Path(f".claude/plugins/{self.plugin_name}"), source.id
                 ),
                 *[
                     Artifact(

@@ -324,10 +324,8 @@ def main():
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
             found = observe(payload)
-            # The same one channel Claude's half has, for the same reason:
-            # the call has run, so a clean exit says nothing anybody reads.
-            # Silence when the result checks out, so the channel means
-            # something when it is used.
+            # Codex receives post-tool findings through stderr and exit 2.
+            # A clean result needs no feedback.
             if found:
                 detail = "\n".join(found)
                 record_hook_evidence(

@@ -58,6 +58,7 @@ from lup.policy.dispatcher import (
     compile_dispatcher,
     dispatcher_banner,
     guarded_hook_command,
+    hook_guard_artifact,
 )
 from lup.policy.kernel.commands import no_write_facts, unresolved_evidence
 from lup.policy.kernel.decision import SandboxPlacement
@@ -750,6 +751,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     semantic_id=source.id,
                     executable=True,
                     banner=dispatcher_banner(CODEX_DISPATCHER),
+                ),
+                hook_guard_artifact(
+                    Path(f".codex/plugins/{self.plugin_name}"), source.id
                 ),
                 *[
                     Artifact(

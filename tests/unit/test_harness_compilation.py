@@ -560,10 +560,8 @@ def registered_hook_commands(config: str) -> list[str]:
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
     """The hook starts outside the workspace, so nothing it runs may need uv.
 
-    Asked of the words a shell would split the command into rather than of the
-    text: the guard around the dispatcher names the rebuild command in the
-    diagnostic it writes when the compiled script will not start, and a
-    substring read cannot tell that argument from a call.
+    The registered command stays short because the native UI can echo it.
+    Recovery instructions belong in the generated guard it invokes.
     """
     recipe = claude_target(Path.cwd()).recipe
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
@@ -571,7 +569,9 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
     hook_config = artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content
     for command in registered_hook_commands(hook_config):
         assert "uv" not in shlex.split(command)
-        assert "hooks/scripts/policy.py" in command
+        assert "hooks/scripts/policy.sh" in command
+        assert REGENERATE_COMMAND not in command
+    assert artifacts[Path(".claude/plugins/lup/hooks/scripts/policy.sh")].executable
     assert Path(".claude/plugins/lup/hooks/runtime/kernel/shell.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/policy_data.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/evidence.json") in artifacts
@@ -585,7 +585,9 @@ def test_codex_recipe_registers_semantic_permission_approval() -> None:
     assert '"PermissionRequest"' in hook_config
     for command in registered_hook_commands(hook_config):
         assert "uv" not in shlex.split(command)
-        assert "hooks/scripts/policy.py" in command
+        assert "hooks/scripts/policy.sh" in command
+        assert REGENERATE_COMMAND not in command
+    assert artifacts[Path(".codex/plugins/lup/hooks/scripts/policy.sh")].executable
 
 
 def test_the_watching_event_is_registered_for_editing_tools_alone() -> None:

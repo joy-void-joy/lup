@@ -367,6 +367,7 @@ def observe(payload):
 
 def main():
     payload = {}
+    event = ""
     placed = None
     failed = False
     try:
@@ -379,17 +380,15 @@ def main():
         # approval prompt for work already done.
         if event == "PostToolUse":
             found = observe(payload)
-            # Exit 2 is the one channel this event has to the agent: the tool
-            # already ran, so nothing is undone, and stdout on a clean exit
-            # reaches a debug log nobody reads. Silence when the file checks
-            # out, so the channel means something when it is used.
+            # Structured feedback reaches the agent beside the completed tool.
+            # A file diagnostic is a successful check, so it exits normally.
             if found:
                 detail = "\n".join(found)
                 record_hook_evidence(
                     plugin_data_root(), payload, "completed", "observed", detail
                 )
-                sys.stderr.write(detail)
-                raise SystemExit(2)
+                json.dump({"decision": "block", "reason": detail}, sys.stdout)
+                return
             json.dump({}, sys.stdout)
             record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
@@ -413,6 +412,12 @@ def main():
             "error",
             f"{type(error).__name__}: {error}",
         )
+        if event == "PostToolUse":
+            json.dump(
+                {"decision": "block", "reason": f"Lup post-tool check failed: {error}"},
+                sys.stdout,
+            )
+            return
     json.dump(rendered(decision, payload, placed), sys.stdout)
     if not failed:
         detail = decision.reason if decision.effect == "deny" else None

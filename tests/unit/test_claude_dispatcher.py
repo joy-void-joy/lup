@@ -7,7 +7,10 @@ the harness invokes it.
 """
 
 import importlib.util
+import io
 import json
+import shlex
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -889,6 +892,125 @@ def dispatcher_rewrite(
     rewritten = specific["updatedInput"] if "updatedInput" in specific else None
     assert rewritten is None or isinstance(rewritten, dict)
     return rewritten
+
+
+@pytest.mark.parametrize(
+    "findings",
+    [
+        [],
+        [
+            'evidence.py:188: error: "EVIDENCE_REFRESHED" is not defined',
+            'evidence.py:211: error: Argument missing for parameter "refreshed"',
+        ],
+    ],
+)
+def test_post_tool_findings_are_feedback_without_a_process_error(
+    findings: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    dispatcher = bundled_dispatcher()
+    payload = {"hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": {}}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr(dispatcher, "observe", lambda _payload: findings)
+    monkeypatch.setattr(dispatcher, "plugin_data_root", lambda: tmp_path)
+
+    dispatcher.main()
+
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert json.loads(output.out) == (
+        {"decision": "block", "reason": "\n".join(findings)} if findings else {}
+    )
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "hook-events.jsonl").read_text().splitlines()
+    ]
+    assert events[-1]["phase"] == "completed"
+
+
+def test_a_failed_post_tool_check_does_not_request_permission_for_the_edit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    def failed_check(_payload: object) -> list[str]:
+        raise ValueError("checker output has no range")
+
+    dispatcher = bundled_dispatcher()
+    payload = {"hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": {}}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr(dispatcher, "observe", failed_check)
+    monkeypatch.setattr(dispatcher, "plugin_data_root", lambda: tmp_path)
+
+    dispatcher.main()
+
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert json.loads(output.out) == {
+        "decision": "block",
+        "reason": "Lup post-tool check failed: checker output has no range",
+    }
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "hook-events.jsonl").read_text().splitlines()
+    ]
+    assert events[-1]["phase"] == "failed"
+
+
+def test_registered_post_tool_command_reports_the_edited_file(tmp_path: Path) -> None:
+    work = tmp_path / "repo"
+    initialized_repo(work, tmp_path / "no-hooks")
+    edited = work / "evidence.py"
+    edited.write_text("value = missing\n", encoding="utf-8")
+    diagnostics = {
+        "generalDiagnostics": [
+            {
+                "file": str(edited),
+                "severity": "error",
+                "range": {"start": {"line": 0}},
+                "message": '"missing" is not defined',
+            }
+        ]
+    }
+    binaries = work / ".venv" / "bin"
+    binaries.mkdir(parents=True)
+    declaration = declared_hook_set()
+    for command, report in (
+        (declaration.diagnostics_command, diagnostics),
+        (declaration.repair_command, {"repaired": []}),
+    ):
+        program = binaries / command[0]
+        program.write_text(
+            f"#!/bin/sh\nprintf '%s\\n' {shlex.quote(json.dumps(report))}\n",
+            encoding="utf-8",
+        )
+        program.chmod(0o755)
+    plugin = Path(".claude/plugins/lup").resolve()
+    config = json.loads((plugin / "hooks" / "hooks.json").read_text())
+    command = config["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+
+    done = sh.Command("sh")(
+        "-c",
+        command,
+        _in=json.dumps(
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(edited)},
+            }
+        ),
+        _env={"PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": str(plugin)},
+        _return_cmd=True,
+    )
+
+    assert done.exit_code == 0
+    assert done.stderr == b""
+    assert json.loads(done.stdout) == {
+        "decision": "block",
+        "reason": 'evidence.py:1: error: "missing" is not defined',
+    }
 
 
 def spent_call(spent: bool) -> JsonObject:
