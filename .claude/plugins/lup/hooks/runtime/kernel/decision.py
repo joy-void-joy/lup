@@ -463,7 +463,9 @@ class KernelDecision:
         peers = [
             part.reason
             for part in self.findings
-            if part.effect == self.effect and part.reason and part.reason != self.reason
+            if part.effect == self.effect
+            and part.reason
+            and part.reason not in self.reason
         ]
         if not peers:
             return self.reason
