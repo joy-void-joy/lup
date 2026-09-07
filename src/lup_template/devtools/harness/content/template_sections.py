@@ -34,6 +34,8 @@ plus its sandbox and permission mode; Codex uses generated command hooks where
 the installed CLI supports them plus its workspace sandbox. Unsupported
 approval effects fail closed and are recorded as explicit capability gaps.
 
+Every supported runtime must provide equivalent user-visible behavior, validation, diagnostics, tests, and documentation for each capability. Runtime-specific implementations are valid only when their semantic differences are explicit and evidence-backed.
+
 ### Naming Convention
 
 """

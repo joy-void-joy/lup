@@ -29,6 +29,8 @@ This document is the map of every intended difference and the parity audit of
 every generated artifact family. "Parity" means the same semantic content in
 each platform's native format — never byte parity.
 
+Generated files are one surface, not the boundary of the audit. Launch readiness, authentication, host bridges, delegated-agent paths, runtime diagnostics, and verification must provide equivalent user-visible semantics too; a runtime-specific substitute belongs in this map with the evidence that proves its difference.
+
 ## Where each intended difference lives
 
 | Concern | Claude | Codex | Why it differs (all deliberate) |
@@ -78,6 +80,16 @@ Every family in `.claude/` vs `.codex/`/`.agents/`, with an explicit decision.
 | `settings.json` | `.claude/settings.json` | none | Intentional — Claude-native project settings (plugin enablement, marketplace, permissions, file suggestion). The Codex counterparts are the generated `.codex/config.toml` plus uncommitted personal `config.local.toml`. |
 | `scripts/file_suggest.sh` | `.claude/plugins/lup/scripts/file_suggest.sh` | none | Intentional — wired to Claude's native `fileSuggestion` setting; Codex has no equivalent feature. |
 | Codex-only files | none | `.codex/config.toml`, `.agents/plugins/marketplace.json` | Intentional — native Codex requirements with no Claude analogue (Claude's marketplace lives inside `.claude/plugins/`). |
+
+## Parity audit of runtime capability families
+
+| Family | Required evidence |
+| --- | --- |
+| Launch readiness | Exercise the same native startup path a user runs, including implicit services; `Ready` may describe only checks that completed successfully. |
+| Authentication | Ask the runtime that owns and refreshes a credential, and cover every user-visible service whose authentication path differs from the primary model transport. Never infer managed-auth readiness from one locally decoded token. |
+| Host bridges | Probe the native API each runtime actually calls for clipboard, browser, terminal, and credential access; a command shim proves only callers of that command. Advertised access must match the probe. |
+| Delegated-agent paths | Invoke each declared role through every supported runtime with provider-neutral model tiers and tool capabilities; listing a tool or rendering a declaration does not prove the delegated turn can start. |
+| Diagnostics and tests | Equivalent failures identify the failed capability, owning runtime, recovery, and affected credential or bridge without exposing secrets. Unit fixtures cover native adapters, and a live requirement exercises each supported startup path. |
 
 ## What portable prose may name
 

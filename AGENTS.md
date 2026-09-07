@@ -107,7 +107,7 @@ To **read** code use the `py` group or `codeintel`, which resolves a name throug
 
 `harness generate all` regenerates every native plugin; `harness <runtime>` regenerates one and launches it. Skills and agents render from typed catalogs, one per half, composing both — change the catalog that owns the subject, then regenerate.
 
-**Every runtime, same change.** State and build each answer to every policy, flag, hook, or artifact; name substitutes for unsupported concepts. One runtime's verdicts place no call, so it renders the plain effect. Done means `harness generate all` reconciles both; `docs/permissions.md` maps gaps.
+**Every runtime, same semantics.** A capability is complete only when every supported runtime provides equivalent user-visible behavior, validation, diagnostics, tests, and documentation. State and build each answer to every policy, flag, hook, artifact, launch service, host bridge, and delegated-agent path; a native substitute is valid only when its difference is explicit and evidence-backed. One runtime's verdicts place no call, so it renders the plain effect. Done means `harness generate all` reconciles both; `docs/platform-differentiation.md` audits parity and `docs/permissions.md` maps enforcement gaps.
 
 ---
 
