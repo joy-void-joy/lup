@@ -506,6 +506,18 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # the layout it spelled, and gate every other one in silence.
             diagnostics_command=["pyright", "--outputjson"],
             resolution_command=["lup-devtools", "dev", "refutations"],
+            # The audit's own sweep, narrowed to the file that was just
+            # written. Declared rather than left empty because the edit gate
+            # does not name a dead directive in the prompt: what goes
+            # unmentioned has to go, or it stays in the tree unread.
+            repair_command=[
+                "lup-devtools",
+                "dev",
+                "check",
+                "--antipatterns",
+                "--fix",
+                "--json",
+            ],
             shell_rules=SHELL_RULES,
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.

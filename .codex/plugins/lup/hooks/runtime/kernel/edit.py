@@ -2594,11 +2594,17 @@ def suppression_site(number: int, line: str) -> str:
 def suppression_reason(sites: list[str], creation: bool = False) -> str:
     """Name every suppression this edit declares, not merely that it declares one.
 
-    A permission prompt carries the reason and nothing else, so a verdict
-    that said only what kind of thing happened left the reviewer to find the
-    line themselves — in a diff they were being asked to approve precisely
-    because it needed reading. Every site is listed rather than the first,
-    since approving is one decision over the whole batch.
+    A verdict that said only what kind of thing happened left the reviewer to
+    find the line themselves — in a diff they were being asked to approve
+    precisely because it needed reading. Every site is listed rather than the
+    first, since approving is one decision over the whole batch.
+
+    Where the sites are read is the runtime's to answer and not this
+    function's. One of them puts the reason in the prompt for a command and
+    drops it in the dialog for a write, so the adapter repeats what its own
+    prompt will not carry; another writes the reason out whole and needs
+    nothing. What is owed here is that the words name the sites, in terms any
+    of them can render.
 
     A creation is the case where that matters most and reads least. The whole
     file arrives at once, so its directives are approved along with everything
@@ -2946,12 +2952,37 @@ def antipattern_decision(
             suppression_site(number, original_lines[number - 1]) for number in numbers
         ]
 
+    def silences_nothing(number: int) -> bool:
+        """Whether the bare directive on this line guards no rule these rows see.
+
+        Only the untyped form is answerable here. A typed directive naming an
+        id no row owns belongs to the scanner that does own it, and the
+        refusal loop above has already taken out every typed one this table
+        can call dead — so what is left is the bare form, which the audit
+        reports spurious on exactly this test and `--fix` then deletes.
+
+        Asked only where the tree parsed, because a rule that reads the tree
+        contributes no hit when it did not: without that guard a directive
+        standing over a live violation would look dead for the gate's own
+        blindness, and be dropped from the prompt that exists to name it.
+        """
+        directive = IGNORE_RE.search(original_lines[number - 1])
+        if directive is None or ignore_rule_ids(directive) is not None:
+            return False
+        return not guarded_hits(number)
+
     # Every violation the edit added is covered, so what is left to decide is
     # the suppressions themselves: the ones this edit declares, or the standing
-    # one an added line has moved under.
-    if declared:
+    # one an added line has moved under. A directive that silences nothing is
+    # not among them: naming it would spend the reader's attention on a line
+    # the audit deletes unread, and the listing exists so that what is read
+    # there is what the approval is actually about.
+    listed = [
+        number for number in declared if not (decidable and silences_nothing(number))
+    ]
+    if listed:
         return KernelDecision(
-            suppression, suppression_reason(sites_at(declared), before is None)
+            suppression, suppression_reason(sites_at(listed), before is None)
         )
     if covering:
         return KernelDecision(suppression, suppression_reason(sites_at(list(covering))))
@@ -3093,7 +3124,7 @@ def edit_verdict(
     effect = decided["effect"]
     if effect not in ("allow", "ask", "deny", "defer"):
         return default
-    return KernelDecision(effect, decided["reason"] or default.reason)
+    return default.revised(effect=effect, reason=decided["reason"] or default.reason)
 
 
 def edit_threshold(

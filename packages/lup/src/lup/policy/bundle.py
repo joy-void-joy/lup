@@ -490,6 +490,7 @@ def render_policy_data(
     auto_escape_prefixes: list[list[str]],
     diagnostics_command: list[str],
     resolution_command: list[str],
+    repair_command: list[str],
     rules: AntiPatternSet | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
@@ -538,6 +539,7 @@ def render_policy_data(
             + string_rows_literal(diagnostics_command),
             "RESOLUTION_COMMAND: list[str] = "
             + string_rows_literal(resolution_command),
+            "REPAIR_COMMAND: list[str] = " + string_rows_literal(repair_command),
         ]
     )
     return (

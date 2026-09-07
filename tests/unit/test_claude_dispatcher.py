@@ -1085,3 +1085,44 @@ def test_a_container_whose_placement_went_unmeasured_still_asks(
     unmeasured = {**CONTAINED_LEDGER, "delivered": ["question_relay"]}
 
     assert unjudged_effect_under(unmeasured, tmp_path, monkeypatch) == "ask"
+
+
+def created(path: str, content: str) -> JsonObject:
+    return {"tool_name": "Write", "tool_input": {"file_path": path, "content": content}}
+
+
+def test_a_write_announces_what_its_own_prompt_will_not_show() -> None:
+    """This runtime's create-file dialog takes nothing from a hook.
+
+    Measured: a `Write` ask renders as that dialog's own path, preview and two
+    answers, and the reason handed alongside it is dropped — where the same
+    field is shown for a shell command. So a verdict that enumerated something
+    the approver cannot otherwise see says it through the one field this
+    runtime displays to a person from every hook.
+    """
+    carrying = "value: Any = 1  # lup: ignore[any-type]\n"
+    decision = decide(created("src/lup_template/zz_probe.py", carrying))
+    announcement = decision["systemMessage"]
+
+    assert isinstance(announcement, str)
+    assert "arrives carrying antipattern suppressions" in announcement
+    assert "line 1 silences any-type" in announcement
+
+
+def test_a_reason_naming_only_its_category_announces_nothing() -> None:
+    """The dialog already shows the file and its content.
+
+    Repeating that a whole file is being written adds a line telling the
+    reader what they are looking at, which is how a channel that exists to
+    carry evidence becomes one nobody reads.
+    """
+    decision = decide(created("src/lup_template/zz_plain.py", "value = 1\n"))
+
+    assert "systemMessage" not in decision
+
+
+def test_a_shell_prompt_is_not_told_twice() -> None:
+    """A command's prompt renders the reason itself, so announcing it repeats it."""
+    decision = decide({"tool_name": "Bash", "tool_input": {"command": "rm -rf src"}})
+
+    assert "systemMessage" not in decision

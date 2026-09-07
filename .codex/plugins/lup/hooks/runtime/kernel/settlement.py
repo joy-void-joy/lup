@@ -336,6 +336,7 @@ class TrappedPlacement(SettlementRule):
             reason=SANDBOX_TRAPPED_REASON,
             cause="capability",
             capability="host_executor",
+            rule=self.id,
         )
 
 

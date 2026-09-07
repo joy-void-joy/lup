@@ -1558,6 +1558,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             auto_escape_prefixes=[],
             diagnostics_command=[],
             resolution_command=[],
+            repair_command=[],
         ),
         encoding="utf-8",
     )
@@ -2973,6 +2974,30 @@ def test_a_creation_names_the_suppressions_it_arrives_carrying() -> None:
     assert policy.decide(plain).reason == "full-file writes require approval"
 
 
+def test_a_creation_names_only_the_suppressions_that_silence_something() -> None:
+    """A directive guarding no rule is not part of what is being approved.
+
+    Naming one spends the reader's attention on a line the audit deletes
+    unread, and a listing that mixes a dead directive in with a live one
+    teaches that the listing is noise — which costs the live one its reader.
+    """
+    policy = EditPolicy(protected=[])
+    mixed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("src/new.py"),
+                after='"""Doc."""\n\n'
+                "value: Any = 1  # lup: ignore[any-type]\n"
+                'other: str = "x"  # lup: ignore\n',
+            )
+        ]
+    )
+    decision = policy.decide(mixed)
+
+    assert "line 3 silences any-type" in decision.reason
+    assert "line 4" not in decision.reason
+
+
 def test_dropping_one_rule_from_a_suppression_needs_no_approval() -> None:
     """Shrinking a directive is what the audit asks for when it calls one spurious.
 
@@ -3024,18 +3049,28 @@ def test_widening_a_suppression_still_asks() -> None:
 
 
 def test_a_named_suppression_going_bare_still_asks() -> None:
-    """Dropping the names widens the directive to every rule."""
+    """Dropping the names widens the directive to every rule.
+
+    Over something, or over nothing. A bare directive standing above a line
+    that trips no rule silences no rule, and the audit reports that one
+    spurious — so the gate leaves it to the sweep that deletes it rather than
+    spending an approval on a directive that is about to go.
+    """
     policy = EditPolicy(protected=[])
-    widened = EditBatch(
-        changes=[
-            EditChange(
-                path=Path("a.py"),
-                before="# lup: ignore[any-type]\nvalue = 1\n",
-                after="# lup: ignore\nvalue = 1\n",
-            )
-        ]
-    )
-    assert policy.decide(widened).effect == "ask"
+
+    def widened(guarded: str) -> EditBatch:
+        return EditBatch(
+            changes=[
+                EditChange(
+                    path=Path("a.py"),
+                    before=f"# lup: ignore[any-type]\n{guarded}\n",
+                    after=f"# lup: ignore\n{guarded}\n",
+                )
+            ]
+        )
+
+    assert policy.decide(widened("value: Any = 1")).effect == "ask"
+    assert policy.decide(widened("value = 1")).effect == "allow"
 
 
 def test_prose_mentioning_a_suppression_is_not_declaring_one() -> None:
