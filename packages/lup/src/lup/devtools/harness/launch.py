@@ -36,6 +36,12 @@ from lup.providers.codex.harness_runtime import (
     PluginCacheConfig,
 )
 from lup.providers.codex.transcripts import CodexTranscripts
+from lup.coordination.identity import (
+    MEMBER_ENV,
+    derived_cli_name,
+    member_environment,
+    mint_member_id,
+)
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
@@ -1357,6 +1363,19 @@ def session_argv(
     session that had already ended.
     """
     banner = cleared.banner
+    # Minted where both runtimes pass through, so a session's coordination
+    # address is a fact about having been launched rather than about which
+    # CLI was launched. Exported rather than derived because the session's
+    # tool server and its hooks are separate processes with no channel
+    # between them, and an id each worked out for itself would put one
+    # session on the roster twice.
+    #
+    # Overwritten rather than respected. The variable is a launcher's claim to
+    # have minted the id behind it, and an operator who happened to have it
+    # exported would otherwise hand their own roster address to every session
+    # they start — two peers answering to one id, which is the one thing the
+    # durable id exists to rule out.
+    environment.update(member_environment(mint_member_id()))
 
     # Settled once and handed to everything that needs it. Resolving a
     # registration can clone it, so a second resolution would be a second
@@ -1401,9 +1420,19 @@ def session_argv(
         config_home,
         credential if credential.exists() else None,
         login,
-        inherited_environment=(
-            [MAX_RECURSIVE_AGENT_ENV] if MAX_RECURSIVE_AGENT_ENV in environment else []
-        ),
+        inherited_environment=[
+            # By name, so the value crosses out of this process's environment
+            # rather than through an argv every process on the host can read.
+            # The member id is not a secret, but a session whose id reached it
+            # by a second route would be a session two mechanisms could
+            # disagree about.
+            *(
+                [MAX_RECURSIVE_AGENT_ENV]
+                if MAX_RECURSIVE_AGENT_ENV in environment
+                else []
+            ),
+            MEMBER_ENV,
+        ],
         banner=banner,
         sentinels=sentinels,
         accessible=accessible,
@@ -1552,6 +1581,18 @@ def launch_claude(
                     else []
                 ),
             ),
+            # What this runtime shows in its own chrome, made to agree with
+            # the name the roster answers to. The roster's name lives in
+            # `names.jsonl` and is what addressing resolves through, so this
+            # is a display detail rather than the identity — which is why
+            # Codex, whose launch takes no such flag, loses nothing by it: a
+            # peer there is addressed by exactly the same name, and renames
+            # through the same command.
+            #
+            # Ahead of `extra_args`, so a caller who named their own session
+            # still wins.
+            "--name",
+            derived_cli_name(root),
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]
