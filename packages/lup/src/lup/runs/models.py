@@ -114,6 +114,46 @@ class UnitAttempt(BaseModel, frozen=True):
         return f"{self.step}/{self.item}"
 
 
+class UnitProgress(BaseModel, frozen=True):
+    """What one unit says about its own inside while it is still running.
+
+    A claim says a unit started and is still held. It cannot say whether the
+    unit is forty percent through or spinning at zero, and from outside those
+    read alike — so the unit publishes the one thing only it knows, how much
+    of its own work it has done, and everything else is derived from that by
+    whoever is watching.
+
+    It carries no rate and no estimate. Two readings of ``done`` and the clock
+    between them give both, and the reader is what holds two readings; a
+    writer's own number would be taken over one burst, which is exactly the
+    estimate :mod:`lup.runs.progress` exists to refuse.
+
+    The record lives in the unit's own workspace rather than beside its claim
+    because it outlives the claim: a unit that died at 2870 of 3000 in phase
+    ``fit`` leaves that reading next to its traceback, where whoever comes
+    back to the failure is already looking.
+    """
+
+    done: int = 0
+    total: int | None = None
+    """How much there is to do, or None when the unit cannot know its budget."""
+
+    phase: str = ""
+    """Which part of its own work the unit is in — a word, never a number."""
+
+    detail: dict[str, JsonValue] = {}
+    """The unit's own vocabulary, rendered as sent and never filtered."""
+
+    reported_at: datetime = Field(default_factory=utc_now)
+
+    @property
+    def fraction(self) -> float | None:
+        """How much of the unit is done, or None when it declared no budget."""
+        if self.total is None or self.total <= 0:
+            return None
+        return min(1.0, self.done / self.total)
+
+
 class StepRecord(BaseModel, frozen=True):
     """One scheduled step as the manifest carries it.
 

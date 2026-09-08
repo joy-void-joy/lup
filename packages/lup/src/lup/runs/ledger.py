@@ -22,6 +22,7 @@ from lup.runs.models import (
     RunManifest,
     RunSummary,
     UnitAttempt,
+    UnitProgress,
     UnitResult,
 )
 
@@ -39,8 +40,62 @@ here, so the window has to cover the worst of them.
 """
 
 
+# lup: ignore[constant-declaration] — an identity this layout defines, named
+# like the manifest and the summary: a writer in another language and a reader
+# in this one meet only by spelling it alike, so a caller free to replace it
+# would be a caller free to publish where nothing looks
+PROGRESS_RECORD = "progress.json"
+"""What a unit's own progress record is called inside its workspace."""
+
+
+# lup: ignore[constant-declaration] — the runtime's own binding, the same
+# string at both ends of the doorway, and the only thing a unit in another
+# language is given to find its workspace by
+WORKSPACE_ENV = "LUP_RUN_WORKSPACE"
+"""The variable a shell unit finds its own workspace under.
+
+The runtime binds it above every shell command and ``run report`` reads it
+back to know where to write.
+"""
+
+# lup: ignore[constant-declaration] — the layout's name for a shell unit's
+# output, written by the runtime and read by the monitor
+STDOUT_RECORD = "stdout.txt"
+"""What a shell unit's output is called inside its workspace."""
+
+# lup: ignore[constant-declaration] — the layout's name for a shell unit's
+# errors, beside the output it is read with
+STDERR_RECORD = "stderr.txt"
+"""What a shell unit's errors are called inside its workspace."""
+
+
+def progress_in(workspace: Path) -> Path:
+    """Where a unit's progress record sits, given only the workspace it owns.
+
+    A shell unit holds ``$LUP_RUN_WORKSPACE`` and nothing else — not the run
+    root, not its own step and item — so the doorway it reports through can
+    only be handed that. Both spellings of the path end here.
+    """
+    return workspace / PROGRESS_RECORD
+
+
+def stdout_in(workspace: Path) -> Path:
+    """Where a shell unit's output goes, which is also where a reader finds it.
+
+    The runtime writes it and the monitor falls back to its last line for a
+    unit that reports nothing, so the name is settled here rather than at
+    each end.
+    """
+    return workspace / STDOUT_RECORD
+
+
+def stderr_in(workspace: Path) -> Path:
+    """Where a shell unit's errors go."""
+    return workspace / STDERR_RECORD
+
+
 class RunningUnit(BaseModel, frozen=True):
-    """A claimed unit, how long it has been going, and whether anybody holds it."""
+    """A claimed unit, how it is going, and whether anybody is still holding it."""
 
     attempt: UnitAttempt
     age_seconds: float
@@ -50,6 +105,22 @@ class RunningUnit(BaseModel, frozen=True):
     """How long since its holder last said it was still working it."""
 
     lease_seconds: float = CLAIM_LEASE_SECONDS
+
+    progress: UnitProgress | None = None
+    """What the unit last said about its own inside, when it says anything.
+
+    Filled by whoever takes the reading rather than by the claim, because a
+    unit that reports nothing is the ordinary case and a claim is complete
+    without it.
+    """
+
+    last_line: str = ""
+    """The last line the unit printed, for one that reports nothing.
+
+    A shell unit writing to stdout has already said what it is doing; the
+    fallback carries that rather than a placeholder, so the only unit showing
+    nothing is one that neither reported nor printed.
+    """
 
     @property
     def slug(self) -> str:
@@ -121,6 +192,37 @@ class RunDirectory(BaseModel, frozen=True):
         computing the same path by hand is how they stop agreeing.
         """
         return self.root / "artifacts" / step / item
+
+    def progress_path(self, step: str, item: str = SINGLE_ITEM) -> Path:
+        """Where one unit publishes how far into its own work it has got.
+
+        Inside the workspace rather than beside the claim, because the claim
+        is dropped the instant the unit lands and this reading is worth most
+        exactly then: a failed unit's last sample sits beside its traceback.
+        """
+        return progress_in(self.workspace(step, item))
+
+    def write_progress(self, step: str, item: str, progress: UnitProgress) -> None:
+        """Publish one unit's reading of itself, replacing the one before it."""
+        publish_atomic(self.progress_path(step, item), progress)
+
+    def read_progress_record(
+        self, step: str, item: str = SINGLE_ITEM
+    ) -> UnitProgress | None:
+        """What one unit last said about itself, or None when it has said nothing.
+
+        A record half-written cannot be seen — every write here is an atomic
+        rename — so one that will not parse is the disk or this reader being
+        wrong, and a reading with none is simply a unit that does not report.
+        """
+        path = self.progress_path(step, item)
+        if not path.is_file():
+            return None
+        try:
+            return UnitProgress.model_validate_json(path.read_text(encoding="utf-8"))
+        except (ValidationError, OSError) as error:
+            logger.warning("unreadable progress record at %s: %s", path, error)
+            return None
 
     def write_manifest(self, manifest: RunManifest) -> None:
         """Record what this run scheduled, replacing any earlier declaration."""
