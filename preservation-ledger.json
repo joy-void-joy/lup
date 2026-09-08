@@ -1,5 +1,5 @@
 {
-  "revision": "efd6ca50f84afb5fa620f9c0b99291aad740dea9",
+  "revision": "4ef2f570aeba058a99421ccbd37a8b86ee2e3f48",
   "roots": [
     "lup",
     "lup_template"
@@ -2240,7 +2240,7 @@
         "register_merge_driver",
         "merge_driver_registered",
         "refuse_a_blocked_registration",
-        "refuse_a_blocked_arming",
+        "report_a_blocked_arming",
         "SetupStep",
         "SetupStep.label",
         "SetupStep.satisfied",
@@ -2256,6 +2256,7 @@
         "ArmedGitGuards.label",
         "ArmedGitGuards.satisfied",
         "ArmedGitGuards.run",
+        "ArmedGitGuards.required",
         "BranchBase",
         "BranchBase.named",
         "BranchBase.current",

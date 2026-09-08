@@ -14,7 +14,9 @@ from lup.devtools.dev.git_guards import (
     DECLARED_GUARDS,
     GitGuard,
     arm,
+    arming_is_refused,
     blocked_arming,
+    hooks_directory,
     read_guards,
 )
 from lup.policy.assets.host import project_environment
@@ -168,30 +170,36 @@ def refuse_a_blocked_registration(root: Path | None = None) -> None:
     refuse_blocked_config_writes(root)
 
 
-def refuse_a_blocked_arming(
+def report_a_blocked_arming(
     guards: list[GitGuard] = DECLARED_GUARDS, root: Path | None = None
 ) -> None:
-    """Stop before an arming write the hooks directory will not take.
+    """Name the guards this clone has not armed, without stopping over them.
 
-    The same pre-flight as :func:`refuse_a_blocked_registration`, over the
-    other thing under the shared directory whose contents name a program the
-    host runs. `<common>/hooks/` holds scripts git executes at the operator's
+    The same pre-flight moment as :func:`refuse_a_blocked_registration`, over
+    the other thing under the shared directory whose contents name a program
+    the host runs, and answered differently. `<common>/hooks/` holds scripts git executes at the operator's
     next commit in any worktree of this repository, so it is held read-only —
     and holding it costs nothing, because arming is a once-per-clone act too:
     hooks resolve through that shared directory, so a guard armed on the host
     covers every worktree cut after it.
 
-    Conditional for the reason the registration's is, and refusing for a
-    reason of its own. Handing back a worktree whose guards could not be
-    armed would hand back one whose commits skip the drift gate, and skip it
-    quietly — a checkout that runs no hook reads exactly like one whose hooks
-    are green. So a run with an arming outstanding is told which moment is
-    outstanding and which host command settles it, before anything is cut.
+    Reported rather than refused, because refusing protects nothing it names.
+    Hooks resolve through the shared directory, so the worktree about to be
+    cut inherits exactly the arming every existing worktree of this clone
+    already commits under: if the guard is stale, every checkout here has been
+    running the stale one all along, and stopping this one creates no exposure
+    it did not already have. What refusing does reach is the work — a clone
+    whose `<common>/hooks/` is read-only cannot arm from inside the sandbox at
+    all, so the gate would stand on every worktree forever, and the way past
+    it is to stop using the command that records a base.
+
+    So the outstanding moment is named and the run continues. The reader is
+    told which host command settles it, which is the whole of what refusing
+    communicated, and keeps the checkout that the refusal cost them.
     """
     diagnosis = blocked_arming(guards, root if root is not None else Path.cwd())
     if diagnosis:
         typer.echo(diagnosis, err=True)
-        raise typer.Exit(1)
 
 
 class SetupStep(BaseModel, ABC, frozen=True):
@@ -272,6 +280,24 @@ class ArmedGitGuards(SetupStep, frozen=True):
     def run(self) -> None:
         for line in arm(self.guards, self.worktree):
             typer.echo(line)
+
+    def required(self) -> bool:
+        """Whether a worktree this step could not finish is unusable.
+
+        Arming writes into `<common>/hooks/`, which every worktree of the
+        clone resolves to and which a confined session may be unable to write
+        at all. Where it is held, no run from here can satisfy this step, and
+        the worktree being cut inherits exactly the arming every other
+        worktree here already commits under — so failing the command would
+        withhold a checkout on every run, permanently, while arming nothing.
+
+        Answered from the directory rather than declared, because the two
+        cases are genuinely different: a clone that can arm and did not is a
+        worktree whose commits would skip the drift gate, and that is worth
+        refusing over. The report names the outstanding moment and the host
+        command that settles it either way.
+        """
+        return not arming_is_refused(hooks_directory(self.worktree))
 
 
 class BranchBase(BaseModel, frozen=True):
@@ -517,7 +543,7 @@ def create(
     `git pr push` and which the pre-push guard judges.
     """
     refuse_a_blocked_registration()
-    refuse_a_blocked_arming(guards)
+    report_a_blocked_arming(guards)
     current_dir = Path.cwd()
 
     tree_dir = get_tree_dir()
