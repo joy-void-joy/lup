@@ -1,5 +1,5 @@
 {
-  "revision": "0b44d4106209cdc91a613cbaa2ab12ba8c47161c",
+  "revision": "efd6ca50f84afb5fa620f9c0b99291aad740dea9",
   "roots": [
     "lup",
     "lup_template"
@@ -5689,9 +5689,12 @@
         "Document.source",
         "Document.document",
         "Document.selection_id",
-        "GUIDANCE_BYTE_BUDGET",
-        "TemplateGuidanceBudget",
-        "TemplateGuidanceBudget.headroom",
+        "GuidanceBudget",
+        "GuidanceBudget.ceiling",
+        "GuidanceBudget.template_headroom",
+        "GuidanceBudget.scaffold_ceiling",
+        "GuidanceBudget.reserve_fits_inside_the_ceiling",
+        "GUIDANCE_BUDGET",
         "document_byte_size",
         "Argument",
         "Argument.name",

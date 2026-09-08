@@ -506,7 +506,7 @@
     {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
-      "sha256": "324fa9ec89a15859a1da74023aceca825189aac0f1e164a5ddd18caeeccc7bcd",
+      "sha256": "c4452a0865af6338043ead998e19d14160ef63a3b9f3d4fb88723c4e11850fe8",
       "semantic_id": "docs.dev-tooling-decisions",
       "executable": false
     },
@@ -541,7 +541,7 @@
     {
       "path": "docs/patterns.md",
       "category": "generated",
-      "sha256": "06d533bb3d759c849170cdc0f977e5623815f0611a64de3616dc28c9c54276d5",
+      "sha256": "70d500e39291f746a4657cbca1239af487299de004b122b50a23561efadaa61c",
       "semantic_id": "docs.patterns",
       "executable": false
     },
