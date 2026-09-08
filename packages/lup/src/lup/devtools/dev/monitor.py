@@ -17,15 +17,25 @@ import typer
 
 from lup.runs.follow import follow, follow_events
 from lup.runs.ledger import RunDirectory
-from lup.runs.progress import read_progress
+from lup.runs.progress import read_progress, render_unit
 
 
 def once(directory: RunDirectory, log: Path | None) -> str:
-    """One reading, rendered as the two lines a person would have watched."""
+    """One reading, rendered as the lines a person would have watched.
+
+    The run's two, then one per running unit — how far into its own work each
+    has got, or the last line it printed. Every one of them, because a reading
+    that showed the first few would read as the whole run; the screen is where
+    the room runs out, not here.
+    """
     reading = read_progress(directory, log)
-    return (
-        f"{reading.name}: {reading.landed}/{reading.total} units landed "
-        f"{reading.postfix()}\n{reading.describe_activity()}"
+    return "\n".join(
+        [
+            f"{reading.name}: {reading.landed}/{reading.total} units landed "
+            f"{reading.postfix()}",
+            reading.describe_activity(),
+            *(render_unit(unit) for unit in reading.running),
+        ]
     )
 
 
