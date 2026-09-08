@@ -24,8 +24,22 @@ change once you know where it goes.
 ```bash
 uv sync                                    # both workspace packages
 uv run lup-devtools setup                  # interactive: keys, integrations
+uv run lup-devtools dev test <paths>       # while iterating: only these files
 uv run lup-devtools dev check              # the local pre-flight bar
 ```
+
+Two commands, because they answer different questions. `dev check` puts both
+test suites, pyright and ruff on the machine at once and costs whichever of
+them finishes last — a couple of minutes — and it is what has to be green
+before a commit. `dev test` runs the files you name, in the suite that
+installs each, and answers in seconds: that is the loop to be in while a
+change is still moving. The gate reports what each of its checks cost, so a
+run that felt slow can be read rather than guessed at.
+
+Run one at a time. Two gates at once are slower than the same two in
+sequence, because each already spreads itself across every core the machine
+has — and a suite reading a repository whose branches another command is
+moving fails on that rather than on the code.
 
 `uv` is the package manager: use `uv add <package>`, never edit
 `pyproject.toml` by hand. Secrets go in `.env.local`, which is gitignored;

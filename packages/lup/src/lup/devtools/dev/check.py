@@ -9,6 +9,7 @@ from functools import partial
 from importlib.util import find_spec
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from time import perf_counter
 
 import sh
 import typer
@@ -55,13 +56,19 @@ from lup.devtools.utils import decode_stderr, uv
 from lup.execution.shell import git
 
 # The suite waits on git subprocesses and hook scripts far more than it
-# computes, so it parallelizes well — but each worker pays a full interpreter
-# boot and package import, and past roughly this many that startup costs more
-# than the concurrency returns. Measured on a 32-core host, the root suite ran
-# in 19.1s under 8 workers, 15.7s under 16, and back up at 18.0s under 24: so
-# `-n auto` on a large host is slower than serial arithmetic suggests, and the
-# count is capped rather than derived from cores. It is bounded by them too,
-# because a cap that suits a large host oversubscribes a laptop.
+# computes — its system time runs to roughly twice its user time — so it
+# parallelizes well, and goes on doing so past the point a worker's own
+# interpreter boot would be expected to cancel the return. Measured on a
+# 32-core host, the root suite alone ran in 673s serial, 102s under 8 workers,
+# 97s under 16, and 88s under 24: more workers is still winning at this cap.
+#
+# Capped regardless, because the gate is not one suite running alone. It puts
+# both test roots and pyright on the host at once, so a count that saturates
+# the machine in isolation buys its own suite's time out of the two phases
+# beside it — and the gate costs whichever of the three finishes last, not the
+# one that was tuned. The cap is what keeps one suite from starving the
+# others. It is bounded by the core count too, because a number that suits
+# this host oversubscribes a laptop.
 TEST_WORKERS = min(16, os.process_cpu_count() or 8)
 
 
@@ -82,6 +89,17 @@ class CheckReport(BaseModel):
     gates: a note asking somebody for something is worth reading, not worth
     refusing a branch over."""
 
+    elapsed: float = 0.0
+    """Seconds this check spent, zero where nothing timed it.
+
+    Carried on the row rather than printed as it goes, for the reason the
+    lines are: checks finish out of order, so a timing echoed on completion
+    would interleave differently every run and could not be read down the
+    page. Zero is the honest reading for a row nobody timed — an in-process
+    sweep costs what the gate's own wall time already accounts for, and a
+    fabricated duration there would invite the reader to optimise a number
+    that measures nothing."""
+
 
 def ran(name: str, command: Callable[[], object], ok: str = "ok") -> CheckReport:
     """One external tool's verdict, carrying what it printed when it failed.
@@ -94,11 +112,17 @@ def ran(name: str, command: Callable[[], object], ok: str = "ok") -> CheckReport
     condition of the environment reads as a crash in the checker. So the two
     are reported the same way and told apart by what the row says.
     """
+    started = perf_counter()
     try:
         command()
     except sh.ErrorReturnCode as error:
         printed = [error.stdout.decode().rstrip()] if error.stdout else []
-        return CheckReport(name=name, passed=False, lines=[f"{name}: FAIL", *printed])
+        return CheckReport(
+            name=name,
+            passed=False,
+            lines=[f"{name}: FAIL", *printed],
+            elapsed=perf_counter() - started,
+        )
     except sh.ForkException as error:
         return CheckReport(
             name=name,
@@ -107,8 +131,35 @@ def ran(name: str, command: Callable[[], object], ok: str = "ok") -> CheckReport
                 f"{name}: FAIL (never started)",
                 *(f"  {line}" for line in str(error).strip().splitlines()),
             ],
+            elapsed=perf_counter() - started,
         )
-    return CheckReport(name=name, lines=[f"{name}: {ok}"])
+    return CheckReport(
+        name=name, lines=[f"{name}: {ok}"], elapsed=perf_counter() - started
+    )
+
+
+def spent(reports: list[CheckReport], started: float) -> str:
+    """What the gate cost, and which rows to attack to make it cost less.
+
+    Appended to the tally rather than printed as a block of its own, because
+    it is read in the same glance: a gate that passed in nine seconds and one
+    that passed in nine minutes ask for different next moves, and a reader who
+    has to hold a stopwatch to tell them apart will not.
+
+    Every timed row is named, ranked. The gate runs its tools at once, so its
+    wall time is the slowest of them rather than their sum — which is exactly
+    why the ranking is the useful half: it says which single row the wall time
+    is waiting on, and what would be waiting on next if that row got faster.
+    An untimed row is left out because it has nothing to say, not to keep the
+    line short.
+    """
+    ranked = sorted(
+        (report for report in reports if report.elapsed),
+        key=lambda report: report.elapsed,
+        reverse=True,
+    )
+    costs = ", ".join(f"{report.name} {report.elapsed:.0f}s" for report in ranked)
+    return f" in {perf_counter() - started:.0f}s" + (f" — {costs}" if costs else "")
 
 
 def non_code_roots(project: DevProject) -> list[str]:
@@ -954,6 +1005,7 @@ def run_checks(
     Pass *fix* to auto-fix formatting and lint issues. ``scope`` narrows the
     note and anti-pattern gates to paths this tree is answerable for.
     """
+    started = perf_counter()
     excluded_roots = non_code_roots(project)
     tools: list[Callable[[], CheckReport]] = [
         partial(ruff_format_check, fix, excluded_roots),
@@ -1006,7 +1058,7 @@ def run_checks(
 
     counted = [report for report in reports if report.counted]
     passed = sum(1 for report in counted if report.passed)
-    typer.echo(f"\n{passed}/{len(counted)} checks passed")
+    typer.echo(f"\n{passed}/{len(counted)} checks passed{spent(reports, started)}")
 
     failed = [report.name for report in counted if not report.passed]
     if failed:
