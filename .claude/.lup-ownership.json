@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "34ab3e949d3c666a89901c78e06ba5ed83ca0f9cdf85442b91c76a4fa606932a",
+  "source_digest": "350aeb3a5a4111998870d63053ed03a9d24b7e692670912c7d061b4fe8f68273",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "84b3a0f06cdc7f9b47217b64b7b697f93366daa78b7f648695103ecc61142df3",
+      "sha256": "bb9d703d5c368aa13281b2a26b2fb6c4b23a7951314d041fdb90cf6ac4c8a396",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "2e83cbf3e72f7a61e8b11ebaa2c46c906e513a440d66fd4f74dcdbea59ef3934",
+      "sha256": "d4b30d559757b6062c32c692762f0a2e5324c68779758d51f576068e8dc8d66a",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -107,7 +107,7 @@
     {
       "path": ".claude/plugins/lup/commands/commit.md",
       "category": "generated",
-      "sha256": "28110cd8110e473946fda9ed89e67ab6c6061ef27b73466320889b272c67b572",
+      "sha256": "27505d404f57f0fe99aefc5ee6181537f3dd4171b22402cd6aee1ded73c975c7",
       "semantic_id": "skill.commit",
       "executable": false
     },
@@ -548,7 +548,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "50d3537fa06dac7313f08ec978d6f35243447c30de414858ca88274c2d078dbf",
+      "sha256": "07a2ff972d18decd1a5a3e40c58a9d82460a1c1a79eca1d33bb665d6e724513c",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

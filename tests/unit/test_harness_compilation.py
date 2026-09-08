@@ -338,6 +338,23 @@ def test_every_published_document_is_generated_and_banners_itself() -> None:
         assert banner.opens(document.path, artifacts[document.path].content)
 
 
+def test_platform_parity_audits_live_runtime_capabilities() -> None:
+    page = next(
+        document.document
+        for document in documents(Path.cwd())
+        if document.path == Path("docs/platform-differentiation.md")
+    )
+    content = claude_prompt_renderer().render(page)
+    for family in (
+        "Launch readiness",
+        "Authentication",
+        "Host bridges",
+        "Delegated-agent paths",
+        "Diagnostics and tests",
+    ):
+        assert f"| {family} |" in content
+
+
 def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
     """Guidance carried links to sections that live only in the adopter template.
 
@@ -518,6 +535,9 @@ def test_codex_tree_renders_the_agents_flavored_template() -> None:
 def test_template_flavors_share_sections_and_differ_natively() -> None:
     claude_render = claude_prompt_renderer().render(TEMPLATE_CLAUDE)
     codex_render = codex_prompt_renderer().render(TEMPLATE_CODEX)
+    parity = "Every supported runtime must provide equivalent user-visible behavior"
+    assert parity in claude_render
+    assert parity in codex_render
 
     def sections(render: str) -> list[str]:
         return [
@@ -536,6 +556,11 @@ def test_template_flavors_share_sections_and_differ_natively() -> None:
     assert "EnterWorktree" in claude_render and "ExitWorktree" in claude_render
     assert "EnterWorktree" not in codex_render
     assert "ExitWorktree" not in codex_render
+
+
+def test_repository_guidance_requires_semantic_parity_on_both_runtimes() -> None:
+    assert "Every runtime, same semantics." in claude_prompt_renderer().render(GUIDANCE)
+    assert "Every runtime, same semantics." in codex_prompt_renderer().render(GUIDANCE)
 
 
 def test_template_flavors_render_the_declared_codeintel_tools() -> None:

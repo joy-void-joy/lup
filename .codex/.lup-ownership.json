@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "34ab3e949d3c666a89901c78e06ba5ed83ca0f9cdf85442b91c76a4fa606932a",
+  "source_digest": "350aeb3a5a4111998870d63053ed03a9d24b7e692670912c7d061b4fe8f68273",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "12fb4db9ac90db0e2132a24f6c0ebdf42608b3ba193df4616054f85a4c34c6be",
+      "sha256": "46b33df0154f5a4dddfe00eaa0ce29628f3104ba3e11214fe4f1d1df5d1fde7f",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -254,7 +254,7 @@
     {
       "path": ".codex/plugins/lup/skills/commit/SKILL.md",
       "category": "generated",
-      "sha256": "c964fda691824cff2c900789326f52ac0cb5362cb72db15f83659e17a0b6377e",
+      "sha256": "52eabc2901b657e80b99ee040b22efec9d6b4f50d1899f8debeb12c1b2aa94f6",
       "semantic_id": "skill.commit",
       "executable": false
     },
@@ -464,7 +464,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "543fe79b03ce34f21ff64781bad505ad5d0a7fe84512233c643f628451aeeab6",
+      "sha256": "fb184a76f774a20a9a233eb7a5a3b6da9f245a58ec261363c1a74bb733677d74",
       "semantic_id": "harness.guidance",
       "executable": false
     }

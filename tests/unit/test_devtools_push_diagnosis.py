@@ -8,12 +8,13 @@ the field and the sentence that separates the two readings.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 import sh
 import typer
 
-from lup.devtools.dev import pr
+from lup.devtools.dev import pr, records
 from lup.devtools import utils
 
 
@@ -56,11 +57,12 @@ class UnreachableGit:
 
 
 @pytest.fixture
-def no_pr(monkeypatch: pytest.MonkeyPatch) -> None:
+def no_pr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A forge with no open request over the branch, so only the push shows."""
     monkeypatch.setattr(utils, "repository_slug", lambda: "owner/name")
     monkeypatch.setattr(pr, "current_branch", lambda: "feat-thing")
     monkeypatch.setattr(pr, "gh", EmptyGh())
+    monkeypatch.setattr(records, "shared_directory_of", lambda _root: tmp_path)
 
 
 def test_a_refused_push_carries_its_reason_into_the_json(
@@ -78,7 +80,10 @@ def test_a_refused_push_carries_its_reason_into_the_json(
 
 
 def test_a_push_that_landed_complains_about_nothing(
-    no_pr: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    no_pr: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(pr, "git", StubGit())
 
@@ -87,6 +92,7 @@ def test_a_push_that_landed_complains_about_nothing(
     reported = json.loads(capsys.readouterr().out)
     assert reported["pushed"] is True
     assert reported["push_complaint"] == ""
+    assert (tmp_path / "lup" / "branches" / "feat-thing.json").is_file()
 
 
 def test_a_branch_the_remote_never_received_is_named_as_such(
