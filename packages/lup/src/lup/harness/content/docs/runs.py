@@ -21,6 +21,7 @@ fully readable — and reading it cannot perturb what it is reading.
   units/<step>/<item>.json   one result per landed unit, written atomically
   attempts/<step>/<item>.json  one claim per unit currently running
   artifacts/<step>/<item>/     whatever a unit produces besides its result
+  artifacts/<step>/<item>/progress.json  how far into its own work a unit is
   run.log                a line each time something happens
   summary.json           how the run ended, written whatever the ending
 ```
@@ -104,6 +105,82 @@ twenty-nine seconds about thirty-six two-hour cells. The estimate here divides
 everything landed so far by the whole elapsed time, which is the only estimate
 bursty landings support. A runtime writing its own bar sets `smoothing=0` for
 the same reason.
+
+## What a unit says while it runs
+
+A claim says a unit started and is still held. It cannot separate a unit forty
+percent through from one spinning at step zero: from outside those read alike,
+and age grows for both at the same rate. So a unit publishes the one thing only
+it knows, into its own workspace:
+
+```
+artifacts/<step>/<item>/progress.json
+```
+
+`done`, an optional `total`, a `phase` — a word, never a number — and a
+`detail` in the unit's own vocabulary. Never a rate and never an estimate:
+those take two readings and the clock between them, and the reader is what
+holds two readings.
+
+The record sits in the workspace rather than beside the claim because it
+outlives the claim: a unit that died at 2870 of 3000 in phase `fit` leaves that
+reading next to its traceback, where whoever comes back to the failure is
+already looking.
+
+### Three doorways, one writer
+
+- A callable step calls `context.report(done=…, total=…, phase=…, detail=…)`.
+  The context knows the workspace, so the body names no path.
+- A shell unit that can import this library calls
+  `lup.runs.report.report_progress(workspace, done=…)`, taking the workspace
+  from `$LUP_RUN_WORKSPACE` at the call site.
+- A unit in any language at all spawns `uv run lup-devtools run report --done N
+  [--total N] [--phase word] [--detail key=value ...]`, which reads
+  `$LUP_RUN_WORKSPACE` itself. A `--detail` value is read as JSON where it is
+  JSON — `supports=41`, `ok=true`, `shape={"k":1}` — and as text where it is
+  not. A process per report, which is right at one report a second and wrong at
+  a thousand.
+
+All three write through `report_progress`, so the record cannot drift between
+them.
+
+Call it from the loop that does the work rather than at chosen milestones. A
+report landing within a second of the one before it for the same workspace is
+dropped, because progress is a sample rather than a log and the monitor reads
+every two seconds — so the cheapest call site is the right one, and the unit's
+result records how it ended whatever the last sample was.
+
+### What the reader makes of it
+
+`run monitor` draws one line per reporting unit, under the run's own three:
+
+```
+family-3:  41%|████      | 2460/6000, fit · supports=41 · 41 steps/min · eta 0:12:30
+```
+
+The rate and the time left are the monitor's, taken from two readings that
+share a clock. That estimate is honest at this grain in a way the run-level one
+is not: one unit's own work advances steadily, where a run's landings come in
+bursts. A unit that declared no `total` gets a count rather than a bar.
+`detail` renders as sent — the unit's keys, in its order, nothing filtered and
+nothing cut. At most twelve units get a line and the rest are counted on the
+activity line, so a screen never implies it is showing everything.
+
+A unit that reports nothing falls back to the last line it printed, so a shell
+step is readable without cooperating at all. That line is only as fresh as the
+unit's own buffering: one printing without `flush=True` shows a stale line,
+which is the unit's to fix rather than the reader's.
+
+`--events` yields a line when a unit enters a new phase — `solve/family-3
+entered fit at 1200/6000` — and never per sample, so an agent following a
+thousand-unit sweep is woken by changes rather than flooded by counts.
+`--once` prints every running unit's line, which is where a watcher goes for
+the counts themselves.
+
+A landed unit needs nothing new. `outcome` already tallies whatever word a unit
+lands under, so a step setting `outcome="certified"` reads as `certified=6
+failed=2` with nothing added — and a per-key breakdown of `detail` is the
+project's own command over its own results, not the monitor's.
 
 ## Declaring the work
 
