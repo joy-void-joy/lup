@@ -371,15 +371,15 @@ class ResolverCore:
         )
         self.mailbox = QuestionMailbox(self.repository.root)
         self.journal = Journal(self.repository.root)
-        # The run's own ref is the spawner, so a worker telling the humans
-        # something has an address to send it to. It was already constructed
-        # to attribute the run's own journal entries; nothing delivered to it,
-        # so a worker's only route out was a blocking question.
+        # The cohort joins the person itself, so a worker telling the humans
+        # something has an address to send it to. That address used to be the
+        # run's own ref, which was constructed to attribute journal entries and
+        # answered to nothing else; a worker's only route out was a question.
         self.actors = ActorCohort(
             self.repository.root,
             journal=self.journal,
             mail=self.mailbox.mail,
-            spawner=self.journal.run,
+            description=f"resolver run {config.run_id}",
             parallel=config.max_parallel_workers,
             settles=lambda error: settles_the_actor(error, environmental_fault),
         )

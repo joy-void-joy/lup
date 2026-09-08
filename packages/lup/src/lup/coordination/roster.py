@@ -248,6 +248,21 @@ class Roster:
         self.lock_path = path.with_suffix(".lock")
         self.lock = threading.Lock()
 
+    def present(self, actor: ActorRef) -> bool:
+        """Whether this exact round is already standing as a working member.
+
+        The idempotence test, named rather than inlined, because it is asked
+        twice: once outside the lock to keep the common arrival cheap, and once
+        inside it to make the answer binding.
+        """
+        conversation = actor.conversation()
+        return any(
+            member.actor.conversation() == conversation
+            and member.actor.round == actor.round
+            and member.running
+            for member in self.standing()
+        )
+
     def announce(self, actor: ActorRef, arrival: RosterEntry) -> None:
         """Append one arrival, unless the record already has this member present.
 
@@ -265,18 +280,23 @@ class Roster:
         lock sits outside the file lock because ``flock`` is granted per open
         file description rather than per thread, so two threads in one process
         would each hold it and interleave inside the region.
+
+        Read once before taking anything, because the standing case is now the
+        common one: every process opening a view onto a cohort announces the
+        member that is always present, and a lock taken to discover that it is
+        already there would put an exclusive file lock on the constructor of
+        the reading half. A false negative here costs the lock the guard was
+        already written for; a false positive cannot happen, because nothing
+        removes an arrival.
         """
+        if self.present(actor):
+            return
         with self.lock:
             self.lock_path.parent.mkdir(parents=True, exist_ok=True)
             with self.lock_path.open("a", encoding="utf-8") as handle:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
                 try:
-                    if any(
-                        member.actor.conversation() == actor.conversation()
-                        and member.actor.round == actor.round
-                        and member.running
-                        for member in self.standing()
-                    ):
+                    if self.present(actor):
                         return
                     self.stream.append(arrival)
                 finally:

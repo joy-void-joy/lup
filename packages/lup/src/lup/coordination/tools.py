@@ -37,9 +37,10 @@ from lup.coordination.progress import (
     ProgressWindow,
     read_progress,
 )
+from lup.coordination.peers import USER_ADDRESS
 from lup.coordination.questions import Question
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import SpawnedActor
+from lup.coordination.roster import Delivery, SpawnedActor
 from lup.channels.models import Door, utc_now
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 
@@ -103,6 +104,15 @@ class SpawnSayOutput(BaseModel):
         description=(
             "How much is queued for this spawn and not yet handed over. "
             "Nonzero after a spawn has ended means it read none of it"
+        )
+    )
+    delivery: Delivery = Field(
+        description=(
+            "What carries this to the recipient. `inbox` means its own hook "
+            "puts the message in front of its next tool call, so a working "
+            "recipient cannot fail to read it. `mailbox` means the message "
+            "waits in the file until the recipient next looks, and nothing "
+            "will wake it"
         )
     )
 
@@ -359,8 +369,10 @@ def create_cohort_tools[Q: Question](
         "ones still working first. Their addresses are what the say tool "
         "takes. Use it when you want to steer something you started and do "
         "not remember its address, or to see what a finished spawn concluded "
-        "without re-reading its output. Returns {spawns: [{address, kind, "
-        "task, running, summary, error}]}.",
+        "without re-reading its output. The person watching is not listed and "
+        "needs no listing: they are always reachable at the address `user`, "
+        "which is what an unaddressed report goes to. Returns {spawns: "
+        "[{address, kind, task, running, summary, error}]}.",
         name="spawn_actors",
     )
     async def spawn_actors(_params: NoInput) -> SpawnListOutput:
@@ -412,8 +424,9 @@ def create_cohort_tools[Q: Question](
         "the wrong statement, or working a branch you have since closed, is "
         "otherwise unreachable until it finishes. Address it by anything the "
         "spawn listing printed — the bare id works. Returns {address, "
-        "delivered, outstanding}, where outstanding counts what is queued "
-        "and not yet handed over: a spawn that has ended reads nothing more.",
+        "reaches, outstanding, delivery}, where outstanding counts what is "
+        "queued and not yet handed over — a spawn that has ended reads "
+        "nothing more — and delivery says what carries it there.",
         name="spawn_say",
     )
     async def spawn_say(params: SpawnSayInput) -> SpawnSayOutput:
@@ -423,6 +436,7 @@ def create_cohort_tools[Q: Question](
             address=actor.label(),
             reaches=cohort.reaches(actor),
             outstanding=cohort.outstanding(actor),
+            delivery=cohort.delivery(actor),
         )
 
     @lup_tool(
@@ -443,12 +457,12 @@ def create_cohort_tools[Q: Question](
         name="send_message",
     )
     async def send_message(params: SendMessageInput) -> SendMessageOutput:
-        # An unaddressed message goes to the spawner, which is the address a
-        # person reads. Blank used to match every actor's own address list, so
+        # An unaddressed message goes to the person, which is the address a
+        # report is for. Blank used to match every actor's own address list, so
         # a report meant for the humans was delivered into every sibling's
         # context, consumed there, and shown on no surface anyone watches.
         cohort.post(
-            params.to_actor or cohort.spawner.label(),
+            params.to_actor or USER_ADDRESS,
             params.text,
             door=door,
             in_reply_to=params.in_reply_to,

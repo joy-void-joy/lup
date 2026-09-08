@@ -51,8 +51,10 @@ from lup.coordination.mail import (
     ActorMail,
     new_message,
 )
+from lup.coordination.manifest import CohortManifest, publish_manifest
+from lup.coordination.peers import USER_KIND, join_user
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import ROSTER_FILE, Roster, SpawnedActor
+from lup.coordination.roster import ROSTER_FILE, Delivery, Roster, SpawnedActor
 from lup.coordination.sessions import (
     RECORD_ADAPTER,
     ActorEvent,
@@ -78,7 +80,6 @@ JOURNAL_LOCK = "journal.lock"
 Its own path rather than the journal itself, because a lock taken on the file
 being appended to is a lock every reader of that file also has to know about.
 """
-SPAWNER_KIND = "spawner"
 
 
 type ActorRecipe = Callable[[ActorRef, LupHooksConfig], Client]
@@ -222,7 +223,7 @@ class ActorCohort:
         journal: ActorJournal | None = None,
         mail: ActorMail | None = None,
         run_id: str | None = None,
-        spawner: ActorRef | None = None,
+        description: str = "",
         parallel: int | None = None,
         settles: WorkSettles = lambda _: True,
     ) -> None:
@@ -244,7 +245,14 @@ class ActorCohort:
         # different files to disagree in.
         self.mail = mail or ActorMail(self.root)
         self.roster = Roster(self.root / ROSTER_FILE)
-        self.spawner = spawner or ActorRef(kind=SPAWNER_KIND, id=self.run_id)
+        # What makes this directory a cohort to a reader that did not open it,
+        # and the address a member reaches a person on — written and joined
+        # here rather than by each consumer, because three call sites
+        # reconstructing the same convention is what a manifest replaces.
+        self.manifest: CohortManifest = publish_manifest(
+            self.root, self.run_id, description
+        )
+        self.user = join_user(self.roster)
         # Keyed by conversation rather than by label, because a round is an
         # attempt and not a new agent: a worker's second round is the session
         # that took its first, and keying by the label held two of them.
@@ -357,11 +365,25 @@ class ActorCohort:
             publish_atomic(self.path(actor), found.record)
 
     def live(self) -> list[SpawnedActor]:
-        """Every agent this cohort holds, the ones still working first."""
-        return self.roster.live()
+        """Every agent this cohort holds, the ones still working first.
+
+        The agents, which is one member short of the roster: the person this
+        cohort answers to is on it and is not one of them. A listing that
+        included them would answer "what did I start?" with something nobody
+        started, and every reader counting agents would carry the same
+        exception — while a person's address needs no discovering, being the
+        same word in every cohort.
+        """
+        return [member for member in self.roster.live() if member.kind != USER_KIND]
 
     def members(self) -> list[ActorRef]:
-        """Every agent as the ref that currently reaches it."""
+        """Every address on this roster, the person's included.
+
+        Wider than :meth:`live` on purpose, because the two answer different
+        questions. This one is asked by whatever routes a message, and routing
+        that skipped the one member a report is for would be the delivery bug
+        the person being on the roster exists to close.
+        """
         return self.roster.members()
 
     def reaching(self, address: str) -> ActorRef | None:
@@ -374,9 +396,13 @@ class ActorCohort:
         A broadcast token resolves to nobody on purpose: it is not one agent,
         and a door that answered it with the first member would deliver to one
         recipient what was meant for all of them.
+
+        One fold and no cases. The person this cohort answers to used to be
+        resolved ahead of the roster by a branch of its own, which made every
+        other reader of a roster half-right: a listing did not show them, a
+        peer could not find them, and whether an address reached anybody
+        depended on which of the two paths a caller happened to be on.
         """
-        if address in self.spawner.addresses():
-            return self.spawner
         return self.roster.reaching(address)
 
     def say(
@@ -410,17 +436,17 @@ class ActorCohort:
         """
         self.post(EVERYONE, text, redirect=redirect, door=door)
 
-    def tell_spawner(
+    def tell_user(
         self, text: str, door: Door = Door.AGENT, in_reply_to: str = ""
     ) -> None:
-        """Say something to whoever spawned this cohort.
+        """Say something to the person this cohort answers to.
 
-        The spawner is an ordinary address with an inbox and no session, which
-        is what makes contact symmetric: an agent volunteering something uses
-        the same mechanism that steers it, and what it says lands somewhere a
-        person can read rather than nowhere.
+        A roster member with an inbox and no session, which is what makes
+        contact symmetric: an agent volunteering something uses the verb that
+        steers it, and what it says lands somewhere a person can read rather
+        than nowhere.
         """
-        self.say(self.spawner, text, door=door, in_reply_to=in_reply_to)
+        self.say(self.user, text, door=door, in_reply_to=in_reply_to)
 
     def post(
         self,
@@ -447,13 +473,13 @@ class ActorCohort:
         )
 
     def heard(self) -> ActorDelivery:
-        """What agents have told the spawner, consuming none of it."""
-        return self.mail.waiting(self.spawner)
+        """What agents have told the user, consuming none of it."""
+        return self.mail.waiting(self.user)
 
     def hear(self) -> ActorDelivery:
-        """Take what agents have told the spawner, for a door displaying it."""
+        """Take what agents have told the user, for a door displaying it."""
         delivery = self.heard()
-        self.mail.delivered(self.spawner, delivery.through)
+        self.mail.delivered(self.user, delivery.through)
         return delivery
 
     def reaches(self, actor: ActorRef) -> bool:
@@ -469,6 +495,30 @@ class ActorCohort:
         return any(
             member.actor.conversation() == conversation and member.running
             for member in self.roster.standing()
+        )
+
+    def delivery(self, actor: ActorRef) -> Delivery:
+        """How a message to this member is carried, off its own roster entry.
+
+        Read rather than assumed, because it differs by what the member is: an
+        agent this process spawned holds a hook that puts mail in front of its
+        next tool call, and a peer that walked in may have nothing but the
+        file. A sender told only that the mail accepted a message cannot tell
+        those apart, and the difference is whether anything will wake.
+
+        A member nothing recorded is reached the way a member that declared
+        nothing is: the mode that needs no process beside it. Guessing the
+        other way would tell a sender something is about to be woken when the
+        record does not say so.
+        """
+        conversation = actor.conversation()
+        return next(
+            (
+                member.delivery
+                for member in self.roster.standing()
+                if member.actor.conversation() == conversation
+            ),
+            Delivery.MAILBOX,
         )
 
     def outstanding(self, actor: ActorRef) -> int:

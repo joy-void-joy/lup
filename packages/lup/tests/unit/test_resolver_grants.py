@@ -194,7 +194,6 @@ def turn_runner(desk: QuestionBroker, recipe: RecordingRecipe) -> TurnRunner:
             desk.mailbox.root,
             journal=desk.journal,
             mail=desk.mailbox.mail,
-            spawner=desk.journal.run,
         ),
         desk.mailbox,
         recipe,

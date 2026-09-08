@@ -4,7 +4,7 @@ These are written against the failures that make a cohort useless without
 being visibly broken: an agent that cannot be steered because whoever spawned
 it is blocked waiting for it, an address that resolves only in the process
 that minted it, a second round that turns one agent into two, and a message
-meant for the spawner that its siblings eat.
+meant for the person that its siblings eat.
 """
 
 import asyncio
@@ -245,8 +245,8 @@ def test_a_process_that_spawned_nothing_reaches_what_another_one_did(
     assert [member.task for member in outside.live()] == ["attack the bound"]
 
 
-def test_the_spawner_is_an_address_its_agents_can_reach(tmp_path: Path) -> None:
-    """A member's report goes to whoever spawned it, and to no sibling.
+def test_the_user_is_an_address_its_agents_can_reach(tmp_path: Path) -> None:
+    """A member's report goes to the person, and to no sibling.
 
     Addressed to the humans by leaving the target blank, it used to match
     every actor's own address list — so it was delivered into the siblings'
@@ -256,7 +256,7 @@ def test_the_spawner_is_an_address_its_agents_can_reach(tmp_path: Path) -> None:
     sibling = cohort.actor("worker", "other-concern")
     cohort.spawn(sibling, "do the other thing")
 
-    cohort.tell_spawner("I could not remove my own scratch file")
+    cohort.tell_user("I could not remove my own scratch file")
 
     assert [message.text for message in cohort.heard().messages] == [
         "I could not remove my own scratch file"

@@ -22,7 +22,6 @@ from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 from lup.policy.assets.host import recoverable_write_targets
 from lup.resolver.declaration import declaration_delta, inspect_changes
 from lup.coordination.cohort import ActorCohort
-from lup.coordination.refs import ActorRef
 from lup.coordination.tools import (
     AskedQuestion,
     AwaitAnswersOutput,
@@ -203,7 +202,6 @@ def create_question_tools(
         journal=Journal(mailbox.root),
         mail=mailbox.mail,
         run_id=run_id,
-        spawner=ActorRef(kind="run", id=run_id),
     )
 
     def material(identifier: str, asked: AskedQuestion) -> MaterialQuestion:

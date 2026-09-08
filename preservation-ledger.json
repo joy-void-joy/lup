@@ -1,5 +1,5 @@
 {
-  "revision": "8d2eff808c5eace2e48c2cf9e705e6bd9debfbfd",
+  "revision": "9ca2acc11a322cad6ee80ee3c698b92a790eef2b",
   "roots": [
     "lup",
     "lup_template"
@@ -283,7 +283,6 @@
         "SESSION_DIR",
         "JOURNAL_FILE",
         "JOURNAL_LOCK",
-        "SPAWNER_KIND",
         "ActorRecipe",
         "WorkSettles",
         "CohortEntry",
@@ -312,11 +311,12 @@
         "ActorCohort.reaching",
         "ActorCohort.say",
         "ActorCohort.say_all",
-        "ActorCohort.tell_spawner",
+        "ActorCohort.tell_user",
         "ActorCohort.post",
         "ActorCohort.heard",
         "ActorCohort.hear",
         "ActorCohort.reaches",
+        "ActorCohort.delivery",
         "ActorCohort.outstanding",
         "ActorCohort.round",
         "ActorCohort.ask",
@@ -437,6 +437,34 @@
       ]
     },
     {
+      "module": "lup.coordination.manifest",
+      "declares": [
+        "MANIFEST_FILE",
+        "MANIFEST_GLOB",
+        "CohortManifest",
+        "CohortManifest.run_id",
+        "CohortManifest.opened_at",
+        "CohortManifest.description",
+        "DiscoveredCohort",
+        "DiscoveredCohort.root",
+        "DiscoveredCohort.manifest",
+        "manifest_path",
+        "publish_manifest",
+        "read_manifest",
+        "cohorts_under"
+      ]
+    },
+    {
+      "module": "lup.coordination.peers",
+      "declares": [
+        "USER_KIND",
+        "USER_ADDRESS",
+        "USER_TASK",
+        "user_peer",
+        "join_user"
+      ]
+    },
+    {
       "module": "lup.coordination.progress",
       "declares": [
         "ProgressKind",
@@ -538,6 +566,7 @@
         "SpawnedActor.kind",
         "Roster",
         "Roster.__init__",
+        "Roster.present",
         "Roster.announce",
         "Roster.spawned",
         "Roster.joined",
@@ -598,6 +627,7 @@
         "SpawnSayOutput.address",
         "SpawnSayOutput.reaches",
         "SpawnSayOutput.outstanding",
+        "SpawnSayOutput.delivery",
         "SpawnReadInput",
         "SpawnReadInput.address",
         "SendMessageInput",
