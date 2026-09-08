@@ -10,11 +10,12 @@ the person is *in* the roster: a member with an address, an inbox, and a
 liveness nobody has to assert, addressed by exactly the verbs that address an
 agent.
 
-That is what makes the human channel stop being a second mechanism. A report
+That is what makes the human channel one mechanism rather than two. A report
 to whoever is watching is a message to ``user``; a question is a message to
 ``user`` carrying a slot id, and the reply settles the slot. A console
 displaying "what has been said to you" is reading one member's inbox. None of
-those needed a case in the send path, and each of them used to have one.
+those needs a case in the send path, which is the whole of what the roster
+buys: a person is somewhere to send to, not a branch in front of sending.
 
 The peer answers for itself and is never finished, because there is nothing
 that could finish it: a person does not stop existing when a run does, and a

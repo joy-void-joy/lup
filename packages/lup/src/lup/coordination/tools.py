@@ -458,9 +458,9 @@ def create_cohort_tools[Q: Question](
     )
     async def send_message(params: SendMessageInput) -> SendMessageOutput:
         # An unaddressed message goes to the person, which is the address a
-        # report is for. Blank used to match every actor's own address list, so
-        # a report meant for the humans was delivered into every sibling's
-        # context, consumed there, and shown on no surface anyone watches.
+        # report is for. Blank matching every actor's own address list would
+        # deliver a report meant for the humans into every sibling's context,
+        # consume it there, and show it on no surface anyone watches.
         cohort.post(
             params.to_actor or USER_ADDRESS,
             params.text,

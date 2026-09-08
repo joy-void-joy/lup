@@ -163,6 +163,7 @@ display around the readers it names.
 
 - `agent` — Agent introspection and debugging
 - `conversation` — Retain authenticated AI conversations
+- `coordination` — Reach the other sessions working in this repository
 - `dev` — Read this repository, and hold it to what it settled
 - `feedback` — Feedback state, metrics, and commits
 - `git` — Branches, worktrees, pull requests, and conflicts

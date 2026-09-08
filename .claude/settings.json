@@ -33,7 +33,8 @@
       "Read(./sync.json.local)",
       "mcp__plugin_lup_notes",
       "mcp__plugin_lup_sandbox",
-      "mcp__plugin_lup_codeintel"
+      "mcp__plugin_lup_codeintel",
+      "mcp__plugin_lup_coordination"
     ],
     "deny": [
       "Read(./**/.env*.local)",

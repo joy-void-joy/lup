@@ -35,6 +35,11 @@ def build(
         outputs_dir=base / "outputs",
         sandbox=sandbox,
         realtime_dir=(base / "realtime") if realtime else None,
+        # A session has an identity — its own runtime gives it one even where
+        # no launcher minted a durable member id — and the coordination group
+        # is built against it. Omitting it here would build one group fewer
+        # than the names served, which is the drift these tests exist to catch.
+        session_id="toolset-test",
     )
 
 

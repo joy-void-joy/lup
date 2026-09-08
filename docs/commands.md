@@ -22,6 +22,18 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `conversation chatgpt` | Retain ChatGPT conversations and their downloadable attachments. |
 | `conversation claude` | Retain Claude conversations and their API-provided attachments. |
 
+## `coordination`
+
+| Command | What it does |
+| --- | --- |
+| `coordination roster` | List every session working in this repository, the live ones first. |
+| `coordination join` | Put a session on the roster and print the id it answers to. |
+| `coordination describe` | Record what one session is doing, for whoever reads the roster next. |
+| `coordination rename` | Rename one session, leaving the old name resolving to it. |
+| `coordination leave` | Record that a session has stopped, so nothing addresses it again. |
+| `coordination send` | Send one message to a peer, and say what will carry it there. |
+| `coordination inbox` | Read what is queued for one session, consuming it only when asked. |
+
 ## `dev`
 
 | Command | What it does |

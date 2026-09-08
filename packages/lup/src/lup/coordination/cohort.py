@@ -397,11 +397,11 @@ class ActorCohort:
         and a door that answered it with the first member would deliver to one
         recipient what was meant for all of them.
 
-        One fold and no cases. The person this cohort answers to used to be
-        resolved ahead of the roster by a branch of its own, which made every
-        other reader of a roster half-right: a listing did not show them, a
-        peer could not find them, and whether an address reached anybody
-        depended on which of the two paths a caller happened to be on.
+        One fold and no cases. A person resolved ahead of the roster by a
+        branch of their own makes every other reader of a roster half-right:
+        a listing does not show them, a peer cannot find them, and whether an
+        address reaches anybody depends on which of the two paths a caller
+        happens to be on.
         """
         return self.roster.reaching(address)
 

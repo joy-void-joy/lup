@@ -68,6 +68,7 @@ def collect_tools_by_server(
         subagent_tool=create_run_subagent_tool(
             get_subagent_specs(), factory_recipe=subagent_factory
         ),
+        session_id=context.session_id or "",
     )
     return toolset["groups"]
 

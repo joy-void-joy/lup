@@ -150,6 +150,28 @@ launches anything, and 401 bytes is what that costs. The subjects that are off
 either cost a great deal more or announce themselves when wanted.
 """
 
+COORDINATION = ModuleSpec(
+    id="coordination",
+    title="Coordination",
+    summary=(
+        "Sessions that already exist finding each other: one roster per "
+        "repository, mail that outlives the process that sent it, and the "
+        "person on that roster as a peer like any other."
+    ),
+    default_on=True,
+    subapps=["coordination"],
+    tool_groups=["coordination"],
+)
+"""On, because the failure it answers is silent and is paid in whole runs.
+
+Work that cannot see itself does not fail loudly: two sessions crawl the same
+thing, one re-derives what another settled an hour ago, and a question that
+needed a person is asked of nobody. Nothing fires, and what it costs is work
+already done. A repository whose sessions never overlap carries a roster with
+one member on it and pays a paragraph for the privilege, which is the cheap
+side of the asymmetry.
+"""
+
 REALTIME = ModuleSpec(
     id="realtime",
     title="Realtime",
@@ -184,6 +206,7 @@ LIBRARY_SPECS = [
     CONVERSATION,
     FEEDBACK_LOOP,
     RUNS,
+    COORDINATION,
     REALTIME,
     REFLECTION,
 ]

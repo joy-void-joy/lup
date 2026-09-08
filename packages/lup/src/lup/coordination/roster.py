@@ -146,6 +146,16 @@ class ActorJoined(RosterRecord, frozen=True):
     told what it will and will not do.
     """
 
+    worktree: str = ""
+    """Where this peer is working, absolute, empty where it is nowhere in particular.
+
+    Carried because two questions need it and neither can derive it. A person
+    reading a roster of sessions is choosing between checkouts as much as
+    between names; and what a member may be attributed for changing is bounded
+    by where it works, so a lease over a path is meaningless without knowing
+    whose tree that path is in.
+    """
+
     def applied(self, standing: "SpawnedActor | None") -> "SpawnedActor | None":
         """This peer, present. A rejoin under a round already held says nothing."""
         if standing is not None and self.actor.round < standing.actor.round:
@@ -156,7 +166,33 @@ class ActorJoined(RosterRecord, frozen=True):
             running=True,
             liveness=self.liveness,
             delivery=self.delivery,
+            worktree=self.worktree,
         )
+
+
+class ActorDescribed(RosterRecord, frozen=True):
+    """One member saying what it is doing now, which its task cannot keep up with.
+
+    A task is what a member arrived for and it never changes. A description is
+    what that member is doing, and on a roster that outlives one assignment
+    those stop being the same fact: a session that joined this morning is on
+    its third thing by noon, and a listing built from the task alone still
+    shows the first. A person scanning a roster to decide who to ask is
+    reading for the second, so the roster has to carry it.
+
+    A record rather than a mutable field, because the roster is a fold and a
+    field would be a second way to change a member — one that a reader in
+    another process could not see arrive, and that a replay could not rebuild.
+    """
+
+    type: Literal["described"] = "described"
+    description: str = ""
+
+    def applied(self, standing: "SpawnedActor | None") -> "SpawnedActor | None":
+        """The member, redescribed. A description of nobody invents no member."""
+        if standing is None:
+            return None
+        return standing.model_copy(update={"description": self.description})
 
 
 class ActorFinished(RosterRecord, frozen=True):
@@ -181,13 +217,17 @@ class ActorFinished(RosterRecord, frozen=True):
         )
 
 
-type RosterEntry = ActorSpawned | ActorJoined | ActorFinished
+type RosterEntry = ActorSpawned | ActorJoined | ActorDescribed | ActorFinished
 """What the population record carries. Nothing here is about a turn.
 
 Two ways in and one way out. A member is spawned by a process that owns its
 lifetime, or joins as a peer that owns its own, and either leaves by the same
 record — because how a member arrived is a fact about its arrival, and how it
 went is the same question whichever way it came.
+
+What happens in between is one record too. A member redescribing itself is not
+arriving and not leaving, and the fold takes it the way it takes the other
+three: by asking the record what it makes of the member.
 """
 
 
@@ -209,6 +249,23 @@ class SpawnedActor(BaseModel, frozen=True):
     running: bool
     summary: str = ""
     error: str = ""
+
+    worktree: str = ""
+    """Where this member is working, absolute, empty where it is nowhere.
+
+    A fact about the member rather than about its arrival, which is why it
+    survives here: a listing built after the fact still says which checkout
+    each session is in, and a lease over a path can say whose tree it is.
+    """
+
+    description: str = ""
+    """What this member is doing now, empty until it has said.
+
+    Beside the task rather than replacing it, because a reader wants both: the
+    task is what this member is answerable for, and the description is where
+    it has got to. Empty is honest for a member that has not spoken, and reads
+    as such — the task is still there to fall back on.
+    """
 
     liveness: str = ""
     """Who answers for this member still being there, empty where it answers itself.
@@ -312,6 +369,7 @@ class Roster:
         task: str = "",
         liveness: str = "",
         delivery: Delivery = Delivery.MAILBOX,
+        worktree: str = "",
     ) -> None:
         """Record that a peer nobody spawned is present, and how to reach it."""
         self.announce(
@@ -321,8 +379,20 @@ class Roster:
                 task=task,
                 liveness=liveness,
                 delivery=delivery,
+                worktree=worktree,
                 at=utc_now(),
             ),
+        )
+
+    def describes(self, actor: ActorRef, description: str) -> None:
+        """Record what this member is doing now.
+
+        Appended rather than announced, because this is not an arrival and the
+        idempotence guard would refuse the second one — a member that describes
+        itself twice is a member that moved on, which is the whole use.
+        """
+        self.stream.append(
+            ActorDescribed(actor=actor, description=description, at=utc_now())
         )
 
     def finished(self, actor: ActorRef, summary: str = "", error: str = "") -> None:
