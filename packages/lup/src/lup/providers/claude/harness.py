@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
+from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
 from lup.formats.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -558,13 +559,32 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 "hooks": command,
             }
         ]
+        # An empty matcher is every tool, which is what delivery needs and the
+        # policy must not have: mail is worth carrying before a `Read` as much
+        # as before an `Edit`, while a permission branch for `Read` is a
+        # permission `Read` could be refused by. A second group rather than a
+        # widened one keeps those apart — every matching hook runs, and the
+        # most restrictive verdict wins, so a delivery that only ever allows
+        # cannot loosen what the policy decided beside it.
+        delivery = [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": delivery_command("CLAUDE_PLUGIN_ROOT"),
+                        "timeout": 10,
+                    }
+                ],
+            }
+        ]
         hooks = {
-            "description": "Lup semantic permission policy",
+            "description": "Lup semantic permission policy and peer delivery",
             "hooks": {
                 event: (
                     observed
                     if event == CLAUDE_DISPATCHER.observation_event
-                    else decided
+                    else [*decided, *delivery]
                 )
                 for event in CLAUDE_DISPATCHER.hook_events
             },
@@ -588,6 +608,9 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     banner=dispatcher_banner(CLAUDE_DISPATCHER),
                 ),
                 hook_guard_artifact(
+                    Path(f".claude/plugins/{self.plugin_name}"), source.id
+                ),
+                *delivery_artifacts(
                     Path(f".claude/plugins/{self.plugin_name}"), source.id
                 ),
                 *[

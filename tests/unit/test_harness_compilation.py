@@ -616,14 +616,45 @@ def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() ->
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
 
     hook_config = artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content
-    for command in registered_hook_commands(hook_config):
+    registered = registered_hook_commands(hook_config)
+    # More than one hook is registered — the policy dispatcher and the peer
+    # delivery guard — and the property under test belongs to all of them:
+    # each starts outside the workspace, so none of them may reach for `uv`.
+    for command in registered:
         assert "uv" not in shlex.split(command)
-        assert "hooks/scripts/policy.sh" in command
+        assert "hooks/scripts/" in command
         assert REGENERATE_COMMAND not in command
+    assert any("hooks/scripts/policy.sh" in command for command in registered)
     assert artifacts[Path(".claude/plugins/lup/hooks/scripts/policy.sh")].executable
     assert Path(".claude/plugins/lup/hooks/runtime/kernel/shell.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/policy_data.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/evidence.json") in artifacts
+
+
+def test_peer_delivery_is_registered_for_every_tool_and_refuses_nothing() -> None:
+    """The second hook group, and the two properties that keep it safe.
+
+    Its matcher is empty, which is every tool: mail is worth carrying before a
+    `Read` as much as before an `Edit`, and the policy matcher deliberately
+    names neither. And its command cannot refuse — no `exit 2` beside it — so
+    a mailbox nobody can read never becomes a tool call nobody can make.
+    """
+    recipe = claude_target(Path.cwd()).recipe
+    artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
+    hooks = json.loads(artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content)
+
+    delivering = [
+        group for group in hooks["hooks"]["PreToolUse"] if group["matcher"] == ""
+    ]
+
+    assert len(delivering) == 1
+    command = delivering[0]["hooks"][0]["command"]
+    assert "coordination_delivery.sh" in command
+    assert "exit 2" not in command
+    guard = Path(".claude/plugins/lup/hooks/scripts/coordination_delivery.sh")
+    assert artifacts[guard].executable
+    runtime = Path(".claude/plugins/lup/hooks/runtime/coordination_delivery.py")
+    assert runtime in artifacts
 
 
 def test_codex_recipe_registers_semantic_permission_approval() -> None:
