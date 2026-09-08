@@ -347,9 +347,27 @@ def create_dev_app(
                 "the fix-one-file loop. Repeatable",
             ),
         ] = None,
+        changed: Annotated[
+            bool,
+            typer.Option(
+                "--changed",
+                help="Run ruff and pyright over the Python files changed since "
+                "--since (default: the integration branch) and no tests at all — "
+                "the loop while a change is moving, not the bar a commit passes",
+            ),
+        ] = False,
     ) -> None:
         """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
         declarations = declared()
+        if changed:
+            from lup.devtools.dev.branches import get_integration_branch
+
+            check.run_changed(
+                declarations.project,
+                since if since is not None else get_integration_branch(),
+                fix=fix,
+            )
+            return
         if antipatterns:
             if profiled:
                 antipatterns_mod.profile(declarations.project, path)

@@ -174,8 +174,16 @@ def option_arguments(option: str, values: list[str]) -> list[str]:
     return [argument for value in values for argument in (option, value)]
 
 
-def ruff_format_check(fix: bool, excluded_roots: list[str]) -> CheckReport:
-    """Whether every file is formatted — or, with *fix*, formatting them."""
+def ruff_format_check(
+    fix: bool, excluded_roots: list[str], scope: list[str] | None = None
+) -> CheckReport:
+    """Whether every file is formatted — or, with *fix*, formatting them.
+
+    An empty *scope* is the whole tree rather than nothing, which is what the
+    dot has always meant here. A caller narrowing to a list it computed hands
+    that list; a caller narrowing to nothing wants nothing checked and says so
+    by not narrowing at all.
+    """
     return ran(
         "ruff format",
         lambda: uv(
@@ -184,13 +192,15 @@ def ruff_format_check(fix: bool, excluded_roots: list[str]) -> CheckReport:
             "format",
             *([] if fix else ["--check"]),
             *option_arguments("--exclude", excluded_roots),
-            ".",
+            *(scope or ["."]),
         ),
         "applied" if fix else "ok",
     )
 
 
-def ruff_lint_check(fix: bool, excluded_roots: list[str]) -> CheckReport:
+def ruff_lint_check(
+    fix: bool, excluded_roots: list[str], scope: list[str] | None = None
+) -> CheckReport:
     """Whether the lint rules hold — or, with *fix*, applying what they can."""
     return ran(
         "ruff check",
@@ -199,7 +209,7 @@ def ruff_lint_check(fix: bool, excluded_roots: list[str]) -> CheckReport:
             "ruff",
             "check",
             *option_arguments("--exclude", excluded_roots),
-            ".",
+            *(scope or ["."]),
             *(["--fix"] if fix else []),
         ),
     )
@@ -222,8 +232,18 @@ def pyright_base_configuration(root: Path) -> Path | None:
             return None
 
 
-def pyright_check(excluded_roots: list[str]) -> CheckReport:
-    """Whether the code-bearing workspace type-checks."""
+def pyright_check(
+    excluded_roots: list[str], scope: list[str] | None = None
+) -> CheckReport:
+    """Whether the code-bearing workspace type-checks.
+
+    Narrowed by naming files beside the project, which is exact rather than a
+    guess: Pyright resolves each named file's imports itself, so a scope is a
+    statement about which files are *reported on* and not about which code was
+    understood. That is what separates narrowing this from narrowing a test
+    run — there is no dependency graph to reconstruct and therefore none to
+    reconstruct wrongly.
+    """
     root = project_root()
     base = pyright_base_configuration(root)
     with NamedTemporaryFile(
@@ -245,7 +265,9 @@ def pyright_check(excluded_roots: list[str]) -> CheckReport:
     try:
         return ran(
             "pyright",
-            lambda: uv("run", "pyright", "--project", str(configuration)),
+            lambda: uv(
+                "run", "pyright", "--project", str(configuration), *(scope or [])
+            ),
         )
     finally:
         configuration.unlink(missing_ok=True)
@@ -664,6 +686,27 @@ def changed_paths(since: str) -> list[str]:
     return [line for line in named if line]
 
 
+def changed_python_files(since: str) -> list[str]:
+    """Every Python file this tree changed since a ref, untracked ones included.
+
+    Untracked is the half `git diff` does not report and an iterating check
+    cannot afford to miss: a module written five minutes ago is exactly what
+    its author is asking about, and a scope that silently left it out would
+    answer "clean" about the one file in the tree nobody has read yet.
+
+    Deleted paths are dropped, because a scope naming them hands a checker a
+    file it cannot open and turns a narrowed run into an error about its own
+    argument list.
+    """
+    named = {
+        *changed_paths(since),
+        *git.lines("ls-files", "--others", "--exclude-standard"),
+    }
+    return sorted(
+        path for path in named if path.endswith(".py") and Path(path).is_file()
+    )
+
+
 def owned_comments(
     found: list[FoundComment], scope: list[str] | None
 ) -> list[FoundComment]:
@@ -1061,6 +1104,63 @@ def run_checks(
     typer.echo(f"\n{passed}/{len(counted)} checks passed{spent(reports, started)}")
 
     failed = [report.name for report in counted if not report.passed]
+    if failed:
+        typer.echo(f"Failed: {', '.join(failed)}")
+        raise typer.Exit(1)
+
+
+def run_changed(
+    project: DevProject,
+    since: str,
+    fix: bool = False,
+) -> None:
+    """Check the files this tree changed, and say plainly what went unchecked.
+
+    The narrow half of the gate, for the loop a change is still moving in.
+    Ruff and Pyright are the two checks a scope narrows *exactly*: each reads
+    the files it is handed and answers about those, so a narrowed run says the
+    same thing about them a whole run would. Pyright resolves each file's
+    imports itself, which is why naming files is a statement about what is
+    reported rather than about what was understood.
+
+    **Tests are not narrowed, and not run.** Which tests reach a change is a
+    question about the import graph, and this repository reaches modules
+    through `importlib` in places no static reading sees — so a narrowed suite
+    could report green while skipping the one test the change breaks. A gate
+    that is trusted and wrong costs more than a gate that is slow, so this one
+    declines the question and says so on every run. `dev test` runs the files
+    a person names; `dev check` stays the bar a commit passes.
+    """
+    started = perf_counter()
+    scope = changed_python_files(since)
+    excluded_roots = non_code_roots(project)
+    if not scope:
+        typer.echo(f"No Python file changed since {since}; nothing to check.")
+        return
+
+    tools: list[Callable[[], CheckReport]] = [
+        partial(ruff_format_check, fix, excluded_roots, scope),
+        partial(ruff_lint_check, fix, excluded_roots, scope),
+        partial(pyright_check, excluded_roots, scope),
+    ]
+    with ThreadPoolExecutor(max_workers=len(tools)) as pool:
+        reports = [job.result() for job in [pool.submit(tool) for tool in tools]]
+
+    for report in reports:
+        for line in report.lines:
+            typer.echo(line)
+
+    passed = sum(1 for report in reports if report.passed)
+    typer.echo(
+        f"\n{passed}/{len(reports)} checks passed over {len(scope)} changed "
+        f"file(s) since {since}{spent(reports, started)}"
+    )
+    typer.echo(
+        "No tests ran, and no whole-tree gate ran. `uv run lup-devtools dev "
+        "check` is what a commit has to pass."
+    )
+
+    failed = [report.name for report in reports if not report.passed]
     if failed:
         typer.echo(f"Failed: {', '.join(failed)}")
         raise typer.Exit(1)

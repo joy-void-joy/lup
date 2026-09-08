@@ -13,17 +13,29 @@ change once you know where it goes.
 ```bash
 uv sync                                    # both workspace packages
 uv run lup-devtools setup                  # interactive: keys, integrations
+uv run lup-devtools dev check --changed     # ruff + pyright on what you changed
 uv run lup-devtools dev test <paths>       # while iterating: only these files
 uv run lup-devtools dev check              # the local pre-flight bar
 ```
 
-Two commands, because they answer different questions. `dev check` puts both
+Three commands, because they answer different questions. `dev check` puts both
 test suites, pyright and ruff on the machine at once and costs whichever of
 them finishes last — a couple of minutes — and it is what has to be green
-before a commit. `dev test` runs the files you name, in the suite that
-installs each, and answers in seconds: that is the loop to be in while a
-change is still moving. The gate reports what each of its checks cost, so a
-run that felt slow can be read rather than guessed at.
+before a commit. The gate reports what each of its checks cost, so a run that
+felt slow can be read rather than guessed at.
+
+The other two are the loop while a change is still moving. `dev check
+--changed` runs ruff and pyright over the Python files changed since the
+integration branch, in seconds — those are the two checks a scope narrows
+*exactly*, because each answers about the files it is handed and Pyright
+resolves their imports itself. It runs **no tests**, and says so every time.
+`dev test` runs the test files you name, in the suite that installs each.
+
+Which tests reach a change is deliberately left to you. It is a question about
+the import graph, and modules reached through `importlib` are invisible to any
+static reading of it — so a suite narrowed automatically could report green
+while skipping the one test the change breaks. A gate that is trusted and
+wrong costs more than one that is slow.
 
 Run one at a time. Two gates at once are slower than the same two in
 sequence, because each already spreads itself across every core the machine
