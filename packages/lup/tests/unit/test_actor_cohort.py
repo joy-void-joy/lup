@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from lup.coordination.cohort import ActorCohort, ActorRecipe, CohortJournal
 from lup.coordination.mail import EVERYONE
 from lup.coordination.refs import ActorRef
+from lup.coordination.roster import ROSTER_FILE, Delivery, Roster
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.capabilities import Session, Turn
 from lup.sessions.client import Client
@@ -591,3 +592,58 @@ async def test_a_suspension_out_of_a_turn_leaves_its_agent_standing(
     standing = {member.actor.id: member for member in cohort.live()}
     assert standing["faulted"].running is True, "the host said nothing about it"
     assert standing["faulted"].error == ""
+
+
+def test_a_peer_that_joins_is_a_member_nobody_spawned(tmp_path: Path) -> None:
+    """The record a spawn cannot stand in for.
+
+    A spawned member is live because the process that started it says so. A
+    peer that walked in has no such process, so what would otherwise be
+    inferred has to be carried: who answers for it still being there, and what
+    reaches it.
+    """
+    roster = Roster(tmp_path / ROSTER_FILE)
+    peer = ActorRef(kind="session", id="walked-in")
+
+    roster.joined(peer, task="reading the ledger", liveness="launcher")
+
+    [member] = roster.live()
+    assert member.running
+    assert member.task == "reading the ledger"
+    assert member.liveness == "launcher"
+    assert member.delivery is Delivery.MAILBOX, "no wake declared, so mail waits"
+
+
+def test_a_peer_rejoining_after_a_restart_is_the_same_member(tmp_path: Path) -> None:
+    """Announcing itself twice must not offer an operator two of one session."""
+    roster = Roster(tmp_path / ROSTER_FILE)
+    peer = ActorRef(kind="session", id="restarted")
+
+    roster.joined(peer, task="first")
+    roster.joined(peer, task="second")
+
+    assert [member.actor.id for member in roster.live()] == ["restarted"]
+
+
+def test_a_peer_leaves_by_the_same_record_a_spawn_does(tmp_path: Path) -> None:
+    """How a member went is one question however it arrived."""
+    roster = Roster(tmp_path / ROSTER_FILE)
+    peer = ActorRef(kind="session", id="departed")
+    roster.joined(peer, delivery=Delivery.INBOX)
+
+    roster.finished(peer, summary="done reading")
+
+    [member] = roster.live()
+    assert not member.running
+    assert member.summary == "done reading"
+    assert member.delivery is Delivery.INBOX, "how it was reached survives its leaving"
+
+
+def test_a_spawned_member_is_reachable_through_its_own_hook(tmp_path: Path) -> None:
+    """The spawned default, which is the one mode that needs nothing beside it."""
+    roster = Roster(tmp_path / ROSTER_FILE)
+    roster.spawned(ActorRef(kind="worker", id="opened"), task="work")
+
+    [member] = roster.live()
+    assert member.delivery is Delivery.INBOX
+    assert member.liveness == "", "the process that spawned it is the answer"

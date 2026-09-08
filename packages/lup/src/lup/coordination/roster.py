@@ -31,6 +31,7 @@ import fcntl
 import threading
 from collections.abc import Iterator
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
@@ -83,6 +84,81 @@ class ActorSpawned(RosterRecord, frozen=True):
         return SpawnedActor(actor=self.actor, task=self.task, running=True)
 
 
+class Delivery(StrEnum):
+    """How a message reaches one member, which differs by what that member is.
+
+    A property of the member rather than of the message: what carries a line to
+    a peer is decided by what that peer is and who is holding it, and a sender
+    that had to choose would be choosing on facts it does not have.
+    """
+
+    INBOX = "inbox"
+    """Injected in front of the member's next tool call by its own hook.
+
+    What a spawned agent gets, and the only mode that needs nothing running
+    beside it: the hook fires because the member takes a turn, so a busy member
+    cannot fail to receive and an idle one receives the moment it moves.
+    """
+
+    MAILBOX = "mailbox"
+    """Left in the file for the member to read when it next looks.
+
+    The mode with no wake at all, and the honest answer for a peer nothing can
+    reach: a headless session between invocations, a member on a machine this
+    one does not share. The file is the durable record either way — every other
+    mode is a wake *on top of* this one, not an alternative to it.
+    """
+
+
+class ActorJoined(RosterRecord, frozen=True):
+    """One peer that joined a cohort nobody spawned it into.
+
+    The record a spawn cannot stand in for. A spawned member is live because
+    the process that made it says so and finished because that process said
+    that too; a peer that walked in has no such process, so what would
+    otherwise be inferred has to be carried: who vouches for it still being
+    there, and what reaches it.
+
+    That is the whole difference between a cohort and a roster. A cohort is
+    what one process started, and its membership is a fact that process owns; a
+    roster is who is present, which nobody owns and everybody appends to.
+    """
+
+    type: Literal["joined"] = "joined"
+    task: str = ""
+    """What the peer says it is doing, in its own words. Empty is honest."""
+
+    liveness: str = ""
+    """Who answers for this peer still being there, by address.
+
+    Empty means the peer answers for itself — it wrote this record and will
+    write the one that ends it. A named holder is a peer that cannot: a
+    launcher that minted the identity, or a watcher that will mark it gone when
+    it stops answering. Somebody has to be able to say a member left, and for a
+    session nobody spawned that is not automatic.
+    """
+
+    delivery: Delivery = Delivery.MAILBOX
+    """How this peer is reached, defaulting to the mode that needs nothing.
+
+    A member that declared no wake path still has a durable inbox, which is the
+    conservative answer: mail waits rather than being dropped, and a sender is
+    told what it will and will not do.
+    """
+
+    def applied(self, standing: "SpawnedActor | None") -> "SpawnedActor | None":
+        """This peer, present. A rejoin under a round already held says nothing."""
+        if standing is not None and self.actor.round < standing.actor.round:
+            return standing
+        return SpawnedActor(
+            actor=self.actor,
+            task=self.task,
+            running=True,
+            liveness=self.liveness,
+            delivery=self.delivery,
+        )
+
+
 class ActorFinished(RosterRecord, frozen=True):
     """One agent stopped, and what it left behind.
 
@@ -105,8 +181,14 @@ class ActorFinished(RosterRecord, frozen=True):
         )
 
 
-type RosterEntry = ActorSpawned | ActorFinished
-"""What the population record carries. Nothing here is about a turn."""
+type RosterEntry = ActorSpawned | ActorJoined | ActorFinished
+"""What the population record carries. Nothing here is about a turn.
+
+Two ways in and one way out. A member is spawned by a process that owns its
+lifetime, or joins as a peer that owns its own, and either leaves by the same
+record — because how a member arrived is a fact about its arrival, and how it
+went is the same question whichever way it came.
+"""
 
 
 ENTRY_ADAPTER: TypeAdapter[RosterEntry] = TypeAdapter(RosterEntry)
@@ -127,6 +209,23 @@ class SpawnedActor(BaseModel, frozen=True):
     running: bool
     summary: str = ""
     error: str = ""
+
+    liveness: str = ""
+    """Who answers for this member still being there, empty where it answers itself.
+
+    A spawned member leaves this empty and means something different by it than
+    a peer that does: the spawning process is the answer, and it is the one
+    writing these records. A peer with a named holder is one whose absence
+    somebody else has undertaken to notice.
+    """
+
+    delivery: Delivery = Delivery.INBOX
+    """How a message reaches this member.
+
+    The spawned default, because a spawned member is opened with the hook that
+    makes it true — mail lands in front of its next tool call whether or not it
+    thinks to look. A peer says what it can actually do instead.
+    """
 
     @computed_field
     @property
@@ -149,19 +248,18 @@ class Roster:
         self.lock_path = path.with_suffix(".lock")
         self.lock = threading.Lock()
 
-    def spawned(self, actor: ActorRef, task: str) -> None:
-        """Record that this address is live, unless the record already says so.
+    def announce(self, actor: ActorRef, arrival: RosterEntry) -> None:
+        """Append one arrival, unless the record already has this member present.
 
         Idempotent per round, because two callers legitimately announce one
-        start: work detached under an address announces it so the caller can
-        steer it immediately, and the round that work then opens announces
-        the same round again. Appending both would give that round two starts
-        and leave a reader measuring how long it took with no way to say
-        which of them it ran from.
+        arrival. For a spawn they are the process that detached the work and
+        the round that work then opened; for a peer they are one session
+        rejoining after a restart, which is the same member arriving again
+        rather than a second one. Appending both would give that round two
+        starts, and offer an operator two addresses reaching one session.
 
-        Under a lock, because those two callers are in *different processes* —
-        the one that detached the work, and the one the work opened. Folding
-        the record and then appending to it is a read-modify-write, so
+        Under a lock, because those callers are in *different processes*.
+        Folding the record and then appending to it is a read-modify-write, so
         unguarded both see no standing entry and both append: the idempotence
         would hold in every case except the one it was written for. The thread
         lock sits outside the file lock because ``flock`` is granted per open
@@ -180,11 +278,32 @@ class Roster:
                         for member in self.standing()
                     ):
                         return
-                    self.stream.append(
-                        ActorSpawned(actor=actor, task=task, at=utc_now())
-                    )
+                    self.stream.append(arrival)
                 finally:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def spawned(self, actor: ActorRef, task: str) -> None:
+        """Record that a member this process started is live."""
+        self.announce(actor, ActorSpawned(actor=actor, task=task, at=utc_now()))
+
+    def joined(
+        self,
+        actor: ActorRef,
+        task: str = "",
+        liveness: str = "",
+        delivery: Delivery = Delivery.MAILBOX,
+    ) -> None:
+        """Record that a peer nobody spawned is present, and how to reach it."""
+        self.announce(
+            actor,
+            ActorJoined(
+                actor=actor,
+                task=task,
+                liveness=liveness,
+                delivery=delivery,
+                at=utc_now(),
+            ),
+        )
 
     def finished(self, actor: ActorRef, summary: str = "", error: str = "") -> None:
         """Record that this address has stopped, and how."""
