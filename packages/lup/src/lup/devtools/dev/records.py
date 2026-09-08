@@ -215,7 +215,7 @@ def record_landing(branch: str, integration: str, cwd: Path | None = None) -> No
     publish_atomic(record_path(branch, cwd), landing)
 
 
-# lup: solved: run `uv run lup-devtools dev
+# lup: solved: run `uv run lup-devtools git
 # worktree adopt-records` on the host, once for this clone, so this fallback
 # stops being what a branch's base is read through. Not before that branch
 # lands: a worktree still on older code reads the shared config alone, and
