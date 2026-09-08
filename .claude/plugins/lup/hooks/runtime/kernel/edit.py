@@ -2666,6 +2666,53 @@ class AntiPatternHit(TypedDict):
     row: AntiPatternRow
 
 
+class WithdrawnGuard(TypedDict):
+    """One line this edit stopped suppressing, and the rule it stopped for."""
+
+    rule: str
+    text: str
+
+
+def withdrawn_guards(
+    before: str | None, after: str, known_ids: list[str]
+) -> Iterator[WithdrawnGuard]:
+    """Every line whose suppression this edit took away, once per rule.
+
+    Deleting a directive adds no line, so the violation it was covering is
+    byte-identical across the edit and the added-line scan never reaches it —
+    the one way past this gate that costs nothing to write, since the guard
+    and the guarded thing are separate lines and only one of them has to move.
+    What the directive reached is read from *before*, where it still stands,
+    through `suppression_reaches` — the same placement policy every other
+    reader here consults, so the marker shape valid on the way in is the shape
+    whose removal is noticed on the way out.
+
+    Lines are carried as text rather than as numbers because an edit moves
+    them: an insertion above renumbers everything below it, and matching what
+    a violation says survives that where matching where it sat does not.
+
+    A bare directive named no rule and silenced all of them, so it comes back
+    once per rule these rows carry. A directive whose text still stands in
+    *after* was re-sited rather than withdrawn, which `resites_a_suppression`
+    already governs and this leaves to it.
+    """
+    previous = (before or "").splitlines()
+    remaining = after.splitlines()
+    for number, line in enumerate(previous, start=1):
+        if line in remaining:
+            remaining.remove(line)
+            continue
+        directive = IGNORE_RE.search(line)
+        if directive is None:
+            continue
+        named = ignore_rule_ids(directive)
+        for candidate in range(number, len(previous) + 1):
+            if not suppression_reaches(previous, number, candidate):
+                continue
+            for rule in named if named is not None else known_ids:
+                yield WithdrawnGuard(rule=rule, text=previous[candidate - 1])
+
+
 def anti_pattern_hits(
     added: dict[int, bool],
     rows: list[AntiPatternRow],
@@ -2718,6 +2765,24 @@ def anti_pattern_denial(number: int, row: AntiPatternRow) -> KernelDecision:
     return KernelDecision(
         "deny",
         f"line {number}: {row['message']}{placement} "
+        f"(rule {row['id']} — see docs/rules.md)",
+    )
+
+
+def withdrawn_suppression_denial(number: int, row: AntiPatternRow) -> KernelDecision:
+    """Deny a line the edit stopped covering rather than one it wrote.
+
+    Said differently from the ordinary denial because the remedy is: the line
+    is not new, so reading it as one sends whoever gets this looking at code
+    they did not touch. What they did touch is the directive, and either half
+    of the pair they broke is a fix — put the marker back, or make the line it
+    was covering stop tripping the rule.
+    """
+    return KernelDecision(
+        "deny",
+        f"line {number}: this edit removes the `# lup: ignore[{row['id']}]` "
+        f"covering it, and the line still trips the rule: {row['message']} "
+        f"— restore the directive or clear what it was silencing "
         f"(rule {row['id']} — see docs/rules.md)",
     )
 
@@ -2983,6 +3048,43 @@ def antipattern_decision(
         if refuted is None and hit["row"]["resolution"] == "required":
             return unresolved_anti_pattern_ask(number, hit["row"])
         return anti_pattern_denial(number, hit["row"])
+
+    # The mirror of the loop above, for the violation an edit exposes without
+    # touching it. Withdrawing a directive leaves the line it covered exactly
+    # as it was, so `added` is empty of it and every scan keyed on added lines
+    # is blind to it by construction — the file goes out tripping a rule that
+    # `dev check` then reports missing, which is the split this gate exists to
+    # prevent.
+    #
+    # Scoped twice over, because a rescan is the one reader here that can see
+    # lines the edit never proposed. Only the rules some withdrawn directive
+    # named are consulted, and within those only the lines that directive was
+    # actually covering — so debt the file was already carrying, uncovered
+    # before this edit and uncovered after it, is left to the audit that owns
+    # it rather than charged to whoever happened to edit the file next.
+    withdrawn = list(withdrawn_guards(before, after, [row["id"] for row in rows]))
+    if withdrawn:
+        everywhere = {number: True for number in range(1, len(original_lines) + 1)}
+        for hit in anti_pattern_hits(
+            everywhere, rows, code_lines, scanned_lines, exempt, tokenized, matched
+        ):
+            number = hit["line"]
+            rule_id = hit["row"]["id"]
+            text = original_lines[number - 1]
+            if not any(
+                guard["rule"] == rule_id and guard["text"] == text
+                for guard in withdrawn
+            ):
+                continue
+            if has_file_ignore and (disabled_ids is None or rule_id in disabled_ids):
+                continue
+            holder = covering_suppression_line(original_lines, number)
+            directive = IGNORE_RE.search(original_lines[holder - 1]) if holder else None
+            if directive is not None:
+                covered = ignore_rule_ids(directive)
+                if covered is None or rule_id in covered:
+                    continue
+            return withdrawn_suppression_denial(number, hit["row"])
 
     def sites_at(numbers: list[int]) -> list[str]:
         """The directives written on these lines, rendered for the prompt."""
