@@ -17,9 +17,10 @@ says nothing once there is not.
 """
 
 from pathlib import Path
+from time import perf_counter
 
 from lup.devtools.dev.antipatterns import within_scope
-from lup.devtools.dev.check import branch_record_reports
+from lup.devtools.dev.check import CheckReport, branch_record_reports, spent
 
 
 def test_a_pending_move_names_the_command_and_counts_the_branches() -> None:
@@ -116,3 +117,41 @@ def test_a_file_outside_this_checkout_still_names_nothing() -> None:
     assert not within_scope(
         "packages/lup/src/lup/devtools/dev/check.py", ["/elsewhere/repo/src"]
     )
+
+
+def test_the_cost_line_ranks_every_timed_check() -> None:
+    # The gate runs its tools at once, so its wall time is waiting on exactly
+    # one of them. The ranking says which, and what it would wait on next.
+    reports = [
+        CheckReport(name="ruff check", lines=[], elapsed=0.4),
+        CheckReport(name="pytest", lines=[], elapsed=136.2),
+        CheckReport(name="pyright", lines=[], elapsed=124.0),
+    ]
+
+    line = spent(reports, perf_counter() - 137.0)
+
+    assert "pytest 136s, pyright 124s, ruff check 0s" in line
+    assert line.startswith(" in 137s")
+
+
+def test_an_untimed_row_is_left_out_rather_than_called_free() -> None:
+    # A sweep costs what the gate's own wall time already accounts for, and a
+    # zero beside the tools invites somebody to optimise a number that
+    # measures nothing.
+    reports = [
+        CheckReport(name="pytest", lines=[], elapsed=90.0),
+        CheckReport(name="antipatterns", lines=[]),
+    ]
+
+    line = spent(reports, perf_counter() - 91.0)
+
+    assert "antipatterns" not in line
+    assert "pytest 90s" in line
+
+
+def test_a_gate_that_timed_nothing_still_says_what_it_cost() -> None:
+    # `--no-test` and the sweep-only modes run no external tool at all, and
+    # the wall time is the whole of what such a run has to report.
+    line = spent([CheckReport(name="antipatterns", lines=[])], perf_counter() - 3.0)
+
+    assert line == " in 3s"
