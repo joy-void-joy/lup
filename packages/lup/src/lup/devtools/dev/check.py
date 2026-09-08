@@ -19,9 +19,9 @@ from lup.harness.codescan.markers import find_feedback
 from lup.harness.coverage import coverage_gaps
 from lup.harness.modules import unloaded_guidance
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
+    GUIDANCE_BUDGET,
+    GuidanceBudget,
     GuidanceSection,
-    TemplateGuidanceBudget,
     HookSet,
     document_byte_size,
 )
@@ -473,7 +473,11 @@ def budget_reports(
     ]
 
 
-def roster_budget_report(used: int, declined: list[GuidanceSection]) -> CheckReport:
+def roster_budget_report(
+    used: int,
+    declined: list[GuidanceSection],
+    budget: GuidanceBudget = GUIDANCE_BUDGET,
+) -> CheckReport:
     """Whether a project taking every module could load every module's prose.
 
     The row the two above it cannot stand in for. Both weigh the document this
@@ -490,7 +494,7 @@ def roster_budget_report(used: int, declined: list[GuidanceSection]) -> CheckRep
     return budget_report(
         "roster budget",
         used + sum(document_byte_size(section.text) for section in declined),
-        GUIDANCE_BYTE_BUDGET,
+        budget.ceiling,
         f"every module's prose loaded, {len(declined)} section(s) this tree declines",
     )
 
@@ -513,18 +517,20 @@ def budget_report(name: str, used: int, ceiling: int, note: str) -> CheckReport:
     )
 
 
-def guidance_budget_report(used: int) -> CheckReport:
+def guidance_budget_report(
+    used: int, budget: GuidanceBudget = GUIDANCE_BUDGET
+) -> CheckReport:
     """Whether a session will load the whole document or a truncated one."""
     return budget_report(
         "guidance budget",
         used,
-        GUIDANCE_BYTE_BUDGET,
-        f"{GUIDANCE_BYTE_BUDGET - used} free",
+        budget.ceiling,
+        f"{budget.ceiling - used} free",
     )
 
 
 def scaffold_budget_report(
-    used: int, headroom: int = TemplateGuidanceBudget().headroom
+    used: int, budget: GuidanceBudget = GUIDANCE_BUDGET
 ) -> CheckReport:
     """Whether a scaffold has left its adopter room inside the runtime ceiling.
 
@@ -544,11 +550,10 @@ def scaffold_budget_report(
     never moves — cannot tell it that. The failing row states the overage
     instead: a negative amount of room is what the overage already says.
     """
-    ceiling = GUIDANCE_BYTE_BUDGET - headroom
-    free = ceiling - used
-    reserved = f"{headroom} reserved for the adopting domain"
+    free = budget.scaffold_ceiling - used
+    reserved = f"{budget.template_headroom} reserved for the adopting domain"
     note = f"{free} free, {reserved}" if free >= 0 else reserved
-    return budget_report("scaffold budget", used, ceiling, note)
+    return budget_report("scaffold budget", used, budget.scaffold_ceiling, note)
 
 
 def branch_record_reports(pending: list[str]) -> list[CheckReport]:

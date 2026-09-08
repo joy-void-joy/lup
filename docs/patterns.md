@@ -166,11 +166,17 @@ Sort a value by asking whether anyone could reasonably want another:
 
 The tell is a downstream reader who agrees with the mechanism and disagrees
 with the number. If that reader has to edit library source, the value was
-declared at the wrong level. `GUIDANCE_BYTE_BUDGET`
-(`packages/lup/src/lup/harness/models.py`) is a worked example of the fix: it
-mirrors a real vendor default, so the number is not arbitrary — but *which*
-number a given project wants is still its own call, so it is a parameter with
-that default rather than a constant.
+declared at the wrong level. `GuidanceBudget`
+(`packages/lup/src/lup/harness/models.py`) is a worked example of the fix: its
+ceiling mirrors a real vendor default, so the number is not arbitrary — but
+*which* number a given project wants is still its own call, so it is a field
+default on a declaration callers take, rather than a constant.
+
+It also shows what a declaration buys over two loose defaults sitting side by
+side. The scaffold's reserve belongs with the ceiling it comes out of, because
+the number every caller actually wants is the difference between them —
+derived once on the declaration rather than subtracted by hand at each site,
+where the site that gets it wrong is the one nobody reads twice.
 
 ## Read The Thing You Are Checking Moved
 

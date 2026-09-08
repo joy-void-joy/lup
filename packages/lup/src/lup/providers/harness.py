@@ -23,7 +23,8 @@ from lup.harness.codescan.portable import prose_breaches
 from lup.harness.contracts import NativeSpellings
 from lup.harness.prompts import SpelledPromptRenderer
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
+    GUIDANCE_BUDGET,
+    GuidanceBudget,
     document_byte_size,
     Artifact,
     ArtifactTree,
@@ -84,7 +85,7 @@ def guidance_artifacts(tree: ArtifactTree) -> list[Artifact]:
 
 
 def reject_oversized_guidance(
-    tree: ArtifactTree, budget: int = GUIDANCE_BYTE_BUDGET
+    tree: ArtifactTree, budget: GuidanceBudget = GUIDANCE_BUDGET
 ) -> None:
     """Hold the always-loaded document to its budget as a session sees it.
 
@@ -95,11 +96,12 @@ def reject_oversized_guidance(
     """
     for artifact in guidance_artifacts(tree):
         used = document_byte_size(artifact.content)
-        if used <= budget:
+        if used <= budget.ceiling:
             continue
         raise ValueError(
             f"rendered guidance {artifact.path.as_posix()} is {used} bytes, "
-            f"over the {budget} budget by {used - budget}. Move a section to a "
+            f"over the {budget.ceiling} budget by {used - budget.ceiling}. "
+            "Move a section to a "
             "generated document under docs/ and leave a file-path pointer, the "
             "way Self-Improvement Loop and Permission Hooks were split."
         )

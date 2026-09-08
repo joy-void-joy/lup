@@ -35,8 +35,9 @@ from lup.harness.prompts import (
     sentences,
 )
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
+    GUIDANCE_BUDGET,
     Agent,
+    GuidanceBudget,
     Artifact,
     ArtifactTree,
     Harness,
@@ -437,7 +438,9 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
 
 
 def codex_project_config(
-    source: Harness, spellings: NativeSpellings, budget: int = GUIDANCE_BYTE_BUDGET
+    source: Harness,
+    spellings: NativeSpellings,
+    budget: GuidanceBudget = GUIDANCE_BUDGET,
 ) -> str:
     """Render the project config: enabled features, then every tool server.
 
@@ -476,7 +479,7 @@ def codex_project_config(
     features = tomlkit.table()
     features["hooks"] = True
     document["features"] = features
-    document["project_doc_max_bytes"] = budget
+    document["project_doc_max_bytes"] = budget.ceiling
     servers = tomlkit.table(is_super_table=True)
     for plugin in source.plugins:
         for server in plugin.mcp_servers:
@@ -501,7 +504,7 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
         self,
         prompts: PromptRenderer,
         spellings: NativeSpellings,
-        budget: int = GUIDANCE_BYTE_BUDGET,
+        budget: GuidanceBudget = GUIDANCE_BUDGET,
     ) -> None:
         self.prompts = prompts
         self.spellings = spellings
