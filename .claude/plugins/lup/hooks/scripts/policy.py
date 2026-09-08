@@ -61,6 +61,7 @@ from policy_data import (
     RESOLUTION_COMMAND,
     DENIED_FETCH_SCOPES,
     EDIT_RULES,
+    IMPORT_BOUNDARIES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
@@ -1914,6 +1915,7 @@ def edit_decision(
         suffix=suffix,
         operation=operation,
         edit_rules=EDIT_RULES,
+        import_boundaries=IMPORT_BOUNDARIES,
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
     )

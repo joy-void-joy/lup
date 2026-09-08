@@ -54,6 +54,12 @@ including tools for sessions running on the host. Add `--inside` to check
 the container, or `--inside --launch-only` to run just its startup checks.
 Full container checks include a test model turn.
 
+The target selector also chooses its login layout and configuration home:
+`claude` honors `CLAUDE_CONFIG_DIR`, falling back to the personal `.claude`
+directory; `codex` honors `CODEX_HOME`, falling back to the launcher's worktree
+home. `all` checks each with its own selection. These checks use existing
+configuration; they do not install plugins or perform an interactive login.
+
 Reports name the environment and show the failed operation, its impact and
 the next step separately. A check that could not run reports an unknown
 result. A missing command can produce misleading shell results: exit code
@@ -115,7 +121,7 @@ Canonical sources live in `lup.harness.content`
 (adapter renderers and the policy bundle).
 
 Three things that map states and the reason for each. The
-16 modules under `hooks/runtime/kernel/` are a verbatim
+17 modules under `hooks/runtime/kernel/` are a verbatim
 copy of `lup/policy/kernel/`, kept byte-identical so it can be diffed against
 the canonical package. The ownership manifests are written by
 `lup.harness.ownership` from the generation result rather than compiled from a

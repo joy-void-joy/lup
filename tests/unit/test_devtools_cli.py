@@ -23,6 +23,11 @@ from typer.testing import CliRunner
 
 from lup.devtools.dev import policy_explain, pr
 from lup.devtools.harness import launch
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.codex.home import CodexWorktreeHomeStore
+from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.login import ProviderLogin
+from lup.workspace.paths import project_root
 from lup.harness.enforcement import MeasuredContainment
 from lup_template.harness.catalog import declared_hook_set
 from lup_template.devtools.main import app
@@ -68,12 +73,20 @@ def test_command_tree_is_walked() -> None:
 
 
 @pytest.mark.parametrize("launch_only", [False, True])
+@pytest.mark.parametrize(
+    "target, login", [("claude", CLAUDE_LOGIN), ("codex", CODEX_LOGIN)]
+)
 def test_container_requirements_respect_launch_only(
-    monkeypatch: pytest.MonkeyPatch, launch_only: bool
+    monkeypatch: pytest.MonkeyPatch,
+    launch_only: bool,
+    target: str,
+    login: ProviderLogin,
+    tmp_path: Path,
 ) -> None:
     checks = Mock(return_value=[])
     monkeypatch.setattr(launch, "report_inside_requirements", checks)
-    arguments = ["harness", "requirements", "claude", "--inside"]
+    monkeypatch.setenv(login.config_home_env, str(tmp_path))
+    arguments = ["harness", "requirements", target, "--inside"]
 
     if launch_only:
         arguments.append("--launch-only")
@@ -82,8 +95,29 @@ def test_container_requirements_respect_launch_only(
     assert result.exit_code == 0, result.output
     checks.assert_called_once()
     assert checks.call_args.kwargs["setting_up"] == (not launch_only)
+    assert checks.call_args.args[2] == tmp_path
+    assert checks.call_args.args[3] == login
 
     assert "No container requirements selected." in result.output
+
+
+def test_all_container_requirements_select_each_runtimes_default_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checks = Mock(return_value=[])
+    monkeypatch.setattr(launch, "report_inside_requirements", checks)
+    monkeypatch.delenv(CLAUDE_LOGIN.config_home_env, raising=False)
+    monkeypatch.delenv(CODEX_LOGIN.config_home_env, raising=False)
+
+    result = runner.invoke(
+        app, ["harness", "requirements", "all", "--inside", "--launch-only"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert [(call.args[2], call.args[3]) for call in checks.call_args_list] == [
+        (Path.home() / ".claude", CLAUDE_LOGIN),
+        (CodexWorktreeHomeStore().home_for(project_root()), CODEX_LOGIN),
+    ]
 
 
 @pytest.mark.parametrize(

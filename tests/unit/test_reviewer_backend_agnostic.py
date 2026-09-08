@@ -60,7 +60,8 @@ async def test_reviewer_uses_explicit_factory_and_typed_request(
     assert result is not None
     assert result.assessment == "critique"
     assert built["model"] == "review-model"
-    assert built["tools"] == ["Read", "Glob", "Grep", "WebFetch"]
+    assert built["capabilities"] == ["workspace-read", "web-search"]
+    assert built["timeout_seconds"] == 300
     assert requested["factory"] is marker
     assert requested["output_type"] is ReviewResult
     assert isinstance(requested["prompt"], str)
@@ -81,4 +82,4 @@ async def test_reviewer_factory_shape_does_not_depend_on_model_family(
     await reflect.run_reviewer(make_input(), None, model="gpt-model")
 
     assert set(calls[0]) == set(calls[1])
-    assert calls[0]["tools"] == calls[1]["tools"]
+    assert calls[0]["capabilities"] == calls[1]["capabilities"]

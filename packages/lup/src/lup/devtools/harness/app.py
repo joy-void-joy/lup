@@ -183,9 +183,9 @@ def create_harness_app(
                     composition,
                     composition.recipe.source.plugins[0],
                     launch.ambient_config_home(
-                        directory.login, Path.home() / ".claude"
+                        composition.login, composition.default_config_home
                     ),
-                    directory.login,
+                    composition.login,
                     setting_up=not launch_only,
                 )
             ]

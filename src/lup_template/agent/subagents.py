@@ -9,16 +9,17 @@ This is a TEMPLATE. Define subagents for specialized tasks in your domain.
 Subagents are spawned by the main agent to perform focused work.
 Each subagent has:
 - A specialized prompt (focused on one job)
-- A subset of tools (only what it needs)
-- Its own model (cheaper models for simpler tasks)
+- Runtime capabilities and optional exact tool grants
+- A portable model tier, resolved by the selected provider
 
 Definitions use ``SubagentSpec`` as portable data. The application injects a
 typed factory recipe into :func:`lup.orchestration.subagents.create_run_subagent_tool`; the
 tool then performs a one-shot query without selecting a provider itself.
 
-A spec without a ``model`` inherits the session's main model on every
-backend; pinning one (as the specs below do) is a deliberate cost/skill
-choice that holds regardless of ``AGENT_SDK``.
+A spec without a ``model`` inherits the session's main model. These roles
+request the strongest tier; each adapter supplies its native model.
+Capabilities express runtime facilities; exact ``tools`` grants retain
+Lup's canonical vocabulary and must never be widened by an adapter.
 
 Subagents are one of several agent shapes — ``docs/orchestration.md`` is
 the full catalog. Where the siblings live:
@@ -37,37 +38,13 @@ the full catalog. Where the siblings live:
 from lup.types import SubagentSpec
 
 # =============================================================================
-# lup: template: tool lists — grant each subagent only the tools its job needs
+# lup: template: capabilities — grant each subagent only the facilities its job needs
 # =============================================================================
-
-
-def research_tools() -> list[str]:
-    """Names of the tools a research subagent is allowed to call.
-
-    A function rather than a constant so that a tool which depends on a
-    configured API key can be added conditionally, keeping that choice
-    beside the rest of the selection. Resolved at import here; to vary it
-    per session, call it from :func:`get_subagent_specs` instead.
-    """
-    return [
-        "WebSearch",
-        "WebFetch",
-        "Read",
-        "Glob",
-    ]
-
-
-def analysis_tools() -> list[str]:
-    """Names of the tools an analysis subagent is allowed to call."""
-    return [
-        "Read",
-        "Glob",
-    ]
 
 
 # =============================================================================
 # lup: template: subagent definitions — replace researcher/analyzer with your
-# domain's specialists (each spec: prompt, tool subset, pinned model)
+# domain's specialists (each spec: prompt, capabilities, exact grants, model tier)
 # =============================================================================
 
 
@@ -101,8 +78,8 @@ researcher = SubagentSpec(
         "verifies facts, and returns organized findings."
     ),
     prompt=RESEARCHER_PROMPT,
-    tools=research_tools(),
-    model="claude-opus-5",
+    capabilities=["workspace-read", "web-search"],
+    model="strongest",
 )
 
 
@@ -137,8 +114,8 @@ analyzer = SubagentSpec(
         "Identifies patterns, anomalies, and draws conclusions."
     ),
     prompt=ANALYZER_PROMPT,
-    tools=analysis_tools(),
-    model="claude-opus-5",
+    capabilities=["workspace-read"],
+    model="strongest",
 )
 
 

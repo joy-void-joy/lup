@@ -38,6 +38,8 @@ from lup.providers.codex.native import (
 )
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
+from lup.harness.codescan.boundaries import native_import_boundaries
+from lup.harness.codescan.common import RuleSelection
 from lup.types import JsonObject
 from lup.policy.chain import UnknownToolPolicy
 from lup.policy.grants import LeaseGrants, write_allowance_grants
@@ -99,7 +101,11 @@ from lup.policy.rules import (
 )
 
 from lup.policy.vocabulary import runner_target_rules
-from lup_template.harness.catalog import declared_hook_set, portable_harness
+from lup_template.harness.catalog import (
+    application_roots,
+    declared_hook_set,
+    portable_harness,
+)
 
 SHELL_RULES = declared_hook_set().resolved_shell_rules()
 """This project's vocabulary as the runtime resolves it, not as it is declared.
@@ -173,6 +179,250 @@ class EditDecisionCase(BaseModel, frozen=True):
     effect: Literal["allow", "ask", "deny", "defer"]
     autonomous: bool = False
     path_exists: bool = True
+
+
+NATIVE_IMPORT_CASES = [
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="from lup.providers import codex\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="from lup.providers import *\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import claude_agent_sdk as sdk\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/lup_template/agent/core.py",
+        before="",
+        after="import openai\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/lup_template/agent/core.py",
+        before="",
+        after="from lup.providers.codex.runtime import create_codex\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="packages/lup/src/lup/providers/codex/example.py",
+        before="",
+        after="import openai\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="tests/test_example.py",
+        before="",
+        after="import claude_agent_sdk\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after='tools = ["Read", "WebSearch"]\nruntime = "codex"\n',
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after='"""Claude and Codex: from openai import AsyncOpenAI"""\n',
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import openai_settings\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="packages/lup/src/lup/orchestration/example.py",
+        before="",
+        after="from ..providers import claude\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="from lup.providers import (\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import openai  # lup: ignore[seam-boundary]\n",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="# lup: ignore[seam-boundary]\nimport openai\n",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after=(
+            "def run() -> None:\n"
+            "    # lup: ignore[seam-boundary]\n"
+            "    import \\\n"
+            "        openai\n"
+        ),
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="value = 1  # lup: ignore[seam-boundary]\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import openai\nvalue = cast(str, raw)  # lup: ignore[cast]\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="# lup: ignore[seam-boundary]\nimport openai\n",
+        after="import openai\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="import openai  # lup: ignore[seam-boundary]\n",
+        after="import openai  # lup: ignore[seam-boundary]\nvalue = 1\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="from lup.providers import (\n    capabilities,\n)\n",
+        after="from lup.providers import (\n    capabilities,\n    codex,\n)\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import openai\n",
+        effect="deny",
+        autonomous=True,
+    ),
+]
+
+
+@pytest.mark.parametrize("case", NATIVE_IMPORT_CASES)
+def test_import_ownership_has_one_canonical_and_hermetic_verdict(
+    tmp_path: Path, case: EditDecisionCase
+) -> None:
+    boundaries = native_import_boundaries(application_roots())
+    policy = EditPolicy(
+        protected=[],
+        path_roles=FIXTURE_PATH_ROLES,
+        autonomous=case.autonomous,
+        import_boundaries=boundaries,
+    )
+    change = EditChange(path=Path(case.path), before=case.before, after=case.after)
+    canonical = policy.decide(EditBatch(changes=[change]))
+    bundled = load_bundled_kernel(tmp_path, "edit")
+    generated = bundled.decide_edit(
+        case.path,
+        case.before,
+        case.after,
+        path_exists=case.path_exists,
+        path_rules=[],
+        antipattern_rows=antipattern_rows(change),
+        path_roles=FIXTURE_PATH_ROLES,
+        autonomous=case.autonomous,
+        python_source=True,
+        import_boundaries=[boundary.erased() for boundary in boundaries],
+    )
+    assert canonical.effect == generated.effect == case.effect
+    if case.effect == "deny":
+        assert "seam-boundary" in canonical.reason
+        assert "seam-boundary" in generated.reason
+
+
+def test_import_boundary_allowance_cannot_admit_an_unsuppressed_dependency() -> None:
+    boundaries = [
+        item.erased() for item in native_import_boundaries(application_roots())
+    ]
+    for after, effect in (
+        ("import openai\n", "deny"),
+        ("import openai  # lup: ignore[seam-boundary]\n", "allow"),
+    ):
+        decision = decide_edit(
+            "src/worker.py",
+            "",
+            after,
+            path_exists=True,
+            path_rules=[],
+            antipattern_rows=[],
+            python_source=True,
+            allowances=["antipattern-suppression"],
+            import_boundaries=boundaries,
+        )
+        assert decision.effect == effect
+
+
+@pytest.mark.parametrize(
+    "path,effect",
+    [
+        ("packages/lup/src/lup/providers/codex/example.py", "allow"),
+        ("src/lup_template/agent/core.py", "deny"),
+        ("packages/lup/src/lup/orchestration/example.py", "deny"),
+    ],
+)
+def test_import_ownership_resolves_absolute_paths_in_their_own_worktree(
+    tmp_path: Path, path: str, effect: str
+) -> None:
+    repository = tmp_path / "sibling"
+    marker = repository / ".git"
+    marker.mkdir(parents=True)
+    (marker / "HEAD").write_text("ref: refs/heads/fixture\n", encoding="utf-8")
+    policy = EditPolicy(
+        protected=[], import_boundaries=native_import_boundaries(application_roots())
+    )
+    decision = policy.decide(
+        EditBatch(
+            changes=[
+                EditChange(
+                    path=repository / path,
+                    before="",
+                    after="import openai\n",
+                )
+            ]
+        )
+    )
+    assert decision.effect == effect
+
+
+def test_import_boundary_retirement_reaches_the_canonical_policy() -> None:
+    hooks = HookSet(
+        id="fixture",
+        policy_ids=["edit"],
+        rules=RuleSelection(retired=["seam-boundary"]),
+        import_boundaries=native_import_boundaries(application_roots()),
+    )
+    policy = semantic_policy_for(hooks)
+    decision = policy.decide(
+        EditBatch(
+            changes=[
+                EditChange(
+                    path=Path("src/worker.py"),
+                    before="",
+                    after="import openai\n",
+                )
+            ]
+        )
+    )
+    assert decision.effect == "allow"
 
 
 # The roles this repository declares, mirrored so the fixtures judge the same
@@ -1551,6 +1801,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             acceptance_guard=None,
             shell_rules=SHELL_RULES,
             edit_rules=FIXTURE_EDIT_RULES,
+            import_boundaries=native_import_boundaries(application_roots()),
             refused_tools=FIXTURE_REFUSED_TOOLS,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
@@ -1571,7 +1822,10 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                     for item in SHELL_POLICY_CASES
                 ],
                 "fetch": [item.model_dump() for item in FETCH_POLICY_CASES],
-                "edit": [item.model_dump() for item in EDIT_POLICY_CASES],
+                "edit": [
+                    item.model_dump()
+                    for item in [*EDIT_POLICY_CASES, *NATIVE_IMPORT_CASES]
+                ],
             }
         ),
         encoding="utf-8",
@@ -1588,9 +1842,11 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
         "    EDIT_RULES, MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES,\n"
+        "    IMPORT_BOUNDARIES,\n"
         "    RUNNER_TARGETS, SANDBOX_EXCLUDED_COMMANDS, SHELL_RULES,\n"
         ")\n"
         "assert EDIT_RULES, 'the declared edit table did not reach the runtime'\n"
+        "assert IMPORT_BOUNDARIES, 'import ownership did not reach the runtime'\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
         ")\n"
@@ -1623,6 +1879,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        autonomous=case['autonomous'],\n"
         "        python_source=suffix in ('.py', '.pyi'),\n"
         "        suffix=suffix, edit_rules=EDIT_RULES,\n"
+        "        import_boundaries=IMPORT_BOUNDARIES,\n"
         "    )\n"
         "    assert decision.effect == case['effect'], case\n",
         encoding="utf-8",
@@ -1655,6 +1912,39 @@ def test_equivalent_multi_file_native_edits_decode_identically() -> None:
     )
 
     assert claude.tool == codex.tool == EditBatch(changes=changes)
+
+
+def test_native_edit_batches_cannot_hide_a_dependency_breach_behind_an_ask() -> None:
+    changes = [
+        EditChange(path=Path("README.md"), before="", after="Review this\n"),
+        EditChange(
+            path=Path("src/worker.py"),
+            before="",
+            after="from lup.providers import codex\n",
+        ),
+    ]
+    events = [
+        ClaudeEventDecoder().decode(
+            ClaudeBeforeToolEvent(operation=ClaudeEditBatchOperation(changes=changes))
+        ),
+        CodexEventDecoder().decode(
+            CodexBeforeToolEvent(
+                operation=CodexFileChangeOperation(
+                    changes=[
+                        CodexFileChange(
+                            path=change.path, before=change.before, after=change.after
+                        )
+                        for change in changes
+                    ]
+                )
+            )
+        ),
+    ]
+    policy = semantic_policy_for(declared_hook_set())
+    for event in events:
+        decision = policy.decide(event.tool)
+        assert decision.effect == "deny"
+        assert "seam-boundary" in decision.reason
 
 
 def test_unknown_tools_remain_auditable_and_ask() -> None:

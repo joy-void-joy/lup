@@ -105,6 +105,16 @@ class AcceptanceGuardRow(TypedDict):
     autonomous_reason: str
 
 
+class ImportBoundaryRow(TypedDict):
+    """Module families whose dependencies belong in declared repository roots."""
+
+    modules: list[str]
+    owners: list[str]
+    source_roots: list[str]
+    rule_id: str
+    message: str
+
+
 class AntiPatternRow(TypedDict):
     """One erased anti-pattern rule and the syntactic context it inspects."""
 

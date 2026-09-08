@@ -50,6 +50,8 @@ from lup.policy.kernel.rows import (
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
 from lup.policy.kernel.words import command_words as kernel_command_words
 from lup.policy.edit_rules import EditRule, erase_edit_rules
+from lup.policy.imports import ImportBoundary
+from lup.policy.assets.host import worktree_path
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
@@ -434,6 +436,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         grants: LeaseGrants | None = None,
         acceptance_guard: AcceptanceGuardRow | None = None,
         edit_rules: list[EditRule] | None = None,
+        import_boundaries: list[ImportBoundary] | None = None,
     ) -> None:
         self.acceptance_guard = acceptance_guard
         self.path_roles = path_roles or []
@@ -445,6 +448,9 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         # that does not move while this policy answers, and the generated
         # dispatchers read rows that were erased the same way at generation.
         self.edit_rules = erase_edit_rules(edit_rules or [])
+        self.import_boundaries = [
+            boundary.erased() for boundary in import_boundaries or []
+        ]
 
     def decide(self, event: EditBatch) -> Decision:
         decisions = [self.decide_change(change) for change in event.changes]
@@ -463,7 +469,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         suffix = change.path.suffix.lower()
         return pydantic_decision(
             decide_edit(
-                change.path.as_posix(),
+                worktree_path(change.path.as_posix()),
                 change.before,
                 change.after,
                 path_exists=change.path.exists(),
@@ -478,5 +484,6 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 suffix=suffix,
                 operation=change.operation,
                 edit_rules=self.edit_rules,
+                import_boundaries=self.import_boundaries,
             )
         )

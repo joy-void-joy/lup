@@ -20,8 +20,8 @@ from lup.harness.coverage import coverage_gaps
 from lup.harness.modules import unloaded_guidance
 from lup.harness.models import (
     GUIDANCE_BYTE_BUDGET,
-    TEMPLATE_GUIDANCE_HEADROOM,
     GuidanceSection,
+    TemplateGuidanceBudget,
     HookSet,
     document_byte_size,
 )
@@ -524,7 +524,7 @@ def guidance_budget_report(used: int) -> CheckReport:
 
 
 def scaffold_budget_report(
-    used: int, headroom: int = TEMPLATE_GUIDANCE_HEADROOM
+    used: int, headroom: int = TemplateGuidanceBudget().headroom
 ) -> CheckReport:
     """Whether a scaffold has left its adopter room inside the runtime ceiling.
 

@@ -215,7 +215,7 @@ async def repl(
     from lup.workspace.paths import project_root
 
     console = Console(highlight=False)
-    effective_model = model or settings.model
+    effective_model = model or settings.model or "strongest (engine-native)"
     stack = AsyncExitStack()
 
     # Welcome panel with server → tool listing

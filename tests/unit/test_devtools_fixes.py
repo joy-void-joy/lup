@@ -556,6 +556,41 @@ class TestTheAntiPatternSweepIsScopedToWhatATreeChanged:
 
         assert scan.findings == []
 
+    @pytest.mark.parametrize(
+        "suppression", ["", "    # lup: ignore[own-model-dispatch]\n"]
+    )
+    def test_scoped_dispatch_uses_declarations_outside_its_scope(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suppression: str
+    ) -> None:
+        work = tmp_path / "repo"
+        git = initialized_repo(work, tmp_path / "no-hooks")
+        (work / "models.py").write_text(
+            "from pydantic import BaseModel\n\nclass Entry(BaseModel):\n    pass\n",
+            encoding="utf-8",
+        )
+        (work / "adapter.py").write_text(
+            "from models import Entry\n\ndef convert(value: Entry) -> bool:\n"
+            f"{suppression}    return isinstance(value, Entry)\n",
+            encoding="utf-8",
+        )
+        git("add", "-A")
+        monkeypatch.chdir(work)
+        project = DevProject(package="app")
+
+        whole = scan_antipatterns(project)
+        scoped = scan_antipatterns(project, ["adapter.py"])
+        expected = [
+            finding for finding in whole.findings if finding.file == "adapter.py"
+        ]
+
+        assert scoped.findings == expected
+        dispatch = [
+            finding for finding in expected if finding.rule_id == "own-model-dispatch"
+        ]
+        assert [finding.kind for finding in dispatch] == (
+            [] if suppression else ["missing"]
+        )
+
     def test_a_ref_git_cannot_resolve_refuses_instead_of_scoping_to_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

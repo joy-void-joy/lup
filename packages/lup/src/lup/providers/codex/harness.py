@@ -8,6 +8,8 @@ from pathlib import Path
 
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.subagents import CodexModelTiers
+from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.formats.banner import (
     COMMENT_FREE,
@@ -39,7 +41,6 @@ from lup.harness.models import (
     ArtifactTree,
     Harness,
     HookSet,
-    ModelTier,
     Plugin,
     PluginLocation,
     QualifiedAgentName,
@@ -267,6 +268,9 @@ class CodexSpellings(NativeSpellings):
             "https://learn.chatgpt.com/"
         )
 
+    def runtime_key(self) -> str:
+        return "codex"
+
     def project_root(self) -> str:
         # Codex substitutes nothing into a server command, but it reads this
         # config only for the project the config sits in, so the launch
@@ -276,7 +280,7 @@ class CodexSpellings(NativeSpellings):
         return "."
 
     def model_alias(self, tier: ModelTier) -> str | None:
-        return None
+        return CodexModelTiers().resolve(tier)
 
     def tree(self, location: TreeLocation) -> Atom:
         match location:
@@ -817,6 +821,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),
+                        import_boundaries=source.resolved_import_boundaries(),
                         refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),

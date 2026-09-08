@@ -50,30 +50,42 @@ TMUX_BUFFER_VERBS = ("load-buffer", "set-buffer")
 TMUX_VALUE_FLAGS = ("-b", "-t", "-n")
 
 
-def ask(request):
-    """Put one question to the broker and return its reply, or exit."""
+class UnsupportedClipboardType(ValueError):
+    """A normal native format probe outside the broker's declared types."""
+
+
+def exchange(request, timeout=5, limit=32 * 1024 * 1024):
+    """One bounded broker exchange, shared by command and native clients."""
     endpoint = os.environ.get("LUP_CLIPBOARD_SOCKET", "")
     if not endpoint:
-        sys.stderr.write("no clipboard bridge in this session\n")
-        sys.exit(1)
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
-            channel.connect(endpoint)
-            channel.sendall((json.dumps(request) + "\n").encode("utf-8"))
-            received = b""
-            while not received.endswith(b"\n"):
-                block = channel.recv(65536)
-                if not block:
-                    break
-                received += block
-    except OSError as error:
-        sys.stderr.write("clipboard bridge unreachable: %s\n" % error)
-        sys.exit(1)
+        raise OSError("no clipboard bridge in this session")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
+        channel.settimeout(timeout)
+        channel.connect(endpoint)
+        channel.sendall((json.dumps(request) + "\n").encode("utf-8"))
+        # JSON may encode one text byte as six characters (a Unicode escape).
+        # The broker owns the payload limit; this bounds its wire envelope too.
+        with channel.makefile("rb") as reader:
+            received = reader.readline(limit * 6 + 65536)
+        if not received.endswith(b"\n"):
+            raise ValueError("clipboard bridge reply incomplete or oversized")
     reply = json.loads(received.decode("utf-8"))
-    if not reply.get("ok", False):
-        sys.stderr.write(reply.get("error", "clipboard unavailable") + "\n")
-        sys.exit(1)
+    if not isinstance(reply, dict):
+        raise ValueError("clipboard bridge reply is not an object")
+    if reply.get("ok") is not True:
+        if reply.get("code") == "unsupported_type":
+            raise UnsupportedClipboardType(reply.get("error", "unsupported type"))
+        raise ValueError(reply.get("error", "clipboard unavailable"))
     return reply
+
+
+def ask(request):
+    """Put one question to the broker and return its reply, or exit."""
+    try:
+        return exchange(request)
+    except (OSError, ValueError) as error:
+        sys.stderr.write("clipboard bridge: %s\n" % error)
+        sys.exit(1)
 
 
 def wanted_type(argv):

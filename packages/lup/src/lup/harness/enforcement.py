@@ -161,6 +161,7 @@ def semantic_policy_for(
         grants=grants,
         acceptance_guard=guard.erased() if (guard := hooks.acceptance_guard) else None,
         edit_rules=hooks.resolved_edit_rules(),
+        import_boundaries=hooks.resolved_import_boundaries(),
     )
     return SemanticToolPolicy(
         fetch=FetchPolicy(allowed, denied, hooks.unjudged_ambient),

@@ -1,5 +1,6 @@
 """Codex CLI evidence, cache verification, and explicit plugin installation."""
 
+import fcntl
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import sh
+import tomlkit
 from packaging.version import Version
 from pydantic import BaseModel, Field
 
@@ -251,48 +253,112 @@ class CodexPluginInstaller:
     def ensure(
         self, source_root: Path, cwd: Path, force: bool = False
     ) -> PluginCacheEvidence:
-        before = plugin_cache_evidence(source_root, self.config)
-        if before.ready and not force:
-            return before
-        environment = self.plugin_environment()
-        marketplace_root = stage_cachebusted_marketplace(
-            source_root, cwd, self.config, before.installed_root.name
-        )
-        # The staged marketplace carries an immutable manifest version. Repoint
-        # the project-specific name there without removing any installed
-        # revision, because another session may still execute its hooks.
-        sh.Command(str(self.executable))(
-            "plugin",
-            "marketplace",
-            "remove",
-            self.config.marketplace,
-            _cwd=str(cwd),
-            _env=environment,
-            _ok_code=[0, 1],
-        )
-        sh.Command(str(self.executable))(
-            "plugin",
-            "marketplace",
-            "add",
-            str(marketplace_root),
-            _cwd=str(cwd),
-            _env=environment,
-        )
-        selector = f"{self.config.plugin}@{self.config.marketplace}"
-        sh.Command(str(self.executable))(
-            "plugin",
-            "add",
-            selector,
-            "--json",
-            _cwd=str(cwd),
-            _env=environment,
-        )
-        after = plugin_cache_evidence(source_root, self.config)
-        if not after.ready:
+        """Stage with the native CLI, then publish without pruning live revisions."""
+        self.config.codex_home.mkdir(parents=True, exist_ok=True)
+        with (self.config.codex_home / ".lup-plugin-install.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            before = plugin_cache_evidence(source_root, self.config)
+            if before.ready and self.registered(before) and not force:
+                return before
+            if before.installed_root.exists() and not before.ready:
+                raise RuntimeError(
+                    f"Installed immutable Codex revision is corrupt: {before.installed_root}. "
+                    "Select a clean Codex home; a live revision cannot be overwritten."
+                )
+            marketplace_root = stage_cachebusted_marketplace(
+                source_root, cwd, self.config, before.installed_root.name
+            )
+            with TemporaryDirectory(
+                prefix=".plugin-install-", dir=self.config.codex_home
+            ) as temporary_text:
+                staged = self.config.model_copy(
+                    update={"codex_home": Path(temporary_text)}
+                )
+                environment = {
+                    **self.plugin_environment(),
+                    **CODEX_LOGIN.environment(staged.codex_home),
+                }
+                command = sh.Command(str(self.executable))
+                command(
+                    "plugin",
+                    "marketplace",
+                    "add",
+                    str(marketplace_root),
+                    _cwd=str(cwd),
+                    _env=environment,
+                )
+                command(
+                    "plugin",
+                    "add",
+                    f"{self.config.plugin}@{self.config.marketplace}",
+                    "--json",
+                    _cwd=str(cwd),
+                    _env=environment,
+                )
+                self.publish(source_root, staged)
+            return plugin_cache_evidence(source_root, self.config)
+
+    def registered(self, evidence: PluginCacheEvidence) -> bool:
+        """The native home must select this revision, not merely contain its files."""
+        settings = self.config.codex_home / "config.toml"
+        if not settings.exists():
+            return False
+        document = tomlkit.parse(settings.read_text(encoding="utf-8"))
+        try:
+            marketplace = document["marketplaces"][self.config.marketplace]
+            plugin = document["plugins"][
+                f"{self.config.plugin}@{self.config.marketplace}"
+            ]
+            source = marketplace["source"]
+            expected = (
+                self.config.codex_home
+                / "plugins"
+                / "sources"
+                / self.config.marketplace
+                / evidence.installed_root.name
+            )
+            return (
+                plugin["enabled"] is True
+                and marketplace["source_type"] == "local"
+                and isinstance(source, str)
+                and Path(source) == expected
+            )
+        except (KeyError, TypeError):
+            return False
+
+    def publish(self, source_root: Path, staged: PluginCacheConfig) -> None:
+        """Retain every live path and merge only this native installation's state."""
+        installed = plugin_cache_evidence(source_root, staged)
+        if not installed.ready:
             raise RuntimeError(
                 "Codex reported installation success but cached plugin digest differs"
             )
-        return after
+        destination = plugin_cache_evidence(source_root, self.config).installed_root
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if not destination.exists():
+            with TemporaryDirectory(prefix=".publish-", dir=destination.parent) as area:
+                revision = Path(area) / "revision"
+                shutil.copytree(installed.installed_root, revision)
+                revision.replace(destination)
+        settings = self.config.codex_home / "config.toml"
+        document = (
+            tomlkit.parse(settings.read_text(encoding="utf-8"))
+            if settings.exists()
+            else tomlkit.document()
+        )
+        native = tomlkit.parse(
+            (staged.codex_home / "config.toml").read_text(encoding="utf-8")
+        )
+        for key, name in (
+            ("marketplaces", self.config.marketplace),
+            ("plugins", f"{self.config.plugin}@{self.config.marketplace}"),
+        ):
+            entries = document.setdefault(key, tomlkit.table(is_super_table=True))
+            entries[name] = native[key][name]
+        temporary = staged.codex_home / "published.config.toml"
+        temporary.write_text(tomlkit.dumps(document), encoding="utf-8")
+        temporary.chmod(settings.stat().st_mode & 0o777 if settings.exists() else 0o600)
+        temporary.replace(settings)
 
     def remove(self, cwd: Path) -> None:
         """Explicitly remove this plugin and its configured marketplace."""

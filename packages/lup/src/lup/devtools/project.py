@@ -13,7 +13,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.harness.codescan.boundaries import ApplicationRoots
+from lup.harness.codescan.boundaries import ApplicationRoots, native_import_boundaries
+from lup.policy.imports import ImportBoundary
 from lup.harness.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.subapps import SubAppSelection
@@ -181,6 +182,18 @@ class DevProject(BaseModel, frozen=True):
     ``ClaudeSpellings`` because choosing is its whole job — from a module
     that reached past the abstraction it was handed.
     """
+
+    import_boundaries: list[ImportBoundary] | None = None
+    """The hook's import ownership, or library ownership when not declared."""
+
+    def resolved_import_boundaries(self) -> list[ImportBoundary]:
+        """Dependency rules retained by the project's shared rule selection."""
+        declared = (
+            native_import_boundaries(self.roots)
+            if self.import_boundaries is None
+            else self.import_boundaries
+        )
+        return [boundary for boundary in declared if self.rules.keeps(boundary.rule_id)]
 
     catalog: Path | None = None
     """Where this repository writes down what it settled about itself.

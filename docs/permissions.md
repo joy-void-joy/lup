@@ -349,8 +349,8 @@ failed` mid-commit.
 
 ## Edit decisions
 
-Edit decisions cover protected paths, marker changes, size, and the canonical
-anti-pattern audit. An edit over the size gate alone is deferred — the hook
+Edit decisions cover protected paths, marker changes, size, the canonical
+anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook
 emits no decision, so auto-accept applies while hard gates stay explicit.
 
 Size is counted in *real* changed lines per change block, and an edit of
@@ -363,6 +363,22 @@ gate, and a full-file write asks for everything but a package marker — an
 question the gate exists to raise has no content to answer it. One carrying
 anything else is the module it became, and asks. The anti-pattern audit runs
 before any auto-allow, so keeping an edit small cannot outrun it.
+
+`HookSet.import_boundaries` carries the same `seam-boundary` ownership that
+the repository audit reads. Concrete adapter imports belong in providers or
+declared composition roots; provider SDK imports belong in implementations
+and explicitly named fixtures, not application composition roots. The shared
+AST scanner understands direct, parent-package, wildcard, and relative
+imports, including multiline statements. Provider names in prose and canonical
+tool grants such as `Read` and `WebSearch` remain valid: vocabulary is not a
+dependency. Computed import names and arbitrary executed code are outside this
+static guard, not claims of runtime isolation.
+
+An unsuppressed dependency breach denies before size allowances or a batch's
+approval request can admit it. A typed suppression uses the existing reviewed
+suppression allowance; removing one exposes the import again. Retiring
+`seam-boundary` through `HookSet.rules` retires the hook and audit together.
+Both native dispatchers carry the same scanner and ownership rows.
 
 Every verdict above is what the kernel reaches when a project says nothing,
 and every one of them is nameable. `HookSet.edit_rules` is a `Selection` of

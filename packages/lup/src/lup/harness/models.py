@@ -35,11 +35,12 @@ from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
+from lup.policy.imports import ImportBoundary
 from lup.policy.everyday import CommandFamily
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
 from lup.seams import SelectableRule, Selection
-from lup.types import JsonValue, ToolGrant, ToolName
+from lup.types import JsonValue, ModelTier, ToolGrant, ToolName
 
 if TYPE_CHECKING:
     from lup.harness.contracts import NativeSpellings, PromptRenderer
@@ -571,27 +572,37 @@ however little literal text the declaration holds. Reference material that a
 skill or a denial message surfaces at the right moment belongs in a generated
 document under ``docs/`` instead, reached by a file-path pointer."""
 
-TEMPLATE_GUIDANCE_HEADROOM = 11_776
-"""Bytes a scaffold holds back, out of the budget above, for its adopter.
 
-The ceiling above is what a *runtime* will load. This is what a **template**
-may spend of it, and the difference is the whole point: a repository that is
-still the scaffold is writing guidance every domain built on it inherits, and
-that domain then has to describe its own architecture, conventions and
-workflow inside whatever is left. A scaffold that fills the runtime's ceiling
-has not passed its budget on, it has spent it — and the adopter discovers this
-by writing three paragraphs about its own project and being refused.
+class TemplateGuidanceBudget(BaseModel, frozen=True):
+    """The scaffold's reserve for its adopter, independent of a runtime ceiling.
 
-11.5 KiB, half a kilobyte under what this repository's own architecture,
-conventions and tooling sections cost together: a scaffold that also has to
-tell every domain how to answer its runtime's ambient instructions spends
-that much of the reserve on their behalf. Enough for a domain to say the
-equivalent about itself, rather than a round number that sounds generous.
+    The ceiling above is what a *runtime* will load. This is what a **template**
+    may spend of it, and the difference is the whole point: a repository that is
+    still the scaffold is writing guidance every domain built on it inherits,
+    and that domain then has to describe its own architecture, conventions and
+    workflow inside whatever is left. A scaffold that fills the runtime's
+    ceiling has not passed its budget on, it has spent it — and the adopter
+    discovers this by writing three paragraphs about its own project and being
+    refused.
 
-Only ``dev check`` weighs this, and only while ``[tool.lup] template = true``.
-It must never reach ``budget`` on the checks above: those decide what a real
-runtime is told to load, and a scaffold's self-restraint is not a fact about
-any runtime's ceiling."""
+    A field default rather than a module constant, because the reserve is a
+    judgement about how much room an adopter needs and a project with a
+    different answer replaces it rather than editing the library. ``ge=0`` is
+    what the field buys over an integer: a negative reserve is not a stricter
+    scaffold, it is a check that passes whatever the document weighs.
+
+    Only ``dev check`` weighs this, and only while ``[tool.lup] template =
+    true``. It must never reach ``budget`` on the checks above: those decide
+    what a real runtime is told to load, and a scaffold's self-restraint is not
+    a fact about any runtime's ceiling.
+    """
+
+    headroom: int = Field(default=11_776, ge=0)
+    """11.5 KiB, half a kilobyte under what this repository's own architecture,
+    conventions and tooling sections cost together: a scaffold that also has to
+    tell every domain how to answer its runtime's ambient instructions spends
+    that much of the reserve on their behalf. Enough for a domain to say the
+    equivalent about itself, rather than a round number that sounds generous."""
 
 
 def document_byte_size(text: str) -> int:
@@ -703,14 +714,6 @@ type AgentColor = Literal[
     "red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"
 ]
 """The closed agent accent-color palette native runtimes accept."""
-
-
-type ModelTier = Literal["inherit", "strongest", "balanced", "fast"]
-"""Portable model preference for one role.
-
-Runtimes name and version their own model lineups, so a declaration states the
-need and each adapter spells whichever tier it can honor — or omits the choice
-where it has no proven vocabulary to spell it in."""
 
 
 class Agent(SelectableRule, frozen=True):
@@ -938,7 +941,18 @@ class ProjectRootWord(McpWord, frozen=True):
         return runtime.project_root()
 
 
-type McpCommandWord = Annotated[LiteralWord | ProjectRootWord, Discriminator("type")]
+class RuntimeWord(McpWord, frozen=True):
+    """The engine that owns the tool server, independent of ambient settings."""
+
+    type: Literal["runtime"] = "runtime"
+
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        return runtime.runtime_key()
+
+
+type McpCommandWord = Annotated[
+    LiteralWord | ProjectRootWord | RuntimeWord, Discriminator("type")
+]
 
 
 class McpServer(BaseModel, frozen=True):
@@ -1131,6 +1145,7 @@ class HookSet(BaseModel, frozen=True):
     allowed_fetch: list[HookUrlScope] = []
     denied_fetch: list[HookUrlScope] = []
     protected_edit_roots: list[Path] = []
+    import_boundaries: list[ImportBoundary] = []
     path_roles: list[HookPathRole] = Field(
         default=[],
         description=(
@@ -1359,6 +1374,14 @@ class HookSet(BaseModel, frozen=True):
         one out from under the project that never asked to.
         """
         return self.edit_rules.over([])
+
+    def resolved_import_boundaries(self) -> list[ImportBoundary]:
+        """The dependency rules retained by the same selection as the auditor."""
+        return [
+            boundary
+            for boundary in self.import_boundaries
+            if self.rules.keeps(boundary.rule_id)
+        ]
 
 
 class ResolveSpec(BaseModel, frozen=True):

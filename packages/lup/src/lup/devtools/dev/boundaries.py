@@ -151,6 +151,7 @@ def scan_boundaries(project: DevProject) -> list[FoundBreach]:
     """Every native import, spelling, and kernel-import breach in the tree."""
     found: list[FoundBreach] = []  # lup: ignore[empty-collection]
     roots = project.roots
+    boundaries = project.resolved_import_boundaries()
     for source in tracked_python_sources(project):
         found.extend(
             FoundBreach(
@@ -159,8 +160,10 @@ def scan_boundaries(project: DevProject) -> list[FoundBreach]:
                 module=finding.module,
                 text=finding.text,
             )
-            for finding in audit_path_boundaries(source.path, source.text, roots)
-            if finding.kind == "missing"
+            for finding in audit_path_boundaries(
+                source.path, source.text, roots, boundaries
+            )
+            if finding.kind == "missing" and project.rules.keeps(finding.rule_id)
         )
         if source.rel.startswith(KERNEL_ROOT):
             found.extend(

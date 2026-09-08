@@ -90,9 +90,8 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
             "openai-compat otherwise. claude-compat keeps the Claude "
             "scaffolding on an Anthropic-protocol endpoint (OPENAI_BASE_URL). "
             "The reviewer and background agents follow AGENT_AUX_MODEL, "
-            "which defaults to an engine-native model. Subagent specs pin "
-            "their own models — the template's pin Anthropic ones, so they "
-            "need Anthropic credentials on codex/openai unless overridden."
+            "which defaults to an engine-native model. Delegated roles "
+            "declare portable model tiers resolved by the selected engine."
         ),
     )
 
@@ -191,10 +190,10 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
     # MODEL SETTINGS
     # ==========================================================================
 
-    model: str = Field(
-        default="claude-opus-5",
+    model: str | None = Field(
+        default=None,
         validation_alias="AGENT_MODEL",
-        description="Model to use (provider-specific identifier)",
+        description="Explicit model identifier; unset selects the native engine's strongest tier",
     )
 
     max_thinking_tokens: int | None = Field(
@@ -272,8 +271,7 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
         default=None,
         validation_alias="AGENT_TURN_TIMEOUT_SECONDS",
         description=(
-            "Wall-clock cap on a single turn (codex/openai only — a Codex "
-            "turn is otherwise unbounded: no max_turns, no interrupt). "
+            "Wall-clock cap on a complete logical turn, enforced for every engine. "
             "None = no limit."
         ),
     )
@@ -304,7 +302,7 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
 settings = Settings()
 
 
-def engine_for_model(model: str) -> Engine:
+def engine_for_model(model: str | None) -> Engine:
     """The engine one model id routes to by vendor prefix alone.
 
     ``claude-*`` runs the native Claude engine and ``gpt-*``/``o<digit>``/
@@ -313,6 +311,8 @@ def engine_for_model(model: str) -> Engine:
     Anthropic-protocol endpoint, ``openai-compat`` otherwise.
     """
     match model:
+        case None | "opus" | "sonnet" | "haiku":
+            return "claude"
         case model if model.startswith("claude-"):
             return "claude"
         case model if model.startswith(("gpt-", "codex")) or (
@@ -323,17 +323,17 @@ def engine_for_model(model: str) -> Engine:
             return "claude-compat" if settings.openrouter_api_key else "openai-compat"
 
 
-def engine_for_settings() -> Engine:
+def engine_for_settings(model: str | None = None) -> Engine:
     """The engine the session runs: explicit ``AGENT_SDK``, else routed.
 
-    Unset ``AGENT_SDK`` routes by the configured model's vendor prefix.
+    Unset ``AGENT_SDK`` routes by the requested or configured model's vendor prefix.
     """
     if settings.agent_sdk is not None:
         return settings.agent_sdk
-    return engine_for_model(settings.model)
+    return engine_for_model(model or settings.model)
 
 
-def aux_model() -> str:
+def aux_model() -> str | None:
     """Backend-coherent model for auxiliary agents (reviewer, backgrounds).
 
     Explicit ``AGENT_AUX_MODEL`` wins. Otherwise native Claude sessions get
@@ -344,7 +344,7 @@ def aux_model() -> str:
     if settings.aux_model:
         return settings.aux_model
     if engine_for_settings() == "claude" and compat_base_url() is None:
-        return "claude-opus-5"
+        return None
     return settings.model
 
 

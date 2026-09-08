@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "350aeb3a5a4111998870d63053ed03a9d24b7e692670912c7d061b4fe8f68273",
+  "source_digest": "8db2163806c6865b611f026e1c397fdbc858a5feaaf40ca9a8c3bcf188201c99",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -16,35 +16,35 @@
     {
       "path": ".codex/agents/tdd-implementer.toml",
       "category": "generated",
-      "sha256": "2f04f7a3821405c4d854b843ab374398fdf8709492231d91cf75094dce17da8f",
+      "sha256": "e11c2897843a2df45994f3e02540d26efa6e3981d6b0bb49026139c0108bafc7",
       "semantic_id": "agent.tdd-implementer",
       "executable": false
     },
     {
       "path": ".codex/agents/trace-explorer.toml",
       "category": "generated",
-      "sha256": "6b8c86fed28e9e5453bc224f53784c0e1403d25baefd04cd676cf3168a1b16ff",
+      "sha256": "0d59e4d3a58a6cac6c5a52b22460f7a5851b04d5357c1bd62fcb54b0b8200e21",
       "semantic_id": "agent.trace-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-explorer.toml",
       "category": "generated",
-      "sha256": "209e1ae2f5e9d00e0fcb5ff7832d324b1f9dd093987e2f0a2ed4e32fe6176d70",
+      "sha256": "ce8abe0173258a9db3b0d3aca67e435944bffaaed185018c790bdff95ed777c1",
       "semantic_id": "agent.version-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-reviewer.toml",
       "category": "generated",
-      "sha256": "3af7399b3f02b73d701195b0773a098b53d8cc6dadbcd43e590d2665d16ce472",
+      "sha256": "5f5edf87773afd384938ddc1a30b97769f842675ea21c0ff3777796e83aea616",
       "semantic_id": "agent.version-reviewer",
       "executable": false
     },
     {
       "path": ".codex/config.toml",
       "category": "generated",
-      "sha256": "237f4bf7ca0cad99e437f5642f5e15f3f4a00ce744d139783b0651190d90a23c",
+      "sha256": "d75775050ac9a88dcfb63f4929af12256c6777fb13d5e22b9ddd98d96224e501",
       "semantic_id": "harness.project-config",
       "executable": false
     },
@@ -114,7 +114,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "73ffd59d4f700dac89d7c1c687d6182632ee638b8afd128d0ba3bfcc6c28c699",
+      "sha256": "9a2c97635a66cff5c1afc746d36116d0b2c22db206eca332dd5e2e321a98cb81",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -140,6 +140,13 @@
       "executable": false
     },
     {
+      "path": ".codex/plugins/lup/hooks/runtime/kernel/imports.py",
+      "category": "generated",
+      "sha256": "5f3036f7c73b0e209d6ec78f95f6ff7c2dae7d032ebdd91cb964d0d577fc9bf7",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
       "sha256": "fc84a7205579284165129bce4c7a4fca3790115ae682b5c0d983b1322322a74f",
@@ -156,7 +163,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "e27c38c807565e7b3edc0805083297196bd3fa48d51a2655f2b6030cbfc82d0c",
+      "sha256": "5119ef68a6aa0b5c902929d358a5b96294ded47659a12b8fc2beb6444d332e97",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -198,14 +205,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "386636a7ff752580471918501e3fda529f1666f5cc3254ffe47e2eb1d211073d",
+      "sha256": "8acb6664b5ff38f4f7e75d65dbafca73278452353f36209de8a00ecc264b9303",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "35b42b2396b2ca3c8de40d9cb1a0a88dc952e2bc4440826e1f260cd8c719fad0",
+      "sha256": "30f0d9ab7a435f174ec50dfb6f5055192b081108348875e8922aafd779b9daf2",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

@@ -28,12 +28,17 @@ from lup.harness.models import (
     McpServer,
     Plugin,
     ProjectRootWord,
+    RuntimeWord,
     ResolveSpec,
     SkillInvocation,
 )
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.codex.harness import CodexSpellings
-from lup.harness.codescan.boundaries import ApplicationRoots, generated_tree_paths
+from lup.harness.codescan.boundaries import (
+    ApplicationRoots,
+    generated_tree_paths,
+    native_import_boundaries,
+)
 from lup.harness.codescan.common import RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import WorkflowSpec
@@ -42,7 +47,11 @@ from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
 from lup.policy.boundary import depends_on
 from lup.policy.refused_tools import RefusedTool
-from lup.workspace.paths import project_root, read_project_name
+from lup.workspace.paths import (
+    declared_project_root,
+    project_root,
+    read_project_name,
+)
 from lup_template.agent.toolsets import tool_group_names
 from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
 from lup.harness.coverage import ContentRoot, ModuleCoverage
@@ -210,6 +219,8 @@ def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer
                 LiteralWord(text="lup-devtools"),
                 LiteralWord(text="agent"),
                 LiteralWord(text="serve-tools"),
+                LiteralWord(text="--runtime"),
+                RuntimeWord(),
                 LiteralWord(text="--server"),
                 LiteralWord(text=name),
                 LiteralWord(text="--session"),
@@ -249,7 +260,7 @@ NATIVE_RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
 """Every runtime this project generates a tree for."""
 
 
-def application_roots() -> ApplicationRoots:
+def application_roots(plugin_names: list[str] | None = None) -> ApplicationRoots:
     """Where this project composes concrete native implementations.
 
     The generated trees are asked of the runtimes rather than written down, so
@@ -257,10 +268,26 @@ def application_roots() -> ApplicationRoots:
     project's own homes, derived from where this package actually sits, so
     renaming it during initialization moves them instead of leaving the rule
     pointing at a package that is gone.
+
+    Where it sits is resolved against the declaration enclosing *the package*,
+    never against the working directory. The CLI is reached from wherever it
+    is invoked — a scratch checkout, a repository whose own manifest will not
+    parse — and a root taken from the caller's location makes this package
+    relative to a tree it is not under, which raises at import and before
+    Typer has a command to fail. That is the whole class of failure the
+    documented launcher exists to survive.
     """
-    package = Path(__file__).resolve().parents[1].relative_to(project_root()).as_posix()
+    package_path = Path(__file__).resolve().parents[1]
+    package_root = declared_project_root(package_path)
+    if package_root is None:
+        raise ValueError(f"No project declaration encloses {package_path}")
+    package = package_path.relative_to(package_root).as_posix()
     harness = f"{package}/harness/"
-    plugins = [plugin.name for plugin in portable_harness().plugins]
+    plugins = (
+        [plugin.name for plugin in portable_harness().plugins]
+        if plugin_names is None
+        else plugin_names
+    )
     generated = generated_tree_paths(NATIVE_RUNTIMES, plugins)
     return ApplicationRoots(
         generated=generated,
@@ -278,6 +305,8 @@ def application_roots() -> ApplicationRoots:
             f"{package}/devtools/setup.py",
         ],
         portable_prose=[f"{harness}content/"],
+        native_dependencies=["tests/", "packages/lup/tests/", "examples/"],
+        source_roots=[f"{Path(package).parent.as_posix()}/"],
     )
 
 
@@ -338,6 +367,7 @@ def dev_project() -> DevProject:
         package=Path(__file__).resolve().parents[1].name,
         roots=application_roots(),
         rules=hooks.rules,
+        import_boundaries=hooks.import_boundaries,
         subapps=SUBAPP_SELECTION,
         # lup: template: which trackers beyond this checkout this project may
         # report to. What is here is lup's own, and an adopted scaffold
@@ -393,9 +423,10 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
     Per-platform declarations overriding a shared default were rejected
     because they would let semantic content fork silently.
     """
+    plugin_name = "lup"
     plugin = Plugin(
         id="plugin.lup",
-        name="lup",
+        name=plugin_name,
         marketplace=f"{read_project_name(root or project_root())}-repository",
         version=version,
         description=(
@@ -415,6 +446,9 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # family outright with `--retire-all`, which is one answer here
             # instead of thirty retirements one denial at a time.
             rules=RuleSelection(retired=[]),
+            import_boundaries=native_import_boundaries(
+                application_roots([plugin_name])
+            ),
             allowed_fetch=[
                 HookUrlScope(origin=AnyHttpUrl("https://docs.claude.com")),
                 HookUrlScope(origin=AnyHttpUrl("http://docs.claude.com")),

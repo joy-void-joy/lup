@@ -13,6 +13,7 @@ CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
 CLAUDE_LOGIN = ProviderLogin(
     config_home_env=CLAUDE_CONFIG_DIR,
     credentials_file=".credentials.json",
+    credential_fields=["claudeAiOauth"],
     renewable=(
         '(.claudeAiOauth.refreshToken // "") != ""'
         " and .claudeAiOauth.refreshTokenExpiresAt > (now * 1000)"
