@@ -447,9 +447,37 @@ class SyncedEnvironment(SetupStep, frozen=True):
         return f"the synced environment ({project_environment(self.worktree).name})"
 
     def satisfied(self) -> bool:
-        return project_environment(self.worktree).is_dir()
+        """Whether this worktree has an environment of its own.
+
+        Its own, which ``is_dir()`` alone does not ask: that call follows the
+        link, so an environment symlinked to a sibling worktree's answers yes
+        and the sync is skipped. What the worktree then holds is a name
+        pointing at somebody else's environment, and a ``uv sync`` reached
+        through it repoints *that* worktree's editable install at this one's
+        source — two checkouts import one tree, and the branch under test is
+        whichever synced last. Nothing reports it, which is the expensive
+        failure this class names, arrived at from the other side.
+
+        A link is unsatisfied rather than an error, because the step's whole
+        job is to build the environment: a run that builds a real one over the
+        link leaves the worktree in the state the step promised.
+        """
+        environment = project_environment(self.worktree)
+        return environment.is_dir() and not environment.is_symlink()
 
     def run(self) -> None:
+        """Build this worktree's own environment, clearing a link left in its place.
+
+        The link goes first because syncing through it is the failure rather
+        than the repair: `uv` resolves the path, finds the sibling's
+        environment at the end of it, and rewrites that one's editable install
+        to point here. Only the link is removed — what it named belongs to
+        another worktree and is left exactly as it is.
+        """
+        environment = project_environment(self.worktree)
+        if environment.is_symlink():
+            typer.echo(f"Removing {environment}, a link to {environment.readlink()}")
+            environment.unlink()
         typer.echo("Running uv sync...")
         sync_dependencies(self.worktree)
 
