@@ -1,5 +1,5 @@
 {
-  "revision": "75c335102cd49c120c5558abb75298ccbadf6fcd",
+  "revision": "20fd29ca73e3fbfa65754eb30dc170dc45c462b3",
   "roots": [
     "lup",
     "lup_template"
@@ -4731,6 +4731,7 @@
         "cited_library_fixture",
         "LIBRARY_RUNTIME_FIXTURES",
         "LIBRARY_DISPATCHER_FIXTURES",
+        "LIBRARY_EXEC_FIXTURES",
         "document"
       ]
     },
@@ -5374,12 +5375,12 @@
     {
       "module": "lup.harness.evidence",
       "declares": [
-        "EVIDENCE_REFRESHED",
         "EvidenceEntry",
         "EvidenceEntry.capability",
         "EvidenceEntry.version",
+        "EvidenceEntry.refreshed",
         "EVIDENCE_LEDGER",
-        "accepted_version",
+        "accepted",
         "cited_fixture",
         "SchemaDigest",
         "SchemaDigest.path",
@@ -5394,6 +5395,7 @@
         "EvidenceDrift.capability",
         "EvidenceDrift.installed",
         "EvidenceDrift.accepted",
+        "EvidenceDrift.refreshed",
         "EvidenceDrift.message",
         "parse_version",
         "newer_than",
@@ -5401,6 +5403,7 @@
         "DigestDrift.path",
         "DigestDrift.found",
         "DigestDrift.accepted",
+        "DigestDrift.refreshed",
         "DigestDrift.message",
         "digest_drift",
         "evidence_drift",
@@ -8370,8 +8373,13 @@
         "AntiPatternHit",
         "AntiPatternHit.line",
         "AntiPatternHit.row",
+        "WithdrawnGuard",
+        "WithdrawnGuard.rule",
+        "WithdrawnGuard.text",
+        "withdrawn_guards",
         "anti_pattern_hits",
         "anti_pattern_denial",
+        "withdrawn_suppression_denial",
         "awaits_resolution",
         "unresolved_anti_pattern_ask",
         "spurious_refusal",
