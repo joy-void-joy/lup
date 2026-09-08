@@ -17,6 +17,7 @@ from lup.coordination.identity import (
     mint_member_id,
     session_member_id,
 )
+from lup.coordination.peer_tools import create_peer_tools
 from lup.coordination.repository import RepositoryPeers
 from lup.coordination.roster import Delivery
 from lup.coordination.store import coordination_root
@@ -187,3 +188,39 @@ def test_renames_are_a_record_rather_than_a_field(tmp_path: Path) -> None:
     assert [record.cli_name for record in names.named()] == ["first", "second"]
     assert names.resolve("first") == "one"
     assert names.current("one") == "second"
+
+
+async def test_a_session_using_its_tools_is_on_the_roster(tmp_path: Path) -> None:
+    """A verb puts its session on the roster before it does anything else.
+
+    Nothing else could: a description names a member the fold has never seen
+    and is dropped, and a peer looking for who is working here reads a roster
+    this session is absent from. Joining on every call rather than once is
+    what lets a tool server answer without knowing whether it is the first.
+    """
+    peers = RepositoryPeers(tmp_path)
+    tools = {
+        tool.name: tool
+        for tool in create_peer_tools(peers, "abc123", tmp_path / "feat-thing")
+    }
+
+    await tools["coordination_describe"].handler({"description": "rewriting the guard"})
+
+    [listed] = peers.listing()
+    assert listed.member.actor.id == "abc123"
+    assert listed.doing == "rewriting the guard"
+    assert listed.member.delivery == Delivery.INBOX
+
+
+async def test_joining_twice_leaves_one_member(tmp_path: Path) -> None:
+    """Idempotent, because every verb calls it and a session takes many."""
+    peers = RepositoryPeers(tmp_path)
+    tools = {
+        tool.name: tool
+        for tool in create_peer_tools(peers, "abc123", tmp_path / "feat-thing")
+    }
+
+    await tools["coordination_peers"].handler({})
+    await tools["coordination_peers"].handler({})
+
+    assert len(peers.listing()) == 1

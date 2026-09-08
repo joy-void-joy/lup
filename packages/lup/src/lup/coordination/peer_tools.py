@@ -16,6 +16,8 @@ be never. A sender told "sent" cannot tell those apart, so nothing here says
 "sent".
 """
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field
 
 from lup.channels.models import Door
@@ -81,7 +83,10 @@ class InboxOutput(BaseModel):
 
 
 def create_peer_tools(
-    peers: RepositoryPeers, member_id: str, door: Door = Door.AGENT
+    peers: RepositoryPeers,
+    member_id: str,
+    worktree: Path,
+    door: Door = Door.AGENT,
 ) -> list[LupMcpTool]:
     """The repository verbs, bound to one roster and one session's identity.
 
@@ -91,6 +96,26 @@ def create_peer_tools(
     session's inbox — and neither is a thing to be trusted rather than made
     unspellable.
     """
+
+    def present() -> None:
+        """Put this session on the roster before it does anything with it.
+
+        Every verb calls this, because a session that never joined is one
+        nothing else can reach: a description applies to no member and the
+        fold drops it, and a peer looking for who is working here reads a
+        roster this session is absent from.
+
+        Here rather than where the tools are built, because building them
+        must not create the store — a session that never coordinates should
+        leave no sign of having been able to. Idempotent through the roster's
+        own announce, so every call after the first costs a fold rather than
+        a record.
+
+        ``INBOX`` because this session has the plugin carrying the delivery
+        hook. What a member says about itself is what a sender is told, so
+        claiming the weaker mode here would understate what a message does.
+        """
+        peers.join(member_id, worktree, delivery=Delivery.INBOX)
 
     @lup_tool(
         "List every session working in this repository, including the ones in "
@@ -107,6 +132,7 @@ def create_peer_tools(
         name="coordination_peers",
     )
     async def coordination_peers(_params: NoInput) -> PeerListOutput:
+        present()
         return PeerListOutput(peers=peers.listing())
 
     @lup_tool(
@@ -120,6 +146,7 @@ def create_peer_tools(
         name="coordination_describe",
     )
     async def coordination_describe(params: DescribeInput) -> DescribeOutput:
+        present()
         peers.describe(member_id, params.description)
         return DescribeOutput(description=params.description)
 
@@ -138,6 +165,7 @@ def create_peer_tools(
         name="coordination_send",
     )
     async def coordination_send(params: PeerSayInput) -> PeerSayOutput:
+        present()
         found = peers.send(params.address, params.text, door=door)
         if found is None:
             known = ", ".join(view.address for view in peers.listing()) or "none"
@@ -161,6 +189,7 @@ def create_peer_tools(
         name="coordination_inbox",
     )
     async def coordination_inbox(_params: NoInput) -> InboxOutput:
+        present()
         delivery = peers.take(member_id)
         return InboxOutput(
             messages=[

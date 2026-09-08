@@ -153,8 +153,12 @@ def build_session_toolset(
 
     member = session_member_id(session_id)
     if member:
+        # The worktree is passed rather than looked up inside the tools,
+        # because it is what puts this session on the roster: a peer reading
+        # the listing is choosing between checkouts as much as between names.
+        working = project_root()
         groups[COORDINATION_GROUP] = create_peer_tools(
-            RepositoryPeers(project_root()), member
+            RepositoryPeers(working), member, working
         )
 
     groups[EXAMPLE_GROUP] = list(EXAMPLE_TOOLS)
