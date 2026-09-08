@@ -29,7 +29,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, TypeAdapter
 
-from lup.orchestration.actors.mail import (
+from lup.coordination.mail import (
     ActorDelivery,
     ActorMail,
     ActorMessage,
@@ -37,7 +37,7 @@ from lup.orchestration.actors.mail import (
     MessageOutstandingEvent,
     MessagePostedEvent,
 )
-from lup.orchestration.actors.refs import ActorRef
+from lup.coordination.refs import ActorRef
 from lup.policy.hooks import (
     LupHookInput,
     LupHookMatcher,

@@ -21,9 +21,9 @@ from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter
 
-from lup.orchestration.actors.mail import MessageOutstandingEvent, MessagePostedEvent
-from lup.orchestration.actors.questions import QuestionAnswer
-from lup.orchestration.actors.refs import ActorRef
+from lup.coordination.mail import MessageOutstandingEvent, MessagePostedEvent
+from lup.coordination.questions import QuestionAnswer
+from lup.coordination.refs import ActorRef
 from lup.channels.models import utc_now
 from lup.observability.journal import Journal as SharedJournal
 from lup.observability.journal import JournalRecord

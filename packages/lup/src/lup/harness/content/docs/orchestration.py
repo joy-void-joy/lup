@@ -160,7 +160,7 @@ several agents work at once and the facts move under them, that is the whole
 problem — an agent verifying a statement you have since disproved, or working
 a branch you closed, keeps going because nothing can tell it.
 
-An **actor cohort** (`lup.orchestration.actors.cohort.ActorCohort`) is a population of
+An **actor cohort** (`lup.coordination.cohort.ActorCohort`) is a population of
 agents that stay in contact while they work. Each holds one session across
 every turn it takes; anything addressed to one lands in front of its next tool
 call through a hook it never chooses to check; and the spawner is itself an
@@ -221,14 +221,14 @@ difference between the two cases.
 `reaching()` fold `roster.jsonl`, so a console in another process resolves the
 same address the cohort's own tools do, and a restart rebuilds the roster.
 
-**Library support:** `lup.orchestration.actors.tools.create_cohort_tools` serves the verbs an
+**Library support:** `lup.coordination.tools.create_cohort_tools` serves the verbs an
 agent needs — list what I spawned, read what one of them has found so far, say
 something to one of them, say something back to whoever spawned me. Reading is
 what makes steering more than a guess: a spawn's turn events reach the journal
 as they happen, so `spawn_read` folds its own words, its calls and its
 refusals out of that record while it is still working, and a redirect can be
 aimed at what the agent is doing rather than at what it was asked.
-`lup.orchestration.actors.mailbox.QuestionMailbox`
+`lup.coordination.mailbox.QuestionMailbox`
 adds decisions that park a run, on the same storage; messages ride a stream
 and never park anything, which is why "a message stalled the run" is not
 expressible rather than merely avoided.

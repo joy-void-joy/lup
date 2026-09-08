@@ -24,10 +24,10 @@ from lup.resolver.models import (
 )
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
 from lup.resolver.status import RunStatus, run_status
-from lup.orchestration.actors.cohort import ActorCohort
-from lup.orchestration.actors.mail import EVERYONE
-from lup.orchestration.actors.refs import ActorRef
-from lup.orchestration.actors.mailbox import (
+from lup.coordination.cohort import ActorCohort
+from lup.coordination.mail import EVERYONE
+from lup.coordination.refs import ActorRef
+from lup.coordination.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,

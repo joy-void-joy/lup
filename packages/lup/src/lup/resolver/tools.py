@@ -21,16 +21,16 @@ from lup.harness.process import LocalProcessLauncher, ProcessLauncher
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 from lup.policy.assets.host import recoverable_write_targets
 from lup.resolver.declaration import declaration_delta, inspect_changes
-from lup.orchestration.actors.cohort import ActorCohort
-from lup.orchestration.actors.refs import ActorRef
-from lup.orchestration.actors.tools import (
+from lup.coordination.cohort import ActorCohort
+from lup.coordination.refs import ActorRef
+from lup.coordination.tools import (
     AskedQuestion,
     AwaitAnswersOutput,
     QuestionDesk,
     create_cohort_tools,
 )
 from lup.resolver.journal import Journal
-from lup.orchestration.actors.mailbox import (
+from lup.coordination.mailbox import (
     ANSWER_POLL_SECONDS,
 )
 from lup.resolver.mailbox import QuestionMailbox

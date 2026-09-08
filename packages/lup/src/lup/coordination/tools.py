@@ -24,22 +24,22 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
-from lup.orchestration.actors.cohort import ActorCohort
-from lup.orchestration.actors.mailbox import (
+from lup.coordination.cohort import ActorCohort
+from lup.coordination.mailbox import (
     ANSWER_POLL_SECONDS,
     MailboxConflictError,
     PendingQuestion,
     QuestionMailbox,
     wait_for_answers,
 )
-from lup.orchestration.actors.progress import (
+from lup.coordination.progress import (
     ActorProgress,
     ProgressWindow,
     read_progress,
 )
-from lup.orchestration.actors.questions import Question
-from lup.orchestration.actors.refs import ActorRef
-from lup.orchestration.actors.roster import SpawnedActor
+from lup.coordination.questions import Question
+from lup.coordination.refs import ActorRef
+from lup.coordination.roster import SpawnedActor
 from lup.channels.models import Door, utc_now
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 
@@ -92,7 +92,13 @@ class SpawnSayInput(BaseModel):
 
 class SpawnSayOutput(BaseModel):
     address: str
-    delivered: bool
+    reaches: bool = Field(
+        description=(
+            "Whether this address is still working, and so will read what was "
+            "just posted. False means the message is recorded and nobody will "
+            "ever be handed it — the spawn has ended"
+        )
+    )
     outstanding: int = Field(
         description=(
             "How much is queued for this spawn and not yet handed over. "
@@ -415,7 +421,7 @@ def create_cohort_tools[Q: Question](
         cohort.say(actor, params.text, redirect=params.redirect, door=door)
         return SpawnSayOutput(
             address=actor.label(),
-            delivered=True,
+            reaches=cohort.reaches(actor),
             outstanding=cohort.outstanding(actor),
         )
 

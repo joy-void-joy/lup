@@ -45,15 +45,15 @@ from uuid import uuid4
 
 from pydantic import BaseModel, TypeAdapter
 
-from lup.orchestration.actors.mail import (
+from lup.coordination.mail import (
     EVERYONE,
     ActorDelivery,
     ActorMail,
     new_message,
 )
-from lup.orchestration.actors.refs import ActorRef
-from lup.orchestration.actors.roster import ROSTER_FILE, Roster, SpawnedActor
-from lup.orchestration.actors.sessions import (
+from lup.coordination.refs import ActorRef
+from lup.coordination.roster import ROSTER_FILE, Roster, SpawnedActor
+from lup.coordination.sessions import (
     RECORD_ADAPTER,
     ActorEvent,
     ActorInbox,
@@ -64,7 +64,7 @@ from lup.orchestration.actors.sessions import (
 )
 from lup.channels.models import Door, publish_atomic, utc_now
 from lup.policy.hooks import LupHooksConfig
-from lup.observability.journal import Journal, JournalRecord
+from lup.observability.journal import ChainedWriter, Journal, JournalRecord
 from lup.sessions.client import Client
 from lup.sessions.events import TurnRequest, TurnResult
 
@@ -72,6 +72,12 @@ logger = logging.getLogger(__name__)
 
 SESSION_DIR = "sessions"
 JOURNAL_FILE = "journal.jsonl"
+JOURNAL_LOCK = "journal.lock"
+"""What writers take before appending, beside the file they are ordering.
+
+Its own path rather than the journal itself, because a lock taken on the file
+being appended to is a lock every reader of that file also has to know about.
+"""
 SPAWNER_KIND = "spawner"
 
 
@@ -131,10 +137,24 @@ class CohortJournal(Journal[ActorRef, CohortEntry]):
     answer different questions: a transcript is what that session did, and this
     is what was said to whom and whether it landed. A redirect that reached
     nobody is only visible here.
+
+    Written under a lock, because this file has several writers and the default
+    does not. :class:`~lup.observability.journal.AppendWriter` holds its
+    sequence in memory and says so — "for a log with one writer" — while every
+    process that reaches a cohort appends here: the session that spawned it,
+    each spawned agent's own tools, and a console door in a third terminal.
+    Each would start counting from what the file held when *it* first appended,
+    so two of them write the same sequence number and the record stops being an
+    order at all. :class:`~lup.observability.journal.ChainedWriter` re-reads the
+    head inside the lock it writes under, which is the property this needs.
     """
 
     def __init__(self, root: Path) -> None:
-        super().__init__(root / JOURNAL_FILE, TypeAdapter(CohortEntry))
+        super().__init__(
+            root / JOURNAL_FILE,
+            TypeAdapter(CohortEntry),
+            ChainedWriter(root / JOURNAL_LOCK),
+        )
 
     def append(self, actor: ActorRef, event: ActorEvent) -> CohortEntry:
         """Record one event against the actor that produced it."""
@@ -435,6 +455,21 @@ class ActorCohort:
         delivery = self.heard()
         self.mail.delivered(self.spawner, delivery.through)
         return delivery
+
+    def reaches(self, actor: ActorRef) -> bool:
+        """Whether this address is still working, and so will read what it is sent.
+
+        The honest half of "delivered". Posting cannot know that anybody read a
+        message — that is what :meth:`outstanding` answers afterwards — but it
+        can know whether there is still a session that ever will. Mail to an
+        agent whose rounds have ended sits in the file permanently, and a sender
+        told otherwise goes on steering something that stopped listening.
+        """
+        conversation = actor.conversation()
+        return any(
+            member.actor.conversation() == conversation and member.running
+            for member in self.roster.standing()
+        )
 
     def outstanding(self, actor: ActorRef) -> int:
         """How much this agent has been sent and not yet been handed.

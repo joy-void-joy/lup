@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.orchestration.actors.cohort import ActorCohort, ActorRecipe, CohortJournal
-from lup.orchestration.actors.mail import EVERYONE
-from lup.orchestration.actors.refs import ActorRef
+from lup.coordination.cohort import ActorCohort, ActorRecipe, CohortJournal
+from lup.coordination.mail import EVERYONE
+from lup.coordination.refs import ActorRef
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.capabilities import Session, Turn
 from lup.sessions.client import Client

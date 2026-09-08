@@ -27,6 +27,8 @@ one — and the round-one ref left standing answered to none of the addresses
 the cohort was by then printing.
 """
 
+import fcntl
+import threading
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
@@ -34,7 +36,7 @@ from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter, computed_field
 
-from lup.orchestration.actors.refs import ActorRef
+from lup.coordination.refs import ActorRef
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
 
@@ -144,6 +146,8 @@ class Roster:
 
     def __init__(self, path: Path) -> None:
         self.stream: Stream[RosterEntry] = Stream(path, ENTRY_ADAPTER)
+        self.lock_path = path.with_suffix(".lock")
+        self.lock = threading.Lock()
 
     def spawned(self, actor: ActorRef, task: str) -> None:
         """Record that this address is live, unless the record already says so.
@@ -154,15 +158,33 @@ class Roster:
         the same round again. Appending both would give that round two starts
         and leave a reader measuring how long it took with no way to say
         which of them it ran from.
+
+        Under a lock, because those two callers are in *different processes* —
+        the one that detached the work, and the one the work opened. Folding
+        the record and then appending to it is a read-modify-write, so
+        unguarded both see no standing entry and both append: the idempotence
+        would hold in every case except the one it was written for. The thread
+        lock sits outside the file lock because ``flock`` is granted per open
+        file description rather than per thread, so two threads in one process
+        would each hold it and interleave inside the region.
         """
-        if any(
-            member.actor.conversation() == actor.conversation()
-            and member.actor.round == actor.round
-            and member.running
-            for member in self.standing()
-        ):
-            return
-        self.stream.append(ActorSpawned(actor=actor, task=task, at=utc_now()))
+        with self.lock:
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.lock_path.open("a", encoding="utf-8") as handle:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    if any(
+                        member.actor.conversation() == actor.conversation()
+                        and member.actor.round == actor.round
+                        and member.running
+                        for member in self.standing()
+                    ):
+                        return
+                    self.stream.append(
+                        ActorSpawned(actor=actor, task=task, at=utc_now())
+                    )
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def finished(self, actor: ActorRef, summary: str = "", error: str = "") -> None:
         """Record that this address has stopped, and how."""
