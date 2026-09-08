@@ -29,6 +29,42 @@ waiting forever. It is written from a `finally`, so it appears whether the run
 succeeded, failed, or was interrupted — and its absence beside a directory
 nothing is touching is exactly the evidence that the runner was killed.
 
+## A claim is a lease
+
+A killed runner — a power cut, an OOM, a `kill -9` — leaves its claims on disk
+with no result beside them and no process to finish them. On disk that is
+indistinguishable from a unit that is simply taking a long time, and age
+cannot separate them: it grows for a healthy unit exactly as fast.
+
+So a claim carries `renewed_at` as well as `started_at`, and the runner
+re-stamps it from the same heartbeat that writes the log line. The interval
+sits well inside the lease, so a runner that stopped writing lines has also
+stopped renewing and the two readings cannot disagree. A claim nobody has
+renewed within the lease is one nobody holds:
+
+- `run monitor` reports it as `abandoned=` rather than counting it as running,
+  and says so outright when every claim has lapsed and no summary was written.
+- A resumed run frees the lapsed claims and re-runs those units, naming each in
+  the log. Claims whose lease is live are left alone, so two runners sharing a
+  directory do not free each other's work.
+
+The process table is not consulted, here or anywhere in this package. Under a
+sandbox `/proc` is PID-isolated, so a healthy run is indistinguishable there
+from a dead one — a liveness answer that asks it is no answer at all on the
+host a long job most often runs on. The `pid` on a claim is there for a person
+diagnosing the machine they are standing on, and nothing decides on it.
+
+## Resuming
+
+A pipeline is resumable by default, and nothing has to be arranged for it. Each
+unit's result lands in its own file as it completes, and reuse is decided by
+fingerprint — a step's own declaration folded together with the fingerprints of
+everything it depends on. Re-running the same pipeline over the same directory
+reuses every unit whose fingerprint still stands and re-runs the rest, so an
+interrupted run costs only what never landed. Editing a step changes its
+fingerprint, which reruns it and everything downstream without anybody
+maintaining the list of what that is.
+
 Nothing here consults the process table. Under a sandbox `/proc` is
 PID-isolated, so a healthy run is indistinguishable there from a dead one; a
 liveness answer that asks the process table is no answer at all on the host a

@@ -344,13 +344,16 @@ class StepPlan(BaseModel, frozen=True):
     forced: bool
 
 
-class RunState(BaseModel):
+class RunState(BaseModel, arbitrary_types_allowed=True):
     """What one execution accumulates while it works.
 
-    Only the driving thread touches this. A worker is handed a unit, writes
-    its own result file, and hands the result back — so the one thing that
-    would otherwise need a lock, the growing picture of what has landed, never
-    crosses a thread boundary at all.
+    The growing picture of what has landed is the driving thread's alone. A
+    worker is handed a unit, writes its own result file, and hands the result
+    back, so that picture never crosses a thread boundary.
+
+    The claims this invocation holds do cross one, and are the exception the
+    lock exists for: a worker takes a claim and drops it, and the heartbeat
+    thread renews whatever is held at the time.
     """
 
     run: RunDirectory
@@ -358,6 +361,39 @@ class RunState(BaseModel):
     items: dict[str, list[str]] = {}
     skipped: list[SkippedStep] = []
     interrupted: bool = False
+
+    held: dict[str, UnitAttempt] = {}
+    """The claims this invocation is holding, by slug.
+
+    This process's own, rather than every claim on disk: renewing a claim a
+    sibling runner holds would be this process vouching for work it is not
+    doing, which is the one thing the lease exists to make impossible.
+    """
+
+    holding: threading.Lock = Field(default_factory=threading.Lock, exclude=True)
+
+    def take(self, attempt: UnitAttempt) -> None:
+        """Claim one unit and hold its lease until the unit lands."""
+        with self.holding:
+            self.held[attempt.slug] = attempt
+        self.run.claim(attempt)
+
+    def drop(self, attempt: UnitAttempt) -> None:
+        """Stop holding a unit's lease, whatever became of the unit."""
+        with self.holding:
+            self.held.pop(attempt.slug, None)
+
+    def renew(self) -> None:
+        """Say every unit this invocation holds is still being worked.
+
+        Called from the heartbeat, which already ticks well inside the lease
+        and already means "this runner is alive" — per unit rather than for the
+        run as a whole, because that is the grain a claim is read at.
+        """
+        with self.holding:
+            attempts = list(self.held.values())
+        for attempt in attempts:
+            self.run.renew(attempt.step, attempt.item)
 
     def record(self, result: UnitResult) -> None:
         """Take one landed unit into the picture the remaining steps read."""
@@ -470,9 +506,17 @@ class RunState(BaseModel):
             item=unit.item,
             dependencies=unit.dependencies,
         )
-        self.run.claim(UnitAttempt(step=unit.step.id, item=unit.item, pid=os.getpid()))
-        result = attempt(unit, context)
-        self.run.write_result(result)
+        claimed = UnitAttempt(step=unit.step.id, item=unit.item, pid=os.getpid())
+        self.take(claimed)
+        try:
+            result = attempt(unit, context)
+            self.run.write_result(result)
+        finally:
+            # Dropped whatever happened, because the lease says who is working
+            # this unit and this invocation stops being the answer either way.
+            # `write_result` releases the claim on disk; this releases the hold
+            # that would otherwise have the heartbeat put it back.
+            self.drop(claimed)
         self.run.append_heartbeat(render_landing(result))
         return result
 
@@ -532,16 +576,23 @@ def attempt(unit: PlannedUnit, context: StepContext) -> UnitResult:
     raise PipelineError(f"{unit.step.id} ran zero times, which cannot happen")
 
 
-def heartbeat(run: RunDirectory, stop: threading.Event, interval: float) -> None:
-    """Write a line at a fixed interval for as long as the run is working.
+def heartbeat(state: RunState, stop: threading.Event, interval: float) -> None:
+    """Renew what this run holds, and write a line, for as long as it is working.
 
-    Without this a run whose units take hours writes nothing between
+    Without the line, a run whose units take hours writes nothing between
     landings, and a follower cannot tell a solver thinking from a runner that
     was killed. A line every interval makes silence mean one thing only.
+
+    The renewal is the same statement made per unit, and it belongs on this
+    thread because the interval is already chosen to sit well inside the claim
+    lease: a runner that has stopped writing lines has also stopped renewing,
+    so the two readings can never disagree about whether it is alive.
     """
     while not stop.wait(interval):
-        run.append_heartbeat(
-            f"working: {len(run.read().results)} landed, {len(run.running())} running"
+        state.renew()
+        state.run.append_heartbeat(
+            f"working: {len(state.run.read().results)} landed, "
+            f"{len(state.run.running())} running"
         )
 
 
@@ -667,14 +718,15 @@ class Pipeline(BaseModel, frozen=True):
         run.root.mkdir(parents=True, exist_ok=True)
         if request.fresh:
             self.wipe(run)
-        run.clear_claims()
+        for slug in run.clear_claims():
+            run.append_heartbeat(f"reclaimed {slug}: its lease had lapsed")
         state = RunState(run=run)
         decided = self.decide(request)
         manifest = self.declare(run, decided)
         run.append_heartbeat(f"started {self.name}: {len(self.steps)} steps")
         stop = threading.Event()
         beat = threading.Thread(
-            target=heartbeat, args=(run, stop, self.heartbeat_seconds), daemon=True
+            target=heartbeat, args=(state, stop, self.heartbeat_seconds), daemon=True
         )
         beat.start()
         try:

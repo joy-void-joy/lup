@@ -102,13 +102,26 @@ class RunProgress(BaseModel, frozen=True):
         """The unit claimed longest, which is the one worth looking at."""
         return self.running[0] if self.running else None
 
+    @property
+    def abandoned(self) -> list[RunningUnit]:
+        """The claimed units whose lease has lapsed, so nobody is working them.
+
+        Counted apart from the running ones because they mean the opposite: a
+        directory holding four claims and no live lease is a run whose process
+        is gone, which reads as "4 running" to anybody counting claims alone.
+        """
+        return [unit for unit in self.running if unit.stale]
+
     def postfix(self) -> str:
         """The status tally, alphabetical, with what the monitor knows itself."""
         parts = [
             entry.render() for entry in sorted(self.statuses, key=lambda e: e.status)
         ]
-        if self.running:
-            parts.append(f"running={len(self.running)}")
+        held = len(self.running) - len(self.abandoned)
+        if held:
+            parts.append(f"running={held}")
+        if self.abandoned:
+            parts.append(f"abandoned={len(self.abandoned)}")
         if self.unreadable:
             parts.append(f"unreadable={len(self.unreadable)}")
         if self.elapsed_seconds is not None:
@@ -127,6 +140,19 @@ class RunProgress(BaseModel, frozen=True):
         """
         if self.summary is not None:
             return describe_summary(self.summary)
+        if self.abandoned and len(self.abandoned) == len(self.running):
+            # Every claim lapsed and no summary was written: the runner was
+            # killed rather than stopped. Said outright, because the alternative
+            # reading — several units still working — is what a reader would
+            # otherwise take from the same directory, and it sends them waiting
+            # on a process that is gone.
+            oldest = self.abandoned[0]
+            return (
+                f"no runner holds this: {len(self.abandoned)} claim(s) abandoned, "
+                f"oldest {oldest.slug}, none renewed for "
+                f"{render_span(oldest.since_renewed_seconds)}. Resume it to "
+                "re-run them"
+            )
         if self.oldest_running is not None:
             span = render_span(self.oldest_running.age_seconds)
             return (

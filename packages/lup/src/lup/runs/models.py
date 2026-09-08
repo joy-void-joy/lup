@@ -78,14 +78,34 @@ class UnitAttempt(BaseModel, frozen=True):
     """A unit a runner has claimed and not yet landed.
 
     Written when the unit starts and removed when its result lands, so the
-    claims still present are the units running now. A run killed mid-flight
-    leaves its claims behind; the age a reader computes from ``started_at`` is
-    what distinguishes a unit that is working from one whose runner is gone.
+    claims still present are the units a runner believes it is working on.
+
+    A claim is a **lease** rather than a note, because the two states it has to
+    separate are otherwise identical on disk: a unit that is taking a long time
+    and a unit whose runner was killed both leave a claim behind with no result
+    beside it. Age since ``started_at`` cannot tell them apart — it grows for a
+    healthy unit exactly as fast — so the runner re-stamps ``renewed_at`` while
+    it holds the unit, and a claim nobody has renewed within the lease is one
+    nobody is working.
+
+    The process table is not the answer here and the reason is stated where the
+    reading is taken: under a sandbox ``/proc`` is PID-isolated, so a healthy
+    run is indistinguishable there from a dead one. ``pid`` is kept for a reader
+    diagnosing a machine they are standing on, and nothing decides on it.
     """
 
     step: str
     item: str = SINGLE_ITEM
     started_at: datetime = Field(default_factory=utc_now)
+    renewed_at: datetime = Field(default_factory=utc_now)
+    """When the holder last said it was still working this unit.
+
+    Separate from ``started_at`` because they answer different questions: how
+    long this unit has been going, and whether anyone is still going. A reader
+    wants both — a unit renewed thirty seconds ago and running for two hours is
+    healthy and slow, which is not the same as stalled.
+    """
+
     pid: int
 
     @property
