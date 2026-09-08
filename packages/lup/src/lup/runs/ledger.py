@@ -28,16 +28,43 @@ from lup.runs.models import (
 logger = logging.getLogger(__name__)
 
 
+CLAIM_LEASE_SECONDS = 90.0
+"""How long a claim stands without being renewed before nobody holds it.
+
+Generous against the renewal interval rather than tight against it, because
+the two failures are not symmetric: renewing late costs nothing, and calling a
+live unit dead frees a claim somebody is working under. A machine that
+suspended, a loaded host, and a runner between renewals all look the same from
+here, so the window has to cover the worst of them.
+"""
+
+
 class RunningUnit(BaseModel, frozen=True):
-    """A claimed unit and how long it has been claimed."""
+    """A claimed unit, how long it has been going, and whether anybody holds it."""
 
     attempt: UnitAttempt
     age_seconds: float
+    """How long since the unit was first claimed — how long it is taking."""
+
+    since_renewed_seconds: float
+    """How long since its holder last said it was still working it."""
+
+    lease_seconds: float = CLAIM_LEASE_SECONDS
 
     @property
     def slug(self) -> str:
         """How this unit is named to a reader."""
         return self.attempt.slug
+
+    @property
+    def stale(self) -> bool:
+        """Whether the lease has lapsed, so no runner is holding this unit.
+
+        The one question age alone cannot answer. A unit running for two hours
+        and a unit whose runner was killed two hours ago have the same age; only
+        the renewal separates them.
+        """
+        return self.since_renewed_seconds > self.lease_seconds
 
 
 class LedgerReading(BaseModel, frozen=True):
@@ -156,12 +183,35 @@ class RunDirectory(BaseModel, frozen=True):
         """Record that a unit has started."""
         publish_atomic(self.attempt_path(attempt.step, attempt.item), attempt)
 
+    def renew(self, step: str, item: str = SINGLE_ITEM) -> None:
+        """Say this unit is still being worked, without disturbing when it began.
+
+        Re-stamping rather than re-claiming, so ``started_at`` goes on
+        answering how long the unit is taking while ``renewed_at`` answers
+        whether anybody is still on it. A claim that has since been released —
+        the unit landed as this was called — is not resurrected: renewing what
+        is gone would put a claim back on a finished unit.
+        """
+        held = self.parse_attempt(self.attempt_path(step, item))
+        if held is None:
+            return
+        publish_atomic(
+            self.attempt_path(step, item),
+            held.model_copy(update={"renewed_at": utc_now()}),
+        )
+
     def release(self, step: str, item: str = SINGLE_ITEM) -> None:
         """Drop a unit's claim, whether it landed or its runner gave up."""
         self.attempt_path(step, item).unlink(missing_ok=True)
 
-    def running(self) -> list[RunningUnit]:
-        """The units claimed and not landed, longest-running first."""
+    def running(self, lease_seconds: float = CLAIM_LEASE_SECONDS) -> list[RunningUnit]:
+        """The units claimed and not landed, longest-running first.
+
+        Every claim on disk, stale ones included, because a reader wants to see
+        a unit nobody is holding rather than have it quietly omitted — a run
+        whose process was killed reads as several stale claims and no live ones,
+        which is the diagnosis.
+        """
         if not self.attempts_root.is_dir():
             return []
         now = utc_now()
@@ -174,6 +224,10 @@ class RunDirectory(BaseModel, frozen=True):
                 RunningUnit(
                     attempt=attempt,
                     age_seconds=max(0.0, (now - attempt.started_at).total_seconds()),
+                    since_renewed_seconds=max(
+                        0.0, (now - attempt.renewed_at).total_seconds()
+                    ),
+                    lease_seconds=lease_seconds,
                 )
                 for attempt in claimed
                 if attempt is not None
@@ -190,17 +244,25 @@ class RunDirectory(BaseModel, frozen=True):
             logger.warning("unreadable attempt at %s: %s", path, error)
             return None
 
-    def clear_claims(self) -> None:
-        """Drop every claim left behind by a runner that did not finish.
+    def clear_claims(self, lease_seconds: float = CLAIM_LEASE_SECONDS) -> list[str]:
+        """Drop the claims nobody is holding, and say which those were.
 
-        A resumed run calls this before starting: the claims on disk belong to
-        a process that is gone, and left in place they would report units as
-        running for as long as the directory survives.
+        A resumed run calls this before starting: a claim left by a process that
+        was killed would otherwise report a unit as running for as long as the
+        directory survives, and a watcher has no way to see through it.
+
+        Only the lapsed ones. Dropping every claim is right exactly once — when
+        this is the only runner and the previous one is gone — and wrong the
+        moment two share a directory, where it frees units a live sibling is
+        working and lets both run them at once. The lease is what separates the
+        cases, so nothing has to assume which it is in.
         """
         if not self.attempts_root.is_dir():
-            return
-        for path in sorted(self.attempts_root.glob("*/*.json")):
-            path.unlink(missing_ok=True)
+            return []
+        lapsed = [unit for unit in self.running(lease_seconds) if unit.stale]
+        for unit in lapsed:
+            self.release(unit.attempt.step, unit.attempt.item)
+        return [unit.slug for unit in lapsed]
 
     def append_heartbeat(self, line: str) -> None:
         """Add one line to the run's log, which is what a follower re-reads.

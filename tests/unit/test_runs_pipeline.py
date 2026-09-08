@@ -14,12 +14,15 @@ result per landed unit, and a summary. A follower that found none of those
 would be watching a run it could never report on.
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
-from lup.runs.ledger import RunDirectory
-from lup.runs.models import UnitStatus
+from lup.channels.models import utc_now
+from lup.runs.ledger import CLAIM_LEASE_SECONDS, RunDirectory
+from lup.runs.models import UnitAttempt, UnitStatus
+from lup.runs.progress import read_progress
 from lup.runs.pipeline import (
     CallableStep,
     ComputedItems,
@@ -262,3 +265,96 @@ def test_a_step_whose_input_never_landed_refuses_rather_than_guessing(
 ) -> None:
     with pytest.raises(PipelineError, match="cannot run middle: first has landed"):
         chain().execute(RunRequest(directory=tmp_path, only=["middle"]))
+
+
+def killed_claim(run: RunDirectory, step: str, renewed_ago: float) -> UnitAttempt:
+    """A claim on disk with nothing landed beside it, last renewed some time ago.
+
+    What a killed runner leaves behind: the file is written, the process is
+    gone, and nothing will ever renew it or write the result that releases it.
+    """
+    stamp = utc_now() - timedelta(seconds=renewed_ago)
+    attempt = UnitAttempt(step=step, pid=999999, started_at=stamp, renewed_at=stamp)
+    run.claim(attempt)
+    return attempt
+
+
+def test_a_claim_nobody_renews_reads_as_stale(tmp_path: Path) -> None:
+    """The reading a power cut produces, and the one age alone cannot give.
+
+    A unit running for an hour and a unit whose runner died an hour ago have
+    the same age. Only the renewal separates them, which is the whole reason a
+    claim is a lease rather than a note.
+    """
+    run = RunDirectory(root=tmp_path)
+    killed_claim(run, "abandoned", renewed_ago=CLAIM_LEASE_SECONDS * 2)
+    killed_claim(run, "working", renewed_ago=0.0)
+
+    standing = {unit.attempt.step: unit for unit in run.running()}
+
+    assert standing["abandoned"].stale
+    assert not standing["working"].stale
+
+
+def test_a_long_unit_that_keeps_renewing_is_not_stale(tmp_path: Path) -> None:
+    """Slow is not dead, and the lease is what stops one reading as the other."""
+    run = RunDirectory(root=tmp_path)
+    attempt = killed_claim(run, "slow", renewed_ago=CLAIM_LEASE_SECONDS * 2)
+    run.renew(attempt.step)
+
+    [unit] = run.running()
+
+    assert not unit.stale
+    assert unit.age_seconds > CLAIM_LEASE_SECONDS
+    assert unit.since_renewed_seconds < CLAIM_LEASE_SECONDS
+
+
+def test_resuming_reclaims_only_the_leases_that_lapsed(tmp_path: Path) -> None:
+    """A resumed run frees what nobody holds and leaves a live sibling's alone.
+
+    Dropping every claim is right exactly once — when this is the only runner
+    and the last one is gone — and frees units another runner is working the
+    moment two share a directory.
+    """
+    run = RunDirectory(root=tmp_path)
+    killed_claim(run, "abandoned", renewed_ago=CLAIM_LEASE_SECONDS * 2)
+    killed_claim(run, "held-by-a-sibling", renewed_ago=0.0)
+
+    assert run.clear_claims() == ["abandoned/once"]
+    assert [unit.attempt.step for unit in run.running()] == ["held-by-a-sibling"]
+
+
+def test_a_renewal_does_not_resurrect_a_claim_that_landed(tmp_path: Path) -> None:
+    """The unit finished while the heartbeat was mid-tick; it stays finished."""
+    run = RunDirectory(root=tmp_path)
+    attempt = killed_claim(run, "landed", renewed_ago=0.0)
+    run.release(attempt.step)
+
+    run.renew(attempt.step)
+
+    assert run.running() == []
+
+
+def test_a_run_that_finishes_leaves_no_claim_behind(tmp_path: Path) -> None:
+    """The ordinary path, pinned because a lease only shows when it is not taken."""
+    chain().execute(RunRequest(directory=tmp_path))
+
+    assert RunDirectory(root=tmp_path).running() == []
+
+
+def test_a_killed_run_reads_as_abandoned_rather_than_working(tmp_path: Path) -> None:
+    """What the monitor says about the directory a power cut leaves.
+
+    The failure this exists to stop is a reader taking "4 running" from four
+    claims nobody holds, and settling in to wait on a process that is gone.
+    """
+    run = RunDirectory(root=tmp_path)
+    killed_claim(run, "one", renewed_ago=CLAIM_LEASE_SECONDS * 3)
+    killed_claim(run, "two", renewed_ago=CLAIM_LEASE_SECONDS * 3)
+
+    reading = read_progress(run)
+
+    assert len(reading.abandoned) == 2
+    assert "no runner holds this" in reading.describe_activity()
+    assert "abandoned=2" in reading.postfix()
+    assert "running=" not in reading.postfix()
