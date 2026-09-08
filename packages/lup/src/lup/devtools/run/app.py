@@ -1,22 +1,78 @@
 """The command tree for work that outlives the tool call that started it.
 
-One command, and its own sub-app anyway. A sub-app is a surface of a module,
-and this is the runs module's only one: a project that declines long-running
-pipelines should stop being offered a way to watch them, and while ``monitor``
-sat under ``dev`` it was owned by ``core`` and every project had it.
+A sub-app is a surface of a module, and this is the runs module's: a project
+that declines long-running pipelines should stop being offered a way to watch
+them, and while ``monitor`` sat under ``dev`` it was owned by ``core`` and
+every project had it.
 
-It reads only what a runner writes, so a run launched detached, launched by
-somebody else, or launched before this shell existed all read back the same —
-and reading one cannot perturb it.
+``monitor`` reads only what a runner writes, so a run launched detached,
+launched by somebody else, or launched before this shell existed all read back
+the same — and reading one cannot perturb it. ``report`` is the other
+direction and the only write here: a unit in any language saying how far into
+its own work it has got, which is what separates a unit forty percent through
+from one spinning at zero.
 """
 
+import json
+import os
 from pathlib import Path
 from typing import Annotated
 
 import typer
+from pydantic import BaseModel
 
 import lup.devtools.dev.monitor as monitor
-from lup.runs.ledger import RunDirectory
+from lup.runs.ledger import WORKSPACE_ENV, RunDirectory
+from lup.runs.report import report_progress
+from lup.types import JsonValue
+
+
+class DetailPair(BaseModel, frozen=True):
+    """One entry of a unit's own vocabulary, as its command line spells it."""
+
+    key: str
+    value: JsonValue
+
+
+def json_or_text(value: str) -> JsonValue:
+    """One flag value as the unit meant it: JSON where it is JSON, text where not.
+
+    ``supports=41`` is a number, ``ok=true`` a flag, ``shape={"k":1}`` an
+    object, and ``note=alpha`` — which is no JSON at all — the text itself.
+    One flag rather than a second one for the nested case, because the record
+    already holds any JSON value and two flags would be two things to keep in
+    step with each other.
+    """
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def parsed_pair(pair: str) -> DetailPair:
+    """One ``key=value`` as this command's flag grammar spells it."""
+    key, separator, value = pair.partition("=")  # lup: ignore[string-split] — a flag
+    if not separator:
+        raise typer.BadParameter(f"--detail wants key=value, not {pair!r}")
+    return DetailPair(key=key, value=json_or_text(value))
+
+
+def parsed_detail(pairs: list[str]) -> dict[str, JsonValue]:
+    """Every ``--detail`` given, in the order the unit put them."""
+    return {entry.key: entry.value for entry in map(parsed_pair, pairs)}
+
+
+def reporting_workspace(named: Path | None) -> Path:
+    """Where to report: what was named, else the workspace this unit was given."""
+    if named is not None:
+        return named
+    inherited = os.environ.get(WORKSPACE_ENV, "")  # lup: ignore[os-environ] — a unit's
+    if not inherited:
+        raise typer.BadParameter(
+            f"no workspace: run this inside a step, where {WORKSPACE_ENV} is bound, "
+            "or name one with --workspace"
+        )
+    return Path(inherited)
 
 
 def create_run_app() -> typer.Typer:
@@ -71,5 +127,55 @@ def create_run_app() -> typer.Typer:
             typer.echo(monitor.once(directory, log))
             return
         typer.echo(monitor.report(directory, log, interval))
+
+    @app.command("report")
+    def report_cmd(
+        done: Annotated[
+            int, typer.Option("--done", help="How much of its work this unit has done")
+        ],
+        total: Annotated[
+            int | None,
+            typer.Option("--total", help="How much there is to do, when it is known"),
+        ] = None,
+        phase: Annotated[
+            str,
+            typer.Option("--phase", help="Which part of its own work it is in, a word"),
+        ] = "",
+        detail: Annotated[
+            list[str],
+            typer.Option(
+                "--detail",
+                help="key=value in the unit's own vocabulary; the value is read "
+                'as JSON where it is JSON (supports=41, ok=true, shape={"k":1}) '
+                "and as text where it is not",
+            ),
+        ] = [],
+        workspace: Annotated[
+            Path | None,
+            typer.Option(
+                "--workspace",
+                help=f"Where to write; defaults to ${WORKSPACE_ENV}",
+            ),
+        ] = None,
+    ) -> None:
+        """Say how far into its own work a unit has got, from any language.
+
+        For a unit that cannot import this library. It writes the same record
+        `lup.runs.report.report_progress` does, into the workspace the runtime
+        gave the unit, and `run monitor` shows it as a bar beside the run's own.
+
+        A process per report, which is right at one report a second and wrong
+        at a thousand: a loop reporting that often should call
+        `report_progress` in-process, where a report costs nothing to drop.
+        The throttle that drops one here cannot see the report before it,
+        every invocation being its own process, so every call writes.
+        """
+        report_progress(
+            reporting_workspace(workspace),
+            done=done,
+            total=total,
+            phase=phase,
+            detail=parsed_detail(detail),
+        )
 
     return app

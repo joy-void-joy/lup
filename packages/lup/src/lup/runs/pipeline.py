@@ -40,7 +40,7 @@ from lup.channels.models import utc_now
 from lup.execution.dag import DependencyGraph
 from lup.execution.shell import LazyCommand
 from lup.runs.follow import render_landing
-from lup.runs.ledger import RunDirectory
+from lup.runs.ledger import WORKSPACE_ENV, RunDirectory, stderr_in, stdout_in
 from lup.runs.models import (
     SINGLE_ITEM,
     RunManifest,
@@ -48,9 +48,11 @@ from lup.runs.models import (
     SkippedStep,
     StepRecord,
     UnitAttempt,
+    UnitProgress,
     UnitResult,
     UnitStatus,
 )
+from lup.runs.report import report_progress
 from lup.types import JsonValue
 
 logger = logging.getLogger(__name__)
@@ -98,6 +100,25 @@ class StepContext(FanContext, frozen=True):
         path = self.run.workspace(self.step, self.item)
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def report(
+        self,
+        done: int,
+        total: int | None = None,
+        phase: str = "",
+        detail: dict[str, JsonValue] | None = None,
+    ) -> UnitProgress | None:
+        """Say how far into its own work this unit has got.
+
+        The context already knows where this unit's workspace is, so a body
+        names no path and cannot publish where nothing reads. Call it from
+        the loop that does the work: reporting more often than a reader looks
+        costs a dropped call rather than a write, which is what lets the
+        cheapest call site be the right one.
+        """
+        return report_progress(
+            self.workspace, done=done, total=total, phase=phase, detail=detail
+        )
 
 
 type StepBody = Callable[[StepContext], StepOutcome | None]
@@ -267,7 +288,7 @@ class ShellStep(Step, frozen=True):
                 ("LUP_RUN_DIR", str(context.run.root)),
                 ("LUP_RUN_STEP", context.step),
                 ("LUP_RUN_ITEM", context.item),
-                ("LUP_RUN_WORKSPACE", str(context.workspace)),
+                (WORKSPACE_ENV, str(context.workspace)),
             ]
         )
         return f"{bindings}\n{self.command}"
@@ -280,8 +301,8 @@ class ShellStep(Step, frozen=True):
         that swallowed it would be unreadable, and one that kept a prefix
         would look complete while being cut. The result points at all of it.
         """
-        out_path = context.workspace / "stdout.txt"
-        err_path = context.workspace / "stderr.txt"
+        out_path = stdout_in(context.workspace)
+        err_path = stderr_in(context.workspace)
         with (
             out_path.open("w", encoding="utf-8") as out,
             err_path.open("w", encoding="utf-8") as err,
