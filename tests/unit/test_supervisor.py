@@ -28,10 +28,10 @@ from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry, PhaseChangedEvent, RunEvent
 from lup.sessions.events import TurnEvent
-from lup.orchestration.actors.mailbox import AnswerDoor, RecordedAnswer
-from lup.orchestration.actors.questions import QuestionAnswer
-from lup.orchestration.actors.refs import ActorRef
-from lup.orchestration.actors.roster import ROSTER_FILE, Roster
+from lup.coordination.mailbox import AnswerDoor, RecordedAnswer
+from lup.coordination.questions import QuestionAnswer
+from lup.coordination.refs import ActorRef
+from lup.coordination.roster import ROSTER_FILE, Roster
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
     AcceptanceCriterion,

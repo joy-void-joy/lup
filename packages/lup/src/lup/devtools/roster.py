@@ -28,6 +28,7 @@ from pathlib import Path
 import typer
 from pydantic import BaseModel
 
+from lup.devtools.coordination.app import create_coordination_app
 from lup.devtools.dev.app import create_dev_app
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.feedback.app import create_feedback_app
@@ -161,6 +162,13 @@ LIBRARY_ROSTER = [
             name="conversation", help="Retain authenticated AI conversations"
         ),
         build=lambda declared: conversation_app(declared),
+    ),
+    RosterEntry(
+        spec=SubAppSpec(
+            name="coordination",
+            help="Reach the other sessions working in this repository",
+        ),
+        build=lambda _: create_coordination_app(),
     ),
     RosterEntry(
         spec=SubAppSpec(

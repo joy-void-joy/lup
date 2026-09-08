@@ -536,6 +536,7 @@ def build_session_factory(
             outputs_dir=notes.output.parent,
             sandbox=sandbox,
             realtime_dir=realtime_dir,
+            session_id=session_id,
         )
         servers = [
             create_mcp_server(name, tools=policy.filter_tools(group_tools))

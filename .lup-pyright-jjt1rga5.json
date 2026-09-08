@@ -1,0 +1,1 @@
+{"extends": "/home/pfftz/job/onit/lup.git/tree/coordination/pyproject.toml", "exclude": [".venv", "build", "dist", "htmlcov", "**/tmp", "**/__pycache__", "**/*.egg-info", "**/.ruff_cache", "**/.pytest_cache", "**/node_modules"]}

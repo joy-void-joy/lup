@@ -73,7 +73,7 @@ from lup.resolver.models import (
     WorkerContext,
 )
 from lup.channels.models import local_stamp, utc_now
-from lup.orchestration.actors.mailbox import (
+from lup.coordination.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
@@ -1763,11 +1763,11 @@ def run_resolve(
             def relay(why: str, refusal: str) -> None:
                 """Put a refused escalation where a human running this will see it.
 
-                Addressed to the run rather than broadcast, so it lands in the
-                one inbox `resolve actors` prints for a person rather than in
-                every sibling worker's context.
+                Addressed to the person rather than broadcast, so it lands in
+                the one inbox `resolve actors` prints for a human rather than
+                in every sibling worker's context.
                 """
-                core.actors.tell_spawner(
+                core.actors.tell_user(
                     f"{context.actor.label()} was refused a command it escalated.\n"
                     f"Its reason: {why}\n"
                     f"The refusal: {refusal}"

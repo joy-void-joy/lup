@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from lup.orchestration.actors.refs import ActorRef
+from lup.coordination.refs import ActorRef
 from lup.resolver.journal import Journal
 from lup.sessions.events import (
     BlockCompletedEvent,

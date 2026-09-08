@@ -31,10 +31,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from lup.orchestration.actors.cohort import ActorCohort, CohortEntry
-from lup.orchestration.actors.mail import MailEventBase
-from lup.orchestration.actors.refs import ActorRef
-from lup.orchestration.actors.roster import SpawnedActor
+from lup.coordination.cohort import ActorCohort, CohortEntry
+from lup.coordination.mail import MailEventBase
+from lup.coordination.refs import ActorRef
+from lup.coordination.roster import SpawnedActor
 from lup.sessions.events import TurnMessage
 from lup.types import JsonObject
 

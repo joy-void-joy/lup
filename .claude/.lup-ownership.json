@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "8db2163806c6865b611f026e1c397fdbc858a5feaaf40ca9a8c3bcf188201c99",
+  "source_digest": "52bffe70067f99c8056be14593161fe1284df277928585eb7ae1279db7976b83",
   "target_requirements": [
     "claude-code"
   ],
@@ -30,7 +30,7 @@
     {
       "path": ".claude/plugins/lup/.mcp.json",
       "category": "generated",
-      "sha256": "3d7c64cde04753ef99452c6d649d2f27162cc8b48fa571eb5179ee913c5be38e",
+      "sha256": "93e78390dd01c4227f179de29e3229a0c46428513d4f8fc62cc47ee7fa153fcd",
       "semantic_id": "plugin.lup",
       "executable": false
     },
@@ -205,7 +205,7 @@
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "e6e161a93c563c261d1a951da3d725b4db9fa6d54316f1bee5276ad6e655e2f8",
+      "sha256": "70951c8fa2129e59804a82a84dd73b0aa6a439db6614e5139dbeaa67f44dc6bb",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -471,7 +471,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "25547cce66a44219f55e42f4f6489d5172e43b5ff2fc49c93e0750210fbb2418",
+      "sha256": "73ad78cf66b418ae1c46c1c9edad39c7f628d5c1294eb39b69e21a3694c89367",
       "semantic_id": "harness.project-settings",
       "executable": false
     },
@@ -504,6 +504,13 @@
       "executable": false
     },
     {
+      "path": "docs/coordination.md",
+      "category": "generated",
+      "sha256": "f155ea4e0e60072b23d665fb9a27cd87bf19c5de9dada2c3a5e3a83e206ef530",
+      "semantic_id": "docs.coordination",
+      "executable": false
+    },
+    {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
       "sha256": "c4452a0865af6338043ead998e19d14160ef63a3b9f3d4fb88723c4e11850fe8",
@@ -520,7 +527,7 @@
     {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "b7e7a0805f9676772d773ae52fc697e5ec72fcf4a469d11188b3cba165171ed8",
+      "sha256": "87cee7fad2508597bcf20c57f75d29c88c9d4fed6663e9b835b3d9b6ffb75f61",
       "semantic_id": "docs.library",
       "executable": false
     },
@@ -534,7 +541,7 @@
     {
       "path": "docs/orchestration.md",
       "category": "generated",
-      "sha256": "bb67571af70f3ad231c83b30051e6f0c13ba864838a405a2fc456660e7d1dcf0",
+      "sha256": "bd4a486a6f17670d8b1e328cb08be7a909eaa77f02f85c5e535f7ff807cb53a7",
       "semantic_id": "docs.orchestration",
       "executable": false
     },
@@ -597,7 +604,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "6ef63841a4e4cf26eee4479575d101306e909346b5af7408e4215833e37b93f2",
+      "sha256": "6db74b1418b17bd2b7305f6a2ee6b6238fba61fdd6cf19ec945f8d48fa898d0b",
       "semantic_id": "docs.template",
       "executable": false
     },

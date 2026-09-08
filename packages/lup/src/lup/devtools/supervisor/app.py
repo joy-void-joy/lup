@@ -20,14 +20,14 @@ from fastapi.responses import StreamingResponse
 from lup.providers.harness import AdapterName
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry
-from lup.orchestration.actors.mail import ActorMessage
-from lup.orchestration.actors.mailbox import (
+from lup.coordination.mail import ActorMessage
+from lup.coordination.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
     ParkRequest,
 )
-from lup.orchestration.actors.questions import QuestionAnswer
+from lup.coordination.questions import QuestionAnswer
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.types import StringMap

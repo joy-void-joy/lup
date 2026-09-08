@@ -22,7 +22,7 @@ from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter
 
-from lup.orchestration.actors.refs import ActorRef
+from lup.coordination.refs import ActorRef
 from lup.channels.cursor import StreamCursors
 from lup.channels.models import Door, utc_now
 from lup.channels.stream import Stream

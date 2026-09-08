@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from lup.orchestration.actors.cohort import ActorCohort
-from lup.orchestration.actors.progress import ProgressWindow, read_progress
-from lup.orchestration.actors.tools import SpawnReadInput, create_cohort_tools
+from lup.coordination.cohort import ActorCohort
+from lup.coordination.progress import ProgressWindow, read_progress
+from lup.coordination.tools import SpawnReadInput, create_cohort_tools
 from lup.channels.models import Door
 from lup.tools.mcp import LupMcpTool, ToolError
 from lup.sessions.events import (

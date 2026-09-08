@@ -10,10 +10,10 @@ printed `redirected worker:research-corpus-retrieval#1`.
 
 from pathlib import Path
 
-from lup.orchestration.actors.mail import EVERYONE, ActorMail, new_message
-from lup.orchestration.actors.mailbox import AnswerDoor
-from lup.orchestration.actors.refs import ActorRef
-from lup.orchestration.actors.sessions import ActorInbox, create_inbox_hooks
+from lup.coordination.mail import EVERYONE, ActorMail, new_message
+from lup.coordination.mailbox import AnswerDoor
+from lup.coordination.refs import ActorRef
+from lup.coordination.sessions import ActorInbox, create_inbox_hooks
 from lup.resolver.journal import Journal
 
 from lup.policy.hooks import LupHookInput

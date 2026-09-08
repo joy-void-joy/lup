@@ -165,11 +165,11 @@ several agents work at once and the facts move under them, that is the whole
 problem — an agent verifying a statement you have since disproved, or working
 a branch you closed, keeps going because nothing can tell it.
 
-An **actor cohort** (`lup.orchestration.actors.cohort.ActorCohort`) is a population of
+An **actor cohort** (`lup.coordination.cohort.ActorCohort`) is a population of
 agents that stay in contact while they work. Each holds one session across
 every turn it takes; anything addressed to one lands in front of its next tool
-call through a hook it never chooses to check; and the spawner is itself an
-address, so an agent can say something back.
+call through a hook it never chooses to check; and the person watching is
+itself an address, `user`, so an agent can say something back.
 
 | Aspect | Actor Cohort |
 | --- | --- |
@@ -225,15 +225,23 @@ difference between the two cases.
 **The population is a record, not a dict.** `live()`, `members()` and
 `reaching()` fold `roster.jsonl`, so a console in another process resolves the
 same address the cohort's own tools do, and a restart rebuilds the roster.
+`cohort.json` beside it says the directory is a cohort at all, which is what a
+peer that did not create one reads to find it.
 
-**Library support:** `lup.orchestration.actors.tools.create_cohort_tools` serves the verbs an
+**The person is on the roster.** They join as the member `user`, with an inbox
+and no session, so a report reaches them through the verb that steers an agent
+rather than through a channel of its own — and a console attaching to a
+directory some other process wrote resolves that address by the same fold. It
+is the one member `live()` leaves out, because nobody started them.
+
+**Library support:** `lup.coordination.tools.create_cohort_tools` serves the verbs an
 agent needs — list what I spawned, read what one of them has found so far, say
-something to one of them, say something back to whoever spawned me. Reading is
+something to one of them, say something to the person watching. Reading is
 what makes steering more than a guess: a spawn's turn events reach the journal
 as they happen, so `spawn_read` folds its own words, its calls and its
 refusals out of that record while it is still working, and a redirect can be
 aimed at what the agent is doing rather than at what it was asked.
-`lup.orchestration.actors.mailbox.QuestionMailbox`
+`lup.coordination.mailbox.QuestionMailbox`
 adds decisions that park a run, on the same storage; messages ride a stream
 and never park anything, which is why "a message stalled the run" is not
 expressible rather than merely avoided.
