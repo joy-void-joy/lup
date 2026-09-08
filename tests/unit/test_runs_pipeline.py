@@ -18,10 +18,17 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from lup.channels.models import utc_now
-from lup.runs.ledger import CLAIM_LEASE_SECONDS, RunDirectory
-from lup.runs.models import UnitAttempt, UnitStatus
+from lup.devtools.run.app import create_run_app
+from lup.runs.ledger import (
+    CLAIM_LEASE_SECONDS,
+    WORKSPACE_ENV,
+    RunDirectory,
+    progress_in,
+)
+from lup.runs.models import UnitAttempt, UnitProgress, UnitStatus
 from lup.runs.progress import read_progress
 from lup.runs.pipeline import (
     CallableStep,
@@ -358,3 +365,101 @@ def test_a_killed_run_reads_as_abandoned_rather_than_working(tmp_path: Path) -> 
     assert "no runner holds this" in reading.describe_activity()
     assert "abandoned=2" in reading.postfix()
     assert "running=" not in reading.postfix()
+
+
+def crawls(context: StepContext) -> StepOutcome:
+    """A body that says how far into its own work it is before it finishes."""
+    CALLS[context.step] = CALLS.get(context.step, 0) + 1
+    context.report(done=3, total=10, phase="fit", detail={"supports": 41})
+    return StepOutcome(outcome="done")
+
+
+def test_a_body_reports_through_the_context_it_was_already_given(
+    tmp_path: Path,
+) -> None:
+    """The context knows the workspace, so a body names no path to get this wrong."""
+    Pipeline(name="crawl", steps=[CallableStep(id="solve", body=crawls)]).execute(
+        RunRequest(directory=tmp_path)
+    )
+    record = RunDirectory(root=tmp_path).read_progress_record("solve")
+    assert record is not None
+    assert (record.done, record.total, record.phase) == (3, 10, "fit")
+    assert record.detail == {"supports": 41}
+
+
+def test_a_units_last_reading_outlives_the_claim_that_carried_it(
+    tmp_path: Path,
+) -> None:
+    """A unit that died at 2870 of 3000 leaves that reading beside its traceback."""
+    run = RunDirectory(root=tmp_path)
+    Pipeline(name="crawl", steps=[CallableStep(id="solve", body=crawls)]).execute(
+        RunRequest(directory=tmp_path)
+    )
+    assert run.running() == []
+    assert run.progress_path("solve").is_file()
+    assert run.read_result("solve") is not None
+
+
+def test_a_shell_unit_is_told_where_to_report(tmp_path: Path) -> None:
+    """The doorway for a unit in any language is one environment variable."""
+    step = ShellStep(id="solve", command="true")
+    script = step.script(StepContext(run=RunDirectory(root=tmp_path), step="solve"))
+    assert f"{WORKSPACE_ENV}=" in script
+
+
+def test_run_report_writes_the_file_report_progress_writes(tmp_path: Path) -> None:
+    """A unit in any language reaches the same record, parsed the same way."""
+    workspace = tmp_path / "unit"
+    result = CliRunner().invoke(
+        create_run_app(),
+        [
+            "report",
+            "--workspace",
+            str(workspace),
+            "--done",
+            "41",
+            "--total",
+            "300",
+            "--phase",
+            "fit",
+            "--detail",
+            "supports=41",
+            "--detail",
+            "note=alpha",
+            "--detail",
+            'shape={"k":1}',
+        ],
+    )
+    assert result.exit_code == 0
+    written = UnitProgress.model_validate_json(
+        progress_in(workspace).read_text(encoding="utf-8")
+    )
+    assert (written.done, written.total, written.phase) == (41, 300, "fit")
+    assert written.detail == {"supports": 41, "note": "alpha", "shape": {"k": 1}}
+
+
+def test_run_report_takes_the_workspace_the_runtime_gave_the_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "unit"))
+    assert (
+        CliRunner().invoke(create_run_app(), ["report", "--done", "7"]).exit_code == 0
+    )
+    assert progress_in(tmp_path / "unit").is_file()
+
+
+def test_run_report_refuses_a_detail_that_is_not_a_pair(tmp_path: Path) -> None:
+    """A flag grammar that guessed would put a unit's own words somewhere odd."""
+    failed = CliRunner().invoke(
+        create_run_app(),
+        ["report", "--workspace", str(tmp_path), "--done", "1", "--detail", "oops"],
+    )
+    assert failed.exit_code != 0
+
+
+def test_run_report_says_so_when_nothing_told_it_where_to_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(WORKSPACE_ENV, raising=False)
+    failed = CliRunner().invoke(create_run_app(), ["report", "--done", "1"])
+    assert failed.exit_code != 0
