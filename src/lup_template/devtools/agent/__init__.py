@@ -22,6 +22,8 @@ import asyncio
 from typing import Annotated
 
 import typer
+from pydantic import TypeAdapter, ValidationError
+from lup_template.agent.config import Engine
 
 import lup_template.devtools.agent.inspect_agent as inspect_agent
 import lup_template.devtools.agent.repl as repl
@@ -77,6 +79,12 @@ def serve_tools_cmd(
             help="Open a session under this name when none is relayed",
         ),
     ] = None,
+    runtime: Annotated[
+        str | None,
+        typer.Option(
+            "--runtime", help="Engine owning this tool server; overrides AGENT_SDK"
+        ),
+    ] = None,
 ) -> None:
     """Start SDK tools as an MCP stdio server (the ``notes`` server).
 
@@ -90,7 +98,15 @@ def serve_tools_cmd(
     A native runtime relays no such context, so it names a session instead
     and this process opens it.
     """
-    serve.serve_tools(list_only, server_group, session)
+    try:
+        selected = (
+            TypeAdapter(Engine).validate_python(runtime)
+            if runtime is not None
+            else None
+        )
+    except ValidationError as error:
+        raise typer.BadParameter(str(error), param_hint="--runtime") from error
+    serve.serve_tools(list_only, server_group, session, selected)
 
 
 @app.command("repl")

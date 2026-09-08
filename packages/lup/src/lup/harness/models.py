@@ -35,11 +35,12 @@ from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
+from lup.policy.imports import ImportBoundary
 from lup.policy.everyday import CommandFamily
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
 from lup.seams import SelectableRule, Selection
-from lup.types import JsonValue, ToolGrant, ToolName
+from lup.types import JsonValue, ModelTier, ToolGrant, ToolName
 
 if TYPE_CHECKING:
     from lup.harness.contracts import NativeSpellings, PromptRenderer
@@ -546,52 +547,104 @@ class Document(SelectableRule, frozen=True):
         return self.semantic_id
 
 
-GUIDANCE_BYTE_BUDGET = 32_768
-"""Default ceiling, in UTF-8 bytes, on the always-loaded guidance document.
+class GuidanceBudget(BaseModel, frozen=True):
+    """What the always-loaded document may weigh, and what a scaffold keeps back.
 
-Codex stops adding project documentation once the combined size reaches
-``project_doc_max_bytes``, whose own default is 32 KiB — so exceeding this is
-not an error a reader ever sees, it is *silent truncation*. The unit is bytes
-for the same reason: that is what the vendor limits, and UTF-8 punctuation
-makes a document's byte count exceed its character count, so a character-based
-check runs looser than the real cap and passes documents that would be cut.
+    One declaration rather than two numbers, because the third value is the one
+    every caller actually wants and neither number carries it: what a *template*
+    may spend is the ceiling less the reserve, and that subtraction was written
+    out by hand at every site that needed it. Derived here instead, so a project
+    that moves either number moves the answer everywhere rather than moving it
+    at seven sites and missing the eighth.
 
-Claude has no equivalent setting — its guidance file is loaded in full
-whatever its length. Lup applies one number to both trees anyway, so the two
-runtimes read the same document rather than one reading a longer one.
+    Field defaults rather than module constants for the reason
+    ``docs/patterns.md`` § *A Constant Should Probably Be An Overridable
+    Default* gives: both are judgements a project may make differently, and
+    ``ge=0`` is what the fields buy over integers — a negative reserve is not a
+    stricter scaffold, it is a check that passes whatever the document weighs.
+    """
 
-This is a default rather than a constant: the number mirrors a real vendor
-default, but which ceiling a given project wants is its own call. Pass
-``budget`` to the checks below to state a different one. See § A Constant
-Should Probably Be An Overridable Default in ``docs/patterns.md``.
+    ceiling: int = Field(default=32_768, ge=0)
+    """Ceiling, in UTF-8 bytes, on the always-loaded guidance document.
 
-What a session pays for is the rendered document, so that is what the adapters
-check as they compile it. A typed part costs whatever its adapter spells it as,
-however little literal text the declaration holds. Reference material that a
-skill or a denial message surfaces at the right moment belongs in a generated
-document under ``docs/`` instead, reached by a file-path pointer."""
+    Codex stops adding project documentation once the combined size reaches
+    ``project_doc_max_bytes``, whose own default is 32 KiB — so exceeding this
+    is not an error a reader ever sees, it is *silent truncation*. The unit is
+    bytes for the same reason: that is what the vendor limits, and UTF-8
+    punctuation makes a document's byte count exceed its character count, so a
+    character-based check runs looser than the real cap and passes documents
+    that would be cut.
 
-TEMPLATE_GUIDANCE_HEADROOM = 11_776
-"""Bytes a scaffold holds back, out of the budget above, for its adopter.
+    Claude has no equivalent setting — its guidance file is loaded in full
+    whatever its length. Lup applies one number to both trees anyway, so the two
+    runtimes read the same document rather than one reading a longer one.
 
-The ceiling above is what a *runtime* will load. This is what a **template**
-may spend of it, and the difference is the whole point: a repository that is
-still the scaffold is writing guidance every domain built on it inherits, and
-that domain then has to describe its own architecture, conventions and
-workflow inside whatever is left. A scaffold that fills the runtime's ceiling
-has not passed its budget on, it has spent it — and the adopter discovers this
-by writing three paragraphs about its own project and being refused.
+    What a session pays for is the rendered document, so that is what the
+    adapters check as they compile it. A typed part costs whatever its adapter
+    spells it as, however little literal text the declaration holds. Reference
+    material that a skill or a denial message surfaces at the right moment
+    belongs in a generated document under ``docs/`` instead, reached by a
+    file-path pointer."""
 
-11.5 KiB, half a kilobyte under what this repository's own architecture,
-conventions and tooling sections cost together: a scaffold that also has to
-tell every domain how to answer its runtime's ambient instructions spends
-that much of the reserve on their behalf. Enough for a domain to say the
-equivalent about itself, rather than a round number that sounds generous.
+    template_headroom: int = Field(default=11_776, ge=0)
+    """Bytes a scaffold holds back, out of the ceiling above, for its adopter.
 
-Only ``dev check`` weighs this, and only while ``[tool.lup] template = true``.
-It must never reach ``budget`` on the checks above: those decide what a real
-runtime is told to load, and a scaffold's self-restraint is not a fact about
-any runtime's ceiling."""
+    The ceiling is what a *runtime* will load. This is what a **template** may
+    not spend of it, and the difference is the whole point: a repository that is
+    still the scaffold is writing guidance every domain built on it inherits,
+    and that domain then has to describe its own architecture, conventions and
+    workflow inside whatever is left. A scaffold that fills the runtime's
+    ceiling has not passed its budget on, it has spent it — and the adopter
+    discovers this by writing three paragraphs about its own project and being
+    refused.
+
+    11.5 KiB, half a kilobyte under what this repository's own architecture,
+    conventions and tooling sections cost together: a scaffold that also has to
+    tell every domain how to answer its runtime's ambient instructions spends
+    that much of the reserve on their behalf. Enough for a domain to say the
+    equivalent about itself, rather than a round number that sounds generous.
+
+    Only ``dev check`` weighs this, and only while ``[tool.lup] template =
+    true``. It never reaches :attr:`ceiling`: that decides what a real runtime
+    is told to load, and a scaffold's self-restraint is not a fact about any
+    runtime's ceiling."""
+
+    @property
+    def scaffold_ceiling(self) -> int:
+        """What a repository still shipping as a template may spend.
+
+        The value every caller subtracted for itself. A derived property rather
+        than a third field, because it is not a judgement anybody makes — it is
+        what the two judgements above already imply, and a field would let a
+        project set three numbers that disagree.
+        """
+        return self.ceiling - self.template_headroom
+
+    @model_validator(mode="after")
+    def reserve_fits_inside_the_ceiling(self) -> "GuidanceBudget":
+        """A reserve larger than the ceiling leaves a scaffold negative room.
+
+        Refused rather than clamped, because both readings of a clamp are
+        wrong: silently keeping nothing back abandons the reserve a project
+        asked for, and silently lowering the ceiling tells a runtime to load
+        less than it will. The project stated two numbers that cannot both
+        hold, and only the project can say which it meant.
+        """
+        if self.template_headroom > self.ceiling:
+            raise ValueError(
+                f"a scaffold reserve of {self.template_headroom} bytes does not "
+                f"fit inside a {self.ceiling}-byte ceiling"
+            )
+        return self
+
+
+GUIDANCE_BUDGET = GuidanceBudget()
+"""The budget a project that has said nothing about it carries.
+
+Named so every default argument reads the same value rather than constructing
+its own, which is the one thing a bare default would get wrong here: a project
+that replaced the budget would have to be threaded to each of them, and a site
+that constructed its own would go on answering with the library's."""
 
 
 def document_byte_size(text: str) -> int:
@@ -703,14 +756,6 @@ type AgentColor = Literal[
     "red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"
 ]
 """The closed agent accent-color palette native runtimes accept."""
-
-
-type ModelTier = Literal["inherit", "strongest", "balanced", "fast"]
-"""Portable model preference for one role.
-
-Runtimes name and version their own model lineups, so a declaration states the
-need and each adapter spells whichever tier it can honor — or omits the choice
-where it has no proven vocabulary to spell it in."""
 
 
 class Agent(SelectableRule, frozen=True):
@@ -938,7 +983,18 @@ class ProjectRootWord(McpWord, frozen=True):
         return runtime.project_root()
 
 
-type McpCommandWord = Annotated[LiteralWord | ProjectRootWord, Discriminator("type")]
+class RuntimeWord(McpWord, frozen=True):
+    """The engine that owns the tool server, independent of ambient settings."""
+
+    type: Literal["runtime"] = "runtime"
+
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        return runtime.runtime_key()
+
+
+type McpCommandWord = Annotated[
+    LiteralWord | ProjectRootWord | RuntimeWord, Discriminator("type")
+]
 
 
 class McpServer(BaseModel, frozen=True):
@@ -1131,6 +1187,7 @@ class HookSet(BaseModel, frozen=True):
     allowed_fetch: list[HookUrlScope] = []
     denied_fetch: list[HookUrlScope] = []
     protected_edit_roots: list[Path] = []
+    import_boundaries: list[ImportBoundary] = []
     path_roles: list[HookPathRole] = Field(
         default=[],
         description=(
@@ -1359,6 +1416,14 @@ class HookSet(BaseModel, frozen=True):
         one out from under the project that never asked to.
         """
         return self.edit_rules.over([])
+
+    def resolved_import_boundaries(self) -> list[ImportBoundary]:
+        """The dependency rules retained by the same selection as the auditor."""
+        return [
+            boundary
+            for boundary in self.import_boundaries
+            if self.rules.keeps(boundary.rule_id)
+        ]
 
 
 class ResolveSpec(BaseModel, frozen=True):
@@ -1641,11 +1706,11 @@ class Harness(BaseModel, frozen=True):
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
 
         used = self.guidance.text_size()
-        if used > GUIDANCE_BYTE_BUDGET:
+        if used > GUIDANCE_BUDGET.ceiling:
             raise ValueError(
                 f"always-loaded guidance is {used} bytes, over the "
-                f"{GUIDANCE_BYTE_BUDGET} budget by "
-                f"{used - GUIDANCE_BYTE_BUDGET}. Move a section to a "
+                f"{GUIDANCE_BUDGET.ceiling} budget by "
+                f"{used - GUIDANCE_BUDGET.ceiling}. Move a section to a "
                 "generated document under docs/ and leave a file-path pointer, "
                 "the way Self-Improvement Loop and Permission Hooks were split."
             )

@@ -24,7 +24,6 @@ if TYPE_CHECKING:
         ArtifactTree,
         CapabilityEvidence,
         LocatedPart,
-        ModelTier,
         PluginLocation,
         PromptDocument,
         QualifiedAgentName,
@@ -32,6 +31,7 @@ if TYPE_CHECKING:
         TreeLocation,
     )
     from lup.harness.reconciliation import CurrentTree, ReconciliationProposal
+    from lup.types import ModelTier
 
 
 class ArtifactRenderer[S](ABC):
@@ -268,6 +268,10 @@ class NativeSpellings(SkillInvocationRenderer, ABC):  # lup: ignore[abc-capabili
     @abstractmethod
     def runtime_docs(self) -> Instruction:
         """Name this runtime's own documentation, wherever it lives."""
+
+    @abstractmethod
+    def runtime_key(self) -> str:
+        """The selection key a spawned tool server uses for this runtime."""
 
     @abstractmethod
     def project_root(self) -> str:

@@ -6,15 +6,14 @@ same `SubagentSpec` roster the native path uses.
 Engines with native subagents run them directly (from a
 ``SubagentSpec``). Engines without get this served MCP tool instead: the
 agent calls ``run_subagent(name, task)`` and the tool dispatches a
-one-shot client to the engine that serves the spec's model. The same
+one-shot client through the application's selected engine. The same
 spec list drives both paths, so the available roles never diverge
 between engines.
 
-A spec may pin knobs (tools, a turn cap) that a one-shot delegation on
-the target model's engine cannot honor. Rather than name which engines
-those are, the tool builds the client with ``on_unsupported="raise"`` and
-surfaces the engine's own refusal, so it fails loudly instead of silently
-dropping the knobs.
+A spec declares runtime capabilities separately from exact canonical tool
+grants. Its injected factory compiles both, resolves its model tier, and
+refuses any restriction the target engine cannot honor. Construction errors
+reach the caller as tool errors; declarations are never silently discarded.
 """
 
 import logging

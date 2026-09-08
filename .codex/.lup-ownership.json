@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "205702f96ae6e79d255a7ef83e1ccdf6b572061daf6d74a80c7ddcedd347f6de",
+  "source_digest": "52bffe70067f99c8056be14593161fe1284df277928585eb7ae1279db7976b83",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -16,35 +16,35 @@
     {
       "path": ".codex/agents/tdd-implementer.toml",
       "category": "generated",
-      "sha256": "2f04f7a3821405c4d854b843ab374398fdf8709492231d91cf75094dce17da8f",
+      "sha256": "e11c2897843a2df45994f3e02540d26efa6e3981d6b0bb49026139c0108bafc7",
       "semantic_id": "agent.tdd-implementer",
       "executable": false
     },
     {
       "path": ".codex/agents/trace-explorer.toml",
       "category": "generated",
-      "sha256": "6b8c86fed28e9e5453bc224f53784c0e1403d25baefd04cd676cf3168a1b16ff",
+      "sha256": "0d59e4d3a58a6cac6c5a52b22460f7a5851b04d5357c1bd62fcb54b0b8200e21",
       "semantic_id": "agent.trace-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-explorer.toml",
       "category": "generated",
-      "sha256": "209e1ae2f5e9d00e0fcb5ff7832d324b1f9dd093987e2f0a2ed4e32fe6176d70",
+      "sha256": "ce8abe0173258a9db3b0d3aca67e435944bffaaed185018c790bdff95ed777c1",
       "semantic_id": "agent.version-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-reviewer.toml",
       "category": "generated",
-      "sha256": "3af7399b3f02b73d701195b0773a098b53d8cc6dadbcd43e590d2665d16ce472",
+      "sha256": "5f5edf87773afd384938ddc1a30b97769f842675ea21c0ff3777796e83aea616",
       "semantic_id": "agent.version-reviewer",
       "executable": false
     },
     {
       "path": ".codex/config.toml",
       "category": "generated",
-      "sha256": "ad42a912ae36cb9162f678b6c4b00b81144fd2b1cb289910a0f6abaab3b40894",
+      "sha256": "03c55f276c1084563b3b4e7c67df7b4bf58e60c0527e6a8c1e74cd6c7117efa9",
       "semantic_id": "harness.project-config",
       "executable": false
     },
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "12fb4db9ac90db0e2132a24f6c0ebdf42608b3ba193df4616054f85a4c34c6be",
+      "sha256": "46b33df0154f5a4dddfe00eaa0ce29628f3104ba3e11214fe4f1d1df5d1fde7f",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -114,7 +114,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "4ada259ae60bc6ff1a1a6be86d0938b1d7c71b5c20698870d62f05f6e01bf619",
+      "sha256": "9a2c97635a66cff5c1afc746d36116d0b2c22db206eca332dd5e2e321a98cb81",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -140,6 +140,13 @@
       "executable": false
     },
     {
+      "path": ".codex/plugins/lup/hooks/runtime/kernel/imports.py",
+      "category": "generated",
+      "sha256": "5f3036f7c73b0e209d6ec78f95f6ff7c2dae7d032ebdd91cb964d0d577fc9bf7",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
       "sha256": "fc84a7205579284165129bce4c7a4fca3790115ae682b5c0d983b1322322a74f",
@@ -156,7 +163,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "e27c38c807565e7b3edc0805083297196bd3fa48d51a2655f2b6030cbfc82d0c",
+      "sha256": "5119ef68a6aa0b5c902929d358a5b96294ded47659a12b8fc2beb6444d332e97",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -198,14 +205,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "386636a7ff752580471918501e3fda529f1666f5cc3254ffe47e2eb1d211073d",
+      "sha256": "8acb6664b5ff38f4f7e75d65dbafca73278452353f36209de8a00ecc264b9303",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "35b42b2396b2ca3c8de40d9cb1a0a88dc952e2bc4440826e1f260cd8c719fad0",
+      "sha256": "30f0d9ab7a435f174ec50dfb6f5055192b081108348875e8922aafd779b9daf2",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -254,7 +261,7 @@
     {
       "path": ".codex/plugins/lup/skills/commit/SKILL.md",
       "category": "generated",
-      "sha256": "c964fda691824cff2c900789326f52ac0cb5362cb72db15f83659e17a0b6377e",
+      "sha256": "52eabc2901b657e80b99ee040b22efec9d6b4f50d1899f8debeb12c1b2aa94f6",
       "semantic_id": "skill.commit",
       "executable": false
     },
@@ -464,7 +471,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "543fe79b03ce34f21ff64781bad505ad5d0a7fe84512233c643f628451aeeab6",
+      "sha256": "fb184a76f774a20a9a233eb7a5a3b6da9f245a58ec261363c1a74bb733677d74",
       "semantic_id": "harness.guidance",
       "executable": false
     }

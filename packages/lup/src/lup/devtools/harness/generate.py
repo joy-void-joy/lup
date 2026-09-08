@@ -61,6 +61,8 @@ from lup.harness.contracts import (
     SkillInvocationRenderer,
 )
 from lup.harness.validation import validated_tree
+from lup.harness.clipboard import ClipboardTransport
+from lup.providers.login import ProviderLogin
 
 
 class ProjectContent(BaseModel, frozen=True):
@@ -127,6 +129,9 @@ class NativeHarnessComposition(BaseModel, frozen=True, arbitrary_types_allowed=T
     recipe: GenerationRecipe
     readiness: RuntimeReadiness
     invocation_renderer: SkillInvocationRenderer
+    login: ProviderLogin
+    default_config_home: Path
+    clipboard_transport: ClipboardTransport = "commands"
 
 
 class HarnessGenerationConflict(RuntimeError):

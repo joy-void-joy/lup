@@ -1,5 +1,5 @@
 {
-  "revision": "9ca2acc11a322cad6ee80ee3c698b92a790eef2b",
+  "revision": "f289dca35f45066c848122534627ef9247951ef3",
   "roots": [
     "lup",
     "lup_template"
@@ -11,6 +11,13 @@
     "agent repl",
     "conversation chatgpt",
     "conversation claude",
+    "coordination roster",
+    "coordination join",
+    "coordination describe",
+    "coordination rename",
+    "coordination leave",
+    "coordination send",
+    "coordination inbox",
     "dev pending",
     "dev check",
     "dev test",
@@ -332,6 +339,32 @@
       ]
     },
     {
+      "module": "lup.coordination.identity",
+      "declares": [
+        "MEMBER_ENV",
+        "MEMBER_KIND",
+        "NAMES_FILE",
+        "MemberNamed",
+        "MemberNamed.id",
+        "MemberNamed.cli_name",
+        "MemberNamed.at",
+        "NAME_ADAPTER",
+        "MemberEnv",
+        "MemberEnv.member_id",
+        "session_member_id",
+        "mint_member_id",
+        "member_environment",
+        "member_ref",
+        "derived_cli_name",
+        "MemberNames",
+        "MemberNames.__init__",
+        "MemberNames.rename",
+        "MemberNames.named",
+        "MemberNames.current",
+        "MemberNames.resolve"
+      ]
+    },
+    {
       "module": "lup.coordination.mail",
       "declares": [
         "MESSAGE_FILE",
@@ -455,6 +488,32 @@
       ]
     },
     {
+      "module": "lup.coordination.peer_tools",
+      "declares": [
+        "NoInput",
+        "PeerListOutput",
+        "PeerListOutput.peers",
+        "DescribeInput",
+        "DescribeInput.description",
+        "DescribeOutput",
+        "DescribeOutput.description",
+        "PeerSayInput",
+        "PeerSayInput.address",
+        "PeerSayInput.text",
+        "PeerSayOutput",
+        "PeerSayOutput.address",
+        "PeerSayOutput.delivery",
+        "PeerSayOutput.outstanding",
+        "InboxOutput",
+        "InboxOutput.messages",
+        "create_peer_tools",
+        "create_peer_tools.coordination_peers",
+        "create_peer_tools.coordination_describe",
+        "create_peer_tools.coordination_send",
+        "create_peer_tools.coordination_inbox"
+      ]
+    },
+    {
       "module": "lup.coordination.peers",
       "declares": [
         "USER_KIND",
@@ -527,6 +586,28 @@
       ]
     },
     {
+      "module": "lup.coordination.repository",
+      "declares": [
+        "PeerView",
+        "PeerView.member",
+        "PeerView.cli_name",
+        "PeerView.address",
+        "PeerView.doing",
+        "RepositoryPeers",
+        "RepositoryPeers.__init__",
+        "RepositoryPeers.cohort",
+        "RepositoryPeers.join",
+        "RepositoryPeers.rename",
+        "RepositoryPeers.describe",
+        "RepositoryPeers.leave",
+        "RepositoryPeers.address",
+        "RepositoryPeers.listing",
+        "RepositoryPeers.send",
+        "RepositoryPeers.waiting",
+        "RepositoryPeers.take"
+      ]
+    },
+    {
       "module": "lup.coordination.roster",
       "declares": [
         "ROSTER_FILE",
@@ -546,7 +627,12 @@
         "ActorJoined.task",
         "ActorJoined.liveness",
         "ActorJoined.delivery",
+        "ActorJoined.worktree",
         "ActorJoined.applied",
+        "ActorDescribed",
+        "ActorDescribed.type",
+        "ActorDescribed.description",
+        "ActorDescribed.applied",
         "ActorFinished",
         "ActorFinished.type",
         "ActorFinished.summary",
@@ -560,6 +646,8 @@
         "SpawnedActor.running",
         "SpawnedActor.summary",
         "SpawnedActor.error",
+        "SpawnedActor.worktree",
+        "SpawnedActor.description",
         "SpawnedActor.liveness",
         "SpawnedActor.delivery",
         "SpawnedActor.address",
@@ -570,6 +658,7 @@
         "Roster.announce",
         "Roster.spawned",
         "Roster.joined",
+        "Roster.describes",
         "Roster.finished",
         "Roster.standing",
         "Roster.live",
@@ -609,6 +698,14 @@
         "ActorSession.with_pending",
         "ActorSession.check_schema",
         "ActorSession.close"
+      ]
+    },
+    {
+      "module": "lup.coordination.store",
+      "declares": [
+        "STORE_DIR",
+        "COORDINATION_DIR",
+        "coordination_root"
       ]
     },
     {
@@ -1049,6 +1146,21 @@
         "RetentionAttempt.destination",
         "RetentionAttempt.error",
         "RetentionAttempt.unauthenticated"
+      ]
+    },
+    {
+      "module": "lup.devtools.coordination.app",
+      "declares": [
+        "peer_line",
+        "create_coordination_app",
+        "create_coordination_app.peers",
+        "create_coordination_app.roster_cmd",
+        "create_coordination_app.join_cmd",
+        "create_coordination_app.describe_cmd",
+        "create_coordination_app.rename_cmd",
+        "create_coordination_app.leave_cmd",
+        "create_coordination_app.send_cmd",
+        "create_coordination_app.inbox_cmd"
       ]
     },
     {
@@ -1546,7 +1658,9 @@
         "CheckReport.passed",
         "CheckReport.lines",
         "CheckReport.counted",
+        "CheckReport.elapsed",
         "ran",
+        "spent",
         "non_code_roots",
         "option_arguments",
         "ruff_format_check",
@@ -2645,7 +2759,7 @@
         "register_merge_driver",
         "merge_driver_registered",
         "refuse_a_blocked_registration",
-        "refuse_a_blocked_arming",
+        "report_a_blocked_arming",
         "SetupStep",
         "SetupStep.label",
         "SetupStep.satisfied",
@@ -2661,6 +2775,7 @@
         "ArmedGitGuards.label",
         "ArmedGitGuards.satisfied",
         "ArmedGitGuards.run",
+        "ArmedGitGuards.required",
         "BranchBase",
         "BranchBase.named",
         "BranchBase.current",
@@ -3167,6 +3282,9 @@
         "NativeHarnessComposition.recipe",
         "NativeHarnessComposition.readiness",
         "NativeHarnessComposition.invocation_renderer",
+        "NativeHarnessComposition.login",
+        "NativeHarnessComposition.default_config_home",
+        "NativeHarnessComposition.clipboard_transport",
         "HarnessGenerationConflict",
         "HarnessGenerationConflict.__init__",
         "GenerationReport",
@@ -3262,6 +3380,7 @@
         "verify_inside",
         "report_inside_requirements",
         "codex_login_preflight",
+        "codex_login_preflight.verified",
         "apply_sandbox_environment",
         "CODEX_SANDBOX_OVERRIDES",
         "codex_sandbox_arguments",
@@ -3278,7 +3397,8 @@
         "say_opening",
         "probing",
         "launch_claude",
-        "launch_codex"
+        "launch_codex",
+        "launch_codex.authenticate"
       ]
     },
     {
@@ -3535,6 +3655,8 @@
         "DevProject.modules",
         "DevProject.coverage",
         "DevProject.roots",
+        "DevProject.import_boundaries",
+        "DevProject.resolved_import_boundaries",
         "DevProject.catalog",
         "DevProject.seams"
       ]
@@ -4428,6 +4550,8 @@
         "TYPE_FLAGS",
         "TMUX_BUFFER_VERBS",
         "TMUX_VALUE_FLAGS",
+        "UnsupportedClipboardType",
+        "exchange",
         "ask",
         "wanted_type",
         "writing",
@@ -4435,6 +4559,42 @@
         "tmux_operand.operands",
         "tmux_text",
         "tmux",
+        "main"
+      ]
+    },
+    {
+      "module": "lup.harness.assets.clipboard_x11",
+      "declares": [
+        "clipboard_shim",
+        "exchange",
+        "UnsupportedClipboardType",
+        "Outbound",
+        "Outbound.__init__",
+        "SelectionBridge",
+        "SelectionBridge.__init__",
+        "SelectionBridge.atom",
+        "SelectionBridge.owner",
+        "SelectionBridge.claim",
+        "SelectionBridge.protocol_error",
+        "SelectionBridge.request",
+        "SelectionBridge.advance",
+        "SelectionBridge.copy_started",
+        "SelectionBridge.copy_finished",
+        "SelectionBridge.copy_received",
+        "SelectionBridge.dispatch",
+        "SelectionBridge.run",
+        "private_display",
+        "private_display.start_ready",
+        "main"
+      ]
+    },
+    {
+      "module": "lup.harness.assets.credential_seed",
+      "declares": [
+        "seed_login",
+        "seed_login.read",
+        "seed_login.usable",
+        "seed_login.replace",
         "main"
       ]
     },
@@ -4463,12 +4623,14 @@
       "module": "lup.harness.clipboard",
       "declares": [
         "logger",
+        "ClipboardTransport",
         "ClipboardReply",
         "ClipboardReply.ok",
         "ClipboardReply.text",
         "ClipboardReply.types",
         "ClipboardReply.data",
         "ClipboardReply.error",
+        "ClipboardReply.code",
         "ClipboardReply.rendered",
         "ClipboardAsk",
         "ClipboardAsk.answer",
@@ -4506,7 +4668,11 @@
         "ClipboardBridge.display",
         "ClipboardBridge.media_types",
         "ClipboardBridge.limit",
+        "ClipboardBridge.native_packages",
         "ClipboardBridge.path",
+        "ClipboardBridge.packages",
+        "ClipboardBridge.wrap",
+        "ClipboardBridge.native_program",
         "ClipboardBridge.environment",
         "ClipboardBridge.answered",
         "ClipboardBridge.serve",
@@ -4566,16 +4732,21 @@
         "LIBRARY_ROOT",
         "KERNEL_ROOT",
         "NATIVE_PREFIXES",
+        "SDK_PREFIXES",
+        "IMPORT_BOUNDARY_MESSAGE",
         "NATIVE_SPELLINGS",
         "generated_tree_paths",
         "ApplicationRoots",
         "ApplicationRoots.composition",
         "ApplicationRoots.portable_prose",
         "ApplicationRoots.generated",
+        "ApplicationRoots.native_dependencies",
+        "ApplicationRoots.source_roots",
         "ApplicationRoots.sanctions",
         "ApplicationRoots.renders",
         "ApplicationRoots.sanctions_spelling",
         "NO_APPLICATION",
+        "native_import_boundaries",
         "LIBRARY_COMPOSITION",
         "composes_natively",
         "path_is_sanctioned",
@@ -5081,6 +5252,12 @@
       ]
     },
     {
+      "module": "lup.harness.content.docs.coordination",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
       "module": "lup.harness.content.docs.harness",
       "declares": [
         "kernel_module_count",
@@ -5136,6 +5313,9 @@
         "cited_library_fixture",
         "LIBRARY_RUNTIME_FIXTURES",
         "LIBRARY_DISPATCHER_FIXTURES",
+        "LIBRARY_PUBLICATION_FIXTURES",
+        "LIBRARY_AUTHENTICATION_FIXTURES",
+        "LIBRARY_EXEC_FIXTURES",
         "document"
       ]
     },
@@ -5217,6 +5397,7 @@
         "conversation_module",
         "feedback_loop_module",
         "runs_module",
+        "coordination_module",
         "realtime_module",
         "reflection_module",
         "library_modules"
@@ -5224,6 +5405,12 @@
     },
     {
       "module": "lup.harness.content.modules.conversation",
+      "declares": [
+        "module"
+      ]
+    },
+    {
+      "module": "lup.harness.content.modules.coordination",
       "declares": [
         "module"
       ]
@@ -5309,6 +5496,7 @@
         "CONVERSATION",
         "FEEDBACK_LOOP",
         "RUNS",
+        "COORDINATION",
         "REALTIME",
         "REFLECTION",
         "LIBRARY_SPECS"
@@ -5539,6 +5727,7 @@
         "NativeSpellings.read_document",
         "NativeSpellings.resolver_entry",
         "NativeSpellings.runtime_docs",
+        "NativeSpellings.runtime_key",
         "NativeSpellings.project_root",
         "NativeSpellings.model_alias",
         "PromptRenderer",
@@ -5779,12 +5968,12 @@
     {
       "module": "lup.harness.evidence",
       "declares": [
-        "EVIDENCE_REFRESHED",
         "EvidenceEntry",
         "EvidenceEntry.capability",
         "EvidenceEntry.version",
+        "EvidenceEntry.refreshed",
         "EVIDENCE_LEDGER",
-        "accepted_version",
+        "accepted",
         "cited_fixture",
         "SchemaDigest",
         "SchemaDigest.path",
@@ -5799,6 +5988,7 @@
         "EvidenceDrift.capability",
         "EvidenceDrift.installed",
         "EvidenceDrift.accepted",
+        "EvidenceDrift.refreshed",
         "EvidenceDrift.message",
         "parse_version",
         "newer_than",
@@ -5806,6 +5996,7 @@
         "DigestDrift.path",
         "DigestDrift.found",
         "DigestDrift.accepted",
+        "DigestDrift.refreshed",
         "DigestDrift.message",
         "digest_drift",
         "evidence_drift",
@@ -6032,8 +6223,12 @@
         "Document.source",
         "Document.document",
         "Document.selection_id",
-        "GUIDANCE_BYTE_BUDGET",
-        "TEMPLATE_GUIDANCE_HEADROOM",
+        "GuidanceBudget",
+        "GuidanceBudget.ceiling",
+        "GuidanceBudget.template_headroom",
+        "GuidanceBudget.scaffold_ceiling",
+        "GuidanceBudget.reserve_fits_inside_the_ceiling",
+        "GUIDANCE_BUDGET",
         "document_byte_size",
         "Argument",
         "Argument.name",
@@ -6055,7 +6250,6 @@
         "Skill.coherent_arguments",
         "Skill.commands_it_names_are_commands_it_may_run",
         "AgentColor",
-        "ModelTier",
         "Agent",
         "Agent.id",
         "Agent.name",
@@ -6095,6 +6289,9 @@
         "ProjectRootWord",
         "ProjectRootWord.type",
         "ProjectRootWord.spell_in",
+        "RuntimeWord",
+        "RuntimeWord.type",
+        "RuntimeWord.spell_in",
         "McpCommandWord",
         "McpServer",
         "McpServer.id",
@@ -6129,6 +6326,7 @@
         "HookSet.allowed_fetch",
         "HookSet.denied_fetch",
         "HookSet.protected_edit_roots",
+        "HookSet.import_boundaries",
         "HookSet.path_roles",
         "HookSet.human_owned_files",
         "HookSet.acceptance_guard",
@@ -6150,6 +6348,7 @@
         "HookSet.excluded_commands",
         "HookSet.resolved_shell_rules",
         "HookSet.resolved_edit_rules",
+        "HookSet.resolved_import_boundaries",
         "ResolveSpec",
         "ResolveSpec.id",
         "ResolveSpec.worker_identity",
@@ -7710,6 +7909,7 @@
         "shell_rule_rows_literal",
         "edit_rule_rows_literal",
         "POLICY_DATA_BANNER",
+        "import_boundary_rows_literal",
         "render_policy_data"
       ]
     },
@@ -8090,6 +8290,21 @@
       ]
     },
     {
+      "module": "lup.policy.imports",
+      "declares": [
+        "ImportBoundary",
+        "ImportBoundary.modules",
+        "ImportBoundary.owners",
+        "ImportBoundary.source_roots",
+        "ImportBoundary.rule_id",
+        "ImportBoundary.message",
+        "ImportBoundary.module_names",
+        "ImportBoundary.repository_roots",
+        "ImportBoundary.repository_roots.normalized",
+        "ImportBoundary.erased"
+      ]
+    },
+    {
       "module": "lup.policy.kernel",
       "declares": []
     },
@@ -8415,8 +8630,13 @@
         "AntiPatternHit",
         "AntiPatternHit.line",
         "AntiPatternHit.row",
+        "WithdrawnGuard",
+        "WithdrawnGuard.rule",
+        "WithdrawnGuard.text",
+        "withdrawn_guards",
         "anti_pattern_hits",
         "anti_pattern_denial",
+        "withdrawn_suppression_denial",
         "awaits_resolution",
         "unresolved_anti_pattern_ask",
         "spurious_refusal",
@@ -8582,6 +8802,26 @@
       ]
     },
     {
+      "module": "lup.policy.kernel.imports",
+      "declares": [
+        "ImportReference",
+        "ImportReference.line",
+        "ImportReference.end_line",
+        "ImportReference.module",
+        "ImportViolation",
+        "ImportViolation.rule_id",
+        "ImportViolation.message",
+        "ResolvedImportRule",
+        "ResolvedImportRule.row",
+        "ResolvedImportRule.spans",
+        "owns_path",
+        "package_name",
+        "import_references",
+        "import_violations",
+        "resolved_import_rules"
+      ]
+    },
+    {
       "module": "lup.policy.kernel.lex",
       "declares": [
         "Scan",
@@ -8689,6 +8929,12 @@
         "AcceptanceGuardRow",
         "AcceptanceGuardRow.ask_reason",
         "AcceptanceGuardRow.autonomous_reason",
+        "ImportBoundaryRow",
+        "ImportBoundaryRow.modules",
+        "ImportBoundaryRow.owners",
+        "ImportBoundaryRow.source_roots",
+        "ImportBoundaryRow.rule_id",
+        "ImportBoundaryRow.message",
         "AntiPatternRow",
         "AntiPatternRow.id",
         "AntiPatternRow.pattern",
@@ -9538,7 +9784,6 @@
     {
       "module": "lup.providers.claude.harness",
       "declares": [
-        "CLAUDE_MODEL_ALIASES",
         "ClaudeSpellings",
         "ClaudeSpellings.runtime_name",
         "ClaudeSpellings.native_identifiers",
@@ -9554,6 +9799,7 @@
         "ClaudeSpellings.resolver_entry",
         "ClaudeSpellings.arguments_ref",
         "ClaudeSpellings.runtime_docs",
+        "ClaudeSpellings.runtime_key",
         "ClaudeSpellings.project_root",
         "ClaudeSpellings.model_alias",
         "ClaudeSpellings.tree",
@@ -9800,6 +10046,14 @@
       ]
     },
     {
+      "module": "lup.providers.claude.subagents",
+      "declares": [
+        "model_alias",
+        "subagent_tools",
+        "subagent_tools.native_tools"
+      ]
+    },
+    {
       "module": "lup.providers.claude.transcripts",
       "declares": [
         "CLAUDE_BLOCK_SPELLINGS",
@@ -9928,6 +10182,18 @@
       "declares": []
     },
     {
+      "module": "lup.providers.codex.account",
+      "declares": [
+        "CodexAccountIdentity",
+        "CodexAccountIdentity.type",
+        "CodexAccountState",
+        "CodexAccountState.account",
+        "CodexAccountState.requires_openai_auth",
+        "CodexAccountState.ready",
+        "read_account"
+      ]
+    },
+    {
       "module": "lup.providers.codex.app_server",
       "declares": [
         "RpcError",
@@ -10052,6 +10318,7 @@
         "CodexSpellings.resolver_entry",
         "CodexSpellings.arguments_ref",
         "CodexSpellings.runtime_docs",
+        "CodexSpellings.runtime_key",
         "CodexSpellings.project_root",
         "CodexSpellings.model_alias",
         "CodexSpellings.tree",
@@ -10114,6 +10381,8 @@
         "CodexPluginInstaller.__init__",
         "CodexPluginInstaller.plugin_environment",
         "CodexPluginInstaller.ensure",
+        "CodexPluginInstaller.registered",
+        "CodexPluginInstaller.publish",
         "CodexPluginInstaller.remove"
       ]
     },
@@ -10318,6 +10587,7 @@
         "CodexSessionConfig.submission_gate_resolver",
         "CodexSessionConfig.mcp_servers",
         "CodexSessionConfig.writable_roots",
+        "CodexSessionConfig.delegated_tools",
         "CodexSessionConfig.reject_unanswerable_approvals",
         "CodexMcpServerConfig",
         "CodexMcpServerConfig.command",
@@ -10325,6 +10595,10 @@
         "CodexMcpServerConfig.env",
         "CodexThreadRef",
         "CodexThreadRef.id",
+        "CodexInheritedConfig",
+        "CodexInheritedConfig.mcp_servers",
+        "CodexConfigReadResponse",
+        "CodexConfigReadResponse.config",
         "CodexTurnRef",
         "CodexTurnRef.id",
         "CodexTurnRef.status",
@@ -10415,6 +10689,21 @@
         "codex_session",
         "codex_workspace_home",
         "CODEX_RUNTIME"
+      ]
+    },
+    {
+      "module": "lup.providers.codex.subagents",
+      "declares": [
+        "CodexModelTiers",
+        "CodexModelTiers.strongest",
+        "CodexModelTiers.balanced",
+        "CodexModelTiers.fast",
+        "CodexModelTiers.resolve",
+        "CodexSubagentTools",
+        "CodexSubagentTools.workspace_read",
+        "CodexSubagentTools.web_search",
+        "CodexSubagentTools.configuration",
+        "subagent_tools"
       ]
     },
     {
@@ -10559,6 +10848,7 @@
         "ProviderLogin",
         "ProviderLogin.config_home_env",
         "ProviderLogin.credentials_file",
+        "ProviderLogin.credential_fields",
         "ProviderLogin.renewable",
         "ProviderLogin.home_subdir",
         "ProviderLogin.environment",
@@ -13100,10 +13390,13 @@
         "LupToolResultBlock.result_payload",
         "LupToolResultBlock.log_summary",
         "MessageContentBlock",
+        "ModelTier",
+        "SubagentCapability",
         "SubagentSpec",
         "SubagentSpec.name",
         "SubagentSpec.description",
         "SubagentSpec.prompt",
+        "SubagentSpec.capabilities",
         "SubagentSpec.tools",
         "SubagentSpec.model",
         "SubagentSpec.max_turns",
@@ -13496,6 +13789,7 @@
         "decorate_factory.trace_result",
         "build_session_factory",
         "build_auxiliary_factory",
+        "build_subagent_factory",
         "resolve_resume_token",
         "result_text",
         "ConsultedSource",
@@ -13539,8 +13833,6 @@
     {
       "module": "lup_template.agent.subagents",
       "declares": [
-        "research_tools",
-        "analysis_tools",
         "RESEARCHER_PROMPT",
         "researcher",
         "ANALYZER_PROMPT",
@@ -13672,9 +13964,6 @@
         "ReviewOutput.reviewer_verdict",
         "ReviewOutput.gate_open",
         "ReviewOutput.reviewer_critique",
-        "REVIEWER_TOOLS",
-        "REVIEWER_THINKING_BUDGET",
-        "REVIEWER_MAX_TURNS",
         "run_reviewer",
         "ReflectToolKit",
         "ReflectToolKit.tools",
@@ -13691,6 +13980,7 @@
         "SANDBOX_GROUP",
         "CODEINTEL_GROUP",
         "SESSION_GROUP",
+        "COORDINATION_GROUP",
         "EXAMPLE_GROUP",
         "SessionToolset",
         "SessionToolset.groups",
@@ -13733,6 +14023,7 @@
         "SubagentDict.description",
         "SubagentDict.model",
         "SubagentDict.tools",
+        "SubagentDict.capabilities",
         "InspectPayload",
         "InspectPayload.model",
         "InspectPayload.max_thinking_tokens",
@@ -13773,7 +14064,6 @@
       "module": "lup_template.devtools.agent.serve",
       "declares": [
         "collect_tools_by_server",
-        "collect_tools_by_server.subagent_factory",
         "collect_registry_tools",
         "harness_session_context",
         "serve_tools"

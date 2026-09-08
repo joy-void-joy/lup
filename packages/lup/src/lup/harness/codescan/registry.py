@@ -139,10 +139,8 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         family="boundary",
         scope="Neutral Python modules",
         example="from lup.providers.codex.runtime import CodexSessionConfig",
-        message=(
-            "Concrete adapter imports belong only in adapters, tests, examples, and "
-            "named application composition roots."
-        ),
+        cleared='tools = ["Read", "WebSearch"]; runtime = "codex"',
+        message=boundaries.IMPORT_BOUNDARY_MESSAGE,
         defined_in=boundaries.__name__,
     ),
     RegisteredRule(

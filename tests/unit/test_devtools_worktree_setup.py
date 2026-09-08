@@ -222,6 +222,45 @@ def test_an_environment_that_was_built_is_not_rebuilt(
     create("topic", no_sync=False)
 
 
+def test_an_environment_that_only_links_to_a_sibling_is_rebuilt(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
+) -> None:
+    """A link to another worktree's environment is not an environment.
+
+    `is_dir()` follows it, so readiness read off the link alone reports a
+    worktree that is set up and skips the sync. What syncing through the link
+    would then do is the expensive half: `uv` resolves it, finds the sibling's
+    environment at the far end, and repoints *that* worktree's editable
+    install at this one's source — two checkouts importing one tree, the
+    branch under test being whichever synced last, and nothing said.
+
+    So the link is cleared and a real environment built where it stood. What
+    it pointed at belongs to another worktree and is left as it was.
+    """
+    worktree_path = interrupted_creation(repo, tree_dir, "topic")
+    sibling = tree_dir / "sibling-environment"
+    sibling.mkdir()
+    (worktree_path / ".venv").symlink_to(sibling)
+    monkeypatch.chdir(repo)
+
+    built: list[Path] = []  # lup: ignore[empty-collection] — sync call record
+
+    def build(path: Path) -> None:
+        (path / ".venv").mkdir()
+        built.append(path)
+
+    monkeypatch.setattr(worktree, "sync_dependencies", build)
+
+    create("topic", no_sync=False)
+
+    assert built == [worktree_path]
+    assert not (worktree_path / ".venv").is_symlink()
+    assert sibling.is_dir()
+
+
 def test_an_opted_out_step_is_not_owed(
     repo: Path,
     tree_dir: Path,

@@ -13,6 +13,7 @@ from lup_template.agent.toolsets import (
 from lup_template.agent.tools.example import EXAMPLE_TOOLS
 from lup.workspace.context import SessionContext
 from lup.tools.mcp import LupMcpTool
+from lup_template.agent.config import Engine
 
 
 def collect_tools_by_server(
@@ -35,10 +36,8 @@ def collect_tools_by_server(
         return {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)}
 
     from lup.orchestration.reflection import ReviewGate
-    from lup.sessions.client import Client
     from lup.orchestration.subagents import create_run_subagent_tool
-    from lup.types import SubagentSpec
-    from lup_template.agent.core import build_auxiliary_factory
+    from lup_template.agent.core import build_subagent_factory
     from lup_template.agent.config import settings
     from lup_template.agent.subagents import get_subagent_specs
 
@@ -52,13 +51,6 @@ def collect_tools_by_server(
         )
         atexit.register(sandbox.stop)
 
-    def subagent_factory(spec: SubagentSpec) -> Client:
-        return build_auxiliary_factory(
-            model=spec.model or settings.model,
-            system_prompt=spec.prompt,
-            tools=spec.tools,
-        )
-
     toolset = build_session_toolset(
         session_dir=context.session_dir,
         outputs_dir=context.outputs_dir,
@@ -66,7 +58,7 @@ def collect_tools_by_server(
         sandbox=sandbox,
         realtime_dir=context.realtime_dir,
         subagent_tool=create_run_subagent_tool(
-            get_subagent_specs(), factory_recipe=subagent_factory
+            get_subagent_specs(), factory_recipe=build_subagent_factory
         ),
         session_id=context.session_id or "",
     )
@@ -121,12 +113,19 @@ def harness_session_context(name: str) -> SessionContext:
 
 
 def serve_tools(
-    list_only: bool, server_group: ServerGroup | None, session: str | None = None
+    list_only: bool,
+    server_group: ServerGroup | None,
+    session: str | None = None,
+    runtime: Engine | None = None,
 ) -> None:
     """Serve the collected tools over MCP stdio (see the ``serve-tools`` command)."""
     from lup.workspace.context import read_session_context
     from lup.tools.mcp import create_mcp_server, serve_stdio
     from lup.observability.metrics import configure_metrics, metrics_path
+    from lup_template.agent.config import settings
+
+    if runtime is not None:
+        settings.agent_sdk = runtime
 
     context = read_session_context()
     if context is None and session is not None:

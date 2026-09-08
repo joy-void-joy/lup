@@ -6,10 +6,11 @@ key in between. Holding it costs nothing because arming is a once-per-clone
 act: `git rev-parse --git-path hooks` in a linked worktree names the shared
 directory, so a guard armed once is armed for every worktree cut afterwards.
 
-Which is what the refusal in front of it has to know. Asked about the
-outstanding arming, it stays out of the way of a clone whose guards are
-already current, and still stops a clone that would otherwise be handed a
-worktree whose commits skip the drift gate without saying so.
+Which is what the diagnosis in front of it has to know. Asked about the
+outstanding arming, it says nothing to a clone whose guards are already
+current, and names the moment for one whose guards are not — while leaving
+the worktree to be cut either way, because a checkout withheld here arms
+nothing that was not already unarmed everywhere else in the clone.
 """
 
 import os
@@ -17,7 +18,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-import typer
 
 from lup.devtools.dev import worktree
 from lup.devtools.dev.git_guards import DECLARED_GUARDS, install_guards
@@ -85,27 +85,32 @@ def test_an_armed_clone_is_not_stopped_by_hooks_it_cannot_write(
     arm_on_the_host(repo)
     hold(hooks)
 
-    worktree.refuse_a_blocked_arming()
+    worktree.report_a_blocked_arming()
 
 
 @needs_a_mode_that_refuses
-def test_an_unarmed_clone_meets_the_diagnosis_up_front(
+def test_an_unarmed_clone_is_told_which_moment_is_outstanding(
     repo: Path, hooks: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The case the refusal exists for, said before anything is cut."""
+    """The case the diagnosis exists for, said before anything is cut.
+
+    Said, and not enforced. The worktree about to be cut resolves its hooks
+    through the same shared directory every existing worktree of this clone
+    already commits under, so refusing it withholds a checkout without arming
+    anything — and where that directory cannot be written from here at all,
+    it withholds every checkout, permanently.
+    """
     hold(hooks)
 
-    with pytest.raises(typer.Exit) as raised:
-        worktree.refuse_a_blocked_arming()
+    worktree.report_a_blocked_arming()
 
     reported = capsys.readouterr().err
-    assert raised.value.exit_code == 1
     assert "guard not installed" in reported
     assert "git hooks install" in reported
 
 
 @needs_a_mode_that_refuses
-def test_a_stale_guard_is_refused_by_name_rather_than_left_standing(
+def test_a_stale_guard_is_named_rather_than_left_standing(
     repo: Path, hooks: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The hook git runs is not the one the declaration describes.
@@ -121,15 +126,14 @@ def test_a_stale_guard_is_refused_by_name_rather_than_left_standing(
     )
     hold(hooks)
 
-    with pytest.raises(typer.Exit):
-        worktree.refuse_a_blocked_arming()
+    worktree.report_a_blocked_arming()
 
     assert "is an older body" in capsys.readouterr().err
 
 
 def test_an_unarmed_clone_that_can_write_is_let_through(repo: Path) -> None:
     """Nothing is refused where the arming it guards would simply happen."""
-    worktree.refuse_a_blocked_arming()
+    worktree.report_a_blocked_arming()
 
 
 @needs_a_mode_that_refuses
@@ -154,3 +158,32 @@ def test_a_worktree_is_still_made_where_the_hooks_directory_is_held(
     )
 
     assert (tree_dir / "topic").is_dir()
+
+
+@needs_a_mode_that_refuses
+def test_a_worktree_is_still_made_where_the_guard_could_not_be_armed(
+    repo: Path,
+    tree_dir: Path,
+    hooks: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nothing armed this clone, and the worktree is cut regardless.
+
+    Naming the outstanding moment is the most that can truthfully be done
+    from here: the guard is armed on the host or not at all, and the worktree
+    being cut resolves its hooks through the same shared directory this
+    repository is already committing under. Withholding the checkout as well
+    would leave the operator holding neither.
+    """
+    hold(hooks)
+
+    worktree.create(
+        "topic",
+        no_sync=True,
+        no_copy_data=True,
+        base_branch=None,
+        launcher=relocation_hint,
+    )
+
+    assert (tree_dir / "topic").is_dir()
+    assert "git hooks install" in capsys.readouterr().err

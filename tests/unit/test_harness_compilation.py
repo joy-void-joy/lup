@@ -15,12 +15,13 @@ import pytest
 import sh
 import typer
 from claude_agent_sdk.types import SandboxNetworkConfig, SandboxSettings
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from lup.tools.lsp.tools import CODEINTEL_TOOL_DECLARATIONS
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
 from lup.providers.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
+from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.harness import (
     CODEX_DISPATCHER,
     CodexSpellings,
@@ -66,9 +67,9 @@ from lup.harness.materialization import (
 )
 from lup.harness.validation import validated_tree
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
+    GUIDANCE_BUDGET,
     INVOCATION_SIGILS,
-    TEMPLATE_GUIDANCE_HEADROOM,
+    GuidanceBudget,
     Agent,
     Argument,
     Artifact,
@@ -338,6 +339,23 @@ def test_every_published_document_is_generated_and_banners_itself() -> None:
         assert banner.opens(document.path, artifacts[document.path].content)
 
 
+def test_platform_parity_audits_live_runtime_capabilities() -> None:
+    page = next(
+        document.document
+        for document in documents(Path.cwd())
+        if document.path == Path("docs/platform-differentiation.md")
+    )
+    content = claude_prompt_renderer().render(page)
+    for family in (
+        "Launch readiness",
+        "Authentication",
+        "Host bridges",
+        "Delegated-agent paths",
+        "Diagnostics and tests",
+    ):
+        assert f"| {family} |" in content
+
+
 def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
     """Guidance carried links to sections that live only in the adopter template.
 
@@ -367,9 +385,9 @@ def test_guidance_stays_within_its_always_loaded_budget() -> None:
     for runtime, document in rendered.items():
         used = document_byte_size(document)
         assert used >= declared
-        assert used <= GUIDANCE_BYTE_BUDGET, (
+        assert used <= GUIDANCE_BUDGET.ceiling, (
             f"{runtime} guidance is {used} bytes, over budget by "
-            f"{used - GUIDANCE_BYTE_BUDGET}"
+            f"{used - GUIDANCE_BUDGET.ceiling}"
         )
 
 
@@ -385,12 +403,12 @@ def test_the_scaffold_leaves_its_adopter_room_inside_the_runtime_ceiling() -> No
     for composition in (claude_target(Path.cwd()), codex_target(Path.cwd())):
         for artifact in guidance_artifacts(composition.recipe.desired):
             used = document_byte_size(artifact.content)
-            ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+            ceiling = GUIDANCE_BUDGET.scaffold_ceiling
             assert used <= ceiling, (
                 f"{artifact.path.as_posix()} is {used} bytes, over the "
                 f"{ceiling} scaffold ceiling by {used - ceiling}. It fits the "
-                f"runtime's {GUIDANCE_BYTE_BUDGET}, but leaves an adopting "
-                f"domain less than the {TEMPLATE_GUIDANCE_HEADROOM} bytes "
+                f"runtime's {GUIDANCE_BUDGET.ceiling}, but leaves an adopting "
+                f"domain less than the {GUIDANCE_BUDGET.template_headroom} bytes "
                 "reserved for its own guidance."
             )
 
@@ -402,7 +420,7 @@ def test_the_scaffold_ceiling_is_weighed_only_while_the_flag_stands() -> None:
     Once adopted there is no further adopter to reserve for, and a domain that
     inherited a lean document is entitled to spend what it saved.
     """
-    fits = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+    fits = GUIDANCE_BUDGET.scaffold_ceiling
 
     assert [report.name for report in budget_reports(fits, scaffold=True)] == [
         "guidance budget",
@@ -421,7 +439,7 @@ def test_a_document_between_the_two_ceilings_fails_only_the_scaffold() -> None:
     What it has spent is its adopter's room, which is the only row that can say
     so. If both rows ever agree on everything, one of them is redundant.
     """
-    between = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM + 1
+    between = GUIDANCE_BUDGET.scaffold_ceiling + 1
 
     verdicts = {report.name: report.passed for report in budget_reports(between, True)}
 
@@ -439,7 +457,7 @@ def test_this_repository_is_still_the_scaffold_that_reservation_assumes() -> Non
 
 def test_the_scaffold_row_reports_the_reservation_it_withholds() -> None:
     """Over budget, the row names the overage rather than only failing."""
-    ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+    ceiling = GUIDANCE_BUDGET.scaffold_ceiling
 
     fits = scaffold_budget_report(ceiling)
     over = scaffold_budget_report(ceiling + 1)
@@ -447,7 +465,7 @@ def test_the_scaffold_row_reports_the_reservation_it_withholds() -> None:
     assert fits.passed
     assert not over.passed
     assert "over by 1" in over.lines[0]
-    assert str(TEMPLATE_GUIDANCE_HEADROOM) in fits.lines[0]
+    assert str(GUIDANCE_BUDGET.template_headroom) in fits.lines[0]
 
 
 def test_the_scaffold_row_reports_the_room_a_session_may_still_spend() -> None:
@@ -458,30 +476,30 @@ def test_the_scaffold_row_reports_the_room_a_session_may_still_spend() -> None:
     exists from the gate refusing writing it has already done. Both rows
     report the room left, in one shape, so either one answers before it does.
     """
-    ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+    ceiling = GUIDANCE_BUDGET.scaffold_ceiling
 
     fits = scaffold_budget_report(ceiling - 23)
-    runtime = guidance_budget_report(GUIDANCE_BYTE_BUDGET - 23)
+    runtime = guidance_budget_report(GUIDANCE_BUDGET.ceiling - 23)
 
     assert fits.lines == [
         f"scaffold budget: ok — {ceiling - 23}/{ceiling} bytes, 23 free, "
-        f"{TEMPLATE_GUIDANCE_HEADROOM} reserved for the adopting domain"
+        f"{GUIDANCE_BUDGET.template_headroom} reserved for the adopting domain"
     ]
     assert runtime.lines == [
-        f"guidance budget: ok — {GUIDANCE_BYTE_BUDGET - 23}/"
-        f"{GUIDANCE_BYTE_BUDGET} bytes, 23 free"
+        f"guidance budget: ok — {GUIDANCE_BUDGET.ceiling - 23}/"
+        f"{GUIDANCE_BUDGET.ceiling} bytes, 23 free"
     ]
 
 
 def test_the_scaffold_row_over_budget_names_the_overage_and_not_the_room() -> None:
     """Room left is what a passing row adds; a failing one has none to state."""
-    ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+    ceiling = GUIDANCE_BUDGET.scaffold_ceiling
 
     over = scaffold_budget_report(ceiling + 1_078)
 
     assert over.lines == [
         f"scaffold budget: FAIL (over by 1078) — {ceiling + 1_078}/{ceiling} "
-        f"bytes, {TEMPLATE_GUIDANCE_HEADROOM} reserved for the adopting domain"
+        f"bytes, {GUIDANCE_BUDGET.template_headroom} reserved for the adopting domain"
     ]
 
 
@@ -491,10 +509,34 @@ def test_a_project_may_reserve_a_different_share_than_this_one() -> None:
     A downstream project with a thinner scaffold, or none, states its own
     share rather than forking the module that declares the default.
     """
-    used = GUIDANCE_BYTE_BUDGET - 1_000
+    used = GUIDANCE_BUDGET.ceiling - 1_000
 
-    assert scaffold_budget_report(used, headroom=512).passed
-    assert not scaffold_budget_report(used, headroom=4_096).passed
+    assert scaffold_budget_report(used, GuidanceBudget(template_headroom=512)).passed
+    assert not scaffold_budget_report(
+        used, GuidanceBudget(template_headroom=4_096)
+    ).passed
+
+
+def test_what_a_scaffold_may_spend_is_derived_from_the_two_it_is_given() -> None:
+    """The number every caller wanted, which neither field carries alone.
+
+    Written out by hand it was the same subtraction at every site that needed
+    it, and a project moving either number moved it at seven of them.
+    """
+    budget = GuidanceBudget(ceiling=20_000, template_headroom=8_000)
+
+    assert budget.scaffold_ceiling == 12_000
+
+
+def test_a_reserve_larger_than_the_ceiling_is_refused() -> None:
+    """Both readings of a clamp are wrong, so the project is asked instead.
+
+    Keeping nothing back abandons the reserve; lowering the ceiling tells a
+    runtime to load less than it will. Only the project can say which of its
+    two numbers it meant.
+    """
+    with pytest.raises(ValidationError, match="does not fit inside"):
+        GuidanceBudget(ceiling=1_000, template_headroom=2_000)
 
 
 def test_codex_config_states_the_same_ceiling_the_check_enforces() -> None:
@@ -504,7 +546,7 @@ def test_codex_config_states_the_same_ceiling_the_check_enforces() -> None:
         for artifact in codex_target(Path.cwd()).recipe.desired.artifacts
         if artifact.path.as_posix() == ".codex/config.toml"
     )
-    assert f"project_doc_max_bytes = {GUIDANCE_BYTE_BUDGET}" in config.content
+    assert f"project_doc_max_bytes = {GUIDANCE_BUDGET.ceiling}" in config.content
 
 
 def test_codex_tree_renders_the_agents_flavored_template() -> None:
@@ -518,6 +560,9 @@ def test_codex_tree_renders_the_agents_flavored_template() -> None:
 def test_template_flavors_share_sections_and_differ_natively() -> None:
     claude_render = claude_prompt_renderer().render(TEMPLATE_CLAUDE)
     codex_render = codex_prompt_renderer().render(TEMPLATE_CODEX)
+    parity = "Every supported runtime must provide equivalent user-visible behavior"
+    assert parity in claude_render
+    assert parity in codex_render
 
     def sections(render: str) -> list[str]:
         return [
@@ -536,6 +581,11 @@ def test_template_flavors_share_sections_and_differ_natively() -> None:
     assert "EnterWorktree" in claude_render and "ExitWorktree" in claude_render
     assert "EnterWorktree" not in codex_render
     assert "ExitWorktree" not in codex_render
+
+
+def test_repository_guidance_requires_semantic_parity_on_both_runtimes() -> None:
+    assert "Every runtime, same semantics." in claude_prompt_renderer().render(GUIDANCE)
+    assert "Every runtime, same semantics." in codex_prompt_renderer().render(GUIDANCE)
 
 
 def test_template_flavors_render_the_declared_codeintel_tools() -> None:
@@ -3132,6 +3182,15 @@ def test_each_runtime_spells_the_project_root_a_tool_server_starts_from() -> Non
     assert "." in server.command_line(CodexSpellings())
 
 
+def test_every_native_tool_server_selects_its_own_engine() -> None:
+    for server in portable_harness().plugins[0].mcp_servers:
+        for spellings in (ClaudeSpellings(), CodexSpellings()):
+            arguments = server.command_line(spellings)
+            assert (
+                arguments[arguments.index("--runtime") + 1] == spellings.runtime_key()
+            )
+
+
 def test_claude_tree_offers_the_tool_servers_as_a_plugin_configuration() -> None:
     """The scope that follows the plugin, so enabling it is what starts them."""
     tree = compile_claude(portable_harness())
@@ -3410,6 +3469,8 @@ def test_a_target_that_renders_one_declaration_short_is_named_with_it(
     full = compile_claude(harness)
     dropped = harness.plugins[0].skills[0].id
     composition = NativeHarnessComposition(
+        login=CLAUDE_LOGIN,
+        default_config_home=tmp_path,
         recipe=GenerationRecipe(
             label="claude",
             root=tmp_path,
@@ -3448,6 +3509,8 @@ def test_a_tree_generated_on_the_way_to_something_else_says_nothing(
     generate(third_recipe(tmp_path, None))
     settled = manifest_of(third_recipe(tmp_path, None))
     composed = NativeHarnessComposition(
+        login=CLAUDE_LOGIN,
+        default_config_home=tmp_path,
         recipe=third_recipe(tmp_path, settled),
         readiness=lambda: [],
         invocation_renderer=ClaudeSpellings(),

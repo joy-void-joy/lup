@@ -8,6 +8,8 @@ from pathlib import Path
 
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.subagents import CodexModelTiers
+from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.formats.banner import (
     COMMENT_FREE,
@@ -33,13 +35,13 @@ from lup.harness.prompts import (
     sentences,
 )
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
+    GUIDANCE_BUDGET,
     Agent,
+    GuidanceBudget,
     Artifact,
     ArtifactTree,
     Harness,
     HookSet,
-    ModelTier,
     Plugin,
     PluginLocation,
     QualifiedAgentName,
@@ -267,6 +269,9 @@ class CodexSpellings(NativeSpellings):
             "https://learn.chatgpt.com/"
         )
 
+    def runtime_key(self) -> str:
+        return "codex"
+
     def project_root(self) -> str:
         # Codex substitutes nothing into a server command, but it reads this
         # config only for the project the config sits in, so the launch
@@ -276,7 +281,7 @@ class CodexSpellings(NativeSpellings):
         return "."
 
     def model_alias(self, tier: ModelTier) -> str | None:
-        return None
+        return CodexModelTiers().resolve(tier)
 
     def tree(self, location: TreeLocation) -> Atom:
         match location:
@@ -433,7 +438,9 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
 
 
 def codex_project_config(
-    source: Harness, spellings: NativeSpellings, budget: int = GUIDANCE_BYTE_BUDGET
+    source: Harness,
+    spellings: NativeSpellings,
+    budget: GuidanceBudget = GUIDANCE_BUDGET,
 ) -> str:
     """Render the project config: enabled features, then every tool server.
 
@@ -472,7 +479,7 @@ def codex_project_config(
     features = tomlkit.table()
     features["hooks"] = True
     document["features"] = features
-    document["project_doc_max_bytes"] = budget
+    document["project_doc_max_bytes"] = budget.ceiling
     servers = tomlkit.table(is_super_table=True)
     for plugin in source.plugins:
         for server in plugin.mcp_servers:
@@ -497,7 +504,7 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
         self,
         prompts: PromptRenderer,
         spellings: NativeSpellings,
-        budget: int = GUIDANCE_BYTE_BUDGET,
+        budget: GuidanceBudget = GUIDANCE_BUDGET,
     ) -> None:
         self.prompts = prompts
         self.spellings = spellings
@@ -817,6 +824,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),
+                        import_boundaries=source.resolved_import_boundaries(),
                         refused_tools=list(source.refused_tools),
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),

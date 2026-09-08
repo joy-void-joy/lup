@@ -97,6 +97,26 @@ def write_plugin_source(root: Path) -> None:
     (root / "hook.py").write_text("DECISION = 'ask'\n", encoding="utf-8")
 
 
+def installing_cli(tmp_path: Path, source: Path, config: PluginCacheConfig) -> Path:
+    """The native command prunes its own cache and writes its own registration."""
+    version = plugin_cache_evidence(source, config).installed_root.name
+    return fake_cli(
+        tmp_path,
+        "codex",
+        f'echo "$1 $2 $3" >> "{tmp_path / "calls.log"}"\n'
+        'if [ "$2" = "marketplace" ]; then\n'
+        f'  printf \'[marketplaces."{config.marketplace}"]\\nsource_type = "local"\\nsource = "%s"\\n\' "$4" > "$CODEX_HOME/config.toml"\n'
+        "fi\n"
+        'if [ "$2" = "add" ]; then\n'
+        f'  cache="$CODEX_HOME/plugins/cache/{config.marketplace}/{config.plugin}"\n'
+        '  rm -rf "$cache"\n'
+        f'  mkdir -p "$cache/{version}"\n'
+        f'  cp -R "{source}/." "$cache/{version}/"\n'
+        f'  printf \'[plugins."{config.plugin}@{config.marketplace}"]\\nenabled = true\\n\' >> "$CODEX_HOME/config.toml"\n'
+        "fi",
+    )
+
+
 class TestPluginInstallGate:
     @pytest.fixture(autouse=True)
     def marketplace(self, tmp_path: Path) -> None:
@@ -119,6 +139,17 @@ class TestPluginInstallGate:
             codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
         )
         write_plugin_source(self.cache_root(config, source))
+        staged = (
+            config.codex_home
+            / "plugins"
+            / "sources"
+            / config.marketplace
+            / self.cache_root(config, source).name
+        )
+        (config.codex_home / "config.toml").write_text(
+            f'[marketplaces."{config.marketplace}"]\nsource_type = "local"\nsource = "{staged}"\n'
+            f'[plugins."{config.plugin}@{config.marketplace}"]\nenabled = true\n'
+        )
         exploding = fake_cli(tmp_path, "codex", "exit 97")
 
         evidence = CodexPluginInstaller(config, exploding).ensure(source, tmp_path)
@@ -126,7 +157,26 @@ class TestPluginInstallGate:
         assert evidence.ready
         assert evidence.installed_digest == evidence.source_digest
 
-    def test_differing_cache_is_reinstalled_without_removal(
+    def test_matching_files_without_registration_are_installed(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "source"
+        write_plugin_source(source)
+        config = PluginCacheConfig(
+            codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
+        )
+        write_plugin_source(self.cache_root(config, source))
+        installer = CodexPluginInstaller(
+            config, installing_cli(tmp_path, source, config)
+        )
+
+        evidence = installer.ensure(source, tmp_path)
+
+        assert evidence.ready
+        assert installer.registered(evidence)
+
+    def test_corrupt_live_revision_is_refused_without_overwriting_it(
         self, tmp_path: Path
     ) -> None:
         source = tmp_path / "source"
@@ -137,60 +187,34 @@ class TestPluginInstallGate:
         cache = self.cache_root(config, source)
         write_plugin_source(cache)
         (cache / "hook.py").write_text("DECISION = 'allow'\n", encoding="utf-8")
-        log = tmp_path / "calls.log"
-        installer_cli = fake_cli(
-            tmp_path,
-            "codex",
-            f'echo "$1 $2 $3" >> "{log}"\n'
-            'if [ "$2" = "add" ]; then\n'
-            f'  rm -rf "{cache}" && mkdir -p "{cache}" && cp -R "{source}/." "{cache}/"\n'
-            "fi",
-        )
+        installer_cli = fake_cli(tmp_path, "codex", "exit 97")
 
-        evidence = CodexPluginInstaller(config, installer_cli).ensure(source, tmp_path)
+        with pytest.raises(RuntimeError, match="immutable Codex revision is corrupt"):
+            CodexPluginInstaller(config, installer_cli).ensure(source, tmp_path)
 
-        assert evidence.ready
-        selector = f"{config.plugin}@{config.marketplace}"
-        assert log.read_text(encoding="utf-8").splitlines() == [
-            "plugin marketplace remove",
-            "plugin marketplace add",
-            f"plugin add {selector}",
-        ]
+        assert (cache / "hook.py").read_text() == "DECISION = 'allow'\n"
 
     def test_marketplace_bound_to_another_source_is_repointed(
         self, tmp_path: Path
     ) -> None:
-        """Codex refuses a marketplace name already bound to a different root.
-
-        Every sibling worktree and template-derived project is such a root,
-        so the name is dropped before it is re-pointed at this one.
-        """
+        """Only this registration is replaced; the live cache is not removed."""
         source = tmp_path / "source"
         write_plugin_source(source)
         config = PluginCacheConfig(
             codex_home=tmp_path / "codex-home", marketplace=MARKETPLACE
         )
-        cache = self.cache_root(config, source)
-        bound = tmp_path / "bound-elsewhere"
-        bound.write_text(config.marketplace, encoding="utf-8")
-        installer_cli = fake_cli(
-            tmp_path,
-            "codex",
-            f'if [ "$3" = "remove" ]; then rm -f "{bound}"; fi\n'
-            f'if [ "$3" = "add" ] && [ -f "{bound}" ]; then\n'
-            f"  echo \"marketplace '{config.marketplace}' is already added"
-            ' from a different source" >&2\n'
-            "  exit 1\n"
-            "fi\n"
-            'if [ "$2" = "add" ]; then\n'
-            f'  rm -rf "{cache}" && mkdir -p "{cache}" && cp -R "{source}/." "{cache}/"\n'
-            "fi",
+        config.codex_home.mkdir()
+        settings = config.codex_home / "config.toml"
+        settings.write_text(
+            f'[marketplaces."{config.marketplace}"]\nsource_type = "local"\nsource = "/another/root"\n'
         )
+        installer_cli = installing_cli(tmp_path, source, config)
 
         evidence = CodexPluginInstaller(config, installer_cli).ensure(source, tmp_path)
 
         assert evidence.ready
-        assert not bound.exists()
+        assert "/another/root" not in settings.read_text()
+        assert "plugin marketplace remove" not in (tmp_path / "calls.log").read_text()
 
     def test_installed_revision_remains_available_to_other_sessions(
         self, tmp_path: Path
@@ -202,23 +226,18 @@ class TestPluginInstallGate:
         )
         cache = self.cache_root(config, source)
         log = tmp_path / "calls.log"
-        installer_cli = fake_cli(
-            tmp_path,
-            "codex",
-            f'echo "$1 $2 $3" >> "{log}"\n'
-            'if [ "$2" = "add" ]; then\n'
-            f'  mkdir -p "{cache}" && cp -R "{source}/." "{cache}/"\n'
-            "fi\n",
-        )
+        previous = cache.parent / "0.1.0"
+        write_plugin_source(previous)
+        installer_cli = installing_cli(tmp_path, source, config)
         installer = CodexPluginInstaller(config, installer_cli)
         evidence = installer.ensure(source, tmp_path)
 
         assert evidence.ready
         assert cache.exists()
+        assert (previous / "hook.py").read_text() == "DECISION = 'ask'\n"
 
         selector = f"{config.plugin}@{config.marketplace}"
         assert log.read_text(encoding="utf-8").splitlines() == [
-            "plugin marketplace remove",
             "plugin marketplace add",
             f"plugin add {selector}",
         ]

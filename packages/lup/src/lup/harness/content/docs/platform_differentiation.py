@@ -59,6 +59,8 @@ This document is the map of every intended difference and the parity audit of
 every generated artifact family. "Parity" means the same semantic content in
 each platform's native format — never byte parity.
 
+Generated files are one surface, not the boundary of the audit. Launch readiness, authentication, host bridges, delegated-agent paths, runtime diagnostics, and verification must provide equivalent user-visible semantics too; a runtime-specific substitute belongs in this map with the evidence that proves its difference.
+
 ## Where each intended difference lives
 
 | Concern | Claude | Codex | Why it differs (all deliberate) |
@@ -107,8 +109,8 @@ each platform's native format — never byte parity.
             models.TextPart(
                 text=rf""" Both entries only launch the shared persisted Python resolver, and differ solely in the adapter they name — `ResolverEntry` is deliberately undifferentiated because workflow scripts execute in an isolated VM with no shell, leaving the Claude entry nothing to wrap. The entry contract is the CLI's: optional `--run-id <id>` (resume) and repeatable `--answer <question-id>=<value>`, through which the reserved `integration-assembly` gate is approved like any other question. Both rendered entries document it (pinned by `test_generated_resolver_entries_only_launch_the_shared_python_core`, which also asserts no `Workflow(` wrapper appears). |
 | Downstream template guidance | `.claude/plugins/lup/TEMPLATE_CLAUDE.md` from `content/template_claude.py` | `.codex/plugins/lup/TEMPLATE_AGENTS.md` from `content/template_codex.py` | Both flavors compose the portable sections in `content/template_sections.py`; only platform slices (guidance-file names, meta-agent naming, edit-hook vs opaque-patch guidance, LSP vs CLI diagnostics, settings, communication idiom) differ. |
-| Launch and trust | Launches the verified local plugin directory with `--plugin-dir`; `CLAUDE_CONFIG_DIR` selects the profile | Seeds a persistent per-worktree home from personal authentication and settings, materializes the Claude daltonized theme without selecting it, and installs and verifies an immutable content-addressed plugin revision there; explicit `--codex-home`/`CODEX_HOME` overrides bypass isolation | Native trust models: Claude trusts the workspace plugin, while Codex requires an installed cache and keeps plugin identity in home-level config. Retaining revisions keeps every live `PLUGIN_ROOT` valid across concurrent starts and exits. |
-| Runtime preflight | `claude` CLI version, plugin support, `plugin validate` | `codex` CLI version and cache digest evidence | Each side probes only its own native capabilities (`harness_runtime.py` in each adapter). |
+| Launch and trust | Launches the verified local plugin directory with `--plugin-dir`; `CLAUDE_CONFIG_DIR` selects the profile | Seeds a persistent per-worktree home from personal authentication and settings, materializes the Claude daltonized theme without selecting it, and publishes a verified content-addressed plugin revision; explicit `--codex-home`/`CODEX_HOME` overrides bypass isolation | Codex installs in a temporary home, verifies the native output, then publishes the revision and only its marketplace/plugin registration. Native installation never runs against the live home: its cache pruning would remove earlier revisions. Concurrent Lup publishers serialize, unrelated settings survive, and existing revision paths remain available. |
+| Runtime preflight | `claude` CLI version, plugin support, `plugin validate` | CLI version, cache digest, and native `account/read` with managed-token refresh | Account checks use the session's execution boundary: the selected host home for inner/none, the container's home for outer. Container sign-in uses device authentication and is checked again afterward. Named profiles remain explicitly unverified because the account API cannot select them. Declining sign-in continues explicitly unverified; account readiness does not prove implicit MCP service startup. |
 | Reasoning effort | `CLAUDE_EFFORT` in `providers/claude/selection.py` | `CODEX_EFFORT` in `providers/codex/selection.py` | `SessionRequest.effort` is asked for in portable words and mapped by each adapter, the way autonomy already is. `low`, `medium`, `high`, and `xhigh` are the four rungs both ladders carry outright. The two ends belong to one runtime each and the other renders the nearest it has: `minimal` is Codex's own floor, which Claude meets with `low` because its ladder has no rung beneath that; `max` is Claude's own ceiling, which Codex meets with `xhigh` for the same reason at the top. Codex's `none` is deliberately absent from the portable vocabulary — Claude would render it as `low`, turning "do not reason" into "reason a little" on one runtime without saying so. |
 | Usage display | the OAuth usage endpoint for live windows, plus the local stats cache for per-day and per-model detail | the app-server's own account calls for both the metered windows and the daily token buckets | One display over two readers (`lup.observability.usage`, `usage/reader.py` in each adapter). Each side reports a plan's windows and its days into the same report, so the pacing bars, the daily budget, and the `--json` snapshot are decided once. What differs is what each account publishes: fixed named windows and a per-model split on one side, two self-describing windows and no model breakdown on the other — which is why one draws a model legend and the other has none to draw. |
 | Sensitive local-only files | `.claude/settings.local.json` | `.codex/config.local.toml` | Native personal-config locations, excluded from generation. |
@@ -133,6 +135,53 @@ Every family in `.claude/` vs `.codex/`/`.agents/`, with an explicit decision.
 | `settings.json` | `.claude/settings.json` | none | Intentional — Claude-native project settings (plugin enablement, marketplace, permissions, file suggestion). The Codex counterparts are the generated `.codex/config.toml` plus uncommitted personal `config.local.toml`. |
 | `scripts/file_suggest.sh` | `.claude/plugins/lup/scripts/file_suggest.sh` | none | Intentional — wired to Claude's native `fileSuggestion` setting; Codex has no equivalent feature. |
 | Codex-only files | none | `.codex/config.toml`, `.agents/plugins/marketplace.json` | Intentional — native Codex requirements with no Claude analogue (Claude's marketplace lives inside `.claude/plugins/`). |
+
+## Parity audit of runtime capability families
+
+| Family | Required evidence |
+| --- | --- |
+| Launch readiness | Exercise the same native startup path a user runs, including implicit services; `Ready` may describe only checks that completed successfully. |
+| Authentication | Ask the runtime that owns and refreshes a credential, and cover every user-visible service whose authentication path differs from the primary model transport. Never infer managed-auth readiness from one locally decoded token. |
+| Host bridges | Probe the native API each runtime actually calls for clipboard, browser, terminal, and credential access; a command shim proves only callers of that command. Advertised access must match the probe. |
+| Delegated-agent paths | Invoke each declared role through every supported runtime with provider-neutral model tiers and tool capabilities; listing a tool or rendering a declaration does not prove the delegated turn can start. |
+| Diagnostics and tests | Equivalent failures identify the failed capability, owning runtime, recovery, and affected credential or bridge without exposing secrets. Unit fixtures cover native adapters, and a live requirement exercises each supported startup path. |
+
+### Outer-sandbox clipboard and login handoff
+
+Both runtimes reach the same bounded clipboard broker. Claude Code's command
+clients use the image's `xclip` and `wl-paste` shims directly. Codex's native
+X11 client uses a private Xvfb server and a python-xlib selection bridge; its
+installed CLI has no configurable clipboard-helper command. The composition
+declares that transport, not a provider-name branch in the shared launcher.
+Only native-X11 sessions start the display, with GLX and TCP disabled and a
+per-session Xauthority cookie. Neither transport mounts a host display socket.
+The wrapper waits for server and selection ownership before starting the CLI,
+then cleans them up with it. Large native transfers are incremental and bounded;
+unsupported types are refused, not truncated or forwarded to the desktop.
+
+Regression tests exercise command and native clients against a synthetic
+clipboard, including live changes, text copies, image reads, payload limits,
+and private-display authentication. Isolated Codex 0.153.4 TUI probes attached
+a synthetic PNG through its actual paste shortcut on the host and in the built
+image, without a model request or real credentials; the container probe had no
+network. This proves the native clipboard path, independently of authentication.
+Host-broker discovery reports
+only its own result, and private-display startup is checked inside the session.
+
+Host login handoff fingerprints the selected credential fields. A changed host
+login replaces those fields once; an unchanged host login preserves the
+container's renewed tokens. Claude's shared credentials file retains unrelated
+MCP credentials, and Codex's dedicated auth file is replaced as a unit. A
+fingerprint is bookkeeping, not authentication evidence: the owning runtime
+must still validate or renew its credential in the session's actual boundary.
+
+A separate Codex 0.153.4 outer-container probe successfully forced managed
+login renewal through `account/read(refreshToken=true)`. An ephemeral thread
+using that saved login then observed `codex_apps` startup go from `starting`
+to `ready`. No model turn or app tool call ran. This checks the implicit
+service's own authentication path, not merely the primary account response;
+it is evidence for the selected account and runtime, not a promise of future
+remote-service availability.
 
 ## What portable prose may name
 

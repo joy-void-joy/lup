@@ -269,7 +269,7 @@ roster resolves last-declaration-wins.
 
 ## ADR-016: Hold a scaffold to a share of the guidance budget it passes on
 
-Context: the always-loaded guidance is checked against `GUIDANCE_BYTE_BUDGET`,
+Context: the always-loaded guidance is checked against `GuidanceBudget.ceiling`,
 which mirrors a runtime's own `project_doc_max_bytes` — exceed it and nothing
 reports an error, the document is silently truncated. That number is right for
 every project and wrong for one: a repository still shipping as the template
@@ -281,8 +281,8 @@ gate could see the problem, because at the only ceiling anyone had declared
 the document was passing.
 
 Decision: while `[tool.lup] template = true`, a second and stricter row —
-`scaffold budget` — holds guidance to `GUIDANCE_BYTE_BUDGET` less
-`TEMPLATE_GUIDANCE_HEADROOM`, 11.5 KiB withheld for the adopter. Its own row
+`scaffold budget` — holds guidance to `GuidanceBudget.scaffold_ceiling`, the
+ceiling less 11.5 KiB withheld for the adopter. Its own row
 rather than a stricter number in the existing one, because the two answer
 different questions of the same byte count: whether a runtime will truncate
 this tree, true of every project, and whether a scaffold is spending for a

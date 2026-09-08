@@ -79,7 +79,7 @@ are the whole vocabulary; neither needs an escape hatch.
 feat(agent): add retry logic for API calls
 fix(tools): handle empty response from search
 refactor(config): extract settings validation
-meta(claude): add new workflow command
+meta(harness): add new workflow command
 ```
 
 ## Phase 4: Verify

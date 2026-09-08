@@ -18,8 +18,8 @@ from pydantic import BaseModel
 
 from lup.providers.harness import guidance_artifacts
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
-    TEMPLATE_GUIDANCE_HEADROOM,
+    GUIDANCE_BUDGET,
+    GuidanceBudget,
     document_byte_size,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
@@ -83,7 +83,7 @@ def report(
     compositions: list[NativeHarnessComposition],
     scaffold: bool,
     by_size: bool,
-    headroom: int = TEMPLATE_GUIDANCE_HEADROOM,
+    budget: GuidanceBudget = GUIDANCE_BUDGET,
 ) -> None:
     """Print every guidance artifact's sections against the budget it answers to.
 
@@ -91,7 +91,7 @@ def report(
     typed parts differently and a section can be the largest in one and not
     the other — which is exactly the section worth reading twice.
     """
-    ceiling = GUIDANCE_BYTE_BUDGET - headroom if scaffold else GUIDANCE_BYTE_BUDGET
+    ceiling = budget.scaffold_ceiling if scaffold else budget.ceiling
     for composition in compositions:
         for artifact in guidance_artifacts(composition.recipe.desired):
             sections = heading_sections(artifact.content)
@@ -111,6 +111,7 @@ def report(
             typer.echo(f"  {used:{widest}d}  total — {verdict} of {ceiling}")
     if scaffold:
         typer.echo(
-            f"\nCeiling is the scaffold's: {GUIDANCE_BYTE_BUDGET} runtime budget "
-            f"less {headroom} reserved for the domain that adopts this template."
+            f"\nCeiling is the scaffold's: {budget.ceiling} runtime budget "
+            f"less {budget.template_headroom} reserved for the domain that "
+            "adopts this template."
         )

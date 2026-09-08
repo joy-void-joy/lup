@@ -17,7 +17,7 @@ paid for in every session, against a ceiling that truncates rather than fails.
 import typer
 from pydantic import BaseModel
 
-from lup.harness.models import GUIDANCE_BYTE_BUDGET, document_byte_size
+from lup.harness.models import GUIDANCE_BUDGET, document_byte_size
 from lup.harness.modules import Module, ModuleSelection
 
 
@@ -123,7 +123,8 @@ def report(modules: list[Module], selection: ModuleSelection, verbose: bool) -> 
                 typer.echo(f"{'':{widest}}  requires {', '.join(row.requires)}")
     typer.echo(
         f"\n{len(listed)} module(s); this document carries {loaded} of the "
-        f"{offered} prose bytes the roster offers, against a {GUIDANCE_BYTE_BUDGET} "
+        f"{offered} prose bytes the roster offers, against a "
+        f"{GUIDANCE_BUDGET.ceiling} "
         "ceiling. `dev check` weighs the rendered document, which is heavier by "
         "the banner and the parts no section spells."
     )
