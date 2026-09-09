@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "20cc7baa72181c042573256f9f5724d800fb950a4d3c96ad0e8d78ee5859b46d",
+  "source_digest": "2b7531d5a299b45f12442bdaded58c716811aef0c6df79c31039bd372fad84e2",
   "target_requirements": [
     "claude-code"
   ],
@@ -30,7 +30,7 @@
     {
       "path": ".claude/plugins/lup/.mcp.json",
       "category": "generated",
-      "sha256": "93e78390dd01c4227f179de29e3229a0c46428513d4f8fc62cc47ee7fa153fcd",
+      "sha256": "24f32e965f07aa5c14ba49d10a5a2ba58bda32b93b446c3f1d0ef85472baff09",
       "semantic_id": "plugin.lup",
       "executable": false
     },
@@ -506,7 +506,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "73ad78cf66b418ae1c46c1c9edad39c7f628d5c1294eb39b69e21a3694c89367",
+      "sha256": "7742109ff22cf924d86dcbd3bef5497780b75ba850547ca5c244900d1a663688",
       "semantic_id": "harness.project-settings",
       "executable": false
     },
@@ -569,7 +569,7 @@
     {
       "path": "docs/ledger.md",
       "category": "generated",
-      "sha256": "93e8fe45bf6eebf21203e16bbad8be233a278fde569f746600c2b6bd8eeb5258",
+      "sha256": "efe9a2354c64069c57d49eb19560da575f02a31c316470bf8a9d82d435be159b",
       "semantic_id": "docs.ledger",
       "executable": false
     },
@@ -653,7 +653,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "79b21173f6d02ea45fe85d8ab241f1f71f4fb6f165f87d5f03e0e8854b77fa4e",
+      "sha256": "dcaa855b07b0a2dac3d71136e25ea0d02c69f29ae6b07eadd2028ca2b53a09de",
       "semantic_id": "docs.template",
       "executable": false
     },

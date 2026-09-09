@@ -37,6 +37,7 @@ from lup.coordination.tasks import NEEDS_NAMES, Needs, Task
 from lup.coordination.refs import ActorRef
 from lup.ledger.cite import read_cites
 from lup.ledger.journal import LedgerRefusal, LedgerStore
+from lup.ledger.kinds import by_kind, declared_fields, kind_of
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.snapshot import snapshot
 from lup.types import JsonObject
@@ -125,32 +126,6 @@ def node_line(store: LedgerStore, node: LedgerNode) -> str:
     )
 
 
-def kind_of(declared: type[LedgerNode] | type[LedgerEdge]) -> str:
-    """The kind a declared type records itself under, read off its declaration.
-
-    The `kind` field's default is the literal the type spells, so a word a
-    person types on the command line is matched against what the type would
-    write, not against a class name somebody has to know.
-    """
-    return str(declared.model_fields["kind"].default)
-
-
-def declared_fields(declared: type[LedgerNode] | type[LedgerEdge]) -> list[str]:
-    """Each field a caller may pass in `--json`, spelled with its annotation.
-
-    The stamped ones — id, author, time, kind, endpoints — are left out because
-    a caller cannot set them, and listing them would invite a payload the store
-    then ignores.
-    """
-    stamped = {"id", "kind", "author", "at", "attachments", "source", "target"}
-    return [
-        f"{name}: {field.annotation.__name__ if isinstance(field.annotation, type) else field.annotation}"
-        + ("" if field.is_required() else f" = {field.default!r}")
-        for name, field in declared.model_fields.items()
-        if name not in stamped
-    ]
-
-
 def parsed_payload(text: str) -> JsonObject:
     """One `--json` object as the fields it names, refusing anything else.
 
@@ -181,8 +156,8 @@ def create_ledger_app(
     """
     app = typer.Typer(no_args_is_help=True)
     relations = list(edges or [])
-    node_kinds = {kind_of(declared): declared for declared in classes}
-    edge_kinds = {kind_of(declared): declared for declared in relations}
+    node_kinds = by_kind(classes)
+    edge_kinds = by_kind(relations)
 
     def store() -> LedgerStore:
         return LedgerStore(

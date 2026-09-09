@@ -128,6 +128,14 @@ stored. A node may carry a `slug`, unique once taken, and every command that
 takes an id takes a slug. `ledger show` counts the edges pointing at a node by
 kind before listing them, because the count is what a reader weighs a node by.
 
+The same verbs are a session's tools — `ledger_types`, `ledger_record`,
+`ledger_relate`, `ledger_amend`, `ledger_show`, `ledger_list`, `ledger_cite`
+— served as the `ledger` group beside coordination's, bound to the session's
+identity so every record it makes says who made it. An agent that has to
+shell out to write down what it learned writes it down less often, and a
+corpus nobody records into answers nothing; the tools exist so recording is
+one call at the moment something is learned, not a chore at the end.
+
 ## Standing reaches through the log
 
 A type's `standing()` reads its neighbourhood, and the neighbourhood carries
