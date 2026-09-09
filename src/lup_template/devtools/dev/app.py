@@ -26,9 +26,11 @@ from lup.workspace.paths import project_root
 def declared() -> DevDeclarations:
     """What this repository tells the dev tree, read where a command runs.
 
-    Both test suites are installed separately — the workspace root and the
+    Both pytest suites are installed separately — the workspace root and the
     vendored library — so the gate runs pytest once per root rather than
-    reporting a green tree that never exercised half of it.
+    reporting a green tree that never exercised half of it. The frontend's
+    own tests are a third suite, run by bun from the workspace that holds
+    them.
     """
     return DevDeclarations(
         project=catalog.dev_project(),
@@ -37,6 +39,7 @@ def declared() -> DevDeclarations:
         test_roots=[
             check.TestRoot(name="pytest", directory=Path.cwd()),
             check.TestRoot(name="pytest (lup)", directory=Path("packages/lup")),
+            check.BunTestRoot(name="bun test", directory=Path("packages/lup/web")),
         ],
     )
 

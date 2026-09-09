@@ -9,6 +9,7 @@ for every project that installed the library.
 """
 
 import os
+import shutil
 from importlib.machinery import ModuleSpec
 from pathlib import Path
 
@@ -156,3 +157,45 @@ def test_a_path_under_no_declared_suite_is_refused(tmp_path: Path) -> None:
     # Silently dropping it would report a green run over tests nobody ran.
     with pytest.raises(typer.BadParameter):
         check.group_by_root(declared_roots(tmp_path / "workspace"), [str(tmp_path)])
+
+
+@pytest.mark.skipif(shutil.which("bun") is None, reason="bun is not installed here")
+def test_a_bun_root_runs_the_workspace_tests_and_carries_their_report(
+    tmp_path: Path,
+) -> None:
+    """The frontend's tests are a suite of the gate: green where they pass,
+    and a failure carries bun's own report, which it writes to stderr."""
+    workspace = tmp_path / "web"
+    workspace.mkdir()
+    (workspace / "passing.test.ts").write_text(
+        'import { expect, test } from "bun:test";\n'
+        'test("holds", () => { expect(1 + 1).toBe(2); });\n',
+        encoding="utf-8",
+    )
+    root = check.BunTestRoot(name="bun test", directory=workspace)
+
+    assert root.checked(4, []).passed
+
+    (workspace / "failing.test.ts").write_text(
+        'import { expect, test } from "bun:test";\n'
+        'test("breaks", () => { expect(1 + 1).toBe(3); });\n',
+        encoding="utf-8",
+    )
+    report = root.checked(4, [])
+
+    assert not report.passed
+    assert report.lines[0] == "bun test: FAIL"
+    assert any("breaks" in line for line in report.lines)
+
+
+def test_a_path_under_the_bun_workspace_is_owned_by_the_bun_root(
+    tmp_path: Path,
+) -> None:
+    roots = [
+        check.TestRoot(name="pytest (lup)", directory=tmp_path / "packages/lup"),
+        check.BunTestRoot(name="bun test", directory=tmp_path / "packages/lup/web"),
+    ]
+    named = tmp_path / "packages/lup/web/src/explorer/narrow.test.ts"
+
+    assert check.owning_index(roots, named) == 1
+    assert check.owning_index(roots, tmp_path / "packages/lup/tests/test_x.py") == 0
