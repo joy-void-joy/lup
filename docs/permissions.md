@@ -187,7 +187,7 @@ than merely quieter. The lattice asked about everything unjudged for an
 *observability* reason, and a deferral is the one verdict that reaches nobody
 — the runtime's own gate decides and the reason goes to no human. So every
 deferral appends to `.lup/hooks/learned.jsonl`, one line per distinct command,
-and `uv run lup-devtools dev hookslearn` reads it back as two lists:
+and `uv run lup-devtools dev hooks learn` reads it back as two lists:
 
 - **gaps** — commands nobody has judged, which a boundary carried rather than
   a rule. Each is a candidate for a row in the shell vocabulary, and this list
@@ -519,7 +519,7 @@ rather than a reading of this page:
 ```bash
 uv run lup-devtools dev policy '<the command as you would run it>'
 uv run lup-devtools dev vocabulary --provenance
-uv run lup-devtools dev hookssweep
+uv run lup-devtools dev hooks sweep
 ```
 
 `dev policy` prints the decision and the sentence explaining it — the same

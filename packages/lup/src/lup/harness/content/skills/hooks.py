@@ -90,7 +90,7 @@ generated artifacts. Never edit them as the source of a policy change.
 6. Run `uv run pytest -q tests/unit/test_semantic_policy.py`.
 7. Sweep the commands this project actually runs, because the fixtures cover
    what the change was aimed at and say nothing about what it caught by
-   accident. `uv run lup-devtools dev hookssweep <file>` classifies a list one
+   accident. `uv run lup-devtools dev hooks sweep <file>` classifies a list one
    per line and exits non-zero on anything not allowed, so a rule that
    tightened something it did not mean to tighten fails here instead of in
    somebody's session. Keep that list in a file rather than retyping it, and

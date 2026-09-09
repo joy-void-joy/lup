@@ -422,7 +422,7 @@ once on a command and reach every verb beneath it. Run
 each half of every rule, and `dev vocabulary --json --output <path>` before and
 after a reshaping to confirm no verdict moved that you did not move.
 
-Then sweep what an ordinary session runs. `uv run lup-devtools hooks sweep`
+Then sweep what an ordinary session runs. `uv run lup-devtools dev hooks sweep`
 classifies the everyday corpus this project declared in
 `HookSet.everyday_commands` and exits non-zero on anything that is not a plain
 allow — the one measurement that reads the direction a *tightening* shows up

@@ -2080,7 +2080,7 @@ def test_generated_codex_hook_refuses_the_declared_calls() -> None:
 
     refused = run("Artifact", {"content": "a page"})
     assert refused.exit_code == 2
-    assert b"lup-devtools report" in refused.stderr
+    assert b"lup-devtools dev report" in refused.stderr
 
     narrowed = run("Skill", {"skill": "artifact-design"})
     assert narrowed.exit_code == 2
@@ -2156,7 +2156,7 @@ def test_generated_claude_hook_refuses_the_declared_calls() -> None:
 
     refused = decision("Artifact", {"content": "a page"})
     assert refused.permission_decision == "deny"
-    assert "lup-devtools report" in refused.permission_decision_reason
+    assert "lup-devtools dev report" in refused.permission_decision_reason
 
     narrowed = decision("Skill", {"skill": "artifact-design"})
     assert narrowed.permission_decision == "deny"
