@@ -644,4 +644,42 @@ def create_ledger_app(
         )
         typer.echo(f"{branch} at {commit[:12]}: {held}")
 
+    @app.command("explore")
+    def explore_cmd(
+        export: Annotated[
+            Path | None,
+            typer.Option(
+                "--export", help="Write one self-contained page here instead of serving"
+            ),
+        ] = None,
+        host: Annotated[str, typer.Option(help="Interface to bind")] = "127.0.0.1",
+        port: Annotated[int, typer.Option(help="TCP port to bind")] = 8767,
+        open_page: Annotated[
+            bool, typer.Option("--open/--no-open", help="Open the page in a browser")
+        ] = True,
+    ) -> None:
+        """Open the log in a browser, or write it as one self-contained page.
+
+        Every node listed with its standing read now, narrowed by kind,
+        standing or the moment it last moved; one node in full; the DAG drawn.
+        Served on the loopback and refusing any other bind, like every local
+        surface. `--export` writes the same page with the whole log embedded —
+        a memo attachment opened without a server, showing what the log held
+        when it was written.
+        """
+        # Imported where it is used, because the explorer serves a page and
+        # that is the `web` extra: a project without it still reads its log
+        # through every other command here.
+        from lup.ledger.explorer import export_explorer, serve_explorer
+
+        root = project_root()
+        if export is not None:
+            written = export_explorer(root, classes, relations, export)
+            typer.echo(f"written {written}")
+            return
+        try:
+            serve_explorer(root, classes, relations, host, port, open_page)
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+
     return app

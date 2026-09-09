@@ -56,6 +56,7 @@ from lup.devtools.harness.drift import (
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.utils import decode_stderr, uv
 from lup.execution.shell import git
+from lup.web.build import BUN
 
 # The suite waits on git subprocesses and hook scripts far more than it
 # computes — its system time runs to roughly twice its user time — so it
@@ -118,7 +119,17 @@ def ran(name: str, command: Callable[[], object], ok: str = "ok") -> CheckReport
     try:
         command()
     except sh.ErrorReturnCode as error:
-        printed = [error.stdout.decode().rstrip()] if error.stdout else []
+        # Both streams, because the tools disagree about where a verdict
+        # goes: pytest and the type checker write theirs to stdout, bun's
+        # test runner to stderr.
+        printed = [
+            stream
+            for stream in (
+                error.stdout.decode().rstrip(),
+                decode_stderr(error).rstrip(),
+            )
+            if stream
+        ]
         return CheckReport(
             name=name,
             passed=False,
@@ -333,26 +344,60 @@ class TestRoot(BaseModel):
             ],
         )
 
-    def checked(self, workers: int, excluded_roots: list[str]) -> CheckReport:
-        """Whether this suite passes, run from its own root.
+    def run(
+        self,
+        paths: list[str],
+        workers: int,
+        excluded_roots: list[str],
+        foreground: bool = False,
+    ) -> None:
+        """Run this suite over these paths, or the whole of it for none.
 
-        The library ships to an index without the application beside it, so
-        its suite runs from its own directory where `src` is all it can see —
-        a library test reaching for a template fixture passes at the root and
-        fails there, which is the only place that difference shows.
+        From its own directory, because the library ships to an index without
+        the application beside it: its suite runs where `src` is all it can
+        see, and a library test reaching for a template fixture passes at the
+        root and fails there, which is the only place that difference shows.
+        ``foreground`` hands the runner's own output to the terminal as it
+        arrives, for a caller who named one file and wants its report whole.
         """
+        uv(
+            "run",
+            "pytest",
+            *paths,
+            *parallel_arguments(workers),
+            *ignored_arguments(excluded_roots),
+            _cwd=str(self.directory),
+            _fg=foreground,
+        )
+
+    def checked(self, workers: int, excluded_roots: list[str]) -> CheckReport:
+        """Whether this suite passes, run whole from its own root."""
         if not self.directory.is_dir():
             return self.absent()
-        return ran(
-            self.name,
-            lambda: uv(
-                "run",
-                "pytest",
-                *parallel_arguments(workers),
-                *ignored_arguments(excluded_roots),
-                _cwd=str(self.directory),
-            ),
-        )
+        return ran(self.name, lambda: self.run([], workers, excluded_roots))
+
+
+class BunTestRoot(TestRoot):
+    """A bun workspace's own tests, run by `bun test` from the workspace.
+
+    The frontend's pure functions — how a page narrows and searches a graph it
+    holds — are held to the server's semantics here, beside the pytest
+    suites, so a gate that is green ran them. Where bun is missing this
+    fails the way the bundle check does: a repository that builds surfaces
+    has the toolchain as a dependency of its gate.
+    """
+
+    def run(
+        self,
+        paths: list[str],
+        workers: int,
+        excluded_roots: list[str],
+        foreground: bool = False,
+    ) -> None:
+        # Workers and the ignored roots are pytest's vocabulary; bun runs the
+        # workspace's tests in its own way and reads neither.
+        del workers, excluded_roots
+        BUN("test", *paths, _cwd=str(self.directory), _fg=foreground)
 
 
 class RootSelection(BaseModel):
@@ -444,15 +489,7 @@ def run_selected(
             continue
         typer.echo(f"\n{group.root.name}  ({group.root.directory})")
         try:
-            uv(
-                "run",
-                "pytest",
-                *group.paths,
-                *parallel_arguments(workers),
-                *ignored_arguments(excluded_roots),
-                _cwd=str(group.root.directory),
-                _fg=True,
-            )
+            group.root.run(group.paths, workers, excluded_roots, foreground=True)
         except sh.ErrorReturnCode:
             failed.append(group.root.name)
         except sh.ForkException as error:

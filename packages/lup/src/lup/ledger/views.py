@@ -12,7 +12,8 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from lup.ledger.journal import LedgerStore
-from lup.ledger.models import LedgerNode
+from lup.ledger.kinds import KindInfo, describe
+from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.types import JsonObject
 
 
@@ -28,6 +29,13 @@ class NodeView(BaseModel, frozen=True):
     standing: str
     reason: str = ""
     sound: bool = True
+    moved: datetime
+    """When the log last grew around this node: its own record, or an edge touching it.
+
+    Read off the log's timestamps rather than stored, so a reader opening on
+    what moved since they last looked, or sorting a listing by recency, reads
+    the same fact `--since` narrows by.
+    """
 
 
 class EdgeView(BaseModel, frozen=True):
@@ -65,11 +73,43 @@ class GraphView(BaseModel, frozen=True):
     standings: list[str]
 
 
+class KindsView(BaseModel, frozen=True):
+    """What a project declares: its node kinds and its relations, with their fields."""
+
+    nodes: list[KindInfo]
+    edges: list[KindInfo]
+
+
+class ExportView(BaseModel, frozen=True):
+    """Everything a standalone page needs, so it opens with no server behind it.
+
+    The graph, every node's detail and the declared kinds, because a page
+    opened from a file cannot ask for more later — the worked example this
+    came from was an 18 MB single file for exactly this reason, and a memo
+    attachment that needed a server would not be one. Stamped with the moment
+    it was taken, since what it shows is the log as it was then.
+    """
+
+    graph: GraphView
+    details: list[NodeDetail]
+    kinds: KindsView
+    exported_at: datetime
+
+
 def node_view(
-    store: LedgerStore, classes: list[type[LedgerNode]], node: LedgerNode
+    store: LedgerStore,
+    classes: list[type[LedgerNode]],
+    node: LedgerNode,
+    movements: dict[str, datetime] | None = None,
 ) -> NodeView:
-    """One node with its standing read now."""
+    """One node with its standing read now.
+
+    ``movements`` is the store's fold of when the log last grew around each
+    node, passed in by a caller building many views so the log is read once
+    for all of them; a caller building one view lets this read it.
+    """
     where = store.standing(node, classes)
+    moved = movements if movements is not None else store.movements()
     return NodeView(
         id=node.id,
         kind=node.kind,
@@ -80,11 +120,22 @@ def node_view(
         standing=where.label,
         reason=where.reason,
         sound=where.sound,
+        moved=moved.get(node.id, node.at),
     )
 
 
 def edge_view(kind: str, source: str, target: str) -> EdgeView:
     return EdgeView(kind=kind, source=source, target=target)
+
+
+def kinds_view(
+    classes: list[type[LedgerNode]], edges: list[type[LedgerEdge]]
+) -> KindsView:
+    """Every declared kind as a reader is told about it."""
+    return KindsView(
+        nodes=[describe(declared) for declared in classes],
+        edges=[describe(declared) for declared in edges],
+    )
 
 
 def node_detail(
@@ -125,7 +176,10 @@ def graph_view(
     and standing vocabularies are read off the whole log, not the narrowed
     one, so the filters a reader is offered do not shrink as they are used.
     """
-    every = [node_view(store, classes, node) for node in store.all_nodes(classes)]
+    movements = store.movements()
+    every = [
+        node_view(store, classes, node, movements) for node in store.all_nodes(classes)
+    ]
     moved = store.moved_since(since) if since is not None else None
     shown = [
         node

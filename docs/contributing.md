@@ -289,7 +289,9 @@ against what is committed, so it needs `bun` and the workspace's dependencies:
 `bun install --frozen-lockfile` in `packages/lup/web/`, once, and again when
 `bun.lock` moves. Without them `dev check` fails naming that command rather
 than passing over what it could not build. A dependency is added with
-`bun add`, which the policy asks about the way it asks about `uv add`.
+`bun add`, which the policy asks about the way it asks about `uv add`. The
+workspace's own tests are a third suite beside the two pytest roots, run by
+`bun test` from the workspace, so a green gate ran the frontend's tests too.
 
 [quality-pipeline.md](quality-pipeline.md) explains which of the three
 automated layers catches what. The short version: `git hooks install`

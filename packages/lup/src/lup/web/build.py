@@ -109,9 +109,14 @@ def built_files(workspace: Path, surface: str, out: Path) -> list[Path]:
             _cwd=str(workspace),
         )
     except sh.ErrorReturnCode as failed:
-        # The toolchain's own error output, kept whole; it is not always
-        # UTF-8, and a decode error here would hide the failure it describes.
-        said = failed.stderr.decode("utf-8", errors="replace")
+        # The toolchain's own output, both streams and kept whole: the type
+        # checker writes its diagnostics to stdout and the bundler to stderr,
+        # and neither is always UTF-8, so a decode error here would hide the
+        # failure it describes.
+        said = "\n".join(
+            stream.decode("utf-8", errors="replace")
+            for stream in (failed.stdout, failed.stderr)
+        )
         raise RuntimeError(
             f"building the {surface!r} surface failed:\n{said}"
         ) from failed

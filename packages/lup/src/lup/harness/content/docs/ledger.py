@@ -142,6 +142,24 @@ shell out to write down what it learned writes it down less often, and a
 corpus nobody records into answers nothing; the tools exist so recording is
 one call at the moment something is learned, not a chore at the end.
 
+## The explorer
+
+`ledger explore` opens the log in a browser, on the loopback: every node
+listed with its standing read now, narrowed by kind, standing or the moment
+it last moved, searched by title, text, slug or id, sorted by any column; one
+node in full, the edges pointing at it counted by kind, each end a link; and
+the DAG drawn as a graph, a tap opening the node. Every view is a URL, so a
+reader hands another one exactly what they were looking at.
+
+`ledger explore --export <path>` writes the same page as one self-contained
+file with the whole log embedded — a memo attachment opened without a server,
+showing what the log held when it was written and stamped with the moment.
+The page is the TypeScript surface Vite built into `lup.web`'s package data;
+what it reads is `lup.ledger.views`, the same models the tool group returns,
+served as JSON routes under `/api/` or carried whole in the export. Generic
+over declared kinds: a project's explorer is this with the project's types,
+and the page lists what they are.
+
 ## Writeups are declared documents
 
 A document whose figures must never go stale is generated from the log rather
