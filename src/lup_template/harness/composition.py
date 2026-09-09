@@ -25,6 +25,7 @@ from lup.devtools.harness.generate import (
     ProjectContent,
 )
 from lup.devtools.harness.generated_paths import write_generated_paths
+from lup.devtools.surfaces import LIBRARY_SURFACES
 from lup.web.build import write_web_bundles
 from lup.web.schema import write_view_schema
 from lup.providers.profiles import ProfileDirectory
@@ -104,12 +105,16 @@ REPOSITORY_WIDE: list[RepositoryWriter] = [
     partial(write_generated_paths, TARGETS),
     # The schema before the bundles, because the frontend build compiles its
     # types from it: written in this order, one generation leaves both true.
-    partial(write_view_schema, Path("packages/lup/web/schema/views.json")),
+    # Both read the one surface list, so a page and its types cannot disagree
+    # about which surfaces exist.
+    partial(
+        write_view_schema, Path("packages/lup/web/schema/views.json"), LIBRARY_SURFACES
+    ),
     partial(
         write_web_bundles,
         Path("packages/lup/web"),
         Path("packages/lup/src/lup/web/bundles"),
-        ["explorer"],
+        LIBRARY_SURFACES,
     ),
 ]
 """Every project-owned generated file outside a native runtime tree."""

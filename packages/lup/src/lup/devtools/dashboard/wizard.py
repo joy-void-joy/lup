@@ -17,10 +17,11 @@ declaration-plus-renderer split the harness uses for prompts: a step says what
 is meant, the renderer says how a browser spells it.
 
 Nothing here names a service, a domain, or a project. A domain supplies its own
-scope and its own steps, and this draws them — which is also why the page is
-*generated* from the declarations rather than served from a file. An asset file
-under this package is one an adopter's wheel has to remember to include, and
-the version of this dashboard that read one had exactly that bug.
+scope and its own steps, and the page draws them: the ``wizard`` surface Vite
+builds into ``lup.web``'s package data, typed against the models below, which
+knows no step by name. A test holds the package data to naming every built
+bundle, because the version of this dashboard that read an asset shipped
+without it.
 
 Two guards live here rather than in any surface, because a page draws only what
 a step offers while a request is whatever arrived on the socket:

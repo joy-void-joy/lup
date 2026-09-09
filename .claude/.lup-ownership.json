@@ -646,14 +646,14 @@
     {
       "path": "docs/supervisor.md",
       "category": "generated",
-      "sha256": "7dd79c838097949d2c15d8ef983eb79c1c58b05baab345f6f62dba8c06b6555a",
+      "sha256": "41f6b9af3693a9df9ab19eda85abc3dc8c0158621ff29ef766b402597502b370",
       "semantic_id": "docs.supervisor",
       "executable": false
     },
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "dc1bb0d4f4de06c0723a7687d8b801280a32a392a1965974f216768058fd5ed2",
+      "sha256": "e17632dd3b1fcf889d03f3dd599c8abc2095fd5f0e76145501ac6349f458e75a",
       "semantic_id": "docs.template",
       "executable": false
     },

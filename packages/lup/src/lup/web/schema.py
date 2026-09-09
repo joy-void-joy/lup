@@ -22,21 +22,8 @@ from pydantic_core import core_schema
 from lup.formats.banner import COMMENT_FREE, REGENERATE_COMMAND
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
-from lup.ledger.views import ExportView, GraphView, KindsView, NodeDetail
+from lup.web.build import Surface
 from lup.workspace.paths import project_root
-
-SERVED_VIEWS: tuple[type[BaseModel], ...] = (
-    GraphView,
-    NodeDetail,
-    KindsView,
-    ExportView,
-)
-"""Every model the library's own surfaces hand a page, the default a project extends.
-
-The explorer's routes and its export, named once here so the schema and
-every caller writing it agree; a project serving views of its own passes
-these plus its own.
-"""
 
 
 class ServedSchema(GenerateJsonSchema):
@@ -65,14 +52,21 @@ class ServedSchema(GenerateJsonSchema):
         return json_schema
 
 
-def view_schema(models: tuple[type[BaseModel], ...] = SERVED_VIEWS) -> str:
-    """One schema document declaring every view model under `$defs`.
+def served_models(surfaces: list[Surface]) -> list[type[BaseModel]]:
+    """Every model any surface is handed, each once, in declaration order."""
+    return list(
+        dict.fromkeys(model for surface in surfaces for model in surface.models)
+    )
+
+
+def view_schema(surfaces: list[Surface]) -> str:
+    """One schema document declaring every surface's view models under `$defs`.
 
     The models are every one a served page is handed, and therefore every
-    type it needs; a project serving its own views names them here.
+    type it needs; a project serving views of its own lists its surface.
     """
     _mapping, schema = models_json_schema(
-        [(model, "serialization") for model in models],
+        [(model, "serialization") for model in served_models(surfaces)],
         title="LupViews",
         schema_generator=ServedSchema,
     )
@@ -81,15 +75,15 @@ def view_schema(models: tuple[type[BaseModel], ...] = SERVED_VIEWS) -> str:
 
 def write_view_schema(
     destination: Path,
+    surfaces: list[Surface],
     root: Path | None = None,
     *,
     check: bool = False,
-    models: tuple[type[BaseModel], ...] = SERVED_VIEWS,
 ) -> Path:
     """Write or verify the schema the frontend build compiles its types from."""
     artifact = Artifact(
         path=destination,
-        content=view_schema(models),
+        content=view_schema(surfaces),
         semantic_id="web.views-schema",
         banner=COMMENT_FREE.compiled_from(__name__),
     )

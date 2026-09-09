@@ -1,5 +1,25 @@
 {
   "$defs": {
+    "Answer": {
+      "additionalProperties": false,
+      "description": "One value that came back, against the field that asked for it.",
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "title": "Answer",
+      "type": "object"
+    },
     "EdgeCount": {
       "additionalProperties": false,
       "description": "How many edges of one kind point at a node \u2014 its weight in the log.",
@@ -328,6 +348,453 @@
         "moved"
       ],
       "title": "NodeView",
+      "type": "object"
+    },
+    "Row": {
+      "additionalProperties": false,
+      "description": "One thing a listing step lists, and what may be done to it.",
+      "properties": {
+        "acts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RowAct"
+          },
+          "title": "Acts",
+          "type": "array"
+        },
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "stream": {
+          "default": "",
+          "title": "Stream",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "detail",
+        "acts",
+        "stream"
+      ],
+      "title": "Row",
+      "type": "object"
+    },
+    "RowAct": {
+      "additionalProperties": false,
+      "description": "One verb offered against one row.\n\nThe same shape a terminal menu draws, so a surface cannot offer a verb the\nother surface does not have.",
+      "properties": {
+        "asks": {
+          "default": "",
+          "title": "Asks",
+          "type": "string"
+        },
+        "consequence": {
+          "title": "Consequence",
+          "type": "string"
+        },
+        "destructive": {
+          "default": false,
+          "title": "Destructive",
+          "type": "boolean"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug",
+        "label",
+        "consequence",
+        "asks",
+        "destructive"
+      ],
+      "title": "RowAct",
+      "type": "object"
+    },
+    "RowRequest": {
+      "additionalProperties": false,
+      "description": "Which of a row's acts somebody clicked, and the one value it asked for.",
+      "properties": {
+        "act": {
+          "default": "",
+          "title": "Act",
+          "type": "string"
+        },
+        "answer": {
+          "default": "",
+          "title": "Answer",
+          "type": "string"
+        },
+        "row": {
+          "default": "",
+          "title": "Row",
+          "type": "string"
+        }
+      },
+      "required": [
+        "row",
+        "act",
+        "answer"
+      ],
+      "title": "RowRequest",
+      "type": "object"
+    },
+    "ScopeChoice": {
+      "additionalProperties": false,
+      "description": "One of the things this wizard can be pointed at.",
+      "properties": {
+        "chosen": {
+          "default": false,
+          "title": "Chosen",
+          "type": "boolean"
+        },
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "detail",
+        "chosen"
+      ],
+      "title": "ScopeChoice",
+      "type": "object"
+    },
+    "ScopeRequest": {
+      "additionalProperties": false,
+      "description": "A scope somebody asked to make.",
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ScopeRequest",
+      "type": "object"
+    },
+    "StepAnswers": {
+      "additionalProperties": false,
+      "description": "Everything a page submitted for one step.\n\nA list of named answers rather than a bare mapping: what arrives on a\nsocket is untrusted, and a shape says which keys were expected where a\nmapping would take any of them.",
+      "properties": {
+        "answers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Answer"
+          },
+          "title": "Answers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "answers"
+      ],
+      "title": "StepAnswers",
+      "type": "object"
+    },
+    "StepField": {
+      "additionalProperties": false,
+      "description": "One value a step asks for.",
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "placeholder": {
+          "default": "",
+          "title": "Placeholder",
+          "type": "string"
+        },
+        "secret": {
+          "default": false,
+          "title": "Secret",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "placeholder",
+        "secret"
+      ],
+      "title": "StepField",
+      "type": "object"
+    },
+    "StepKind": {
+      "enum": [
+        "form",
+        "rows"
+      ],
+      "type": "string"
+    },
+    "StepOutcome": {
+      "additionalProperties": false,
+      "description": "What running, testing, or undoing a step did.",
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "message"
+      ],
+      "title": "StepOutcome",
+      "type": "object"
+    },
+    "StepReply": {
+      "additionalProperties": false,
+      "description": "What an act did, and the page as it stands afterwards.",
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/StepOutcome"
+        },
+        "view": {
+          "$ref": "#/$defs/WizardView"
+        }
+      },
+      "required": [
+        "outcome",
+        "view"
+      ],
+      "title": "StepReply",
+      "type": "object"
+    },
+    "StepStanding": {
+      "additionalProperties": false,
+      "description": "Where a step stands right now.\n\n``done`` and ``offered`` are separate because they answer different\nquestions and disagree in both directions: a finished step is still\noffered when redoing it is how a wrong answer gets fixed, and an unfinished\none is withheld while the step before it is unanswered.",
+      "properties": {
+        "blocked": {
+          "default": "",
+          "title": "Blocked",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "done": {
+          "default": false,
+          "title": "Done",
+          "type": "boolean"
+        },
+        "offered": {
+          "default": true,
+          "title": "Offered",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "done",
+        "detail",
+        "offered",
+        "blocked"
+      ],
+      "title": "StepStanding",
+      "type": "object"
+    },
+    "StepView": {
+      "additionalProperties": false,
+      "description": "One step as the page draws it: the declaration, plus where it stands.",
+      "properties": {
+        "blurb": {
+          "default": "",
+          "title": "Blurb",
+          "type": "string"
+        },
+        "fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/StepField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "guide": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Guide",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/StepKind",
+          "default": "form"
+        },
+        "numbered": {
+          "default": true,
+          "title": "Numbered",
+          "type": "boolean"
+        },
+        "opens": {
+          "default": "",
+          "title": "Opens",
+          "type": "string"
+        },
+        "rows": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Row"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        },
+        "standing": {
+          "$ref": "#/$defs/StepStanding",
+          "default": {
+            "blocked": "",
+            "detail": "",
+            "done": false,
+            "offered": true
+          }
+        },
+        "submit": {
+          "default": "Save",
+          "title": "Submit",
+          "type": "string"
+        },
+        "tests": {
+          "default": "",
+          "title": "Tests",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "undoes": {
+          "default": "",
+          "title": "Undoes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug",
+        "title",
+        "blurb",
+        "guide",
+        "numbered",
+        "opens",
+        "kind",
+        "fields",
+        "submit",
+        "standing",
+        "rows",
+        "tests",
+        "undoes"
+      ],
+      "title": "StepView",
+      "type": "object"
+    },
+    "WizardView": {
+      "additionalProperties": false,
+      "description": "Everything the page needs to draw itself, in one reply.",
+      "properties": {
+        "chosen": {
+          "default": "",
+          "title": "Chosen",
+          "type": "string"
+        },
+        "create_asks": {
+          "default": "",
+          "title": "Create Asks",
+          "type": "string"
+        },
+        "creates": {
+          "default": "",
+          "title": "Creates",
+          "type": "string"
+        },
+        "lede": {
+          "default": "",
+          "title": "Lede",
+          "type": "string"
+        },
+        "notice": {
+          "default": "",
+          "title": "Notice",
+          "type": "string"
+        },
+        "scope_label": {
+          "default": "",
+          "title": "Scope Label",
+          "type": "string"
+        },
+        "scopes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ScopeChoice"
+          },
+          "title": "Scopes",
+          "type": "array"
+        },
+        "steps": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/StepView"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "lede",
+        "scope_label",
+        "scopes",
+        "chosen",
+        "steps",
+        "creates",
+        "create_asks",
+        "notice"
+      ],
+      "title": "WizardView",
       "type": "object"
     }
   },

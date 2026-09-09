@@ -222,9 +222,10 @@ A progress-oriented wizard covers first setup; an all-integrations view covers
 later maintenance. Browser forms are generated only for declarative
 environment fields, from an explicit per-integration allowlist, so the page
 cannot write an arbitrary variable; anything needing OAuth or bespoke
-validation routes to its existing CLI command. FastAPI serves one packaged
-HTML asset — zero build, no Node — and `--no-open` and `--port` cover the
-cases where the defaults do not fit.
+validation routes to its existing CLI command. FastAPI serves the `wizard`
+surface Vite built into `lup.web`'s package data — the wheel carries the
+bundle, and bun is needed only to change it — and `--no-open` and `--port`
+cover the cases where the defaults do not fit.
 
 `--host` takes only a loopback address, and every request's `Host` header is
 checked against one. The page writes credentials into `.env.local`, and a
