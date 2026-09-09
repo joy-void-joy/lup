@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "f2fd0e358d4026bb2002b15d3aa573e96e6f8a6dec18e85fa67ee8238d4d52f4",
+  "source_digest": "20cc7baa72181c042573256f9f5724d800fb950a4d3c96ad0e8d78ee5859b46d",
   "target_requirements": [
     "claude-code"
   ],
@@ -179,6 +179,13 @@
       "category": "generated",
       "sha256": "4d919cb585d80f325b86781b32ed548e1544ef5cb55f0ebb377db45430d3845a",
       "semantic_id": "skill.feedback-loop",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/commands/handoff.md",
+      "category": "generated",
+      "sha256": "314bcd3ec896a043af4eb28bb919b225f1c496f29bcb56f3da5a03bed3068b19",
+      "semantic_id": "skill.handoff",
       "executable": false
     },
     {
@@ -534,7 +541,7 @@
     {
       "path": "docs/coordination.md",
       "category": "generated",
-      "sha256": "4917c41ae42188e06c4fc84b9f11adc8b8c27844767daf79861e6a8803efe9e5",
+      "sha256": "34e31b828a21dcb906cd2183c2471e0d437c77d71313a0c70350c55f3d6e6979",
       "semantic_id": "docs.coordination",
       "executable": false
     },
@@ -548,7 +555,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "9d33a3f85bf3e53d7c726d04edc5b4b0cd2858ff251288983c7e9e3a3ba493c5",
+      "sha256": "4fa98c00cbff5a1d1303407e4a414fb9c32d4a98cb9669f43bee1c1c89313431",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -597,7 +604,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "3139dbec1214293f977b4b5c6fb771abd665a72af708ca3c1b6d2b5c5a2997cc",
+      "sha256": "740839f4f49f8bf0ecdb97441a1773a74296992064f4d3ed76c85934b929d155",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

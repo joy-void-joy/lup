@@ -176,6 +176,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `ledger list` | Show every node in this repository, with its standing read now. |
 | `ledger show` | Print one node in full, with its edges and what it attaches. |
 | `ledger delegate` | Record one task, hand it to a peer if there is one, and say what happened. |
+| `ledger handoff` | Move a body of work to a peer, and say exactly what crossed. |
+| `ledger brief` | Write one handoff out for whoever is going to read it. |
 | `ledger mine` | Print one holder&#x27;s outstanding tasks, grouped by what they cost. |
 | `ledger done` | Mark one task finished, by recording it again as done. |
 | `ledger snapshot` | Commit the store to a branch of its own, for a record worth keeping. |

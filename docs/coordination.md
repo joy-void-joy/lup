@@ -138,6 +138,87 @@ anything here to ask about — and `coordination holdings` carries the paths,
 because a person who wants those wants all of them at once rather than one row
 at a time.
 
+## Work that outlives the session that found it
+
+A touch says what a live session is holding and expires with it. A **task**
+outlives whoever wrote it and is meant to be picked up by somebody who was not
+there — the same distinction the ledger exists for, so a task is a node in the
+repository's log rather than a record of coordination's own. That also puts it
+in reach of an edge from anywhere: a handoff transferring it, a claim it
+verifies.
+
+**A task needs only a title.** Delegating is reached for far more often than
+anything else here, so it has to be one line. A gate asking for more would
+make it expensive enough to skip, and a task nobody has scoped is still a real
+thing to have written down.
+
+**`needs` and `blocks` are different facts and must not be conflated.**
+`needs` says what *class of input* a task waits on — judgement, identity,
+account, payment, command, review — from a closed vocabulary, which is what
+lets a rendering be ordered without anybody writing "most urgent first" at the
+top, and what tells a reader whether a row is a decision to make or a command
+to paste. A dependency between two tasks is the `blocks` edge, node to node.
+Running them together makes both useless: the ordering stops meaning anything
+and the dependency stops being checkable.
+
+`ledger delegate` records one and hands it over; a name nobody answers to
+parks it rather than refusing it, because work is often scoped before there is
+anybody to do it. `ledger mine` renders one holder's outstanding tasks grouped
+by what they cost — the person's by default, since they read on a machine that
+cannot query the log.
+
+## Handing over a body of work
+
+A task is one piece of work. A **handoff** is the larger thing: a session
+stopping, or somebody better placed taking over, where what crosses is the
+work *plus* what the sender learned that is not in the diff.
+
+What a receiver needs is a **field, not a gate**. `open_questions` refuses to
+be empty at construction — a handoff with nothing open is somebody finishing,
+and closing the task is the verb for that. Every established result carries
+the **source** it came from and a **grade** saying how well it is supported,
+because a result the receiver can neither check nor weigh is one they have to
+derive again, which is the cost the handoff exists to remove. The grade is a
+string this library does not interpret: what grades exist is a project's
+question, the same one the ledger refuses to answer about node types.
+
+`not_again` is the cheapest field here and the one that pays most. A dead end
+costs the receiver exactly what it cost the sender, and it is invisible in the
+tasks, the locks and the diff.
+
+**Locks move only where the sender held them.** Only a holder can release a
+lock, which is an invariant rather than an accident. A scope naming a path
+somebody else holds neither takes it from them nor refuses the handoff: the
+contest is recorded with both names, the way an unattributable edit already
+is, and the receiver is told. Refusing would make handing work over expensive
+enough to skip; taking it would revoke a claim from a session still writing
+under it.
+
+**One record, three renderings.** A peer in this repository resolves ids and
+keeps them, because an id stays true as the work moves where a copy goes
+stale. An agent with no repository access gets everything a peer would look up
+written out. A person gets a file. They differ in form and never in substance,
+and the inlining one earns its keep by proving the record stands alone: if it
+is not enough to work from, something was still living in the sender's head.
+
+## Waking whoever it went to
+
+Mail is written first, always. A wake that cannot be made costs latency and
+never the work, which is what makes the asymmetry below tolerable rather than
+a gap.
+
+The asymmetry is the runtime's own. One of them serves a command that reaches
+a session from any process, so waking finishes the job itself. The other has
+no command that speaks to a running session at all — so waking returns an
+*instruction* naming the caller's own messaging tool and the address to use,
+and a skill running inside a session carries it. A third outcome, that nothing
+can reach the peer, is reported rather than silently skipped.
+
+The handle a peer is addressed by is **self-reported on the roster**, because
+on one runtime it can only be: the session identifiers in its environment are
+not what peers address it by, and the address is discoverable only by asking
+the runtime from inside the session.
+
 ## The other address book
 
 A runtime that can already address another session offers a second way to

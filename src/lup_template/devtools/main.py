@@ -44,6 +44,7 @@ from lup.devtools.dev import conflicts
 from lup.devtools.dev.commands import write_command_reference
 from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
+from lup.coordination.handoffs import Handoff
 from lup.coordination.tasks import Task
 from lup.devtools.roster import DevtoolsDeclarations
 from lup.devtools.subapps import SubApp, compose
@@ -114,7 +115,7 @@ DECLARATIONS = DevtoolsDeclarations(
     # the adopted modules, because a union assembled at run time is not
     # one a type checker can narrow — and the console is the one reader
     # that needs the list at all.
-    node_classes=[Task],
+    node_classes=[Task, Handoff],
 )
 """What this repository tells the library's roster about itself.
 
