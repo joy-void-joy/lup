@@ -3,7 +3,7 @@
 The library declares none. Whether this project's sessions coordinate at all
 is the coordination module's answer rather than the policy's, so this states
 the shape a declaration takes and
-:func:`lup.coordination.redirect.peer_redirect` builds one from the store's own
+:func:`lup.coordination.policy.peer_policy` builds one from the store's own
 layout — which is what keeps the directory spelled once, in the module that
 owns it, instead of once there and once in a compiled hook.
 :mod:`lup.policy.kernel.peers` decides against the erased row.
@@ -11,10 +11,10 @@ owns it, instead of once there and once in a compiled hook.
 
 from pydantic import BaseModel, Field
 
-from lup.policy.kernel.rows import PeerRedirectRow
+from lup.policy.kernel.rows import PeerPolicyRow
 
 
-class PeerRedirect(BaseModel, frozen=True):
+class PeerPolicy(BaseModel, frozen=True):
     """Where this project's sessions find each other, and what a caller is told.
 
     Carried as one declaration rather than two because it is one subject read
@@ -33,16 +33,24 @@ class PeerRedirect(BaseModel, frozen=True):
     names_file: str = Field(min_length=1)
     send_reason: str = Field(min_length=1)
     listing_note: str = Field(min_length=1)
+    touches_file: str = Field(min_length=1)
+    windows_dir: str = Field(min_length=1)
+    claim_reason: str = Field(min_length=1)
+    member_env: str = Field(min_length=1)
 
 
-def erase_peer_redirect(declared: PeerRedirect | None) -> PeerRedirectRow | None:
+def erase_peer_policy(declared: PeerPolicy | None) -> PeerPolicyRow | None:
     """Erase the validated declaration into the primitive row the kernel reads."""
     if declared is None:
         return None
-    return PeerRedirectRow(
+    return PeerPolicyRow(
         store=list(declared.store),
         roster_file=declared.roster_file,
         names_file=declared.names_file,
         send_reason=declared.send_reason,
         listing_note=declared.listing_note,
+        touches_file=declared.touches_file,
+        windows_dir=declared.windows_dir,
+        claim_reason=declared.claim_reason,
+        member_env=declared.member_env,
     )

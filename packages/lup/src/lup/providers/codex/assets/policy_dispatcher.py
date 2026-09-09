@@ -35,6 +35,8 @@ from decisions import (
     unconfined_by_declaration,
     bash_decision,
     edit_decision,
+    claim_window_closed,
+    claim_window_opened,
     fetch_decision,
     refused_tool_decision,
     written_review,
@@ -206,6 +208,12 @@ def dispatch(payload, permission_request=False):
     autonomous = declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
         requested_escape = spent_escape(tool_input)
+        # The snapshot a comparison afterwards is read against, taken only on
+        # the event that runs immediately before the call: a permission
+        # request runs before the prompt, and a window opened there would span
+        # however long somebody took to answer it.
+        if not permission_request:
+            claim_window_opened(session_directory)
         escaped = requested_escape or auto_escape_matches(
             tool_input["command"], AUTO_ESCAPE_PREFIXES
         )
@@ -309,6 +317,9 @@ def observe(payload):
     command = tool_input["command"] if "command" in tool_input else ""
     if not command:
         return []
+    # What the command changed, read against the snapshot its own PreToolUse
+    # took, and contested where another session had a window open across it.
+    claim_window_closed(Path(root) if root else None)
     return written_review(command, Path(root) if root else Path.cwd())
 
 

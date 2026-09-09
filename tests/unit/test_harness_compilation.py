@@ -670,18 +670,23 @@ def test_codex_recipe_registers_semantic_permission_approval() -> None:
     assert artifacts[Path(".codex/plugins/lup/hooks/scripts/policy.sh")].executable
 
 
-def test_the_watching_event_is_registered_for_editing_tools_alone() -> None:
-    """A narrow matcher, because this event is registered to record, not judge.
+def test_the_watching_event_is_registered_for_what_leaves_writes_behind() -> None:
+    """A narrow matcher, because this event records rather than judges.
 
-    The deciding events cover everything the dispatcher routes, so sharing
-    one registration would spawn the script after every shell command and
-    every fetch to find no edited file to record. The two are separate keys
-    for that reason, and the compiler still proves the dispatcher may name
-    the event at all.
+    Narrow means *what leaves a write behind*, not *what names a file*. The
+    editing tools and the shell tool both do, and both have a reading
+    afterwards — an edited file to check, a command's result to review and
+    attribute — while a fetch leaves nothing, so sharing the deciding events'
+    registration would spawn the script to find no write at all.
+
+    The shell tool is pinned here because leaving it out fails silently: the
+    review of what a command wrote was wired into both dispatchers and
+    reachable from neither, for exactly as long as this matcher named only the
+    tools that carry a file path.
     """
     for target, plugin_root, edits in (
-        (claude_target, ".claude", "Edit|Write"),
-        (codex_target, ".codex", "apply_patch"),
+        (claude_target, ".claude", "Edit|Write|Bash"),
+        (codex_target, ".codex", "apply_patch|Bash"),
     ):
         artifacts = {
             artifact.path: artifact

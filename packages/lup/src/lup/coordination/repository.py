@@ -24,7 +24,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, computed_field
 
-from lup.channels.models import Door
+from lup.channels.models import Door, utc_now
 from lup.coordination.cohort import ActorCohort
 from lup.coordination.identity import (
     NAMES_FILE,
@@ -36,6 +36,7 @@ from lup.coordination.mail import ActorDelivery
 from lup.coordination.refs import ActorRef
 from lup.coordination.roster import Delivery, SpawnedActor
 from lup.coordination.store import coordination_root
+from lup.coordination.touches import TOUCHES_FILE, Claim, Touches
 
 
 class PeerView(BaseModel, frozen=True):
@@ -217,3 +218,42 @@ class RepositoryPeers:
         delivery = inbox.waiting()
         inbox.commit(delivery)
         return delivery
+
+    @cached_property
+    def touches(self) -> Touches:
+        """What this repository's sessions are holding, over the shared record.
+
+        Beside the roster rather than on it, because the two are read on
+        different schedules and only one of them moves per tool call. A
+        listing of who is here is asked once; what they are holding is asked
+        before every write.
+        """
+        return Touches(self.root / TOUCHES_FILE)
+
+    def live_ids(self) -> list[str]:
+        """Every member still working here, by id, which is what expires a claim.
+
+        A claim is alive while its holder is, so this is the whole of the
+        expiry rule: no timeout to tune, no release to forget, and the failure
+        mode is a session that stopped taking its own claims with it.
+        """
+        return [member.actor.id for member in self.cohort.live() if member.running]
+
+    def held(self) -> list[Claim]:
+        """Every claim a live session is holding, newest first."""
+        return self.touches.held(self.live_ids())
+
+    def holding(self, path: Path) -> list[Claim]:
+        """Every live claim a write to this path would land under."""
+        return self.touches.covering(path, self.live_ids())
+
+    def lock(self, member_id: str, prefix: Path) -> Claim:
+        """Take everything beneath a prefix, ahead of having touched any of it."""
+        self.touches.locked(member_ref(member_id), prefix)
+        return Claim(
+            path=str(prefix), prefix=True, holders=[member_ref(member_id)], at=utc_now()
+        )
+
+    def release(self, member_id: str, prefix: Path) -> None:
+        """Give a prefix back, which does nothing unless this session held it."""
+        self.touches.released(member_ref(member_id), prefix)

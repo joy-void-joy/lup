@@ -1717,3 +1717,313 @@ def peer_listing(
         " — ".join(part for part in described(member) if part)
         for member in peer_members(directory, roster_file)
     ]
+
+
+def claim_covers(claim: dict, candidate: str) -> bool:
+    """Whether a path about to be written falls under one standing claim."""
+    held = claim["path"]
+    if not claim["prefix"]:
+        return candidate == held
+    return candidate == held or candidate.startswith(held + "/")
+
+
+def peer_claims(directory: Path, touches_file: str) -> list[dict]:
+    """Every claim standing on the record, alive or not, folded in order.
+
+    Keyed by the kind as well as the path, because locking a directory and
+    touching a file of that name are different claims and a later record must
+    not silently convert one into the other.
+    """
+    # lup: ignore[empty-collection] — a fold whose every step reads what the
+    # steps before it left: a release answers against the claim an earlier
+    # record created, which is the one shape a comprehension cannot spell
+    standing: dict = {}
+    for record in stream_records(directory / touches_file):
+        actor = record["actor"] if "actor" in record else {}
+        path = record["path"] if "path" in record else ""
+        if not isinstance(actor, dict) or "id" not in actor or not path:
+            continue
+        kind = record["type"] if "type" in record else ""
+        subject = f"{'under' if kind in ('locked', 'released') else 'at'} {path}"
+        match kind:
+            case "touched" | "contested":
+                rivals = record["rivals"] if "rivals" in record else []
+                standing[subject] = {
+                    "path": path,
+                    "prefix": False,
+                    "holders": [
+                        actor,
+                        *[rival for rival in rivals if isinstance(rival, dict)],
+                    ],
+                }
+            case "locked":
+                standing[subject] = {"path": path, "prefix": True, "holders": [actor]}
+            case "released" if subject in standing:
+                if actor["id"] in [
+                    holder["id"] for holder in standing[subject]["holders"]
+                ]:
+                    del standing[subject]
+            case _:
+                continue
+    return list(standing.values())
+
+
+def claim_holders(
+    root: Path | None,
+    store: list[str],
+    roster_file: str,
+    names_file: str,
+    touches_file: str,
+    path_text: str,
+    mine: str,
+) -> list[str]:
+    """Who else, still working here, is holding the path a write would land on.
+
+    Live holders other than the asker. A claim expires with the session that
+    made it, so a departed holder is nobody to ask; and a session meeting its
+    own claim on every edit would be asked about its own work.
+
+    Named where a session has a name and identified by id otherwise, because
+    this reaches somebody deciding whom to ask, and an id is what you fall
+    back on when nothing has been called anything yet.
+    """
+    directory = peer_store(root, store)
+    if directory is None:
+        return []
+    live = [member["actor"]["id"] for member in peer_members(directory, roster_file)]
+    names = peer_name_claims(directory, names_file)
+    target = str(Path(path_text).resolve())
+    holding = [
+        holder["id"]
+        for claim in peer_claims(directory, touches_file)
+        if claim_covers(claim, target)
+        for holder in claim["holders"]
+        if holder["id"] in live and holder["id"] != mine
+    ]
+    return sorted(
+        {
+            next(
+                (name for name, held in names.items() if held == member),
+                member,
+            )
+            for member in holding
+        }
+    )
+
+
+def writable_snapshot(root: Path) -> dict:
+    """What every file Git reports as moved looks like right now, by size and time.
+
+    Two questions asked as two invocations that each answer in one path per
+    line, rather than one status report this half would have to take apart:
+    what differs from the commit, and what is not tracked at all. Between them
+    they cover every path a command could write that anybody could later
+    attribute.
+
+    Size and modification time rather than a digest. A digest of every moved
+    file before every shell call is paid on the whole working set, where these
+    two are a stat each — and what the snapshot is for is telling *which* files
+    moved, after which digesting the few that did is cheap.
+    """
+    moved = git_answers(["diff", "--name-only", "HEAD"], root) or []
+    fresh = git_answers(["ls-files", "--others", "--exclude-standard"], root) or []
+    return {
+        path: [stat.st_size, stat.st_mtime_ns]
+        for path in dict.fromkeys([*moved, *fresh])
+        for stat in [file_stat(root / path)]
+        if stat is not None
+    }
+
+
+def file_stat(path: Path):
+    """One file's stat, or nothing where it cannot be read.
+
+    A path Git reported and the filesystem will not stat is a file deleted
+    between the two calls, which is a race rather than a failure: it simply
+    does not appear in this snapshot, and the comparison treats it the way it
+    treats anything else absent from one side.
+    """
+    try:
+        return path.stat()
+    except OSError:
+        return None
+
+
+def open_claim_window(
+    root: Path | None, store: list[str], windows_dir: str, mine: str
+) -> None:
+    """Record what this session's tree looked like before a command ran.
+
+    The file's presence is the window: another session listing this directory
+    while its own command runs learns that somebody else's was open over the
+    same moment, which is the whole of what tier three needs to know.
+    """
+    directory = peer_store(root, store)
+    if directory is None or not mine or root is None:
+        return
+    windows = directory / windows_dir
+    try:
+        windows.mkdir(parents=True, exist_ok=True)
+        (windows / f"{mine}.json").write_text(
+            json.dumps(
+                {
+                    "root": str(root),
+                    "at": datetime.now(UTC).timestamp(),
+                    "entries": writable_snapshot(root),
+                }
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        return
+
+
+def stale_window(window: Path, stale_after_seconds: float) -> bool:
+    """Whether a window has been open too long to be anybody"'s live command.
+
+    A window is opened before a call and closed after it, so one left standing
+    is a call that never ran — refused at the prompt, or a session that died
+    holding it. Left counted, that session would make every change any other
+    session made afterwards read as contested, for as long as the file sat
+    there. An unreadable stamp reads as stale for the same reason.
+    """
+    try:
+        opened = json.loads(window.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    if not isinstance(opened, dict) or "at" not in opened:
+        return True
+    return datetime.now(UTC).timestamp() - opened["at"] > stale_after_seconds
+
+
+def close_claim_window(
+    root: Path | None,
+    store: list[str],
+    windows_dir: str,
+    mine: str,
+    stale_after_seconds: float = 300.0,
+) -> dict:
+    """What changed while this session's command ran, and who else was watching.
+
+    ``paths`` are the files whose size or modification time differs from the
+    snapshot, plus the ones that were not in it at all. ``rivals`` are the
+    other sessions whose own windows were open across this one — the case a
+    before-and-after comparison cannot attribute, because it sees every change
+    in its window regardless of who made it.
+    """
+    empty = {"paths": [], "rivals": []}
+    directory = peer_store(root, store)
+    if directory is None or not mine or root is None:
+        return empty
+    windows = directory / windows_dir
+    opened = windows / f"{mine}.json"
+    try:
+        before = json.loads(opened.read_text(encoding="utf-8"))
+        opened.unlink()
+    except (OSError, ValueError):
+        return empty
+    if not isinstance(before, dict) or "entries" not in before:
+        return empty
+    entries = before["entries"]
+    after = writable_snapshot(root)
+    try:
+        rivals = [
+            other.stem
+            for other in windows.glob("*.json")
+            if other.stem != mine and not stale_window(other, stale_after_seconds)
+        ]
+    except OSError:
+        rivals = []
+    return {
+        "paths": sorted(
+            str(root / path)
+            for path, stamp in after.items()
+            if path not in entries or entries[path] != stamp
+        ),
+        "rivals": sorted(rivals),
+    }
+
+
+def file_digest(path_text: str) -> str:
+    """What one file's bytes hash to, or nothing where they cannot be read.
+
+    Carried on the claim so a later reader can tell the content this session
+    left from whatever stands there now — which is what makes a claim evidence
+    of a change rather than only an assertion that one happened.
+    """
+    try:
+        return sha256(Path(path_text).read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def member_actor(directory: Path, roster_file: str, member: str) -> dict | None:
+    """This session's own address as the roster holds it, or nothing.
+
+    Read rather than composed. A session that never joined has no address to
+    write claims under, and inventing one here would put a holder on the
+    record that no listing shows and nothing can ask.
+    """
+    return next(
+        (
+            found["actor"]
+            for found in peer_members(directory, roster_file)
+            if found["actor"]["id"] == member
+        ),
+        None,
+    )
+
+
+def record_claims(
+    root: Path | None,
+    store: list[str],
+    roster_file: str,
+    touches_file: str,
+    mine: str,
+    paths: list[str],
+    rivals: list[str],
+) -> None:
+    """Write down what this session's call changed, and who else it could be.
+
+    A claim per path. Where another session had a window open across the same
+    moment, every name goes on the record instead of one being guessed at: a
+    before-and-after comparison sees the change and cannot see who made it,
+    and a confident wrong author is worse than an honest pair, because the
+    next reader is deciding whether it is safe to write.
+
+    Silent on every failure. This runs after the work has already happened, so
+    the call it belongs to cannot be undone by refusing — and a claim nobody
+    could record costs a later reader an attribution, while a raised exception
+    here costs the session its ability to work.
+    """
+    directory = peer_store(root, store)
+    if directory is None or not mine or not paths:
+        return
+    actor = member_actor(directory, roster_file, mine)
+    if actor is None:
+        return
+    contenders = [
+        found
+        for other in rivals
+        for found in [member_actor(directory, roster_file, other)]
+        if found is not None
+    ]
+    stamped = datetime.now(UTC).isoformat()
+    lines = [
+        json.dumps(
+            {
+                "type": "contested" if contenders else "touched",
+                "actor": actor,
+                "at": stamped,
+                "path": path,
+                "digest": file_digest(path),
+                "rivals": contenders,
+            }
+        )
+        for path in paths
+    ]
+    try:
+        with (directory / touches_file).open("a", encoding="utf-8") as record:
+            record.write("".join(f"{line}\n" for line in lines))
+    except OSError:
+        return

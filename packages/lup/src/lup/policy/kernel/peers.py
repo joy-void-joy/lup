@@ -19,7 +19,8 @@ the reader did not ask.
 """
 
 from .decision import KernelDecision
-from .rows import PeerRedirectRow
+from .effects import STRENGTH
+from .rows import PeerPolicyRow
 from .tools import TOOL_ESCALATE_HINT, escalated_reason
 
 
@@ -49,7 +50,7 @@ def addressed_peer(values: list[str], addresses: list[str]) -> str:
 
 
 def decide_peer_send(
-    values: list[str], addresses: list[str], row: PeerRedirectRow | None
+    values: list[str], addresses: list[str], row: PeerPolicyRow | None
 ) -> KernelDecision:
     """Judge one native send against who this repository's roster holds.
 
@@ -69,7 +70,7 @@ def decide_peer_send(
     return KernelDecision("deny", f"{named}: {row['send_reason']}" + TOOL_ESCALATE_HINT)
 
 
-def decide_peer_listing(row: PeerRedirectRow | None) -> KernelDecision:
+def decide_peer_listing(row: PeerPolicyRow | None) -> KernelDecision:
     """Judge one native listing, which is to say leave it alone.
 
     Always a deferral. The call answers a question this repository's roster
@@ -82,7 +83,7 @@ def decide_peer_listing(row: PeerRedirectRow | None) -> KernelDecision:
     return KernelDecision("defer", "a wider population than this repository's roster")
 
 
-def peer_listing_context(listing: list[str], row: PeerRedirectRow | None) -> str:
+def peer_listing_context(listing: list[str], row: PeerPolicyRow | None) -> str:
     """This repository's roster, framed so a reader can tell it from the wider one.
 
     Empty where nothing has joined, because an attachment saying a roster is
@@ -92,3 +93,53 @@ def peer_listing_context(listing: list[str], row: PeerRedirectRow | None) -> str
     if row is None or not listing:
         return ""
     return "\n".join([row["listing_note"], *[f"  {line}" for line in listing]])
+
+
+def decide_foreign_claim(
+    path: str, holders: list[str], row: PeerPolicyRow | None
+) -> KernelDecision | None:
+    """Judge a write to a path a live session other than this one is holding.
+
+    An approval question rather than a refusal, because the answer is
+    genuinely the operator's: two sessions editing one file is sometimes
+    exactly right, and a policy that decided otherwise would refuse ordinary
+    parallel work. What it must not be is silent — the failure this exists for
+    is finding out at merge time.
+
+    Every holder is named rather than the first. More than one is a change
+    nothing could attribute, and a reader deciding whom to ask has to see that
+    it is a question rather than an answer.
+
+    ``None`` where nothing is held, which is not the same as an allow: this
+    family has no positive authority to grant, and returning one would let a
+    quiet path weaken a verdict the edit gates reached on their own.
+    """
+    if row is None or not holders:
+        return None
+    return KernelDecision(
+        "ask", f"{path} is held by {', '.join(holders)} — {row['claim_reason']}"
+    )
+
+
+def settled_with_claim(
+    verdict: KernelDecision, claim: KernelDecision | None
+) -> KernelDecision:
+    """One edit's own verdict and the claim over its path, settled together.
+
+    The stronger effect decides and both reasons survive, because the two
+    answer different questions — whether this content may be written, and
+    whether somebody else is already in this file — and an approver shown only
+    one of them is deciding on half of it.
+
+    ``findings`` is the channel composition already travels, so the reasons
+    are joined once at the seam every renderer funnels through rather than
+    concatenated here. A tie keeps the edit's own verdict as the carrier,
+    which is right: it is the verdict about the act, and the claim is context
+    for whoever answers it.
+    """
+    if claim is None:
+        return verdict
+    parts = (verdict, claim)
+    return max(parts, key=lambda part: STRENGTH.index(part.effect)).revised(
+        findings=parts
+    )

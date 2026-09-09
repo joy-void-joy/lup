@@ -21,6 +21,7 @@ from lup.channels.models import Door
 from lup.coordination.identity import mint_member_id
 from lup.coordination.repository import PeerView, RepositoryPeers
 from lup.coordination.roster import Delivery
+from lup.coordination.touches import Claim
 from lup.workspace.paths import project_root
 
 
@@ -31,6 +32,25 @@ def peer_line(view: PeerView) -> str:
     return " — ".join(
         part
         for part in (f"{view.address}{state}", where, view.doing, view.member.delivery)
+        if part
+    )
+
+
+def claim_line(claim: Claim) -> str:
+    """One holding as a person reads it: what, who, and whether anyone is sure.
+
+    The holders are spelled out in full where there is more than one, because
+    that row means something different from the others — nothing could tell
+    who made the change — and a reader skimming for whom to ask has to see
+    that it is a question rather than an answer.
+    """
+    holders = ", ".join(holder.id for holder in claim.holders)
+    return " — ".join(
+        part
+        for part in (
+            f"{'under' if claim.prefix else 'at'} {claim.path}",
+            f"contested by {holders}" if len(claim.holders) > 1 else holders,
+        )
         if part
     )
 
@@ -166,3 +186,39 @@ def create_coordination_app() -> typer.Typer:
             typer.echo(f"[{kind} by {message.door}] {message.text}")
 
     return app
+
+    @app.command("holdings")
+    def holdings_cmd() -> None:
+        """List what each live session in this repository is holding.
+
+        Nobody declared any of it. A row is either a file some session's calls
+        actually changed or a prefix one of them took deliberately, and a row
+        naming more than one session is a change nothing could attribute —
+        which is worth reading as it is rather than as a guess.
+        """
+        listing = peers().held()
+        if not listing:
+            typer.echo("No session is holding anything in this repository.")
+            return
+        for claim in listing:
+            typer.echo(claim_line(claim))
+
+    @app.command("lock")
+    def lock_cmd(
+        prefix: Annotated[Path, typer.Argument(help="What to take, as a path")],
+        member_id: Annotated[
+            str, typer.Option("--id", help="Which session, by its durable id")
+        ],
+    ) -> None:
+        """Take everything beneath a prefix, before having touched any of it."""
+        peers().lock(member_id, prefix.resolve())
+
+    @app.command("release")
+    def release_cmd(
+        prefix: Annotated[Path, typer.Argument(help="What to give back, as a path")],
+        member_id: Annotated[
+            str, typer.Option("--id", help="Which session, by its durable id")
+        ],
+    ) -> None:
+        """Give a prefix back, which does nothing unless this session held it."""
+        peers().release(member_id, prefix.resolve())

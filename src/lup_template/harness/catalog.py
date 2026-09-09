@@ -46,7 +46,7 @@ from lup.devtools.project import DevProject, Tracker
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
 from lup.policy.boundary import depends_on
-from lup.coordination.redirect import peer_redirect
+from lup.coordination.policy import peer_policy
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import (
     declared_project_root,
@@ -598,7 +598,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # of them is judged against the roster it would otherwise bypass.
             # Built from the store's own layout rather than spelled: renaming
             # the coordination directory moves the compiled hook with it.
-            peer_redirect=peer_redirect(),
+            peer_policy=peer_policy(),
             refused_tools=REFUSED_TOOLS,
             # Which checker answers for an edit is this project's toolchain,
             # not the library's, and it is named rather than located: the

@@ -546,7 +546,7 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     routed_tools=["Bash", "web_fetch", "apply_patch"],
     hook_events=["PermissionRequest", "PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
-    observed_tools=["apply_patch"],
+    observed_tools=["apply_patch", "Bash"],
     failure="stderr_exit",
     runtime_modules=["codex_patch", "policy_data"],
 )
@@ -826,7 +826,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         edit_rules=source.resolved_edit_rules(),
                         import_boundaries=source.resolved_import_boundaries(),
                         refused_tools=list(source.refused_tools),
-                        peer_redirect=source.peer_redirect,
+                        peer_policy=source.peer_policy,
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),

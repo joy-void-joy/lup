@@ -10,7 +10,7 @@ from kernel.rows import (
     ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
-    PeerRedirectRow,
+    PeerPolicyRow,
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
@@ -17816,12 +17816,16 @@ REFUSED_TOOLS: list[RefusedToolRow] = [
     },
 ]
 
-PEER_REDIRECT: PeerRedirectRow | None = {
+PEER_POLICY: PeerPolicyRow | None = {
     "store": ["lup", "coordination"],
     "roster_file": "roster.jsonl",
     "names_file": "names.jsonl",
     "send_reason": "that address is a session on this repository's roster, and a native send reaches it through a channel no other worktree can fold \u2014 nothing later can read that the two of you agreed on anything. Say it with the `coordination_send` tool instead, which reaches the same peer, records it where every session working in this clone can read it, and tells you whether the peer's own hook will put it in front of that peer's next tool call or it waits in the file until they next look",
     "listing_note": "This repository's own roster, which is a different population from the listing above: these are the sessions working in this clone, in whatever worktree, and they include peers no account-scoped listing can see. Reach any of them with `coordination_send`, which records what it carries. The person watching is always at `user`.",
+    "touches_file": "touches.jsonl",
+    "windows_dir": "windows",
+    "claim_reason": "a live session in this repository has that path, which nobody declared \u2014 it is there because that session's own calls changed it, or because it took the prefix deliberately. Writing under it is how two sessions overwrite each other between merges, and the loser finds out at merge time. Ask the holder with `coordination_send` first, or go ahead if you already know what they are doing. A claim expires with the session holding it, so one still standing means that session has not stopped",
+    "member_env": "LUP_COORDINATION_MEMBER",
 }
 
 AUTONOMOUS_AGENT_IDENTITIES: list[str] = [

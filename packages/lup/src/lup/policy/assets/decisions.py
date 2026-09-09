@@ -40,6 +40,11 @@ from host import (
     patch_write_targets,
     peer_addresses,
     peer_listing,
+    claim_holders,
+    close_claim_window,
+    declared_identity,
+    open_claim_window,
+    record_claims,
     recoverable_write_targets,
     record_deferral,
     record_question,
@@ -59,7 +64,13 @@ from kernel.edit import (
 )
 from kernel.effects import STRENGTH
 from kernel.fetch import decide_fetch
-from kernel.peers import decide_peer_listing, decide_peer_send, peer_listing_context
+from kernel.peers import (
+    decide_foreign_claim,
+    decide_peer_listing,
+    decide_peer_send,
+    peer_listing_context,
+    settled_with_claim,
+)
 from kernel.lex import (
     authored_writes,
     python_script_targets,
@@ -85,7 +96,7 @@ from policy_data import (
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
-    PEER_REDIRECT,
+    PEER_POLICY,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
@@ -339,23 +350,23 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     recipient in is that runtime's business and this half answers for all of
     them.
     """
-    if PEER_REDIRECT is None:
+    if PEER_POLICY is None:
         return decide_peer_send(values, [], None)
     return decide_peer_send(
         values,
         peer_addresses(
             cwd,
-            PEER_REDIRECT["store"],
-            PEER_REDIRECT["roster_file"],
-            PEER_REDIRECT["names_file"],
+            PEER_POLICY["store"],
+            PEER_POLICY["roster_file"],
+            PEER_POLICY["names_file"],
         ),
-        PEER_REDIRECT,
+        PEER_POLICY,
     )
 
 
 def peer_listing_decision() -> KernelDecision:
     """Judge one native listing of who this session can reach, which defers."""
-    return decide_peer_listing(PEER_REDIRECT)
+    return decide_peer_listing(PEER_POLICY)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:
@@ -366,16 +377,16 @@ def peer_listing_attachment(cwd: Path | None) -> str:
     acts on rather than a condition of the call happening — folding it into
     a reason would make it visible only where something refused.
     """
-    if PEER_REDIRECT is None:
+    if PEER_POLICY is None:
         return ""
     return peer_listing_context(
         peer_listing(
             cwd,
-            PEER_REDIRECT["store"],
-            PEER_REDIRECT["roster_file"],
-            PEER_REDIRECT["names_file"],
+            PEER_POLICY["store"],
+            PEER_POLICY["roster_file"],
+            PEER_POLICY["names_file"],
         ),
-        PEER_REDIRECT,
+        PEER_POLICY,
     )
 
 
@@ -594,3 +605,96 @@ def written_review(command: str, cwd: Path) -> list[str]:
         if verdict.effect != "allow":
             findings.append(f"{target}: {verdict.reason}")
     return findings
+
+
+def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision | None:
+    """Whether a live session other than this one is already in the named file.
+
+    The roster and the claim record are both live, so both are folded here and
+    handed over as the names they resolve to — the kernel reads no filesystem
+    and decides from what it is given.
+    """
+    if PEER_POLICY is None:
+        return None
+    return decide_foreign_claim(
+        path_text,
+        claim_holders(
+            cwd,
+            PEER_POLICY["store"],
+            PEER_POLICY["roster_file"],
+            PEER_POLICY["names_file"],
+            PEER_POLICY["touches_file"],
+            path_text,
+            declared_identity(PEER_POLICY["member_env"]),
+        ),
+        PEER_POLICY,
+    )
+
+
+def claim_window_opened(cwd: Path | None) -> None:
+    """Snapshot the tree before a command whose writes no input names.
+
+    Only a command needs this. Every other writing call says which file it is
+    about, and a call that names its own target is attributed from the target
+    rather than from a comparison.
+    """
+    if PEER_POLICY is None:
+        return
+    open_claim_window(
+        cwd,
+        PEER_POLICY["store"],
+        PEER_POLICY["windows_dir"],
+        declared_identity(PEER_POLICY["member_env"]),
+    )
+
+
+def claim_window_closed(cwd: Path | None) -> None:
+    """Attribute what a command changed, contested where nothing could tell."""
+    if PEER_POLICY is None:
+        return
+    mine = declared_identity(PEER_POLICY["member_env"])
+    closed = close_claim_window(
+        cwd, PEER_POLICY["store"], PEER_POLICY["windows_dir"], mine
+    )
+    record_claims(
+        cwd,
+        PEER_POLICY["store"],
+        PEER_POLICY["roster_file"],
+        PEER_POLICY["touches_file"],
+        mine,
+        closed["paths"],
+        closed["rivals"],
+    )
+
+
+def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
+    """Attribute a change to the exact file the call named.
+
+    The tier that needs no comparison and admits no contest: the call said
+    which file, so the claim it leaves is the one record another session can
+    act on without qualification, and it settles a path an earlier comparison
+    could only guess at.
+    """
+    if PEER_POLICY is None or not path_text:
+        return
+    record_claims(
+        cwd,
+        PEER_POLICY["store"],
+        PEER_POLICY["roster_file"],
+        PEER_POLICY["touches_file"],
+        declared_identity(PEER_POLICY["member_env"]),
+        [str(Path(path_text).resolve())],
+        [],
+    )
+
+
+def edit_claim_decision(
+    verdict: KernelDecision, path_text: str, cwd: Path | None
+) -> KernelDecision:
+    """One edit's own verdict, settled together with any claim over its path.
+
+    The join lives here rather than in either runtime, so both reach the same
+    answer about the same file: what the content gates decided, and whether
+    somebody else is already in it, are two questions and one approval.
+    """
+    return settled_with_claim(verdict, foreign_claim_decision(path_text, cwd))

@@ -32,7 +32,11 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from decisions import (
     bash_decision,
     edit_decision,
+    claim_window_closed,
+    claim_window_opened,
+    edit_claim_decision,
     fetch_decision,
+    named_claim_recorded,
     peer_listing_attachment,
     peer_listing_decision,
     peer_send_decision,
@@ -212,6 +216,9 @@ def dispatch(payload):
     )
     if name == "Bash":
         unsandboxed = spent_escape(tool_input)
+        # A command names no file it will write, so what it changed can only
+        # be read afterwards against what stood here before it ran.
+        claim_window_opened(session_directory)
         return bash_decision(
             tool_input["command"],
             managed_root(),
@@ -242,25 +249,33 @@ def dispatch(payload):
             tool_input["new_string"],
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
-        return edit_decision(
+        return edit_claim_decision(
+            edit_decision(
+                path,
+                before,
+                after,
+                Path(path).exists(),
+                autonomous,
+                "modify",
+                session_directory,
+            ),
             path,
-            before,
-            after,
-            Path(path).exists(),
-            autonomous,
-            "modify",
             session_directory,
         )
     if name == "Write":
         path = tool_input["file_path"]
         exists = Path(path).exists()
-        return edit_decision(
+        return edit_claim_decision(
+            edit_decision(
+                path,
+                read_document(path),
+                tool_input["content"],
+                exists,
+                autonomous,
+                "overwrite" if exists else "create",
+                session_directory,
+            ),
             path,
-            read_document(path),
-            tool_input["content"],
-            exists,
-            autonomous,
-            "overwrite" if exists else "create",
             session_directory,
         )
     if name == "SendMessage":
@@ -419,6 +434,9 @@ def observe(payload):
     path = tool_input["file_path"] if "file_path" in tool_input else ""
     if path:
         publish_edition(path)
+        # The tier that needs no comparison: the call said which file, so the
+        # claim it leaves is one another session can act on unqualified.
+        named_claim_recorded(path, session_root(payload))
         # Repaired before checked, because the repair rewrites the file: run
         # the other way round and the diagnostics describe lines that have
         # already moved. Both reports reach the agent together, which is the
@@ -427,7 +445,12 @@ def observe(payload):
             path, DIAGNOSTICS_COMMAND
         )
     command = tool_input["command"] if "command" in tool_input else ""
-    return written_review(command, Path.cwd()) if command else []
+    if not command:
+        return []
+    # What the command changed, read against the snapshot its own PreToolUse
+    # took, and contested where another session had a window open across it.
+    claim_window_closed(session_root(payload))
+    return written_review(command, session_root(payload) or Path.cwd())
 
 
 def main():
