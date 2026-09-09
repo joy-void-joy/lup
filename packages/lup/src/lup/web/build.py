@@ -16,13 +16,16 @@ large binary one. A build that emits one fails loudly rather than landing a
 corrupted file.
 
 **Bun is a dependency of the build, not of the wheel.** An adopter has the
-bundles; only somebody changing frontend code needs the toolchain. Where the
-workspace has no `node_modules`, this refuses with the one command to run
-rather than installing anything — installing fetches code, and that is a
-decision the policy asks about.
+bundles; only somebody changing frontend code needs the toolchain. Bun has no
+verb that restores the workspace and then runs, the way `uv run` syncs before
+running, so the build restores it itself: where `node_modules` is missing or
+behind `bun.lock`, :func:`restore_dependencies` runs the frozen install first
+— every package pinned by integrity hash, nothing resolved anew — and the
+gate's `bun test` row does the same before it runs.
 """
 
 import hashlib
+import os
 from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -103,6 +106,64 @@ def source_digest(workspace: Path) -> str:
     return digest.hexdigest()
 
 
+def toolchain_output(failed: sh.ErrorReturnCode) -> str:
+    """What a failed bun command printed, both streams, kept whole.
+
+    Both, because the toolchain disagrees with itself about where a verdict
+    goes: the type checker writes its diagnostics to stdout and the bundler
+    to stderr. Neither is always UTF-8, so a decode error here would hide the
+    failure it describes.
+    """
+    return "\n".join(
+        stream.decode("utf-8", errors="replace")
+        for stream in (failed.stdout, failed.stderr)
+    )
+
+
+def dependencies_behind(workspace: Path, lockfile: str = "bun.lock") -> bool:
+    """Whether the workspace's dependencies are missing or older than its lockfile.
+
+    Bun writes nothing under `node_modules` saying which lockfile it
+    restored, so the directory's own timestamp stands for that record:
+    :func:`restore_dependencies` dates a restore after the lockfile it read,
+    and a lockfile that moved since — a checkout, a merge, a `bun add` — is
+    newer than the tree it describes. A workspace with no lockfile has
+    nothing to be behind, so its dependencies are behind only while absent.
+    """
+    installed = workspace / "node_modules"
+    if not installed.is_dir():
+        return True
+    locked = workspace / lockfile
+    return locked.is_file() and locked.stat().st_mtime > installed.stat().st_mtime
+
+
+def restore_dependencies(workspace: Path) -> bool:
+    """Restore the workspace's dependencies from its lockfile where they are behind it.
+
+    What `uv run` does before running anything, for a toolchain that has no
+    verb for it: `bun test` and `bun run build` assume `node_modules`, so
+    whatever runs them restores it first — from the lockfile as frozen, every
+    package pinned by integrity hash and nothing resolved anew, which is the
+    restore the policy allows unasked. A restore that fails raises naming the
+    command with bun's own output, so the row or generation reporting it says
+    what to run by hand. Returns whether a restore ran, for a caller that
+    reports its work.
+    """
+    if not dependencies_behind(workspace):
+        return False
+    try:
+        BUN("install", "--frozen-lockfile", _cwd=str(workspace))
+    except sh.ErrorReturnCode as failed:
+        raise RuntimeError(
+            f"`bun install --frozen-lockfile` in {workspace} failed:\n"
+            f"{toolchain_output(failed)}"
+        ) from failed
+    # Dated after the lockfile it read, so the next reading finds nothing
+    # behind whether or not bun itself touched the directory.
+    os.utime(workspace / "node_modules")
+    return True
+
+
 def built_files(workspace: Path, surface: str, out: Path) -> list[Path]:
     """Build one surface into ``out`` and return every file Vite wrote there.
 
@@ -123,16 +184,8 @@ def built_files(workspace: Path, surface: str, out: Path) -> list[Path]:
             _cwd=str(workspace),
         )
     except sh.ErrorReturnCode as failed:
-        # The toolchain's own output, both streams and kept whole: the type
-        # checker writes its diagnostics to stdout and the bundler to stderr,
-        # and neither is always UTF-8, so a decode error here would hide the
-        # failure it describes.
-        said = "\n".join(
-            stream.decode("utf-8", errors="replace")
-            for stream in (failed.stdout, failed.stderr)
-        )
         raise RuntimeError(
-            f"building the {surface!r} surface failed:\n{said}"
+            f"building the {surface!r} surface failed:\n{toolchain_output(failed)}"
         ) from failed
     return sorted(path for path in out.rglob("*") if path.is_file())
 
@@ -215,7 +268,8 @@ def write_web_bundles(
     template names them once. A tree whose proof holds is current in either
     mode without a build, since :func:`proof_holds` reads exactly what a
     rebuild would restate; anything else is behind, which a check says and a
-    write settles by building.
+    write settles by building — after restoring the workspace's dependencies
+    where they are behind its lockfile, since a build assumes them.
     """
     base = root or project_root()
     home = base / workspace
@@ -227,11 +281,7 @@ def write_web_bundles(
         raise RuntimeError(
             f"{bundles} is behind {workspace}; run `{REGENERATE_COMMAND}`"
         )
-    if not (home / "node_modules").is_dir():
-        raise RuntimeError(
-            f"{workspace} has no node_modules; run `bun install --frozen-lockfile`"
-            " there, then the generation again"
-        )
+    restore_dependencies(home)
     with TemporaryDirectory(prefix="lup-web-") as scratch:
         artifacts = [
             artifact

@@ -166,7 +166,8 @@ def test_a_bun_root_runs_the_workspace_tests_and_carries_their_report(
     """The frontend's tests are a suite of the gate: green where they pass,
     and a failure carries bun's own report, which it writes to stderr."""
     workspace = tmp_path / "web"
-    workspace.mkdir()
+    # Dependencies present and no lockfile to be behind: nothing to restore.
+    (workspace / "node_modules").mkdir(parents=True)
     (workspace / "passing.test.ts").write_text(
         'import { expect, test } from "bun:test";\n'
         'test("holds", () => { expect(1 + 1).toBe(2); });\n',
@@ -199,3 +200,58 @@ def test_a_path_under_the_bun_workspace_is_owned_by_the_bun_root(
 
     assert check.owning_index(roots, named) == 1
     assert check.owning_index(roots, tmp_path / "packages/lup/tests/test_x.py") == 0
+
+
+def test_a_bun_root_restores_its_workspace_before_the_tests_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What `uv run pytest` gets from uv, the bun row does itself: the
+    lockfile is restored first, then the tests run against it."""
+    workspace = tmp_path / "web"
+    workspace.mkdir()
+    steps: list[str] = []  # lup: ignore[empty-collection] — order record
+
+    def restore(directory: Path) -> bool:
+        assert directory == workspace
+        steps.append("restore")
+        return True
+
+    def bun(*args: str, **_options: object) -> None:
+        steps.append(args[0])
+
+    monkeypatch.setattr(check, "restore_dependencies", restore)
+    monkeypatch.setattr(check, "BUN", bun)
+
+    assert check.BunTestRoot(name="bun test", directory=workspace).checked(4, [])
+
+    assert steps == ["restore", "test"]
+
+
+def test_a_restore_that_fails_is_the_bun_rows_verdict_naming_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "web"
+    workspace.mkdir()
+
+    def refuse(directory: Path) -> bool:
+        raise RuntimeError(
+            f"`bun install --frozen-lockfile` in {directory} failed:\n"
+            "error: lockfile had changes, but lockfile is frozen"
+        )
+
+    monkeypatch.setattr(check, "restore_dependencies", refuse)
+
+    report = check.BunTestRoot(name="bun test", directory=workspace).checked(4, [])
+
+    assert not report.passed
+    assert report.lines[0] == "bun test: FAIL"
+    assert any("bun install --frozen-lockfile" in line for line in report.lines)
+    assert any("lockfile is frozen" in line for line in report.lines)
+
+
+def test_only_the_bun_root_names_a_workspace_to_restore(tmp_path: Path) -> None:
+    pytest_root = check.TestRoot(name="pytest", directory=tmp_path)
+    bun_root = check.BunTestRoot(name="bun test", directory=tmp_path / "web")
+
+    assert pytest_root.restored_workspaces() == []
+    assert bun_root.restored_workspaces() == [tmp_path / "web"]
