@@ -72,6 +72,7 @@ from lup.policy.kernel.edit import (
     standalone_suppression,
 )
 from lup.policy.kernel.roles import path_role
+from lup.policy.kernel.rows import ResolutionRow
 from lup.devtools.dev.pyright_oracle import default_oracle
 from lup.devtools.project import DevProject
 from lup.devtools.utils import output_json
@@ -724,8 +725,9 @@ def report(
             raise typer.Exit(1)
         return
     for refutation in scan.refuted:
+        verdict = "refuted" if refutation.settled else "unresolved"
         typer.echo(
-            f"{refutation.file}:{refutation.line} [refuted {refutation.rule_id}] "
+            f"{refutation.file}:{refutation.line} [{verdict} {refutation.rule_id}] "
             f"{refutation.evidence}"
         )
     if not found:
@@ -756,22 +758,35 @@ def report_refutations(project: DevProject, path: Path, text: str) -> None:
     and has to ask rather than refuse, so a session with no language server
     must not report an empty refutation: that reads as "resolved, and nothing
     was refuted", which is the one wrong answer of the three available.
+
+    The refutations go out as the kernel's own resolution row, settled and
+    unsettled apart, because the gate reads them oppositely: a directive on a
+    refuted line is dead, one on an unresolved line stands. This is the same
+    `refute` the sweep runs, so what the gate is told is what `dev check`
+    will say — the hook may know less than the sweep, and knowing less comes
+    out here as unresolved, never as refuted.
     """
     oracle = default_oracle()
     if oracle is None:
-        output_json({"resolved": False, "refuted": {}})
+        output_json({"resolved": False, **ResolutionRow(refuted={}, unresolved={})})
         return
     source = PythonSource(
         path=path, module=module_name(path, scanned_roots(project)), text=text
     )
     found = refute([source], oracle, declared_rules(project).python)
     rows = found[path.as_posix()] if path.as_posix() in found else []
+
+    def lines_where(settled: bool) -> dict[str, list[int]]:
+        """Each rule's refuted lines, on the side of the verdict named."""
+        chosen = [row for row in rows if row.settled is settled]
+        return {
+            rule: [row.line for row in chosen if row.rule_id == rule]
+            for rule in dict.fromkeys(row.rule_id for row in chosen)
+        }
+
     output_json(
         {
             "resolved": True,
-            "refuted": {
-                rule: [row.line for row in rows if row.rule_id == rule]
-                for rule in dict.fromkeys(row.rule_id for row in rows)
-            },
+            **ResolutionRow(refuted=lines_where(True), unresolved=lines_where(False)),
         }
     )

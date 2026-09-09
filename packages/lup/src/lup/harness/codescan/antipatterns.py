@@ -407,7 +407,13 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             "about — an unannotated parameter, a value the checker infers "
             "nothing for — because a rule about mappings has nothing to say "
             "about a value nobody can show is one, and a denial nobody can "
-            "substantiate leaves a directive as the only way past it. A "
+            "substantiate leaves a directive as the only way past it. The two "
+            "are refuted differently: a receiver resolved outside the family "
+            "makes a marker there spurious, while one nothing can be shown "
+            "about leaves a marker standing — what a checker failed to learn "
+            "is no evidence against it, and a hook knowing less than the sweep "
+            "has to come out unresolved rather than spurious, or the two would "
+            "trade one marker back and forth. A "
             "`TypedDict` resolves to its own class and is refuted there: it "
             "is already the modelling this rule asks for. What the tree "
             "settles it settles alone, so a key computed at runtime, a route "
@@ -439,10 +445,12 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "fields (BaseModel/TypedDict). Nothing else is this rule's subject and none "
         "of it takes a directive: a key computed at runtime is a lookup into a map "
         "whose keys are data, a receiver the checker resolves outside the mapping "
-        "family or cannot resolve at all is refuted by the audit, and a `TypedDict` "
-        "is already the modelling this asks for — `.get` is how an optional key is "
-        "read out of one. A marker at any of those is reported spurious. Where the "
-        "literal is genuinely one key of an open dict, add `# lup: ignore[dict-get]`",
+        "family is refuted by the audit, and a `TypedDict` is already the "
+        "modelling this asks for — `.get` is how an optional key is read out of "
+        "one. A marker at any of those is reported spurious. A receiver the "
+        "checker cannot resolve at all is refuted too, and a marker there stands. "
+        "Where the literal is genuinely one key of an open dict, add "
+        "`# lup: ignore[dict-get]`",
     ),
     AntiPattern(
         id="bare-object",
@@ -1520,12 +1528,17 @@ def audit_text(
       bare ignore on a line that trips nothing -> "spurious";
     - a bare `# lup: ignore` that does silence the line -> "untyped".
 
-    A hit a resolution refuted is not a trip at all, so a directive naming
+    A hit a resolution settled is not a trip at all, so a directive naming
     that rule there reports "spurious" — the audit drives the cleanup of
     markers the refinement made unnecessary. These arrive as `refutations`
-    the caller resolved: the typed grammar in `lup.harness.codescan.grammar` passes
-    the sites whose receiver a type oracle proved outside the rule's family.
-    With none supplied and no oracle behind them, every selected line stands.
+    the caller resolved: `lup.harness.codescan.resolution` passes the sites
+    whose receiver a type oracle proved outside the rule's family. One it
+    refuted without settling — the checker inferred no type for the receiver
+    — drops the demand and nothing else: the line is not reported missing,
+    and a directive there stands, because a marker deleted on what a checker
+    failed to learn is one the next sweep, resolving the receiver, demands
+    straight back. With none supplied and no oracle behind them, every
+    selected line stands.
 
     An ignore counts as a guard only where a comment actually starts (per the
     tokenizer), so a docstring or string literal that merely *mentions*
@@ -1557,7 +1570,17 @@ def audit_text(
 
     context = PythonContext.parse(text)
     refuted = {
-        (refutation.rule_id, refutation.line) for refutation in refutations or []
+        (refutation.rule_id, refutation.line)
+        for refutation in refutations or []
+        if refutation.settled
+    }
+    # Refuted without being settled: the checker inferred no type for the
+    # receiver. These hits stay in `hits_by_line` so a directive written over
+    # one is read as reached rather than dead, and are never reported missing.
+    unresolved = {
+        (refutation.rule_id, refutation.line)
+        for refutation in refutations or []
+        if not refutation.settled
     }
 
     file_ignore_line = file_ignore.line if file_ignore is not None else 0
@@ -1660,7 +1683,12 @@ def audit_text(
         directive = guarding_directive(index)
         covered_ids = ignore_rule_ids(directive) if directive is not None else None
         for ap in hits:
-            if ap.strength == "strong":
+            # Nothing shown about the receiver: the rule demands no directive
+            # here and this audit reports none missing. The hit itself stays,
+            # so a directive over it keeps a file-level opt-out live below and
+            # is graded as reached rather than dead further down.
+            open_question = (ap.id, index) in unresolved
+            if ap.strength == "strong" and not open_question:
                 # No directive reaches this one. A soft rule's suppression is a
                 # reasoned exception the audit then grades; a strong rule has a
                 # replacement that is right every time, so the same comment
@@ -1684,6 +1712,8 @@ def audit_text(
                     file_live.add(ap.id)
                 continue
             if directive is not None and (covered_ids is None or ap.id in covered_ids):
+                continue
+            if open_question:
                 continue
             findings.append(
                 AntiPatternFinding(

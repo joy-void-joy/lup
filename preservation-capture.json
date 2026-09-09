@@ -1,5 +1,5 @@
 {
-  "revision": "30b9314288902477637f664cb050992a8672a681",
+  "revision": "2bbef1bfe2c8e745712b25ba35ae3197b6b3fea1",
   "roots": [
     "lup",
     "lup_template"
@@ -1616,7 +1616,8 @@
         "ADVISORY_KINDS",
         "summarize",
         "report",
-        "report_refutations"
+        "report_refutations",
+        "report_refutations.lines_where"
       ]
     },
     {
@@ -5203,6 +5204,7 @@
         "Refutation.line",
         "Refutation.subject",
         "Refutation.evidence",
+        "Refutation.settled",
         "PythonContext",
         "PythonContext.comment_columns",
         "PythonContext.docstring_lines",
@@ -8452,6 +8454,7 @@
         "peer_listing_attachment",
         "placed_document",
         "placed_edit_text",
+        "resolution_of",
         "rewritten_files",
         "edit_decision",
         "authored_review",
@@ -9688,6 +9691,9 @@
         "AcceptanceGuardRow",
         "AcceptanceGuardRow.ask_reason",
         "AcceptanceGuardRow.autonomous_reason",
+        "ResolutionRow",
+        "ResolutionRow.refuted",
+        "ResolutionRow.unresolved",
         "RewrittenFileRow",
         "RewrittenFileRow.target",
         "RewrittenFileRow.path",
@@ -9695,7 +9701,7 @@
         "RewrittenFileRow.after",
         "RewrittenFileRow.foreign",
         "RewrittenFileRow.outside_project",
-        "RewrittenFileRow.refuted",
+        "RewrittenFileRow.resolution",
         "ImportBoundaryRow",
         "ImportBoundaryRow.modules",
         "ImportBoundaryRow.owners",

@@ -82,7 +82,7 @@ from kernel.lex import (
     shell_sed_rewrites,
     shell_write_targets,
 )
-from kernel.rows import DisplacedTargetRow, RewrittenFileRow
+from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
@@ -439,6 +439,20 @@ def placed_edit_text(path_text: str, after: str, start: int, end: int) -> str | 
     return relocated_edit_text(after, start, end)
 
 
+def resolution_of(
+    reply: dict[str, dict[str, list[int]]] | None,
+) -> ResolutionRow | None:
+    """The kernel's row for what a checker answered, or None where none did.
+
+    The host half returns the checker's two verdict maps as the primitives it
+    read off the wire, because it may name no kernel type; this is where they
+    become the row the kernel reads, and the only place the two are joined.
+    """
+    if reply is None:
+        return None
+    return ResolutionRow(refuted=reply["refuted"], unresolved=reply["unresolved"])
+
+
 def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
     """What every in-place rewrite in this command would leave behind.
 
@@ -488,7 +502,7 @@ def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
                     # repository's environment, and starting one to answer a
                     # rule that will not be applied costs a language server's
                     # second for nothing.
-                    refuted=(
+                    resolution=resolution_of(
                         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
                         if not foreign
                         and awaits_resolution(
@@ -543,7 +557,7 @@ def edit_decision(
     # has nothing to say about. It would resolve another repository's imports
     # against another repository's environment to answer a rule that will not
     # be applied, and pay a language server's second for the privilege.
-    refuted = (
+    resolution = resolution_of(
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
         if not outside_this_repository
         and after is not None
@@ -563,7 +577,7 @@ def edit_decision(
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
         python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
-        refuted=refuted,
+        resolution=resolution,
         suffix=suffix,
         operation=operation,
         edit_rules=EDIT_RULES,

@@ -118,6 +118,23 @@ class AcceptanceGuardRow(TypedDict):
     autonomous_reason: str
 
 
+class ResolutionRow(TypedDict):
+    """What a checker settled about one text's receivers, per rule id.
+
+    ``refuted`` holds the lines whose receiver resolved to a declaration
+    outside the rule's family: no violation is there, and a directive naming
+    the rule there guards nothing. ``unresolved`` holds the lines nothing
+    could be shown about: the rule demands no directive there and refuses
+    none, and a directive written there stands, because a gate that learned
+    nothing about a receiver has no evidence against the line or against the
+    marker on it. The audit reads the same two verdicts off the same
+    resolution, so neither gate can call dead what the other demands.
+    """
+
+    refuted: dict[str, list[int]]
+    unresolved: dict[str, list[int]]
+
+
 class RewrittenFileRow(TypedDict):
     """One file an in-place rewrite names, as it stands and as it would stand.
 
@@ -143,8 +160,8 @@ class RewrittenFileRow(TypedDict):
     outside_project: bool
     """Whether it sits in no checkout whose conventions these rules are."""
 
-    refuted: dict[str, list[int]] | None
-    """Which anti-pattern findings a checker cleared, where one was worth running."""
+    resolution: ResolutionRow | None
+    """What a checker settled about the rewritten text, where one was worth running."""
 
 
 class ImportBoundaryRow(TypedDict):

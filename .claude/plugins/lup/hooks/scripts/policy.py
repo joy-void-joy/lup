@@ -57,7 +57,7 @@ from kernel.lex import (
     shell_sed_rewrites,
     shell_write_targets,
 )
-from kernel.rows import DisplacedTargetRow, RewrittenFileRow
+from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
@@ -1056,13 +1056,21 @@ def resolved_refutations(
     proposed: str,
     command: list[str],
     timeout_seconds: float = 30.0,
-) -> dict[str, list[int]] | None:
+) -> dict[str, dict[str, list[int]]] | None:
     """What a checker refutes in the text about to be written, or None.
 
     The kernel decides from primitive rows and reads nothing, which is what
     keeps a verdict a pure function of its inputs. Resolving a receiver's
     declaration is not a decision — it is a fact about the machine, the same
     kind this half already resolves — so it is answered here and passed in.
+
+    Two maps come back, each rule id to lines, under the names the kernel's
+    resolution row gives them: ``refuted`` for the lines whose receiver
+    resolved outside the rule's family, and ``unresolved`` for the lines the
+    checker looked at and could type nothing for. They are kept apart because
+    the gate treats them oppositely — a directive on a refuted line is dead,
+    one on an unresolved line stands — and this half may name no kernel type,
+    so the caller builds the row from the primitives.
 
     Run in the checkout holding the file, like every other checker this half
     starts, and handed the proposed text on stdin: the change is judged before
@@ -1098,7 +1106,10 @@ def resolved_refutations(
         reported = json.loads(finished.stdout)
         if not reported["resolved"]:
             return None
-        return {rule: list(lines) for rule, lines in reported["refuted"].items()}
+        return {
+            verdict: {rule: list(lines) for rule, lines in reported[verdict].items()}
+            for verdict in ("refuted", "unresolved")
+        }
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -2491,6 +2502,20 @@ def placed_edit_text(path_text: str, after: str, start: int, end: int) -> str | 
     return relocated_edit_text(after, start, end)
 
 
+def resolution_of(
+    reply: dict[str, dict[str, list[int]]] | None,
+) -> ResolutionRow | None:
+    """The kernel's row for what a checker answered, or None where none did.
+
+    The host half returns the checker's two verdict maps as the primitives it
+    read off the wire, because it may name no kernel type; this is where they
+    become the row the kernel reads, and the only place the two are joined.
+    """
+    if reply is None:
+        return None
+    return ResolutionRow(refuted=reply["refuted"], unresolved=reply["unresolved"])
+
+
 def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
     """What every in-place rewrite in this command would leave behind.
 
@@ -2540,7 +2565,7 @@ def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
                     # repository's environment, and starting one to answer a
                     # rule that will not be applied costs a language server's
                     # second for nothing.
-                    refuted=(
+                    resolution=resolution_of(
                         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
                         if not foreign
                         and awaits_resolution(
@@ -2595,7 +2620,7 @@ def edit_decision(
     # has nothing to say about. It would resolve another repository's imports
     # against another repository's environment to answer a rule that will not
     # be applied, and pay a language server's second for the privilege.
-    refuted = (
+    resolution = resolution_of(
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
         if not outside_this_repository
         and after is not None
@@ -2615,7 +2640,7 @@ def edit_decision(
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
         python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
-        refuted=refuted,
+        resolution=resolution,
         suffix=suffix,
         operation=operation,
         edit_rules=EDIT_RULES,

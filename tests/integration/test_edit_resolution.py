@@ -72,7 +72,7 @@ def test_the_host_resolves_a_receiver_the_gate_could_not() -> None:
 
     refuted = resolved_refutations(unwritten(root), PROPOSED, RESOLUTION_COMMAND)
 
-    assert refuted == {"dict-get": [REFUTED_LINE]}
+    assert refuted == {"refuted": {"dict-get": [REFUTED_LINE]}, "unresolved": {}}
     assert not Path(unwritten(root)).exists(), "resolving wrote the file"
 
 
@@ -87,7 +87,30 @@ def test_a_mapping_receiver_comes_back_unrefuted() -> None:
 
     refuted = resolved_refutations(unwritten(root), proposed, RESOLUTION_COMMAND)
 
-    assert refuted == {}
+    assert refuted == {"refuted": {}, "unresolved": {}}
+
+
+def test_a_framework_header_map_resolves_as_the_mapping_it_is() -> None:
+    """Starlette's `Headers` is a `typing.Mapping`, and the checker says so.
+
+    The #459 receiver: `request.headers.get("literal")`, where `request` is
+    annotated `Request`. The sweep resolves it into the family and demands a
+    directive, so a hook that reported it refuted — because its own checker
+    answered nothing — deleted the very marker this answer requires. Pinned
+    here so the resolved verdict is the one both gates are built on.
+    """
+    root = project_root()
+    proposed = (
+        "from starlette.requests import Request\n"
+        "\n"
+        "\n"
+        "def resume_of(request: Request) -> str:\n"
+        '    return request.headers.get("last-event-id", "")\n'
+    )
+
+    refuted = resolved_refutations(unwritten(root), proposed, RESOLUTION_COMMAND)
+
+    assert refuted == {"refuted": {}, "unresolved": {}}
 
 
 def test_no_declared_resolver_is_not_an_empty_refutation() -> None:
