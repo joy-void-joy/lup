@@ -14,6 +14,9 @@ from lup.devtools.dev.git_guards import (
 )
 from lup.devtools.gitguard import (
     GIT_ENVIRONMENT,
+    GuardVerdict,
+    RepositoryWatch,
+    Window,
     guard_report,
     moved_refs,
     repository_refs,
@@ -268,3 +271,58 @@ def test_a_repository_leaving_identity_to_the_global_config_reads_empty(
     sh.Command("git").bake("-C", str(tmp_path), _tty_out=False)("init", "-b", "main")
 
     assert watched_config(tmp_path) == {}
+
+
+def test_watched_settings_come_back_under_their_declared_spelling(
+    tmp_path: Path,
+) -> None:
+    """One listing serves every setting, and git's lowercasing does not leak.
+
+    The value is chosen to hold the characters the listing's own delimiters
+    would have tripped on had it been parsed as `key=value` lines.
+    """
+    git = sh.Command("git").bake("-C", str(tmp_path), _tty_out=False)
+    git("init", "-b", "main")
+    git("config", "core.hooksPath", str(tmp_path / "hooks"))
+    git("config", "user.name", "A = B")
+
+    assert watched_config(tmp_path) == {
+        "config core.hooksPath": str(tmp_path / "hooks"),
+        "config user.name": "A = B",
+    }
+
+
+def test_the_report_says_where_the_change_was_noticed() -> None:
+    """Under xdist the reader's first question is which worker, during what."""
+    window = Window(worker="gw3", test="tests/unit/test_x.py::test_y")
+
+    report = guard_report(
+        {"refs/heads/dev": "a" * 40}, {"refs/heads/dev": "b" * 40}, window
+    )
+
+    assert "noticed on worker gw3, during tests/unit/test_x.py::test_y" in report
+    assert "bystander" in report
+
+
+def test_a_watch_lays_a_change_at_the_door_of_the_test_that_saw_it(
+    tmp_path: Path,
+) -> None:
+    """The window that saw the change answers for it; the ones after do not.
+
+    A difference closed once per session lands on whichever test the worker
+    ran last, which is how a policy row about `gh pr create` was blamed for
+    a branch. Settling per test names the window, and moves the baseline so
+    the next window is not blamed for the same branch again.
+    """
+    git = guarded_repository(tmp_path)
+    watch = RepositoryWatch.armed(tmp_path, worker="gw7")
+
+    assert watch.after("tests/test_one.py::test_first") == GuardVerdict()
+    git("branch", "escaped")
+    verdict = watch.after("tests/test_one.py::test_second")
+    assert "refs/heads/escaped: created" in verdict.failure
+    assert (
+        "noticed on worker gw7, during tests/test_one.py::test_second"
+        in verdict.failure
+    )
+    assert watch.after("tests/test_one.py::test_third") == GuardVerdict()

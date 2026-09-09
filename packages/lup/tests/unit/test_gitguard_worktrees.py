@@ -16,6 +16,7 @@ import sh
 from lup.devtools.gitguard import (
     TEST_IDENTITY,
     ForeignCheckouts,
+    RepositoryWatch,
     repository_state,
 )
 
@@ -258,3 +259,21 @@ def test_a_worktree_cut_while_the_suite_runs_holds_its_branch(tmp_path: Path) ->
     verdict = foreign.joined(ForeignCheckouts.beside(main)).verdict(before, after)
     assert verdict.failure == ""
     assert "refs/heads/late" in verdict.notice
+
+
+def test_a_watch_tells_of_a_sibling_cut_mid_run_without_failing(
+    tmp_path: Path,
+) -> None:
+    """The same case through the watch a suite actually arms, window named."""
+    main = repository_with_a_sibling(tmp_path)
+    watch = RepositoryWatch.armed(main, worker="gw2")
+    worktree_cut(main, "late", tmp_path / "late")
+
+    verdict = watch.after("tests/test_matrix.py::test_row[gh pr create]")
+
+    assert verdict.failure == ""
+    assert "refs/heads/late" in verdict.notice
+    assert (
+        "noticed on worker gw2, during tests/test_matrix.py::test_row[gh pr create]"
+        in verdict.notice
+    )

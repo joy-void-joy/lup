@@ -29,6 +29,16 @@ ceiling that stopped git discovering the enclosing repository would also stop
 the tests that legitimately read it, and a suite that cannot run is a worse
 trade than one that reports what it broke.
 
+Read around every test, and per worker, rather than once around the session.
+Under xdist each worker is a session of its own over one shared ref store, so
+a difference closed once per session lands on whichever test that worker ran
+last: a policy row about `gh pr create` was failed for a branch a sibling
+session cut forty seconds into the run. A :class:`RepositoryWatch` settles
+after each test against a baseline that moves with it, so a change is laid at
+the door of the test whose window saw it, naming the worker that saw it; and
+the sibling worktrees are re-read when something moved, so a worktree cut
+mid-run answers for its own branch instead of the suite.
+
 Nothing here needs the repository to exist: a suite running outside a checkout
 gets an empty snapshot both times and never fails.
 """
@@ -152,17 +162,26 @@ def watched_config(
     Absent settings are simply absent, so a repository that leaves identity to
     the user's global config reads as empty here and a fixture writing one in
     shows up as a creation rather than as a change from nothing.
+
+    One listing rather than one query per setting, because this is read after
+    every test on every worker, and three processes a test is the difference
+    between a guard the suite does not feel and one it does. Git lowercases
+    the keys it lists, so each is mapped back to the spelling it was declared
+    under, which is the spelling a reader knows it by.
     """
-    found = {}
-    for setting in settings:
-        try:
-            value = sh.Command("git")(
-                "-C", str(root), "config", "--local", "--get", setting, _tty_out=False
-            )
-        except (sh.ErrorReturnCode, sh.CommandNotFound):
-            continue
-        found[f"config {setting}"] = str(value).strip()
-    return found
+    try:
+        listed = sh.Command("git")(
+            "-C", str(root), "config", "--local", "--list", "-z", _tty_out=False
+        )
+    except (sh.ErrorReturnCode, sh.CommandNotFound):
+        return {}
+    declared = {setting.lower(): setting for setting in settings}
+    # lup: ignore[string-split] — git's own `-z` listing, one `key\nvalue`
+    # entry per NUL by that format's definition
+    entries = [entry.partition("\n") for entry in str(listed).split("\0") if entry]
+    return {
+        f"config {declared[key]}": value for key, _, value in entries if key in declared
+    }
 
 
 def repository_state(root: Path, namespace: str = "") -> dict[str, str]:
@@ -217,14 +236,50 @@ def moved_refs(before: dict[str, str], after: dict[str, str]) -> list[str]:
     ]
 
 
-def guard_report(before: dict[str, str], after: dict[str, str]) -> str:
+class Window(BaseModel, frozen=True):
+    """Where a change was noticed: which worker, and the test it was running.
+
+    Under xdist the suite is many sessions over one ref store, and a
+    comparison closed once per session lands on whichever test tore down
+    last on the worker that noticed — a policy row about `gh pr create` was
+    failed for a branch a sibling session cut forty seconds into the run.
+    Naming the window says the one thing the evidence supports: the change
+    appeared while this test ran here.
+    """
+
+    worker: str
+    """The xdist worker, or whatever the suite calls the only one."""
+
+    test: str
+    """The test whose window saw the change, as pytest names it."""
+
+    def describe(self) -> str:
+        """One line locating the change, for either report to carry."""
+        return f"noticed on worker {self.worker}, during {self.test}"
+
+    def located(self) -> list[str]:
+        """The lines a failure opens with: where, and what that does not prove."""
+        return [
+            f"Change {self.describe()}.",
+            "That is the test running here when the change appeared: the",
+            "culprit when it came from this worker, and a bystander when",
+            "another worker or another session wrote the shared ref store",
+            "just then.",
+            "",
+        ]
+
+
+def guard_report(
+    before: dict[str, str], after: dict[str, str], window: Window | None = None
+) -> str:
     """What to tell a developer whose checkout the suite just wrote into.
 
     Empty when nothing moved, which is the caller's signal to say nothing.
     The wording names the cause the evidence actually supports — a fixture
     that reached the enclosing repository — because the alternative reading,
     that the developer moved a branch mid-run, is one they can rule out
-    themselves and the suite cannot.
+    themselves and the suite cannot. ``window`` locates the change where the
+    caller settles per test; a caller comparing two bare states has none.
     """
     moved = moved_refs(before, after)
     if not moved:
@@ -233,6 +288,7 @@ def guard_report(before: dict[str, str], after: dict[str, str]) -> str:
         [
             "This test run modified the repository it is running inside.",
             "",
+            *(window.located() if window else []),
             "A fixture bound git to the working directory rather than to its",
             "own throwaway repository, so this much of the real checkout",
             "changed:",
@@ -306,15 +362,22 @@ class ForeignCheckouts(BaseModel, frozen=True):
         """
         return ForeignCheckouts(holders=self.holders | other.holders)
 
-    def verdict(self, before: dict[str, str], after: dict[str, str]) -> "GuardVerdict":
+    def verdict(
+        self,
+        before: dict[str, str],
+        after: dict[str, str],
+        window: Window | None = None,
+    ) -> "GuardVerdict":
         """What moved, split into what this run answers for and what it does not.
 
         Config is never anybody else's: it is one shared file rather than a
         ref a worktree holds, so it stays on the failing side whatever moved.
         """
         return GuardVerdict(
-            failure=guard_report(self.ours(before), self.ours(after)),
-            notice=foreign_notice(moved_refs(self.theirs(before), self.theirs(after))),
+            failure=guard_report(self.ours(before), self.ours(after), window),
+            notice=foreign_notice(
+                moved_refs(self.theirs(before), self.theirs(after)), window
+            ),
         )
 
     @classmethod
@@ -425,7 +488,7 @@ class GuardVerdict(BaseModel, frozen=True):
     """What moved in a sibling worktree: worth saying, not worth failing."""
 
 
-def foreign_notice(moved: list[str]) -> str:
+def foreign_notice(moved: list[str], window: Window | None = None) -> str:
     """What to say about refs a sibling worktree moved under the suite's feet."""
     if not moved:
         return ""
@@ -435,9 +498,63 @@ def foreign_notice(moved: list[str]) -> str:
             "",
             *(f"  {line}" for line in moved),
             "",
+            *([f"Change {window.describe()}.", ""] if window else []),
             "Another session committing in a sibling worktree is not this run",
             "writing into the checkout, so the suite is not failed for it. A",
             "ref this worktree owns, or one that appeared from nowhere, still",
             "is.",
         ]
     )
+
+
+class RepositoryWatch(BaseModel):
+    """One worker's watch over the repository enclosing its suite, test by test.
+
+    A comparison per test rather than one per session, because a session
+    under xdist is one worker's share of the suite and its single difference
+    lands on whichever test that worker ran last. Settling after each test
+    against a baseline that moves with it lays a change at the door of the
+    test whose window saw it, on the worker that saw it, and leaves the tests
+    after it answering for their own windows rather than for the same change
+    again.
+    """
+
+    root: Path
+    """The checkout the suite runs inside, which is what the watch reads."""
+
+    worker: str
+    """Who is watching, for the report: the xdist worker, or the only one."""
+
+    foreign: ForeignCheckouts
+    """Which refs sibling worktrees answer for, as last read."""
+
+    baseline: dict[str, str]
+    """The state every later reading is compared against, moving with each."""
+
+    @classmethod
+    def armed(cls, root: Path, worker: str) -> "RepositoryWatch":
+        """A watch reading the repository as it stands before the first test."""
+        return cls(
+            root=root,
+            worker=worker,
+            foreign=ForeignCheckouts.beside(root),
+            baseline=repository_state(root),
+        )
+
+    def after(self, test: str) -> GuardVerdict:
+        """What moved since the last settlement, laid at ``test``'s door.
+
+        The sibling map is re-read only when something moved: a worktree cut
+        mid-run is found then, at the cost of one listing per change rather
+        than per test, and the quiet case — every test of every run — costs
+        the state read alone.
+        """
+        current = repository_state(self.root)
+        if current == self.baseline:
+            return GuardVerdict()
+        self.foreign = self.foreign.joined(ForeignCheckouts.beside(self.root))
+        verdict = self.foreign.verdict(
+            self.baseline, current, Window(worker=self.worker, test=test)
+        )
+        self.baseline = current
+        return verdict
