@@ -1,5 +1,5 @@
 {
-  "revision": "f289dca35f45066c848122534627ef9247951ef3",
+  "revision": "06a85b477b0cc2567266d68a2990471b8550fafb",
   "roots": [
     "lup",
     "lup_template"
@@ -504,13 +504,21 @@
         "PeerSayOutput.address",
         "PeerSayOutput.delivery",
         "PeerSayOutput.outstanding",
+        "PrefixInput",
+        "PrefixInput.path",
+        "ClaimOutput",
+        "ClaimOutput.path",
+        "ClaimOutput.holders",
         "InboxOutput",
         "InboxOutput.messages",
         "create_peer_tools",
+        "create_peer_tools.present",
         "create_peer_tools.coordination_peers",
         "create_peer_tools.coordination_describe",
         "create_peer_tools.coordination_send",
-        "create_peer_tools.coordination_inbox"
+        "create_peer_tools.coordination_inbox",
+        "create_peer_tools.coordination_lock",
+        "create_peer_tools.coordination_release"
       ]
     },
     {
@@ -521,6 +529,15 @@
         "USER_TASK",
         "user_peer",
         "join_user"
+      ]
+    },
+    {
+      "module": "lup.coordination.policy",
+      "declares": [
+        "SEND_REDIRECT",
+        "LISTING_NOTE",
+        "CLAIM_HELD",
+        "peer_policy"
       ]
     },
     {
@@ -604,7 +621,13 @@
         "RepositoryPeers.listing",
         "RepositoryPeers.send",
         "RepositoryPeers.waiting",
-        "RepositoryPeers.take"
+        "RepositoryPeers.take",
+        "RepositoryPeers.touches",
+        "RepositoryPeers.live_ids",
+        "RepositoryPeers.held",
+        "RepositoryPeers.holding",
+        "RepositoryPeers.lock",
+        "RepositoryPeers.release"
       ]
     },
     {
@@ -772,6 +795,58 @@
         "create_cohort_tools.asking.queue_questions",
         "create_cohort_tools.asking.await_answers",
         "create_cohort_tools.asking.ask_questions"
+      ]
+    },
+    {
+      "module": "lup.coordination.touches",
+      "declares": [
+        "TOUCHES_FILE",
+        "WINDOWS_DIR",
+        "Claim",
+        "Claim.path",
+        "Claim.prefix",
+        "Claim.holders",
+        "Claim.digest",
+        "Claim.at",
+        "Claim.covers",
+        "Claim.subject",
+        "TouchRecord",
+        "TouchRecord.actor",
+        "TouchRecord.at",
+        "TouchRecord.path",
+        "TouchRecord.claim",
+        "TouchRecord.applied",
+        "PathTouched",
+        "PathTouched.type",
+        "PathTouched.digest",
+        "PathTouched.claim",
+        "PathTouched.applied",
+        "PathContested",
+        "PathContested.type",
+        "PathContested.digest",
+        "PathContested.rivals",
+        "PathContested.claim",
+        "PathContested.applied",
+        "PrefixLocked",
+        "PrefixLocked.type",
+        "PrefixLocked.claim",
+        "PrefixLocked.applied",
+        "PrefixReleased",
+        "PrefixReleased.type",
+        "PrefixReleased.claim",
+        "PrefixReleased.applied",
+        "TouchEntry",
+        "TOUCH_ADAPTER",
+        "Touches",
+        "Touches.__init__",
+        "Touches.record",
+        "Touches.touched",
+        "Touches.contested",
+        "Touches.locked",
+        "Touches.released",
+        "Touches.claims",
+        "Touches.held",
+        "Touches.covering"
       ]
     },
     {
@@ -1152,6 +1227,7 @@
       "module": "lup.devtools.coordination.app",
       "declares": [
         "peer_line",
+        "claim_line",
         "create_coordination_app",
         "create_coordination_app.peers",
         "create_coordination_app.roster_cmd",
@@ -1160,7 +1236,10 @@
         "create_coordination_app.rename_cmd",
         "create_coordination_app.leave_cmd",
         "create_coordination_app.send_cmd",
-        "create_coordination_app.inbox_cmd"
+        "create_coordination_app.inbox_cmd",
+        "create_coordination_app.holdings_cmd",
+        "create_coordination_app.lock_cmd",
+        "create_coordination_app.release_cmd"
       ]
     },
     {
@@ -1689,10 +1768,12 @@
         "scaffold_budget_report",
         "branch_record_reports",
         "changed_paths",
+        "changed_python_files",
         "owned_comments",
         "scan_reports",
         "scan_reports.reported",
-        "run_checks"
+        "run_checks",
+        "run_changed"
       ]
     },
     {
@@ -6336,6 +6417,7 @@
         "HookSet.resolution_command",
         "HookSet.repair_command",
         "HookSet.refused_tools",
+        "HookSet.peer_policy",
         "HookSet.runner_targets",
         "HookSet.everyday_commands",
         "HookSet.rules",
@@ -7744,11 +7826,20 @@
         "unconfined_by_declaration",
         "fetch_decision",
         "refused_tool_decision",
+        "peer_send_decision",
+        "peer_listing_decision",
+        "peer_listing_attachment",
         "placed_document",
         "placed_edit_text",
+        "rewritten_files",
         "edit_decision",
         "authored_review",
-        "written_review"
+        "written_review",
+        "foreign_claim_decision",
+        "claim_window_opened",
+        "claim_window_closed",
+        "named_claim_recorded",
+        "edit_claim_decision"
       ]
     },
     {
@@ -7791,6 +7882,7 @@
         "undo_expire",
         "undo_expire.outlived",
         "undo_snapshot",
+        "rewritten_text",
         "recoverable_write_targets",
         "committed_text",
         "patch_write_targets",
@@ -7802,7 +7894,26 @@
         "read_document",
         "declared_identity",
         "document_allowances",
-        "granted_allowances"
+        "granted_allowances",
+        "peer_store",
+        "stream_records",
+        "stream_records.legible",
+        "peer_members",
+        "peer_name_claims",
+        "peer_addresses",
+        "peer_listing",
+        "peer_listing.described",
+        "claim_covers",
+        "peer_claims",
+        "claim_holders",
+        "writable_snapshot",
+        "file_stat",
+        "open_claim_window",
+        "stale_window",
+        "close_claim_window",
+        "file_digest",
+        "member_actor",
+        "record_claims"
       ]
     },
     {
@@ -7897,6 +8008,7 @@
         "antipattern_rows_literal.row_fields",
         "path_role_rows_literal",
         "acceptance_guard_literal",
+        "peer_policy_literal",
         "refused_tool_rows_literal",
         "runner_target_rows_literal",
         "string_rows_literal",
@@ -8328,9 +8440,6 @@
       "module": "lup.policy.kernel.commands",
       "declares": [
         "IN_PLACE_SED_REFUSAL",
-        "SED_SAFE_SHORT_FLAGS",
-        "SED_SAFE_LONG_OPTIONS",
-        "SED_SUBSTITUTE_FLAG_CHARS",
         "row_verdict",
         "WriteFacts",
         "WriteFacts.existing",
@@ -8339,6 +8448,17 @@
         "WriteFacts.path_rules",
         "WriteFacts.contained",
         "WriteFacts.worktrees",
+        "SedContext",
+        "SedContext.path_roles",
+        "SedContext.path_rules",
+        "SedContext.antipattern_rows",
+        "SedContext.edit_rules",
+        "SedContext.import_boundaries",
+        "SedContext.acceptance_guard",
+        "SedContext.maximum_added_lines",
+        "SedContext.autonomous",
+        "SedContext.allowances",
+        "SedContext.rewritten_documents",
         "WriteAnswer",
         "WriteAnswer.effect",
         "WriteAnswer.scope",
@@ -8356,11 +8476,8 @@
         "split_subcommand",
         "declares_command",
         "decide_command_rows",
-        "scan_sed_delimited",
-        "scan_sed_address",
-        "scan_sed_command",
-        "safe_sed_script",
         "decide_sed_words",
+        "rewrite_verdict",
         "safe_awk_program",
         "decide_awk_words",
         "CURL_SAFE_FLAGS",
@@ -8883,7 +9000,23 @@
         "parse_shell_words.close_segment",
         "shell_flag_write_targets",
         "shell_patch_operands",
-        "shell_path_verb_targets"
+        "shell_path_verb_targets",
+        "SedRewrite",
+        "SedRewrite.scripts",
+        "SedRewrite.targets",
+        "shell_sed_rewrites"
+      ]
+    },
+    {
+      "module": "lup.policy.kernel.peers",
+      "declares": [
+        "undeclared_roster",
+        "addressed_peer",
+        "decide_peer_send",
+        "decide_peer_listing",
+        "peer_listing_context",
+        "decide_foreign_claim",
+        "settled_with_claim"
       ]
     },
     {
@@ -8929,6 +9062,14 @@
         "AcceptanceGuardRow",
         "AcceptanceGuardRow.ask_reason",
         "AcceptanceGuardRow.autonomous_reason",
+        "RewrittenFileRow",
+        "RewrittenFileRow.target",
+        "RewrittenFileRow.path",
+        "RewrittenFileRow.before",
+        "RewrittenFileRow.after",
+        "RewrittenFileRow.foreign",
+        "RewrittenFileRow.outside_project",
+        "RewrittenFileRow.refuted",
         "ImportBoundaryRow",
         "ImportBoundaryRow.modules",
         "ImportBoundaryRow.owners",
@@ -8996,7 +9137,17 @@
         "EditRuleRow.operations",
         "EditRuleRow.effect",
         "EditRuleRow.maximum_added_lines",
-        "EditRuleRow.reason"
+        "EditRuleRow.reason",
+        "PeerPolicyRow",
+        "PeerPolicyRow.store",
+        "PeerPolicyRow.roster_file",
+        "PeerPolicyRow.names_file",
+        "PeerPolicyRow.send_reason",
+        "PeerPolicyRow.listing_note",
+        "PeerPolicyRow.touches_file",
+        "PeerPolicyRow.windows_dir",
+        "PeerPolicyRow.claim_reason",
+        "PeerPolicyRow.member_env"
       ]
     },
     {
@@ -9115,8 +9266,17 @@
         "ShellContext.target_tables",
         "ShellContext.contained",
         "ShellContext.unjudged_ambient",
+        "ShellContext.antipattern_rows",
+        "ShellContext.edit_rules",
+        "ShellContext.import_boundaries",
+        "ShellContext.acceptance_guard",
+        "ShellContext.maximum_added_lines",
+        "ShellContext.autonomous",
+        "ShellContext.allowances",
+        "ShellContext.rewritten_documents",
         "write_facts",
         "shell_context",
+        "sed_facts",
         "decide_find_words",
         "decide_segment_words",
         "decide_shell_segment",
@@ -9208,7 +9368,6 @@
         "refuses_generated_plugin_target",
         "refuses_generated_plugin_write",
         "asks_before_removing_a_directory",
-        "rewrites_only_recoverable_files",
         "protected_write_target",
         "confined_to_recoverable_roots",
         "archive_lands_on_nothing",
@@ -9225,7 +9384,20 @@
         "is_help_probe",
         "xargs_payload",
         "refspec_effects",
-        "destination_form"
+        "destination_form",
+        "SED_SAFE_SHORT_FLAGS",
+        "SED_SAFE_LONG_OPTIONS",
+        "SED_SUBSTITUTE_FLAG_CHARS",
+        "scan_sed_delimited",
+        "scan_sed_address",
+        "scan_sed_command",
+        "safe_sed_script",
+        "SedInvocation",
+        "SedInvocation.scripts",
+        "SedInvocation.targets",
+        "SedInvocation.in_place",
+        "SedInvocation.screened",
+        "sed_invocation"
       ]
     },
     {
@@ -9382,6 +9554,22 @@
       ]
     },
     {
+      "module": "lup.policy.peer_policy",
+      "declares": [
+        "PeerPolicy",
+        "PeerPolicy.store",
+        "PeerPolicy.roster_file",
+        "PeerPolicy.names_file",
+        "PeerPolicy.send_reason",
+        "PeerPolicy.listing_note",
+        "PeerPolicy.touches_file",
+        "PeerPolicy.windows_dir",
+        "PeerPolicy.claim_reason",
+        "PeerPolicy.member_env",
+        "erase_peer_policy"
+      ]
+    },
+    {
       "module": "lup.policy.profiles",
       "declares": [
         "depended_on",
@@ -9479,6 +9667,9 @@
         "ShellPolicy",
         "ShellPolicy.__init__",
         "ShellPolicy.authored_verdict",
+        "ShellPolicy.rewritten_documents",
+        "ShellPolicy.rewritten_documents.produced",
+        "ShellPolicy.rewrite_antipatterns",
         "ShellPolicy.decide",
         "ShellPolicy.decide_segment",
         "PathRule",
@@ -9699,8 +9890,11 @@
         "edit_documents",
         "spent_escape",
         "placed_input",
+        "session_root",
         "dispatch",
+        "attachment",
         "rendered",
+        "rendered.carried",
         "rendered.surfaced",
         "observe",
         "main"
@@ -9909,6 +10103,55 @@
         "ClaudeDecisionOutput.additional_context",
         "ClaudeDecisionRenderer",
         "ClaudeDecisionRenderer.render"
+      ]
+    },
+    {
+      "module": "lup.providers.claude.peer_delivery",
+      "declares": [
+        "RUNTIME_MODULE",
+        "GUARD_SCRIPT",
+        "RUNTIME_ORIGIN",
+        "delivery_runtime_source",
+        "guard_body",
+        "delivery_command",
+        "delivery_artifacts"
+      ]
+    },
+    {
+      "module": "lup.providers.claude.peer_delivery_runtime",
+      "declares": [
+        "MESSAGE_FILE",
+        "DELIVERY_DIR",
+        "MEMBER_KIND",
+        "EVERYONE",
+        "EVENT_FIELD",
+        "EVENT_NAME",
+        "Message",
+        "Message.to_actor",
+        "Message.text",
+        "Message.door",
+        "Message.redirect",
+        "Arrived",
+        "Arrived.messages",
+        "Arrived.consumed",
+        "Delivered",
+        "Delivered.hookEventName",
+        "Delivered.additionalContext",
+        "Delivered.permissionDecision",
+        "Delivered.permissionDecisionReason",
+        "HookOutput",
+        "HookOutput.hookSpecificOutput",
+        "reader_name",
+        "reaches",
+        "committed_offset",
+        "framed",
+        "parsed",
+        "waiting",
+        "commit",
+        "rendered",
+        "envelope",
+        "deliver",
+        "main"
       ]
     },
     {

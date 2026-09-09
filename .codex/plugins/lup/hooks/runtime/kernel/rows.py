@@ -105,6 +105,35 @@ class AcceptanceGuardRow(TypedDict):
     autonomous_reason: str
 
 
+class RewrittenFileRow(TypedDict):
+    """One file an in-place rewrite names, as it stands and as it would stand.
+
+    The host produces this by running the screened script over a *copy*, never
+    over the file, so a command still refused has changed nothing — and the
+    classifier reads the result as the ``before`` and ``after`` of an ordinary
+    edit, which is what lets one gate answer for both spellings of a write.
+
+    ``target`` and ``path`` differ because two readers need different
+    spellings of the same file. The rules match on ``path``, relative to the
+    worktree that holds it, since a rule anchored at the repository top has to
+    be asked about where the file sits; a refusal names ``target``, the word
+    the writer actually typed and the one they would have to change.
+    """
+
+    target: str
+    path: str
+    before: str
+    after: str
+    foreign: bool
+    """Whether the file belongs to a repository that is not this one."""
+
+    outside_project: bool
+    """Whether it sits in no checkout whose conventions these rules are."""
+
+    refuted: dict[str, list[int]] | None
+    """Which anti-pattern findings a checker cleared, where one was worth running."""
+
+
 class ImportBoundaryRow(TypedDict):
     """Module families whose dependencies belong in declared repository roots."""
 

@@ -8,7 +8,12 @@ from fnmatch import fnmatchcase
 from typing import TypedDict
 
 from .archives import archive_targets, archive_write
-from .decision import CheckpointRequirement, KernelDecision, SUBSTITUTION_SENTINEL
+from .decision import (
+    CheckpointRequirement,
+    KernelDecision,
+    SUBSTITUTION_SENTINEL,
+    unjudged,
+)
 from .edit import path_rule_matches, protected_path_reason
 from .roles import (
     GENERATED_PLUGIN_REFUSAL,
@@ -735,58 +740,6 @@ def asks_before_removing_a_directory(
     )
 
 
-def rewrites_only_recoverable_files(
-    targets: list[str],
-    path_roles: list[PathRoleRow],
-    recoverable_targets: list[str] | None = None,
-    recoverable_target_limit: int = 5,
-    path_rules: list[PathRuleRow] | None = None,
-) -> KernelDecision | None:
-    """Grant a rewrite in place whose every named file could be brought back.
-
-    The same question :func:`confined_to_recoverable_roots` asks of a delete,
-    asked of a command that overwrites: what would this cost if it were
-    wrong. A scratch file costs nothing by declaration; a committed file with
-    no uncommitted change costs a checkout and no information. Past the cap
-    it is a sweep rather than an edit, and a sweep is worth a question even
-    where every file in it could be restored.
-
-    What this does *not* answer is the other half of why an in-place rewrite
-    is gated: it walks past the gates an edit is judged by — the anti-pattern
-    table, the review-note gate, the size gate. Those are reviewability, and
-    no boundary and no undo layer answers them. What recoverability does
-    settle is that being wrong is repairable and the whole change stands in
-    the diff, so the grant says which half it granted.
-
-    ``None`` wherever the answer is not established — no targets, a word that
-    expands at run time, a file the host reported nothing about — and ``None``
-    leaves the caller's own refusal standing.
-    """
-    if not targets:
-        return None
-    if any(opaque_argument(word) or "$" in word for word in targets):
-        return None
-    disposable = [word for word in targets if path_role(word, path_roles) == "scratch"]
-    restorable = [
-        word
-        for word in targets
-        if word not in disposable and word in (recoverable_targets or [])
-    ]
-    if len(disposable) + len(restorable) != len(targets):
-        return None
-    if len(restorable) > recoverable_target_limit:
-        return None
-    protected = protected_write_target(targets, path_rules or [], True)
-    if protected is not None:
-        return protected
-    return KernelDecision(
-        "allow",
-        "every file this rewrites is restorable, and the whole change is in the"
-        " diff — but the edit gates did not read it, so the anti-pattern, note"
-        " and size rules are `dev check`'s to catch",
-    )
-
-
 def protected_write_target(
     targets: list[str], path_rules: list[PathRuleRow], path_exists: bool
 ) -> KernelDecision | None:
@@ -1186,3 +1139,245 @@ def destination_form(word: str) -> str:
     if "/" in word or word.startswith((".", "~")):
         return "path"
     return ""
+
+
+# lup: ignore[constant-declaration] — sed's own short flags, spelled as sed does
+SED_SAFE_SHORT_FLAGS = "nErsuz"
+# lup: ignore[library-default] — sed's own long spellings of the short flags above
+SED_SAFE_LONG_OPTIONS = (
+    "--quiet",
+    "--silent",
+    "--regexp-extended",
+    "--separate",
+    "--null-data",
+)
+# lup: ignore[constant-declaration] — the flag characters sed's own `s///` takes
+SED_SUBSTITUTE_FLAG_CHARS = "0123456789gpiImM"
+
+
+def scan_sed_delimited(script: str, position: int, parts: int) -> int | None:
+    """Scan ``parts`` sections after the delimiter at ``position``.
+
+    The delimiter is whatever character sits at ``position``; backslash
+    escapes are honored inside sections.
+    """
+    if position >= len(script):
+        return None
+    delimiter = script[position]
+    if delimiter.isalnum() or delimiter in " \t\n;\\":
+        return None
+    cursor = position + 1
+    seen = 0
+    while cursor < len(script) and seen < parts:
+        character = script[cursor]
+        if character == "\\":
+            cursor += 2
+            continue
+        if character == delimiter:
+            seen += 1
+        cursor += 1
+    return cursor if seen == parts else None
+
+
+def scan_sed_address(script: str, position: int) -> int | None:
+    """Scan one address: a line-number form, ``$``, or a regex form."""
+    character = script[position]
+    if character == "$":
+        return position + 1
+    if character.isdigit():
+        cursor = position + 1
+        while cursor < len(script) and script[cursor].isdigit():
+            cursor += 1
+        if cursor < len(script) and script[cursor] == "~":
+            cursor += 1
+            while cursor < len(script) and script[cursor].isdigit():
+                cursor += 1
+        return cursor
+    if character == "+":
+        cursor = position + 1
+        while cursor < len(script) and script[cursor].isdigit():
+            cursor += 1
+        return cursor if cursor > position + 1 else None
+    end = (
+        scan_sed_delimited(script, position, 1)
+        if character == "/"
+        else scan_sed_delimited(script, position + 1, 1)
+        if character == "\\" and position + 1 < len(script)
+        else None
+    )
+    if end is None:
+        return None
+    while end < len(script) and script[end] in "IM":
+        end += 1
+    return end
+
+
+def scan_sed_command(script: str, position: int) -> int | None:
+    """Scan one address-guarded command, returning the position after it.
+
+    Accepted commands read the input and write standard output only: print,
+    delete, hold-space, branching, labels, blocks, line numbering, text
+    insertion, file reading, transliteration, and flag-screened substitution.
+    The write and execute forms (``w``, ``W``, ``e``, ``s///e``, ``s///w``)
+    fall out as unrecognized trailing characters.
+    """
+    length = len(script)
+    address = scan_sed_address(script, position)
+    if address is not None:
+        position = address
+        while position < length and script[position] in " \t":
+            position += 1
+        if position < length and script[position] == ",":
+            position += 1
+            while position < length and script[position] in " \t":
+                position += 1
+            if position >= length:
+                return None
+            second = scan_sed_address(script, position)
+            if second is None:
+                return None
+            position = second
+    while position < length and script[position] in " \t!":
+        position += 1
+    if position >= length:
+        return None
+    command = script[position]
+    if command in "pPdDnNgGhHxz=F{}":
+        return position + 1
+    if command in "qQl":
+        cursor = position + 1
+        while cursor < length and (script[cursor].isdigit() or script[cursor] == " "):
+            cursor += 1
+        return cursor
+    if command in "btT:":
+        cursor = position + 1
+        while cursor < length and script[cursor] in " \t":
+            cursor += 1
+        while cursor < length and (script[cursor].isalnum() or script[cursor] == "_"):
+            cursor += 1
+        return cursor
+    if command in "aicrR":
+        newline = script.find("\n", position)
+        return length if newline == -1 else newline
+    if command == "s":
+        end = scan_sed_delimited(script, position + 1, 2)
+        if end is None:
+            return None
+        while end < length and script[end] in SED_SUBSTITUTE_FLAG_CHARS:
+            end += 1
+        return end
+    if command == "y":
+        return scan_sed_delimited(script, position + 1, 2)
+    return None
+
+
+def safe_sed_script(script: str) -> bool:
+    """Accept only scripts whose every command reads input and prints output."""
+    length = len(script)
+    position = 0
+    while position < length:
+        if script[position] in " \t\n;":
+            position += 1
+            continue
+        end = scan_sed_command(script, position)
+        if end is None:
+            return False
+        position = end
+    return True
+
+
+class SedInvocation(TypedDict):
+    """One `sed` call read the way sed reads it: scripts, files, and mode.
+
+    Parsed here rather than inside the classifier so that both readers of an
+    in-place rewrite work from one answer. The classifier asks what this would
+    do to each named file; the host runs these same screened scripts over
+    those same files to produce the documents that question is answered from.
+    A second parse would be a second answer to "which files does this
+    rewrite", and the two would part company the first time one of them
+    learned a flag the other had not.
+    """
+
+    scripts: list[str]
+    targets: list[str]
+    in_place: bool
+    screened: bool
+    """Whether every script only reads its input and writes standard output.
+
+    ``--sandbox`` makes sed itself refuse the write and execute commands, so a
+    call carrying it is screened by sed rather than by the grammar above, and
+    reads as screened here without the grammar having to accept it.
+    """
+
+
+def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
+    """Read one sed call's flags into its scripts, its files, and its mode.
+
+    A refusal rather than an invocation wherever the reading itself fails: a
+    script this cannot see is a script nothing screens, and an option nothing
+    classified is a mode nobody has decided about. Both are stronger than
+    "no files", which is why they come back as decisions instead of as an
+    empty parse a caller could mistake for a harmless call.
+    """
+    scripts: list[str] = []
+    positional: list[str] = []
+    script_expected = False
+    script_from_options = False
+    sandbox = False
+    in_place = False
+    for word in words[1:]:
+        if script_expected:
+            scripts.append(word)
+            script_expected = False
+            continue
+        if word.startswith("--"):
+            name, separator, value = word.partition("=")
+            if name in ("--in-place", "--inplace"):
+                in_place = True
+                continue
+            if name == "--file":
+                return KernelDecision(
+                    "deny", "sed script files are not screened — inline the script"
+                )
+            if name == "--sandbox" and not separator:
+                sandbox = True
+                continue
+            if name == "--expression":
+                if separator:
+                    scripts.append(value)
+                script_expected = not separator
+                script_from_options = True
+                continue
+            if name in SED_SAFE_LONG_OPTIONS and not separator:
+                continue
+            return unjudged(f"sed option {name!r} is not classified")
+        if word.startswith("-") and len(word) > 1:
+            flags = word[1:]
+            if "i" in flags:
+                # `-i` takes its backup suffix attached, so everything after
+                # it is that suffix rather than more flags — which is also
+                # sed's own reading of `-ie`.
+                in_place = True
+                flags = flags[: flags.index("i")]
+            if "f" in flags:
+                return KernelDecision(
+                    "deny", "sed script files are not screened — inline the script"
+                )
+            if flags.endswith("e"):
+                script_expected = True
+                script_from_options = True
+                flags = flags[:-1]
+            if any(flag not in SED_SAFE_SHORT_FLAGS for flag in flags):
+                return unjudged(f"sed option {word!r} is not classified")
+            continue
+        positional.append(word)
+    if script_expected:
+        return unjudged("sed expression flag has no script")
+    if not script_from_options and positional:
+        scripts.append(positional.pop(0))
+    return SedInvocation(
+        scripts=scripts,
+        targets=positional,
+        in_place=in_place,
+        screened=sandbox or all(safe_sed_script(script) for script in scripts),
+    )

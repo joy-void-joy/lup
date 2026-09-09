@@ -16,12 +16,18 @@ from .decision import (
     unlisted,
 )
 from .rows import (
+    AcceptanceGuardRow,
+    AntiPatternRow,
+    EditRuleRow,
+    ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
+    RewrittenFileRow,
     RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
 )
+from .edit import decide_edit
 from .effects import (
     STRENGTH,
     EffectEvidence,
@@ -43,7 +49,7 @@ from .words import (
     opaque_argument,
     protected_write_target,
     refspec_effects,
-    rewrites_only_recoverable_files,
+    sed_invocation,
     uv_run_words,
     write_checkpoint,
     write_scope,
@@ -60,18 +66,6 @@ IN_PLACE_SED_REFUSAL = (
     " exact-string substitution cannot tell apart; otherwise make the change"
     " through the edit tool, which is what those gates read"
 )
-# lup: ignore[constant-declaration] — sed's own short flags, spelled as sed does
-SED_SAFE_SHORT_FLAGS = "nErsuz"
-# lup: ignore[library-default] — sed's own long spellings of the short flags above
-SED_SAFE_LONG_OPTIONS = (
-    "--quiet",
-    "--silent",
-    "--regexp-extended",
-    "--separate",
-    "--null-data",
-)
-# lup: ignore[constant-declaration] — the flag characters sed's own `s///` takes
-SED_SUBSTITUTE_FLAG_CHARS = "0123456789gpiImM"
 
 
 def row_verdict(
@@ -167,6 +161,36 @@ class WriteFacts(TypedDict):
     absolute spelling as outside. Asked of git on the host and handed down
     here, the question becomes one of identity, which a sibling worktree
     answers wherever it happens to sit on disk.
+    """
+
+
+class SedContext(TypedDict):
+    """Everything judging an in-place rewrite as an edit needs, in this shape.
+
+    Beside :class:`WriteFacts` and for its reason: the edit gates are declared
+    above this module, so the classifier is handed what they read rather than
+    reaching up for it. What arrives is the declarations an ``Edit`` is judged
+    against — unchanged, so the two cannot come to disagree about a file — and
+    the documents the host produced by running the rewrite into a copy.
+    """
+
+    path_roles: list[PathRoleRow]
+    path_rules: list[PathRuleRow]
+    antipattern_rows: dict[str, list[AntiPatternRow]]
+    """The anti-pattern table by file suffix, as the edit gate reads it."""
+
+    edit_rules: list[EditRuleRow]
+    import_boundaries: list[ImportBoundaryRow]
+    acceptance_guard: AcceptanceGuardRow | None
+    maximum_added_lines: int
+    autonomous: bool
+    allowances: list[str]
+    rewritten_documents: list[RewrittenFileRow]
+    """What each named file would hold afterwards, where the host could say.
+
+    A list rather than a mapping because it crosses the same boundary every
+    other host reading crosses, and one absent row is the fact the classifier
+    acts on: a rewrite nothing read is asked about rather than granted.
     """
 
 
@@ -819,242 +843,111 @@ def decide_command_rows(
     return apply_command_row(subrows[0], remainder, measured)
 
 
-def scan_sed_delimited(script: str, position: int, parts: int) -> int | None:
-    """Scan ``parts`` sections after the delimiter at ``position``.
-
-    The delimiter is whatever character sits at ``position``; backslash
-    escapes are honored inside sections.
-    """
-    if position >= len(script):
-        return None
-    delimiter = script[position]
-    if delimiter.isalnum() or delimiter in " \t\n;\\":
-        return None
-    cursor = position + 1
-    seen = 0
-    while cursor < len(script) and seen < parts:
-        character = script[cursor]
-        if character == "\\":
-            cursor += 2
-            continue
-        if character == delimiter:
-            seen += 1
-        cursor += 1
-    return cursor if seen == parts else None
-
-
-def scan_sed_address(script: str, position: int) -> int | None:
-    """Scan one address: a line-number form, ``$``, or a regex form."""
-    character = script[position]
-    if character == "$":
-        return position + 1
-    if character.isdigit():
-        cursor = position + 1
-        while cursor < len(script) and script[cursor].isdigit():
-            cursor += 1
-        if cursor < len(script) and script[cursor] == "~":
-            cursor += 1
-            while cursor < len(script) and script[cursor].isdigit():
-                cursor += 1
-        return cursor
-    if character == "+":
-        cursor = position + 1
-        while cursor < len(script) and script[cursor].isdigit():
-            cursor += 1
-        return cursor if cursor > position + 1 else None
-    end = (
-        scan_sed_delimited(script, position, 1)
-        if character == "/"
-        else scan_sed_delimited(script, position + 1, 1)
-        if character == "\\" and position + 1 < len(script)
-        else None
-    )
-    if end is None:
-        return None
-    while end < len(script) and script[end] in "IM":
-        end += 1
-    return end
-
-
-def scan_sed_command(script: str, position: int) -> int | None:
-    """Scan one address-guarded command, returning the position after it.
-
-    Accepted commands read the input and write standard output only: print,
-    delete, hold-space, branching, labels, blocks, line numbering, text
-    insertion, file reading, transliteration, and flag-screened substitution.
-    The write and execute forms (``w``, ``W``, ``e``, ``s///e``, ``s///w``)
-    fall out as unrecognized trailing characters.
-    """
-    length = len(script)
-    address = scan_sed_address(script, position)
-    if address is not None:
-        position = address
-        while position < length and script[position] in " \t":
-            position += 1
-        if position < length and script[position] == ",":
-            position += 1
-            while position < length and script[position] in " \t":
-                position += 1
-            if position >= length:
-                return None
-            second = scan_sed_address(script, position)
-            if second is None:
-                return None
-            position = second
-    while position < length and script[position] in " \t!":
-        position += 1
-    if position >= length:
-        return None
-    command = script[position]
-    if command in "pPdDnNgGhHxz=F{}":
-        return position + 1
-    if command in "qQl":
-        cursor = position + 1
-        while cursor < length and (script[cursor].isdigit() or script[cursor] == " "):
-            cursor += 1
-        return cursor
-    if command in "btT:":
-        cursor = position + 1
-        while cursor < length and script[cursor] in " \t":
-            cursor += 1
-        while cursor < length and (script[cursor].isalnum() or script[cursor] == "_"):
-            cursor += 1
-        return cursor
-    if command in "aicrR":
-        newline = script.find("\n", position)
-        return length if newline == -1 else newline
-    if command == "s":
-        end = scan_sed_delimited(script, position + 1, 2)
-        if end is None:
-            return None
-        while end < length and script[end] in SED_SUBSTITUTE_FLAG_CHARS:
-            end += 1
-        return end
-    if command == "y":
-        return scan_sed_delimited(script, position + 1, 2)
-    return None
-
-
-def safe_sed_script(script: str) -> bool:
-    """Accept only scripts whose every command reads input and prints output."""
-    length = len(script)
-    position = 0
-    while position < length:
-        if script[position] in " \t\n;":
-            position += 1
-            continue
-        end = scan_sed_command(script, position)
-        if end is None:
-            return False
-        position = end
-    return True
-
-
-def decide_sed_words(
-    words: list[str],
-    path_roles: list[PathRoleRow] | None = None,
-    recoverable_targets: list[str] | None = None,
-    recoverable_target_limit: int = 5,
-    path_rules: list[PathRuleRow] | None = None,
-) -> KernelDecision:
-    """Allow only read-only sed: safe flags plus a safe script grammar.
+def decide_sed_words(words: list[str], context: "SedContext") -> KernelDecision:
+    """Allow read-only sed; judge an in-place rewrite as the edit it performs.
 
     ``--sandbox`` makes sed itself reject the write and execute commands, so
     the script screen is skipped under it; a script file stays denied toward
     an inline script, because nothing screens what is in it.
 
-    In-place editing is two objections wearing one refusal, and only one of
-    them survives a boundary. *Being wrong is unrepairable* is answered by
-    the files themselves: a scratch file costs nothing, a committed file with
-    no uncommitted change costs a checkout, and the whole change stands in
-    the diff either way — the same question a delete is already granted on,
-    asked of the verb that overwrites instead of the one that removes. So a
-    rewrite whose every named file could be brought back is allowed, with the
-    grant saying what it granted.
+    In-place editing was two objections wearing one refusal, and only one of
+    them was ever answered. *Being wrong is unrepairable* is answered by the
+    files themselves, and a rewrite whose every named file could be brought
+    back was allowed on that ground alone. *It walks past the gates an edit
+    is judged by* was answered by nothing — so the grant it produced was a
+    grant to bypass the anti-pattern table, the review-note gate and the size
+    gate, given on the strength of an undo that answers a different question.
 
-    *It walks past the gates an edit is judged by* is not answered by
-    anything: the anti-pattern table, the review-note gate and the size gate
-    are reviewability, and no container and no undo layer enforces them. That
-    is what remains once recoverability is established, and it is why the
-    grant names `dev check` as where those rules will still be read.
+    So the after-document is judged instead. The host runs the screened
+    script over a copy of each named file and hands back what would land;
+    each goes to :func:`~lup.policy.kernel.edit.decide_edit`, the same gate an
+    ``Edit`` meets, and the strongest verdict is this command's. A rewrite
+    that introduces nothing those rules refuse allows because it is a
+    permissible edit, not because it could be undone.
 
-    Where recoverability is not established — a file the host reported
-    nothing about, a word that expands at run time, more restorable files
-    than a rewrite should sweep — the refusal stands and names the tool that
-    does the job it is usually reached for: a rename across many sites is
-    `rename_symbol`, which resolves scopes an exact-string substitution
-    cannot tell apart. A stated reason still turns that refusal into the
-    question it asks for.
+    **A target with no document asks.** A word that expands at run time, a
+    file the host could not read, a script sed itself refused — each leaves
+    a rewrite about to happen that nothing has read, and an unjudgeable
+    rewrite is exactly the one that must not go through unasked. Composition
+    paths that forget to resolve the documents therefore ask rather than
+    allow, which is the only arrangement in which forgetting is safe.
     """
-    scripts: list[str] = []
-    positional: list[str] = []
-    script_expected = False
-    script_from_options = False
-    sandbox = False
-    in_place = False
-    for word in words[1:]:
-        if script_expected:
-            scripts.append(word)
-            script_expected = False
-            continue
-        if word.startswith("--"):
-            name, separator, value = word.partition("=")
-            if name in ("--in-place", "--inplace"):
-                in_place = True
-                continue
-            if name == "--file":
-                return KernelDecision(
-                    "deny", "sed script files are not screened — inline the script"
-                )
-            if name == "--sandbox" and not separator:
-                sandbox = True
-                continue
-            if name == "--expression":
-                if separator:
-                    scripts.append(value)
-                script_expected = not separator
-                script_from_options = True
-                continue
-            if name in SED_SAFE_LONG_OPTIONS and not separator:
-                continue
-            return unjudged(f"sed option {name!r} is not classified")
-        if word.startswith("-") and len(word) > 1:
-            flags = word[1:]
-            if "i" in flags:
-                # `-i` takes its backup suffix attached, so everything after
-                # it is that suffix rather than more flags — which is also
-                # sed's own reading of `-ie`.
-                in_place = True
-                flags = flags[: flags.index("i")]
-            if "f" in flags:
-                return KernelDecision(
-                    "deny", "sed script files are not screened — inline the script"
-                )
-            if flags.endswith("e"):
-                script_expected = True
-                script_from_options = True
-                flags = flags[:-1]
-            if any(flag not in SED_SAFE_SHORT_FLAGS for flag in flags):
-                return unjudged(f"sed option {word!r} is not classified")
-            continue
-        positional.append(word)
-    if script_expected:
-        return unjudged("sed expression flag has no script")
-    if not script_from_options and positional:
-        scripts.append(positional.pop(0))
-    if not sandbox and not all(safe_sed_script(script) for script in scripts):
+    invocation = sed_invocation(words)
+    if isinstance(invocation, KernelDecision):
+        return invocation
+    if not invocation["screened"]:
         return unjudged("sed script is not classified as read-only")
-    if not in_place:
+    if not invocation["in_place"]:
         return KernelDecision("allow", "read-only sed script")
-    granted = rewrites_only_recoverable_files(
-        positional,
-        path_roles or [],
-        recoverable_targets,
-        recoverable_target_limit,
-        path_rules,
+    if not invocation["targets"]:
+        return KernelDecision("deny", IN_PLACE_SED_REFUSAL)
+    documents = {row["target"]: row for row in context["rewritten_documents"]}
+    verdicts = [
+        rewrite_verdict(target, documents[target], context)
+        if target in documents
+        else KernelDecision(
+            "ask",
+            f"sed would rewrite {target} in place and nothing read the result:"
+            " the edit gates judge the file this would produce, and that file"
+            " could not be produced. Make the change through the edit tool,"
+            " which carries its own content",
+            purpose="quality_review",
+        )
+        for target in invocation["targets"]
+    ]
+    stopped = [verdict for verdict in verdicts if verdict.effect != "allow"]
+    if not stopped:
+        return KernelDecision(
+            "allow",
+            "every file this rewrites was judged as the edit it performs, and"
+            " the edit gates passed it",
+        )
+    return max(stopped, key=lambda verdict: STRENGTH.index(verdict.effect))
+
+
+def rewrite_verdict(
+    target: str, document: RewrittenFileRow, context: "SedContext"
+) -> KernelDecision:
+    """What the edit gates say about one file an in-place rewrite would produce.
+
+    The path the rules match on is the document's, not the word's: a rule
+    anchored at the repository top has to be asked about where the file sits,
+    and the word is spelled relative to wherever the session was launched.
+    The word is still what the reason names, because that is what the writer
+    typed and what they would have to change.
+    """
+    suffix = posixpath.splitext(document["path"])[1].lower()
+    verdict = decide_edit(
+        document["path"],
+        document["before"],
+        document["after"],
+        path_exists=True,
+        path_rules=context["path_rules"],
+        antipattern_rows=context["antipattern_rows"].get(suffix, []),
+        path_roles=context["path_roles"],
+        maximum_added_lines=context["maximum_added_lines"],
+        autonomous=context["autonomous"],
+        allowances=context["allowances"],
+        python_source=suffix in (".py", ".pyi"),
+        acceptance_guard=context["acceptance_guard"],
+        refuted=document["refuted"],
+        suffix=suffix,
+        operation="modify",
+        edit_rules=context["edit_rules"],
+        foreign=document["foreign"],
+        outside_project=document["outside_project"],
+        import_boundaries=context["import_boundaries"],
     )
-    return (
-        granted if granted is not None else KernelDecision("deny", IN_PLACE_SED_REFUSAL)
+    if verdict.effect == "allow":
+        return verdict
+    return KernelDecision(
+        verdict.effect,
+        f"sed would rewrite {target} in place, and the edit gates refuse what"
+        f" it would produce: {verdict.reason}",
+        checkpoint=verdict.checkpoint,
+        purpose=verdict.purpose,
+        rule=verdict.rule,
+        reviewer=verdict.reviewer,
     )
 
 
