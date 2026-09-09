@@ -41,6 +41,7 @@ from kernel.edit import (
 )
 from kernel.effects import STRENGTH
 from kernel.fetch import decide_fetch
+from kernel.peers import decide_peer_listing, decide_peer_send, peer_listing_context
 from kernel.lex import (
     authored_writes,
     python_script_targets,
@@ -66,6 +67,7 @@ from policy_data import (
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
+    PEER_REDIRECT,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
@@ -1595,6 +1597,176 @@ def granted_allowances(grants_env: str, known: list[str]) -> list[str]:
     )
 
 
+def peer_store(root: Path | None, store: list[str]) -> Path | None:
+    """Where this repository's sessions meet, or nothing outside a repository.
+
+    The parts arrive as data rather than spelled here, because the directory
+    belongs to whichever module put a roster in it. A dispatcher compiled for
+    a project whose sessions never coordinate carries this same code and is
+    handed nothing to read, which is the difference between a capability a
+    project declined and a path this half decided for it.
+
+    The shared git directory rather than a worktree, so every checkout of one
+    clone resolves the same roster and a branch cannot change what a peer
+    reads.
+    """
+    if root is None:
+        return None
+    shared = shared_git_directory(str(root))
+    if not shared:
+        return None
+    return Path(shared).joinpath(*store)
+
+
+def stream_records(path: Path) -> list[dict]:
+    """Every legible JSON object an append-only record holds, oldest first.
+
+    A line that does not parse is skipped rather than raised on. These files
+    are appended to by other sessions while this one reads them, so a torn
+    final line is the ordinary state of a healthy store — and a reader that
+    failed on it would stop judging peer calls for the duration of somebody
+    else's write.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    def legible():
+        """Each line that is a JSON object, skipping whatever is not one."""
+        for line in raw.splitlines():
+            try:
+                loaded = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(loaded, dict):
+                yield loaded
+
+    return list(legible())
+
+
+def peer_members(directory: Path, roster_file: str) -> list[dict]:
+    """Every member the roster still holds, folded from its own record.
+
+    Keyed by kind and id rather than by the printed address, because a member
+    taken through a second round is that member further on and not a second
+    one — which is what the roster's own fold says, and a reader answering
+    differently would show one session twice.
+
+    A record about nobody standing is dropped rather than inventing a member,
+    so a description or a finish arriving before its join says nothing.
+    """
+    # lup: ignore[empty-collection] — a fold whose every step reads what the
+    # steps before it left, which is the one shape a comprehension has no
+    # spelling for: a description updates a member an earlier record created
+    standing: dict = {}
+    for record in stream_records(directory / roster_file):
+        actor = record["actor"] if "actor" in record else {}
+        if not isinstance(actor, dict) or "id" not in actor or "kind" not in actor:
+            continue
+        held = f"{actor['kind']}-{actor['id']}"
+        match record["type"] if "type" in record else "":
+            case "spawned" | "joined":
+                standing[held] = {**record, "running": True}
+            case "described" | "finished" if held in standing:
+                standing[held] = {
+                    **standing[held],
+                    **record,
+                    "running": record["type"] != "finished",
+                }
+            case _:
+                continue
+    return [member for member in standing.values() if member["running"]]
+
+
+def peer_name_claims(directory: Path, names_file: str) -> dict:
+    """Which member each name reaches now, the newest claim on a name winning.
+
+    Every name ever recorded rather than only the current ones: a name
+    somebody wrote down before a rename goes on reaching the session it named
+    until something else claims it, which is what the record is kept
+    append-only for. A sender typing the older name is typing what was correct
+    when they read it, and there is no error they could have been shown.
+
+    Newest wins by construction — a later record for one name replaces the
+    earlier entry as the comprehension walks the stream in order.
+    """
+    return {
+        record["cli_name"]: record["id"]
+        for record in stream_records(directory / names_file)
+        if "cli_name" in record and "id" in record
+    }
+
+
+def peer_addresses(
+    root: Path | None, store: list[str], roster_file: str, names_file: str
+) -> list[str]:
+    """Every spelling that currently reaches a live member of this roster.
+
+    Ids, the kind-qualified label a door prints, and whatever each member is
+    called now, because a sender types whichever of those it last read — a
+    check knowing only one of them would let the others through, which is the
+    failure that made a redirect reach nobody.
+
+    Live members only. A session that has left is not somewhere a durable
+    message would arrive either, so redirecting a send to it would trade one
+    call reaching nobody for another.
+    """
+    directory = peer_store(root, store)
+    if directory is None:
+        return []
+    members = peer_members(directory, roster_file)
+    live = [member["actor"]["id"] for member in members]
+    return sorted(
+        {
+            *live,
+            *[
+                f"{member['actor']['kind']}:{member['actor']['id']}"
+                for member in members
+            ],
+            *[
+                name
+                for name, held in peer_name_claims(directory, names_file).items()
+                if held in live
+            ],
+        }
+    )
+
+
+def peer_listing(
+    root: Path | None, store: list[str], roster_file: str, names_file: str
+) -> list[str]:
+    """One line per live member, as somebody choosing who to reach reads it.
+
+    The same four facts a console prints — who, which checkout they are in,
+    what they are on, and what carries a message to them — because a listing
+    naming members without saying what reaches them leaves a reader to guess
+    which of them will hear anything.
+    """
+    directory = peer_store(root, store)
+    if directory is None:
+        return []
+    names = peer_name_claims(directory, names_file)
+
+    def described(member: dict) -> list[str]:
+        """The parts one member's line is joined from, blanks included."""
+        actor = member["actor"]
+        called = [name for name, held in names.items() if held == actor["id"]]
+        worktree = member["worktree"] if "worktree" in member else ""
+        saying = member["description"] if "description" in member else ""
+        return [
+            called[-1] if called else actor["id"],
+            Path(worktree).name if worktree else "",
+            saying or (member["task"] if "task" in member else ""),
+            member["delivery"] if "delivery" in member else "",
+        ]
+
+    return [
+        " — ".join(part for part in described(member) if part)
+        for member in peer_members(directory, roster_file)
+    ]
+
+
 def bash_decision(
     command: str,
     managed_root: Path | None,
@@ -1828,6 +2000,55 @@ def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None
     what it approved — an unmentioned tool is still unclassified.
     """
     return decide_tool(name, values, REFUSED_TOOLS)
+
+
+def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
+    """Judge one native send against who this repository's roster holds.
+
+    The kernel reads no filesystem, so the roster is folded here and passed as
+    the spellings it currently answers to. Every string the call carries is
+    offered rather than a named field, because which field a runtime spells a
+    recipient in is that runtime's business and this half answers for all of
+    them.
+    """
+    if PEER_REDIRECT is None:
+        return decide_peer_send(values, [], None)
+    return decide_peer_send(
+        values,
+        peer_addresses(
+            cwd,
+            PEER_REDIRECT["store"],
+            PEER_REDIRECT["roster_file"],
+            PEER_REDIRECT["names_file"],
+        ),
+        PEER_REDIRECT,
+    )
+
+
+def peer_listing_decision() -> KernelDecision:
+    """Judge one native listing of who this session can reach, which defers."""
+    return decide_peer_listing(PEER_REDIRECT)
+
+
+def peer_listing_attachment(cwd: Path | None) -> str:
+    """This repository's roster, as a listing carries it, or nothing to carry.
+
+    Beside the verdict rather than inside it. A deferral says the runtime
+    decides this call, and what the roster has to add is context a reader
+    acts on rather than a condition of the call happening — folding it into
+    a reason would make it visible only where something refused.
+    """
+    if PEER_REDIRECT is None:
+        return ""
+    return peer_listing_context(
+        peer_listing(
+            cwd,
+            PEER_REDIRECT["store"],
+            PEER_REDIRECT["roster_file"],
+            PEER_REDIRECT["names_file"],
+        ),
+        PEER_REDIRECT,
+    )
 
 
 def placed_document(path_text: str, after: str) -> str:
@@ -2174,6 +2395,17 @@ def placed_input(payload):
     return None if revised is None else {**tool_input, "new_string": revised}
 
 
+def session_root(payload):
+    """Where this session is rooted, which its relative operands resolve against.
+
+    A hook is promised nothing about where it runs, so the payload's own answer
+    is the only one there is. Read through here by both halves of an answer —
+    the verdict and whatever rides beside it — because a second spelling of it
+    is a second place it can be forgotten.
+    """
+    return Path(payload["cwd"]) if "cwd" in payload else None
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -2181,7 +2413,7 @@ def dispatch(payload):
     # belongs to the repository being worked on or to somebody else's. Read
     # once, because the shell path and the edit path ask the same question of
     # it and a second read is a second place it can be forgotten.
-    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
+    session_directory = session_root(payload)
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = (
         agent_type in AUTONOMOUS_AGENT_IDENTITIES
@@ -2240,6 +2472,22 @@ def dispatch(payload):
             "overwrite" if exists else "create",
             session_directory,
         )
+    if name == "SendMessage":
+        # Every string the call carries rather than a named field, the reading
+        # the refusal table already takes: which key this runtime spells a
+        # recipient in is its own business, and the roster answers for all of
+        # them. A target nobody on it answers to passes through untouched,
+        # which is what leaves subagent continuation and every other session
+        # this repository does not hold working exactly as before.
+        return peer_send_decision(
+            [value for value in tool_input.values() if isinstance(value, str)],
+            session_directory,
+        )
+    if name == "ListAgents":
+        # Nothing to permit and nothing to refuse: it answers for a population
+        # wider than one repository, so the roster rides alongside as context
+        # rather than as a verdict that could take the answer away.
+        return peer_listing_decision()
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them
     # here would be this file holding a second, narrower copy of it. The
@@ -2252,7 +2500,20 @@ def dispatch(payload):
     return KernelDecision("ask", "tool is not classified")
 
 
-def rendered(decision, payload, placed):
+def attachment(name, cwd):
+    """What one call carries back beside its verdict, or nothing to carry.
+
+    Only the listing has any. It answers for a wider population than this
+    repository's roster, and the roster is exactly what a reader needs beside
+    it to tell the two apart — every other call has no second population to be
+    confused with, so nothing is folded for it and nothing is paid.
+    """
+    if name != "ListAgents":
+        return ""
+    return peer_listing_attachment(cwd)
+
+
+def rendered(decision, payload, placed, attached):
     """Answer one call on the permission channel, and place it on the other.
 
     Claude Code takes a call's sandbox as an argument of the call rather than
@@ -2296,8 +2557,30 @@ def rendered(decision, payload, placed):
     agent set for itself is not that request.
     """
     settled = decision.placed(escapable=True)
+
+    def carried(result):
+        """The same answer, with whatever context rides beside the verdict.
+
+        Beside rather than inside, and it survives a deferral: the whole point
+        of attaching a roster to a listing is that the listing goes ahead, so
+        the one answer that says "this runtime decides" is the one that most
+        needs to carry it. An empty attachment adds no key, so a call with
+        nothing to say returns exactly what it returned before.
+        """
+        if not attached:
+            return result
+        specific = (
+            result["hookSpecificOutput"]
+            if "hookSpecificOutput" in result
+            else {"hookEventName": "PreToolUse"}
+        )
+        return {
+            **result,
+            "hookSpecificOutput": {**specific, "additionalContext": attached},
+        }
+
     if settled.effect == "defer":
-        return {}
+        return carried({})
     answer = {
         "hookEventName": "PreToolUse",
         "permissionDecision": settled.effect,
@@ -2307,7 +2590,7 @@ def rendered(decision, payload, placed):
     def surfaced(result):
         """The same verdict, with what this runtime will not show it said."""
         message = announced(settled.effect, payload["tool_name"], settled.reason)
-        return {**result, "systemMessage": message} if message else result
+        return carried({**result, "systemMessage": message} if message else result)
 
     if placed is not None and settled.effect != "deny":
         return surfaced({"hookSpecificOutput": {**answer, "updatedInput": placed}})
@@ -2360,6 +2643,7 @@ def main():
     payload = {}
     event = ""
     placed = None
+    attached = ""
     failed = False
     try:
         payload = json.load(sys.stdin)
@@ -2385,6 +2669,7 @@ def main():
             return
         decision = dispatch(payload)
         placed = placed_input(payload)
+        attached = attachment(payload["tool_name"], session_root(payload))
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -2409,7 +2694,7 @@ def main():
                 sys.stdout,
             )
             return
-    json.dump(rendered(decision, payload, placed), sys.stdout)
+    json.dump(rendered(decision, payload, placed, attached), sys.stdout)
     if not failed:
         detail = decision.reason if decision.effect == "deny" else None
         record_hook_evidence(

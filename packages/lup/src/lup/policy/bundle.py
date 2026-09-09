@@ -30,6 +30,7 @@ from lup.policy.kernel.rows import (
     ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
+    PeerRedirectRow,
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
@@ -39,6 +40,7 @@ from lup.policy.kernel.rows import (
 )
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
+from lup.policy.peer_redirect import PeerRedirect, erase_peer_redirect
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -298,6 +300,26 @@ def acceptance_guard_literal(guard: AcceptanceGuardRow | None) -> str:
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
 
 
+def peer_redirect_literal(redirect: PeerRedirectRow | None) -> str:
+    """Render the declared roster the peer calls are judged against, or its absence.
+
+    Spelled here rather than through ``json.dumps`` for the reason the
+    acceptance guard is: JSON's ``null`` is not a Python name, and a data file
+    carrying one fails at import — which in a generated dispatcher means every
+    permission decision stops happening at once.
+    """
+    if redirect is None:
+        return "None"
+    entries = [
+        f'"store": {json.dumps(redirect["store"])}',
+        f'"roster_file": {json.dumps(redirect["roster_file"])}',
+        f'"names_file": {json.dumps(redirect["names_file"])}',
+        f'"send_reason": {json.dumps(redirect["send_reason"])}',
+        f'"listing_note": {json.dumps(redirect["listing_note"])}',
+    ]
+    return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
+
+
 def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
     """Render declared tool refusals as primitive runtime rows."""
     return dict_rows_literal(
@@ -511,6 +533,7 @@ def render_policy_data(
     shell_rules: list[ShellCommandRule],
     edit_rules: list[EditRule],
     refused_tools: list[RefusedTool],
+    peer_redirect: PeerRedirect | None,
     recoverable_target_limit: int,
     runner_targets: list[RunnerTargetRule],
     sandbox_excluded_commands: list[str],
@@ -552,6 +575,8 @@ def render_policy_data(
             ),
             "REFUSED_TOOLS: list[RefusedToolRow] = "
             + refused_tool_rows_literal(erase_refused_tools(refused_tools)),
+            "PEER_REDIRECT: PeerRedirectRow | None = "
+            + peer_redirect_literal(erase_peer_redirect(peer_redirect)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
@@ -583,6 +608,7 @@ def render_policy_data(
         "    ImportBoundaryRow,\n"
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
+        "    PeerRedirectRow,\n"
         "    RefusedToolRow,\n"
         "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"

@@ -1547,3 +1547,173 @@ def granted_allowances(grants_env: str, known: list[str]) -> list[str]:
     return document_allowances(
         environ[grants_env] if grants_env in environ else "", known
     )
+
+
+def peer_store(root: Path | None, store: list[str]) -> Path | None:
+    """Where this repository's sessions meet, or nothing outside a repository.
+
+    The parts arrive as data rather than spelled here, because the directory
+    belongs to whichever module put a roster in it. A dispatcher compiled for
+    a project whose sessions never coordinate carries this same code and is
+    handed nothing to read, which is the difference between a capability a
+    project declined and a path this half decided for it.
+
+    The shared git directory rather than a worktree, so every checkout of one
+    clone resolves the same roster and a branch cannot change what a peer
+    reads.
+    """
+    if root is None:
+        return None
+    shared = shared_git_directory(str(root))
+    if not shared:
+        return None
+    return Path(shared).joinpath(*store)
+
+
+def stream_records(path: Path) -> list[dict]:
+    """Every legible JSON object an append-only record holds, oldest first.
+
+    A line that does not parse is skipped rather than raised on. These files
+    are appended to by other sessions while this one reads them, so a torn
+    final line is the ordinary state of a healthy store — and a reader that
+    failed on it would stop judging peer calls for the duration of somebody
+    else's write.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    def legible():
+        """Each line that is a JSON object, skipping whatever is not one."""
+        for line in raw.splitlines():
+            try:
+                loaded = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(loaded, dict):
+                yield loaded
+
+    return list(legible())
+
+
+def peer_members(directory: Path, roster_file: str) -> list[dict]:
+    """Every member the roster still holds, folded from its own record.
+
+    Keyed by kind and id rather than by the printed address, because a member
+    taken through a second round is that member further on and not a second
+    one — which is what the roster's own fold says, and a reader answering
+    differently would show one session twice.
+
+    A record about nobody standing is dropped rather than inventing a member,
+    so a description or a finish arriving before its join says nothing.
+    """
+    # lup: ignore[empty-collection] — a fold whose every step reads what the
+    # steps before it left, which is the one shape a comprehension has no
+    # spelling for: a description updates a member an earlier record created
+    standing: dict = {}
+    for record in stream_records(directory / roster_file):
+        actor = record["actor"] if "actor" in record else {}
+        if not isinstance(actor, dict) or "id" not in actor or "kind" not in actor:
+            continue
+        held = f"{actor['kind']}-{actor['id']}"
+        match record["type"] if "type" in record else "":
+            case "spawned" | "joined":
+                standing[held] = {**record, "running": True}
+            case "described" | "finished" if held in standing:
+                standing[held] = {
+                    **standing[held],
+                    **record,
+                    "running": record["type"] != "finished",
+                }
+            case _:
+                continue
+    return [member for member in standing.values() if member["running"]]
+
+
+def peer_name_claims(directory: Path, names_file: str) -> dict:
+    """Which member each name reaches now, the newest claim on a name winning.
+
+    Every name ever recorded rather than only the current ones: a name
+    somebody wrote down before a rename goes on reaching the session it named
+    until something else claims it, which is what the record is kept
+    append-only for. A sender typing the older name is typing what was correct
+    when they read it, and there is no error they could have been shown.
+
+    Newest wins by construction — a later record for one name replaces the
+    earlier entry as the comprehension walks the stream in order.
+    """
+    return {
+        record["cli_name"]: record["id"]
+        for record in stream_records(directory / names_file)
+        if "cli_name" in record and "id" in record
+    }
+
+
+def peer_addresses(
+    root: Path | None, store: list[str], roster_file: str, names_file: str
+) -> list[str]:
+    """Every spelling that currently reaches a live member of this roster.
+
+    Ids, the kind-qualified label a door prints, and whatever each member is
+    called now, because a sender types whichever of those it last read — a
+    check knowing only one of them would let the others through, which is the
+    failure that made a redirect reach nobody.
+
+    Live members only. A session that has left is not somewhere a durable
+    message would arrive either, so redirecting a send to it would trade one
+    call reaching nobody for another.
+    """
+    directory = peer_store(root, store)
+    if directory is None:
+        return []
+    members = peer_members(directory, roster_file)
+    live = [member["actor"]["id"] for member in members]
+    return sorted(
+        {
+            *live,
+            *[
+                f"{member['actor']['kind']}:{member['actor']['id']}"
+                for member in members
+            ],
+            *[
+                name
+                for name, held in peer_name_claims(directory, names_file).items()
+                if held in live
+            ],
+        }
+    )
+
+
+def peer_listing(
+    root: Path | None, store: list[str], roster_file: str, names_file: str
+) -> list[str]:
+    """One line per live member, as somebody choosing who to reach reads it.
+
+    The same four facts a console prints — who, which checkout they are in,
+    what they are on, and what carries a message to them — because a listing
+    naming members without saying what reaches them leaves a reader to guess
+    which of them will hear anything.
+    """
+    directory = peer_store(root, store)
+    if directory is None:
+        return []
+    names = peer_name_claims(directory, names_file)
+
+    def described(member: dict) -> list[str]:
+        """The parts one member's line is joined from, blanks included."""
+        actor = member["actor"]
+        called = [name for name, held in names.items() if held == actor["id"]]
+        worktree = member["worktree"] if "worktree" in member else ""
+        saying = member["description"] if "description" in member else ""
+        return [
+            called[-1] if called else actor["id"],
+            Path(worktree).name if worktree else "",
+            saying or (member["task"] if "task" in member else ""),
+            member["delivery"] if "delivery" in member else "",
+        ]
+
+    return [
+        " — ".join(part for part in described(member) if part)
+        for member in peer_members(directory, roster_file)
+    ]

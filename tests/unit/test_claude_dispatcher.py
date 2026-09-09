@@ -886,6 +886,7 @@ def dispatcher_rewrite(
         dispatcher.KernelDecision("allow", "placed", placement),
         {"tool_name": "Bash", "tool_input": call},
         None,
+        "",
     )
     specific = answer["hookSpecificOutput"]
     assert isinstance(specific, dict)

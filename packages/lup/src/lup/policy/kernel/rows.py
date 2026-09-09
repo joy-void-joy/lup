@@ -559,3 +559,28 @@ class EditRuleRow(TypedDict):
     effect: str
     maximum_added_lines: int | None
     reason: str
+
+
+class PeerRedirectRow(TypedDict):
+    """Where this project's sessions find each other, and what a sender is told.
+
+    ``store``, ``roster_file`` and ``names_file`` say where the roster lives —
+    parts beneath the repository's shared git directory rather than a joined
+    path, because the dispatcher rebuilds it with the host's own separator and
+    a compiled literal carrying one platform's answers on one platform.
+
+    ``send_reason`` is the whole of what a stopped sender is told, so it names
+    the surface reaching the same peer durably rather than only refusing.
+    ``listing_note`` frames the roster attached to a listing that speaks for a
+    wider population, so a reader can tell the two apart.
+
+    No native tool name is carried. Which call sends and which lists is what a
+    runtime spells for itself, and the branch recognizing one belongs to that
+    runtime's own dispatcher — this row answers what to do once it has.
+    """
+
+    store: list[str]
+    roster_file: str
+    names_file: str
+    send_reason: str
+    listing_note: str
