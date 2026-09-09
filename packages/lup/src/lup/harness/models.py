@@ -456,6 +456,52 @@ class WatchOutput(SemanticPart, frozen=True):
         return self.command
 
 
+class CommandInvocation(SemanticPart, frozen=True):
+    """One `lup-devtools` command, named by its path rather than spelled out.
+
+    A document telling its reader to run something is issuing an instruction,
+    and one naming a command that does not exist fails for whoever follows it.
+    Twenty-two of those shipped at once — `dev hookssweep` in the hooks
+    workflow's own step 7, `py info` without its `dev` group in the
+    introspection tools' own docstring — each written beside the command it
+    named, which is why nobody reading either noticed.
+
+    Declared the way this document declares a plugin path or a skill it
+    invokes: the part holds what it means and the harness spells it, so the
+    executable's name is written once and the path is a value the walked CLI
+    can be asked about. ``arguments`` is whatever follows, which is the
+    reader's to fill in as often as not — placeholders belong there and are
+    resolved against nothing.
+
+    What this cannot reach is a docstring or a checked-in Markdown file, where
+    most of those twenty-two lived. The sweep in
+    :mod:`lup.devtools.dev.documented` covers those, and covers this too.
+    """
+
+    type: Literal["command_invocation"] = "command_invocation"
+    path: list[str] = Field(min_length=1)
+    """The command's own words, as the CLI mounts them: ``["dev", "check"]``."""
+
+    arguments: PortableText = ""
+    """Whatever follows the command — flags, operands, a placeholder."""
+
+    def spelled(self) -> str:
+        """This invocation as a reader types it, executable and all."""
+        return " ".join(["uv run lup-devtools", *self.path, self.arguments]).strip()
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        """The same words for every runtime, which all reach the same shell."""
+        return self.spelled()
+
+    @property
+    def text_payload(self) -> str:
+        return self.spelled()
+
+    @property
+    def shell_command(self) -> str:
+        return self.spelled()
+
+
 class ResolverEntry(SemanticPart, frozen=True):
     type: Literal["resolver_entry"] = "resolver_entry"
 
@@ -489,6 +535,7 @@ type PromptPart = Annotated[
     | RequestApproval
     | RelocateSession
     | WatchOutput
+    | CommandInvocation
     | ResolverEntry
     | ArgumentsRef,
     Discriminator("type"),

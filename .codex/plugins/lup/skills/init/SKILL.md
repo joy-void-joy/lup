@@ -353,10 +353,6 @@ proposes rather than writes. The template ships `README.md` that way, which is
 right for a file whose words are the author's and wrong for a project that
 wants its README kept current by the agent.
 
-```bash
-uv run lup-devtools dev init ownership
-```
-
 Ask the user directly, offering concrete options, and wait for the answer: which files the human author owns, starting from whether README.md stays locked — then apply the answer with `--lock` / `--unlock` on that same command,
 which rewrites the declaration and regenerates the native trees. Never
 hand-edit `human_owned_files` in the catalog.
@@ -467,7 +463,7 @@ Customize the interactive setup wizard for the domain's integrations:
 - Update the `INTEGRATIONS` list — each entry is an `Integration(name, env_keys, setup_func, status_func)`
 - Add corresponding `@app.command()` subcommands for individual integration setup
 - Update env var names in `config.py` to match what the setup wizard writes to `.env.local`
-- Verify `lup-devtools dashboard` exposes the same registry: declarative fields become browser forms, while bespoke flows link back to their CLI command
+- Verify `lup-devtools setup dashboard` exposes the same registry: declarative fields become browser forms, while bespoke flows link back to their CLI command
 
 The framework (env helpers, status table, mask, clipboard, browser open, wizard flow) is reusable — only the integration functions and registry need customization.
 

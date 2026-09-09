@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "5e52d20b2ea395e42a50d9e45e2fc01868a9c066f5fa64eb654ca57b12feb3b7",
+  "source_digest": "ab53d762b8d01ec03ce8230c3426337e3b3f33a147020d30be00be24af2394a7",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -212,7 +212,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "838cacb7e6bf35b05e04b3eeeb39cb29013e6bf07bf75e941a7c634319269fa0",
+      "sha256": "502e1da21637dcd85d7ffedcf5bf40974c69debda06a31a40b3930f1f85b5aa5",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -247,7 +247,7 @@
     {
       "path": ".codex/plugins/lup/skills/brainstorm/SKILL.md",
       "category": "generated",
-      "sha256": "d5481e0c8741efc3ebc622e5e48c14cd24cc691b4dbc31cb94c6cf0738c2bd83",
+      "sha256": "58a3f6ec64218194079bf4464d1e0b66b26ad1450caf8d13614a48ce491f1028",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -275,7 +275,7 @@
     {
       "path": ".codex/plugins/lup/skills/create-investigator/SKILL.md",
       "category": "generated",
-      "sha256": "4bfc8a2fc7b5875c02982ec06239462f7ec0c90ffe39765b794c65d7468163e1",
+      "sha256": "e293a2839663df6db4a76c924630a6fde9412ff2b7861cc2186b9b89c1652fc1",
       "semantic_id": "skill.create-investigator",
       "executable": false
     },
@@ -352,7 +352,7 @@
     {
       "path": ".codex/plugins/lup/skills/hooks/SKILL.md",
       "category": "generated",
-      "sha256": "73174d8d990aedfa473d3cdd9889cb9c162242c47cdd9764e3f3fb64c78932b0",
+      "sha256": "c9e282d472e84abbb2cce34152991bd3620ac154392061f792413df7260c2769",
       "semantic_id": "skill.hooks",
       "executable": false
     },
@@ -373,7 +373,7 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "9657f0c74034d28f9a4b0d49ea2d4c15e62ca5972da15864f20077f874bf550c",
+      "sha256": "8c0aa564d7d2793015318af27e232b8d19a54d518f0916a2c2741cc7195081ac",
       "semantic_id": "skill.init",
       "executable": false
     },
@@ -408,14 +408,14 @@
     {
       "path": ".codex/plugins/lup/skills/modify-command/SKILL.md",
       "category": "generated",
-      "sha256": "4da04300b053b946071b9d255b40b7b8305cd684fd2d4d3fa895d2c3c5c487ac",
+      "sha256": "3d0c58e137da269c413ee0cfdba1e707152af0d8939a1e837ac2f2678014afe4",
       "semantic_id": "skill.modify-command",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/principle/SKILL.md",
       "category": "generated",
-      "sha256": "26ab6766d8fdce3eec0c28bec62e50ebbdb5664bd2a00cd128dbad25b9170bec",
+      "sha256": "47a5eb8be44d31f11dc1b1a7baa9d44d4a2df2945b0102ceac5a5971a118b15d",
       "semantic_id": "skill.principle",
       "executable": false
     },

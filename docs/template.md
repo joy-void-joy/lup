@@ -213,7 +213,7 @@ what a session is offered are all derived from that one answer.
 
 ### The setup dashboard
 
-`uv run lup-devtools dashboard` serves a local browser interface at
+`uv run lup-devtools setup dashboard` serves a local browser interface at
 `http://127.0.0.1:8765`. It is the web face of the same declarative
 `INTEGRATIONS` registry that `uv run lup-devtools setup` walks in the
 terminal: a domain customizes the registry once and gets both.

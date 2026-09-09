@@ -37,6 +37,7 @@ import lup.devtools.dev.rules as rules
 from lup.harness.codescan.markers import NoteKind
 from lup.harness.codescan.registry import all_rules
 import lup.devtools.py.app as py
+from lup.devtools.dev.commands import CommandSurface
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.hooks.app import create_hooks_app
 from lup.devtools.report.app import create_report_app
@@ -59,6 +60,7 @@ def create_dev_app(
     usage_entries: list[UsageEntry] | None = None,
     node_classes: list[type[LedgerNode]] | None = None,
     ledger: LedgerPlacement = SharedStore(),
+    command_surface: Callable[[], CommandSurface] | None = None,
 ) -> typer.Typer:
     """Wire the dev command tree over what one repository declares about itself."""
     app = typer.Typer(no_args_is_help=True)
@@ -395,6 +397,7 @@ def create_dev_app(
             repository_writers=repository_writers,
             git_guards=declarations.git_guards,
             hooks_declaration=declarations.hooks,
+            command_surface=command_surface,
             scope=check.changed_paths(since) if since is not None else None,
             node_classes=node_classes or [],
             ledger=ledger,

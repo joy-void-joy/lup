@@ -80,7 +80,7 @@ If `"""
 
 1. **Parse** the command name and delta from the arguments
 2. **Find** the source -- search in these locations, in order:
-   - `lup.harness.content.skills.<name>`, then `{layout.directory("harness", "content", "skills")}<name>.py` (lup skills, including every `lup:name` variant -- the underscored module name; the library half holds the skills about agent work, this project's the ones about being a template). Where lup is not vendored here, read its modules with `uv run lup-devtools dev pysource` rather than by path
+   - `lup.harness.content.skills.<name>`, then `{layout.directory("harness", "content", "skills")}<name>.py` (lup skills, including every `lup:name` variant -- the underscored module name; the library half holds the skills about agent work, this project's the ones about being a template). Where lup is not vendored here, read its modules with `uv run lup-devtools dev py source` rather than by path
    - a command the project or the person defined natively, outside any plugin
 
    Files under """

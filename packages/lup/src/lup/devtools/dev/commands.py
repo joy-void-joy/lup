@@ -18,6 +18,7 @@ close the import loop the harness content is kept out of.
 """
 
 from collections.abc import Iterator
+from itertools import takewhile
 from pathlib import Path
 
 import typer
@@ -30,6 +31,7 @@ from pydantic import BaseModel
 from typer._click.core import Command as ClickCommand
 from typer.core import TyperGroup
 
+from lup.devtools.dev.documented import refuse_unresolved_commands
 import lup.harness.models as models
 from lup.providers.harness import claude_prompt_renderer
 from lup.formats.banner import GeneratedBanner
@@ -118,6 +120,99 @@ class CommandEntry(BaseModel, frozen=True):
         return list(cls.beneath(typer.main.get_command(app), []))
 
 
+class ReachedCommand(BaseModel, frozen=True):
+    """One path the walk reached, and whether typing it alone runs anything."""
+
+    path: tuple[str, ...]
+    runs_alone: bool
+
+
+class CommandSurface(BaseModel, frozen=True):
+    """Every path this CLI answers to, for judging one somebody wrote down.
+
+    The reference page needs the leaves and nothing else. Deciding whether a
+    written command is real needs more: `dev report` is a group that runs,
+    `dev` is a group that only leads somewhere, and `dev pyinfo` is neither
+    while sharing a prefix with both. A reader that tested prefixes at every
+    depth called the third one reachable, because `dev` resolves — so the walk
+    here is greedy and the answer is whatever it lands on.
+
+    Read off the app rather than declared. Whether a group runs without a
+    subcommand is a fact about how it was mounted, and a second list naming
+    the ones that do would be right until somebody mounted another.
+    """
+
+    reached: list[ReachedCommand]
+    """Every path the walk found, each saying whether it runs on its own."""
+
+    @classmethod
+    def beneath(
+        cls, command: ClickCommand, path: list[str]
+    ) -> Iterator[ReachedCommand]:
+        """Each path under ``command``, saying whether it runs on its own."""
+        match command:
+            case TyperGroup():
+                if path:
+                    yield ReachedCommand(
+                        path=tuple(path),
+                        runs_alone=bool(command.invoke_without_command),
+                    )
+                for name, child in command.commands.items():
+                    if not child.hidden:
+                        yield from cls.beneath(child, [*path, name])
+            case _:
+                yield ReachedCommand(path=tuple(path), runs_alone=True)
+
+    @classmethod
+    def of(cls, app: typer.Typer) -> "CommandSurface":
+        """The surface the composed ``app`` presents, hidden commands aside."""
+        return cls(reached=list(cls.beneath(typer.main.get_command(app), [])))
+
+    def admits(self, words: list[str]) -> bool:
+        """Whether every word that could name a command actually names one.
+
+        The question prose asks, and it has to survive two shapes that are not
+        errors. A group named as a family reaches no command of its own —
+        `git pr` in a grant pattern, `setup conversation <provider>` with the
+        provider left to the reader — and an argument can be spelled exactly
+        like a command name: `harness generate all` ends in one, and `all` is
+        nobody's subcommand. So the walk takes the longest prefix the tree
+        knows, and what is left over is admitted only where the walk landed
+        somewhere that runs — because past a runnable command, every further
+        word is an argument to it.
+
+        `dev pyinfo` survives neither: the walk reaches `dev`, which does not
+        run alone, and `pyinfo` is nobody's child.
+
+        The cost is stated rather than hidden. A group that *does* run alone
+        swallows whatever follows it, so `setup nonesuch` reads as `setup`
+        with an argument. Telling those apart means knowing each command's
+        arguments, which is a second grammar to keep true; the words that name
+        nothing at all are the ones that were actually wrong.
+        """
+        named = {
+            item.path[:depth]
+            for item in self.reached
+            for depth in range(1, len(item.path) + 1)
+        }
+        consumed = takewhile(
+            lambda depth: tuple(words[:depth]) in named, range(1, len(words) + 1)
+        )
+        landed = max(consumed, default=0)
+        return landed == len(words) or self.runs(words[:landed])
+
+    def runs(self, path: list[str]) -> bool:
+        """Whether typing exactly this path runs something.
+
+        The stricter question, which a declaration asks: a construct naming a
+        command is issuing an instruction, so a group answering only with its
+        own help is not an answer.
+        """
+        return any(
+            item.path == tuple(path) and item.runs_alone for item in self.reached
+        )
+
+
 class CommandGroup(BaseModel, frozen=True):
     """One sub-app's commands, under the name the CLI mounts them at."""
 
@@ -193,10 +288,21 @@ def command_reference_artifact(app: typer.Typer) -> Artifact:
 def write_command_reference(
     app: typer.Typer, root: Path | None = None, *, check: bool = False
 ) -> Path:
-    """Write or verify the generated command reference."""
-    return write_generated_file(
+    """Write or verify the generated command reference, and what names a command.
+
+    The page and the sweep run together because they are one question asked
+    twice. This writer is where the whole CLI is in scope, and it runs after
+    every tree has been rendered — so the artifacts a session will read are on
+    disk by the time their commands are resolved against the app that serves
+    them. A miss raises rather than reports: generation is where a document is
+    being *made*, and a document is not finished while it tells its reader to
+    run something that does not exist.
+    """
+    written = write_generated_file(
         command_reference_artifact(app),
         root or project_root(),
         COMMAND_REFERENCE_COMMAND,
         check=check,
     )
+    refuse_unresolved_commands(CommandSurface.of(app).admits)
+    return written

@@ -93,6 +93,7 @@ from lup.harness.models import (
     PromptPart,
     RelocateSession,
     WatchOutput,
+    CommandInvocation,
     RequestApproval,
     ResolverEntry,
     RuntimeDocs,
@@ -834,6 +835,13 @@ PART_CONTRACT: dict[str, PartExpectation] = {
         part=WatchOutput(command="lup-devtools resolve status --watch"),
         diverges=True,
     ),
+    # The same words for both, because both reach the same shell: what a
+    # runtime spells differently is how it *asks* for something, and this asks
+    # for nothing — it names a command the reader runs.
+    "CommandInvocation": PartExpectation(
+        part=CommandInvocation(path=["dev", "check"], arguments="--no-test"),
+        diverges=False,
+    ),
     "ResolverEntry": PartExpectation(part=ResolverEntry(), diverges=True),
     "ArgumentsRef": PartExpectation(part=ArgumentsRef(), diverges=True),
 }
@@ -876,7 +884,20 @@ class PartQuestion(BaseModel, frozen=True):
 PART_QUESTIONS: dict[str, PartQuestion] = {
     "text_payload": PartQuestion(
         ask=lambda part: part.text_payload is not None,
-        answered_by=["TextPart", "SpellingExample", "MarkdownTable", "ToolRoster"],
+        answered_by=[
+            "TextPart",
+            "SpellingExample",
+            "MarkdownTable",
+            "ToolRoster",
+            "CommandInvocation",
+        ],
+    ),
+    # What a skill's own `tools` grant is checked against, so a step telling
+    # its reader to run something is one the skill actually granted a shell
+    # for. Both kinds that name a command answer it.
+    "shell_command": PartQuestion(
+        ask=lambda part: part.shell_command is not None,
+        answered_by=["WatchOutput", "CommandInvocation"],
     ),
     "invocation": PartQuestion(
         ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]
@@ -2100,7 +2121,7 @@ def test_generated_codex_hook_refuses_the_declared_calls() -> None:
 
     refused = run("Artifact", {"content": "a page"})
     assert refused.exit_code == 2
-    assert b"lup-devtools report" in refused.stderr
+    assert b"lup-devtools dev report" in refused.stderr
 
     narrowed = run("Skill", {"skill": "artifact-design"})
     assert narrowed.exit_code == 2
@@ -2176,7 +2197,7 @@ def test_generated_claude_hook_refuses_the_declared_calls() -> None:
 
     refused = decision("Artifact", {"content": "a page"})
     assert refused.permission_decision == "deny"
-    assert "lup-devtools report" in refused.permission_decision_reason
+    assert "lup-devtools dev report" in refused.permission_decision_reason
 
     narrowed = decision("Skill", {"skill": "artifact-design"})
     assert narrowed.permission_decision == "deny"

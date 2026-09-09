@@ -130,7 +130,7 @@ the list stays as short as the toolchain's actual incompatibilities."""
 
 ARTIFACT_REFUSAL = (
     "publishing a page leaves the repository, and this project already owns"
-    " surfaces that do not — run `uv run lup-devtools report` for everything"
+    " surfaces that do not — run `uv run lup-devtools dev report` for everything"
     " left to implement, or the report skill to write it whole to a file named"
     " for the work, under tmp/"
 )

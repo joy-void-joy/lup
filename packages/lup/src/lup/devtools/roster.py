@@ -35,6 +35,7 @@ from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerPlacement, SharedStore
 from lup.ledger.writeup import Writeup, write_writeup
 from lup.devtools.dev.app import create_dev_app
+from lup.devtools.dev.commands import CommandSurface
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.feedback.app import create_feedback_app
 from lup.devtools.feedback.models import AgentPrompt
@@ -73,6 +74,16 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
 
     repository_writers: list[RepositoryWriter]
     """Generated files that belong to no single native tree."""
+
+    command_surface: Callable[[], CommandSurface] | None = None
+    """Every command this project's composed CLI serves, when it can say.
+
+    Deferred rather than taken as a value, for the reason the command
+    reference is written by a closure: these declarations are built before the
+    sub-apps are mounted onto the root, so a surface read here would be read
+    off half a CLI. A project declaring none keeps every check but the one
+    that reads it, which is the honest answer for a roster composed without a
+    root to walk."""
 
     prompt: Callable[[], AgentPrompt]
     """This project's system prompt, as the health report weighs it."""
@@ -263,6 +274,7 @@ LIBRARY_ROSTER = [
             usage_entries=declared.usage_entries,
             node_classes=declared.node_classes,
             ledger=declared.ledger,
+            command_surface=declared.command_surface,
         ),
     ),
     RosterEntry(
