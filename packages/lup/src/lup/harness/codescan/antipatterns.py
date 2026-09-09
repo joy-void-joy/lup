@@ -16,12 +16,14 @@ every rule) but the auditor surfaces it as "untyped" so the migration to typed
 directives is gradual.
 
 The set is a syntax-aware linter pass, not a raw grep: every rule declares the
-syntactic ``context`` it inspects, and Python source is tokenized once (via
-`lup.harness.codescan.common.LineProjections`) so "code" rules scan lines with string
-literals and comments blanked while "comment" directive rules see comments
-intact. Every Python rule selects its violations from the tree; the regex it
-also carries is the fallback for source no tree can be had from, and the sole
-detector for the TypeScript table, which this grammar is not for. Neither
+syntactic ``context`` it inspects, and source is masked once (via
+`lup.harness.codescan.common.LineProjections` — Python through its tokenizer,
+the TypeScript family through the kernel's span scan) so "code" rules scan
+lines with string literals and comments blanked while "comment" directive
+rules see comments intact. Every Python rule selects its violations from the
+tree; the regex it also carries is the fallback for source no tree can be had
+from, and the sole detector for the TypeScript table, which this grammar is
+not for. Neither
 gate reaches for a lint engine to do it: ruff has no plugin API, and the ones
 that do — flake8, pylint, semgrep — could not run inside the hook.
 
@@ -82,6 +84,7 @@ from lup.harness.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
+    TYPESCRIPT_SUFFIXES,
     namedtuple_sites,
     noqa_sites,
     pyright_ignore_sites,
@@ -1152,6 +1155,10 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
             RuleExample(
                 code="const session = raw as SessionPayload;", verdict="cleared"
             ),
+            RuleExample(
+                code="// the cast read `raw as any` before the guard existed",
+                verdict="cleared",
+            ),
         ],
         message="Never use `as any` — use proper types or type guards",
     ),
@@ -1171,10 +1178,17 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
         pattern=re.compile(r":\s*any\b"),
         examples=[
             RuleExample(code="function load(payload: any) {}", verdict="flagged"),
+            RuleExample(code="const session: any = raw;", verdict="flagged"),
             RuleExample(
                 code="function load(payload: SessionPayload) {}", verdict="cleared"
             ),
             RuleExample(code="function load(payload: unknown) {}", verdict="cleared"),
+            RuleExample(
+                code="/** Whether a node answers a search: any of its readable fields carries the words. */",
+                verdict="cleared",
+            ),
+            RuleExample(code="// TODO: any of these", verdict="cleared"),
+            RuleExample(code='const label: string = ": any";', verdict="cleared"),
         ],
         message="Never use `any` type annotation — use specific types, generics, or `unknown`",
     ),
@@ -1184,6 +1198,9 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
         examples=[
             RuleExample(code="const session = <any>raw;", verdict="flagged"),
             RuleExample(code="const session = <SessionPayload>raw;", verdict="cleared"),
+            RuleExample(
+                code='const note = "a <any> cast hides the shape";', verdict="cleared"
+            ),
         ],
         message="Never use `<any>` type assertion — use proper types",
     ),
@@ -1310,8 +1327,6 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
 
 # lup: ignore[library-default] — Python's own source suffixes
 PY_SUFFIXES = (".py", ".pyi")
-# lup: ignore[library-default] — the suffixes those ecosystems compile
-TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 
 # lup: ignore[library-default] — the ids other codescan scanners own, so the set
 # follows those rules' own identities rather than any taste of this module's
@@ -1355,7 +1370,7 @@ class AntiPatternSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
         """
         if suffix in PY_SUFFIXES:
             return self.python
-        if suffix in TS_SUFFIXES:
+        if suffix in TYPESCRIPT_SUFFIXES:
             return self.typescript
         return None
 
@@ -1444,12 +1459,13 @@ def line_hits(
     whose text would not parse, which is what puts that rule back on its
     pattern.
 
-    Tokenized Python is scanned per rule context: a "code" rule sees string
+    Masked source is scanned per rule context: a "code" rule sees string
     literals and comments blanked, so identifiers in prose never match, while
     a "comment" directive rule sees comments intact — a standalone `# noqa`
-    line included. Untokenized text (a non-Python file, a fragment) keeps the
-    conservative whole-line scan, skipping blank lines and pure comments that
-    carry no `type:` directive — aligned with what the hook would decide.
+    line included. Text no grammar masked (a Python fragment that will not
+    tokenize, a file of neither family) keeps the conservative whole-line
+    scan, skipping blank lines and pure comments that carry no `type:`
+    directive — aligned with what the hook would decide.
 
     There are two contexts and forty-odd rules, so both projections of the
     line are taken once and the table reads whichever one it declared —
@@ -1500,8 +1516,13 @@ def audit_text(
     text: str,
     patterns: list[AntiPattern],
     refutations: list[Refutation] | None = None,
+    typescript: bool = False,
 ) -> list[AntiPatternFinding]:
     """Audit one file's current text for per-rule ignore-marker health.
+
+    ``typescript`` says the text is of that family, read through the
+    kernel's span scan rather than the Python tokenizer — the same split the
+    hook makes from the file's suffix, so both gates mask one file one way.
 
     A bare file-level `# lup: ignore` opts the whole file out (matching the
     hook); the audit reports it as a single advisory "untyped" finding and
@@ -1555,14 +1576,18 @@ def audit_text(
             ]
         file_disabled = file_ignore.rule_ids
 
-    context = PythonContext.parse(text)
+    context = (
+        PythonContext.parse_typescript(text)
+        if typescript
+        else PythonContext.parse(text)
+    )
     refuted = {
         (refutation.rule_id, refutation.line) for refutation in refutations or []
     }
 
     file_ignore_line = file_ignore.line if file_ignore is not None else 0
     original_lines = text.splitlines()
-    projections = LineProjections.parse(text)
+    projections = LineProjections.parse(text, typescript)
     selected = selected_lines(text, patterns)
 
     def written_directive(line_no: int) -> re.Match[str] | None:

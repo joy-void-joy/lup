@@ -636,6 +636,294 @@ def python_code_lines(source: str) -> list[str]:
     return ["".join(line) for line in lines]
 
 
+# lup: ignore[library-default] — the suffixes the TypeScript-family rule table reads; the kernel carries no config
+TYPESCRIPT_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
+"""The files whose text the TypeScript-family maskers below read.
+
+The one family `lup.harness.codescan.antipatterns` checks against its
+TypeScript table: the hook deriving the language from this tuple and the
+audit from another would mask the same file two ways and judge it twice.
+"""
+
+
+class ScriptSpan(TypedDict):
+    """One run of TypeScript-family text that is not code.
+
+    ``start`` and ``end`` are character offsets into the source, half-open.
+    ``kind`` is "string" for a string, template or regex literal and
+    "comment" for a `//` or `/* */` comment.
+    """
+
+    start: int
+    end: int
+    kind: str
+
+
+def typescript_spans(
+    source: str,
+    expression_openers: str = "(,=:[!&|?{};+-*%<>~^",
+    expression_words: tuple[str, ...] = (
+        "return",
+        "typeof",
+        "case",
+        "do",
+        "else",
+        "in",
+        "of",
+        "instanceof",
+        "new",
+        "delete",
+        "void",
+        "throw",
+        "yield",
+        "await",
+    ),
+) -> list[ScriptSpan]:
+    """Every string, template, regex and comment run of TypeScript-family text.
+
+    A scan rule reads code, and in this family the prose sits where the
+    Python tokenizer cannot see it: `//` and `/* */` comments, `'`, `"` and
+    backtick literals, and the body of a regex literal. Each is returned as
+    an offset span so a masker can blank it while every line and column
+    stays where it was.
+
+    One pass, character by character. A template literal's `${ }` holes are
+    code, so the literal is cut around them, and the braces inside a hole
+    are counted so its closing brace is told from one of its own. A `/` is a
+    regex literal where an expression can start — after an operator, an
+    opening bracket, a separator, or one of the words the grammar puts before
+    an expression — and a division everywhere else, the reading every lexer
+    without a parser settles for; a `/` misread as a regex blanks the rest of
+    its line and never more. A `'` or `"` literal ends at its line, as the
+    grammar has it, so an unbalanced quote in a `.vue` template costs one
+    line rather than the file.
+    """
+    spans: list[ScriptSpan] = []
+    holes: list[int] = []
+    length = len(source)
+    # The last code character and the word it ends, which is all a `/` needs
+    # to know whether an expression can start where it stands.
+    last_code = ""
+    word = ""
+
+    def literal_end(quote: str, start: int) -> int:
+        """One past the quote closing a literal opened at `start`, or its line's end."""
+        index = start + 1
+        while index < length:
+            match source[index]:
+                case "\\":
+                    index += 2
+                case "\n":
+                    return index
+                case character if character == quote:
+                    return index + 1
+                case _:
+                    index += 1
+        return length
+
+    def regex_end(start: int) -> int:
+        """One past the flags of a regex literal opened at `start`, or its line's end."""
+        index = start + 1
+        in_class = False
+        while index < length:
+            match source[index]:
+                case "\\":
+                    index += 2
+                case "\n":
+                    return index
+                case "[":
+                    in_class = True
+                    index += 1
+                case "]":
+                    in_class = False
+                    index += 1
+                case "/" if not in_class:
+                    index += 1
+                    while index < length and source[index].isalpha():
+                        index += 1
+                    return index
+                case _:
+                    index += 1
+        return length
+
+    def template_piece(start: int) -> int:
+        """Record the template text from `start` and return where code resumes.
+
+        `start` is the opening backtick or the `}` closing a hole; the piece
+        runs to the closing backtick, taken with it, or to the `${` opening
+        the next hole, which is left to the code scan.
+        """
+        index = start + 1
+        while index < length:
+            match source[index]:
+                case "\\":
+                    index += 2
+                case "`":
+                    spans.append(ScriptSpan(start=start, end=index + 1, kind="string"))
+                    return index + 1
+                case "$" if source.startswith("${", index):
+                    spans.append(ScriptSpan(start=start, end=index, kind="string"))
+                    holes.append(0)
+                    return index + 2
+                case _:
+                    index += 1
+        spans.append(ScriptSpan(start=start, end=length, kind="string"))
+        return length
+
+    position = 0
+    while position < length:
+        character = source[position]
+        match character:
+            case "/" if source.startswith("//", position):
+                newline = source.find("\n", position)
+                end = length if newline < 0 else newline
+                spans.append(ScriptSpan(start=position, end=end, kind="comment"))
+                position = end
+            case "/" if source.startswith("/*", position):
+                close = source.find("*/", position + 2)
+                end = length if close < 0 else close + 2
+                spans.append(ScriptSpan(start=position, end=end, kind="comment"))
+                position = end
+            case "'" | '"':
+                end = literal_end(character, position)
+                spans.append(ScriptSpan(start=position, end=end, kind="string"))
+                position = end
+                last_code, word = character, ""
+            case "`":
+                position = template_piece(position)
+                last_code, word = character, ""
+            case "/" if (
+                not last_code
+                or last_code in expression_openers
+                or word in expression_words
+            ):
+                end = regex_end(position)
+                spans.append(ScriptSpan(start=position, end=end, kind="string"))
+                position = end
+                last_code, word = "/", ""
+            case "{" if holes:
+                holes[-1] += 1
+                position += 1
+                last_code, word = character, ""
+            case "}" if holes and not holes[-1]:
+                holes.pop()
+                position = template_piece(position)
+                last_code, word = "`", ""
+            case "}" if holes:
+                holes[-1] -= 1
+                position += 1
+                last_code, word = character, ""
+            case _ if character.isspace():
+                position += 1
+            case _ if character.isalnum() or character in "_$":
+                position += 1
+                last_code, word = character, word + character
+            case _:
+                position += 1
+                last_code, word = character, ""
+    return spans
+
+
+def masked_typescript_lines(source: str, comments: bool) -> list[str]:
+    """The lines of TypeScript-family text with its prose blanked, columns kept.
+
+    String, template and regex text always goes, leaving the character that
+    opened it so a rule can still see that a literal stood there; ``comments``
+    says whether `//` and `/* */` runs go too, which is the difference
+    between what a "code" rule and a "comment" rule read.
+    """
+    spans = [
+        span
+        for span in typescript_spans(source)
+        if comments or span["kind"] == "string"
+    ]
+    lines: list[str] = []
+    offset = 0
+    index = 0
+    for line in source.splitlines(keepends=True):
+        content = line.splitlines()[0]
+        chars = list(content)
+        stop = offset + len(content)
+        while index < len(spans) and spans[index]["end"] <= offset:
+            index += 1
+        cursor = index
+        while cursor < len(spans) and spans[cursor]["start"] < stop:
+            span = spans[cursor]
+            kept = 1 if span["kind"] == "string" else 0
+            first = max(span["start"] + kept, offset)
+            last = min(span["end"], stop)
+            if first < last:
+                chars[first - offset : last - offset] = [" "] * (last - first)
+            cursor += 1
+        lines.append("".join(chars))
+        offset += len(line)
+    return lines
+
+
+def typescript_comment_columns(source: str) -> dict[int, int]:
+    """Map TypeScript-family line numbers to the column a comment opens at.
+
+    The last opening on each line, because a `//` runs to the end of its
+    line and nothing opens after it: a directive is written with `//`, so
+    the column that can hold one is the last. A block comment is recorded
+    where it opens and on no later line, so a `//` written inside one is
+    comment text rather than a comment.
+    """
+    columns: dict[int, int] = {}
+    openers = [span for span in typescript_spans(source) if span["kind"] == "comment"]
+    offset = 0
+    cursor = 0
+    for number, line in enumerate(source.splitlines(keepends=True), start=1):
+        stop = offset + len(line)
+        while cursor < len(openers) and openers[cursor]["start"] < stop:
+            columns[number] = openers[cursor]["start"] - offset
+            cursor += 1
+        offset = stop
+    return columns
+
+
+class MaskedSource(TypedDict):
+    """One document's lines as each rule context reads them, and where comments open.
+
+    ``commented`` blanks string text and keeps comments — the surface a
+    "comment" rule scans; ``code`` blanks both — the surface a "code" rule
+    scans. ``comment_columns`` is where a real comment opens on each line,
+    and ``None`` where no grammar mapped the text, which is what puts every
+    rule back on the raw line.
+    """
+
+    commented: list[str]
+    code: list[str]
+    comment_columns: dict[int, int] | None
+
+
+def masked_source(
+    source: str, python_source: bool, typescript_source: bool
+) -> MaskedSource:
+    """Project a document into the surfaces its rules read, by its grammar.
+
+    Python is read through its tokenizer, and where a fragment will not
+    tokenize the raw lines stand in with no comment map. The TypeScript
+    family is read through :func:`typescript_spans`, which has no failure
+    case: what it cannot classify it leaves as code. Text of neither family
+    is its own projection, every rule reading the whole line.
+    """
+    if python_source:
+        return MaskedSource(
+            commented=mask_python_string_literals(source),
+            code=python_code_lines(source),
+            comment_columns=python_comment_columns(source),
+        )
+    if typescript_source:
+        return MaskedSource(
+            commented=masked_typescript_lines(source, comments=False),
+            code=masked_typescript_lines(source, comments=True),
+            comment_columns=typescript_comment_columns(source),
+        )
+    lines = source.splitlines()
+    return MaskedSource(commented=lines, code=lines, comment_columns=None)
+
+
 def quoted_example(line: str, position: int) -> bool:
     """Whether a match at ``position`` sits inside a backtick code span.
 
@@ -2881,14 +3169,17 @@ def antipattern_decision(
     allowances: list[str] | None = None,
     refuted: dict[str, list[int]] | None = None,
     resolved: list[ResolvedImportRule] | None = None,
+    typescript_source: bool = False,
 ) -> KernelDecision | None:
     """Reject newly added unsuppressed anti-patterns and ask on suppressions.
 
     Each row carries the syntactic context it inspects: a "code" rule is
-    matched against token-masked Python (string literals and comments both
+    matched against masked source (string literals and comments both
     blanked) so prose never trips it, while a "comment" rule targets comment
-    directives and sees comments intact. Without a tokenizer (non-Python
-    files, fragments that fail to tokenize) every rule scans the raw line.
+    directives and sees comments intact. Python is masked through its
+    tokenizer and the TypeScript family through :func:`typescript_spans`;
+    without either (a file of neither family, a Python fragment that fails
+    to tokenize) every rule scans the raw line.
 
     A declared suppression is judged before it is asked about. One naming a
     rule that nothing it guards trips is refused outright: it silences
@@ -2914,10 +3205,9 @@ def antipattern_decision(
     suppression = "allow" if "antipattern-suppression" in (allowances or []) else "ask"
     added = added_line_numbers(before, after)
     original_lines = after.splitlines()
-    scanned_lines = (
-        mask_python_string_literals(after) if python_source else original_lines
-    )
-    code_lines = python_code_lines(after) if python_source else original_lines
+    masked = masked_source(after, python_source, typescript_source)
+    scanned_lines = masked["commented"]
+    code_lines = masked["code"]
     exempt: dict[str, set[int]] = {}
     matched = matched_lines(after, rows) if python_source else {}
     rows = [*rows, *(selection["row"] for selection in resolved or [])]
@@ -2931,7 +3221,7 @@ def antipattern_decision(
         exempt[rule_id] = (
             exempt[rule_id] | set(lines) if rule_id in exempt else set(lines)
         )
-    comment_columns = python_comment_columns(after) if python_source else None
+    comment_columns = masked["comment_columns"]
     file_level = file_ignore(after)
     has_file_ignore = file_level["present"]
     disabled_ids = file_level["ids"]
@@ -2961,8 +3251,7 @@ def antipattern_decision(
             directive is not None
             and not resites_a_suppression(original, gone)
             and (
-                not python_source
-                or comment_columns is None
+                comment_columns is None
                 or (
                     number in comment_columns
                     and comment_columns[number] == directive.start()
@@ -3500,6 +3789,7 @@ def decide_edit(
             resolved_import_rules(path, after, import_boundaries or [])
             if python_source and not outside_project
             else None,
+            typescript_source=suffix in TYPESCRIPT_SUFFIXES,
         )
         # A granted suppression answers this gate and no other, so an allow
         # falls through to the rest of the lattice rather than ending it.
