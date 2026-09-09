@@ -226,6 +226,7 @@ owns the subject, then regenerate.
 - /lup:fb-reflect — Meta and meta-meta reflection on the feedback loop process itself
 - /lup:fb-status — Feedback loop entry point — status, targets, and previous session context
 - /lup:feedback-loop — Full feedback loop — orchestrates status, investigation, analysis, reflection, and implementation
+- /lup:handoff — Hand a body of work to another session, with what it takes to resume it
 - /lup:hooks — Inspect and modify the canonical semantic permission policy
 - /lup:implementer — Implement one resolver concern inside its leased worktree
 - /lup:import — Import a feature or pattern from a tracked project or local Git source

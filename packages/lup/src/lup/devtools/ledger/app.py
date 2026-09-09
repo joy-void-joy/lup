@@ -20,11 +20,19 @@ from typing import Annotated
 
 import typer
 
+from lup.coordination.briefs import (
+    Audience,
+    DetachedBrief,
+    PeerBrief,
+    PersonBrief,
+    render_brief,
+)
 from lup.coordination.delegate import delegate
+from lup.coordination.handoffs import Established, Handoff, hand_off
 from lup.coordination.identity import mint_member_id
 from lup.coordination.rendering import USER_HOLDER, render
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.tasks import NEEDS_NAMES, Needs
+from lup.coordination.tasks import NEEDS_NAMES, Needs, Task
 from lup.coordination.refs import ActorRef
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerNode
@@ -54,6 +62,47 @@ def validated_needs(spelling: str) -> Needs:
     raise typer.BadParameter(
         f"{spelling!r} is not one of {', '.join(name for name in NEEDS_NAMES if name)}"
     )
+
+
+def validated_audience(spelling: str) -> Audience:
+    """One `--for` word as the reader it names, refusing anything else.
+
+    Narrowing a word somebody typed into one of the declared readers, which is
+    the boundary case: past here nothing asks what kind of audience it holds,
+    it asks the audience.
+    """
+    match spelling:
+        case "peer":
+            return PeerBrief()
+        case "detached":
+            return DetachedBrief()
+        case "person":
+            return PersonBrief()
+        case _:
+            raise typer.BadParameter(
+                f"{spelling!r} is not one of peer, detached, person"
+            )
+
+
+def validated_results(spellings: list[str]) -> list[Established]:
+    """Each `--result` as the model it has to be, refusing anything short.
+
+    JSON through the model rather than a delimiter this would have to split,
+    because a statement containing whatever character was chosen is a
+    statement that would silently lose half of itself.
+    """
+
+    def parsed(spelling: str) -> Established:
+        try:
+            return Established.model_validate_json(spelling)
+        except ValueError as invalid:
+            raise typer.BadParameter(
+                f"{spelling!r} is not an established result: every one needs a"
+                ' statement, a source and a grade, as {"statement": ...,'
+                ' "source": ..., "grade": ...}'
+            ) from invalid
+
+    return [parsed(spelling) for spelling in spellings]
 
 
 def node_line(store: LedgerStore, node: LedgerNode) -> str:
@@ -188,6 +237,102 @@ def create_ledger_app(classes: list[type[LedgerNode]]) -> typer.Typer:
         for line in (result.instruction, result.note):
             if line:
                 typer.echo(f"  {line}")
+
+    @app.command("handoff")
+    def handoff_cmd(
+        title: Annotated[str, typer.Argument(help="What body of work this is")],
+        open_question: Annotated[
+            list[str],
+            typer.Option("--open", help="Something still undecided; at least one"),
+        ],
+        to: Annotated[
+            str, typer.Option("--to", help="Which peer takes it, by name or id")
+        ] = "",
+        text: Annotated[str, typer.Option("--text", help="What it involves")] = "",
+        result: Annotated[
+            list[str] | None,
+            typer.Option("--result", help="An established result, as a JSON object"),
+        ] = None,
+        not_again: Annotated[
+            list[str] | None,
+            typer.Option("--not-again", help="An approach already tried and dropped"),
+        ] = None,
+        task: Annotated[
+            list[str] | None,
+            typer.Option("--task", help="A task id that crosses with it"),
+        ] = None,
+        path: Annotated[
+            list[str] | None,
+            typer.Option("--path", help="A path in scope, whose lock moves with it"),
+        ] = None,
+    ) -> None:
+        """Move a body of work to a peer, and say exactly what crossed.
+
+        A path the sender holds moves with the work. A path somebody else
+        holds is recorded as contested rather than taken away from them: only
+        a holder can release a lock, and refusing the whole handoff over one
+        overlap would make handing work over expensive enough to skip.
+        """
+        root = project_root()
+        result_of = hand_off(
+            RepositoryPeers(root),
+            store(),
+            title,
+            open_questions=list(open_question),
+            to=to,
+            text=text,
+            established=validated_results(list(result or [])),
+            not_again=list(not_again or []),
+            tasks=list(task or []),
+            paths=list(path or []),
+            root=root,
+        )
+        typer.echo(f"{result_of.handoff.id}: {result_of.handoff.title}")
+        if result_of.to:
+            typer.echo(f"  handed to {result_of.to}")
+        for moved in result_of.transferred:
+            typer.echo(f"  transferred {moved}")
+        for taken in result_of.locked:
+            typer.echo(f"  locked {taken}")
+        for disputed in result_of.contested:
+            typer.echo(
+                f"  contested {disputed} — somebody else holds it, both recorded"
+            )
+        if result_of.woken:
+            typer.echo("  woken")
+        for line in (result_of.instruction, result_of.note):
+            if line:
+                typer.echo(f"  {line}")
+
+    @app.command("brief")
+    def brief_cmd(
+        node_id: Annotated[str, typer.Argument(help="The handoff to render, by id")],
+        for_whom: Annotated[
+            str,
+            typer.Option("--for", help="peer, detached, or person"),
+        ] = "peer",
+    ) -> None:
+        """Write one handoff out for whoever is going to read it.
+
+        The same record either way. A peer resolves the ids, an agent with no
+        repository gets what a peer would look up spelled out, and a person
+        gets a file — so the substance never depends on who asked.
+        """
+        held = store()
+        # Both reads are typed rather than resolved against the whole class
+        # list, because this command is about one type: an id naming something
+        # else is not a handoff, which is the answer rather than a narrowing.
+        found = next((node for node in held.read(Handoff) if node.id == node_id), None)
+        if found is None:
+            typer.echo(f"No handoff in this repository has the id {node_id!r}.")
+            raise typer.Exit(1)
+        carried = {task.id: task for task in held.read(Task)}
+        moved = [
+            carried[edge.target]
+            for edge in held.out_of(found.id)
+            if edge.kind == "coordination:transfers" and edge.target in carried
+        ]
+        typer.echo(render_brief(found, moved, validated_audience(for_whom)))
 
     @app.command("mine")
     def mine_cmd(

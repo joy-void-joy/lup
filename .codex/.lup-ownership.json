@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "f2fd0e358d4026bb2002b15d3aa573e96e6f8a6dec18e85fa67ee8238d4d52f4",
+  "source_digest": "20cc7baa72181c042573256f9f5724d800fb950a4d3c96ad0e8d78ee5859b46d",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -340,6 +340,13 @@
       "category": "generated",
       "sha256": "04bbdd0bce7be32694dbc37e52187f5061b0cebd55e705a98d399610c41378b0",
       "semantic_id": "skill.feedback-loop",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/skills/handoff/SKILL.md",
+      "category": "generated",
+      "sha256": "aaefe9d158000b9e94224de0589bc7f60bd7cbd2c3e6933fe6c4faa09ff559fe",
+      "semantic_id": "skill.handoff",
       "executable": false
     },
     {

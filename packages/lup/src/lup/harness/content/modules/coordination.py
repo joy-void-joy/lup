@@ -30,6 +30,7 @@ from lup.harness.content.docs import coordination
 from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import COORDINATION
 from lup.harness.content.skills.delegate import SKILL as SKILL_DELEGATE
+from lup.harness.content.skills.handoff import SKILL as SKILL_HANDOFF
 from lup.harness.models import ContentRoster
 from lup.harness.modules import Module
 
@@ -39,7 +40,7 @@ def module() -> Module:
     return Module(
         spec=COORDINATION,
         guidance=[conventions.WORKING_ALONGSIDE],
-        content=ContentRoster(skills=[SKILL_DELEGATE]),
+        content=ContentRoster(skills=[SKILL_DELEGATE, SKILL_HANDOFF]),
         documents=[
             page("coordination", "coordination.md", lambda _: coordination.DOCUMENT)
         ],

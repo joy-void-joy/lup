@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 92 artifacts
+## `claude` — 93 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -37,6 +37,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/commands/fb-reflect.md` | lup.harness.content.skills.fb_reflect |
 | `.claude/plugins/lup/commands/fb-status.md` | lup.harness.content.skills.fb_status |
 | `.claude/plugins/lup/commands/feedback-loop.md` | lup.harness.content.skills.feedback_loop |
+| `.claude/plugins/lup/commands/handoff.md` | lup.harness.content.skills.handoff |
 | `.claude/plugins/lup/commands/hooks.md` | lup.harness.content.skills.hooks |
 | `.claude/plugins/lup/commands/implementer.md` | lup.harness.content.skills.implementer |
 | `.claude/plugins/lup/commands/import.md` | lup_template.harness.content.skills.import_skill |
@@ -105,7 +106,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 69 artifacts
+## `codex` — 70 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -157,6 +158,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/skills/fb-reflect/SKILL.md` | lup.harness.content.skills.fb_reflect |
 | `.codex/plugins/lup/skills/fb-status/SKILL.md` | lup.harness.content.skills.fb_status |
 | `.codex/plugins/lup/skills/feedback-loop/SKILL.md` | lup.harness.content.skills.feedback_loop |
+| `.codex/plugins/lup/skills/handoff/SKILL.md` | lup.harness.content.skills.handoff |
 | `.codex/plugins/lup/skills/hooks/SKILL.md` | lup.harness.content.skills.hooks |
 | `.codex/plugins/lup/skills/implementer/SKILL.md` | lup.harness.content.skills.implementer |
 | `.codex/plugins/lup/skills/import/SKILL.md` | lup_template.harness.content.skills.import_skill |
