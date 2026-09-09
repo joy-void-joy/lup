@@ -4,7 +4,7 @@
   "type": "module",
   "description": "The TypeScript surfaces lup serves locally, one Vite entry per surface, built into lup.web's package data.",
   "scripts": {
-    "typegen": "json2ts --input schema/views.json --output src/generated/views.d.ts --bannerComment \"/* Generated from lup.ledger.views by `bun run typegen`; edit the pydantic models, not this file. */\"",
+    "typegen": "json2ts --input schema/views.json --output src/generated/views.d.ts --bannerComment '/* Generated from lup.ledger.views by `bun run typegen`; edit the pydantic models, not this file. */'",
     "build": "bun run typegen && vite build",
     "test": "bun test"
   },
