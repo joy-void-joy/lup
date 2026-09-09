@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "ef5b5ef370f4109ac20bb8a676ba09686f1adc861d558f0e2a50dee978e04950",
+  "source_digest": "ef7ce6452e07d70099bdaf68b9efaee63ff1da58f511d017accd4cd827b75cbb",
   "target_requirements": [
     "bun"
   ],
@@ -35,24 +35,24 @@
       "executable": false
     },
     {
-      "path": "packages/lup/src/lup/web/bundles/supervisor/assets/index-DaIGyr8Z.js",
+      "path": "packages/lup/src/lup/web/bundles/supervisor/assets/index-c-sGjLKQ.js",
       "category": "generated",
-      "sha256": "2ee49aab6a1088f3844c58991366f8a2e30a1c43eca9611f26d428fa249dec36",
-      "semantic_id": "web.supervisor.assets/index-DaIGyr8Z.js",
+      "sha256": "dce337097e1969f00a840f85bd6542c1752540e64b9740a438d1e93a98a37791",
+      "semantic_id": "web.supervisor.assets/index-c-sGjLKQ.js",
       "executable": false
     },
     {
       "path": "packages/lup/src/lup/web/bundles/supervisor/index.html",
       "category": "generated",
-      "sha256": "430d6981f12fdb5e58d6d2d145e967f2a0de167d6b13db7d45de036dcf57909c",
+      "sha256": "16c0654a00d4b45597ec1b3188f59cd1ac13304053c93c7974c9d18b08464893",
       "semantic_id": "web.supervisor.index.html",
       "executable": false
     },
     {
-      "path": "packages/lup/src/lup/web/bundles/wizard/assets/index-BBHh7amF.js",
+      "path": "packages/lup/src/lup/web/bundles/wizard/assets/index-DYNC2H9B.js",
       "category": "generated",
-      "sha256": "b1670ad94ff5038468e2fa579e61d139fb753c93cc212db1d39c70abbf4a0e88",
-      "semantic_id": "web.wizard.assets/index-BBHh7amF.js",
+      "sha256": "5b44ffc4a5513655dcf35f671e4e04f2109ac8182702c80f8c6fa5f9b3d899a7",
+      "semantic_id": "web.wizard.assets/index-DYNC2H9B.js",
       "executable": false
     },
     {
@@ -65,7 +65,7 @@
     {
       "path": "packages/lup/src/lup/web/bundles/wizard/index.html",
       "category": "generated",
-      "sha256": "8c5769ce321cacaf33df9b084fb84223142ac8ab01e010e969ed2c96ee69b700",
+      "sha256": "041388a31350a9899e6ba27580c09d1b92c91f34063132fbacc1de316539e637",
       "semantic_id": "web.wizard.index.html",
       "executable": false
     }
