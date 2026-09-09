@@ -76,7 +76,7 @@ def create_dev_app(
     app.add_typer(
         preserve_app,
         name="preserve",
-        help="The capability ledger a reorganisation is measured against",
+        help="The capability capture a reorganisation is measured against",
     )
     app.add_typer(
         model_config_mod.create_model_config_app(),
@@ -939,22 +939,24 @@ def create_dev_app(
         for mention in relocate_mod.surviving_mentions(roots, declared):
             typer.echo(f"still mentions a moved module: {mention}", err=True)
 
-    # -- preservation ledger --
+    # -- preservation capture --
 
-    def walked(ctx: typer.Context) -> preservation.Ledger:
+    def walked(ctx: typer.Context) -> preservation.SurfaceCapture:
         """The surface the tree offers right now, as this CLI can see it."""
         return preservation.capture(preservation.operations(ctx), declared().project)
 
-    def against(ctx: typer.Context, ledger: Path) -> preservation.Divergence:
+    def against(ctx: typer.Context, capture: Path) -> preservation.Divergence:
         """What the live tree does and does not still answer for a capture."""
-        return preservation.compare(preservation.Ledger.read(ledger), walked(ctx))
+        return preservation.compare(
+            preservation.SurfaceCapture.read(capture), walked(ctx)
+        )
 
     @preserve_app.command("capture")
     def preserve_capture_cmd(
         ctx: typer.Context,
-        ledger: Annotated[
-            Path, typer.Option("--ledger", help="The capture to read or write")
-        ] = preservation.LEDGER_FILE,
+        capture: Annotated[
+            Path, typer.Option("--capture", help="The capture to read or write")
+        ] = preservation.CAPTURE_FILE,
     ) -> None:
         """Record the surface this repository offers, as a checked-in fixture.
 
@@ -963,19 +965,19 @@ def create_dev_app(
         reads, which is the only place a dropped capability is ever noticed.
         """
         captured = walked(ctx)
-        captured.write(ledger)
+        captured.write(capture)
         exports = sum(len(surface.declares) for surface in captured.modules)
         typer.echo(
-            f"{ledger}: {len(captured.commands)} operation(s), {exports} export(s) "
+            f"{capture}: {len(captured.commands)} operation(s), {exports} export(s) "
             f"across {len(captured.modules)} module(s), at {captured.revision}"
         )
 
     @preserve_app.command("check")
     def preserve_check_cmd(
         ctx: typer.Context,
-        ledger: Annotated[
-            Path, typer.Option("--ledger", help="The capture to read or write")
-        ] = preservation.LEDGER_FILE,
+        capture: Annotated[
+            Path, typer.Option("--capture", help="The capture to read or write")
+        ] = preservation.CAPTURE_FILE,
         as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
     ) -> None:
         """Resolve every captured capability against the tree as it stands.
@@ -984,7 +986,7 @@ def create_dev_app(
         declared somewhere else is reported and does not: a move is what a
         reorganisation is, and telling the two apart is the whole point.
         """
-        divergence = against(ctx, ledger)
+        divergence = against(ctx, capture)
         if as_json:
             output_json(divergence)
         else:
@@ -1000,9 +1002,9 @@ def create_dev_app(
     @preserve_app.command("migration")
     def preserve_migration_cmd(
         ctx: typer.Context,
-        ledger: Annotated[
-            Path, typer.Option("--ledger", help="The capture to read or write")
-        ] = preservation.LEDGER_FILE,
+        capture: Annotated[
+            Path, typer.Option("--capture", help="The capture to read or write")
+        ] = preservation.CAPTURE_FILE,
     ) -> None:
         """Print the relocation that repoints an importer of the captured tree.
 
@@ -1010,7 +1012,7 @@ def create_dev_app(
         from the same difference that proved nothing was lost. Add `--root` to
         aim it at the checkout being migrated.
         """
-        moves = against(ctx, ledger).module_moves()
+        moves = against(ctx, capture).module_moves()
         if not moves:
             typer.echo("no module moved since the capture")
             return

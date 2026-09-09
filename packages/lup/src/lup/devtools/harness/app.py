@@ -127,7 +127,7 @@ def create_harness_app(
             typer.Option(
                 "--strict-evidence",
                 help="Exit nonzero when an installed component is newer than the "
-                "evidence ledger (the nightly lane's re-probe trigger)",
+                "evidence register (the nightly lane's re-probe trigger)",
             ),
         ] = False,
     ) -> None:

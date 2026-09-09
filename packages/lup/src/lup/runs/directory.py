@@ -67,7 +67,7 @@ class RunningUnit(BaseModel, frozen=True):
         return self.since_renewed_seconds > self.lease_seconds
 
 
-class LedgerReading(BaseModel, frozen=True):
+class DirectoryReading(BaseModel, frozen=True):
     """Every unit that has landed, and every file that could not be read.
 
     Unreadable files are carried rather than counted into a status, because
@@ -158,15 +158,15 @@ class RunDirectory(BaseModel, frozen=True):
             logger.warning("unreadable unit result at %s: %s", path, error)
             return None
 
-    def read(self) -> LedgerReading:
+    def read(self) -> DirectoryReading:
         """Every unit that has landed, in a stable order, with the failures to read."""
         if not self.units_root.is_dir():
-            return LedgerReading()
+            return DirectoryReading()
         readings = [
             (path, self.parse_result(path))
             for path in sorted(self.units_root.glob("*/*.json"))
         ]
-        return LedgerReading(
+        return DirectoryReading(
             results=[result for _, result in readings if result is not None],
             unreadable=[path for path, result in readings if result is None],
         )

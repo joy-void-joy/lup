@@ -197,5 +197,5 @@ items is the shape to watch.
 A project with its own runner does not need `Pipeline`. Writing
 `manifest.json`, a result per unit under `units/`, and a heartbeat line makes
 that runner followable by the same `run monitor`, because the monitor reads
-the layout rather than the runtime. `lup.runs.ledger.RunDirectory` is where
+the layout rather than the runtime. `lup.runs.directory.RunDirectory` is where
 every path is spelled, so both ends meet there instead of drifting.

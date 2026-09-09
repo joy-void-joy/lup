@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from lup.channels.models import utc_now
-from lup.runs.ledger import CLAIM_LEASE_SECONDS, RunDirectory
+from lup.runs.directory import CLAIM_LEASE_SECONDS, RunDirectory
 from lup.runs.models import UnitAttempt, UnitStatus
 from lup.runs.progress import read_progress
 from lup.runs.pipeline import (

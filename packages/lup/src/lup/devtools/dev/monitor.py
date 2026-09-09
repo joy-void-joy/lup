@@ -16,7 +16,7 @@ from pathlib import Path
 import typer
 
 from lup.runs.follow import follow, follow_events
-from lup.runs.ledger import RunDirectory
+from lup.runs.directory import RunDirectory
 from lup.runs.progress import read_progress
 
 

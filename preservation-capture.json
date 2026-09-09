@@ -1,5 +1,5 @@
 {
-  "revision": "06a85b477b0cc2567266d68a2990471b8550fafb",
+  "revision": "08a18788562a5625f406c0a54d675b8afeeb665a",
   "roots": [
     "lup",
     "lup_template"
@@ -2424,7 +2424,7 @@
     {
       "module": "lup.devtools.dev.preservation",
       "declares": [
-        "LEDGER_FILE",
+        "CAPTURE_FILE",
         "CapabilityKind",
         "CapabilityKind.COMMAND",
         "CapabilityKind.EXPORT",
@@ -2436,15 +2436,15 @@
         "ModuleSurface",
         "ModuleSurface.module",
         "ModuleSurface.declares",
-        "Ledger",
-        "Ledger.revision",
-        "Ledger.roots",
-        "Ledger.commands",
-        "Ledger.modules",
-        "Ledger.read",
-        "Ledger.write",
-        "Ledger.capabilities",
-        "Ledger.homes",
+        "SurfaceCapture",
+        "SurfaceCapture.revision",
+        "SurfaceCapture.roots",
+        "SurfaceCapture.commands",
+        "SurfaceCapture.modules",
+        "SurfaceCapture.read",
+        "SurfaceCapture.write",
+        "SurfaceCapture.capabilities",
+        "SurfaceCapture.homes",
         "Relocation",
         "Relocation.capability",
         "Relocation.homes",
@@ -6053,7 +6053,7 @@
         "EvidenceEntry.capability",
         "EvidenceEntry.version",
         "EvidenceEntry.refreshed",
-        "EVIDENCE_LEDGER",
+        "EVIDENCE_REGISTER",
         "accepted",
         "cited_fixture",
         "SchemaDigest",
@@ -12331,16 +12331,7 @@
       "declares": []
     },
     {
-      "module": "lup.runs.follow",
-      "declares": [
-        "render_steps",
-        "render_landing",
-        "follow",
-        "follow_events"
-      ]
-    },
-    {
-      "module": "lup.runs.ledger",
+      "module": "lup.runs.directory",
       "declares": [
         "logger",
         "CLAIM_LEASE_SECONDS",
@@ -12351,9 +12342,9 @@
         "RunningUnit.lease_seconds",
         "RunningUnit.slug",
         "RunningUnit.stale",
-        "LedgerReading",
-        "LedgerReading.results",
-        "LedgerReading.unreadable",
+        "DirectoryReading",
+        "DirectoryReading.results",
+        "DirectoryReading.unreadable",
         "RunDirectory",
         "RunDirectory.root",
         "RunDirectory.manifest_path",
@@ -12379,6 +12370,15 @@
         "RunDirectory.summary_path",
         "RunDirectory.write_summary",
         "RunDirectory.read_summary"
+      ]
+    },
+    {
+      "module": "lup.runs.follow",
+      "declares": [
+        "render_steps",
+        "render_landing",
+        "follow",
+        "follow_events"
       ]
     },
     {

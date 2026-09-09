@@ -12,7 +12,7 @@ exact `dev relocate` invocation — 106 module pairs — that repoints a checkou
 
 ```sh
 uv run lup-devtools dev preserve migration \
-    --ledger preservation-ledger-before-hierarchy.json
+    --capture preservation-capture-before-hierarchy.json
 ```
 
 Derived rather than pasted here for the reason the reorganisation itself gives:
