@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 91 artifacts
+## `claude` — 92 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -29,6 +29,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/commands/commit.md` | lup.harness.content.skills.commit |
 | `.claude/plugins/lup/commands/create-investigator.md` | lup.harness.content.skills.create_investigator |
 | `.claude/plugins/lup/commands/debug.md` | lup.harness.content.skills.debug |
+| `.claude/plugins/lup/commands/delegate.md` | lup.harness.content.skills.delegate |
 | `.claude/plugins/lup/commands/distill.md` | lup_template.harness.content.skills.distill |
 | `.claude/plugins/lup/commands/fb-analyze.md` | lup.harness.content.skills.fb_analyze |
 | `.claude/plugins/lup/commands/fb-implement.md` | lup.harness.content.skills.fb_implement |
@@ -104,7 +105,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 68 artifacts
+## `codex` — 69 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -148,6 +149,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/skills/commit/SKILL.md` | lup.harness.content.skills.commit |
 | `.codex/plugins/lup/skills/create-investigator/SKILL.md` | lup.harness.content.skills.create_investigator |
 | `.codex/plugins/lup/skills/debug/SKILL.md` | lup.harness.content.skills.debug |
+| `.codex/plugins/lup/skills/delegate/SKILL.md` | lup.harness.content.skills.delegate |
 | `.codex/plugins/lup/skills/distill/SKILL.md` | lup_template.harness.content.skills.distill |
 | `.codex/plugins/lup/skills/fb-analyze/SKILL.md` | lup.harness.content.skills.fb_analyze |
 | `.codex/plugins/lup/skills/fb-implement/SKILL.md` | lup.harness.content.skills.fb_implement |

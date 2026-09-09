@@ -20,7 +20,11 @@ from typing import Annotated
 
 import typer
 
+from lup.coordination.delegate import delegate
 from lup.coordination.identity import mint_member_id
+from lup.coordination.rendering import USER_HOLDER, render
+from lup.coordination.repository import RepositoryPeers
+from lup.coordination.tasks import NEEDS_NAMES, Needs
 from lup.coordination.refs import ActorRef
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerNode
@@ -36,6 +40,20 @@ Nodes accumulate as work happens, and one per turn in the history of the code
 would make that history unreadable. On a branch nothing merges, the record is
 preserved and shares no history with what it is about.
 """
+
+
+def validated_needs(spelling: str) -> Needs:
+    """One `--needs` word as the closed vocabulary, refusing anything else.
+
+    Refused rather than coerced, because the whole value of the field is that
+    a rendering can order by it: one unrecognised spelling is a row nothing
+    groups, and a silent fallback would produce exactly that.
+    """
+    if spelling in NEEDS_NAMES:
+        return spelling
+    raise typer.BadParameter(
+        f"{spelling!r} is not one of {', '.join(name for name in NEEDS_NAMES if name)}"
+    )
 
 
 def node_line(store: LedgerStore, node: LedgerNode) -> str:
@@ -128,6 +146,83 @@ def create_ledger_app(classes: list[type[LedgerNode]]) -> typer.Typer:
         for digest in found.attachments:
             missing = "" if held.blobs.holds(digest) else "  (not on this machine)"
             typer.echo(f"  blob {digest}{missing}")
+
+    @app.command("delegate")
+    def delegate_cmd(
+        title: Annotated[str, typer.Argument(help="What the work is")],
+        to: Annotated[
+            str, typer.Option("--to", help="Which peer holds it, by name or id")
+        ] = "",
+        text: Annotated[str, typer.Option("--text", help="What it involves")] = "",
+        needs: Annotated[
+            str, typer.Option("--needs", help="What class of input it waits on")
+        ] = "",
+        path: Annotated[
+            list[str] | None,
+            typer.Option("--path", help="A path it touches, taken as a lock"),
+        ] = None,
+    ) -> None:
+        """Record one task, hand it to a peer if there is one, and say what happened.
+
+        A name nobody answers to parks the task rather than refusing it, which
+        is a real state: work is often scoped before there is anybody to do it.
+        """
+        root = project_root()
+        result = delegate(
+            RepositoryPeers(root),
+            store(),
+            title,
+            to=to,
+            text=text,
+            needs=validated_needs(needs),
+            paths=list(path or []),
+            root=root,
+        )
+        typer.echo(f"{result.task.id}: {result.task.title}")
+        if result.holder:
+            typer.echo(f"  held by {result.holder}")
+        for taken in result.locked:
+            typer.echo(f"  locked {taken}")
+        if result.woken:
+            typer.echo("  woken")
+        for line in (result.instruction, result.note):
+            if line:
+                typer.echo(f"  {line}")
+
+    @app.command("mine")
+    def mine_cmd(
+        holder: Annotated[
+            str, typer.Option("--holder", help="Whose list to render")
+        ] = USER_HOLDER,
+    ) -> None:
+        """Print one holder's outstanding tasks, grouped by what they cost.
+
+        The person's list by default, because that is the one somebody reads
+        on a machine that cannot ask the log.
+        """
+        typer.echo(render(store(), holder))
+
+    @app.command("done")
+    def done_cmd(
+        node_id: Annotated[str, typer.Argument(help="The task to close, by id")],
+    ) -> None:
+        """Mark one task finished, by recording it again as done.
+
+        Nothing is overwritten: the task as it stood stays in the log, and the
+        reading takes the latest — so who closed it and when are both there.
+        """
+        held = store()
+        found = held.resolve(node_id, classes)
+        closed = found.completed() if found is not None else None
+        if found is None or closed is None:
+            typer.echo(
+                f"No node with the id {node_id!r} is something that can be done."
+                if found is not None
+                else f"No node in this repository has the id {node_id!r}."
+            )
+            raise typer.Exit(1)
+        held.amend(closed)
+        typer.echo(f"{found.id}: done")
 
     @app.command("snapshot")
     def snapshot_cmd(

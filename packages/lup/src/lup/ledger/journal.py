@@ -34,9 +34,23 @@ from pydantic import TypeAdapter, ValidationError
 from lup.channels.models import utc_now
 from lup.coordination.refs import ActorRef
 from lup.ledger.blobs import Blobs
-from lup.ledger.models import LedgerEdge, LedgerNode, Standing
+from lup.ledger.models import LedgerEdge, LedgerNode, Standing, Surroundings
 from lup.ledger.store import JOURNAL_FILE, ledger_root
 from lup.types import JsonObject, JsonValue
+
+
+def latest[N: LedgerNode](nodes: Iterator[N]) -> list[N]:
+    """Each id once, as it was last recorded, in the order it first appeared.
+
+    Two readings of one sequence because the halves disagree and both matter:
+    the value is the last record for an id, so an amendment wins, and the
+    position is the first, so a node amended twice stays where a reader last
+    saw it. Written as one pass each rather than a fold, so neither reading
+    has to be held in a variable the other is also changing.
+    """
+    seen = list(nodes)
+    current = {node.id: node for node in seen}
+    return [current[node_id] for node_id in dict.fromkeys(node.id for node in seen)]
 
 
 class LedgerRefusal(Exception):
@@ -107,12 +121,19 @@ class LedgerStore:
             log.write(record.model_dump_json() + "\n")
 
     def read[N: LedgerNode](self, node: type[N]) -> list[N]:
-        """Every record in the log that is one of these, oldest first.
+        """Every node of this type as it now stands, in the order first recorded.
 
         The typed read, and the one nearly every caller wants. A record of
         another type fails validation and is left out, which is what makes
         this a filter rather than a cast: nothing comes back as an ``N`` that
         is not one.
+
+        **The latest record for an id wins.** Nodes are immutable and the log
+        only grows, so changing one is appending it again — which is the only
+        way a task can ever be finished, and it keeps every earlier version
+        readable rather than overwriting anything. Position is the first
+        appearance, so amending a node does not move it to the end of a
+        listing somebody is reading.
         """
         adapter = TypeAdapter[N](node)
 
@@ -123,7 +144,7 @@ class LedgerStore:
                 except ValidationError:
                     continue
 
-        return list(matching())
+        return list(latest(matching()))
 
     def edges[E: LedgerEdge](self, edge: type[E] = LedgerEdge) -> list[E]:
         """Every edge of one type, or every edge at all as the base.
@@ -145,6 +166,27 @@ class LedgerStore:
 
         return list(matching())
 
+    def around(self, node: LedgerNode, classes: list[type[LedgerNode]]) -> Surroundings:
+        """One node's neighbourhood, resolved once for whoever is asking it.
+
+        The far ends come back as the most specific declared class that
+        accepts them, so a neighbour is asked its own answer rather than the
+        base's — a blocker reads as finished because it is a ``Task`` and
+        knows what that means.
+        """
+        incoming = self.into(node.id)
+        outgoing = self.out_of(node.id)
+        wanted = {edge.source for edge in incoming} | {edge.target for edge in outgoing}
+        return Surroundings(
+            incoming=incoming,
+            outgoing=outgoing,
+            neighbours=[
+                found
+                for other in wanted
+                if (found := self.resolve(other, classes)) is not None
+            ],
+        )
+
     def into(self, node_id: str) -> list[LedgerEdge]:
         """Every edge pointing at one node, which is what standing is read from.
 
@@ -158,6 +200,22 @@ class LedgerStore:
         """Every edge this node is the source of."""
         return [edge for edge in self.edges() if edge.source == node_id]
 
+    def amend[N: LedgerNode](self, node: N) -> N:
+        """Record a changed node under the id it already has.
+
+        The only way anything in the log changes, and it changes nothing that
+        is already written: the earlier record stays where it was and a read
+        takes the last one. So finishing a task, or correcting a title, leaves
+        the history of that node readable instead of overwriting it — which is
+        what an append-only log is for and what a mutable store would cost.
+
+        The author is stamped again, so a node amended by somebody other than
+        whoever wrote it says who last touched it.
+        """
+        restamped = node.model_copy(update={"author": self.author})
+        self.append(restamped)
+        return restamped
+
     def resolve(
         self, node_id: str, classes: list[type[LedgerNode]]
     ) -> LedgerNode | None:
@@ -169,19 +227,28 @@ class LedgerStore:
         — which happens for a type this build does not declare, and is why it
         is a fallback rather than a failure.
         """
-        for line in self.lines():
-            if "id" not in line or line["id"] != node_id:
-                continue
-            for declared in classes:
-                try:
-                    return declared.model_validate(line)
-                except ValidationError:
+
+        def versions() -> Iterator[LedgerNode]:
+            for line in self.lines():
+                if "id" not in line or line["id"] != node_id:
                     continue
-            try:
-                return LedgerNode.model_validate(line)
-            except ValidationError:
-                return None
-        return None
+                for declared in classes:
+                    try:
+                        yield declared.model_validate(line)
+                        break
+                    except ValidationError:
+                        continue
+                else:
+                    try:
+                        yield LedgerNode.model_validate(line)
+                    except ValidationError:
+                        continue
+
+        # The last record for this id, for the reason `read` takes it: a node
+        # is amended by being appended again, so an earlier match is a version
+        # somebody has already moved on from.
+        found = list(versions())
+        return found[-1] if found else None
 
     def all_nodes(self, classes: list[type[LedgerNode]]) -> list[LedgerNode]:
         """Every node in the log, each as the most specific class that fits.
@@ -207,11 +274,19 @@ class LedgerStore:
                     except ValidationError:
                         continue
 
-        return list(resolved())
+        return latest(resolved())
 
-    def standing(self, node: LedgerNode) -> Standing:
-        """Where one node stands right now, asked of the node itself."""
-        return node.standing(self.into(node.id))
+    def standing(
+        self, node: LedgerNode, classes: list[type[LedgerNode]] | None = None
+    ) -> Standing:
+        """Where one node stands right now, asked of the node itself.
+
+        The classes resolve its neighbours, and omitting them is honest rather
+        than lossy: a caller that names none gets a neighbourhood of base
+        nodes, which decline every question a type would have answered. That
+        is the reading a build lacking the declaring module would get anyway.
+        """
+        return node.standing(self.around(node, classes or []))
 
     def record[N: LedgerNode](
         self,

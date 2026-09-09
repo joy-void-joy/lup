@@ -38,6 +38,7 @@ from typing import Literal
 from pydantic import BaseModel, TypeAdapter, computed_field
 
 from lup.coordination.refs import ActorRef
+from lup.coordination.wake import WakePath
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
 
@@ -138,6 +139,14 @@ class ActorJoined(RosterRecord, frozen=True):
     session nobody spawned that is not automatic.
     """
 
+    wake: WakePath = WakePath()
+    """What would make this peer look, where anything can.
+
+    Self-reported, and on one runtime it can only be: the handle a
+    Claude session's peers address it by appears in none of the
+    variables that session is given, so nothing but the session itself
+    can say it."""
+
     delivery: Delivery = Delivery.MAILBOX
     """How this peer is reached, defaulting to the mode that needs nothing.
 
@@ -167,6 +176,7 @@ class ActorJoined(RosterRecord, frozen=True):
             liveness=self.liveness,
             delivery=self.delivery,
             worktree=self.worktree,
+            wake=self.wake,
         )
 
 
@@ -276,6 +286,16 @@ class SpawnedActor(BaseModel, frozen=True):
     somebody else has undertaken to notice.
     """
 
+    wake: WakePath = WakePath()
+    """What would make this member look, where anything can.
+
+    Beside the delivery mode rather than folded into it, because they
+    answer different questions: delivery is how a message is carried and
+    is always the file, while this is what nudges the member into
+    reading it. A wake sits on top of the record and never replaces it,
+    so an empty one costs a peer latency and never a message.
+    """
+
     delivery: Delivery = Delivery.INBOX
     """How a message reaches this member.
 
@@ -370,6 +390,7 @@ class Roster:
         liveness: str = "",
         delivery: Delivery = Delivery.MAILBOX,
         worktree: str = "",
+        wake: WakePath = WakePath(),
     ) -> None:
         """Record that a peer nobody spawned is present, and how to reach it."""
         self.announce(
@@ -380,6 +401,7 @@ class Roster:
                 liveness=liveness,
                 delivery=delivery,
                 worktree=worktree,
+                wake=wake,
                 at=utc_now(),
             ),
         )

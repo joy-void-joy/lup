@@ -111,13 +111,82 @@ class LedgerNode(BaseModel, frozen=True):
     attachments: list[str] = []
     """Content digests of the blobs this node carries, in the order attached."""
 
-    def standing(self, incoming: list[LedgerEdge]) -> Standing:
-        """Where this node stands, given everything pointing at it.
+    def finished(self) -> bool:
+        """Whether this node is done with, for whatever it means to be done.
+
+        On the base because a neighbour asks it: a task reads whether the
+        tasks blocking it are finished, and it holds them as
+        :class:`LedgerNode` because an edge names an id and not a type. Each
+        variant answers or declines, and the base declines — most nodes are
+        claims and records, which are never "done".
+        """
+        return False
+
+    def completed(self) -> "LedgerNode | None":
+        """This node marked finished, or nothing where it cannot be.
+
+        On the base because a surface that closes things holds a
+        :class:`LedgerNode` — it resolved an id, and an id does not say what is
+        at the other end. Each variant answers or declines, and the base
+        declines: a claim and a correction are records rather than work, and
+        there is nothing for "done" to mean about them.
+
+        A new node rather than a mutation, because nothing here is mutable:
+        the caller appends it, and the earlier version stays in the log.
+        """
+        return None
+
+    def standing(self, around: "Surroundings") -> Standing:
+        """Where this node stands, given its neighbourhood.
 
         Run when somebody asks and never stored. The base's answer is what a
         ledger can say without being told anything about evidence — it was
         written down — which is honest rather than a placeholder, and it means
         a type with no epistemics is one class and no overrides.
         """
-        del incoming
+        del around
         return Standing(label="recorded")
+
+
+class Surroundings(BaseModel, frozen=True):
+    """One node's neighbourhood, which is everything its standing may read.
+
+    The edges and the nodes at their far ends, resolved once by whoever is
+    asking. Both are needed and neither alone is enough: an edge says which
+    relation holds, and the node at the other end says whether it still does —
+    a task is blocked by a blocker that has not finished, and the edge cannot
+    know that about the far end.
+
+    The far ends arrive as :class:`LedgerNode`, so what a neighbour can be
+    asked is what the base declares. That is a real constraint and the right
+    one: a question one type wants to ask of its neighbours is a question the
+    base should name, answered or declined by each.
+    """
+
+    incoming: list[LedgerEdge] = []
+    outgoing: list[LedgerEdge] = []
+    neighbours: list[LedgerNode] = []
+    """Every node at the far end of one of those edges, in no order.
+
+    By id rather than by position, because one node may sit at the end of
+    several edges and duplicating it would make a count of blockers wrong.
+    """
+
+    def at(self, node_id: str) -> LedgerNode | None:
+        """The neighbour with this id, or nothing where it was not resolved."""
+        return next((node for node in self.neighbours if node.id == node_id), None)
+
+    def held_by(self, kind: str) -> list[LedgerEdge]:
+        """Every incoming edge of one relation whose far end is not finished.
+
+        The shape a standing evaluator actually wants: what is still holding
+        this node back, rather than what once did. An edge whose source has
+        since finished stops counting without anybody having to go back and
+        amend it — which is the same reason nothing here stores a status.
+        """
+        return [
+            edge
+            for edge in self.incoming
+            if edge.kind == kind
+            and not ((source := self.at(edge.source)) and source.finished())
+        ]

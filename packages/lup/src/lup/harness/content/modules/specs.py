@@ -154,8 +154,8 @@ LEDGER = ModuleSpec(
     id="ledger",
     title="Ledger",
     summary=(
-        "One DAG of typed notes per repository, outside every worktree, whose "
-        "standing is read rather than stored."
+        "One append-only log per repository, outside every worktree, "
+        "holding typed nodes whose standing is read rather than stored."
     ),
     default_on=True,
     subapps=["ledger"],
@@ -169,9 +169,9 @@ it goes away — none of which fails loudly. What it costs a repository that
 records nothing is an empty store and a command nobody runs; what it saves is
 a claim that quietly stopped being true.
 
-It names no note kind and no edge kind, so adopting it is adopting the
-mechanism. The vocabulary is the project's, and `standing` is the answer for a
-project that wants an evidence-based one rather than its own.
+It declares no node type and no edge type, so adopting it is adopting the
+mechanism. What a claim owes is the project's question, and `standing` is the
+answer for one that wants an evidence-based reading rather than its own.
 """
 
 COORDINATION = ModuleSpec(
@@ -183,6 +183,7 @@ COORDINATION = ModuleSpec(
         "person on that roster as a peer like any other."
     ),
     default_on=True,
+    requires=["ledger"],
     subapps=["coordination"],
     tool_groups=["coordination"],
 )
