@@ -150,6 +150,30 @@ launches anything, and 401 bytes is what that costs. The subjects that are off
 either cost a great deal more or announce themselves when wanted.
 """
 
+LEDGER = ModuleSpec(
+    id="ledger",
+    title="Ledger",
+    summary=(
+        "One DAG of typed notes per repository, outside every worktree, whose "
+        "standing is read rather than stored."
+    ),
+    default_on=True,
+    subapps=["ledger"],
+)
+"""On, because what it answers is a failure nobody sees happen.
+
+Work that outlives its session has to live somewhere a later session finds.
+Prose rots because nothing checks it, a per-branch file forks because every
+worktree holds one, and a stored status keeps its label after the support for
+it goes away — none of which fails loudly. What it costs a repository that
+records nothing is an empty store and a command nobody runs; what it saves is
+a claim that quietly stopped being true.
+
+It names no note kind and no edge kind, so adopting it is adopting the
+mechanism. The vocabulary is the project's, and `standing` is the answer for a
+project that wants an evidence-based one rather than its own.
+"""
+
 COORDINATION = ModuleSpec(
     id="coordination",
     title="Coordination",
@@ -206,6 +230,7 @@ LIBRARY_SPECS = [
     CONVERSATION,
     FEEDBACK_LOOP,
     RUNS,
+    LEDGER,
     COORDINATION,
     REALTIME,
     REFLECTION,

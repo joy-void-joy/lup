@@ -168,6 +168,7 @@ display around the readers it names.
 - `feedback` — Feedback state, metrics, and commits
 - `git` — Branches, worktrees, pull requests, and conflicts
 - `harness` — Generate and launch the native harnesses
+- `ledger` — Read and preserve the notes this repository has recorded
 - `resolve` — Drive a resolver run, and watch or answer it
 - `run` — Follow work that outlives its tool call
 - `setup` — Interactive setup wizard, and its page

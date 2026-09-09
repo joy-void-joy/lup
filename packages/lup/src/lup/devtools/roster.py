@@ -29,6 +29,8 @@ import typer
 from pydantic import BaseModel
 
 from lup.devtools.coordination.app import create_coordination_app
+from lup.devtools.ledger.app import create_ledger_app
+from lup.ledger.models import LedgerNode
 from lup.devtools.dev.app import create_dev_app
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.feedback.app import create_feedback_app
@@ -101,6 +103,16 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
     launch_checkpoint: LaunchCheckpoint | None = None
     """Application data saved before generation and after the native CLI closes."""
 
+    node_classes: list[type[LedgerNode]] = []
+    """The node types this project records, for the reader that shows all.
+
+    Needed only by the console, which turns a stored record into some
+    class to ask its standing; everything else asks the store for the
+    type it wants and never sees a list. Empty for a project that
+    records nothing, which still reads the DAG as the base class. The
+    library declares none of these, because what a node type is for is a
+    project's question."""
+
     def roster(self, retired: list[str] | None = None) -> list[SubApp]:
         """Every sub-app the library ships, wired over these declarations.
 
@@ -169,6 +181,13 @@ LIBRARY_ROSTER = [
             help="Reach the other sessions working in this repository",
         ),
         build=lambda _: create_coordination_app(),
+    ),
+    RosterEntry(
+        spec=SubAppSpec(
+            name="ledger",
+            help="Read and preserve the notes this repository has recorded",
+        ),
+        build=lambda declared: create_ledger_app(declared.node_classes),
     ),
     RosterEntry(
         spec=SubAppSpec(
