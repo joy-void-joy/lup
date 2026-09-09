@@ -44,6 +44,7 @@ from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
 from lup.devtools.dev.cites import sweep_cites
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.ledger.models import LedgerNode
+from lup.ledger.store import LedgerPlacement, SharedStore
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
 from lup.devtools.dev.records import branches_awaiting_adoption, record_location
@@ -771,6 +772,7 @@ def scan_reports(
     git_guards: list[GitGuard],
     hooks_declaration: HookSet,
     node_classes: list[type[LedgerNode]] | None = None,
+    ledger: LedgerPlacement = SharedStore(),
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them."""
 
@@ -842,7 +844,7 @@ def scan_reports(
         # A document naming a node is held to what the node says now, so prose
         # cannot go on citing a corrected figure. Counted only where there is
         # a cite to hold: a repository with none has nothing this can fail.
-        cited = sweep_cites(node_classes or [])
+        cited = sweep_cites(node_classes or [], ledger)
         yield CheckReport(
             name="cites",
             counted=bool(cited.checked or cited.failing),
@@ -946,6 +948,20 @@ def scan_reports(
                         "  register it with `lup-devtools git merge-driver`",
                     ]
                 ),
+            ],
+        )
+
+        # The other declaration about a checkout only git can answer for: a
+        # log kept in the tree merges losslessly only where its journal is
+        # declared `merge=union`, an attribute of the checkout rather than of
+        # the code that reads it. The shared store has nothing to ask.
+        troubles = ledger.problems(project_root())
+        yield CheckReport(
+            name="ledger placement",
+            passed=not troubles,
+            lines=[
+                f"ledger placement: {'FAIL' if troubles else 'ok'} ({ledger.describe()})",
+                *(f"  {trouble}" for trouble in troubles),
             ],
         )
 
@@ -1093,6 +1109,7 @@ def run_checks(
     scope: list[str] | None = None,
     test_workers: int = TEST_WORKERS,
     node_classes: list[type[LedgerNode]] | None = None,
+    ledger: LedgerPlacement = SharedStore(),
 ) -> None:
     """Run ruff format, ruff check, pyright, pytest, and this gate's own sweeps.
 

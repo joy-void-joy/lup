@@ -14,14 +14,17 @@ in, a listing of nodes chosen by kind or standing or relation, what needs a
 person, a stamp saying what the document was generated from. A new kind of
 part is a new variant, not a branch somewhere else.
 
-**Generated on demand, not drift-checked across machines.** The ledger is live
-state under the repository's own git directory, so the same declaration
-renders differently on a machine that has recorded and one that has not. A
-writeup is therefore written by `ledger writeup` and committed like any other
-document, and `--check` verifies it against *this* machine's log; what keeps
-it honest everywhere is that every figure it renders is a `lup:` cite, which
-the cite check holds to the node wherever the log is. The stamp names the
-newest record rather than the wall clock, so one log renders one document.
+**Generated on demand, and drift-checked only where the log is in the tree.**
+Under the shared store the ledger is live state under the repository's own
+git directory, so the same declaration renders differently on a machine that
+has recorded and one that has not. A writeup is then written by `ledger
+writeup` and committed like any other document, and `--check` verifies it
+against *this* machine's log; what keeps it honest everywhere is that every
+figure it renders is a `lup:` cite, which the cite check holds to the node
+wherever the log is. Where a project declared its log in the tree, every
+machine holds the same log, and the writeups are repository writers like any
+other generated file. The stamp names the newest record rather than the wall
+clock, so one log renders one document either way.
 """
 
 from abc import ABC, abstractmethod
@@ -39,6 +42,7 @@ from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerNode
+from lup.ledger.store import LedgerPlacement, SharedStore
 from lup.workspace.paths import project_root
 
 # lup: ignore[constant-declaration] — the command that regenerates a writeup,
@@ -302,16 +306,19 @@ def write_writeup(
     root: Path | None = None,
     *,
     check: bool = False,
+    placement: LedgerPlacement = SharedStore(),
 ) -> Path:
     """Write one writeup from this machine's ledger, or verify the one on disk.
 
     Through the same machinery as every other generated repository file, so
     the banner says where to edit and what to run, and `--check` says stale
     in the same words — against this machine's log, which is the only one it
-    can see.
+    can see. The signature past the writeup and its classes is a repository
+    writer's, so a project whose log is in the tree lists these among its
+    generated files.
     """
     base = root or project_root()
-    store = LedgerStore(base, ActorRef(kind="console", id=mint_member_id()))
+    store = LedgerStore(base, ActorRef(kind="console", id=mint_member_id()), placement)
     artifact = Artifact.generated(
         path=Path(writeup.path),
         body=render_writeup(store, classes, writeup),

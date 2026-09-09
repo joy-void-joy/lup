@@ -29,6 +29,7 @@ from lup.coordination.identity import mint_member_id
 from lup.coordination.refs import ActorRef
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerEdge, LedgerNode
+from lup.ledger.store import LedgerPlacement, SharedStore
 from lup.ledger.views import (
     ExportView,
     GraphView,
@@ -51,9 +52,9 @@ differently would serve nothing.
 """
 
 
-def opened(root: Path) -> LedgerStore:
+def opened(root: Path, placement: LedgerPlacement) -> LedgerStore:
     """The store, opened to read; a reader mints a console identity like the CLI."""
-    return LedgerStore(root, ActorRef(kind="console", id=mint_member_id()))
+    return LedgerStore(root, ActorRef(kind="console", id=mint_member_id()), placement)
 
 
 def since_moment(spelling: str) -> datetime | None:
@@ -74,6 +75,7 @@ def explorer_app(
     classes: list[type[LedgerNode]],
     edges: list[type[LedgerEdge]],
     bundles: Path | None = None,
+    placement: LedgerPlacement = SharedStore(),
 ) -> FastAPI:
     """The explorer over one repository's log: its page, and the routes it reads.
 
@@ -85,7 +87,7 @@ def explorer_app(
     @application.get("/api/graph")
     async def graph(kind: str = "", standing: str = "", since: str = "") -> GraphView:
         return graph_view(
-            opened(root),
+            opened(root, placement),
             classes,
             kind=kind,
             standing=standing,
@@ -94,7 +96,7 @@ def explorer_app(
 
     @application.get("/api/node/{spelling}")
     async def node(spelling: str) -> NodeDetail:
-        store = opened(root)
+        store = opened(root, placement)
         found = store.resolve(spelling, classes)
         if found is None:
             raise HTTPException(
@@ -110,10 +112,13 @@ def explorer_app(
 
 
 def export_view(
-    root: Path, classes: list[type[LedgerNode]], edges: list[type[LedgerEdge]]
+    root: Path,
+    classes: list[type[LedgerNode]],
+    edges: list[type[LedgerEdge]],
+    placement: LedgerPlacement = SharedStore(),
 ) -> ExportView:
     """The whole log as one value, for a page that cannot ask for more later."""
-    store = opened(root)
+    store = opened(root, placement)
     return ExportView(
         graph=graph_view(store, classes),
         details=[
@@ -169,6 +174,7 @@ def export_explorer(
     edges: list[type[LedgerEdge]],
     destination: Path,
     bundles: Path | None = None,
+    placement: LedgerPlacement = SharedStore(),
 ) -> Path:
     """Write the explorer as one file holding the log as it is now.
 
@@ -176,7 +182,7 @@ def export_explorer(
     what the log held when it was written — the page says when.
     """
     page = export_page(
-        export_view(root, classes, edges), bundle_assets(SURFACE, bundles)
+        export_view(root, classes, edges, placement), bundle_assets(SURFACE, bundles)
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(page, encoding="utf-8")
@@ -190,10 +196,11 @@ def serve_explorer(
     host: str,
     port: int,
     open_page: bool = True,
+    placement: LedgerPlacement = SharedStore(),
 ) -> None:
     """Bind the loopback and serve the explorer over this repository's log."""
     serve_local_page(
-        lambda url: explorer_app(url, root, classes, edges),
+        lambda url: explorer_app(url, root, classes, edges, placement=placement),
         "Ledger explorer",
         host,
         port,

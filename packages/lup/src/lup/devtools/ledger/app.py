@@ -44,7 +44,7 @@ from lup.ledger.writeup import Writeup, WriteupError, write_writeup
 from lup.types import JsonObject
 from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
-from lup.ledger.store import ledger_root
+from lup.ledger.store import LedgerPlacement, SharedStore, ledger_root
 from lup.workspace.edition import shared_git_directory
 from lup.workspace.paths import project_root
 
@@ -145,6 +145,7 @@ def create_ledger_app(
     classes: list[type[LedgerNode]],
     edges: list[type[LedgerEdge]] | None = None,
     writeups: list[Writeup] | None = None,
+    placement: LedgerPlacement = SharedStore(),
 ) -> typer.Typer:
     """Wire the command tree for this repository's notes, over these types.
 
@@ -155,7 +156,9 @@ def create_ledger_app(
     base class, which is the honest answer for a log a later build may hold
     types for. Recording and relating are generic for the same reason: a kind
     is looked up in what the project declared, and the type validates the
-    fields, so there is one `record` rather than one command per kind.
+    fields, so there is one `record` rather than one command per kind. The
+    placement is the project's too: where its log lives, shared under the
+    git directory or committed in the tree.
     """
     app = typer.Typer(no_args_is_help=True)
     relations = list(edges or [])
@@ -164,7 +167,9 @@ def create_ledger_app(
 
     def store() -> LedgerStore:
         return LedgerStore(
-            project_root(), ActorRef(kind="console", id=mint_member_id())
+            project_root(),
+            ActorRef(kind="console", id=mint_member_id()),
+            placement,
         )
 
     def found(held: LedgerStore, node_id: str) -> LedgerNode:
@@ -322,12 +327,14 @@ def create_ledger_app(
     ) -> None:
         """Generate the documents this project declares over its ledger.
 
-        Written from this machine's log and committed like any document,
-        rather than drift-checked by `dev check`: the log is live state under
-        the git directory, so the same declaration renders differently where
-        nothing has been recorded. `--check` asks whether the file on disk is
-        what this machine would render, which is the question a person about
-        to commit one has.
+        Written from this machine's log and committed like any document.
+        Under the shared store they are not drift-checked by `dev check`: the
+        log is live state under the git directory, so the same declaration
+        renders differently where nothing has been recorded, and `--check`
+        asks whether the file on disk is what this machine would render —
+        the question a person about to commit one has. With the log in the
+        tree every machine renders the same document, and the writeups are
+        generated and drift-checked with every other repository artifact.
         """
         declared = list(writeups or [])
         chosen = [each for each in declared if not name or each.name == name]
@@ -337,7 +344,9 @@ def create_ledger_app(
             raise typer.Exit(1)
         for each in chosen:
             try:
-                written = write_writeup(each, classes, project_root(), check=check)
+                written = write_writeup(
+                    each, classes, project_root(), check=check, placement=placement
+                )
             except (RuntimeError, WriteupError) as problem:
                 typer.echo(str(problem))
                 raise typer.Exit(1) from problem
@@ -626,13 +635,20 @@ def create_ledger_app(
     ) -> None:
         """Commit the store to a branch of its own, for a record worth keeping.
 
-        The store is live untracked state the rest of the time, which is what
-        keeps a node per turn out of the history of the code. This is the
-        deliberate act that preserves it, and it is somebody asking rather
-        than something happening on every write.
+        The shared store is live untracked state the rest of the time, which
+        is what keeps a node per turn out of the history of the code. This is
+        the deliberate act that preserves it, and it is somebody asking rather
+        than something happening on every write. A log declared in the tree
+        is committed with the code, and there is nothing here to copy.
         """
         root = project_root()
-        held = ledger_root(root)
+        if placement.tracked():
+            typer.echo(
+                f"The ledger is {placement.describe()}: it is committed with the"
+                " code, so there is nothing to snapshot."
+            )
+            raise typer.Exit(1)
+        held = ledger_root(root, placement)
         if not held.exists():
             typer.echo("This repository has recorded nothing to snapshot.")
             raise typer.Exit(1)
@@ -674,11 +690,15 @@ def create_ledger_app(
 
         root = project_root()
         if export is not None:
-            written = export_explorer(root, classes, relations, export)
+            written = export_explorer(
+                root, classes, relations, export, placement=placement
+            )
             typer.echo(f"written {written}")
             return
         try:
-            serve_explorer(root, classes, relations, host, port, open_page)
+            serve_explorer(
+                root, classes, relations, host, port, open_page, placement=placement
+            )
         except ValueError as error:
             raise typer.BadParameter(str(error)) from error
 
