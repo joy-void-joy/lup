@@ -294,6 +294,18 @@ class ForeignCheckouts(BaseModel, frozen=True):
         """The watched state another worktree owns."""
         return {key: value for key, value in state.items() if self.holder(key)}
 
+    def joined(self, other: "ForeignCheckouts") -> "ForeignCheckouts":
+        """This map and ``other`` together, either holder answering for a key.
+
+        Read at both ends of a watch, because a worktree cut while the suite
+        runs holds its branch at the end and not at the start: a map read
+        only at the start reports that branch as appearing from nowhere,
+        which is how a sibling session's `worktree create` failed a check it
+        never touched. A worktree removed mid-run is the mirror case, and the
+        map read at the start still holds what it held.
+        """
+        return ForeignCheckouts(holders=self.holders | other.holders)
+
     def verdict(self, before: dict[str, str], after: dict[str, str]) -> "GuardVerdict":
         """What moved, split into what this run answers for and what it does not.
 

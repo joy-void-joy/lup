@@ -231,3 +231,30 @@ def test_a_branch_tracking_a_differently_named_remote_is_attributed(
 def test_no_remote_is_claimed_when_git_cannot_say(tmp_path: Path) -> None:
     """The module's rule: a guard that cannot answer fails on everything."""
     assert ForeignCheckouts.remotes(tmp_path / "nowhere") == []
+
+
+def worktree_cut(main: Path, name: str, at: Path) -> None:
+    """What a sibling session's `worktree create` does to the shared ref store."""
+    sh.Command("git")(
+        "-C", str(main), "worktree", "add", "-b", name, str(at), _tty_out=False
+    )
+
+
+def test_a_worktree_cut_while_the_suite_runs_holds_its_branch(tmp_path: Path) -> None:
+    """The case that failed a check on a policy row: a sibling session's
+    `worktree create`, forty seconds into the run.
+
+    A map read before the worktree existed holds nothing for its branch, so
+    the branch reads as appearing from nowhere. Joined with a map read after
+    the change, the worktree answers for it and the run is told, not failed.
+    """
+    main = repository_with_a_sibling(tmp_path)
+    foreign = ForeignCheckouts.beside(main)
+    before = repository_state(main)
+    worktree_cut(main, "late", tmp_path / "late")
+    after = repository_state(main)
+
+    assert "refs/heads/late: created" in foreign.verdict(before, after).failure
+    verdict = foreign.joined(ForeignCheckouts.beside(main)).verdict(before, after)
+    assert verdict.failure == ""
+    assert "refs/heads/late" in verdict.notice
