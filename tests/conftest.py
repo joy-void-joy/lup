@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.gitguard import TEST_IDENTITY, ForeignCheckouts, repository_state
+from lup.devtools.gitguard import TEST_IDENTITY, GuardVerdict, RepositoryWatch
 from lup.harness.environment import launcher_decided_names
 
 
@@ -46,21 +46,41 @@ def committer_identity_armed() -> Iterator[None]:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def enclosing_repository_untouched() -> Iterator[None]:
-    """Fail the session if it wrote into the checkout it is running inside.
+def enclosing_repository_watched() -> Iterator[RepositoryWatch]:
+    """Read the checkout this suite runs inside before its first test and after its last.
 
     Autouse and session-scoped because the failure it catches is one no test
     can be asked to notice: a fixture that binds git to the working directory
     instead of its own throwaway repository commits successfully, passes, and
     leaves the developer's branch moved. See :mod:`lup.devtools.gitguard` for how that
-    was found here, and what it cost.
+    was found here, and what it cost. Under xdist each worker is a session of
+    its own over one shared ref store, so the watch carries the worker's name
+    for its report to say who saw what.
     """
     root = Path(__file__).resolve().parent.parent
-    foreign = ForeignCheckouts.beside(root)
-    before = repository_state(root)
+    watch = RepositoryWatch.armed(root, os.environ.get("PYTEST_XDIST_WORKER", "main"))
+    yield watch
+    settled(watch.after("the teardown after this worker's last test"))
+
+
+@pytest.fixture(autouse=True)
+def enclosing_repository_untouched(
+    enclosing_repository_watched: RepositoryWatch, request: pytest.FixtureRequest
+) -> Iterator[None]:
+    """Fail the test whose window saw the checkout change, not whichever ran last.
+
+    Function-scoped so the comparison closes around one test: a difference
+    closed once per session lands under xdist on the last test the noticing
+    worker ran, which is a policy row about `gh pr create` as easily as the
+    fixture that escaped.
+    """
     yield
-    verdict = foreign.verdict(before, repository_state(root))
+    settled(enclosing_repository_watched.after(request.node.nodeid))
+
+
+def settled(verdict: GuardVerdict) -> None:
+    """Say what a sibling worktree moved, and fail on what this run moved."""
     if verdict.notice:
-        warnings.warn(verdict.notice, stacklevel=1)
+        warnings.warn(verdict.notice, stacklevel=2)
     if verdict.failure:
         pytest.fail(verdict.failure, pytrace=False)
