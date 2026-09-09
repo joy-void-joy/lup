@@ -232,3 +232,30 @@ def test_opening_one_runtime_generates_every_declared_tree(
         is None
     )
     assert generated == [opened, sibling, writer]
+
+
+def test_a_launch_names_the_waits_it_spends_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One line before each quiet stretch, and none when only generation was asked."""
+    monkeypatch.setattr(
+        launch, "generate_with_report", lambda composition, in_passing=False: None
+    )
+    monkeypatch.setattr(
+        launch,
+        "generate_targets",
+        lambda compositions, writers, in_passing=False: None,
+    )
+    monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch, "sweep_ledgers", lambda root: 0)
+    monkeypatch.setattr(launch, "runtime_preflight", lambda *a, **k: [])
+    monkeypatch.setattr(launch, "settle_base_freshness", lambda *a, **k: None)
+
+    assert launch.ready_to_open(composition(), True, LaunchSentinels()) is None
+    assert capsys.readouterr().out == ""
+
+    assert launch.ready_to_open(composition(), False, LaunchSentinels()) is not None
+    assert capsys.readouterr().out.splitlines() == [
+        "regenerating what this session opens against",
+        "checking the host",
+    ]

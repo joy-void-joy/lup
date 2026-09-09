@@ -7,8 +7,8 @@ derived from typed source, meaningless to hand-edit, stale the moment its
 source moves. So it is materialised the way those trees are — as artifacts
 under an ownership manifest, reconciled against what is on disk, written
 atomically, with orphaned files from an earlier build deleted on proof — and
-`dev check` reads it against a fresh build the way it reads every generated
-tree against its source.
+`dev check` reads it against that proof the way it reads every generated
+tree against its source, building only where the proof no longer holds.
 
 **Text only.** The materializer normalises artifacts as LF text, so a bundle
 is JavaScript, CSS and HTML; Vite inlines small assets and nothing here ships a
@@ -162,6 +162,26 @@ def bundle_manifest(workspace: Path, desired: ArtifactTree) -> OwnershipManifest
     )
 
 
+def proof_holds(prior: OwnershipManifest, base: Path, workspace: Path) -> bool:
+    """Whether the bundles on disk are still the ones this proof was written for.
+
+    Three facts, each of which a fresh build could only restate: the sources
+    hash to what the proof recorded, the generator is the version that wrote
+    it, and every owned file still carries the digest it landed with. Vite is
+    deterministic over those inputs, so where all three hold a rebuild lands
+    the tree that is already there. Building to learn that costs the whole
+    toolchain run, and a launch asks twice.
+    """
+    if prior.source_digest != source_digest(workspace):
+        return False
+    if prior.generator_version != version("lup"):
+        return False
+    owned = [item.path for item in prior.files]
+    current = FilesystemCurrentTreeReader(prior, managed_paths=owned).read(base)
+    standing = {artifact.path: artifact.category for artifact in current.artifacts}
+    return all(standing.get(path) == "generated" for path in owned)
+
+
 def write_web_bundles(
     workspace: Path,
     bundles: Path,
@@ -173,12 +193,21 @@ def write_web_bundles(
     """Build every surface and materialise the bundles tree, or verify it.
 
     ``workspace`` and ``bundles`` are relative to the repository root, so the
-    template names them once. Verification builds too: the only proof that
-    the committed bundles are current is a fresh build that changes nothing,
-    which is what `dev check` asks of every generated tree.
+    template names them once. A tree whose proof holds is current in either
+    mode without a build, since :func:`proof_holds` reads exactly what a
+    rebuild would restate; anything else is behind, which a check says and a
+    write settles by building.
     """
     base = root or project_root()
     home = base / workspace
+    manifest_path = base / bundles / OWNERSHIP_FILENAME
+    prior = load_manifest(manifest_path)
+    if prior is not None and proof_holds(prior, base, home):
+        return base / bundles
+    if check:
+        raise RuntimeError(
+            f"{bundles} is behind {workspace}; run `{REGENERATE_COMMAND}`"
+        )
     if not (home / "node_modules").is_dir():
         raise RuntimeError(
             f"{workspace} has no node_modules; run `bun install --frozen-lockfile`"
@@ -193,8 +222,6 @@ def write_web_bundles(
             )
         ]
     desired = validated_tree(artifacts)
-    manifest_path = base / bundles / OWNERSHIP_FILENAME
-    prior = load_manifest(manifest_path)
     managed = list(
         dict.fromkeys(
             [
@@ -205,14 +232,6 @@ def write_web_bundles(
     )
     reader = FilesystemCurrentTreeReader(prior, managed_paths=managed)
     proposal = DeterministicReconciler().propose(reader.read(base), desired)
-    manifest = bundle_manifest(home, desired)
-    if check:
-        stale = proposal.writes or proposal.deletes or proposal.conflicts
-        if stale or prior != manifest:
-            raise RuntimeError(
-                f"{bundles} is behind {workspace}; run `{REGENERATE_COMMAND}`"
-            )
-        return base / bundles
     AtomicMaterializer().apply(proposal)
-    save_manifest(manifest_path, manifest)
+    save_manifest(manifest_path, bundle_manifest(home, desired))
     return base / bundles

@@ -118,3 +118,43 @@ def test_a_workspace_without_dependencies_is_refused_naming_the_install(
     (tmp_path / "web").mkdir()
     with pytest.raises(RuntimeError, match="bun install --frozen-lockfile"):
         write_web_bundles(Path("web"), Path("bundles"), ["explorer"], tmp_path)
+
+
+def test_the_build_runs_where_the_proof_no_longer_holds_and_nowhere_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A holding proof is current in either mode; a check never builds."""
+    workspace = tmp_path / "web"
+    (workspace / "node_modules").mkdir(parents=True)
+    (workspace / "src" / "explorer").mkdir(parents=True)
+    (workspace / "package.json").write_text("{}\n", encoding="utf-8")
+    source = workspace / "src" / "explorer" / "App.tsx"
+    source.write_text("one", encoding="utf-8")
+    builds: list[str] = []
+
+    def built(home: Path, surface: str, out: Path) -> list[Path]:
+        builds.append(surface)
+        out.mkdir(parents=True, exist_ok=True)
+        page = out / "index.html"
+        page.write_text(f"<!doctype html>{surface}\n", encoding="utf-8")
+        return [page]
+
+    monkeypatch.setattr("lup.web.build.built_files", built)
+    arguments = (Path("web"), Path("bundles"), ["explorer"], tmp_path)
+
+    landed = write_web_bundles(*arguments)
+    write_web_bundles(*arguments, check=True)
+    write_web_bundles(*arguments)
+    assert builds == ["explorer"]
+
+    source.write_text("two", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="behind"):
+        write_web_bundles(*arguments, check=True)
+    assert builds == ["explorer"]
+    write_web_bundles(*arguments)
+    assert builds == ["explorer", "explorer"]
+
+    (landed / "explorer" / "index.html").write_text("edited\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="behind"):
+        write_web_bundles(*arguments, check=True)
+    assert builds == ["explorer", "explorer"]

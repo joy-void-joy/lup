@@ -20,8 +20,9 @@ uv run lup-devtools harness generate all   # render both trees from source
 uv run lup-devtools harness check all      # read-only drift check; what CI runs
 ```
 
-`harness claude` and `harness codex` regenerate the declared targets and launch the selected runtime;
-`--generate-only` stops before launching. `git hooks install` installs
+`harness claude` and `harness codex` regenerate the declared targets, check the host, settle the
+base, and launch the selected runtime; each wait is named as it starts, so a long silence is a
+stopped launch rather than a slow one. `--generate-only` stops before launching. `git hooks install` installs
 the drift check as a git pre-commit hook, so omitted generated output is
 refused before the commit exists rather than minutes later in CI.
 [quality-pipeline.md](quality-pipeline.md) maps all three layers.
