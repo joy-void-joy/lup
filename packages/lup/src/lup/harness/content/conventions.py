@@ -228,6 +228,20 @@ Work outliving its tool call is launched to survive its launcher — never from 
     ],
 )
 
+WORKING_ALONGSIDE = models.GuidanceSection(
+    id="working-alongside",
+    chapter="orientation",
+    parts=[
+        models.TextPart(
+            text=r"""## Who Else Is Here
+
+Other sessions work in this repository, in other worktrees, started by whoever. Before starting something substantial, call `coordination_peers`. Each row carries what a session *says* it is doing and, separately, `holding` — what its calls actually changed or locked. Read `holding`: a description is only as fresh as the last time somebody wrote one. A path somebody holds is not forbidden, but say so with `coordination_send` before writing it, and call `coordination_describe` when what you are on changes, so the row peers read of you is true.
+
+"""
+        ),
+    ],
+)
+
 DEFECT_DISPOSITION = models.GuidanceSection(
     id="defect-disposition",
     chapter="process",

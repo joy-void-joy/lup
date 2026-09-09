@@ -14,6 +14,7 @@ from lup.coordination.identity import (
     MEMBER_ENV,
     MemberNames,
     derived_cli_name,
+    member_ref,
     mint_member_id,
     session_member_id,
 )
@@ -94,6 +95,58 @@ def test_a_listing_says_what_each_session_is_doing_now(tmp_path: Path) -> None:
     [view] = peers.listing()
     assert view.doing == "reading the merge for dropped code"
     assert view.address == "reviewer"
+
+
+def test_a_listing_says_what_each_session_is_holding_not_only_what_it_claims(
+    tmp_path: Path,
+) -> None:
+    """The row is read to decide whether it is safe to write, and a description
+    cannot answer that: it is only as fresh as the last time somebody wrote it.
+    """
+    peers, member = joined(tmp_path, "reviewer")
+
+    peers.describe(member, "reading the merge")
+    peers.lock(member, tmp_path / "packages" / "lup")
+
+    [view] = peers.listing()
+    assert view.doing == "reading the merge"
+    assert view.holding == [f"under {tmp_path / 'packages' / 'lup'}"]
+    assert not view.contested
+
+
+def test_a_session_holding_nothing_says_so_rather_than_guessing(
+    tmp_path: Path,
+) -> None:
+    """Empty is the honest state, and is what a session that has not written
+    yet must report — a reader treats it as "go ahead", so inventing a claim
+    here would be worse than saying nothing.
+    """
+    peers, _member = joined(tmp_path, "reviewer")
+
+    [view] = peers.listing()
+
+    assert view.holding == []
+    assert view.contested == []
+
+
+def test_a_claim_nothing_could_attribute_appears_on_both_sessions_rows(
+    tmp_path: Path,
+) -> None:
+    """Contested is the half a reader acts on: two sessions are in one place and
+    neither of them knows it.
+    """
+    peers, first = joined(tmp_path, "first")
+    second = mint_member_id()
+    peers.join(second, tmp_path / "other", cli_name="second")
+    disputed = tmp_path / "src" / "shared.py"
+
+    peers.touches.contested(
+        member_ref(first), disputed, rivals=[member_ref(second)], digest="abc"
+    )
+
+    rows = {view.address: view for view in peers.listing()}
+    assert rows["first"].contested == [f"at {disputed}"]
+    assert rows["second"].contested == [f"at {disputed}"]
 
 
 def test_a_session_that_never_described_itself_falls_back_to_its_task(

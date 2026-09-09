@@ -128,6 +128,22 @@ an honest pair, because the next reader is deciding whether it is safe to
 write. The next named edit or explicit lock settles it, because both of those
 attribute exactly.
 
+**Holdings ride on the roster row, beside the description rather than behind a
+second call.** A session listing its peers is asking one question — is it safe
+to start here — and the two halves of the answer are what a peer *said* it was
+doing and what its calls actually claimed. Splitting them across two surfaces
+would put the reliable half behind a call nobody makes at the moment it
+matters, so `coordination_peers` carries `holding` on every row, and
+`contested` beside it for the claims that already have more than one name on
+them. `doing` is self-reported and only as fresh as the last time somebody
+wrote it; `holding` is observed. Read the second before writing.
+
+The console splits them the other way, and deliberately. `coordination roster`
+carries a count per row, because a count is the decision — whether there is
+anything here to ask about — and `coordination holdings` carries the paths,
+because a person who wants those wants all of them at once rather than one row
+at a time.
+
 ## The other address book
 
 A runtime that can already address another session offers a second way to

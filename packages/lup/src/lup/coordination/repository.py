@@ -51,6 +51,26 @@ class PeerView(BaseModel, frozen=True):
     member: SpawnedActor
     cli_name: str = ""
 
+    holding: list[str] = []
+    """What this session's calls have actually claimed, as the fold spells it.
+
+    Observed rather than declared, which is the whole reason it rides beside
+    ``doing``: a description is what a session said about itself whenever it
+    last said anything, and a reader deciding whether it is safe to write
+    needs what that session touched. Empty is the honest state for a session
+    that has changed nothing yet.
+    """
+
+    contested: list[str] = []
+    """The claims here that another live session also holds.
+
+    Separate from ``holding`` rather than a flag inside it, because the two
+    answer different questions — what this session has, and what it does not
+    have to itself — and a reader about to write needs the second only when it
+    is not empty. A contested claim appears on both sessions' rows, which is
+    the honest rendering of a change nothing could attribute to one of them.
+    """
+
     @computed_field
     @property
     def address(self) -> str:
@@ -173,11 +193,30 @@ class RepositoryPeers:
         it and is not a session. They need no listing either, being reachable
         at the same word in every repository — where a session's address is
         exactly what a reader cannot know without asking.
+
+        Each row carries what its session is *holding* as well as what it says
+        it is doing, because the question this listing is read to answer — is
+        it safe to start here — is one a self-description cannot answer. The
+        claims are folded once for the whole roster rather than once per row,
+        so a listing costs the same read whatever the population.
         """
-        return [
-            PeerView(member=member, cli_name=self.names.current(member.actor.id))
-            for member in self.cohort.live()
-        ]
+        claims = self.held()
+
+        def row(member: SpawnedActor) -> PeerView:
+            """One session, with what it is observed to hold folded in."""
+            held = [
+                claim
+                for claim in claims
+                if any(holder.id == member.actor.id for holder in claim.holders)
+            ]
+            return PeerView(
+                member=member,
+                cli_name=self.names.current(member.actor.id),
+                holding=[claim.subject() for claim in held],
+                contested=[claim.subject() for claim in held if len(claim.holders) > 1],
+            )
+
+        return [row(member) for member in self.cohort.live()]
 
     def send(
         self,
