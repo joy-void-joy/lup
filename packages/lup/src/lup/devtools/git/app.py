@@ -56,7 +56,10 @@ def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
         ],
         no_sync: Annotated[
             bool,
-            typer.Option("--no-sync", help="Skip running uv sync"),
+            typer.Option(
+                "--no-sync",
+                help="Skip restoring the environment (uv sync) and the bun workspaces",
+            ),
         ] = False,
         no_copy_data: Annotated[
             bool,
@@ -103,6 +106,7 @@ def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
             no_record=no_record,
             clipboard=clipboard,
             guards=declared().git_guards,
+            workspaces=declared().restored_workspaces(),
         )
 
     @worktree_app.command("list")

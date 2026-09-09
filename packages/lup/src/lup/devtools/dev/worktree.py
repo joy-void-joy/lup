@@ -20,6 +20,7 @@ from lup.devtools.dev.git_guards import (
     read_guards,
 )
 from lup.policy.assets.host import project_environment
+from lup.web.build import dependencies_behind, restore_dependencies
 from lup.devtools.layout import get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
 from lup.execution.shell import git
@@ -482,6 +483,38 @@ class SyncedEnvironment(SetupStep, frozen=True):
         sync_dependencies(self.worktree)
 
 
+class RestoredWorkspace(SetupStep, frozen=True):
+    """A bun workspace's dependencies, restored from its lockfile in the worktree.
+
+    The restore the gate runs before `bun test` and the bundle build, done
+    once at creation so the first `dev check` is not the run that pays for
+    it. Not required, and not only because it reaches the registry for what
+    the cache lacks: the gate restores whatever it finds behind, so a worktree
+    without this step is one to work in, where one without its environment
+    is not.
+    """
+
+    worktree: Path
+    workspace: Path
+    """Where `package.json` and `bun.lock` live, relative to the worktree."""
+
+    def label(self) -> str:
+        return f"the restored bun workspace ({self.workspace})"
+
+    def satisfied(self) -> bool:
+        return not dependencies_behind(self.worktree / self.workspace)
+
+    def run(self) -> None:
+        typer.echo(f"Running bun install --frozen-lockfile in {self.workspace}...")
+        try:
+            restore_dependencies(self.worktree / self.workspace)
+        except RuntimeError as failed:
+            typer.echo(f"Warning: {failed}")
+
+    def required(self) -> bool:
+        return False
+
+
 def finish(steps: Sequence[SetupStep]) -> Iterator[SetupStep]:
     """Run each step given, yielding the ones still unfinished afterwards.
 
@@ -560,8 +593,13 @@ def create(
     clipboard: bool = False,
     extras: list[str] = GITIGNORED_EXTRAS,
     guards: list[GitGuard] = DECLARED_GUARDS,
+    workspaces: Sequence[Path] = (),
 ) -> None:
     """Create a git worktree, re-attach one, or finish one left half-made.
+
+    ``workspaces`` are the bun workspaces restored beside the environment,
+    relative to the worktree; ``no_sync`` skips both, since both are the
+    same act for two toolchains.
 
     Nothing here reaches origin. A branch that has no commits of its own can
     only publish a ref holding what origin already had, and rebuilding the
@@ -634,6 +672,8 @@ def create(
             )
         if not no_sync:
             yield SyncedEnvironment(worktree=worktree_path)
+            for workspace in workspaces:
+                yield RestoredWorkspace(worktree=worktree_path, workspace=workspace)
 
     pending = [step for step in setup() if not step.satisfied()]
 
