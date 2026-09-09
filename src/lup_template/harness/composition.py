@@ -25,6 +25,8 @@ from lup.devtools.harness.generate import (
     ProjectContent,
 )
 from lup.devtools.harness.generated_paths import write_generated_paths
+from lup.web.build import write_web_bundles
+from lup.web.schema import write_view_schema
 from lup.providers.profiles import ProfileDirectory
 from lup.workspace.paths import project_root
 from lup_template.harness.catalog import (
@@ -100,5 +102,14 @@ REPOSITORY_WIDE: list[RepositoryWriter] = [
     partial(write_rule_reference, selection=declared_hook_set().rules),
     partial(write_workflow, WORKFLOW),
     partial(write_generated_paths, TARGETS),
+    # The schema before the bundles, because the frontend build compiles its
+    # types from it: written in this order, one generation leaves both true.
+    partial(write_view_schema, Path("packages/lup/web/schema/views.json")),
+    partial(
+        write_web_bundles,
+        Path("packages/lup/web"),
+        Path("packages/lup/src/lup/web/bundles"),
+        ["explorer"],
+    ),
 ]
 """Every project-owned generated file outside a native runtime tree."""

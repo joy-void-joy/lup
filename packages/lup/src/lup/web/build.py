@@ -1,0 +1,218 @@
+"""The frontend bundles as a generated tree, built by Vite and owned like one.
+
+Every interactive surface lup serves is a TypeScript app under the bun
+workspace, and what a wheel carries is the bundle Vite built from it. A
+bundle is a compiled artifact in exactly the sense the native trees are:
+derived from typed source, meaningless to hand-edit, stale the moment its
+source moves. So it is materialised the way those trees are — as artifacts
+under an ownership manifest, reconciled against what is on disk, written
+atomically, with orphaned files from an earlier build deleted on proof — and
+`dev check` reads it against a fresh build the way it reads every generated
+tree against its source.
+
+**Text only.** The materializer normalises artifacts as LF text, so a bundle
+is JavaScript, CSS and HTML; Vite inlines small assets and nothing here ships a
+large binary one. A build that emits one fails loudly rather than landing a
+corrupted file.
+
+**Bun is a dependency of the build, not of the wheel.** An adopter has the
+bundles; only somebody changing frontend code needs the toolchain. Where the
+workspace has no `node_modules`, this refuses with the one command to run
+rather than installing anything — installing fetches code, and that is a
+decision the policy asks about.
+"""
+
+import hashlib
+from importlib.metadata import version
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import sh
+
+from lup.execution.shell import LazyCommand
+from lup.formats.banner import REGENERATE_COMMAND, VERBATIM_COPY
+from lup.harness.materialization import AtomicMaterializer
+from lup.harness.models import Artifact, ArtifactTree
+from lup.harness.ownership import (
+    OWNERSHIP_FILENAME,
+    OwnedArtifact,
+    OwnershipManifest,
+    content_digest,
+    load_manifest,
+    save_manifest,
+)
+from lup.harness.reconciliation import (
+    DeterministicReconciler,
+    FilesystemCurrentTreeReader,
+)
+from lup.harness.validation import validated_tree
+from lup.workspace.paths import project_root
+
+BUN = LazyCommand("bun", tty_out=False)
+
+
+def source_files(
+    workspace: Path,
+    globs: tuple[str, ...] = (
+        "package.json",
+        "bun.lock",
+        "tsconfig.json",
+        "vite.config.ts",
+        "schema/**/*",
+        "src/**/*",
+    ),
+) -> list[Path]:
+    """Every file the bundles are built from, in one stable order.
+
+    The globs are what a bundle is compiled from, and therefore what its proof
+    digests; a workspace laid out differently names its own. `src/generated/`
+    is left out whatever the globs say: it is compiled from the schema at
+    build time, so the schema already stands for it.
+    """
+    found = {
+        path
+        for pattern in globs
+        for path in workspace.glob(pattern)
+        if path.is_file() and "generated" not in path.relative_to(workspace).parts
+    }
+    return sorted(found)
+
+
+def source_digest(workspace: Path) -> str:
+    """One digest over the workspace's sources, so proof says what was built."""
+    digest = hashlib.sha256()
+    for path in source_files(workspace):
+        digest.update(path.relative_to(workspace).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def built_files(workspace: Path, surface: str, out: Path) -> list[Path]:
+    """Build one surface into ``out`` and return every file Vite wrote there.
+
+    The surface rides as Vite's own ``--mode`` and the destination as
+    ``--outDir``, both arguments to the workspace's build script, so nothing
+    about the build is carried in an environment this process would have to
+    assemble.
+    """
+    try:
+        BUN(
+            "run",
+            "build",
+            "--",
+            "--mode",
+            surface,
+            "--outDir",
+            str(out),
+            _cwd=str(workspace),
+        )
+    except sh.ErrorReturnCode as failed:
+        # The toolchain's own error output, kept whole; it is not always
+        # UTF-8, and a decode error here would hide the failure it describes.
+        said = failed.stderr.decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"building the {surface!r} surface failed:\n{said}"
+        ) from failed
+    return sorted(path for path in out.rglob("*") if path.is_file())
+
+
+def bundle_artifacts(
+    workspace: Path, bundles: Path, surface: str, out: Path
+) -> list[Artifact]:
+    """One surface's built files as artifacts under the bundles tree."""
+    source = (workspace / "src" / surface).as_posix()
+
+    def artifact(built: Path) -> Artifact:
+        relative = built.relative_to(out)
+        try:
+            content = built.read_text(encoding="utf-8")
+        except UnicodeDecodeError as binary:
+            raise RuntimeError(
+                f"the {surface!r} bundle emitted a binary file, {relative}, which"
+                " a text-only generated tree cannot carry; inline or drop it"
+            ) from binary
+        return Artifact(
+            path=bundles / surface / relative,
+            content=content,
+            semantic_id=f"web.{surface}.{relative.as_posix()}",
+            banner=VERBATIM_COPY.compiled_from(source),
+        )
+
+    return [artifact(built) for built in built_files(workspace, surface, out)]
+
+
+def bundle_manifest(workspace: Path, desired: ArtifactTree) -> OwnershipManifest:
+    """The proof a materialization of these bundles writes and a check reads."""
+    return OwnershipManifest(
+        schema_version=1,
+        generator_version=version("lup"),
+        source_digest=source_digest(workspace),
+        target_requirements=["bun"],
+        files=[
+            OwnedArtifact(
+                path=artifact.path,
+                category="generated",
+                sha256=content_digest(artifact.content),
+                semantic_id=artifact.semantic_id,
+            )
+            for artifact in desired.artifacts
+        ],
+    )
+
+
+def write_web_bundles(
+    workspace: Path,
+    bundles: Path,
+    surfaces: list[str],
+    root: Path | None = None,
+    *,
+    check: bool = False,
+) -> Path:
+    """Build every surface and materialise the bundles tree, or verify it.
+
+    ``workspace`` and ``bundles`` are relative to the repository root, so the
+    template names them once. Verification builds too: the only proof that
+    the committed bundles are current is a fresh build that changes nothing,
+    which is what `dev check` asks of every generated tree.
+    """
+    base = root or project_root()
+    home = base / workspace
+    if not (home / "node_modules").is_dir():
+        raise RuntimeError(
+            f"{workspace} has no node_modules; run `bun install --frozen-lockfile`"
+            " there, then the generation again"
+        )
+    with TemporaryDirectory(prefix="lup-web-") as scratch:
+        artifacts = [
+            artifact
+            for surface in surfaces
+            for artifact in bundle_artifacts(
+                home, bundles, surface, Path(scratch) / surface
+            )
+        ]
+    desired = validated_tree(artifacts)
+    manifest_path = base / bundles / OWNERSHIP_FILENAME
+    prior = load_manifest(manifest_path)
+    managed = list(
+        dict.fromkeys(
+            [
+                *(artifact.path for artifact in desired.artifacts),
+                *(item.path for item in (prior.files if prior is not None else [])),
+            ]
+        )
+    )
+    reader = FilesystemCurrentTreeReader(prior, managed_paths=managed)
+    proposal = DeterministicReconciler().propose(reader.read(base), desired)
+    manifest = bundle_manifest(home, desired)
+    if check:
+        stale = proposal.writes or proposal.deletes or proposal.conflicts
+        if stale or prior != manifest:
+            raise RuntimeError(
+                f"{bundles} is behind {workspace}; run `{REGENERATE_COMMAND}`"
+            )
+        return base / bundles
+    AtomicMaterializer().apply(proposal)
+    save_manifest(manifest_path, manifest)
+    return base / bundles

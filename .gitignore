@@ -255,3 +255,9 @@ refs/
 # it was reading — including inside the library's own package root, where an
 # empty `.claude/` is the first thing a newcomer scanning that tree meets.
 **/.cc-writes/
+# The frontend workspace: dependencies restored from the lockfile, types
+# compiled from the view schema at build, and Vite's scratch output. The built
+# bundles are committed, under lup.web's package data, as a generated tree.
+packages/lup/web/node_modules/
+packages/lup/web/src/generated/
+packages/lup/web/out/

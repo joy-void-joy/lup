@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "generator_version": "0.2.0",
+  "source_digest": "223bd332a9410eaad715a322eac052daa9c105c8af4de89f88f6d958c16100da",
+  "target_requirements": [
+    "bun"
+  ],
+  "files": [
+    {
+      "path": "packages/lup/src/lup/web/bundles/explorer/assets/index-fEjwfiUx.js",
+      "category": "generated",
+      "sha256": "ae57c6ef384a4558b6282ec7c17e6fb3945c0698049572f2ab4239e942df6eed",
+      "semantic_id": "web.explorer.assets/index-fEjwfiUx.js",
+      "executable": false
+    },
+    {
+      "path": "packages/lup/src/lup/web/bundles/explorer/index.html",
+      "category": "generated",
+      "sha256": "3ef15de41b8705b250451a439944c8015d04fa31377777fcdc28d05de4df6895",
+      "semantic_id": "web.explorer.index.html",
+      "executable": false
+    }
+  ]
+}

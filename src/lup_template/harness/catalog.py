@@ -41,7 +41,7 @@ from lup.harness.codescan.boundaries import (
 )
 from lup.harness.codescan.common import RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
-from lup.devtools.dev.workflow import WorkflowSpec
+from lup.devtools.dev.workflow import FrontendSpec, WorkflowSpec
 from lup.devtools.project import DevProject, Tracker
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
@@ -252,9 +252,14 @@ def declared_hook_set() -> HookSet:
     return portable_harness().declared_hooks
 
 
-WORKFLOW = WorkflowSpec(branches=["main", "dev"])
+WORKFLOW = WorkflowSpec(
+    branches=["main", "dev"],
+    frontend=FrontendSpec(workspace="packages/lup/web", bun_version="1.3.14"),
+)
 """This project's gate: the two-tier model, where `dev` integrates and `main`
-carries what has landed, so both deserve a run of their own."""
+carries what has landed, so both deserve a run of their own. The frontend
+workspace is the library's, installed first because `dev check` rebuilds the
+bundles it compares against what is committed."""
 
 
 NATIVE_RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
@@ -289,7 +294,13 @@ def application_roots(plugin_names: list[str] | None = None) -> ApplicationRoots
         if plugin_names is None
         else plugin_names
     )
-    generated = generated_tree_paths(NATIVE_RUNTIMES, plugins)
+    generated = [
+        *generated_tree_paths(NATIVE_RUNTIMES, plugins),
+        # The frontend bundles: compiled by Vite into lup.web's package data
+        # and owned by a manifest, so every scan skips them the way it skips
+        # the native trees — a minified bundle is nobody's code to audit.
+        "packages/lup/src/lup/web/bundles/",
+    ]
     return ApplicationRoots(
         generated=generated,
         composition=[
@@ -580,6 +591,15 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 HookPathRole(root=Path("**/.ruff_cache"), role="scratch"),
                 HookPathRole(root=Path("**/.pytest_cache"), role="scratch"),
                 HookPathRole(root=Path("**/node_modules"), role="scratch"),
+                # The frontend bundles Vite builds into lup.web's package data
+                # are a build product too — reproduced by `harness generate
+                # all` — and committed only so the wheel carries them. Scratch
+                # keeps the source audits off a minified bundle; what keeps a
+                # hand from editing one is the ownership manifest and the
+                # drift check, which read it as a generated tree.
+                HookPathRole(
+                    root=Path("packages/lup/src/lup/web/bundles"), role="scratch"
+                ),
                 # Deliberately absent, though Git ignores every one of them:
                 # `.env.local`, `notes/`, `.lup/`, and the `*.local` configs
                 # each hold the only copy of what is in them. Ignored means

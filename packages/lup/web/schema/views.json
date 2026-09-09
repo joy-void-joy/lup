@@ -1,0 +1,228 @@
+{
+  "$defs": {
+    "EdgeCount": {
+      "description": "How many edges of one kind point at a node \u2014 its weight in the log.",
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "count"
+      ],
+      "title": "EdgeCount",
+      "type": "object"
+    },
+    "EdgeView": {
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "source",
+        "target"
+      ],
+      "title": "EdgeView",
+      "type": "object"
+    },
+    "GraphView": {
+      "description": "The whole log as a graph, with the vocabularies a reader filters by.",
+      "properties": {
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/EdgeView"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "kinds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Kinds",
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/NodeView"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "standings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Standings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes",
+        "edges",
+        "kinds",
+        "standings"
+      ],
+      "title": "GraphView",
+      "type": "object"
+    },
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "NodeDetail": {
+      "description": "One node in full: its own fields, its weight, and every edge in and out.",
+      "properties": {
+        "attachments": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Attachments",
+          "type": "array"
+        },
+        "edges_in": {
+          "items": {
+            "$ref": "#/$defs/EdgeView"
+          },
+          "title": "Edges In",
+          "type": "array"
+        },
+        "edges_out": {
+          "items": {
+            "$ref": "#/$defs/EdgeView"
+          },
+          "title": "Edges Out",
+          "type": "array"
+        },
+        "fields": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "incoming": {
+          "items": {
+            "$ref": "#/$defs/EdgeCount"
+          },
+          "title": "Incoming",
+          "type": "array"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeView"
+        }
+      },
+      "required": [
+        "node",
+        "fields",
+        "incoming",
+        "edges_in",
+        "edges_out",
+        "attachments"
+      ],
+      "title": "NodeDetail",
+      "type": "object"
+    },
+    "NodeView": {
+      "description": "One node as a reader meets it: what it is and where it stands right now.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "priority": {
+          "default": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "slug": {
+          "default": "",
+          "title": "Slug",
+          "type": "string"
+        },
+        "sound": {
+          "default": true,
+          "title": "Sound",
+          "type": "boolean"
+        },
+        "standing": {
+          "title": "Standing",
+          "type": "string"
+        },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "standing"
+      ],
+      "title": "NodeView",
+      "type": "object"
+    }
+  },
+  "title": "LupViews"
+}

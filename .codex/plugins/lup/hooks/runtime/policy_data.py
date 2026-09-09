@@ -1954,6 +1954,10 @@ PATH_ROLES: list[PathRoleRow] = [
         "root": "**/node_modules",
         "role": "scratch",
     },
+    {
+        "root": "packages/lup/src/lup/web/bundles",
+        "role": "scratch",
+    },
 ]
 
 ACCEPTANCE_GUARD: AcceptanceGuardRow | None = None
@@ -17738,6 +17742,7 @@ IMPORT_BOUNDARIES: list[ImportBoundaryRow] = [
             ".codex/plugins/lup/hooks/",
             ".codex/plugins/lup/skills/",
             "AGENTS.md",
+            "packages/lup/src/lup/web/bundles/",
             "tests/",
             "packages/lup/tests/",
             "examples/",
@@ -17785,6 +17790,7 @@ IMPORT_BOUNDARIES: list[ImportBoundaryRow] = [
             ".codex/plugins/lup/hooks/",
             ".codex/plugins/lup/skills/",
             "AGENTS.md",
+            "packages/lup/src/lup/web/bundles/",
             "tests/",
             "packages/lup/tests/",
             "examples/",
