@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "eeb8413d674a9c2ff67dfbbc30875f4848e0090f8a8124c413fb8699d4db2764",
+  "source_digest": "764ea4243eb54799d56880b87518263675d7cbbc6055dc120d85c244a2d08a5e",
   "target_requirements": [
     "claude-code"
   ],
@@ -191,7 +191,7 @@
     {
       "path": ".claude/plugins/lup/commands/hooks.md",
       "category": "generated",
-      "sha256": "0f924b8f22f5ac526182a4d1d6e17b51410570da4f07f8788d7b0140a500ac05",
+      "sha256": "16a678f9eb1bc1e63591caeafbbb18f4989889e0985ca4a8faca3fb0d7b61522",
       "semantic_id": "skill.hooks",
       "executable": false
     },
@@ -604,7 +604,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "bdf9a000b05166c14072cd14a9bf7d1ed7310cd936370b4f56ae8cc2ca600827",
+      "sha256": "179ad76c64c8c986cb5cc94cf8a12908a2f459f9cb0e5f56b4e92f6b030a27df",
       "semantic_id": "docs.permissions",
       "executable": false
     },
