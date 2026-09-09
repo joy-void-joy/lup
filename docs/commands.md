@@ -219,6 +219,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | Command | What it does |
 | --- | --- |
 | `run monitor` | Follow a background run: its landed units, their statuses, its heartbeat. |
+| `run report` | Say how far into its own work a unit has got, from any language. |
 
 ## `setup`
 
