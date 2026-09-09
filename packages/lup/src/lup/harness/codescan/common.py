@@ -444,7 +444,7 @@ class Refutation(BaseModel, frozen=True):
     empty-collection defaults and the receiver resolution both speak this
     shape, so the audit
     has one mechanism for "matched, but refuted" — and a `# lup: ignore` left
-    guarding a refuted line becomes a dead directive the audit reports.
+    guarding a settled line becomes a dead directive the audit reports.
 
     ``subject`` is the source expression the verdict is about and ``evidence``
     the sentence that justifies it, so a dropped finding is always accountable.
@@ -454,6 +454,19 @@ class Refutation(BaseModel, frozen=True):
     line: int
     subject: str
     evidence: str
+    settled: bool
+    """Whether a declaration settled the line, or nothing could be shown about it.
+
+    Settled, the subject resolved to a declaration outside the family: the
+    line trips nothing, and a directive naming the rule there guards nothing
+    and is reported spurious. Unsettled, the checker inferred no type for the
+    subject: the rule demands no directive there, and one written there
+    stands, because what a checker failed to learn is no evidence against
+    the marker either — a gate deleting it on that would be answering from
+    its own blindness, and a fuller sweep resolving the receiver would demand
+    it straight back. A line carrying several sites of one rule is settled
+    only when every one of them is.
+    """
 
 
 class PythonContext(BaseModel):

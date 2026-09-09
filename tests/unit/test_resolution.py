@@ -117,6 +117,7 @@ def test_non_mapping_receiver_is_refuted_with_evidence() -> None:
     assert refuted[0].subject == "client"
     assert "`Client`" in refuted[0].evidence
     assert "outside the mapping family" in refuted[0].evidence
+    assert refuted[0].settled
     assert audit_text(text, PYTHON_ANTI_PATTERNS, refuted) == []
 
 
@@ -223,6 +224,74 @@ def test_an_unresolved_receiver_is_refuted_rather_than_denied() -> None:
         "the checker inferred no type for `whatever`, so nothing puts it in "
         "the mapping family"
     ]
+    assert not refuted["sample.py"][0].settled
+
+
+def test_an_unresolved_receiver_leaves_its_directive_standing() -> None:
+    """Refuted without being settled: no directive demanded, none called dead.
+
+    The #459 loop in one file. A hook whose checker typed nothing for the
+    receiver reported the marker spurious and deleted it; the sweep, resolving
+    the receiver into the family, reported the line missing the marker; a
+    session restoring it met the hook again. What a checker failed to learn
+    is no evidence against the marker, so the unsettled refutation drops the
+    demand and leaves the directive exactly as written.
+    """
+    marked = 'value = whatever.get("name")  # lup: ignore[dict-get] — open map\n'
+    bare = 'value = whatever.get("name")\n'
+    refuted = refute([source(marked)], TableOracle({}), PYTHON_ANTI_PATTERNS)[
+        "sample.py"
+    ]
+
+    assert audit_text(marked, PYTHON_ANTI_PATTERNS, refuted) == []
+    assert audit_text(bare, PYTHON_ANTI_PATTERNS, refuted) == []
+
+
+def test_an_unresolved_receiver_keeps_a_file_level_opt_out_live() -> None:
+    """The whole-file directive stands on an unsettled hit as an inline one does."""
+    text = (
+        '# lup: ignore[dict-get] — open maps throughout\nvalue = whatever.get("name")\n'
+    )
+    refuted = refute([source(text)], TableOracle({}), PYTHON_ANTI_PATTERNS)["sample.py"]
+
+    assert audit_text(text, PYTHON_ANTI_PATTERNS, refuted) == []
+
+
+class ColumnOracle(TypeOracle):
+    """Answers by the member's column, for a line carrying several sites."""
+
+    def __init__(self, answers: dict[int, Declaration]) -> None:
+        self.answers = answers
+
+    def declarations(
+        self,
+        queries: list[SymbolQuery],
+        buffers: list[SourceBuffer] | None = None,
+    ) -> list[Declaration]:
+        return [
+            self.answers[query.member.column]
+            if query.member.column in self.answers
+            else NOTHING
+            for query in queries
+        ]
+
+
+def test_one_unresolved_site_keeps_the_whole_line_open() -> None:
+    """A line is settled only when every site on it is.
+
+    `client` resolves outside the family and `whatever` resolves to nothing:
+    the directive guarding the line may be guarding exactly the second site,
+    so the line comes back unsettled and the marker stands.
+    """
+    text = 'value = client.get("url") or whatever.get("name")\n'
+    client_member = text.index(".get(") + 1
+    refuted = refute(
+        [source(text)], ColumnOracle({client_member: CLIENT}), PYTHON_ANTI_PATTERNS
+    )["sample.py"]
+
+    assert [row.settled for row in refuted] == [False, False]
+    marked = text.rstrip("\n") + "  # lup: ignore[dict-get] — open map\n"
+    assert audit_text(marked, PYTHON_ANTI_PATTERNS, refuted) == []
 
 
 def test_the_oracle_is_told_the_text_being_audited() -> None:
@@ -410,10 +479,60 @@ def test_a_resolved_receiver_is_admitted_without_a_directive() -> None:
         'response = client.get("url")\n',
         rows,
         python_source=True,
-        refuted={"dict-get": [1]},
+        resolution={"refuted": {"dict-get": [1]}, "unresolved": {}},
     )
 
     assert decision is None or decision.effect == "allow"
+
+
+def test_the_gate_admits_a_line_the_checker_could_type_nothing_for() -> None:
+    """Looked at and unresolved is admitted, not asked about and not denied.
+
+    The audit demands no directive on such a line, so a denial here would
+    be the split the gate exists to prevent; and the ask is for a checker
+    that never answered, which this one did.
+    """
+    rows = bundled_antipattern_rows()[".py"]
+
+    decision = antipattern_decision(
+        None,
+        'value = whatever.get("name")\n',
+        rows,
+        python_source=True,
+        resolution={"refuted": {}, "unresolved": {"dict-get": [1]}},
+    )
+
+    assert decision is None or decision.effect == "allow"
+
+
+def test_a_directive_on_an_unresolved_line_is_not_refused_as_dead() -> None:
+    """The marker the sweep may demand cannot be the marker the gate refuses.
+
+    On a refuted line the directive is dead and refused; on an unresolved
+    line it stands, and is asked about like any other declared suppression.
+    """
+    rows = bundled_antipattern_rows()[".py"]
+    marked = 'value = whatever.get("name")  # lup: ignore[dict-get] — open map\n'
+
+    standing = antipattern_decision(
+        None,
+        marked,
+        rows,
+        python_source=True,
+        resolution={"refuted": {}, "unresolved": {"dict-get": [1]}},
+    )
+    dead = antipattern_decision(
+        None,
+        marked,
+        rows,
+        python_source=True,
+        resolution={"refuted": {"dict-get": [1]}, "unresolved": {}},
+    )
+
+    assert standing is not None and standing.effect == "ask"
+    assert "names dict-get" not in standing.reason
+    assert dead is not None and dead.effect == "deny"
+    assert "names dict-get" in dead.reason
 
 
 def test_an_unresolved_verdict_still_denies_a_rule_that_needs_no_checker() -> None:

@@ -302,7 +302,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         A file this could not produce yields no row, and the classifier turns
         that absence into a question rather than a grant.
 
-        ``refuted`` is left unanswered here for the reason
+        ``resolution`` is left unanswered here for the reason
         :meth:`EditPolicy.decide_change` leaves it unanswered: resolving a
         finding needs a language server, which is a cost the generated
         dispatcher pays where it can and an in-process reading does not.
@@ -334,7 +334,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     after=after,
                     foreign=foreign_repository(target, root),
                     outside_project=outside_this_project(target, root),
-                    refuted=None,
+                    resolution=None,
                 )
 
         return list(produced())

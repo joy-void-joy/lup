@@ -148,6 +148,7 @@ def refute(
             line=chosen.line,
             subject=chosen.subject,
             evidence=declaration.refutation(chosen.subject, family),
+            settled=declaration.settled(),
         )
 
     judged = [
@@ -159,9 +160,25 @@ def refute(
         for chosen, refutation in judged
         if refutation is None
     }
+    # A line is settled only when every site on it is. One receiver nobody
+    # can show anything about keeps the line open whatever the rest resolved
+    # to, because the directive guarding it may be guarding exactly that site.
+    open_lines = {
+        (chosen.file, chosen.rule.id, chosen.line)
+        for chosen, refutation in judged
+        if refutation is not None and not refutation.settled
+    }
 
     surviving = [
-        (chosen.file, refutation)
+        (
+            chosen.file,
+            refutation.model_copy(
+                update={
+                    "settled": (chosen.file, chosen.rule.id, chosen.line)
+                    not in open_lines
+                }
+            ),
+        )
         for chosen, refutation in judged
         if refutation is not None
         and (chosen.file, chosen.rule.id, chosen.line) not in standing

@@ -31,6 +31,7 @@ from .rows import (
     ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
+    ResolutionRow,
 )
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
@@ -2879,7 +2880,7 @@ def antipattern_decision(
     rows: list[AntiPatternRow],
     python_source: bool,
     allowances: list[str] | None = None,
-    refuted: dict[str, list[int]] | None = None,
+    resolution: ResolutionRow | None = None,
     resolved: list[ResolvedImportRule] | None = None,
 ) -> KernelDecision | None:
     """Reject newly added unsuppressed anti-patterns and ask on suppressions.
@@ -2910,6 +2911,17 @@ def antipattern_decision(
     asks into allows, because a human already approved the plan that needs
     them. It reaches neither denial: an allowance justifies a typed, argued
     suppression, never a bare anti-pattern and never a dead directive.
+
+    ``resolution`` is what a checker settled about the receivers this text
+    names, where one ran. A line it refuted resolved outside its rule's
+    family: it trips nothing, and a directive naming the rule there is
+    refused as dead. A line it left unresolved is one nothing could be shown
+    about: the rule demands no directive there and this gate denies none,
+    and a directive written there stands, because a verdict nobody can
+    substantiate is no verdict against the marker either. The audit reads
+    the same two answers off the same resolution, so neither gate can call
+    dead what the other demands. None means no checker answered, and a
+    resolution-required rule is then asked about rather than decided.
     """
     suppression = "allow" if "antipattern-suppression" in (allowances or []) else "ask"
     added = added_line_numbers(before, after)
@@ -2927,10 +2939,17 @@ def antipattern_decision(
             for selection in resolved or []
         }
     )
-    for rule_id, lines in (refuted or {}).items():
+    refuted = resolution["refuted"] if resolution is not None else {}
+    for rule_id, lines in refuted.items():
         exempt[rule_id] = (
             exempt[rule_id] | set(lines) if rule_id in exempt else set(lines)
         )
+    # Hits nothing could be shown about. They stay hits, so a directive over
+    # one is read as guarding something, and they are neither denied nor asked.
+    unresolved = resolution["unresolved"] if resolution is not None else {}
+    open_lines = {
+        (rule_id, line) for rule_id, lines in unresolved.items() for line in lines
+    }
     comment_columns = python_comment_columns(after) if python_source else None
     file_level = file_ignore(after)
     has_file_ignore = file_level["present"]
@@ -3068,12 +3087,17 @@ def antipattern_decision(
                     continue
                 covering[holder] = True
                 continue
+        # A receiver the checker looked at and could not type is not a
+        # violation this gate can state: the audit demands no directive there,
+        # so denying one here would be the split this gate exists to prevent.
+        if (rule_id, number) in open_lines:
+            continue
         # A verdict this gate cannot support is asked about rather than
         # stated. The regex is wider than the defect for a resolution-required
         # rule, and what settles the difference is a declaration nothing here
         # resolved — so a denial would be the audit's opposite, and the two
         # would block on states no version of the file satisfies at once.
-        if refuted is None and hit["row"]["resolution"] == "required":
+        if resolution is None and hit["row"]["resolution"] == "required":
             return unresolved_anti_pattern_ask(number, hit["row"])
         return anti_pattern_denial(number, hit["row"])
 
@@ -3112,6 +3136,8 @@ def antipattern_decision(
                 covered = ignore_rule_ids(directive)
                 if covered is None or rule_id in covered:
                     continue
+            if (rule_id, number) in open_lines:
+                continue
             return withdrawn_suppression_denial(number, hit["row"])
 
     def sites_at(numbers: list[int]) -> list[str]:
@@ -3349,7 +3375,7 @@ def decide_edit(
     python_source: bool = False,
     acceptance_guard: AcceptanceGuardRow | None = None,
     marker_files: tuple[str, ...] = PACKAGE_MARKER_FILES,
-    refuted: dict[str, list[int]] | None = None,
+    resolution: ResolutionRow | None = None,
     suffix: str = "",
     operation: str = "modify",
     edit_rules: list[EditRuleRow] | None = None,
@@ -3496,7 +3522,7 @@ def decide_edit(
             antipattern_rows,
             python_source,
             granted,
-            refuted,
+            resolution,
             resolved_import_rules(path, after, import_boundaries or [])
             if python_source and not outside_project
             else None,

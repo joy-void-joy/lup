@@ -1345,13 +1345,17 @@ EXAMPLE_CASES = [
 def hook_denies(rule: AntiPattern, code: str, python: bool) -> bool:
     """Whether the edit hook refuses this snippet over this one rule.
 
-    ``refuted={}`` says a checker ran and took nothing back, which is what
-    separates the two answers a resolution-required rule can give: without it
-    the gate asks rather than denying, and every `dict-get` example would
-    read the same whatever its receiver was.
+    An empty resolution says a checker ran and took nothing back, which is
+    what separates the two answers a resolution-required rule can give:
+    without it the gate asks rather than denying, and every `dict-get`
+    example would read the same whatever its receiver was.
     """
     decision = antipattern_decision(
-        None, f"{code}\n", [antipattern_row(rule)], python, refuted={}
+        None,
+        f"{code}\n",
+        [antipattern_row(rule)],
+        python,
+        resolution={"refuted": {}, "unresolved": {}},
     )
     return decision is not None and decision.effect == "deny"
 
