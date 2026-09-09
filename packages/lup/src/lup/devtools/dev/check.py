@@ -41,7 +41,9 @@ from lup.devtools.dev.boundaries import (
 from lup.devtools.dev.branches import unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
+from lup.devtools.dev.cites import sweep_cites
 from lup.devtools.dev.comments import FoundComment, scan_tracked
+from lup.ledger.models import LedgerNode
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
 from lup.devtools.dev.records import branches_awaiting_adoption, record_location
@@ -731,6 +733,7 @@ def scan_reports(
     repository_writers: list[RepositoryWriter],
     git_guards: list[GitGuard],
     hooks_declaration: HookSet,
+    node_classes: list[type[LedgerNode]] | None = None,
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them."""
 
@@ -797,6 +800,17 @@ def scan_reports(
             ]
             if breaches
             else ["seam boundaries: ok"],
+        )
+
+        # A document naming a node is held to what the node says now, so prose
+        # cannot go on citing a corrected figure. Counted only where there is
+        # a cite to hold: a repository with none has nothing this can fail.
+        cited = sweep_cites(node_classes or [])
+        yield CheckReport(
+            name="cites",
+            counted=bool(cited.checked or cited.failing),
+            passed=cited.passed(),
+            lines=cited.lines(),
         )
 
         tables = scan_library_placement()
@@ -1041,6 +1055,7 @@ def run_checks(
     hooks_declaration: HookSet,
     scope: list[str] | None = None,
     test_workers: int = TEST_WORKERS,
+    node_classes: list[type[LedgerNode]] | None = None,
 ) -> None:
     """Run ruff format, ruff check, pyright, pytest, and this gate's own sweeps.
 
@@ -1071,6 +1086,7 @@ def run_checks(
         repository_writers,
         git_guards,
         hooks_declaration,
+        node_classes or [],
     )
 
     if fix:

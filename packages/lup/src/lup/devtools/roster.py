@@ -30,7 +30,7 @@ from pydantic import BaseModel
 
 from lup.devtools.coordination.app import create_coordination_app
 from lup.devtools.ledger.app import create_ledger_app
-from lup.ledger.models import LedgerNode
+from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.devtools.dev.app import create_dev_app
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.feedback.app import create_feedback_app
@@ -113,6 +113,13 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
     library declares none of these, because what a node type is for is a
     project's question."""
 
+    edge_classes: list[type[LedgerEdge]] = []
+    """The relations this project draws, for the command that relates two nodes.
+
+    Declared beside the node types and for the same reason: an edge kind is
+    the project's vocabulary, and a generic `relate` has to know which class
+    to validate a spelled kind against."""
+
     def roster(self, retired: list[str] | None = None) -> list[SubApp]:
         """Every sub-app the library ships, wired over these declarations.
 
@@ -187,7 +194,9 @@ LIBRARY_ROSTER = [
             name="ledger",
             help="Read and preserve the notes this repository has recorded",
         ),
-        build=lambda declared: create_ledger_app(declared.node_classes),
+        build=lambda declared: create_ledger_app(
+            declared.node_classes, declared.edge_classes
+        ),
     ),
     RosterEntry(
         spec=SubAppSpec(
@@ -199,6 +208,7 @@ LIBRARY_ROSTER = [
             repository_writers=declared.repository_writers,
             relocate_roots=declared.relocate_roots,
             usage_entries=declared.usage_entries,
+            node_classes=declared.node_classes,
         ),
     ),
     RosterEntry(

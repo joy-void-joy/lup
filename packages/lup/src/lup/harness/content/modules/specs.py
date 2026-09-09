@@ -170,7 +170,7 @@ records nothing is an empty store and a command nobody runs; what it saves is
 a claim that quietly stopped being true.
 
 It declares no node type and no edge type, so adopting it is adopting the
-mechanism. What a claim owes is the project's question, and `standing` is the
+mechanism. What a claim owes is the project's question, and `corpus` is the
 answer for one that wants an evidence-based reading rather than its own.
 """
 

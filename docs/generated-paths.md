@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 93 artifacts
+## `claude` — 94 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -89,6 +89,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/contributing.md` | lup.harness.content.docs.contributing |
 | `docs/conventions.md` | lup.harness.content.docs.conventions |
 | `docs/coordination.md` | lup.harness.content.docs.coordination |
+| `docs/corpus.md` | lup.harness.content.docs.corpus |
 | `docs/dev-tooling-decisions.md` | lup_template.harness.content.docs.decisions |
 | `docs/harness.md` | lup.harness.content.docs.harness |
 | `docs/ledger.md` | lup.harness.content.docs.ledger |

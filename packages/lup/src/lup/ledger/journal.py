@@ -73,6 +73,8 @@ class LedgerStore:
 
     def __init__(self, root: Path, author: ActorRef) -> None:
         self.root = ledger_root(root)
+        self.project = root
+        """The tree this store was opened from, which evidence stands against."""
         self.author = author
         self.blobs = Blobs(self.root)
 
@@ -185,6 +187,7 @@ class LedgerStore:
                 for other in wanted
                 if (found := self.resolve(other, classes)) is not None
             ],
+            root=self.project,
         )
 
     def into(self, node_id: str) -> list[LedgerEdge]:
@@ -308,20 +311,45 @@ class LedgerStore:
         points at bytes already on disk; the other order leaves a window where
         the record names a blob nothing can read.
         """
+        return self.record_fields(
+            node, title, dict(payload), text=text, attachments=attachments, at=at
+        )
+
+    def record_fields[N: LedgerNode](
+        self,
+        node: type[N],
+        title: str,
+        fields: JsonObject,
+        text: str = "",
+        attachments: list[bytes] | None = None,
+        at: datetime | None = None,
+    ) -> N:
+        """Mint one node with its type's own fields arriving as one object.
+
+        The shape a generic caller has — a console or a tool that read the
+        fields rather than spelled them as keywords. The stamps are laid over
+        the fields rather than under them, so a payload naming an author or
+        an id is overruled: provenance a writer cannot spell is provenance a
+        writer cannot get wrong, and that has to hold for a writer handing
+        over a whole object as much as for one naming keywords.
+        """
         held = [self.blobs.store(item) for item in attachments or []]
         built = node.model_validate(
             {
-                "id": uuid4().hex[:12],
                 "title": title,
                 "text": text,
+                **fields,
+                "id": uuid4().hex[:12],
                 "author": self.author.model_dump(),
                 "at": at or utc_now(),
                 "attachments": held,
-                **payload,
             }
         )
-        self.append(built)
-        return built
+        # Derived fields are filled after validation and before the append,
+        # so a type reads the tree exactly once and what lands is complete.
+        prepared = built.prepared(self.project)
+        self.append(prepared)
+        return prepared
 
     def relate[E: LedgerEdge](
         self,
@@ -338,13 +366,29 @@ class LedgerStore:
         that a relation may decline an author who wrote the thing at the other
         end, and only the edge sees both.
         """
+        return self.relate_fields(edge, source, target, dict(payload), at=at)
+
+    def relate_fields[E: LedgerEdge](
+        self,
+        edge: type[E],
+        source: LedgerNode,
+        target: LedgerNode,
+        fields: JsonObject,
+        at: datetime | None = None,
+    ) -> E:
+        """Draw one edge with its type's own fields arriving as one object.
+
+        The endpoints and the stamps are laid over the fields, so an object
+        naming a different source or author is overruled — the caller passed
+        the nodes, and the nodes are what the edge is between.
+        """
         built = edge.model_validate(
             {
+                **fields,
                 "source": source.id,
                 "target": target.id,
                 "author": self.author.model_dump(),
                 "at": at or utc_now(),
-                **payload,
             }
         )
         refusal = built.refusal(source, target)

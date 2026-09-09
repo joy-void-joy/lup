@@ -34,9 +34,13 @@ from lup.coordination.rendering import USER_HOLDER, render
 from lup.coordination.repository import RepositoryPeers
 from lup.coordination.tasks import NEEDS_NAMES, Needs, Task
 from lup.coordination.refs import ActorRef
+from lup.ledger.cite import read_cites
 from lup.ledger.journal import LedgerStore
-from lup.ledger.models import LedgerNode
+from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.snapshot import snapshot
+from lup.types import JsonObject
+from pathlib import Path
+from pydantic import TypeAdapter, ValidationError
 from lup.ledger.store import ledger_root
 from lup.workspace.edition import shared_git_directory
 from lup.workspace.paths import project_root
@@ -120,32 +124,200 @@ def node_line(store: LedgerStore, node: LedgerNode) -> str:
     )
 
 
-def create_ledger_app(classes: list[type[LedgerNode]]) -> typer.Typer:
-    """Wire the command tree for this repository's notes, over these node types.
+def kind_of(declared: type[LedgerNode] | type[LedgerEdge]) -> str:
+    """The kind a declared type records itself under, read off its declaration.
+
+    The `kind` field's default is the literal the type spells, so a word a
+    person types on the command line is matched against what the type would
+    write, not against a class name somebody has to know.
+    """
+    return str(declared.model_fields["kind"].default)
+
+
+def declared_fields(declared: type[LedgerNode] | type[LedgerEdge]) -> list[str]:
+    """Each field a caller may pass in `--json`, spelled with its annotation.
+
+    The stamped ones — id, author, time, kind, endpoints — are left out because
+    a caller cannot set them, and listing them would invite a payload the store
+    then ignores.
+    """
+    stamped = {"id", "kind", "author", "at", "attachments", "source", "target"}
+    return [
+        f"{name}: {field.annotation.__name__ if isinstance(field.annotation, type) else field.annotation}"
+        + ("" if field.is_required() else f" = {field.default!r}")
+        for name, field in declared.model_fields.items()
+        if name not in stamped
+    ]
+
+
+def parsed_payload(text: str) -> JsonObject:
+    """One `--json` object as the fields it names, refusing anything else.
+
+    Through the JSON parser and into the store's own payload type, so the type
+    being recorded validates the fields and this never has to know them.
+    """
+    try:
+        return TypeAdapter(JsonObject).validate_json(text or "{}")
+    except ValidationError as invalid:
+        raise typer.BadParameter(
+            f"--json must be a JSON object: {invalid}"
+        ) from invalid
+
+
+def create_ledger_app(
+    classes: list[type[LedgerNode]], edges: list[type[LedgerEdge]] | None = None
+) -> typer.Typer:
+    """Wire the command tree for this repository's notes, over these types.
 
     The types are the project's and arrive here rather than being looked up,
     which is the same inversion every other sub-app takes: the library ships
     the commands and the project ships what they are about. A project that
     declares none still reads the DAG — every record is listed, each as the
     base class, which is the honest answer for a log a later build may hold
-    types for.
+    types for. Recording and relating are generic for the same reason: a kind
+    is looked up in what the project declared, and the type validates the
+    fields, so there is one `record` rather than one command per kind.
     """
     app = typer.Typer(no_args_is_help=True)
+    relations = list(edges or [])
+    node_kinds = {kind_of(declared): declared for declared in classes}
+    edge_kinds = {kind_of(declared): declared for declared in relations}
 
     def store() -> LedgerStore:
         return LedgerStore(
             project_root(), ActorRef(kind="console", id=mint_member_id())
         )
 
+    def found(held: LedgerStore, node_id: str) -> LedgerNode:
+        node = held.resolve(node_id, classes)
+        if node is None:
+            typer.echo(f"No node in this repository has the id {node_id!r}.")
+            raise typer.Exit(1)
+        return node
+
     @app.command("types")
     def types_cmd() -> None:
-        """List the node types this project declares."""
-        if not classes:
-            typer.echo("This project declares no ledger node types.")
+        """List the node and edge types this project declares, with their fields.
+
+        The fields are what `record --json` and `relate --json` accept, read
+        off the types so the listing cannot disagree with what is validated.
+        """
+        if not classes and not relations:
+            typer.echo("This project declares no ledger types.")
             return
-        for declared in classes:
+        for declared in [*classes, *relations]:
             summary = (declared.__doc__ or "").strip().splitlines()
-            typer.echo(f"{declared.__name__} — {summary[0] if summary else ''}")
+            typer.echo(
+                f"{kind_of(declared)}  ({declared.__name__}) — "
+                f"{summary[0] if summary else ''}"
+            )
+            for line in declared_fields(declared):
+                typer.echo(f"    {line}")
+
+    @app.command("record")
+    def record_cmd(
+        kind: Annotated[str, typer.Argument(help="Which declared node kind")],
+        title: Annotated[str, typer.Argument(help="What it is, in one line")],
+        payload: Annotated[
+            str,
+            typer.Option("--json", help="The kind's other fields, as a JSON object"),
+        ] = "",
+        text: Annotated[str, typer.Option("--text", help="What it says")] = "",
+        attach: Annotated[
+            list[Path] | None,
+            typer.Option("--attach", help="A file whose bytes this node carries"),
+        ] = None,
+    ) -> None:
+        """Record one node of any declared kind; the kind validates the fields.
+
+        Anything the kind derives from the working tree — evidence pinning the
+        digests of the files it was checked against — it fills itself as it is
+        recorded, so a caller names paths and never computes a digest.
+        """
+        declared = node_kinds.get(kind)
+        if declared is None:
+            raise typer.BadParameter(
+                f"{kind!r} is not a declared node kind; `ledger types` lists them"
+            )
+        try:
+            node = store().record_fields(
+                declared,
+                title,
+                parsed_payload(payload),
+                text=text,
+                attachments=[path.read_bytes() for path in attach or []],
+            )
+        except ValidationError as invalid:
+            raise typer.BadParameter(str(invalid)) from invalid
+        typer.echo(f"{node.id}: {node.title}")
+
+    @app.command("relate")
+    def relate_cmd(
+        kind: Annotated[str, typer.Argument(help="Which declared edge kind")],
+        source: Annotated[str, typer.Argument(help="The node the relation runs from")],
+        target: Annotated[str, typer.Argument(help="The node it runs to")],
+        payload: Annotated[
+            str,
+            typer.Option("--json", help="The kind's other fields, as a JSON object"),
+        ] = "",
+    ) -> None:
+        """Draw one edge of any declared kind between two nodes.
+
+        The edge may refuse the pair — a verification of your own work is not
+        one — and the refusal is printed in its own words rather than swallowed.
+        """
+        declared = edge_kinds.get(kind)
+        if declared is None:
+            raise typer.BadParameter(
+                f"{kind!r} is not a declared edge kind; `ledger types` lists them"
+            )
+        held = store()
+        try:
+            edge = held.relate_fields(
+                declared,
+                found(held, source),
+                found(held, target),
+                parsed_payload(payload),
+            )
+        except ValidationError as invalid:
+            raise typer.BadParameter(str(invalid)) from invalid
+        typer.echo(f"{edge.kind}: {edge.source} -> {edge.target}")
+
+    @app.command("amend")
+    def amend_cmd(
+        node_id: Annotated[str, typer.Argument(help="The node to change, by id")],
+        payload: Annotated[
+            str, typer.Option("--json", help="The fields to change, as a JSON object")
+        ],
+    ) -> None:
+        """Record a node again with some fields changed; nothing is overwritten.
+
+        Validated as the whole node rather than patched, so a change that
+        would leave the record invalid is refused the way a fresh one is.
+        """
+        held = store()
+        node = found(held, node_id)
+        try:
+            changed = type(node).model_validate(
+                {**node.model_dump(), **parsed_payload(payload)}
+            )
+        except ValidationError as invalid:
+            raise typer.BadParameter(str(invalid)) from invalid
+        held.amend(changed)
+        typer.echo(f"{node.id}: amended")
+
+    @app.command("cite")
+    def cite_cmd(
+        document: Annotated[Path, typer.Argument(help="A markdown file to check")],
+    ) -> None:
+        """Check every cite in one document against where its node stands now."""
+        readings = read_cites(document.read_text(encoding="utf-8"), store(), classes)
+        failing = [reading for reading in readings if not reading.holds()]
+        for reading in failing:
+            typer.echo(f"{document}:{reading.cite.line}  {reading.problem()}")
+        typer.echo(f"{len(readings) - len(failing)} of {len(readings)} cite(s) hold")
+        if failing:
+            raise typer.Exit(1)
 
     @app.command("list")
     def list_cmd(
