@@ -44,6 +44,7 @@ from lup.devtools.dev import conflicts
 from lup.devtools.dev.commands import write_command_reference
 from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
+from lup.coordination.tasks import Task
 from lup.devtools.roster import DevtoolsDeclarations
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
@@ -109,6 +110,11 @@ DECLARATIONS = DevtoolsDeclarations(
         else None
     ),
     profiles=profile_directory(),
+    # What this repository records. Listed here rather than derived from
+    # the adopted modules, because a union assembled at run time is not
+    # one a type checker can narrow — and the console is the one reader
+    # that needs the list at all.
+    node_classes=[Task],
 )
 """What this repository tells the library's roster about itself.
 

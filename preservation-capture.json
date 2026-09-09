@@ -1,5 +1,5 @@
 {
-  "revision": "de2803223a41f32d755412ac48e27e9d0c5672d3",
+  "revision": "ff20d193cd0ee777aff5e077f8b271dd49ce1073",
   "roots": [
     "lup",
     "lup_template"
@@ -135,6 +135,9 @@
     "ledger types",
     "ledger list",
     "ledger show",
+    "ledger delegate",
+    "ledger mine",
+    "ledger done",
     "ledger snapshot",
     "resolve status",
     "resolve supervise",
@@ -340,6 +343,12 @@
         "ActorCohort.wait_all",
         "ActorCohort.wait_any",
         "ActorCohort.close"
+      ]
+    },
+    {
+      "module": "lup.coordination.delegate",
+      "declares": [
+        "delegate"
       ]
     },
     {
@@ -607,6 +616,20 @@
       ]
     },
     {
+      "module": "lup.coordination.rendering",
+      "declares": [
+        "USER_HOLDER",
+        "Group",
+        "Group.needs",
+        "Group.heading",
+        "GROUPS",
+        "position_of",
+        "task_line",
+        "user_tasks",
+        "render"
+      ]
+    },
+    {
       "module": "lup.coordination.repository",
       "declares": [
         "PeerView",
@@ -653,6 +676,7 @@
         "ActorJoined.type",
         "ActorJoined.task",
         "ActorJoined.liveness",
+        "ActorJoined.wake",
         "ActorJoined.delivery",
         "ActorJoined.worktree",
         "ActorJoined.applied",
@@ -676,6 +700,7 @@
         "SpawnedActor.worktree",
         "SpawnedActor.description",
         "SpawnedActor.liveness",
+        "SpawnedActor.wake",
         "SpawnedActor.delivery",
         "SpawnedActor.address",
         "SpawnedActor.kind",
@@ -733,6 +758,32 @@
         "STORE_DIR",
         "COORDINATION_DIR",
         "coordination_root"
+      ]
+    },
+    {
+      "module": "lup.coordination.tasks",
+      "declares": [
+        "Needs",
+        "NEEDS_NAMES",
+        "Task",
+        "Task.kind",
+        "Task.holder",
+        "Task.needs",
+        "Task.paths",
+        "Task.done",
+        "Task.finished",
+        "Task.completed",
+        "Task.standing",
+        "Blocks",
+        "Blocks.kind",
+        "Delegation",
+        "Delegation.task",
+        "Delegation.holder",
+        "Delegation.locked",
+        "Delegation.delivered",
+        "Delegation.woken",
+        "Delegation.instruction",
+        "Delegation.note"
       ]
     },
     {
@@ -851,6 +902,21 @@
         "Touches.claims",
         "Touches.held",
         "Touches.covering"
+      ]
+    },
+    {
+      "module": "lup.coordination.wake",
+      "declares": [
+        "CODEX_COMMAND",
+        "WakePath",
+        "WakePath.runtime",
+        "WakePath.handle",
+        "Woken",
+        "Woken.reached",
+        "Woken.instruction",
+        "Woken.reason",
+        "wake",
+        "queued"
       ]
     },
     {
@@ -3725,12 +3791,16 @@
       "module": "lup.devtools.ledger.app",
       "declares": [
         "SNAPSHOT_BRANCH",
+        "validated_needs",
         "node_line",
         "create_ledger_app",
         "create_ledger_app.store",
         "create_ledger_app.types_cmd",
         "create_ledger_app.list_cmd",
         "create_ledger_app.show_cmd",
+        "create_ledger_app.delegate_cmd",
+        "create_ledger_app.mine_cmd",
+        "create_ledger_app.done_cmd",
         "create_ledger_app.snapshot_cmd"
       ]
     },
@@ -5664,6 +5734,12 @@
       ]
     },
     {
+      "module": "lup.harness.content.skills.delegate",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
       "module": "lup.harness.content.skills.fb_analyze",
       "declares": [
         "SKILL"
@@ -7045,6 +7121,7 @@
     {
       "module": "lup.ledger.journal",
       "declares": [
+        "latest",
         "LedgerRefusal",
         "LedgerStore",
         "LedgerStore.__init__",
@@ -7056,9 +7133,12 @@
         "LedgerStore.read.matching",
         "LedgerStore.edges",
         "LedgerStore.edges.matching",
+        "LedgerStore.around",
         "LedgerStore.into",
         "LedgerStore.out_of",
+        "LedgerStore.amend",
         "LedgerStore.resolve",
+        "LedgerStore.resolve.versions",
         "LedgerStore.all_nodes",
         "LedgerStore.all_nodes.resolved",
         "LedgerStore.standing",
@@ -7087,7 +7167,15 @@
         "LedgerNode.author",
         "LedgerNode.at",
         "LedgerNode.attachments",
-        "LedgerNode.standing"
+        "LedgerNode.finished",
+        "LedgerNode.completed",
+        "LedgerNode.standing",
+        "Surroundings",
+        "Surroundings.incoming",
+        "Surroundings.outgoing",
+        "Surroundings.neighbours",
+        "Surroundings.at",
+        "Surroundings.held_by"
       ]
     },
     {

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "a15400b67994b48337a87033f0413f2e512857abaf9c957203672296fe6608e5",
+  "source_digest": "692a6e73b36950b609dcff23bb84dd4f05898cc7fa9f2dc5e56e17028d8600ae",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -284,6 +284,13 @@
       "category": "generated",
       "sha256": "5fd9c4fb922aec028c46a168b014d1c6ff311bdb043afd2c98f4efe83277391d",
       "semantic_id": "skill.debug",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/skills/delegate/SKILL.md",
+      "category": "generated",
+      "sha256": "0c93677bb1debecb05cedef6877c46951276a317b0cb46348dc26a7c1b2bb5b2",
+      "semantic_id": "skill.delegate",
       "executable": false
     },
     {

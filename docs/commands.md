@@ -175,6 +175,9 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `ledger types` | List the node types this project declares. |
 | `ledger list` | Show every node in this repository, with its standing read now. |
 | `ledger show` | Print one node in full, with its edges and what it attaches. |
+| `ledger delegate` | Record one task, hand it to a peer if there is one, and say what happened. |
+| `ledger mine` | Print one holder&#x27;s outstanding tasks, grouped by what they cost. |
+| `ledger done` | Mark one task finished, by recording it again as done. |
 | `ledger snapshot` | Commit the store to a branch of its own, for a record worth keeping. |
 
 ## `resolve`
