@@ -26,12 +26,28 @@ from lup.workspace.paths import project_root
 
 
 def peer_line(view: PeerView) -> str:
-    """One roster row as a person reads it: who, where, and what they are on."""
+    """One roster row as a person reads it: who, where, and what they are on.
+
+    What the session *holds* is a count rather than the paths, and the count
+    is the decision: it says whether there is anything to ask about, and
+    `coordination holdings` is where the paths already live. Contested is
+    called out separately because it is the half a reader acts on — it means
+    two sessions are in the same place and neither knows.
+    """
     where = Path(view.member.worktree).name if view.member.worktree else ""
     state = "" if view.member.running else " [gone]"
+    holding = f"holding {len(view.holding)}" if view.holding else ""
+    contested = f"{len(view.contested)} contested" if view.contested else ""
     return " — ".join(
         part
-        for part in (f"{view.address}{state}", where, view.doing, view.member.delivery)
+        for part in (
+            f"{view.address}{state}",
+            where,
+            view.doing,
+            holding,
+            contested,
+            view.member.delivery,
+        )
         if part
     )
 

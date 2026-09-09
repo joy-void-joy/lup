@@ -140,15 +140,20 @@ def create_peer_tools(
     @lup_tool(
         "List every session working in this repository, including the ones in "
         "other worktrees, with the ones still working first. Each row is who "
-        "they are, which checkout they are in, what they are doing, and what "
-        "reaches them.\n\n"
+        "they are, which checkout they are in, what they are doing, what they "
+        "are holding, and what reaches them.\n\n"
         "Reach for it before starting something substantial: another session "
         "may already be on it, may hold the file you are about to rewrite, or "
         "may have settled the question you are about to re-derive. It costs "
         "one call and the alternative is finding out at merge time.\n\n"
+        "`doing` is what a session said about itself and may be old; "
+        "`holding` is what its calls actually changed or locked, so that is "
+        "the field to read before writing. Anything in `contested` is held by "
+        "more than one session already. A path under somebody's `holding` is "
+        "not forbidden — say so with `coordination_send` first.\n\n"
         "The person watching is not a row and needs no listing — they are "
         "always reachable at `user`. Returns {peers: [{address, cli_name, "
-        "doing, member}]}.",
+        "doing, holding, contested, member}]}.",
         name="coordination_peers",
     )
     async def coordination_peers(_params: NoInput) -> PeerListOutput:
