@@ -46,6 +46,7 @@ from host import (
     open_claim_window,
     record_claims,
     recoverable_write_targets,
+    resolved_write_targets,
     rewritten_text,
     record_deferral,
     record_question,
@@ -81,9 +82,9 @@ from kernel.lex import (
     shell_sed_rewrites,
     shell_write_targets,
 )
-from kernel.rows import RewrittenFileRow
+from kernel.rows import DisplacedTargetRow, RewrittenFileRow
 from kernel.words import INTERPRETERS
-from kernel.roles import is_session_scratch_target
+from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
 from kernel.tools import decide_tool
 from policy_data import (
@@ -268,6 +269,19 @@ def bash_decision(
             ],
             boundary,
             cwd,
+        ),
+        # Where a target really lands, for the grants above that read a role
+        # off its spelling. The host resolves the links because the kernel
+        # reads no filesystem, and the kernel says whether the landing changes
+        # what the path is, because the host holds no role table.
+        displaced_targets=displaced_targets(
+            [
+                DisplacedTargetRow(path=path, lands=lands)
+                for path, lands in resolved_write_targets(
+                    [*shell_write_targets(command), *acted_on, *flagged], cwd
+                ).items()
+            ],
+            PATH_ROLES,
         ),
         recovered=bool(reference),
     )
@@ -556,6 +570,20 @@ def edit_decision(
         import_boundaries=IMPORT_BOUNDARIES,
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
+        displaced=next(
+            iter(
+                displaced_targets(
+                    [
+                        DisplacedTargetRow(path=path, lands=lands)
+                        for path, lands in resolved_write_targets(
+                            [path_text], cwd
+                        ).items()
+                    ],
+                    PATH_ROLES,
+                )
+            ),
+            None,
+        ),
     )
 
 

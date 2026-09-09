@@ -1058,6 +1058,48 @@ def existing_write_targets(targets: list[str], root: Path | None = None) -> list
     return [target for target in targets if (where / target).exists()]
 
 
+def resolved_write_targets(
+    targets: list[str],
+    root: Path | None = None,
+    # lup: ignore[dict-str-payload] — the keys are the caller's own write
+    # targets, an open set, and this half compiles into a bare script that can
+    # declare no row to carry them: the kernel's `DisplacedTargetRow` is what
+    # the composition root turns these pairs into
+) -> dict[str, str]:
+    """Report which write targets resolve somewhere other than they spell.
+
+    Every grant in the kernel reads a path lexically — a role names a tree,
+    and a spelling sits under it or does not. A symlink is what breaks that
+    step, and resolving it is filesystem work, so it happens here and crosses
+    as a fact.
+
+    ``lands`` is spelled in the vocabulary the kernel classifies in: relative
+    to the checkout when the real path is inside it, absolute otherwise. That
+    is what lets the kernel ask its own question — whether the role of where
+    this lands is the role its spelling claimed — without resolving anything.
+
+    A word carrying an expansion is skipped, because the path it names at run
+    time is not the one standing here. Resolution covers a target that does
+    not exist yet: the directories above it are what a symlink would sit in.
+    """
+    where = Path.cwd() if root is None else root
+    # lup: ignore[dict-str-payload] — the write targets the caller named
+    reported: dict[str, str] = {}
+    for target in targets:
+        if "$" in target:
+            continue
+        try:
+            real = (where / target).resolve()
+            spelled = (where / target).absolute()
+        except OSError:
+            continue
+        if real == spelled:
+            continue
+        inside = real.is_relative_to(where)
+        reported[target] = str(real.relative_to(where) if inside else real)
+    return reported
+
+
 def git_answers(
     arguments: list[str],
     root: Path,

@@ -57,6 +57,19 @@ class PathRuleRow(TypedDict):
     allow_autonomous: bool
 
 
+class DisplacedTargetRow(TypedDict):
+    """One write target whose real location is not the one it spells.
+
+    A role is read off a spelling, and only the filesystem can say whether the
+    file is in the root that spelling names. Where a symlink says otherwise,
+    this carries both halves: a question naming only the path the caller typed
+    would be asking about the wrong file.
+    """
+
+    path: str
+    lands: str
+
+
 type PathRoleName = Literal["production", "test", "data", "scratch"]
 
 type PathRoleKind = Literal["subtree", "contains_part"]

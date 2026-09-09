@@ -24,6 +24,7 @@ from .rows import (
     ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
+    DisplacedTargetRow,
     RewrittenFileRow,
     RunnerTargetRow,
     ShellRuleRow,
@@ -1143,6 +1144,7 @@ def decide_shell(
     relayed: bool = False,
     unjudged_ambient: UnjudgedAmbient = "ask",
     unleased_targets: list[str] | None = None,
+    displaced_targets: list[DisplacedTargetRow] | None = None,
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
@@ -1262,6 +1264,7 @@ def decide_shell(
             checkpoint="complete" if recovered else "absent",
             unjudged_ambient=unjudged_ambient,
             unleased=unleased_targets,
+            displaced=displaced_targets,
             hint=hint,
         )
     )
