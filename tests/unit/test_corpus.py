@@ -14,6 +14,7 @@ from lup.coordination.refs import ActorRef
 from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.models import LedgerNode
 from lup.ledger.cite import cites_in, read_cites
+from lup.ledger.files import digest_of
 from lup_template.corpus import (
     Artifact,
     Claim,
@@ -24,7 +25,6 @@ from lup_template.corpus import (
     Supports,
     Validation,
     Verifies,
-    digest_of,
 )
 
 CLASSES: list[type[LedgerNode]] = [Claim, Correction, Artifact]

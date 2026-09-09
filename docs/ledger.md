@@ -110,13 +110,25 @@ class Verifies(LedgerEdge, frozen=True):
 That is the one rule this library keeps about who may say what, and it is a
 property of the relation rather than of any project's epistemics.
 
-## No epistemics
+## No epistemics, and one kind
 
-`lup.ledger` declares no node type, no edge type and no grade. What counts as
-verified, what grades exist, and what a claim owes are a project's questions —
-the scaffold's corpus (`docs/corpus.md`) is one project's answer, declared in
-its `node_classes` beside its tasks, and a project that wants its own declares
-its own types the same way.
+`lup.ledger` declares no grade, no edge type, and one node type. What counts
+as verified, what grades exist, and what a claim owes are a project's
+questions — the scaffold's corpus (`docs/corpus.md`) is one project's answer,
+declared in its `node_classes` beside its tasks, and a project that wants its
+own declares its own types the same way.
+
+The one kind is `File`: a path pinned to the digest of its content as it was
+recorded, standing `fresh` while the tree still holds those bytes, `stale`
+once it does not, `missing` where the path is gone, and `unchecked` without a
+tree to read. Files are the substrate standing already rots against —
+evidence pins the files it was checked against — so the file itself is
+citable, and an edge to one is an ordinary edge: a claim `about`
+`src/parser.py`, drawn by the explorer, going stale with the file and nobody
+amending anything. A file says nothing about what counts as verified, which
+is why it is the library's and the rest is not. A project lists it in
+`node_classes` the way it lists `Task`; recorded with an empty title, a file
+takes its path for one.
 
 ## The shared store is untracked
 

@@ -11,9 +11,11 @@ puts its own answer.
 
 from lup.coordination.handoffs import Handoff, Transfers
 from lup.coordination.tasks import Blocks, Task
+from lup.ledger.files import File
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerPlacement, SharedStore
 from lup_template.corpus import (
+    About,
     Answers,
     Artifact,
     Certificate,
@@ -39,6 +41,7 @@ PLACEMENT: LedgerPlacement = SharedStore()
 NODE_KINDS: list[type[LedgerNode]] = [
     Task,
     Handoff,
+    File,
     Question,
     Claim,
     Correction,
@@ -52,6 +55,7 @@ NODE_KINDS: list[type[LedgerNode]] = [
 EDGE_KINDS: list[type[LedgerEdge]] = [
     Blocks,
     Transfers,
+    About,
     Answers,
     RestsOn,
     Supports,

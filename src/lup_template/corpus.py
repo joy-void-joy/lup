@@ -34,12 +34,12 @@ about the pair, so they live on the ``supersedes`` edge; a boolean would have
 thrown the survivors away.
 """
 
-from hashlib import sha256
 from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import BaseModel, Field, field_validator
 
+from lup.ledger.files import digest_of
 from lup.ledger.models import LedgerEdge, LedgerNode, Standing, Surroundings
 
 
@@ -60,14 +60,6 @@ GRADES = [
     Grade(name="lean", meaning="kernel-checked, with the certificate attached"),
     Grade(name="mine", meaning="the sender's own, unchecked by anybody else"),
 ]
-
-
-def digest_of(path: Path) -> str:
-    """The content digest of one file, or nothing where there is no file."""
-    try:
-        return sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return ""
 
 
 class Scoped(BaseModel, frozen=True):
@@ -418,3 +410,15 @@ class Answers(LedgerEdge, frozen=True):
     """This claim answers that question, for as long as the claim stands."""
 
     kind: Literal["corpus:answers"] = "corpus:answers"
+
+
+class About(LedgerEdge, frozen=True):
+    """This node is about that file: a claim about `src/parser.py`, a question about a module.
+
+    Descriptive rather than load-bearing: the file's own standing says whether
+    it moved since it was recorded, and a reader following the edge sees that
+    beside the claim. A claim that must fall with a file rests on evidence
+    scoped to it instead.
+    """
+
+    kind: Literal["corpus:about"] = "corpus:about"

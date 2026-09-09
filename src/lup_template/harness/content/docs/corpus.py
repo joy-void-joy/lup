@@ -53,6 +53,13 @@ A `Source` is external bytes under their own digest, so a claim read from a
 page cites those bytes and not whatever the page serves next year. Read on a
 machine with no working tree, evidence says `unchecked` rather than guessing.
 
+A file is itself a node — the ledger's `File`, pinned by digest the same way
+— and a claim or question `about` one names it through an ordinary edge. The
+file reads `stale` the moment it changes and the explorer draws the line, so
+what a claim is about is visible and rots on its own. The edge is
+descriptive: a claim that must fall with a file rests on evidence scoped to
+it instead.
+
 ## A claim refuses to hide contradiction
 
 `Claim.standing()` reads, in order: `superseded` by a correction; `premise
