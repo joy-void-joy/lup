@@ -119,6 +119,13 @@ architecture forks earn their turn.
   first task of the build, on its own branch.
 - **"Did you check?" gets a plain yes or no**, with what you read against
   what you ran. A ledger quoted is not a probe run.
+- **A recommendation rests on claims already checked.** Marking one "I have
+  not verified this" and recommending it anyway hands the user the check and
+  dresses a guess as a caveat; the questions they push back on are the ones
+  where that happened. Run it first. When the check refutes the reason, say
+  so and give the recommendation the evidence now supports — a reversed
+  recommendation with a measurement behind it is the turn worth taking, not
+  an embarrassment to soften.
 
 ### A second case study
 
