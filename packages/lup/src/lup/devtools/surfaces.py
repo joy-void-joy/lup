@@ -1,0 +1,29 @@
+"""The TypeScript surfaces this library ships, each naming what its page is typed against.
+
+One declaration per surface, read twice: the schema the frontend compiles its
+types from is emitted over every model listed here, and the bundles tree is
+built for every name. A surface added below reaches both, and a model a page
+reads that is not listed fails the build rather than a browser. A project
+with a surface of its own lists it beside these in its composition.
+"""
+
+from lup.devtools.dashboard.serve import RowRequest, ScopeRequest, StepReply
+from lup.devtools.dashboard.wizard import StepAnswers, WizardView
+from lup.ledger.views import ExportView, GraphView, KindsView, NodeDetail
+from lup.web.build import Surface
+
+EXPLORER = Surface(
+    name="explorer", models=[GraphView, NodeDetail, KindsView, ExportView]
+)
+"""The ledger explorer: the graph, one node in full, the kinds, and the export."""
+
+WIZARD = Surface(
+    name="wizard",
+    models=[WizardView, StepReply, StepAnswers, RowRequest, ScopeRequest],
+)
+"""The setup wizard: the page as drawn, every reply, and what the page posts."""
+
+# lup: ignore[library-default] — the surfaces this library authors, so the
+# table is what it ships rather than a choice made for an adopter
+LIBRARY_SURFACES = [EXPLORER, WIZARD]
+"""Every surface lup builds into its own package data."""

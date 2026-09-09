@@ -8,30 +8,64 @@ the rest is exercised over a bundle written by hand.
 
 import json
 import shutil
+import tomllib
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from lup.devtools.surfaces import EXPLORER, LIBRARY_SURFACES
 from lup.harness.ownership import OWNERSHIP_FILENAME, load_manifest
-from lup.web.build import source_digest, write_web_bundles
+from lup.web.build import Surface, source_digest, write_web_bundles
 from lup.web.schema import view_schema, write_view_schema
 from lup.web.serve import bundle_app
 
-WORKSPACE = Path(__file__).resolve().parents[2] / "web"
-"""The library's own bun workspace, beside this test's package."""
+PACKAGE = Path(__file__).resolve().parents[2]
+"""The library's own package, whose bun workspace sits beside its source."""
+
+WORKSPACE = PACKAGE / "web"
+
+HANDMADE = [Surface(name="explorer", models=[])]
+"""One surface by name, for a test that builds nothing real."""
 
 
-def test_the_view_schema_declares_every_view_model(tmp_path: Path) -> None:
-    written = write_view_schema(Path("schema/views.json"), tmp_path)
+def test_the_view_schema_declares_every_surface_model(tmp_path: Path) -> None:
+    written = write_view_schema(Path("schema/views.json"), LIBRARY_SURFACES, tmp_path)
 
     schema = json.loads(written.read_text(encoding="utf-8"))
-    assert {"GraphView", "NodeDetail", "NodeView", "EdgeView"} <= set(schema["$defs"])
-    assert write_view_schema(Path("schema/views.json"), tmp_path, check=True) == written
+    assert {"GraphView", "NodeDetail", "WizardView", "StepReply"} <= set(
+        schema["$defs"]
+    )
+    assert schema["$defs"]["NodeView"]["additionalProperties"] is False
+    assert "slug" in schema["$defs"]["NodeView"]["required"]
+    assert (
+        write_view_schema(
+            Path("schema/views.json"), LIBRARY_SURFACES, tmp_path, check=True
+        )
+        == written
+    )
     written.write_text("{}\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="stale"):
-        write_view_schema(Path("schema/views.json"), tmp_path, check=True)
-    assert view_schema() == view_schema()
+        write_view_schema(
+            Path("schema/views.json"), LIBRARY_SURFACES, tmp_path, check=True
+        )
+    assert view_schema(LIBRARY_SURFACES) == view_schema(LIBRARY_SURFACES)
+
+
+def test_every_built_bundle_is_named_by_the_package_data() -> None:
+    """The wheel carries what the package data names, and a built file it does
+    not name is the failure the surfaces replaced: served from a checkout,
+    missing from the wheel, every request to `/` an error."""
+    manifest = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
+    globs: list[str] = manifest["tool"]["setuptools"]["package-data"]["lup.web"]
+    home = PACKAGE / "src" / "lup" / "web"
+    shipped = {path for glob in globs for path in home.glob(glob) if path.is_file()}
+    built = {path for path in (home / "bundles").rglob("*") if path.is_file()}
+
+    assert built and built <= shipped
+    assert {surface.name for surface in LIBRARY_SURFACES} <= {
+        path.parent.name for path in built if path.name == "index.html"
+    }
 
 
 def handmade(root: Path, surface: str = "explorer") -> Path:
@@ -97,19 +131,19 @@ def test_write_web_bundles_builds_owns_and_verifies(tmp_path: Path) -> None:
     edit is stale; a source edit is stale."""
     bundles = Path("bundles")
 
-    landed = write_web_bundles(WORKSPACE, bundles, ["explorer"], tmp_path)
+    landed = write_web_bundles(WORKSPACE, bundles, [EXPLORER], tmp_path)
 
     assert (landed / "explorer" / "index.html").is_file()
     manifest = load_manifest(landed / OWNERSHIP_FILENAME)
     assert manifest is not None and manifest.target_requirements == ["bun"]
     assert all(item.path.parts[0] == "bundles" for item in manifest.files)
     assert (
-        write_web_bundles(WORKSPACE, bundles, ["explorer"], tmp_path, check=True)
+        write_web_bundles(WORKSPACE, bundles, [EXPLORER], tmp_path, check=True)
         == landed
     )
     (landed / "explorer" / "index.html").write_text("edited\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="behind"):
-        write_web_bundles(WORKSPACE, bundles, ["explorer"], tmp_path, check=True)
+        write_web_bundles(WORKSPACE, bundles, [EXPLORER], tmp_path, check=True)
 
 
 def test_a_workspace_without_dependencies_is_refused_naming_the_install(
@@ -117,7 +151,7 @@ def test_a_workspace_without_dependencies_is_refused_naming_the_install(
 ) -> None:
     (tmp_path / "web").mkdir()
     with pytest.raises(RuntimeError, match="bun install --frozen-lockfile"):
-        write_web_bundles(Path("web"), Path("bundles"), ["explorer"], tmp_path)
+        write_web_bundles(Path("web"), Path("bundles"), HANDMADE, tmp_path)
 
 
 def test_the_build_runs_where_the_proof_no_longer_holds_and_nowhere_else(
@@ -140,7 +174,7 @@ def test_the_build_runs_where_the_proof_no_longer_holds_and_nowhere_else(
         return [page]
 
     monkeypatch.setattr("lup.web.build.built_files", built)
-    arguments = (Path("web"), Path("bundles"), ["explorer"], tmp_path)
+    arguments = (Path("web"), Path("bundles"), HANDMADE, tmp_path)
 
     landed = write_web_bundles(*arguments)
     write_web_bundles(*arguments, check=True)

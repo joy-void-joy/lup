@@ -160,7 +160,7 @@ cross-origin `fetch` with `application/json` is preflighted, and no CORS
 headers are emitted. Not defended: other processes on this machine, which
 only a token would address.
 
-Like the dashboard, the page is zero-build — one packaged HTML asset with
+The page is zero-build — one packaged HTML asset with
 inline CSS and vanilla ES2021, so downstream projects need no Node.
 """
         )

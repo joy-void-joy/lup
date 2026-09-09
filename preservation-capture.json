@@ -1,5 +1,5 @@
 {
-  "revision": "ff20d193cd0ee777aff5e077f8b271dd49ce1073",
+  "revision": "d23540066fba88d356ccdeee83481bdab3770c19",
   "roots": [
     "lup",
     "lup_template"
@@ -18,6 +18,10 @@
     "coordination leave",
     "coordination send",
     "coordination inbox",
+    "coordination holdings",
+    "coordination lock",
+    "coordination release",
+    "coordination watch",
     "dev pending",
     "dev check",
     "dev test",
@@ -133,12 +137,20 @@
     "harness profile use",
     "harness profile remove",
     "ledger types",
+    "ledger record",
+    "ledger relate",
+    "ledger amend",
+    "ledger cite",
+    "ledger writeup",
     "ledger list",
     "ledger show",
     "ledger delegate",
+    "ledger handoff",
+    "ledger brief",
     "ledger mine",
     "ledger done",
     "ledger snapshot",
+    "ledger explore",
     "resolve status",
     "resolve supervise",
     "resolve questions",
@@ -291,6 +303,29 @@
       "declares": []
     },
     {
+      "module": "lup.coordination.briefs",
+      "declares": [
+        "Audience",
+        "Audience.kind",
+        "Audience.resolves_ids",
+        "Audience.task_lines",
+        "Audience.closing",
+        "PeerBrief",
+        "PeerBrief.kind",
+        "PeerBrief.closing",
+        "DetachedBrief",
+        "DetachedBrief.kind",
+        "DetachedBrief.resolves_ids",
+        "DetachedBrief.task_lines",
+        "DetachedBrief.closing",
+        "PersonBrief",
+        "PersonBrief.kind",
+        "PersonBrief.task_lines",
+        "result_line",
+        "render_brief"
+      ]
+    },
+    {
       "module": "lup.coordination.cohort",
       "declares": [
         "logger",
@@ -349,6 +384,36 @@
       "module": "lup.coordination.delegate",
       "declares": [
         "delegate"
+      ]
+    },
+    {
+      "module": "lup.coordination.handoffs",
+      "declares": [
+        "Established",
+        "Established.statement",
+        "Established.source",
+        "Established.grade",
+        "Handoff",
+        "Handoff.kind",
+        "Handoff.to",
+        "Handoff.open_questions",
+        "Handoff.established",
+        "Handoff.not_again",
+        "Handoff.watch",
+        "Handoff.standing",
+        "Transfers",
+        "Transfers.kind",
+        "Handover",
+        "Handover.handoff",
+        "Handover.to",
+        "Handover.transferred",
+        "Handover.locked",
+        "Handover.contested",
+        "Handover.delivered",
+        "Handover.woken",
+        "Handover.instruction",
+        "Handover.note",
+        "hand_off"
       ]
     },
     {
@@ -635,6 +700,8 @@
         "PeerView",
         "PeerView.member",
         "PeerView.cli_name",
+        "PeerView.holding",
+        "PeerView.contested",
         "PeerView.address",
         "PeerView.doing",
         "RepositoryPeers",
@@ -646,6 +713,7 @@
         "RepositoryPeers.leave",
         "RepositoryPeers.address",
         "RepositoryPeers.listing",
+        "RepositoryPeers.listing.row",
         "RepositoryPeers.send",
         "RepositoryPeers.waiting",
         "RepositoryPeers.take",
@@ -917,6 +985,47 @@
         "Woken.reason",
         "wake",
         "queued"
+      ]
+    },
+    {
+      "module": "lup.coordination.watch",
+      "declares": [
+        "WatchEvent",
+        "WatchEvent.at",
+        "WatchEvent.address",
+        "WatchEvent.line",
+        "Arrived",
+        "Arrived.doing",
+        "Arrived.line",
+        "Departed",
+        "Departed.summary",
+        "Departed.line",
+        "Redescribed",
+        "Redescribed.doing",
+        "Redescribed.line",
+        "Mailed",
+        "Mailed.text",
+        "Mailed.door",
+        "Mailed.redirect",
+        "Mailed.line",
+        "Nudged",
+        "Nudged.outcome",
+        "Nudged.line",
+        "mail_key",
+        "Watcher",
+        "Watcher.__init__",
+        "Watcher.watched",
+        "Watcher.tick",
+        "Watcher.tick.roster_changes",
+        "Watcher.tick.mail_changes",
+        "Watcher.follow"
+      ]
+    },
+    {
+      "module": "lup.coordination.watcher",
+      "declares": [
+        "watcher_pipeline",
+        "watcher_pipeline.follow"
       ]
     },
     {
@@ -1309,7 +1418,8 @@
         "create_coordination_app.inbox_cmd",
         "create_coordination_app.holdings_cmd",
         "create_coordination_app.lock_cmd",
-        "create_coordination_app.release_cmd"
+        "create_coordination_app.release_cmd",
+        "create_coordination_app.watch_cmd"
       ]
     },
     {
@@ -1332,12 +1442,6 @@
         "create_dashboard",
         "create_dashboard_app",
         "create_dashboard_app.serve_dashboard"
-      ]
-    },
-    {
-      "module": "lup.devtools.dashboard.page",
-      "declares": [
-        "WIZARD_PAGE"
       ]
     },
     {
@@ -1822,7 +1926,10 @@
         "TestRoot.name",
         "TestRoot.directory",
         "TestRoot.absent",
+        "TestRoot.run",
         "TestRoot.checked",
+        "BunTestRoot",
+        "BunTestRoot.run",
         "RootSelection",
         "RootSelection.root",
         "RootSelection.paths",
@@ -1844,6 +1951,22 @@
         "scan_reports.reported",
         "run_checks",
         "run_changed"
+      ]
+    },
+    {
+      "module": "lup.devtools.dev.cites",
+      "declares": [
+        "Located",
+        "Located.file",
+        "Located.reading",
+        "Located.line",
+        "CiteSweep",
+        "CiteSweep.checked",
+        "CiteSweep.failing",
+        "CiteSweep.passed",
+        "CiteSweep.lines",
+        "sweep_cites",
+        "sweep_cites.located"
       ]
     },
     {
@@ -2882,12 +3005,17 @@
       "declares": [
         "WORKFLOW_PATH",
         "WORKFLOW_COMMAND",
+        "FrontendSpec",
+        "FrontendSpec.workspace",
+        "FrontendSpec.bun_version",
         "WorkflowSpec",
         "WorkflowSpec.branches",
         "WorkflowSpec.runner",
         "WorkflowSpec.sync_flags",
+        "WorkflowSpec.frontend",
         "WorkflowSpec.system_packages",
         "WorkflowSpec.install_step",
+        "WorkflowSpec.frontend_steps",
         "WorkflowSpec.body",
         "WorkflowSpec.artifact",
         "write_workflow"
@@ -3792,16 +3920,30 @@
       "declares": [
         "SNAPSHOT_BRANCH",
         "validated_needs",
+        "validated_audience",
+        "validated_results",
+        "validated_results.parsed",
         "node_line",
+        "parsed_payload",
         "create_ledger_app",
         "create_ledger_app.store",
+        "create_ledger_app.found",
         "create_ledger_app.types_cmd",
+        "create_ledger_app.record_cmd",
+        "create_ledger_app.relate_cmd",
+        "create_ledger_app.amend_cmd",
+        "create_ledger_app.cite_cmd",
+        "create_ledger_app.writeup_cmd",
         "create_ledger_app.list_cmd",
         "create_ledger_app.show_cmd",
         "create_ledger_app.delegate_cmd",
+        "create_ledger_app.handoff_cmd",
+        "create_ledger_app.brief_cmd",
+        "create_ledger_app.brief_cmd.watched_line",
         "create_ledger_app.mine_cmd",
         "create_ledger_app.done_cmd",
-        "create_ledger_app.snapshot_cmd"
+        "create_ledger_app.snapshot_cmd",
+        "create_ledger_app.explore_cmd"
       ]
     },
     {
@@ -4016,7 +4158,12 @@
         "DevtoolsDeclarations.launch_modes",
         "DevtoolsDeclarations.launch_checkpoint",
         "DevtoolsDeclarations.node_classes",
+        "DevtoolsDeclarations.edge_classes",
+        "DevtoolsDeclarations.writeups",
+        "DevtoolsDeclarations.ledger",
+        "DevtoolsDeclarations.writers",
         "DevtoolsDeclarations.roster",
+        "writeup_writers",
         "RosterEntry",
         "RosterEntry.spec",
         "RosterEntry.build",
@@ -4252,6 +4399,14 @@
         "run_is_live",
         "persisted_status",
         "supervisor_state"
+      ]
+    },
+    {
+      "module": "lup.devtools.surfaces",
+      "declares": [
+        "EXPLORER",
+        "WIZARD",
+        "LIBRARY_SURFACES"
       ]
     },
     {
@@ -5387,6 +5542,7 @@
         "SANCTIONED_EXCEPTIONS",
         "FAILURE_ANALYSIS",
         "LONG_RUNNING_WORK",
+        "WORKING_ALONGSIDE",
         "DEFECT_DISPOSITION",
         "MERGE_CONFLICT_RESOLUTION",
         "COMMIT_TYPES",
@@ -5772,6 +5928,12 @@
     },
     {
       "module": "lup.harness.content.skills.feedback_loop",
+      "declares": [
+        "SKILL"
+      ]
+    },
+    {
+      "module": "lup.harness.content.skills.handoff",
       "declares": [
         "SKILL"
       ]
@@ -7119,9 +7281,65 @@
       ]
     },
     {
+      "module": "lup.ledger.cite",
+      "declares": [
+        "CITE_SCHEME",
+        "parser",
+        "Cite",
+        "Cite.line",
+        "Cite.node_id",
+        "Cite.label",
+        "cite_href",
+        "cites_in",
+        "cites_in.linked",
+        "CiteReading",
+        "CiteReading.cite",
+        "CiteReading.node",
+        "CiteReading.standing",
+        "CiteReading.holds",
+        "CiteReading.problem",
+        "read_cites",
+        "read_cites.reading"
+      ]
+    },
+    {
+      "module": "lup.ledger.explorer",
+      "declares": [
+        "SURFACE",
+        "opened",
+        "since_moment",
+        "explorer_app",
+        "explorer_app.graph",
+        "explorer_app.node",
+        "explorer_app.kinds",
+        "export_view",
+        "data_url",
+        "export_page",
+        "export_explorer",
+        "serve_explorer"
+      ]
+    },
+    {
+      "module": "lup.ledger.files",
+      "declares": [
+        "digest_of",
+        "File",
+        "File.kind",
+        "File.title",
+        "File.path",
+        "File.digest",
+        "File.titled",
+        "File.prepared",
+        "File.standing"
+      ]
+    },
+    {
       "module": "lup.ledger.journal",
       "declares": [
         "latest",
+        "Touch",
+        "Touch.id",
+        "Touch.at",
         "LedgerRefusal",
         "LedgerStore",
         "LedgerStore.__init__",
@@ -7134,16 +7352,43 @@
         "LedgerStore.edges",
         "LedgerStore.edges.matching",
         "LedgerStore.around",
+        "LedgerStore.touches",
+        "LedgerStore.touches.touched",
+        "LedgerStore.movements",
+        "LedgerStore.moved_since",
         "LedgerStore.into",
         "LedgerStore.out_of",
         "LedgerStore.amend",
+        "LedgerStore.slug_holder",
         "LedgerStore.resolve",
+        "LedgerStore.resolve.names",
         "LedgerStore.resolve.versions",
         "LedgerStore.all_nodes",
         "LedgerStore.all_nodes.resolved",
         "LedgerStore.standing",
         "LedgerStore.record",
-        "LedgerStore.relate"
+        "LedgerStore.record_fields",
+        "LedgerStore.relate",
+        "LedgerStore.relate_fields",
+        "StandingReader",
+        "StandingReader.__init__",
+        "StandingReader.__call__"
+      ]
+    },
+    {
+      "module": "lup.ledger.kinds",
+      "declares": [
+        "KindInfo",
+        "KindInfo.kind",
+        "KindInfo.name",
+        "KindInfo.summary",
+        "KindInfo.fields",
+        "kind_of",
+        "by_kind",
+        "spelled",
+        "declared_fields",
+        "summary_of",
+        "describe"
       ]
     },
     {
@@ -7152,6 +7397,7 @@
         "Standing",
         "Standing.label",
         "Standing.reason",
+        "Standing.sound",
         "LedgerEdge",
         "LedgerEdge.kind",
         "LedgerEdge.source",
@@ -7167,14 +7413,20 @@
         "LedgerNode.author",
         "LedgerNode.at",
         "LedgerNode.attachments",
+        "LedgerNode.slug",
+        "LedgerNode.priority",
         "LedgerNode.finished",
         "LedgerNode.completed",
         "LedgerNode.standing",
+        "LedgerNode.prepared",
         "Surroundings",
         "Surroundings.incoming",
         "Surroundings.outgoing",
         "Surroundings.neighbours",
+        "Surroundings.root",
+        "Surroundings.standing_of",
         "Surroundings.at",
+        "Surroundings.standing_at",
         "Surroundings.held_by"
       ]
     },
@@ -7192,7 +7444,175 @@
         "LEDGER_DIR",
         "JOURNAL_FILE",
         "BLOBS_DIR",
+        "LedgerPlacement",
+        "LedgerPlacement.kind",
+        "LedgerPlacement.root",
+        "LedgerPlacement.tracked",
+        "LedgerPlacement.problems",
+        "LedgerPlacement.describe",
+        "SharedStore",
+        "SharedStore.kind",
+        "SharedStore.root",
+        "SharedStore.tracked",
+        "SharedStore.problems",
+        "SharedStore.describe",
+        "InTree",
+        "InTree.kind",
+        "InTree.path",
+        "InTree.root",
+        "InTree.tracked",
+        "InTree.journal",
+        "InTree.problems",
+        "InTree.describe",
+        "merges_by_union",
         "ledger_root"
+      ]
+    },
+    {
+      "module": "lup.ledger.tools",
+      "declares": [
+        "NoInput",
+        "RecordInput",
+        "RecordInput.kind",
+        "RecordInput.title",
+        "RecordInput.text",
+        "RecordInput.slug",
+        "RecordInput.fields",
+        "RecordInput.attach",
+        "RelateInput",
+        "RelateInput.kind",
+        "RelateInput.source",
+        "RelateInput.target",
+        "RelateInput.fields",
+        "AmendInput",
+        "AmendInput.node",
+        "AmendInput.fields",
+        "ShowInput",
+        "ShowInput.node",
+        "ListInput",
+        "ListInput.kind",
+        "ListInput.standing",
+        "ListInput.since",
+        "ListOutput",
+        "ListOutput.nodes",
+        "CiteInput",
+        "CiteInput.path",
+        "CiteProblem",
+        "CiteProblem.line",
+        "CiteProblem.node",
+        "CiteProblem.problem",
+        "CiteOutput",
+        "CiteOutput.checked",
+        "CiteOutput.failing",
+        "attached",
+        "create_ledger_tools",
+        "create_ledger_tools.store",
+        "create_ledger_tools.found",
+        "create_ledger_tools.view",
+        "create_ledger_tools.ledger_types",
+        "create_ledger_tools.ledger_record",
+        "create_ledger_tools.ledger_relate",
+        "create_ledger_tools.ledger_amend",
+        "create_ledger_tools.ledger_show",
+        "create_ledger_tools.ledger_list",
+        "create_ledger_tools.ledger_cite"
+      ]
+    },
+    {
+      "module": "lup.ledger.views",
+      "declares": [
+        "NodeView",
+        "NodeView.id",
+        "NodeView.kind",
+        "NodeView.title",
+        "NodeView.slug",
+        "NodeView.text",
+        "NodeView.priority",
+        "NodeView.standing",
+        "NodeView.reason",
+        "NodeView.sound",
+        "NodeView.moved",
+        "EdgeView",
+        "EdgeView.kind",
+        "EdgeView.source",
+        "EdgeView.target",
+        "EdgeCount",
+        "EdgeCount.kind",
+        "EdgeCount.count",
+        "NodeDetail",
+        "NodeDetail.node",
+        "NodeDetail.fields",
+        "NodeDetail.incoming",
+        "NodeDetail.edges_in",
+        "NodeDetail.edges_out",
+        "NodeDetail.attachments",
+        "GraphView",
+        "GraphView.nodes",
+        "GraphView.edges",
+        "GraphView.kinds",
+        "GraphView.standings",
+        "KindsView",
+        "KindsView.nodes",
+        "KindsView.edges",
+        "ExportView",
+        "ExportView.graph",
+        "ExportView.details",
+        "ExportView.kinds",
+        "ExportView.exported_at",
+        "node_view",
+        "edge_view",
+        "kinds_view",
+        "node_detail",
+        "graph_view"
+      ]
+    },
+    {
+      "module": "lup.ledger.writeup",
+      "declares": [
+        "WRITEUP_COMMAND",
+        "WriteupError",
+        "handle",
+        "figure",
+        "Placeholder",
+        "Placeholder.name",
+        "Placeholder.node",
+        "WriteupPart",
+        "WriteupPart.kind",
+        "WriteupPart.render",
+        "Prose",
+        "Prose.kind",
+        "Prose.text",
+        "Prose.figures",
+        "Prose.render",
+        "Listing",
+        "Listing.kind",
+        "Listing.heading",
+        "Listing.of",
+        "Listing.standing",
+        "Listing.since",
+        "Listing.nodes",
+        "Listing.into",
+        "Listing.via",
+        "Listing.min_priority",
+        "Listing.numbered",
+        "Listing.empty",
+        "Listing.chosen",
+        "Listing.render",
+        "NeedsPerson",
+        "NeedsPerson.kind",
+        "NeedsPerson.heading",
+        "NeedsPerson.render",
+        "Stamp",
+        "Stamp.kind",
+        "Stamp.counting",
+        "Stamp.render",
+        "Writeup",
+        "Writeup.name",
+        "Writeup.path",
+        "Writeup.source",
+        "Writeup.parts",
+        "render_writeup",
+        "write_writeup"
       ]
     },
     {
@@ -8075,6 +8495,7 @@
         "repaired_directives",
         "resolved_refutations",
         "existing_write_targets",
+        "resolved_write_targets",
         "git_answers",
         "undo_namespace",
         "undo_retention_days",
@@ -9229,6 +9650,7 @@
         "is_generated_plugin_target",
         "is_session_scratch_target",
         "is_temporary_root_target",
+        "displaced_targets",
         "role_pattern_covers",
         "role_pattern_covers.covers",
         "normalized_path",
@@ -9254,6 +9676,9 @@
         "PathRuleRow.value",
         "PathRuleRow.reason",
         "PathRuleRow.allow_autonomous",
+        "DisplacedTargetRow",
+        "DisplacedTargetRow.path",
+        "DisplacedTargetRow.lands",
         "PathRoleName",
         "PathRoleKind",
         "PathRoleRow",
@@ -9386,6 +9811,7 @@
         "SettlementFacts.checkpoint",
         "SettlementFacts.unjudged_ambient",
         "SettlementFacts.unleased",
+        "SettlementFacts.displaced",
         "SettlementFacts.hint",
         "SettlementFacts.__init__",
         "SettlementFacts.asks",
@@ -9416,6 +9842,9 @@
         "UnleasedWrite",
         "UnleasedWrite.id",
         "UnleasedWrite.reached",
+        "DisplacedWrite",
+        "DisplacedWrite.id",
+        "DisplacedWrite.reached",
         "ProviderNative",
         "ProviderNative.id",
         "ProviderNative.reached",
@@ -13871,6 +14300,23 @@
       "declares": []
     },
     {
+      "module": "lup.web.build",
+      "declares": [
+        "BUN",
+        "Surface",
+        "Surface.name",
+        "Surface.models",
+        "source_files",
+        "source_digest",
+        "built_files",
+        "bundle_artifacts",
+        "bundle_artifacts.artifact",
+        "bundle_manifest",
+        "proof_holds",
+        "write_web_bundles"
+      ]
+    },
+    {
       "module": "lup.web.google_oauth",
       "declares": [
         "MANUAL_REDIRECT_URI",
@@ -13895,8 +14341,26 @@
       ]
     },
     {
+      "module": "lup.web.schema",
+      "declares": [
+        "ServedSchema",
+        "ServedSchema.field_is_required",
+        "ServedSchema.model_schema",
+        "served_models",
+        "view_schema",
+        "write_view_schema"
+      ]
+    },
+    {
       "module": "lup.web.serve",
       "declares": [
+        "bundle_root",
+        "BundleAssets",
+        "BundleAssets.scripts",
+        "BundleAssets.styles",
+        "bundle_assets",
+        "bundle_app",
+        "bundle_app.asset",
         "page_app",
         "page_app.home",
         "local_page_app",
@@ -14424,12 +14888,77 @@
         "CODEINTEL_GROUP",
         "SESSION_GROUP",
         "COORDINATION_GROUP",
+        "LEDGER_GROUP",
         "EXAMPLE_GROUP",
         "SessionToolset",
         "SessionToolset.groups",
         "SessionToolset.gate",
         "tool_group_names",
         "build_session_toolset"
+      ]
+    },
+    {
+      "module": "lup_template.corpus",
+      "declares": [
+        "Grade",
+        "Grade.name",
+        "Grade.meaning",
+        "GRADES",
+        "Scoped",
+        "Scoped.path",
+        "Scoped.digest",
+        "Validation",
+        "Validation.schema_id",
+        "Validation.subject_digest",
+        "Validation.scope",
+        "Validation.drifted",
+        "Evidence",
+        "Evidence.validation",
+        "Evidence.prepared",
+        "Evidence.standing",
+        "Artifact",
+        "Artifact.kind",
+        "Certificate",
+        "Certificate.kind",
+        "Source",
+        "Source.kind",
+        "Source.origin",
+        "Correction",
+        "Correction.kind",
+        "Correction.where",
+        "Correction.wrong",
+        "Correction.lesson",
+        "Question",
+        "Question.kind",
+        "Question.closed",
+        "Question.finished",
+        "Question.completed",
+        "Question.standing",
+        "Claim",
+        "Claim.kind",
+        "Claim.grade",
+        "Claim.graded_in_our_words",
+        "Claim.standing",
+        "Claim.standing.evidence",
+        "Claim.standing.still_standing",
+        "Supports",
+        "Supports.kind",
+        "Refutes",
+        "Refutes.kind",
+        "Verifies",
+        "Verifies.kind",
+        "Verifies.refusal",
+        "Supersedes",
+        "Supersedes.kind",
+        "Supersedes.changes",
+        "Supersedes.survives",
+        "RestsOn",
+        "RestsOn.kind",
+        "RestsOn.refusal",
+        "Answers",
+        "Answers.kind",
+        "About",
+        "About.kind"
       ]
     },
     {
@@ -14771,6 +15300,12 @@
       ]
     },
     {
+      "module": "lup_template.harness.content.docs.corpus",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
       "module": "lup_template.harness.content.docs.decisions",
       "declares": [
         "DOCUMENT"
@@ -14784,6 +15319,7 @@
         "RULES_REFERENCE",
         "COMMAND_REFERENCE",
         "GENERATED_PATHS",
+        "CORPUS_STATUS",
         "document"
       ]
     },
@@ -14992,6 +15528,21 @@
         "CODEX_POLICY_SCOPE",
         "permission_hooks",
         "SELF_IMPROVEMENT_THROUGH_END"
+      ]
+    },
+    {
+      "module": "lup_template.kinds",
+      "declares": [
+        "PLACEMENT",
+        "NODE_KINDS",
+        "EDGE_KINDS"
+      ]
+    },
+    {
+      "module": "lup_template.writeups",
+      "declares": [
+        "STATUS",
+        "WRITEUPS"
       ]
     }
   ]

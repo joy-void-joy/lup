@@ -1,0 +1,179 @@
+:root {
+  --line: #e3e3e0;
+  --dim: #666;
+  --ok: #16794a;
+  --bad: #a3331f;
+}
+body {
+  font: 15px/1.6 system-ui, sans-serif;
+  margin: 0 auto;
+  max-width: 54rem;
+  padding: 2rem 1rem 6rem;
+  color: #1a1a1a;
+  background: #fdfdfc;
+}
+h1 {
+  font-size: 1.5rem;
+  margin: 0 0 0.3rem;
+}
+p.lede {
+  color: var(--dim);
+  margin: 0 0 1.5rem;
+}
+.scopes {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 1rem;
+  margin-bottom: 1.5rem;
+}
+.scopes .tab {
+  font: inherit;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 4px;
+}
+.scopes .tab.on {
+  border-color: #1a1a1a;
+  font-weight: 600;
+}
+.step {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1rem 1.2rem;
+  margin: 0 0 1rem;
+  background: #fff;
+}
+.step h2 {
+  font-size: 1.05rem;
+  margin: 0;
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+.mark {
+  font-size: 0.9rem;
+}
+.mark.done {
+  color: var(--ok);
+}
+.detail {
+  color: var(--dim);
+  font-size: 0.9rem;
+  font-weight: 400;
+  margin-left: auto;
+}
+.blurb {
+  color: #444;
+  margin: 0.5rem 0;
+}
+ol.guide {
+  color: #444;
+  margin: 0.5rem 0;
+  padding-left: 1.3rem;
+}
+ol.guide li {
+  margin: 0.25rem 0;
+}
+.guide-lines {
+  color: #444;
+  margin: 0.5rem 0;
+}
+.guide-lines p {
+  margin: 0.2rem 0;
+}
+.blocked {
+  color: var(--dim);
+  font-style: italic;
+  margin: 0.5rem 0 0;
+}
+label {
+  display: block;
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.9rem;
+  color: #333;
+}
+input {
+  font: inherit;
+  padding: 0.3rem 0.45rem;
+  width: 100%;
+  max-width: 34rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-sizing: border-box;
+  display: block;
+}
+button {
+  font: inherit;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+button.go {
+  background: #1a1a1a;
+  color: #fff;
+  border-color: #1a1a1a;
+}
+.row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0.45rem 0;
+  border-top: 1px solid #f0f0ee;
+}
+.row .name {
+  font-weight: 600;
+  min-width: 9rem;
+}
+.row .state {
+  color: var(--dim);
+  flex: 1;
+  min-width: 12rem;
+}
+.row input {
+  display: inline-block;
+  width: auto;
+}
+.actions {
+  margin-top: 0.8rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ext {
+  display: inline-block;
+  margin: 0.4rem 0;
+}
+#screen {
+  border: 1px solid #ccc;
+  max-width: 100%;
+  margin-top: 1rem;
+}
+#status {
+  position: sticky;
+  bottom: 0;
+  background: #fdfdfc;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+  color: #333;
+}
+#status.ok {
+  color: var(--ok);
+}
+#status.bad {
+  color: var(--bad);
+}
+.notice {
+  background: #fffbe6;
+  border: 1px solid #f0e2a8;
+  padding: 0.8rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}

@@ -28,6 +28,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import sh
+from pydantic import BaseModel
 
 from lup.execution.shell import LazyCommand
 from lup.formats.banner import REGENERATE_COMMAND, VERBATIM_COPY
@@ -49,6 +50,19 @@ from lup.harness.validation import validated_tree
 from lup.workspace.paths import project_root
 
 BUN = LazyCommand("bun", tty_out=False)
+
+
+class Surface(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """One TypeScript surface: the entry it builds from, and what its page is typed against.
+
+    The name is the workspace entry under ``src/<name>/`` and the bundle under
+    ``bundles/<name>/`` alike, so a surface is one word in three places. The
+    models are every one the page is handed — the routes' replies and what it
+    posts — which is what the schema compiles its types from.
+    """
+
+    name: str
+    models: list[type[BaseModel]]
 
 
 def source_files(
@@ -190,7 +204,7 @@ def proof_holds(prior: OwnershipManifest, base: Path, workspace: Path) -> bool:
 def write_web_bundles(
     workspace: Path,
     bundles: Path,
-    surfaces: list[str],
+    surfaces: list[Surface],
     root: Path | None = None,
     *,
     check: bool = False,
@@ -223,7 +237,7 @@ def write_web_bundles(
             artifact
             for surface in surfaces
             for artifact in bundle_artifacts(
-                home, bundles, surface, Path(scratch) / surface
+                home, bundles, surface.name, Path(scratch) / surface.name
             )
         ]
     desired = validated_tree(artifacts)
