@@ -931,7 +931,7 @@ def rewrite_verdict(
         allowances=context["allowances"],
         python_source=suffix in (".py", ".pyi"),
         acceptance_guard=context["acceptance_guard"],
-        refuted=document["refuted"],
+        resolution=document["resolution"],
         suffix=suffix,
         operation="modify",
         edit_rules=context["edit_rules"],
