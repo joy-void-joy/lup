@@ -20,7 +20,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from lup.runs.ledger import RunDirectory
+from lup.runs.directory import RunDirectory
 from lup.runs.models import UnitResult
 from lup.runs.progress import (
     RunProgress,

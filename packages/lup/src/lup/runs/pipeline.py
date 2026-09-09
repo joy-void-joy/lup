@@ -40,7 +40,7 @@ from lup.channels.models import utc_now
 from lup.execution.dag import DependencyGraph
 from lup.execution.shell import LazyCommand
 from lup.runs.follow import render_landing
-from lup.runs.ledger import RunDirectory
+from lup.runs.directory import RunDirectory
 from lup.runs.models import (
     SINGLE_ITEM,
     RunManifest,

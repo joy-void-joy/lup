@@ -1,11 +1,11 @@
-"""Typed native-evidence ledger backing the doctor's version-drift trigger.
+"""Typed native-evidence register backing the doctor's version-drift trigger.
 
 `docs/native-capabilities.md` records the CLI and SDK versions each native
 contract was last probed against. This module is the machine-readable row set
 behind that prose: `lup-devtools harness doctor` compares the *installed*
 versions against these accepted ones and surfaces a drift warning whenever an
 installed component is newer — the trigger to re-probe the native contracts
-and refresh the ledger. Locally the drift is a warning; the nightly lane runs
+and refresh the register. Locally the drift is a warning; the nightly lane runs
 doctor with `--strict-evidence`, turning drift into a nonzero exit so evidence
 re-probes have a schedule instead of a habit.
 """
@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 class EvidenceEntry(BaseModel, frozen=True):
     """One accepted contract version, keyed by its probe capability name.
 
-    The date is per row rather than one date over the ledger. A probe reaches
+    The date is per row rather than one date over the register. A probe reaches
     one vendor at a time — a Codex contract can be re-read while nothing new
     was asked of Claude — and a single date moved by whichever probe ran last
     claims a reading of the two that did not happen.
@@ -34,7 +34,7 @@ class EvidenceEntry(BaseModel, frozen=True):
     """When this row's contract was last read from the vendor."""
 
 
-EVIDENCE_LEDGER = [
+EVIDENCE_REGISTER = [
     EvidenceEntry(capability="claude-cli", version="2.1.237", refreshed="2026-08-20"),
     EvidenceEntry(
         capability="claude-agent-sdk", version="0.2.89", refreshed="2026-08-20"
@@ -44,17 +44,17 @@ EVIDENCE_LEDGER = [
 
 
 def accepted(
-    capability: str, ledger: list[EvidenceEntry] | None = None
+    capability: str, register: list[EvidenceEntry] | None = None
 ) -> EvidenceEntry:
     """The row one capability's evidence was last accepted under.
 
     Prose naming a version or a reading date asks for it here rather than
-    spelling it, so the ledger the doctor compares against and the ledger the
+    spelling it, so the register the doctor compares against and the register the
     page publishes are the same three rows. Raises for a capability no row
     accepts, because a page naming one is a typo rather than a runtime
     condition.
     """
-    entries = EVIDENCE_LEDGER if ledger is None else ledger
+    entries = EVIDENCE_REGISTER if register is None else register
     for entry in entries:
         if entry.capability == capability:
             return entry
@@ -62,7 +62,7 @@ def accepted(
 
 
 def cited_fixture(root: Path, path: str) -> str:
-    """A fixture path the ledger cites, refused when it resolves to nothing.
+    """A fixture path the register cites, refused when it resolves to nothing.
 
     Naming a file as evidence is a claim about the tree, and prose cannot
     check it: a suite that moves leaves the citation reading exactly as it
@@ -157,7 +157,7 @@ class EvidenceDrift(BaseModel, frozen=True):
     def message(self) -> str:
         return (
             f"{self.capability} {self.installed} is newer than the evidence "
-            f"ledger's {self.accepted} (refreshed {self.refreshed}); re-probe "
+            f"register's {self.accepted} (refreshed {self.refreshed}); re-probe "
             "the native contracts and update docs/native-capabilities.md"
         )
 
@@ -227,10 +227,10 @@ def digest_drift(
 def evidence_drift(
     capability: str,
     version_text: str,
-    ledger: list[EvidenceEntry] | None = None,
+    register: list[EvidenceEntry] | None = None,
 ) -> EvidenceDrift | None:
     """Report drift when an installed component is newer than its evidence row."""
-    entries = EVIDENCE_LEDGER if ledger is None else ledger
+    entries = EVIDENCE_REGISTER if register is None else register
     row = next((entry for entry in entries if entry.capability == capability), None)
     if row is None:
         return None
@@ -249,11 +249,11 @@ def evidence_drift(
 
 
 def sdk_evidence_drift(
-    ledger: list[EvidenceEntry] | None = None,
+    register: list[EvidenceEntry] | None = None,
 ) -> EvidenceDrift | None:
     """Compare the installed Claude Agent SDK package against its evidence row."""
     try:
         installed = installed_package_version("claude-agent-sdk")
     except PackageNotFoundError:
         return None
-    return evidence_drift("claude-agent-sdk", installed, ledger)
+    return evidence_drift("claude-agent-sdk", installed, register)

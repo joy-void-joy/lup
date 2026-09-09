@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "2f5c63adafcba479ec681f4a9560e9831ccb2514c128ec2d5254d0dab57a29c8",
+  "source_digest": "a15400b67994b48337a87033f0413f2e512857abaf9c957203672296fe6608e5",
   "target_requirements": [
     "claude-code"
   ],
@@ -205,7 +205,7 @@
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "70951c8fa2129e59804a82a84dd73b0aa6a439db6614e5139dbeaa67f44dc6bb",
+      "sha256": "3b556807c3d417b097ca4b7974d91c6395c0184d7b0ea34b21242854c21b43ed",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -546,9 +546,16 @@
       "executable": false
     },
     {
+      "path": "docs/ledger.md",
+      "category": "generated",
+      "sha256": "1202caaf8e8203155d76c70f7019398bd5730653eb30fe6c6e82e8e8eb2083f7",
+      "semantic_id": "docs.ledger",
+      "executable": false
+    },
+    {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "87cee7fad2508597bcf20c57f75d29c88c9d4fed6663e9b835b3d9b6ffb75f61",
+      "sha256": "110f2b302bca11f7b0c2dc6696107cf130cf2cda0344198edcaeaebed1e1e539",
       "semantic_id": "docs.library",
       "executable": false
     },
@@ -604,7 +611,7 @@
     {
       "path": "docs/runs.md",
       "category": "generated",
-      "sha256": "77fbdeb0eea1b2f46d154b7e366b05a95c8a20af3316a480a235fce9e55a86b5",
+      "sha256": "e2c0172c3ac0ad35f17d2d93e2a8a9b4b341257efcff799abe94e267a2c02ebe",
       "semantic_id": "docs.runs",
       "executable": false
     },
@@ -625,7 +632,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "6db74b1418b17bd2b7305f6a2ee6b6238fba61fdd6cf19ec945f8d48fa898d0b",
+      "sha256": "a0466d4a4e384a3cd393e703dc5cb0150aaa6cb215c2ce8db413e0b4fe18a085",
       "semantic_id": "docs.template",
       "executable": false
     },

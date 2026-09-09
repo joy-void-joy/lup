@@ -85,6 +85,12 @@ def runs_module() -> Module:
     return module()
 
 
+def ledger_module() -> Module:
+    from lup.harness.content.modules.ledger import module
+
+    return module()
+
+
 def coordination_module() -> Module:
     from lup.harness.content.modules.coordination import module
 
@@ -132,6 +138,7 @@ def library_modules(
             spec=specs.FEEDBACK_LOOP, build=lambda: feedback_loop_module(layout)
         ),
         ModuleEntry(spec=specs.RUNS, build=runs_module),
+        ModuleEntry(spec=specs.LEDGER, build=ledger_module),
         ModuleEntry(spec=specs.COORDINATION, build=coordination_module),
         ModuleEntry(spec=specs.REALTIME, build=realtime_module),
         ModuleEntry(spec=specs.REFLECTION, build=reflection_module),

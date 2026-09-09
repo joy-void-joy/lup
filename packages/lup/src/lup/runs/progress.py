@@ -25,7 +25,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.channels.models import utc_now
-from lup.runs.ledger import RunDirectory, RunningUnit
+from lup.runs.directory import RunDirectory, RunningUnit
 from lup.runs.models import RunManifest, RunSummary, StepRecord, UnitStatus
 
 

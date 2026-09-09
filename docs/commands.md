@@ -168,6 +168,15 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness profile use` | Select the profile a launch uses when none is named. |
 | `harness profile remove` | Forget a profile, leaving its configuration home on disk. |
 
+## `ledger`
+
+| Command | What it does |
+| --- | --- |
+| `ledger types` | List the node types this project declares. |
+| `ledger list` | Show every node in this repository, with its standing read now. |
+| `ledger show` | Print one node in full, with its edges and what it attaches. |
+| `ledger snapshot` | Commit the store to a branch of its own, for a record worth keeping. |
+
 ## `resolve`
 
 | Command | What it does |

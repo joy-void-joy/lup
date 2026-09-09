@@ -16,7 +16,7 @@ from typing import Annotated
 import typer
 
 import lup.devtools.dev.monitor as monitor
-from lup.runs.ledger import RunDirectory
+from lup.runs.directory import RunDirectory
 
 
 def create_run_app() -> typer.Typer:

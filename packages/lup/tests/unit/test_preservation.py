@@ -1,9 +1,9 @@
-"""What the ledger must tell apart: a capability that moved and one that went.
+"""What the capture must tell apart: a capability that moved and one that went.
 
 Both leave the old import path unresolvable, which is exactly why a reviewer
 cannot separate them by reading a diff — so these pin the separation itself
 rather than any particular walk. The walk is checked too, but for the one
-property that decides what the ledger is worth: a name it never recorded is a
+property that decides what the capture is worth: a name it never recorded is a
 name nothing will notice the loss of.
 """
 
@@ -13,15 +13,17 @@ from lup.devtools.dev.boundaries import TrackedSource
 from lup.devtools.dev.preservation import (
     Capability,
     CapabilityKind,
-    Ledger,
+    SurfaceCapture,
     ModuleSurface,
     compare,
     surfaces,
 )
 
 
-def ledger(*modules: ModuleSurface, commands: list[str] | None = None) -> Ledger:
-    return Ledger(
+def capture(
+    *modules: ModuleSurface, commands: list[str] | None = None
+) -> SurfaceCapture:
+    return SurfaceCapture(
         revision="0" * 40,
         roots=["lup"],
         commands=commands or [],
@@ -36,8 +38,8 @@ def source(text: str, path: str) -> TrackedSource:
 def test_a_name_no_module_declares_any_more_has_disappeared() -> None:
     """The failure the whole fixture exists to find."""
     divergence = compare(
-        ledger(ModuleSurface(module="lup.jobs.runtime", declares=["JobSpec"])),
-        ledger(ModuleSurface(module="lup.jobs.runtime", declares=[])),
+        capture(ModuleSurface(module="lup.jobs.runtime", declares=["JobSpec"])),
+        capture(ModuleSurface(module="lup.jobs.runtime", declares=[])),
     )
 
     assert [row.identity for row in divergence.disappeared] == ["JobSpec"]
@@ -47,8 +49,8 @@ def test_a_name_no_module_declares_any_more_has_disappeared() -> None:
 def test_a_name_declared_somewhere_else_has_moved_and_does_not_fail() -> None:
     """A reorganisation is moves; reading one as a loss would make this noise."""
     divergence = compare(
-        ledger(ModuleSurface(module="lup.jobs.runtime", declares=["JobSpec"])),
-        ledger(ModuleSurface(module="lup.orchestration.jobs", declares=["JobSpec"])),
+        capture(ModuleSurface(module="lup.jobs.runtime", declares=["JobSpec"])),
+        capture(ModuleSurface(module="lup.orchestration.jobs", declares=["JobSpec"])),
     )
 
     assert divergence.disappeared == []
@@ -58,11 +60,11 @@ def test_a_name_declared_somewhere_else_has_moved_and_does_not_fail() -> None:
 
 def test_a_shared_name_casts_no_vote_in_the_migration_map() -> None:
     """``logger`` is declared forty-six times, so where it went is ambiguous."""
-    before = ledger(
+    before = capture(
         ModuleSurface(module="lup.jobs.runtime", declares=["logger"]),
         ModuleSurface(module="lup.client", declares=["logger"]),
     )
-    after = ledger(
+    after = capture(
         ModuleSurface(module="lup.orchestration.jobs", declares=["logger"]),
         ModuleSurface(module="lup.client", declares=["logger"]),
     )
@@ -78,10 +80,10 @@ def test_a_shared_name_casts_no_vote_in_the_migration_map() -> None:
 
 def test_the_migration_map_is_the_module_pairs_the_moves_imply() -> None:
     """The same difference that proved nothing was lost repoints an importer."""
-    before = ledger(
+    before = capture(
         ModuleSurface(module="lup.jobs.runtime", declares=["JobSpec", "JobStore"])
     )
-    after = ledger(
+    after = capture(
         ModuleSurface(module="lup.orchestration.jobs", declares=["JobSpec", "JobStore"])
     )
 
@@ -93,7 +95,7 @@ def test_the_migration_map_is_the_module_pairs_the_moves_imply() -> None:
 def test_a_renamed_command_is_a_disappearance_at_the_path_a_reader_types() -> None:
     """A caller depends on the words, so changing them is not a move."""
     divergence = compare(
-        ledger(commands=["dev check"]), ledger(commands=["dev verify"])
+        capture(commands=["dev check"]), capture(commands=["dev verify"])
     )
 
     assert [row.identity for row in divergence.disappeared] == ["dev check"]
@@ -103,8 +105,8 @@ def test_a_renamed_command_is_a_disappearance_at_the_path_a_reader_types() -> No
 def test_arrival_is_reported_without_failing_the_run() -> None:
     """What the range added is worth seeing; it is not what the gate is for."""
     divergence = compare(
-        ledger(ModuleSurface(module="lup.client", declares=["Client"])),
-        ledger(ModuleSurface(module="lup.client", declares=["Client", "Session"])),
+        capture(ModuleSurface(module="lup.client", declares=["Client"])),
+        capture(ModuleSurface(module="lup.client", declares=["Client", "Session"])),
     )
 
     assert [row.identity for row in divergence.arrived] == ["Session"]
@@ -154,7 +156,7 @@ def test_a_module_no_root_can_import_is_not_a_surface() -> None:
 def test_every_captured_entry_carries_the_kind_that_resolves_it() -> None:
     """The flattening both halves of the comparison run over."""
     entries = list(
-        ledger(
+        capture(
             ModuleSurface(module="lup.client", declares=["Client"]),
             commands=["dev check"],
         ).capabilities()

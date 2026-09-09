@@ -1,5 +1,5 @@
 {
-  "revision": "06a85b477b0cc2567266d68a2990471b8550fafb",
+  "revision": "de2803223a41f32d755412ac48e27e9d0c5672d3",
   "roots": [
     "lup",
     "lup_template"
@@ -132,6 +132,10 @@
     "harness profile add",
     "harness profile use",
     "harness profile remove",
+    "ledger types",
+    "ledger list",
+    "ledger show",
+    "ledger snapshot",
     "resolve status",
     "resolve supervise",
     "resolve questions",
@@ -2424,7 +2428,7 @@
     {
       "module": "lup.devtools.dev.preservation",
       "declares": [
-        "LEDGER_FILE",
+        "CAPTURE_FILE",
         "CapabilityKind",
         "CapabilityKind.COMMAND",
         "CapabilityKind.EXPORT",
@@ -2436,15 +2440,15 @@
         "ModuleSurface",
         "ModuleSurface.module",
         "ModuleSurface.declares",
-        "Ledger",
-        "Ledger.revision",
-        "Ledger.roots",
-        "Ledger.commands",
-        "Ledger.modules",
-        "Ledger.read",
-        "Ledger.write",
-        "Ledger.capabilities",
-        "Ledger.homes",
+        "SurfaceCapture",
+        "SurfaceCapture.revision",
+        "SurfaceCapture.roots",
+        "SurfaceCapture.commands",
+        "SurfaceCapture.modules",
+        "SurfaceCapture.read",
+        "SurfaceCapture.write",
+        "SurfaceCapture.capabilities",
+        "SurfaceCapture.homes",
         "Relocation",
         "Relocation.capability",
         "Relocation.homes",
@@ -3718,6 +3722,19 @@
       ]
     },
     {
+      "module": "lup.devtools.ledger.app",
+      "declares": [
+        "SNAPSHOT_BRANCH",
+        "node_line",
+        "create_ledger_app",
+        "create_ledger_app.store",
+        "create_ledger_app.types_cmd",
+        "create_ledger_app.list_cmd",
+        "create_ledger_app.show_cmd",
+        "create_ledger_app.snapshot_cmd"
+      ]
+    },
+    {
       "module": "lup.devtools.project",
       "declares": [
         "Tracker",
@@ -3928,6 +3945,7 @@
         "DevtoolsDeclarations.profiles",
         "DevtoolsDeclarations.launch_modes",
         "DevtoolsDeclarations.launch_checkpoint",
+        "DevtoolsDeclarations.node_classes",
         "DevtoolsDeclarations.roster",
         "RosterEntry",
         "RosterEntry.spec",
@@ -5365,6 +5383,12 @@
       ]
     },
     {
+      "module": "lup.harness.content.docs.ledger",
+      "declares": [
+        "DOCUMENT"
+      ]
+    },
+    {
       "module": "lup.harness.content.docs.library",
       "declares": [
         "LIBRARY_PACKAGE",
@@ -5478,6 +5502,7 @@
         "conversation_module",
         "feedback_loop_module",
         "runs_module",
+        "ledger_module",
         "coordination_module",
         "realtime_module",
         "reflection_module",
@@ -5511,6 +5536,12 @@
     },
     {
       "module": "lup.harness.content.modules.git_workflow",
+      "declares": [
+        "module"
+      ]
+    },
+    {
+      "module": "lup.harness.content.modules.ledger",
       "declares": [
         "module"
       ]
@@ -5577,6 +5608,7 @@
         "CONVERSATION",
         "FEEDBACK_LOOP",
         "RUNS",
+        "LEDGER",
         "COORDINATION",
         "REALTIME",
         "REFLECTION",
@@ -6053,7 +6085,7 @@
         "EvidenceEntry.capability",
         "EvidenceEntry.version",
         "EvidenceEntry.refreshed",
-        "EVIDENCE_LEDGER",
+        "EVIDENCE_REGISTER",
         "accepted",
         "cited_fixture",
         "SchemaDigest",
@@ -6993,6 +7025,86 @@
         "DeterministicTreeValidator.validate",
         "TREE_VALIDATORS",
         "validated_tree"
+      ]
+    },
+    {
+      "module": "lup.ledger",
+      "declares": []
+    },
+    {
+      "module": "lup.ledger.blobs",
+      "declares": [
+        "Blobs",
+        "Blobs.__init__",
+        "Blobs.path",
+        "Blobs.store",
+        "Blobs.read",
+        "Blobs.holds"
+      ]
+    },
+    {
+      "module": "lup.ledger.journal",
+      "declares": [
+        "LedgerRefusal",
+        "LedgerStore",
+        "LedgerStore.__init__",
+        "LedgerStore.path",
+        "LedgerStore.lines",
+        "LedgerStore.lines.parsed",
+        "LedgerStore.append",
+        "LedgerStore.read",
+        "LedgerStore.read.matching",
+        "LedgerStore.edges",
+        "LedgerStore.edges.matching",
+        "LedgerStore.into",
+        "LedgerStore.out_of",
+        "LedgerStore.resolve",
+        "LedgerStore.all_nodes",
+        "LedgerStore.all_nodes.resolved",
+        "LedgerStore.standing",
+        "LedgerStore.record",
+        "LedgerStore.relate"
+      ]
+    },
+    {
+      "module": "lup.ledger.models",
+      "declares": [
+        "Standing",
+        "Standing.label",
+        "Standing.reason",
+        "LedgerEdge",
+        "LedgerEdge.kind",
+        "LedgerEdge.source",
+        "LedgerEdge.target",
+        "LedgerEdge.author",
+        "LedgerEdge.at",
+        "LedgerEdge.refusal",
+        "LedgerNode",
+        "LedgerNode.id",
+        "LedgerNode.kind",
+        "LedgerNode.title",
+        "LedgerNode.text",
+        "LedgerNode.author",
+        "LedgerNode.at",
+        "LedgerNode.attachments",
+        "LedgerNode.standing"
+      ]
+    },
+    {
+      "module": "lup.ledger.snapshot",
+      "declares": [
+        "snapshot",
+        "existing_commit"
+      ]
+    },
+    {
+      "module": "lup.ledger.store",
+      "declares": [
+        "STORE_DIR",
+        "LEDGER_DIR",
+        "JOURNAL_FILE",
+        "BLOBS_DIR",
+        "ledger_root"
       ]
     },
     {
@@ -12331,16 +12443,7 @@
       "declares": []
     },
     {
-      "module": "lup.runs.follow",
-      "declares": [
-        "render_steps",
-        "render_landing",
-        "follow",
-        "follow_events"
-      ]
-    },
-    {
-      "module": "lup.runs.ledger",
+      "module": "lup.runs.directory",
       "declares": [
         "logger",
         "CLAIM_LEASE_SECONDS",
@@ -12351,9 +12454,9 @@
         "RunningUnit.lease_seconds",
         "RunningUnit.slug",
         "RunningUnit.stale",
-        "LedgerReading",
-        "LedgerReading.results",
-        "LedgerReading.unreadable",
+        "DirectoryReading",
+        "DirectoryReading.results",
+        "DirectoryReading.unreadable",
         "RunDirectory",
         "RunDirectory.root",
         "RunDirectory.manifest_path",
@@ -12379,6 +12482,15 @@
         "RunDirectory.summary_path",
         "RunDirectory.write_summary",
         "RunDirectory.read_summary"
+      ]
+    },
+    {
+      "module": "lup.runs.follow",
+      "declares": [
+        "render_steps",
+        "render_landing",
+        "follow",
+        "follow_events"
       ]
     },
     {

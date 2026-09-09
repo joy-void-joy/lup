@@ -7,7 +7,7 @@ went missing looks exactly like one that moved, because both leave the old
 import path unresolvable. So the assumption survives review by being
 unfalsifiable rather than by being true.
 
-A ledger makes it falsifiable. The surface is captured before the move as a
+A capture makes it falsifiable. The surface is captured before the move as a
 checked-in fixture; afterwards the same walk runs against the live tree and
 every captured identity is resolved against it. One that resolves nowhere has
 disappeared, and that is the failure. One that resolves somewhere other than
@@ -34,7 +34,7 @@ than leaving the tree in a diff nobody does.
 Only what a published root can import is walked. A generated plugin tree is
 derived from the typed catalog that emits it, and a test names what it tests,
 so neither is a surface an adopter can hold — counting them would grow the
-ledger by half and make every regeneration read as a capability change.
+capture by half and make every regeneration read as a capability change.
 """
 
 import json
@@ -54,7 +54,7 @@ from lup.devtools.dev.relocate import name_parts
 from lup.devtools.project import DevProject
 from lup.execution.shell import git
 
-LEDGER_FILE = Path("preservation-ledger.json")
+CAPTURE_FILE = Path("preservation-capture.json")
 """Where a capture lands by default, relative to the checkout it describes.
 
 A default rather than a fixed location: an adopter keeping its fixtures
@@ -63,7 +63,7 @@ somewhere else passes a path, and every entry point here takes one.
 
 
 class CapabilityKind(StrEnum):
-    """What sort of thing one ledger entry promises stays reachable."""
+    """What sort of thing one capture entry promises stays reachable."""
 
     COMMAND = "command"
     EXPORT = "export"
@@ -99,7 +99,7 @@ class ModuleSurface(BaseModel, frozen=True):
     declares: list[str]
 
 
-class Ledger(BaseModel, frozen=True):
+class SurfaceCapture(BaseModel, frozen=True):
     """A whole surface as it stood at one revision, with what was walked."""
 
     revision: str
@@ -114,11 +114,11 @@ class Ledger(BaseModel, frozen=True):
     modules: list[ModuleSurface]
 
     @classmethod
-    def read(cls, path: Path = LEDGER_FILE) -> "Ledger":
+    def read(cls, path: Path = CAPTURE_FILE) -> "SurfaceCapture":
         """Load a capture from disk."""
         return cls.model_validate_json(path.read_text(encoding="utf-8"))
 
-    def write(self, path: Path = LEDGER_FILE) -> None:
+    def write(self, path: Path = CAPTURE_FILE) -> None:
         """Persist this capture, formatted so a diff reads line by line."""
         path.write_text(
             json.dumps(self.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8"
@@ -245,8 +245,8 @@ def capture(
     commands: Iterable[CommandEntry],
     project: DevProject,
     sources: Iterable[TrackedSource] | None = None,
-) -> Ledger:
-    """Walk the live tree into a ledger, at the revision it is standing on.
+) -> SurfaceCapture:
+    """Walk the live tree into a capture, at the revision it is standing on.
 
     The operations arrive already walked rather than as an app to walk. The
     composed CLI is a root nothing imports, and the command that captures is
@@ -255,7 +255,7 @@ def capture(
     """
     roots = walked_roots(project)
     walked = tracked_python_sources(project) if sources is None else list(sources)
-    return Ledger(
+    return SurfaceCapture(
         revision=str(git("rev-parse", "HEAD")).strip(),
         roots=sorted(roots),
         commands=[entry.spelled() for entry in commands],
@@ -263,7 +263,7 @@ def capture(
     )
 
 
-def compare(captured: Ledger, live: Ledger) -> Divergence:
+def compare(captured: SurfaceCapture, live: SurfaceCapture) -> Divergence:
     """Resolve every captured identity against a later walk of the same tree.
 
     An export is judged against the whole live surface rather than against its
