@@ -51,7 +51,11 @@ from lup_template.writeups import WRITEUPS
 from lup.harness.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.generated_paths import GENERATED_PATHS
-from lup.devtools.harness.drift import generate_with_report, roster_gaps
+from lup.devtools.harness.drift import (
+    generate_targets,
+    generate_with_report,
+    roster_gaps,
+)
 from lup.devtools.harness.settings import served_tool_grants
 from lup.formats.banner import (
     ARTIFACT_COMMENT_ROUTER,
@@ -3570,3 +3574,31 @@ def test_a_tree_generated_on_the_way_to_something_else_says_nothing(
     asked_for = capsys.readouterr().out
     assert "0 writes, 0 deletes, 0 conflicts" in asked_for
     assert "0 changed, 0 removed" in asked_for
+
+
+def test_a_current_repository_artifact_is_neither_rewritten_nor_announced(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """In passing, the check is the whole of what a current artifact costs."""
+    calls: list[str] = []
+
+    def current(root: Path | None = None, *, check: bool = False) -> Path:
+        calls.append(f"current:{'check' if check else 'write'}")
+        return tmp_path / "current.md"
+
+    def behind(root: Path | None = None, *, check: bool = False) -> Path:
+        calls.append(f"behind:{'check' if check else 'write'}")
+        if check:
+            raise RuntimeError("behind its source")
+        return tmp_path / "behind.md"
+
+    generate_targets([], [current, behind], in_passing=True)
+    assert calls == ["current:check", "behind:check", "behind:write"]
+    assert capsys.readouterr().out == (
+        f"repository artifact ready: {tmp_path / 'behind.md'}\n"
+    )
+
+    calls.clear()
+    generate_targets([], [current, behind])
+    assert calls == ["current:write", "behind:write"]
+    assert capsys.readouterr().out.count("repository artifact ready") == 2
