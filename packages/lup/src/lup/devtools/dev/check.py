@@ -1166,7 +1166,8 @@ def run_checks(
         repository_writers,
         git_guards,
         hooks_declaration,
-        node_classes or [],
+        node_classes=node_classes or [],
+        ledger=ledger,
         command_surface=command_surface,
     )
 
