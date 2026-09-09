@@ -2,38 +2,52 @@
 // and whatever live check and undo it declares. A step the server withholds
 // is drawn with its reason and no form, so the page never offers what a
 // request would then be refused for.
+import { useForm } from "@tanstack/react-form";
 import { useState } from "react";
 import type { Row, RowAct, RowRequest, StepAnswers, StepView } from "../generated/views";
 
-// lup: defer: the form is controlled inputs; TanStack Form, the default
+// lup: solved: the form is controlled inputs; TanStack Form, the default
 // answer for form-heavy UI, waits on `bun add @tanstack/react-form`, which
 // the policy asks about — take it when the wizard's forms outgrow two fields
 function Fields({ step, onRun }: { step: StepView; onRun(answers: StepAnswers): void }) {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const answers = (): StepAnswers => ({
-    answers: step.fields.map((field) => ({ key: field.key, value: values[field.key] ?? "" })),
+  const form = useForm({
+    defaultValues: step.fields.reduce<Record<string, string>>(
+      (values, field) => ({ ...values, [field.key]: "" }),
+      {},
+    ),
+    onSubmit: ({ value }) =>
+      onRun({ answers: step.fields.map((field) => ({ key: field.key, value: value[field.key] ?? "" })) }),
   });
   return (
-    <div>
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void form.handleSubmit();
+      }}
+    >
       {step.fields.map((field) => (
-        <div key={field.key}>
-          <label>
-            {field.label}
-            <input
-              type={field.secret ? "password" : "text"}
-              placeholder={field.placeholder}
-              value={values[field.key] ?? ""}
-              onChange={(event) => setValues({ ...values, [field.key]: event.target.value })}
-            />
-          </label>
-        </div>
+        <form.Field key={field.key} name={field.key}>
+          {(input) => (
+            <div>
+              <label>
+                {field.label}
+                <input
+                  type={field.secret ? "password" : "text"}
+                  placeholder={field.placeholder}
+                  value={input.state.value}
+                  onChange={(event) => input.handleChange(event.target.value)}
+                />
+              </label>
+            </div>
+          )}
+        </form.Field>
       ))}
       <div className="actions">
-        <button type="button" className="go" onClick={() => onRun(answers())}>
+        <button type="submit" className="go">
           {step.submit !== "" ? step.submit : "Save"}
         </button>
       </div>
-    </div>
+    </form>
   );
 }
 

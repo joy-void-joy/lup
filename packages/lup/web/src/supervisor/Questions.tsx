@@ -2,28 +2,17 @@
 // ahead of settled ones and settled ones folded to one-line records. A draft
 // survives a reload in this browser, so a half-answered form is not lost to
 // a stream reconnecting under it.
+import { useForm } from "@tanstack/react-form";
 import { useEffect, useMemo, useState } from "react";
-import type { PendingQuestionView, SupervisorState } from "../generated/views";
+import type { MaterialQuestion, PendingQuestionView, QuestionAnswer, SupervisorState } from "../generated/views";
+import { chosen, draftKey, parseDraft, submission, type Draft } from "./drafts";
 
-function draftKey(runId: string): string {
-  return `lup-supervisor:${runId}`;
-}
-
-function readDraft(runId: string): Record<string, string> {
-  try {
-    return JSON.parse(localStorage.getItem(draftKey(runId)) ?? "{}") as Record<string, string>;
-  } catch {
-    return {};
-  }
+function readDraft(runId: string): Draft {
+  return parseDraft(localStorage.getItem(draftKey(runId)));
 }
 
 function cut(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
-}
-
-/** What the form would submit for one question: the draft, else the offer, else the recommendation. */
-function chosen(view: PendingQuestionView, draft: Record<string, string>): string {
-  return draft[view.question.id] ?? view.offer ?? view.question.recommendation ?? "";
 }
 
 function Meta({ view }: { view: PendingQuestionView }) {
@@ -45,33 +34,35 @@ function Meta({ view }: { view: PendingQuestionView }) {
   );
 }
 
-function Question({
+// A settled question is record, not work. One line keeps a long run's
+// decisions scannable; opening it shows the exchange whole.
+function Answered({ question, answered }: { question: MaterialQuestion; answered: string }) {
+  return (
+    <details className="answered">
+      <summary>
+        {cut(question.prompt, 140)} <span className="muted">— answered</span>{" "}
+        <strong>{cut(answered, 60)}</strong> <span className="qid">{question.id}</span>
+      </summary>
+      <div className="prompt">{question.prompt}</div>
+      <p className="muted">
+        Answered <strong>{answered}</strong>
+      </p>
+    </details>
+  );
+}
+
+// An open question is one field of the answer form: a choice among the
+// question's options where it names some, a line of text otherwise.
+function Open({
   view,
-  draft,
+  value,
   onChange,
 }: {
   view: PendingQuestionView;
-  draft: Record<string, string>;
-  onChange(id: string, value: string): void;
+  value: string;
+  onChange(value: string): void;
 }) {
   const question = view.question;
-  if (view.answered !== null) {
-    // A settled question is record, not work. One line keeps a long run's
-    // decisions scannable; opening it shows the exchange whole.
-    return (
-      <details className="answered">
-        <summary>
-          {cut(question.prompt, 140)} <span className="muted">— answered</span>{" "}
-          <strong>{cut(view.answered, 60)}</strong> <span className="qid">{question.id}</span>
-        </summary>
-        <div className="prompt">{question.prompt}</div>
-        <p className="muted">
-          Answered <strong>{view.answered}</strong>
-        </p>
-      </details>
-    );
-  }
-  const value = chosen(view, draft);
   return (
     <>
       <div className="prompt">
@@ -87,7 +78,7 @@ function Question({
               name={question.id}
               value={choice}
               checked={value === choice}
-              onChange={() => onChange(question.id, choice)}
+              onChange={() => onChange(choice)}
             />
             <span>
               {choice}
@@ -100,7 +91,7 @@ function Question({
           type="text"
           value={value}
           autoComplete="off"
-          onChange={(event) => onChange(question.id, event.target.value)}
+          onChange={(event) => onChange(event.target.value)}
         />
       )}
     </>
@@ -115,19 +106,33 @@ export function Questions({
   error,
 }: {
   state: SupervisorState;
-  onSubmit(answers: { question_id: string; value: string }[]): Promise<boolean>;
+  onSubmit(answers: QuestionAnswer[]): Promise<boolean>;
   onPark(): void;
   onResume(): void;
   error: string;
 }) {
-  const [draft, setDraft] = useState<Record<string, string>>(() => readDraft(state.run_id));
+  const [draft, setDraft] = useState<Draft>(() => readDraft(state.run_id));
   const [copied, setCopied] = useState(false);
+  // The draft is the form's defaults. Every change lands in this browser's
+  // storage as it is made, and a submission the server took clears it.
+  const form = useForm({
+    defaultValues: draft,
+    listeners: {
+      onChange: ({ formApi }) =>
+        localStorage.setItem(draftKey(state.run_id), JSON.stringify(formApi.state.values)),
+    },
+    onSubmit: async ({ value }) => {
+      if (await onSubmit(submission(state.pending, value))) localStorage.removeItem(draftKey(state.run_id));
+    },
+  });
   // The draft is re-read only when the question set itself moved: retyping is
   // not a set change, and a reset under a keystroke would lose the word.
   const shape = JSON.stringify(state.pending.map((view) => [view.question.id, view.answered, view.offer]));
   useEffect(() => {
-    setDraft(readDraft(state.run_id));
-  }, [state.run_id, shape]);
+    const stored = readDraft(state.run_id);
+    setDraft(stored);
+    form.reset(stored);
+  }, [form, state.run_id, shape]);
 
   const outstanding = state.pending.filter((view) => view.answered === null);
   const grouped = useMemo(() => {
@@ -143,19 +148,6 @@ export function Questions({
   }, [state.pending]);
 
   if (state.pending.length === 0) return null;
-
-  function changed(id: string, value: string) {
-    const next = { ...draft, [id]: value };
-    setDraft(next);
-    localStorage.setItem(draftKey(state.run_id), JSON.stringify(next));
-  }
-
-  async function submitted() {
-    const answers = outstanding
-      .map((view) => ({ question_id: view.question.id, value: chosen(view, draft) }))
-      .filter((answer) => answer.value !== "");
-    if (await onSubmit(answers)) localStorage.removeItem(draftKey(state.run_id));
-  }
 
   async function copyRecipe() {
     await navigator.clipboard.writeText(state.rerun_recipe);
@@ -174,15 +166,23 @@ export function Questions({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          void submitted();
+          void form.handleSubmit();
         }}
       >
         {grouped.map(([concern, views]) => (
           <fieldset key={concern}>
             <legend>{concern}</legend>
-            {views.map((view) => (
-              <Question key={view.question.id} view={view} draft={draft} onChange={changed} />
-            ))}
+            {views.map((view) =>
+              view.answered !== null ? (
+                <Answered key={view.question.id} question={view.question} answered={view.answered} />
+              ) : (
+                <form.Field key={view.question.id} name={view.question.id}>
+                  {(field) => (
+                    <Open view={view} value={chosen(view, field.state.value)} onChange={field.handleChange} />
+                  )}
+                </form.Field>
+              ),
+            )}
           </fieldset>
         ))}
         {outstanding.length > 0 && (
