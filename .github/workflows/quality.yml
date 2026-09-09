@@ -16,6 +16,12 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: packages/lup/web
       - run: uv sync --all-extras
       - name: Merge driver
         run: uv run lup-devtools git merge-driver

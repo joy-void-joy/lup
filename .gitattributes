@@ -19,3 +19,4 @@
 .claude/** merge=lup-ownership
 .codex/** merge=lup-ownership
 .agents/** merge=lup-ownership
+packages/lup/src/lup/web/bundles/** merge=lup-ownership

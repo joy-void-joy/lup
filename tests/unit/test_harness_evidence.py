@@ -218,7 +218,14 @@ def test_pull_request_workflow_runs_the_same_gate_a_checkout_runs() -> None:
     workflow = NativeWorkflow.model_validate(document)
     commands = [step.run for step in workflow.jobs["check"].steps if step.run]
 
+    # The frontend install is the one step declared rather than constant: a
+    # project with a bun workspace restores it from the lockfile before the
+    # gate rebuilds the bundles it compares against what is committed.
+    frontend = (
+        ["bun install --frozen-lockfile"] if WORKFLOW.frontend is not None else []
+    )
     assert commands == [
+        *frontend,
         "uv sync --all-extras",
         "uv run lup-devtools git merge-driver",
         DRIFT_COMMAND,

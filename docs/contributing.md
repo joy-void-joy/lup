@@ -283,6 +283,14 @@ uv run lup-devtools harness check all      # generated-tree drift
 uv run lup-devtools dev rules --check      # the generated rule reference
 ```
 
+The generated trees include the frontend bundles under `lup.web`'s package
+data, built from `packages/lup/web/` by Vite. The gate rebuilds them to compare
+against what is committed, so it needs `bun` and the workspace's dependencies:
+`bun install --frozen-lockfile` in `packages/lup/web/`, once, and again when
+`bun.lock` moves. Without them `dev check` fails naming that command rather
+than passing over what it could not build. A dependency is added with
+`bun add`, which the policy asks about the way it asks about `uv add`.
+
 [quality-pipeline.md](quality-pipeline.md) explains which of the three
 automated layers catches what. The short version: `git hooks install`
 refuses a commit whose generated artifacts are behind their source and a

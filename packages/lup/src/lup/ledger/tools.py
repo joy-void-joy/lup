@@ -27,6 +27,7 @@ from lup.ledger.cite import read_cites
 from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.kinds import by_kind, declared_fields, kind_of, summary_of
 from lup.ledger.models import LedgerEdge, LedgerNode
+from lup.ledger.views import EdgeView, NodeDetail, NodeView, node_detail, node_view
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 from lup.types import JsonObject
 
@@ -47,32 +48,6 @@ class KindInfo(BaseModel, frozen=True):
 class TypesOutput(BaseModel, frozen=True):
     nodes: list[KindInfo]
     edges: list[KindInfo]
-
-
-class NodeView(BaseModel, frozen=True):
-    """One node as an agent reads it: what it is and where it stands right now."""
-
-    id: str
-    kind: str
-    title: str
-    slug: str = ""
-    text: str = ""
-    standing: str
-    reason: str = ""
-    sound: bool = True
-
-
-class EdgeView(BaseModel, frozen=True):
-    kind: str
-    source: str
-    target: str
-
-
-class EdgeCount(BaseModel, frozen=True):
-    """How many edges of one kind point at a node — its weight in the log."""
-
-    kind: str
-    count: int
 
 
 class RecordInput(BaseModel):
@@ -107,17 +82,6 @@ class AmendInput(BaseModel):
 
 class ShowInput(BaseModel):
     node: str = Field(description="The node to read, by id or slug")
-
-
-class ShowOutput(BaseModel, frozen=True):
-    node: NodeView
-    fields: JsonObject
-    """The kind's own fields — a grade, a priority, a holder — beyond the base."""
-
-    incoming: list[EdgeCount]
-    edges_in: list[EdgeView]
-    edges_out: list[EdgeView]
-    attachments: list[str]
 
 
 class ListInput(BaseModel):
@@ -182,17 +146,7 @@ def create_ledger_tools(
         return node
 
     def view(held: LedgerStore, node: LedgerNode) -> NodeView:
-        where = held.standing(node, classes)
-        return NodeView(
-            id=node.id,
-            kind=node.kind,
-            title=node.title,
-            slug=node.slug,
-            text=node.text,
-            standing=where.label,
-            reason=where.reason,
-            sound=where.sound,
-        )
+        return node_view(held, classes, node)
 
     def info(declared: type[LedgerNode] | type[LedgerEdge]) -> KindInfo:
         return KindInfo(
@@ -315,35 +269,9 @@ def create_ledger_tools(
         "refuted says so here first.",
         name="ledger_show",
     )
-    async def ledger_show(params: ShowInput) -> ShowOutput:
+    async def ledger_show(params: ShowInput) -> NodeDetail:
         held = store()
-        node = found(held, params.node)
-        incoming = held.into(node.id)
-        outgoing = held.out_of(node.id)
-        kinds = list(dict.fromkeys(edge.kind for edge in incoming))
-        return ShowOutput(
-            node=view(held, node),
-            fields={
-                name: value
-                for name, value in node.model_dump(mode="json").items()
-                if name not in LedgerNode.model_fields
-            },
-            incoming=[
-                EdgeCount(
-                    kind=kind, count=sum(1 for edge in incoming if edge.kind == kind)
-                )
-                for kind in kinds
-            ],
-            edges_in=[
-                EdgeView(kind=edge.kind, source=edge.source, target=edge.target)
-                for edge in incoming
-            ],
-            edges_out=[
-                EdgeView(kind=edge.kind, source=edge.source, target=edge.target)
-                for edge in outgoing
-            ],
-            attachments=list(node.attachments),
-        )
+        return node_detail(held, classes, found(held, params.node))
 
     @lup_tool(
         "List what the repository has recorded, each node with its standing "

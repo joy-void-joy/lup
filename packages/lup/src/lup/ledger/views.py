@@ -1,0 +1,147 @@
+"""What a reader is shown of a node, built once for every surface that shows one.
+
+The tool group, the explorer's routes and the console all answer the same
+questions about a node — what is it, where does it stand right now and why,
+what points at it and how much — and an answer built in three places is three
+answers that drift. So the view models and the folds that fill them live here,
+and each surface serializes the same value.
+"""
+
+from datetime import datetime
+
+from pydantic import BaseModel
+
+from lup.ledger.journal import LedgerStore
+from lup.ledger.models import LedgerNode
+from lup.types import JsonObject
+
+
+class NodeView(BaseModel, frozen=True):
+    """One node as a reader meets it: what it is and where it stands right now."""
+
+    id: str
+    kind: str
+    title: str
+    slug: str = ""
+    text: str = ""
+    priority: int = 0
+    standing: str
+    reason: str = ""
+    sound: bool = True
+
+
+class EdgeView(BaseModel, frozen=True):
+    kind: str
+    source: str
+    target: str
+
+
+class EdgeCount(BaseModel, frozen=True):
+    """How many edges of one kind point at a node — its weight in the log."""
+
+    kind: str
+    count: int
+
+
+class NodeDetail(BaseModel, frozen=True):
+    """One node in full: its own fields, its weight, and every edge in and out."""
+
+    node: NodeView
+    fields: JsonObject
+    """The kind's own fields — a grade, a holder, a scope — beyond the base."""
+
+    incoming: list[EdgeCount]
+    edges_in: list[EdgeView]
+    edges_out: list[EdgeView]
+    attachments: list[str]
+
+
+class GraphView(BaseModel, frozen=True):
+    """The whole log as a graph, with the vocabularies a reader filters by."""
+
+    nodes: list[NodeView]
+    edges: list[EdgeView]
+    kinds: list[str]
+    standings: list[str]
+
+
+def node_view(
+    store: LedgerStore, classes: list[type[LedgerNode]], node: LedgerNode
+) -> NodeView:
+    """One node with its standing read now."""
+    where = store.standing(node, classes)
+    return NodeView(
+        id=node.id,
+        kind=node.kind,
+        title=node.title,
+        slug=node.slug,
+        text=node.text,
+        priority=node.priority,
+        standing=where.label,
+        reason=where.reason,
+        sound=where.sound,
+    )
+
+
+def edge_view(kind: str, source: str, target: str) -> EdgeView:
+    return EdgeView(kind=kind, source=source, target=target)
+
+
+def node_detail(
+    store: LedgerStore, classes: list[type[LedgerNode]], node: LedgerNode
+) -> NodeDetail:
+    """One node in full, the edges pointing at it counted by kind first."""
+    incoming = store.into(node.id)
+    outgoing = store.out_of(node.id)
+    kinds = list(dict.fromkeys(edge.kind for edge in incoming))
+    return NodeDetail(
+        node=node_view(store, classes, node),
+        fields={
+            name: value
+            for name, value in node.model_dump(mode="json").items()
+            if name not in LedgerNode.model_fields
+        },
+        incoming=[
+            EdgeCount(kind=kind, count=sum(1 for edge in incoming if edge.kind == kind))
+            for kind in kinds
+        ],
+        edges_in=[edge_view(edge.kind, edge.source, edge.target) for edge in incoming],
+        edges_out=[edge_view(edge.kind, edge.source, edge.target) for edge in outgoing],
+        attachments=list(node.attachments),
+    )
+
+
+def graph_view(
+    store: LedgerStore,
+    classes: list[type[LedgerNode]],
+    kind: str = "",
+    standing: str = "",
+    since: datetime | None = None,
+) -> GraphView:
+    """The log as nodes and edges, narrowed the way a reader asked.
+
+    An edge is kept only where both its ends survived the narrowing, so a
+    filtered graph never draws a line to a node it is not showing. The kind
+    and standing vocabularies are read off the whole log, not the narrowed
+    one, so the filters a reader is offered do not shrink as they are used.
+    """
+    every = [node_view(store, classes, node) for node in store.all_nodes(classes)]
+    moved = store.moved_since(since) if since is not None else None
+    shown = [
+        node
+        for node in every
+        if (not kind or node.kind == kind)
+        and (not standing or node.standing == standing)
+        and (moved is None or node.id in moved)
+    ]
+    ids = {node.id: node for node in shown}
+    return GraphView(
+        nodes=shown,
+        edges=[
+            edge_view(edge.kind, edge.source, edge.target)
+            for edge in store.edges()
+            if edge.source in ids and edge.target in ids
+        ],
+        kinds=list(dict.fromkeys(node.kind for node in every)),
+        standings=list(dict.fromkeys(node.standing for node in every)),
+    )
