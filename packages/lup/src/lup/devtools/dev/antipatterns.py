@@ -58,6 +58,7 @@ from lup.harness.codescan.common import (
     module_name,
 )
 from lup.harness.codescan.dispatch import audit_own_model_dispatch
+from lup.policy.kernel.edit import TYPESCRIPT_SUFFIXES
 from lup.harness.codescan.resolution import refute
 from lup.devtools.dev.refutations import remembered_refutations
 from lup.workspace.paths import project_root, refutation_cache_path
@@ -307,6 +308,7 @@ def scan_antipatterns(
             item.text,
             item.patterns,
             refuted[item.path.as_posix()] if item.path.as_posix() in refuted else None,
+            typescript=item.path.suffix.lower() in TYPESCRIPT_SUFFIXES,
         )
     ]
     results.extend(
