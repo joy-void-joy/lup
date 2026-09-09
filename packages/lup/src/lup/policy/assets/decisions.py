@@ -38,6 +38,8 @@ from host import (
     managed_script_roots,
     outside_this_project,
     patch_write_targets,
+    peer_addresses,
+    peer_listing,
     recoverable_write_targets,
     record_deferral,
     record_question,
@@ -57,6 +59,7 @@ from kernel.edit import (
 )
 from kernel.effects import STRENGTH
 from kernel.fetch import decide_fetch
+from kernel.peers import decide_peer_listing, decide_peer_send, peer_listing_context
 from kernel.lex import (
     authored_writes,
     python_script_targets,
@@ -82,6 +85,7 @@ from policy_data import (
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
+    PEER_REDIRECT,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
@@ -324,6 +328,55 @@ def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None
     what it approved — an unmentioned tool is still unclassified.
     """
     return decide_tool(name, values, REFUSED_TOOLS)
+
+
+def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
+    """Judge one native send against who this repository's roster holds.
+
+    The kernel reads no filesystem, so the roster is folded here and passed as
+    the spellings it currently answers to. Every string the call carries is
+    offered rather than a named field, because which field a runtime spells a
+    recipient in is that runtime's business and this half answers for all of
+    them.
+    """
+    if PEER_REDIRECT is None:
+        return decide_peer_send(values, [], None)
+    return decide_peer_send(
+        values,
+        peer_addresses(
+            cwd,
+            PEER_REDIRECT["store"],
+            PEER_REDIRECT["roster_file"],
+            PEER_REDIRECT["names_file"],
+        ),
+        PEER_REDIRECT,
+    )
+
+
+def peer_listing_decision() -> KernelDecision:
+    """Judge one native listing of who this session can reach, which defers."""
+    return decide_peer_listing(PEER_REDIRECT)
+
+
+def peer_listing_attachment(cwd: Path | None) -> str:
+    """This repository's roster, as a listing carries it, or nothing to carry.
+
+    Beside the verdict rather than inside it. A deferral says the runtime
+    decides this call, and what the roster has to add is context a reader
+    acts on rather than a condition of the call happening — folding it into
+    a reason would make it visible only where something refused.
+    """
+    if PEER_REDIRECT is None:
+        return ""
+    return peer_listing_context(
+        peer_listing(
+            cwd,
+            PEER_REDIRECT["store"],
+            PEER_REDIRECT["roster_file"],
+            PEER_REDIRECT["names_file"],
+        ),
+        PEER_REDIRECT,
+    )
 
 
 def placed_document(path_text: str, after: str) -> str:

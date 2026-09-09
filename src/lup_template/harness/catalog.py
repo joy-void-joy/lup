@@ -46,6 +46,7 @@ from lup.devtools.project import DevProject, Tracker
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
 from lup.policy.boundary import depends_on
+from lup.coordination.redirect import peer_redirect
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import (
     declared_project_root,
@@ -593,6 +594,11 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
             # wants written for it. `dev seams --disown README.md` is the answer
             # to that, and it edits this line rather than asking anyone to.
             human_owned_files=[Path("README.md")],
+            # Sessions here coordinate, so a native call that would reach one
+            # of them is judged against the roster it would otherwise bypass.
+            # Built from the store's own layout rather than spelled: renaming
+            # the coordination directory moves the compiled hook with it.
+            peer_redirect=peer_redirect(),
             refused_tools=REFUSED_TOOLS,
             # Which checker answers for an edit is this project's toolchain,
             # not the library's, and it is named rather than located: the

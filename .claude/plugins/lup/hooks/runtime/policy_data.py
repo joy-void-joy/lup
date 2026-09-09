@@ -10,6 +10,7 @@ from kernel.rows import (
     ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
+    PeerRedirectRow,
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
@@ -17814,6 +17815,14 @@ REFUSED_TOOLS: list[RefusedToolRow] = [
         "reason": "entering a worktree with this tool arms Claude Code's worktree isolation for the rest of the session, which then refuses eval, source, fc, coproc, trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and let in any argv position \u2014 including in read-only commands with no git in them, so `grep -c hash file.py` stops working. Measured: the tool call is what arms it, not where the session is. `git worktree create` already made the tree \u2014 launch a session rooted in it, or address its files by absolute path from here",
     },
 ]
+
+PEER_REDIRECT: PeerRedirectRow | None = {
+    "store": ["lup", "coordination"],
+    "roster_file": "roster.jsonl",
+    "names_file": "names.jsonl",
+    "send_reason": "that address is a session on this repository's roster, and a native send reaches it through a channel no other worktree can fold \u2014 nothing later can read that the two of you agreed on anything. Say it with the `coordination_send` tool instead, which reaches the same peer, records it where every session working in this clone can read it, and tells you whether the peer's own hook will put it in front of that peer's next tool call or it waits in the file until they next look",
+    "listing_note": "This repository's own roster, which is a different population from the listing above: these are the sessions working in this clone, in whatever worktree, and they include peers no account-scoped listing can see. Reach any of them with `coordination_send`, which records what it carries. The person watching is always at `user`.",
+}
 
 AUTONOMOUS_AGENT_IDENTITIES: list[str] = [
     "resolver-worker",

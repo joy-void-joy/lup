@@ -87,6 +87,30 @@ of* it rather than an alternative. A sender told only that the mail accepted a
 message cannot tell a hook from a file nobody is watching, which is why
 `spawn_say` reports the mode rather than asserting delivery.
 
+## The other address book
+
+A runtime that can already address another session offers a second way to
+reach one, and the two acts are not the same. A message on this stream is a
+durable record every worktree folds and every later session can read; a native
+send is a call whose text exists only inside whichever process received it. So
+where both would reach the same member the native send is stopped and told
+where the durable one is, and where it reaches somebody the roster has never
+heard of nothing happens at all — a subagent this session started is on no
+repository roster, so continuing one goes through untouched.
+
+A native *listing* of who can be reached is the different case, and refusing it
+would be wrong rather than merely strict. Measured against a live account, most
+of what such a listing returns is sessions in other repositories: a population
+this roster is structurally incapable of holding, since different repositories
+are disjoint by construction. A redirect to the roster would answer a question
+the reader did not ask and be escalated past every time. So the listing goes
+ahead untouched and this repository's roster rides beside it, labelled — the
+failure worth stopping is a reader taking the wider list for this repository's
+address book, not the reader having the wider list.
+
+That asymmetry is the whole rule. Refuse the act that would leave no record;
+never refuse the answer to a question the record cannot give.
+
 ## Actor cohorts
 
 The three delegation patterns in [orchestration.md](orchestration.md) all end

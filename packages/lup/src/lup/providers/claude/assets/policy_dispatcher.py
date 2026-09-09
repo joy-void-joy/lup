@@ -33,6 +33,9 @@ from decisions import (
     bash_decision,
     edit_decision,
     fetch_decision,
+    peer_listing_attachment,
+    peer_listing_decision,
+    peer_send_decision,
     placed_document,
     placed_edit_text,
     refused_tool_decision,
@@ -183,6 +186,17 @@ def placed_input(payload):
     return None if revised is None else {**tool_input, "new_string": revised}
 
 
+def session_root(payload):
+    """Where this session is rooted, which its relative operands resolve against.
+
+    A hook is promised nothing about where it runs, so the payload's own answer
+    is the only one there is. Read through here by both halves of an answer —
+    the verdict and whatever rides beside it — because a second spelling of it
+    is a second place it can be forgotten.
+    """
+    return Path(payload["cwd"]) if "cwd" in payload else None
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -190,7 +204,7 @@ def dispatch(payload):
     # belongs to the repository being worked on or to somebody else's. Read
     # once, because the shell path and the edit path ask the same question of
     # it and a second read is a second place it can be forgotten.
-    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
+    session_directory = session_root(payload)
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = (
         agent_type in AUTONOMOUS_AGENT_IDENTITIES
@@ -249,6 +263,22 @@ def dispatch(payload):
             "overwrite" if exists else "create",
             session_directory,
         )
+    if name == "SendMessage":
+        # Every string the call carries rather than a named field, the reading
+        # the refusal table already takes: which key this runtime spells a
+        # recipient in is its own business, and the roster answers for all of
+        # them. A target nobody on it answers to passes through untouched,
+        # which is what leaves subagent continuation and every other session
+        # this repository does not hold working exactly as before.
+        return peer_send_decision(
+            [value for value in tool_input.values() if isinstance(value, str)],
+            session_directory,
+        )
+    if name == "ListAgents":
+        # Nothing to permit and nothing to refuse: it answers for a population
+        # wider than one repository, so the roster rides alongside as context
+        # rather than as a verdict that could take the answer away.
+        return peer_listing_decision()
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them
     # here would be this file holding a second, narrower copy of it. The
@@ -261,7 +291,20 @@ def dispatch(payload):
     return KernelDecision("ask", "tool is not classified")
 
 
-def rendered(decision, payload, placed):
+def attachment(name, cwd):
+    """What one call carries back beside its verdict, or nothing to carry.
+
+    Only the listing has any. It answers for a wider population than this
+    repository's roster, and the roster is exactly what a reader needs beside
+    it to tell the two apart — every other call has no second population to be
+    confused with, so nothing is folded for it and nothing is paid.
+    """
+    if name != "ListAgents":
+        return ""
+    return peer_listing_attachment(cwd)
+
+
+def rendered(decision, payload, placed, attached):
     """Answer one call on the permission channel, and place it on the other.
 
     Claude Code takes a call's sandbox as an argument of the call rather than
@@ -305,8 +348,30 @@ def rendered(decision, payload, placed):
     agent set for itself is not that request.
     """
     settled = decision.placed(escapable=True)
+
+    def carried(result):
+        """The same answer, with whatever context rides beside the verdict.
+
+        Beside rather than inside, and it survives a deferral: the whole point
+        of attaching a roster to a listing is that the listing goes ahead, so
+        the one answer that says "this runtime decides" is the one that most
+        needs to carry it. An empty attachment adds no key, so a call with
+        nothing to say returns exactly what it returned before.
+        """
+        if not attached:
+            return result
+        specific = (
+            result["hookSpecificOutput"]
+            if "hookSpecificOutput" in result
+            else {"hookEventName": "PreToolUse"}
+        )
+        return {
+            **result,
+            "hookSpecificOutput": {**specific, "additionalContext": attached},
+        }
+
     if settled.effect == "defer":
-        return {}
+        return carried({})
     answer = {
         "hookEventName": "PreToolUse",
         "permissionDecision": settled.effect,
@@ -316,7 +381,7 @@ def rendered(decision, payload, placed):
     def surfaced(result):
         """The same verdict, with what this runtime will not show it said."""
         message = announced(settled.effect, payload["tool_name"], settled.reason)
-        return {**result, "systemMessage": message} if message else result
+        return carried({**result, "systemMessage": message} if message else result)
 
     if placed is not None and settled.effect != "deny":
         return surfaced({"hookSpecificOutput": {**answer, "updatedInput": placed}})
@@ -369,6 +434,7 @@ def main():
     payload = {}
     event = ""
     placed = None
+    attached = ""
     failed = False
     try:
         payload = json.load(sys.stdin)
@@ -394,6 +460,7 @@ def main():
             return
         decision = dispatch(payload)
         placed = placed_input(payload)
+        attached = attachment(payload["tool_name"], session_root(payload))
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -418,7 +485,7 @@ def main():
                 sys.stdout,
             )
             return
-    json.dump(rendered(decision, payload, placed), sys.stdout)
+    json.dump(rendered(decision, payload, placed, attached), sys.stdout)
     if not failed:
         detail = decision.reason if decision.effect == "deny" else None
         record_hook_evidence(

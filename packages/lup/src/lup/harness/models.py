@@ -33,6 +33,7 @@ from lup.policy.boundary import BoundaryCapability
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
+from lup.policy.peer_redirect import PeerRedirect
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
 from lup.policy.imports import ImportBoundary
@@ -1268,6 +1269,18 @@ class HookSet(BaseModel, frozen=True):
             "carrying the surface to reach for instead. Whether a tool is "
             "against the point of a project is that project's judgement, so "
             "an empty list — the library's own answer — refuses nothing"
+        ),
+    )
+    peer_redirect: PeerRedirect | None = Field(
+        default=None,
+        description=(
+            "Where this project's sessions find each other, so a native call "
+            "reaching one is judged against the roster it would bypass. None "
+            "is a project whose sessions do not coordinate, and leaves every "
+            "such call entirely to the runtime's own permissions. "
+            "`lup.coordination.redirect.peer_redirect` builds one from the "
+            "store's own layout, so the directory is spelled in the module "
+            "that owns it rather than again in a compiled hook"
         ),
     )
     runner_targets: list[RunnerTargetRule] = Field(

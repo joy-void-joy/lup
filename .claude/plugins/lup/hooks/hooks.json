@@ -22,7 +22,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash|WebFetch|Edit|Write|Artifact|Skill|EnterWorktree"
+        "matcher": "Bash|WebFetch|Edit|Write|SendMessage|ListAgents|Artifact|Skill|EnterWorktree"
       },
       {
         "hooks": [

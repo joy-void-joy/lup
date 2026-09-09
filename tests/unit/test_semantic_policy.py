@@ -1803,6 +1803,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             edit_rules=FIXTURE_EDIT_RULES,
             import_boundaries=native_import_boundaries(application_roots()),
             refused_tools=FIXTURE_REFUSED_TOOLS,
+            peer_redirect=None,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
             sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,

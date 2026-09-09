@@ -292,6 +292,33 @@ under a git remote, a daemon socket — is not a scope question: the sandbox's
 only lever there is `excluded_commands`, which drops the command out of
 isolation rather than widening anything.
 
+## Reaching another session
+
+Two native calls address the population [coordination.md](coordination.md)
+describes, and the policy answers both from the roster rather than from a
+table. A send is denied when any string it carries names a live member of this
+repository's roster, with `coordination_send` named as the surface reaching the
+same peer and recording what it carried; every other target — a subagent this
+session started, a teammate, a session in another repository — passes through
+untouched. A listing is never refused: it answers for a wider, account-scoped
+population a repository-scoped roster cannot hold, so the verdict is a deferral
+and this repository's roster is attached beside the answer instead.
+
+This is the one decision whose inputs are not declarative. The roster is live,
+so the dispatcher's host half folds it — `peer_addresses` and `peer_listing` in
+`lup.policy.assets.host` — and hands the kernel the spellings it found, exactly
+the way an edit rule marked `resolution: required` is answered from a resolver
+the dispatcher ran. The kernel still reads no filesystem and still decides from
+its inputs alone. What is *declared* is only where to look: `HookSet.peer_redirect`,
+built by `lup.coordination.redirect.peer_redirect` from the store's own layout,
+so renaming the coordination directory moves the compiled hook with it. A
+project declaring none has both calls left entirely to the runtime's own
+permissions, which is what a repository whose sessions never coordinate should
+pay for them.
+
+A deliberate send to a peer is not walled off. The `# lup: escalate:` marker in
+any of the call's own inputs turns the refusal into the approval question the
+sender asked for, carrying their stated reason — the valve every refusal has.
 ## Forge credentials
 
 A contained session reaches its forge on something the operator lent it,
