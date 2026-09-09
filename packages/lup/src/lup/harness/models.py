@@ -33,7 +33,7 @@ from lup.policy.boundary import BoundaryCapability
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
-from lup.policy.peer_redirect import PeerRedirect
+from lup.policy.peer_policy import PeerRedirect
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
 from lup.policy.imports import ImportBoundary

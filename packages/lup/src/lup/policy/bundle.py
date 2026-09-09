@@ -40,7 +40,7 @@ from lup.policy.kernel.rows import (
 )
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
-from lup.policy.peer_redirect import PeerRedirect, erase_peer_redirect
+from lup.policy.peer_policy import PeerRedirect, erase_peer_redirect
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.shell_rules import (
     RunnerTargetRule,

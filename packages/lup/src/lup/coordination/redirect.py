@@ -15,7 +15,7 @@ that renamed its own is entitled to say so without editing the library.
 from lup.coordination.identity import NAMES_FILE
 from lup.coordination.roster import ROSTER_FILE
 from lup.coordination.store import COORDINATION_DIR, STORE_DIR
-from lup.policy.peer_redirect import PeerRedirect
+from lup.policy.peer_policy import PeerRedirect
 
 SEND_REDIRECT = (
     "that address is a session on this repository's roster, and a native send"

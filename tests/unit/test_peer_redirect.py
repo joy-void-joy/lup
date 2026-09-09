@@ -23,7 +23,7 @@ from lup.policy.kernel.peers import (
     decide_peer_send,
     peer_listing_context,
 )
-from lup.policy.peer_redirect import erase_peer_redirect
+from lup.policy.peer_policy import erase_peer_redirect
 from lup.types import JsonObject
 from tests.unit.repos import initialized_repo
 
