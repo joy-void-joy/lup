@@ -22,6 +22,9 @@ from lup.coordination.identity import mint_member_id
 from lup.coordination.repository import PeerView, RepositoryPeers
 from lup.coordination.roster import Delivery
 from lup.coordination.touches import Claim
+from lup.coordination.watch import Watcher
+from lup.coordination.watcher import watcher_pipeline
+from lup.runs.pipeline import RunRequest
 from lup.workspace.paths import project_root
 
 
@@ -201,8 +204,6 @@ def create_coordination_app() -> typer.Typer:
             kind = "redirect" if message.redirect else "message"
             typer.echo(f"[{kind} by {message.door}] {message.text}")
 
-    return app
-
     @app.command("holdings")
     def holdings_cmd() -> None:
         """List what each live session in this repository is holding.
@@ -238,3 +239,59 @@ def create_coordination_app() -> typer.Typer:
     ) -> None:
         """Give a prefix back, which does nothing unless this session held it."""
         peers().release(member_id, prefix.resolve())
+
+    @app.command("watch")
+    def watch_cmd(
+        member_id: Annotated[
+            str,
+            typer.Option(
+                "--id", help="Follow one session's mail; everyone's by default"
+            ),
+        ] = "",
+        interval: Annotated[
+            float, typer.Option("--interval", help="Seconds between looks")
+        ] = 2.0,
+        nudge: Annotated[
+            bool,
+            typer.Option(
+                "--nudge",
+                help="Wake a member that has new mail, where its runtime allows",
+            ),
+        ] = False,
+        as_run: Annotated[
+            Path | None,
+            typer.Option(
+                "--as-run",
+                help="Run as a pipeline landing in this directory, until the roster is empty",
+            ),
+        ] = None,
+    ) -> None:
+        """Stream what changes: who arrives and leaves, what they are on, what reaches them.
+
+        Nothing is consumed. Mail is read the way a peek reads it, so a person
+        watching a peer's inbox is not the reason the peer never saw it. The
+        first look is a baseline — the live roster and the waiting mail once —
+        rather than a replay.
+
+        `--as-run` is the unattended form: the same watcher declared as a run,
+        so it survives whoever launched it, is followed with `run monitor
+        <dir> --events`, and lands when there is nobody left to watch. It
+        nudges, because a process nobody reads exists to act.
+        """
+        root = project_root()
+        if as_run is not None:
+            summary = watcher_pipeline(
+                root, member=member_id, interval=interval, nudge=True
+            ).execute(RunRequest(directory=as_run))
+            typer.echo(f"watch ended: {summary.landed} landed")
+            return
+        watcher = Watcher(
+            RepositoryPeers(root), root=root, member=member_id, nudge=nudge
+        )
+        try:
+            for event in watcher.follow(interval=interval):
+                typer.echo(event.line())
+        except KeyboardInterrupt:
+            return
+
+    return app

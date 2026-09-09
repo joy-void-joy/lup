@@ -33,6 +33,10 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `coordination leave` | Record that a session has stopped, so nothing addresses it again. |
 | `coordination send` | Send one message to a peer, and say what will carry it there. |
 | `coordination inbox` | Read what is queued for one session, consuming it only when asked. |
+| `coordination holdings` | List what each live session in this repository is holding. |
+| `coordination lock` | Take everything beneath a prefix, before having touched any of it. |
+| `coordination release` | Give a prefix back, which does nothing unless this session held it. |
+| `coordination watch` | Stream what changes: who arrives and leaves, what they are on, what reaches them. |
 
 ## `dev`
 
