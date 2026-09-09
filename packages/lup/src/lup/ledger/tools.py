@@ -27,6 +27,7 @@ from lup.ledger.cite import read_cites
 from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.kinds import by_kind
 from lup.ledger.models import LedgerEdge, LedgerNode
+from lup.ledger.store import LedgerPlacement, SharedStore
 from lup.ledger.views import (
     EdgeView,
     KindsView,
@@ -122,13 +123,14 @@ def create_ledger_tools(
     author: ActorRef,
     classes: list[type[LedgerNode]],
     edges: list[type[LedgerEdge]],
+    placement: LedgerPlacement = SharedStore(),
 ) -> list[LupMcpTool]:
     """The ledger verbs, bound to one working tree, one author, and its kinds."""
     node_kinds = by_kind(classes)
     edge_kinds = by_kind(edges)
 
     def store() -> LedgerStore:
-        return LedgerStore(root, author)
+        return LedgerStore(root, author, placement)
 
     def found(held: LedgerStore, spelling: str) -> LedgerNode:
         node = held.resolve(spelling, classes)

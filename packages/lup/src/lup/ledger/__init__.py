@@ -6,7 +6,8 @@ because every worktree holds one; a stored status keeps its label after the
 support for it goes away. This is the mechanism that avoids all three, and it
 is deliberately only the mechanism.
 
-- :mod:`lup.ledger.store` — the one address, outside every worktree.
+- :mod:`lup.ledger.store` — where the log lives: shared under the git
+  directory, or declared in the tree.
 - :mod:`lup.ledger.models` — the two bases every node and edge type extends.
 - :mod:`lup.ledger.journal` — the log, and the typed reads over it.
 - :mod:`lup.ledger.blobs` — bytes a node attaches, under their own digest.

@@ -12,6 +12,7 @@ puts its own answer.
 from lup.coordination.handoffs import Handoff, Transfers
 from lup.coordination.tasks import Blocks, Task
 from lup.ledger.models import LedgerEdge, LedgerNode
+from lup.ledger.store import LedgerPlacement, SharedStore
 from lup_template.corpus import (
     Answers,
     Artifact,
@@ -26,6 +27,12 @@ from lup_template.corpus import (
     Supports,
     Verifies,
 )
+
+# lup: template: decide where this project keeps its ledger — `SharedStore()`
+# under the git directory every worktree shares, or `InTree()` committed with
+# the code, reviewed in a diff, merged by union and the same on every machine
+PLACEMENT: LedgerPlacement = SharedStore()
+"""Where this repository's log lives, read by every surface that opens it."""
 
 # lup: ignore[constant-declaration] — what this repository records, which is a
 # declaration about this project and not a default an adopter tunes

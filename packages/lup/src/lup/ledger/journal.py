@@ -35,7 +35,7 @@ from lup.channels.models import utc_now
 from lup.coordination.refs import ActorRef
 from lup.ledger.blobs import Blobs
 from lup.ledger.models import LedgerEdge, LedgerNode, Standing, Surroundings
-from lup.ledger.store import JOURNAL_FILE, ledger_root
+from lup.ledger.store import JOURNAL_FILE, LedgerPlacement, SharedStore, ledger_root
 from lup.types import JsonObject, JsonValue
 
 
@@ -78,10 +78,17 @@ class LedgerStore:
     it at once and none of them has to be running for the others to work.
     """
 
-    def __init__(self, root: Path, author: ActorRef) -> None:
-        self.root = ledger_root(root)
+    def __init__(
+        self,
+        root: Path,
+        author: ActorRef,
+        placement: LedgerPlacement = SharedStore(),
+    ) -> None:
+        self.root = ledger_root(root, placement)
         self.project = root
         """The tree this store was opened from, which evidence stands against."""
+        self.placement = placement
+        """Where the log is kept, as the project declared it."""
         self.author = author
         self.blobs = Blobs(self.root)
 

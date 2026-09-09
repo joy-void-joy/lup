@@ -45,7 +45,7 @@ from lup.devtools.dev.commands import write_command_reference
 from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
 from lup.devtools.roster import DevtoolsDeclarations
-from lup_template.kinds import EDGE_KINDS, NODE_KINDS
+from lup_template.kinds import EDGE_KINDS, NODE_KINDS, PLACEMENT
 from lup_template.writeups import WRITEUPS
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
@@ -111,11 +111,13 @@ DECLARATIONS = DevtoolsDeclarations(
         else None
     ),
     profiles=profile_directory(),
-    # What this repository records, declared once in `lup_template.kinds`
-    # because the tool group a session records through reads the same list.
+    # What this repository records and where, declared once in
+    # `lup_template.kinds` because the tool group a session records through
+    # reads the same list and opens the same log.
     node_classes=NODE_KINDS,
     edge_classes=EDGE_KINDS,
     writeups=WRITEUPS,
+    ledger=PLACEMENT,
 )
 """What this repository tells the library's roster about itself.
 

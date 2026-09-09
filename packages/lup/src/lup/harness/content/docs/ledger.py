@@ -61,6 +61,23 @@ Nothing is rewritten in place, so two sessions appending at once produce a
 longer file rather than a lost record, and a malformed line is skipped rather
 than fatal.
 
+That is the default placement, `SharedStore()`, and a project may declare
+the other: `InTree()` keeps the log inside the worktree, at `ledger/` unless
+told otherwise, so the journal travels with commits, is reviewed in a diff,
+and is the same on every machine. Every worktree then holds a copy — the
+failure the shared store answers — and what makes that viable is the shape
+already chosen: append-only lines with unique ids, so two branches appending
+is exactly what git's own `union` merge resolves losslessly, declared as
+`ledger/journal.jsonl merge=union` in `.gitattributes` with no per-clone
+registration, and a read folds any duplicate by id. Blobs are
+content-addressed and never conflict. `dev check` reports the placement and
+refuses an in-tree journal the attribute does not cover. A forge merging on
+its server reads no attributes, so there two branches that both appended
+show a conflict, resolved by taking both sides. A symlink does not do this
+job — git stores a link as its target text — and the placement is a
+declaration in the code rather than a per-worktree setting, so two checkouts
+of one branch cannot disagree about where the log is.
+
 ## Standing is read, never stored
 
 A stored status is a label that outlives whatever justified it. The evidence
@@ -107,13 +124,15 @@ the scaffold's corpus (`docs/corpus.md`) is one project's answer, declared in
 its `node_classes` beside its tasks, and a project that wants its own declares
 its own types the same way.
 
-## The store is untracked
+## The shared store is untracked
 
-Nodes accumulate as work happens and nobody reviews a diff of them. `dev
-ledger snapshot` commits the tree to a branch of its own, sharing no history
-with the code it is about, when somebody wants it preserved — a deliberate act
-rather than something that happens on every write. It is written with git
-plumbing over a scratch index, so it never stages uncommitted work.
+Under the shared store, nodes accumulate as work happens and nobody reviews a
+diff of them. `dev ledger snapshot` commits the tree to a branch of its own,
+sharing no history with the code it is about, when somebody wants it
+preserved — a deliberate act rather than something that happens on every
+write. It is written with git plumbing over a scratch index, so it never
+stages uncommitted work. With the log in the tree it is committed with the
+code, and `snapshot` says so rather than copying what git already keeps.
 
 ## Reading it
 
@@ -173,11 +192,14 @@ costs. `Stamp` says what the document was generated from, naming the newest
 record rather than the clock, so one log renders one document.
 
 `ledger writeup` writes every declared document, and `--check` verifies the
-file on disk against this machine's log. They are not drift-checked by `dev
-check`, deliberately: the log is live state under the git directory, so the
-same declaration renders differently where nothing has been recorded. What
-keeps a writeup honest everywhere is that every figure in it is a `lup:` cite,
-which the cite check holds to its node wherever the log is.
+file on disk against this machine's log. Under the shared store they are not
+drift-checked by `dev check`, deliberately: the log is live state under the
+git directory, so the same declaration renders differently where nothing has
+been recorded. What keeps a writeup honest everywhere is that every figure in
+it is a `lup:` cite, which the cite check holds to its node wherever the log
+is. With the log in the tree every machine renders the same document, so the
+writeups join the drift-checked generation: `harness generate all` writes
+them and `dev check` refuses one that is behind.
 
 ## Standing reaches through the log
 

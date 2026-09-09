@@ -117,7 +117,7 @@ def build_session_toolset(
     from lup.coordination.peer_tools import create_peer_tools
     from lup.coordination.repository import RepositoryPeers
     from lup.ledger.tools import create_ledger_tools
-    from lup_template.kinds import EDGE_KINDS, NODE_KINDS
+    from lup_template.kinds import EDGE_KINDS, NODE_KINDS, PLACEMENT
     from lup.tools.lsp.tools import create_codeintel_tools
     from lup.workspace.paths import project_root
     from lup_template.agent.config import aux_model
@@ -169,7 +169,7 @@ def build_session_toolset(
         # same reason the group waits on one: a record with no author is
         # provenance nobody can read, which is worse than no record.
         groups[LEDGER_GROUP] = create_ledger_tools(
-            working, member_ref(member), NODE_KINDS, EDGE_KINDS
+            working, member_ref(member), NODE_KINDS, EDGE_KINDS, PLACEMENT
         )
 
     groups[EXAMPLE_GROUP] = list(EXAMPLE_TOOLS)

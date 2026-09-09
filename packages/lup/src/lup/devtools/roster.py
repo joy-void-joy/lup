@@ -23,6 +23,7 @@ cannot disagree.
 """
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import typer
@@ -31,7 +32,8 @@ from pydantic import BaseModel
 from lup.devtools.coordination.app import create_coordination_app
 from lup.devtools.ledger.app import create_ledger_app
 from lup.ledger.models import LedgerEdge, LedgerNode
-from lup.ledger.writeup import Writeup
+from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.writeup import Writeup, write_writeup
 from lup.devtools.dev.app import create_dev_app
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.feedback.app import create_feedback_app
@@ -124,9 +126,28 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
     writeups: list[Writeup] = []
     """The documents this project generates from its ledger.
 
-    Declared in Python the way guidance is, and written by `ledger writeup`
-    rather than by the drift-checked generation, because the ledger is live
-    state each machine holds its own copy of."""
+    Declared in Python the way guidance is, and written by `ledger writeup`.
+    Under the shared store that is the only way they are written, because the
+    ledger is live state each machine holds its own copy of; with the log in
+    the tree they join the drift-checked generation as well, since every
+    machine then renders the same document."""
+
+    ledger: LedgerPlacement = SharedStore()
+    """Where this project keeps its log.
+
+    Shared under the git directory every worktree resolves to, which is the
+    default and the answer to a ledger that forks; or `InTree`, committed with
+    the code and merged by union, where a project wants its record reviewed
+    in a diff and identical on every machine. The store, the console, the
+    tool group, the explorer and the gate all read this one declaration."""
+
+    def writers(self) -> list[RepositoryWriter]:
+        """Every generated file outside a native tree, the writeups among them
+        where the log they render from is in the tree."""
+        return [
+            *self.repository_writers,
+            *writeup_writers(self.ledger, self.writeups, self.node_classes),
+        ]
 
     def roster(self, retired: list[str] | None = None) -> list[SubApp]:
         """Every sub-app the library ships, wired over these declarations.
@@ -149,6 +170,27 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
             for entry in LIBRARY_ROSTER
             if entry.spec.name not in declined
         ]
+
+
+def writeup_writers(
+    placement: LedgerPlacement,
+    writeups: list[Writeup],
+    classes: list[type[LedgerNode]],
+) -> list[RepositoryWriter]:
+    """The writeups as generated files, where the log they render from is in the tree.
+
+    A writeup rendered from a log every machine holds identically is a
+    generated file like any other, so it joins the drift-checked generation:
+    `harness generate all` writes it and `dev check` refuses one that is
+    behind. Under a shared store it stays `ledger writeup`'s alone, since the
+    same declaration renders differently where nothing was recorded.
+    """
+    if not placement.tracked():
+        return []
+    return [
+        partial(write_writeup, writeup, classes, placement=placement)
+        for writeup in writeups
+    ]
 
 
 class RosterEntry(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -203,7 +245,10 @@ LIBRARY_ROSTER = [
             help="Read and preserve the notes this repository has recorded",
         ),
         build=lambda declared: create_ledger_app(
-            declared.node_classes, declared.edge_classes, declared.writeups
+            declared.node_classes,
+            declared.edge_classes,
+            declared.writeups,
+            declared.ledger,
         ),
     ),
     RosterEntry(
@@ -213,10 +258,11 @@ LIBRARY_ROSTER = [
         build=lambda declared: create_dev_app(
             declared=declared.dev,
             native_targets=declared.targets,
-            repository_writers=declared.repository_writers,
+            repository_writers=declared.writers(),
             relocate_roots=declared.relocate_roots,
             usage_entries=declared.usage_entries,
             node_classes=declared.node_classes,
+            ledger=declared.ledger,
         ),
     ),
     RosterEntry(
@@ -235,7 +281,7 @@ LIBRARY_ROSTER = [
         ),
         build=lambda declared: create_harness_app(
             declared.targets,
-            declared.repository_writers,
+            declared.writers(),
             declared.model,
             declared.profiles,
             declared.launch_modes,
