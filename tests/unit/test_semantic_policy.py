@@ -60,6 +60,7 @@ from lup.policy.kernel.decision import (
     SandboxPlacement,
     sandbox_escaped,
 )
+from lup.policy.kernel.commands import decide_command_rows, decide_uv
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import (
     PathRoleRow,
@@ -100,7 +101,7 @@ from lup.policy.rules import (
     path_rule_row,
 )
 
-from lup.policy.vocabulary import runner_target_rules
+from lup.policy.vocabulary import bun_rule, runner_target_rules
 from lup_template.harness.catalog import (
     application_roots,
     declared_hook_set,
@@ -486,6 +487,24 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="find . -name '*.py' | xargs grep TODO", effect="allow"),
     DecisionCase(input="echo x | xargs rm -rf", effect="ask"),
     DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),
+    # A frozen restore fetches nothing the lockfile does not pin by integrity
+    # hash, which is what `uv run` restores before running, unasked; the
+    # forms free to rewrite a lockfile resolve anew and keep asking, as does
+    # a frozen one pointed at a source this project never declared.
+    DecisionCase(input="uv sync --frozen", effect="allow"),
+    DecisionCase(input="uv sync --locked", effect="allow"),
+    DecisionCase(input="uv sync --locked --all-extras", effect="allow"),
+    DecisionCase(input="uv sync", effect="ask"),
+    DecisionCase(input="uv sync --all-extras", effect="ask"),
+    DecisionCase(input="uv sync --frozen --index-url https://x", effect="ask"),
+    DecisionCase(input="uv sync --frozen $FLAG", effect="ask"),
+    DecisionCase(input="uv add httpx", effect="ask"),
+    DecisionCase(input="bun install --frozen-lockfile", effect="allow"),
+    DecisionCase(input="bun install", effect="ask"),
+    DecisionCase(input="bun install --frozen-lockfile $FLAG", effect="ask"),
+    DecisionCase(input="bun add zod", effect="ask"),
+    DecisionCase(input="bun test", effect="allow"),
+    DecisionCase(input="bun run build", effect="allow"),
     DecisionCase(input="git status\ncurl https://example.com", effect="ask"),
     DecisionCase(input="find . -name '*.tmp' -delete", effect="ask"),
     DecisionCase(input="cat x |& rm -rf ~", effect="ask"),
@@ -4336,12 +4355,12 @@ def test_installing_asks_and_the_verbs_that_fetch_nothing_do_not() -> None:
     """Where the line sits, and that clearing a cache was never on it.
 
     Fetching a package runs its build code, which is the escape a
-    supply-chain compromise arrives through — so both verbs that install ask,
-    and the packages having been declared earlier does not answer it, because
-    what changed is what the index now serves. Writing a lockfile and
-    dropping a dependency fetch nothing to execute, and a cache is rebuilt by
-    the command that reads it. That verb reached no rule at all, which is why
-    a refresh line asked with it among the reasons.
+    supply-chain compromise arrives through — so the verbs that resolve anew
+    ask: an add, and a sync free to rewrite the lockfile. A sync pinned by
+    its lockfile is the other side of the line, allowed with the reason
+    `uv run` earns, since it fetches nothing the lock does not pin by
+    integrity hash. Writing a lockfile and dropping a dependency fetch
+    nothing to execute, and a cache is rebuilt by the command that reads it.
     """
     policy = ShellPolicy(SHELL_RULES)
 
@@ -4350,9 +4369,40 @@ def test_installing_asks_and_the_verbs_that_fetch_nothing_do_not() -> None:
 
     assert effect("uv add httpx") == "ask"
     assert effect("uv sync --all-extras") == "ask"
+    assert effect("uv sync --frozen") == "allow"
+    assert effect("uv sync --locked --all-extras") == "allow"
     assert effect("uv lock --upgrade-package lup") == "allow"
     assert effect("uv cache clean lup") == "allow"
     assert effect("uv remove ruff") == "allow"
+
+
+def test_a_frozen_restore_is_allowed_for_every_package_manager_alike() -> None:
+    """One judgement, stated once, reached from the row walk and the uv parser.
+
+    The bun row reaches it through `frozen_flags`, uv through its own
+    parser, and both say the same sentence: what `uv run` restores before
+    running is what a frozen install restores, so asking about one and not
+    the other was the same act answered two ways. Bare, the install stays a
+    question whose reason names the frozen spelling that is not one.
+    """
+    pinned = (
+        "a frozen lockfile pins every package to what this project already declares"
+    )
+    bun_rows = erase_shell_rules([bun_rule()])
+
+    assert decide_uv(["uv", "sync", "--frozen"], []).reason == pinned
+    assert decide_uv(["uv", "sync", "--locked"], []).reason == pinned
+    assert decide_uv(["uv", "sync"], []).effect == "ask"
+    assert decide_uv(["uv", "sync", "--frozen", "--index-url", "x"], []).effect == "ask"
+
+    bun = decide_command_rows(["bun", "install", "--frozen-lockfile"], bun_rows)
+    assert (bun.effect, bun.reason) == ("allow", pinned)
+    bare = decide_command_rows(["bun", "install"], bun_rows)
+    assert bare.effect == "ask"
+    assert "free to rewrite the lockfile" in bare.reason
+    assert "`--frozen-lockfile`" in bare.reason
+    added = decide_command_rows(["bun", "add", "zod"], bun_rows)
+    assert added.effect == "ask" and "adding a dependency" in added.reason
 
 
 def test_a_verb_pointed_at_another_index_is_not_the_verb_it_rides_on() -> None:

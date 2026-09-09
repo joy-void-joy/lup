@@ -2007,11 +2007,13 @@ def bun_rule() -> ShellCommandRule:
     `--eval`, `-p`, a bare `-` reading stdin, and on a sibling runtime an
     `eval` *subcommand* that no flag list could have caught.
 
-    The split between allow and ask is what a verb does to the manifest
-    rather than to the filesystem: restoring dependencies somebody already
-    declared is the ordinary case, while adding one, removing one, or
-    fetching a package that is not declared at all changes what this project
-    depends on and is worth a question.
+    The split between allow and ask is what a verb does to the lockfile
+    rather than to the filesystem: restoring what it already pins, as
+    `install --frozen-lockfile` does, is the ordinary case and the act
+    `uv run` performs unasked, while an install free to rewrite the lock,
+    adding a dependency, removing one, or fetching a package that is not
+    declared at all changes what this project depends on and is worth a
+    question.
     """
     return ShellCommandRule(
         name="bun",
@@ -2024,18 +2026,21 @@ def bun_rule() -> ShellCommandRule:
         # the default deny, which is the wrong answer for a pure read.
         allow_flags=["--version", "--revision"],
         subcommands=[
-            # Turns a lockfile into code on disk, which is what `uv sync` and
-            # `npm ci` do -- and both of those already ask. Allowing here was
-            # the same act answered two ways, and a lock pins a version rather
-            # than vouching for it: what a sync fetches is as unreviewed as
-            # what an add fetches, and a pin written before a release was
-            # compromised resolves to the compromised artefact unchanged.
+            # Turns a lockfile into code on disk. Bare, it is free to rewrite
+            # the lockfile first wherever the manifest moved, which resolves
+            # what this project depends on anew and asks the way `uv sync`
+            # does. Frozen, it fetches nothing the lock does not pin by
+            # integrity hash — the restore `uv run` performs before running,
+            # and the one the gate performs before `bun test` — so the flag
+            # answers it, on the terms `uv sync --frozen` is answered.
             ShellSubcommandRule(
                 name="install",
                 effects=[declare("materializes_lockfile", scope="bun lockfile")],
                 refuses="",
-                reason="restoring declared dependencies fetches code this"
-                " project has not reviewed — requires approval",
+                frozen_flags=["--frozen-lockfile"],
+                reason="an install free to rewrite the lockfile resolves what"
+                " this project depends on anew — requires approval; a frozen"
+                " one (`--frozen-lockfile`) restores what it already pins",
             ),
             *[
                 ShellSubcommandRule(

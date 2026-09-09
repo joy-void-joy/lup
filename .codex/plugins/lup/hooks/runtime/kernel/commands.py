@@ -382,6 +382,33 @@ def unresolved_evidence(facts: WriteFacts) -> EffectEvidence:
     )
 
 
+def frozen_restore(
+    arguments: list[str], frozen_flags: list[str], guarded: list[str]
+) -> KernelDecision | None:
+    """The allow a dependency restore earns when a frozen flag pins it.
+
+    One judgement for every package manager, which is why it is a function
+    the row walk and the uv parser both reach rather than a sentence each
+    carries: a restore that may not touch the lockfile fetches nothing the
+    lock does not already pin by integrity hash, which is what `uv run`
+    fetches before running anything, unasked. The flag has to be legible and
+    stand among unguarded words, on the terms a read verb is honored — an
+    unresolved expansion might be a guarded flag, and a guarded flag beside
+    the freeze would still act. Nothing pinned answers ``None``, leaving the
+    row's own verdict to stand.
+    """
+    if not arguments or not frozen_flags:
+        return None
+    if any(opaque_argument(word) or flag_matches(word, guarded) for word in arguments):
+        return None
+    if not any(word in frozen_flags for word in arguments):
+        return None
+    return KernelDecision(
+        "allow",
+        "a frozen lockfile pins every package to what this project already declares",
+    )
+
+
 def apply_command_row(
     row: ShellRuleRow, arguments: list[str], facts: WriteFacts | None = None
 ) -> KernelDecision:
@@ -396,7 +423,10 @@ def apply_command_row(
     verb pins the invocation to its query action. One with ``probe_flags``
     de-escalates on a literal probe flag even beside guarded words, because
     the dry-run form performs none of what they guard — destination grammar
-    alone stands, being about where the probe reaches. One with ``write_markers``
+    alone stands, being about where the probe reaches. One with ``frozen_flags``
+    de-escalates on a literal frozen flag among unguarded words, because a
+    restore that may not touch the lockfile fetches only what it already
+    pins. One with ``write_markers``
     states that de-escalation negatively, for a command whose read-only form
     is the one carrying nothing extra: it allows when no legible word carries
     a marker. One with ``bare_reads`` carries that to its limit, for a command
@@ -457,6 +487,10 @@ def apply_command_row(
             return row_verdict(
                 row, "allow", "a declared read-only verb pins the query action"
             )
+    if stated != "allow":
+        pinned = frozen_restore(arguments, row["frozen_flags"], row["ask_flags"])
+        if pinned is not None:
+            return row_verdict(row, pinned.effect, pinned.reason)
     # Unlike a read verb, a probe stands beside guarded flags: what they guard
     # is an effect the dry-run form does not perform. Only the literal
     # spelling counts — a cluster (`git clean -fdn`) keeps the row's effect,
@@ -1255,6 +1289,17 @@ that pins its own index, or that has a reason to build without isolation,
 says so by naming a different set here.
 """
 
+UV_FROZEN_FLAGS = ("--frozen", "--locked")
+"""The spellings under which `uv sync` may not touch the lockfile.
+
+Both restore exactly what the lock pins — `--frozen` without reading the
+manifest again, `--locked` refusing where the lock is behind it — which is
+the restore `uv run` performs before running anything. The spellings are
+uv's; that they answer the install question is the judgement
+:func:`frozen_restore` states, so a project reading the flags differently
+names a different set here.
+"""
+
 
 def uv_package_source(
     arguments: list[str], guarded: tuple[str, ...] = UV_FOREIGN_SOURCE_FLAGS
@@ -1285,6 +1330,7 @@ def decide_uv(
     runner_targets: list[RunnerTargetRow],
     target_tables: list[ShellRuleRow] | None = None,
     facts: WriteFacts | None = None,
+    frozen: tuple[str, ...] = UV_FROZEN_FLAGS,
 ) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms.
 
@@ -1301,13 +1347,16 @@ def decide_uv(
     hands them on to the walk that reads it. Nothing measured is the cautious
     reading rather than the permissive one.
 
-    Installing is where a decision was asked for and refused. Fetching a
-    package runs its build code, and that code is the escape a supply-chain
-    compromise arrives through — so `add` and `sync` both ask, and the fact
-    that the packages were declared earlier does not answer it, because the
-    thing that changed is not the declaration but what the index now serves
-    under it. What is written down here rather than re-argued: the verb that
-    reaches the network to install is a question, every time.
+    Installing is where the line sits. Fetching a package runs its build
+    code, and that code is the escape a supply-chain compromise arrives
+    through — so `add`, and a `sync` free to rewrite the lockfile, both ask:
+    each resolves anew, and what the index serves under a name today is not
+    what was reviewed when the name was declared. A sync pinned by one of
+    ``frozen`` is the other side of that line, and :func:`frozen_restore`
+    says why once for every package manager: it fetches nothing the lock
+    does not already pin by integrity hash, which is exactly what `uv run`
+    restores before running anything, unasked. Asking about the frozen
+    spelling and not about the run was the same act answered two ways.
 
     Two verbs sit below that line and one sat above it by omission. `lock`
     and `remove` write files and fetch nothing to execute. A cache is
@@ -1326,6 +1375,10 @@ def decide_uv(
     """
     measured = no_write_facts() if facts is None else facts
     subcommand = words[1]
+    if subcommand == "sync" and uv_package_source(words[2:]) is None:
+        pinned = frozen_restore(words[2:], list(frozen), list(UV_FOREIGN_SOURCE_FLAGS))
+        if pinned is not None:
+            return pinned
     if subcommand in ("add", "sync"):
         return KernelDecision(
             "ask", "installing a package fetches and runs its build code"

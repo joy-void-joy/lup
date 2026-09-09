@@ -608,12 +608,14 @@ class InstallsDependency(Effect):
 
 
 class MaterializesLockfile(Effect):
-    """Turning a lockfile into code on disk.
+    """Turning a lockfile into code on disk, where the lockfile may move first.
 
-    Asks alongside the install it completes. A lock pins a version rather than
-    vouching for it, so the code a sync fetches is as unreviewed as the code an
-    add fetches -- and a pin written before a release was compromised resolves
-    to the compromised artefact without the manifest changing a byte.
+    Asks alongside the install it completes: an install whose lockfile is not
+    frozen resolves anew wherever the manifest moved, and what the index
+    serves under a name today is not what was reviewed when the name was
+    declared. The frozen spelling is the de-escalation ``frozen_flags``
+    names -- it fetches nothing the lock does not pin by integrity hash,
+    which is the restore `uv run` performs before running anything, unasked.
     """
 
     kind = "materializes_lockfile"

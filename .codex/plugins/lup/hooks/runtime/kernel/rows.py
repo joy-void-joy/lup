@@ -290,6 +290,11 @@ class ShellRuleRow(TypedDict):
     its verdict past its ``ask_flags`` and ``ask_refspecs``. Destination
     grammar still asks: a probe still contacts the repository it names, and
     where the work would land is guarded as a place, not as a write.
+    ``frozen_flags`` name the flags that pin a dependency restore to what its
+    lockfile already declares (``bun install --frozen-lockfile``): a non-allow
+    row de-escalates to allow when one appears among literal words free of
+    guarded flags, because a frozen restore fetches nothing the lock does not
+    pin by integrity hash — the restore ``uv run`` performs unasked.
     ``write_markers`` are the same
     de-escalation stated negatively, for a command whose read-only form is the
     one with nothing extra in it (``dd if=x`` with no ``of=``): a non-allow row
@@ -453,6 +458,7 @@ class ShellRuleRow(TypedDict):
     allow_flags: list[str]
     read_verbs: list[str]
     probe_flags: list[str]
+    frozen_flags: list[str]
     write_markers: list[str]
     guarded_keys: list[str]
     setting_flags: list[str]
@@ -483,6 +489,7 @@ type ShellRowField = Literal[
     "allow_flags",
     "read_verbs",
     "probe_flags",
+    "frozen_flags",
     "write_markers",
     "guarded_keys",
     "setting_flags",
@@ -535,6 +542,7 @@ def shell_row_values(
         "allow_flags": row["allow_flags"],
         "read_verbs": row["read_verbs"],
         "probe_flags": row["probe_flags"],
+        "frozen_flags": row["frozen_flags"],
         "write_markers": row["write_markers"],
         "guarded_keys": row["guarded_keys"],
         "setting_flags": row["setting_flags"],
