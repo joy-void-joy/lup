@@ -1,6 +1,12 @@
-<!-- Generated from lup_template.harness.content.docs.corpus by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+"""This repository's corpus: a body of claims, what backs each, and what retired it."""
 
-# Corpus
+import lup.harness.models as models
+
+DOCUMENT = models.PromptDocument(
+    source=__name__,
+    parts=[
+        models.TextPart(
+            text=r"""# Corpus
 
 A corpus is a body of claims somebody is prepared to be held to, together with
 the evidence that backs each one and the corrections that have since retired
@@ -142,3 +148,7 @@ uv run lup-devtools ledger relate corpus:supports <artifact> quote-depth-two
 uv run lup-devtools ledger relate corpus:rests_on <dependant> quote-depth-two
 uv run lup-devtools ledger show quote-depth
 ```
+"""
+        )
+    ],
+)

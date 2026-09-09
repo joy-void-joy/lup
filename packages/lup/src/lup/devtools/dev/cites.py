@@ -1,7 +1,7 @@
 """Every cite in every tracked document, held to what its node says now.
 
 The gate's half of the cite check. The reading itself is
-:mod:`lup.corpus.cite`, which takes text and a store and knows nothing about
+:mod:`lup.ledger.cite`, which takes text and a store and knows nothing about
 files or git; this is what walks the tracked markdown, hands each file over,
 and folds what came back into the one report `dev check` prints. Split that
 way so the same reading answers a command over one document and a test over

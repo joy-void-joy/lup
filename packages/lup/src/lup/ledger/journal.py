@@ -168,13 +168,19 @@ class LedgerStore:
 
         return list(matching())
 
-    def around(self, node: LedgerNode, classes: list[type[LedgerNode]]) -> Surroundings:
+    def around(
+        self,
+        node: LedgerNode,
+        classes: list[type[LedgerNode]],
+        reader: "StandingReader | None" = None,
+    ) -> Surroundings:
         """One node's neighbourhood, resolved once for whoever is asking it.
 
         The far ends come back as the most specific declared class that
         accepts them, so a neighbour is asked its own answer rather than the
         base's — a blocker reads as finished because it is a ``Task`` and
-        knows what that means.
+        knows what that means. A reader, where one is passed, lets a type ask
+        a neighbour's standing as deep as the log goes rather than one hop.
         """
         incoming = self.into(node.id)
         outgoing = self.out_of(node.id)
@@ -188,7 +194,36 @@ class LedgerStore:
                 if (found := self.resolve(other, classes)) is not None
             ],
             root=self.project,
+            standing_of=reader,
         )
+
+    def moved_since(self, since: datetime, ids: list[str] | None = None) -> list[str]:
+        """Which nodes have a record after this moment — theirs, or an edge touching them.
+
+        Read off the log's own timestamps rather than off any stored standing,
+        because standing is never stored: "moved" means the log grew around
+        the node, which is the one thing an append-only file can say exactly.
+        Narrowed to ``ids`` where given, in that order; every node otherwise.
+        """
+        marker = since if since.tzinfo is not None else since.astimezone()
+
+        def touched() -> Iterator[str]:
+            for line in self.lines():
+                if (
+                    "at" not in line
+                    or datetime.fromisoformat(str(line["at"])) <= marker
+                ):
+                    continue
+                if "id" in line:
+                    yield str(line["id"])
+                if "source" in line and "target" in line:
+                    yield str(line["source"])
+                    yield str(line["target"])
+
+        moved = dict.fromkeys(touched())
+        if ids is None:
+            return list(moved)
+        return [node_id for node_id in ids if node_id in moved]
 
     def into(self, node_id: str) -> list[LedgerEdge]:
         """Every edge pointing at one node, which is what standing is read from.
@@ -215,9 +250,30 @@ class LedgerStore:
         The author is stamped again, so a node amended by somebody other than
         whoever wrote it says who last touched it.
         """
+        holder = self.slug_holder(node.slug)
+        if holder and holder != node.id:
+            raise LedgerRefusal(f"slug {node.slug!r} already names {holder}")
         restamped = node.model_copy(update={"author": self.author})
         self.append(restamped)
         return restamped
+
+    def slug_holder(self, slug: str) -> str:
+        """The id a slug already names, or nothing where it is free.
+
+        A slug is a handle people type, so two nodes answering to one would
+        make every cite and every command ambiguous; the check is at write time
+        because a read that picked one silently would be the ambiguity.
+        """
+        if not slug:
+            return ""
+        return next(
+            (
+                str(line["id"])
+                for line in self.lines()
+                if "id" in line and "slug" in line and line["slug"] == slug
+            ),
+            "",
+        )
 
     def resolve(
         self, node_id: str, classes: list[type[LedgerNode]]
@@ -228,12 +284,18 @@ class LedgerStore:
         needed: an edge names an id and not what is at the other end, so
         something has to try. A record no class accepts comes back as the base
         — which happens for a type this build does not declare, and is why it
-        is a fallback rather than a failure.
+        is a fallback rather than a failure. A slug resolves the same way an id
+        does, so every surface that takes one takes the other.
         """
+
+        def names(line: JsonObject) -> bool:
+            if "id" not in line:
+                return False
+            return line["id"] == node_id or ("slug" in line and line["slug"] == node_id)
 
         def versions() -> Iterator[LedgerNode]:
             for line in self.lines():
-                if "id" not in line or line["id"] != node_id:
+                if not names(line):
                     continue
                 for declared in classes:
                     try:
@@ -288,8 +350,13 @@ class LedgerStore:
         than lossy: a caller that names none gets a neighbourhood of base
         nodes, which decline every question a type would have answered. That
         is the reading a build lacking the declaring module would get anyway.
+
+        The reader is seeded with this node, so a chain of premises that comes
+        back round to it is reported as a cycle rather than followed forever.
         """
-        return node.standing(self.around(node, classes or []))
+        reader = StandingReader(self, classes or [])
+        reader.asking.append(node.id)
+        return node.standing(self.around(node, classes or [], reader=reader))
 
     def record[N: LedgerNode](
         self,
@@ -345,6 +412,9 @@ class LedgerStore:
                 "attachments": held,
             }
         )
+        holder = self.slug_holder(built.slug)
+        if holder:
+            raise LedgerRefusal(f"slug {built.slug!r} already names {holder}")
         # Derived fields are filled after validation and before the append,
         # so a type reads the tree exactly once and what lands is complete.
         prepared = built.prepared(self.project)
@@ -396,3 +466,39 @@ class LedgerStore:
             raise LedgerRefusal(refusal)
         self.append(built)
         return built
+
+
+class StandingReader:
+    """Where any node in one log stands, asked as deep as the log goes.
+
+    A claim resting on a claim resting on a refuted claim is unsound, and only
+    a reader that follows the chain can say so — a node's own neighbourhood is
+    one hop. Each answer is remembered, so a premise shared by twenty claims is
+    read once; and a chain that comes back round to a node still being asked
+    is reported as a cycle rather than followed forever.
+    """
+
+    def __init__(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> None:
+        self.store = store
+        self.classes = classes
+        self.settled: dict[str, Standing] = {}
+        self.asking: list[str] = []
+        """The ids whose standing is being read right now, outermost first."""
+
+    def __call__(self, node_id: str) -> Standing:
+        if node_id in self.settled:
+            return self.settled[node_id]
+        if node_id in self.asking:
+            return Standing(
+                label="cyclic",
+                reason=f"{node_id} depends on itself through {' -> '.join(self.asking)}",
+                sound=False,
+            )
+        node = self.store.resolve(node_id, self.classes)
+        if node is None:
+            return Standing(label="missing", reason=f"no node {node_id!r}", sound=False)
+        self.asking.append(node_id)
+        reading = node.standing(self.store.around(node, self.classes, reader=self))
+        self.asking.pop()
+        self.settled[node_id] = reading
+        return reading

@@ -169,6 +169,11 @@ def document(pages: list[models.Document]) -> models.PromptDocument:
                         "The architectural decisions behind the development "
                         "tooling, each stated against the current system.",
                     ),
+                    *page.rows(
+                        "docs.corpus",
+                        "This repository's corpus: claims, evidence, questions "
+                        "and corrections over the ledger, and how each stands.",
+                    ),
                 ],
             ),
         ],

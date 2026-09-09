@@ -127,15 +127,30 @@ def result_line(entry: Established, inline: bool) -> str:
     return f"- [{entry.grade}] {entry.statement}{source}"
 
 
-def render_brief(handoff: Handoff, tasks: list[Task], audience: Audience) -> str:
+def render_brief(
+    handoff: Handoff,
+    tasks: list[Task],
+    audience: Audience,
+    watched: list[str] | None = None,
+) -> str:
     """One handoff as its reader should meet it, in the order they need it.
 
-    Established results before open questions before dead ends, because that
-    is the order somebody picking work up asks: what is true, what is not
-    settled, and what has already been tried. The provenance stamp goes last,
-    where it is available and not in the way.
+    What moved comes first, because it is the one thing the receiver must
+    read before anything else: a premise that fell since the handoff makes
+    the established results below it suspect. Then established results before
+    open questions before dead ends, which is the order somebody picking work
+    up asks — what is true, what is not settled, what has already been tried.
+    The provenance stamp goes last, where it is available and not in the way.
+
+    ``watched`` is rendered by the caller, one line per watched node with its
+    standing and whether it moved, because reading standing takes the store
+    and this takes none.
     """
     lines = [f"# {handoff.title}", ""]
+    if watched:
+        lines.extend(["## Watched since this handoff", ""])
+        lines.extend(watched)
+        lines.append("")
     if handoff.text:
         lines.extend([handoff.text, ""])
     if handoff.to:

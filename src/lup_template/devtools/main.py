@@ -47,17 +47,20 @@ from lup.devtools.harness.resolve import ConfiguredModel
 from lup.coordination.handoffs import Handoff, Transfers
 from lup.coordination.tasks import Blocks, Task
 from lup.devtools.roster import DevtoolsDeclarations
-from lup.corpus.models import (
+from lup_template.corpus import (
+    Answers,
     Artifact,
     Certificate,
+    Claim,
     Correction,
+    Question,
     Refutes,
+    RestsOn,
     Source,
     Supersedes,
     Supports,
     Verifies,
 )
-from lup_template.corpus import Claim
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
 from lup_template.agent.config import engine_for_settings, settings
@@ -126,8 +129,26 @@ DECLARATIONS = DevtoolsDeclarations(
     # the adopted modules, because a union assembled at run time is not
     # one a type checker can narrow — and the console is the one reader
     # that needs the list at all.
-    node_classes=[Task, Handoff, Claim, Correction, Artifact, Certificate, Source],
-    edge_classes=[Blocks, Transfers, Supports, Refutes, Verifies, Supersedes],
+    node_classes=[
+        Task,
+        Handoff,
+        Question,
+        Claim,
+        Correction,
+        Artifact,
+        Certificate,
+        Source,
+    ],
+    edge_classes=[
+        Blocks,
+        Transfers,
+        Answers,
+        RestsOn,
+        Supports,
+        Refutes,
+        Verifies,
+        Supersedes,
+    ],
 )
 """What this repository tells the library's roster about itself.
 

@@ -14,7 +14,7 @@ from lup.coordination.refs import ActorRef
 from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.models import LedgerNode
 from lup.ledger.cite import cites_in, read_cites
-from lup.corpus.models import (
+from lup_template.corpus import (
     Artifact,
     Claim,
     Correction,
