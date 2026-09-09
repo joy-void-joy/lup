@@ -101,7 +101,7 @@ class SupervisorState(BaseModel, frozen=True):
 
     ``phases`` and ``statuses`` are served from the library enums rather
     than restated in the page, so adding a phase upstream cannot leave the
-    zero-build frontend silently out of date.
+    frontend silently out of date.
     """
 
     run_id: str

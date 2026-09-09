@@ -1,5 +1,51 @@
 {
   "$defs": {
+    "ActorIndex": {
+      "additionalProperties": false,
+      "description": "Every actor a run's record names, which is every trace it can open.",
+      "properties": {
+        "actors": {
+          "items": {
+            "$ref": "#/$defs/ActorRef"
+          },
+          "title": "Actors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "actors"
+      ],
+      "title": "ActorIndex",
+      "type": "object"
+    },
+    "ActorRef": {
+      "additionalProperties": false,
+      "description": "Which actor something belongs to.\n\nA round is part of the identity because the same worker on round two is a\ndifferent actor: it holds a different session, and a reader tracing a\ndecision needs to know which attempt they are looking at.\n\nHere rather than with the record it attributes, because addressing an\nactor is not the journal's business alone: the mailbox routes mail by the\nsame identity, and the two disagreeing about what named an actor is what\nmade a redirect reach nobody.\n\n``kind`` is an open string. The consumer names its own roles and validates\nthem at its own boundary \u2014 a closed set here would be every consumer's set\nat once, and adding a role to one would mean editing the layer underneath\nall of them.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "round": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Round",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "round"
+      ],
+      "title": "ActorRef",
+      "type": "object"
+    },
     "Answer": {
       "additionalProperties": false,
       "description": "One value that came back, against the field that asked for it.",
@@ -18,6 +64,414 @@
         "value"
       ],
       "title": "Answer",
+      "type": "object"
+    },
+    "AnswerSettledEvent": {
+      "additionalProperties": false,
+      "description": "A question took its answer, from whichever door supplied it.",
+      "properties": {
+        "answer": {
+          "$ref": "#/$defs/QuestionAnswer"
+        },
+        "door": {
+          "title": "Door",
+          "type": "string"
+        },
+        "type": {
+          "const": "answer_settled",
+          "default": "answer_settled",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "answer",
+        "door"
+      ],
+      "title": "AnswerSettledEvent",
+      "type": "object"
+    },
+    "AnswerSubmission": {
+      "additionalProperties": false,
+      "description": "Answers submitted from the browser, for any subset of the questions.",
+      "properties": {
+        "answers": {
+          "description": "One value per question being answered now",
+          "items": {
+            "$ref": "#/$defs/QuestionAnswer"
+          },
+          "title": "Answers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "answers"
+      ],
+      "title": "AnswerSubmission",
+      "type": "object"
+    },
+    "AnyTurnBlock": {
+      "discriminator": {
+        "mapping": {
+          "text": "#/$defs/TurnTextBlock",
+          "thinking": "#/$defs/TurnThinkingBlock",
+          "tool_call": "#/$defs/TurnToolCallBlock",
+          "tool_result": "#/$defs/TurnToolResultBlock"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TurnTextBlock"
+        },
+        {
+          "$ref": "#/$defs/TurnThinkingBlock"
+        },
+        {
+          "$ref": "#/$defs/TurnToolCallBlock"
+        },
+        {
+          "$ref": "#/$defs/TurnToolResultBlock"
+        }
+      ]
+    },
+    "BaseRefreshedEvent": {
+      "additionalProperties": false,
+      "description": "A lease made from here starts from the branch as it stands now.\n\nA run pinned to the commit it was created at cannot see a fix made to\nunblock it, and its workers reason about code that has already been\nreplaced \u2014 reaching careful conclusions that contradict decisions the\nrepository has already taken. Recorded whether it moved or not: a\nrefresh that could not be made cleanly is the reason the leases beside\nit are still where they were.",
+      "properties": {
+        "branch": {
+          "title": "Branch",
+          "type": "string"
+        },
+        "commit": {
+          "title": "Commit",
+          "type": "string"
+        },
+        "conflicts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Conflicts",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "type": {
+          "const": "base_refreshed",
+          "default": "base_refreshed",
+          "title": "Type",
+          "type": "string"
+        },
+        "was": {
+          "title": "Was",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "branch",
+        "was",
+        "commit",
+        "conflicts",
+        "reason"
+      ],
+      "title": "BaseRefreshedEvent",
+      "type": "object"
+    },
+    "BlockCompletedEvent": {
+      "additionalProperties": false,
+      "description": "One native content block completed.",
+      "properties": {
+        "block": {
+          "$ref": "#/$defs/AnyTurnBlock"
+        },
+        "identifiers": {
+          "$ref": "#/$defs/TurnIdentifiers"
+        },
+        "type": {
+          "const": "block_completed",
+          "default": "block_completed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "identifiers",
+        "block"
+      ],
+      "title": "BlockCompletedEvent",
+      "type": "object"
+    },
+    "BlockStartedEvent": {
+      "additionalProperties": false,
+      "description": "A native content block started.",
+      "properties": {
+        "block": {
+          "$ref": "#/$defs/AnyTurnBlock"
+        },
+        "identifiers": {
+          "$ref": "#/$defs/TurnIdentifiers"
+        },
+        "type": {
+          "const": "block_started",
+          "default": "block_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "identifiers",
+        "block"
+      ],
+      "title": "BlockStartedEvent",
+      "type": "object"
+    },
+    "CarriedParent": {
+      "additionalProperties": false,
+      "description": "One parent whose commits another parent already contains.",
+      "properties": {
+        "commit": {
+          "title": "Commit",
+          "type": "string"
+        },
+        "inside": {
+          "title": "Inside",
+          "type": "string"
+        }
+      },
+      "required": [
+        "commit",
+        "inside"
+      ],
+      "title": "CarriedParent",
+      "type": "object"
+    },
+    "ConcernAllowance": {
+      "description": "One edit gate a concern needs, which only a human can grant it.\n\nThese gates exist because the decision is a human's. Naming what a plan\nneeds at plan time moves that decision to where the human is already\ndeciding, instead of parking the run to ask again for work they just\napproved \u2014 and a need nobody could have foreseen is asked for mid-lease\nand granted to the session that asked.\n\nThis enum is the vocabulary's single source of truth: whoever grants a\ngate names it from here, the compiled dispatchers honour exactly its\nmembers, and a name outside it is dropped rather than trusted.\n\nWhere a lease's current grants live, and why they cannot live here, is\n:mod:`lup.policy.grants`: a gate is granted while the session it is\ngranted to is already running, so unlike an identity it is not something\na launcher can settle in advance.",
+      "enum": [
+        "new-devtools-module",
+        "antipattern-suppression"
+      ],
+      "title": "ConcernAllowance",
+      "type": "string"
+    },
+    "ConcernProgress": {
+      "additionalProperties": false,
+      "description": "Atomic persisted status for one concern in the resolver DAG.",
+      "properties": {
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "settled_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Settled At"
+        },
+        "status": {
+          "$ref": "#/$defs/ConcernStatus",
+          "default": "discovered"
+        }
+      },
+      "required": [
+        "concern_id",
+        "status",
+        "reason",
+        "settled_at"
+      ],
+      "title": "ConcernProgress",
+      "type": "object"
+    },
+    "ConcernProgressedEvent": {
+      "additionalProperties": false,
+      "description": "One concern reached a new status.",
+      "properties": {
+        "progress": {
+          "$ref": "#/$defs/ConcernProgress"
+        },
+        "type": {
+          "const": "concern_progressed",
+          "default": "concern_progressed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "progress"
+      ],
+      "title": "ConcernProgressedEvent",
+      "type": "object"
+    },
+    "ConcernStatus": {
+      "description": "Persisted lifecycle of one independently scheduled concern.",
+      "enum": [
+        "discovered",
+        "waiting_for_answers",
+        "eligible",
+        "ineligible",
+        "leased",
+        "running",
+        "validating",
+        "reviewing",
+        "revising",
+        "verified",
+        "integrating",
+        "integrated",
+        "cleaned",
+        "retained",
+        "retired",
+        "failed"
+      ],
+      "title": "ConcernStatus",
+      "type": "string"
+    },
+    "ConcernView": {
+      "additionalProperties": false,
+      "description": "One concern joined across progress, eligibility, and its outcome.",
+      "properties": {
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Branch"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Commit"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "eligibility_reason": {
+          "title": "Eligibility Reason",
+          "type": "string"
+        },
+        "eligible": {
+          "title": "Eligible",
+          "type": "boolean"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Failure"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "integration_approved": {
+          "title": "Integration Approved",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "rounds": {
+          "title": "Rounds",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/ConcernStatus"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "status",
+        "reason",
+        "eligible",
+        "integration_approved",
+        "eligibility_reason",
+        "dependencies",
+        "branch",
+        "commit",
+        "rounds",
+        "failure"
+      ],
+      "title": "ConcernView",
+      "type": "object"
+    },
+    "CriteriaCarriedEvent": {
+      "additionalProperties": false,
+      "description": "A human took an acceptance over criteria the reviewer left unmet.\n\nThe bar is theirs, so waiving part of it is theirs too, and the waiver\nis worth more than the verdict it produced: whoever lands this concern\ninherits work that does not meet everything it was admitted against,\nand only this says which parts and on whose word.",
+      "properties": {
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "criteria": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Criteria",
+          "type": "array"
+        },
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "type": {
+          "const": "criteria_carried",
+          "default": "criteria_carried",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "concern_id",
+        "round",
+        "criteria"
+      ],
+      "title": "CriteriaCarriedEvent",
       "type": "object"
     },
     "EdgeCount": {
@@ -96,6 +550,41 @@
       "title": "ExportView",
       "type": "object"
     },
+    "ForeignCriteriaEvent": {
+      "additionalProperties": false,
+      "description": "An accepted review credited ids the concern never declared.\n\nRecorded rather than acted on. Every declared criterion was accounted\nfor, so nothing passed unchecked and the verdict stands; the stray label\nis the reviewer's bookkeeping, and turning an acceptance back over it\nspent a revision round re-deriving the same verdict until the budget\nran out. Journalled so a reviewer that keeps miscrediting is still\nvisible to whoever reads the run.",
+      "properties": {
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "array"
+        },
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "type": {
+          "const": "foreign_criteria",
+          "default": "foreign_criteria",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "concern_id",
+        "round",
+        "labels"
+      ],
+      "title": "ForeignCriteriaEvent",
+      "type": "object"
+    },
     "GraphView": {
       "additionalProperties": false,
       "description": "The whole log as a graph, with the vocabularies a reader filters by.",
@@ -136,6 +625,176 @@
         "standings"
       ],
       "title": "GraphView",
+      "type": "object"
+    },
+    "JoinAuditEvent": {
+      "additionalProperties": false,
+      "description": "The finished tree was re-checked against every parent that built it.",
+      "properties": {
+        "commit": {
+          "title": "Commit",
+          "type": "string"
+        },
+        "outstanding": {
+          "title": "Outstanding",
+          "type": "integer"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Parents",
+          "type": "array"
+        },
+        "type": {
+          "const": "join_audit",
+          "default": "join_audit",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "parents",
+        "outstanding",
+        "commit"
+      ],
+      "title": "JoinAuditEvent",
+      "type": "object"
+    },
+    "JoinCompletedEvent": {
+      "additionalProperties": false,
+      "description": "One parent was joined, and whether git had to be adjudicated for it.",
+      "properties": {
+        "broke": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Broke",
+          "type": "array"
+        },
+        "commit": {
+          "title": "Commit",
+          "type": "string"
+        },
+        "conflicted": {
+          "title": "Conflicted",
+          "type": "boolean"
+        },
+        "parent": {
+          "title": "Parent",
+          "type": "string"
+        },
+        "type": {
+          "const": "join_completed",
+          "default": "join_completed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "parent",
+        "commit",
+        "conflicted",
+        "broke"
+      ],
+      "title": "JoinCompletedEvent",
+      "type": "object"
+    },
+    "JoinPlannedEvent": {
+      "additionalProperties": false,
+      "description": "Which parents have to be merged, and which already ride inside one.\n\nConcerns are cut from their dependencies' commits, so the branches stack:\na parent contained in another is already in the tree once that one lands,\nand merging it costs a verification and can cost a merger turn to\nconclude that nothing happened. Named here rather than left to the skip\ninside the loop, so what the run declined to merge is on the record.",
+      "properties": {
+        "carried": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CarriedParent"
+          },
+          "title": "Carried",
+          "type": "array"
+        },
+        "tips": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tips",
+          "type": "array"
+        },
+        "type": {
+          "const": "join_planned",
+          "default": "join_planned",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "tips",
+        "carried"
+      ],
+      "title": "JoinPlannedEvent",
+      "type": "object"
+    },
+    "JoinRenderedEvent": {
+      "additionalProperties": false,
+      "description": "A join disagreed only in artifacts, and the generator settled it.\n\nWorth recording because it is the difference between a join that cost a\nmerger turn and one that cost a second: every lease touching a catalog\nre-renders both plugin trees, so a conflict there says nothing about the\nwork and everything about when each branch last generated.",
+      "properties": {
+        "parent": {
+          "title": "Parent",
+          "type": "string"
+        },
+        "type": {
+          "const": "join_rendered",
+          "default": "join_rendered",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "parent"
+      ],
+      "title": "JoinRenderedEvent",
+      "type": "object"
+    },
+    "JournalEntry": {
+      "additionalProperties": false,
+      "description": "One event, stamped and attributed.",
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorRef"
+        },
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "event": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnEvent"
+            },
+            {
+              "$ref": "#/$defs/RunEvent"
+            }
+          ],
+          "title": "Event"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "actor",
+        "at",
+        "event"
+      ],
+      "title": "JournalEntry",
       "type": "object"
     },
     "JsonObject": {
@@ -232,6 +891,309 @@
         "edges"
       ],
       "title": "KindsView",
+      "type": "object"
+    },
+    "LeaseDriftEvent": {
+      "additionalProperties": false,
+      "description": "An abandoned concern's tree does not hold the commit last recorded.\n\nRecorded at restore rather than raised. The concern failed, so nothing\nin this run reads that tree again \u2014 but the work is still on its branch,\nand a reader salvaging it wants both commits named.",
+      "properties": {
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "expected": {
+          "title": "Expected",
+          "type": "string"
+        },
+        "found": {
+          "title": "Found",
+          "type": "string"
+        },
+        "type": {
+          "const": "lease_drift",
+          "default": "lease_drift",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "concern_id",
+        "expected",
+        "found"
+      ],
+      "title": "LeaseDriftEvent",
+      "type": "object"
+    },
+    "LeaseRefreshedEvent": {
+      "additionalProperties": false,
+      "description": "What bringing the refreshed base into one lease did, or what stopped it.\n\nThe base event above says where the run now starts; it says nothing\nabout which branches actually took it. That answer reached stdout once\nand was never written down, so a detached run \u2014 whose output goes to a\nfile nobody is watching \u2014 left no record that three of its leases were\nrefused. A lease still on the old base is the reason its worker reads\nreplaced code, which is the failure the refresh exists to prevent.",
+      "properties": {
+        "applied": {
+          "title": "Applied",
+          "type": "boolean"
+        },
+        "commit": {
+          "title": "Commit",
+          "type": "string"
+        },
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "conflicts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Conflicts",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "type": {
+          "const": "lease_refreshed",
+          "default": "lease_refreshed",
+          "title": "Type",
+          "type": "string"
+        },
+        "uncommitted": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Uncommitted",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "concern_id",
+        "commit",
+        "applied",
+        "conflicts",
+        "uncommitted",
+        "reason"
+      ],
+      "title": "LeaseRefreshedEvent",
+      "type": "object"
+    },
+    "MaterialQuestion": {
+      "additionalProperties": false,
+      "description": "A resolver question: the mailbox's shape, plus what the run consults.\n\nThe id, the prompt, the answer domain and the two validators over them\nare what any door reads, and live on :class:`~lup.coordination.questions.Question`.\nAdded here is only what the resolver itself consults \u2014 which concern the\nquestion belongs to, which edit gates an option would need, and which\nlost criteria a re-check is about.",
+      "properties": {
+        "allowances": {
+          "default": [],
+          "description": "Every edit gate some choice here would need. An option the concern has no grant for is an option whose worker is denied, so naming the gate here is what makes the concern carry it.",
+          "items": {
+            "$ref": "#/$defs/ConcernAllowance"
+          },
+          "title": "Allowances",
+          "type": "array"
+        },
+        "choices": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Choices",
+          "type": "array"
+        },
+        "closed_choices": {
+          "default": false,
+          "description": "Whether the choices are the complete answer domain. A gate whose reader tests for a literal token closes them; a question whose choices are suggestions leaves them open, so the answer may arrive in the answerer's own words.",
+          "title": "Closed Choices",
+          "type": "boolean"
+        },
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "criteria": {
+          "default": [],
+          "description": "The lost criterion ids a re-check question is about, carried as data so an identical standing finding is recognized across occasions instead of re-asked per join.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Criteria",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "recommendation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommendation"
+        }
+      },
+      "required": [
+        "id",
+        "prompt",
+        "choices",
+        "recommendation",
+        "closed_choices",
+        "concern_id",
+        "allowances",
+        "criteria"
+      ],
+      "title": "MaterialQuestion",
+      "type": "object"
+    },
+    "MessageCompletedEvent": {
+      "additionalProperties": false,
+      "description": "One whole transcript message completed.\n\nThe message is carried rather than reconstructed. Folding loose blocks\nback into messages would need contiguous-role grouping, which silently\nmerges two consecutive assistant messages into one; carrying the whole\nmessage makes the fold exact.",
+      "properties": {
+        "identifiers": {
+          "$ref": "#/$defs/TurnIdentifiers"
+        },
+        "message": {
+          "$ref": "#/$defs/TurnMessage"
+        },
+        "type": {
+          "const": "message_completed",
+          "default": "message_completed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "identifiers",
+        "message"
+      ],
+      "title": "MessageCompletedEvent",
+      "type": "object"
+    },
+    "MessageOutstandingEvent": {
+      "additionalProperties": false,
+      "description": "A message still queued for an actor whose session is being closed.\n\nRecorded because the sender was told the message was sent, and the\nstream alone cannot say whether anyone read it. On a park this is a\nmessage that will land at the head of the resumed turn; on a run that\nended it is one that reached nobody, and a redirect nobody read is the\nfailure of an operation somebody performed to stop something.",
+      "properties": {
+        "door": {
+          "title": "Door",
+          "type": "string"
+        },
+        "redirect": {
+          "default": false,
+          "title": "Redirect",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "message_outstanding",
+          "default": "message_outstanding",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "door",
+        "redirect",
+        "type"
+      ],
+      "title": "MessageOutstandingEvent",
+      "type": "object"
+    },
+    "MessagePostedEvent": {
+      "additionalProperties": false,
+      "description": "A door volunteered something to an actor, or an actor replied.\n\nAn intervention belongs in the record beside what it interrupted. A\nreader scrolling one actor's trace sees the moment someone redirected\nit, in order, against what it was doing \u2014 which is the difference\nbetween a trace and an audit filed somewhere else.",
+      "properties": {
+        "door": {
+          "title": "Door",
+          "type": "string"
+        },
+        "in_reply_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "In Reply To"
+        },
+        "redirect": {
+          "default": false,
+          "title": "Redirect",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "message_posted",
+          "default": "message_posted",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "door",
+        "redirect",
+        "type",
+        "in_reply_to"
+      ],
+      "title": "MessagePostedEvent",
+      "type": "object"
+    },
+    "MessageSubmission": {
+      "additionalProperties": false,
+      "description": "Something a door is telling an actor. This decides nothing.",
+      "properties": {
+        "in_reply_to": {
+          "default": "",
+          "description": "Question or message id this answers, if any",
+          "title": "In Reply To",
+          "type": "string"
+        },
+        "redirect": {
+          "default": false,
+          "description": "Refuse the actor's next tool call and hand it this text as the reason, instead of letting it read alongside what it was doing",
+          "title": "Redirect",
+          "type": "boolean"
+        },
+        "text": {
+          "description": "What to say",
+          "title": "Text",
+          "type": "string"
+        },
+        "to_actor": {
+          "default": "*",
+          "description": "Actor label to address; the default reaches every actor in the run, including ones not yet started",
+          "title": "To Actor",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "to_actor",
+        "in_reply_to",
+        "redirect"
+      ],
+      "title": "MessageSubmission",
       "type": "object"
     },
     "NodeDetail": {
@@ -350,6 +1312,279 @@
       "title": "NodeView",
       "type": "object"
     },
+    "ParkSubmission": {
+      "additionalProperties": false,
+      "description": "A door asking every open wait in this run to give up now.",
+      "properties": {
+        "reason": {
+          "default": "parked from the supervisor page",
+          "description": "Why the run is being parked, recorded for the rerun",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "ParkSubmission",
+      "type": "object"
+    },
+    "PendingQuestionView": {
+      "additionalProperties": false,
+      "description": "One question this run has asked, with whatever answer state it holds.\n\n``offer`` is a value some door proposed that no promoter has taken yet.\nShowing it is what makes an offer correctable in the page: a human sees\nthe pending value and can replace it before it counts.",
+      "properties": {
+        "answered": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Answered"
+        },
+        "asked_by": {
+          "title": "Asked By",
+          "type": "string"
+        },
+        "offer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Offer"
+        },
+        "question": {
+          "$ref": "#/$defs/MaterialQuestion"
+        }
+      },
+      "required": [
+        "question",
+        "asked_by",
+        "answered",
+        "offer"
+      ],
+      "title": "PendingQuestionView",
+      "type": "object"
+    },
+    "PhaseChangedEvent": {
+      "additionalProperties": false,
+      "description": "The run moved to a new phase.",
+      "properties": {
+        "phase": {
+          "$ref": "#/$defs/ResolvePhase"
+        },
+        "type": {
+          "const": "phase_changed",
+          "default": "phase_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "phase"
+      ],
+      "title": "PhaseChangedEvent",
+      "type": "object"
+    },
+    "QuestionAnswer": {
+      "additionalProperties": false,
+      "description": "One answer, bound to the question it settles by id alone.",
+      "properties": {
+        "question_id": {
+          "title": "Question Id",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question_id",
+        "value"
+      ],
+      "title": "QuestionAnswer",
+      "type": "object"
+    },
+    "QuestionAskedEvent": {
+      "additionalProperties": false,
+      "description": "An actor put a material question to the humans.",
+      "properties": {
+        "asked_by": {
+          "title": "Asked By",
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/MaterialQuestion"
+        },
+        "type": {
+          "const": "question_asked",
+          "default": "question_asked",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "question",
+        "asked_by"
+      ],
+      "title": "QuestionAskedEvent",
+      "type": "object"
+    },
+    "RecheckRepeatedEvent": {
+      "additionalProperties": false,
+      "description": "A re-check reproduced a standing finding already put to the humans.\n\nThe same lost-criteria set for the same concern asks once; a later join\nthat reproduces it is recorded here instead of re-raising an identical\nquestion per join.",
+      "properties": {
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "criteria": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Criteria",
+          "type": "array"
+        },
+        "occasion": {
+          "title": "Occasion",
+          "type": "string"
+        },
+        "type": {
+          "const": "recheck_repeated",
+          "default": "recheck_repeated",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "concern_id",
+        "occasion",
+        "criteria"
+      ],
+      "title": "RecheckRepeatedEvent",
+      "type": "object"
+    },
+    "RecheckReusedEvent": {
+      "additionalProperties": false,
+      "description": "A resume took these concerns' re-checks from the pass that ran them.",
+      "properties": {
+        "commit": {
+          "title": "Commit",
+          "type": "string"
+        },
+        "concerns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Concerns",
+          "type": "array"
+        },
+        "type": {
+          "const": "recheck_reused",
+          "default": "recheck_reused",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "concerns",
+        "commit"
+      ],
+      "title": "RecheckReusedEvent",
+      "type": "object"
+    },
+    "ResolvePhase": {
+      "description": "Persisted resolver phase names in their only valid forward order.",
+      "enum": [
+        "inventory",
+        "questions",
+        "eligibility",
+        "dag",
+        "leases",
+        "workers",
+        "dependency_bases",
+        "review",
+        "integration",
+        "verification",
+        "cleanup",
+        "complete",
+        "aborted",
+        "failed"
+      ],
+      "title": "ResolvePhase",
+      "type": "string"
+    },
+    "ReviewResidualEvent": {
+      "additionalProperties": false,
+      "description": "Observations an accepting review recorded beside its verdict.\n\nA residual on a rejected review re-enters the worker's feedback; on an\naccepted one it previously reached nobody, and real findings sat unread\nin the round records. The journal is where they surface \u2014 for the CLI,\nthe supervisor, and whoever files the follow-up work.",
+      "properties": {
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "residual": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Residual",
+          "type": "array"
+        },
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "type": {
+          "const": "review_residual",
+          "default": "review_residual",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "concern_id",
+        "round",
+        "residual"
+      ],
+      "title": "ReviewResidualEvent",
+      "type": "object"
+    },
+    "ReviewView": {
+      "additionalProperties": false,
+      "description": "The branch this run built and what mechanically holds about it.\n\nNo verdict. Whether twelve merged concerns are jointly right is a\njudgement, and the actor that can act on the answer is the agent that\nlands the branch \u2014 so it is produced from the journal by whoever opens\nthe run, not persisted here by a reviewer nothing consumed.",
+      "properties": {
+        "review_branch": {
+          "title": "Review Branch",
+          "type": "string"
+        },
+        "verification": {
+          "items": {
+            "$ref": "#/$defs/VerificationRecord"
+          },
+          "title": "Verification",
+          "type": "array"
+        }
+      },
+      "required": [
+        "review_branch",
+        "verification"
+      ],
+      "title": "ReviewView",
+      "type": "object"
+    },
     "Row": {
       "additionalProperties": false,
       "description": "One thing a listing step lists, and what may be done to it.",
@@ -451,6 +1686,183 @@
       "title": "RowRequest",
       "type": "object"
     },
+    "RunEvent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PhaseChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/ConcernProgressedEvent"
+        },
+        {
+          "$ref": "#/$defs/QuestionAskedEvent"
+        },
+        {
+          "$ref": "#/$defs/AnswerSettledEvent"
+        },
+        {
+          "$ref": "#/$defs/MessagePostedEvent"
+        },
+        {
+          "$ref": "#/$defs/MessageOutstandingEvent"
+        },
+        {
+          "$ref": "#/$defs/JoinPlannedEvent"
+        },
+        {
+          "$ref": "#/$defs/JoinRenderedEvent"
+        },
+        {
+          "$ref": "#/$defs/JoinCompletedEvent"
+        },
+        {
+          "$ref": "#/$defs/JoinAuditEvent"
+        },
+        {
+          "$ref": "#/$defs/RecheckReusedEvent"
+        },
+        {
+          "$ref": "#/$defs/ReviewResidualEvent"
+        },
+        {
+          "$ref": "#/$defs/CriteriaCarriedEvent"
+        },
+        {
+          "$ref": "#/$defs/ForeignCriteriaEvent"
+        },
+        {
+          "$ref": "#/$defs/VerificationFailedEvent"
+        },
+        {
+          "$ref": "#/$defs/RecheckRepeatedEvent"
+        },
+        {
+          "$ref": "#/$defs/BaseRefreshedEvent"
+        },
+        {
+          "$ref": "#/$defs/LeaseRefreshedEvent"
+        },
+        {
+          "$ref": "#/$defs/LeaseDriftEvent"
+        },
+        {
+          "$ref": "#/$defs/RunFailedEvent"
+        }
+      ]
+    },
+    "RunFailedEvent": {
+      "additionalProperties": false,
+      "description": "The run reached a terminal failure.",
+      "properties": {
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "type": {
+          "const": "run_failed",
+          "default": "run_failed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "reason"
+      ],
+      "title": "RunFailedEvent",
+      "type": "object"
+    },
+    "RunIndex": {
+      "additionalProperties": false,
+      "description": "Every run found under the resolver state root.",
+      "properties": {
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/RunSummary"
+          },
+          "title": "Runs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "runs"
+      ],
+      "title": "RunIndex",
+      "type": "object"
+    },
+    "RunStatus": {
+      "description": "What the run is waiting on, from the operator's view.",
+      "enum": [
+        "running",
+        "awaiting_answers",
+        "parked",
+        "complete",
+        "aborted",
+        "failed"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    },
+    "RunSummary": {
+      "additionalProperties": false,
+      "description": "One row of the persisted-run index.",
+      "properties": {
+        "concerns": {
+          "title": "Concerns",
+          "type": "integer"
+        },
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "last_activity": {
+          "default": 0.0,
+          "title": "Last Activity",
+          "type": "number"
+        },
+        "live": {
+          "default": false,
+          "title": "Live",
+          "type": "boolean"
+        },
+        "pending_questions": {
+          "title": "Pending Questions",
+          "type": "integer"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvePhase"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "unreadable": {
+          "default": false,
+          "title": "Unreadable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "run_id",
+        "phase",
+        "concerns",
+        "pending_questions",
+        "live",
+        "unreadable",
+        "detail",
+        "last_activity"
+      ],
+      "title": "RunSummary",
+      "type": "object"
+    },
     "ScopeChoice": {
       "additionalProperties": false,
       "description": "One of the things this wizard can be pointed at.",
@@ -497,6 +1909,21 @@
         "name"
       ],
       "title": "ScopeRequest",
+      "type": "object"
+    },
+    "SessionId": {
+      "additionalProperties": false,
+      "description": "Opaque native conversation identity.",
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "SessionId",
       "type": "object"
     },
     "StepAnswers": {
@@ -725,6 +2152,461 @@
         "undoes"
       ],
       "title": "StepView",
+      "type": "object"
+    },
+    "SupervisorState": {
+      "additionalProperties": false,
+      "description": "Everything one page render needs, in one response.\n\n``phases`` and ``statuses`` are served from the library enums rather\nthan restated in the page, so adding a phase upstream cannot leave the\nfrontend silently out of date.",
+      "properties": {
+        "concerns": {
+          "items": {
+            "$ref": "#/$defs/ConcernView"
+          },
+          "title": "Concerns",
+          "type": "array"
+        },
+        "failures": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Failures",
+          "type": "array"
+        },
+        "last_activity": {
+          "default": 0.0,
+          "title": "Last Activity",
+          "type": "number"
+        },
+        "live": {
+          "title": "Live",
+          "type": "boolean"
+        },
+        "pending": {
+          "items": {
+            "$ref": "#/$defs/PendingQuestionView"
+          },
+          "title": "Pending",
+          "type": "array"
+        },
+        "phase": {
+          "$ref": "#/$defs/ResolvePhase"
+        },
+        "phases": {
+          "items": {
+            "$ref": "#/$defs/ResolvePhase"
+          },
+          "title": "Phases",
+          "type": "array"
+        },
+        "progress_line": {
+          "title": "Progress Line",
+          "type": "string"
+        },
+        "rerun_recipe": {
+          "title": "Rerun Recipe",
+          "type": "string"
+        },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "statuses": {
+          "items": {
+            "$ref": "#/$defs/ConcernStatus"
+          },
+          "title": "Statuses",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "live",
+        "status",
+        "phase",
+        "phases",
+        "statuses",
+        "concerns",
+        "pending",
+        "review",
+        "failures",
+        "rerun_recipe",
+        "progress_line",
+        "last_activity"
+      ],
+      "title": "SupervisorState",
+      "type": "object"
+    },
+    "TurnCompletedEvent": {
+      "additionalProperties": false,
+      "description": "A native turn reached a terminal state.",
+      "properties": {
+        "identifiers": {
+          "$ref": "#/$defs/TurnIdentifiers"
+        },
+        "type": {
+          "const": "turn_completed",
+          "default": "turn_completed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "identifiers"
+      ],
+      "title": "TurnCompletedEvent",
+      "type": "object"
+    },
+    "TurnEvent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TurnStartedEvent"
+        },
+        {
+          "$ref": "#/$defs/BlockStartedEvent"
+        },
+        {
+          "$ref": "#/$defs/BlockCompletedEvent"
+        },
+        {
+          "$ref": "#/$defs/MessageCompletedEvent"
+        },
+        {
+          "$ref": "#/$defs/TurnCompletedEvent"
+        }
+      ]
+    },
+    "TurnId": {
+      "additionalProperties": false,
+      "description": "Opaque native turn identity.",
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "TurnId",
+      "type": "object"
+    },
+    "TurnIdentifiers": {
+      "additionalProperties": false,
+      "description": "Identities attached to one accepted turn.",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "turn": {
+          "$ref": "#/$defs/TurnId"
+        }
+      },
+      "required": [
+        "session",
+        "turn"
+      ],
+      "title": "TurnIdentifiers",
+      "type": "object"
+    },
+    "TurnMessage": {
+      "additionalProperties": false,
+      "description": "A portable transcript message derived from canonical blocks.",
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/AnyTurnBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "message_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provider's own message identifier, for correlating replays",
+          "title": "Message Id"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Model the provider reports for this message, when it does",
+          "title": "Model"
+        },
+        "parent_tool_call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The delegation tool call this message was produced under, when the provider attributes it to one \u2014 the only evidence that separates a native subagent's messages from its parent's",
+          "title": "Parent Tool Call Id"
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant",
+            "tool",
+            "system"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "blocks",
+        "parent_tool_call_id",
+        "model",
+        "message_id"
+      ],
+      "title": "TurnMessage",
+      "type": "object"
+    },
+    "TurnStartedEvent": {
+      "additionalProperties": false,
+      "description": "A native turn was accepted.",
+      "properties": {
+        "identifiers": {
+          "$ref": "#/$defs/TurnIdentifiers"
+        },
+        "type": {
+          "const": "turn_started",
+          "default": "turn_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "identifiers"
+      ],
+      "title": "TurnStartedEvent",
+      "type": "object"
+    },
+    "TurnTextBlock": {
+      "additionalProperties": false,
+      "description": "One completed assistant text block.",
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "text",
+          "default": "text",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "title": "TurnTextBlock",
+      "type": "object"
+    },
+    "TurnThinkingBlock": {
+      "additionalProperties": false,
+      "description": "One completed reasoning block.",
+      "properties": {
+        "redacted": {
+          "default": false,
+          "title": "Redacted",
+          "type": "boolean"
+        },
+        "thinking": {
+          "title": "Thinking",
+          "type": "string"
+        },
+        "type": {
+          "const": "thinking",
+          "default": "thinking",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "thinking",
+        "redacted"
+      ],
+      "title": "TurnThinkingBlock",
+      "type": "object"
+    },
+    "TurnToolCallBlock": {
+      "additionalProperties": false,
+      "description": "One completed tool invocation.",
+      "properties": {
+        "arguments": {
+          "$ref": "#/$defs/JsonObject",
+          "default": {}
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool_call",
+          "default": "tool_call",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "name",
+        "arguments"
+      ],
+      "title": "TurnToolCallBlock",
+      "type": "object"
+    },
+    "TurnToolResultBlock": {
+      "additionalProperties": false,
+      "description": "One completed tool result.",
+      "properties": {
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "is_error": {
+          "default": false,
+          "title": "Is Error",
+          "type": "boolean"
+        },
+        "tool_call_id": {
+          "title": "Tool Call Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool_result",
+          "default": "tool_result",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "tool_call_id",
+        "content",
+        "is_error"
+      ],
+      "title": "TurnToolResultBlock",
+      "type": "object"
+    },
+    "VerificationFailedEvent": {
+      "additionalProperties": false,
+      "description": "What one gate saw at the moment it decided a concern's round.\n\nA run's record held no verification event of any kind: the check ran,\nproduced a verdict that decided a concern's fate, and left nothing\nbehind. Journalling it puts what the gate saw beside the turns it\ndecided about, which is the one place a later session can read it \u2014 the\nlease worktree the check ran in is usually still held by the run.",
+      "properties": {
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "exit_code": {
+          "title": "Exit Code",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "output": {
+          "title": "Output",
+          "type": "string"
+        },
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "type": {
+          "const": "verification_failed",
+          "default": "verification_failed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "concern_id",
+        "round",
+        "name",
+        "exit_code",
+        "output"
+      ],
+      "title": "VerificationFailedEvent",
+      "type": "object"
+    },
+    "VerificationRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Arguments",
+          "type": "array"
+        },
+        "exit_code": {
+          "title": "Exit Code",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "output": {
+          "default": "",
+          "title": "Output",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "arguments",
+        "passed",
+        "exit_code",
+        "output"
+      ],
+      "title": "VerificationRecord",
       "type": "object"
     },
     "WizardView": {
