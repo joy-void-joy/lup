@@ -9,7 +9,16 @@ with a surface of its own lists it beside these in its composition.
 
 from lup.devtools.dashboard.serve import RowRequest, ScopeRequest, StepReply
 from lup.devtools.dashboard.wizard import StepAnswers, WizardView
+from lup.devtools.supervisor.projection import (
+    ActorIndex,
+    AnswerSubmission,
+    MessageSubmission,
+    ParkSubmission,
+    RunIndex,
+    SupervisorState,
+)
 from lup.ledger.views import ExportView, GraphView, KindsView, NodeDetail
+from lup.resolver.journal import JournalEntry
 from lup.web.build import Surface
 
 EXPLORER = Surface(
@@ -23,7 +32,22 @@ WIZARD = Surface(
 )
 """The setup wizard: the page as drawn, every reply, and what the page posts."""
 
+
+SUPERVISOR = Surface(
+    name="supervisor",
+    models=[
+        SupervisorState,
+        RunIndex,
+        ActorIndex,
+        JournalEntry,
+        AnswerSubmission,
+        MessageSubmission,
+        ParkSubmission,
+    ],
+)
+"""The resolver supervisor: one run projected, the rail, the record, and what the page posts."""
+
 # lup: ignore[library-default] — the surfaces this library authors, so the
 # table is what it ships rather than a choice made for an adopter
-LIBRARY_SURFACES = [EXPLORER, WIZARD]
+LIBRARY_SURFACES = [EXPLORER, WIZARD, SUPERVISOR]
 """Every surface lup builds into its own package data."""

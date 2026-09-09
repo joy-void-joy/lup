@@ -14,8 +14,6 @@ it, exactly as a page drives a run nothing in this process is attached to.
 import os
 import re  # lup: ignore[import-re] — extracting identifiers from packaged JS
 import time
-from html.parser import HTMLParser
-from importlib import resources
 from pathlib import Path
 from typing import get_args
 
@@ -140,14 +138,23 @@ def client_for(state_root: Path) -> AsyncClient:
     )
 
 
-async def test_supervisor_serves_the_packaged_page(tmp_path: Path) -> None:
+async def test_supervisor_serves_its_built_page(tmp_path: Path) -> None:
+    """The page is the `supervisor` bundle under `lup.web`'s package data,
+    served by name with its script reachable under the bundle's own assets."""
     build_run(tmp_path)
     async with client_for(tmp_path) as client:
         response = await client.get("/")
+        script = next(
+            name
+            for name in response.text.split('"')
+            if name.startswith("./assets/") and name.endswith(".js")
+        )
+        asset = await client.get(script.removeprefix("./"))
 
     assert response.status_code == 200
-    assert "Resolver supervision" in response.text
-    assert "Pending questions" in response.text
+    assert asset.status_code == 200
+    assert "Resolver supervision" in asset.text
+    assert "Pending questions" in asset.text
 
 
 async def test_a_run_reads_back_from_its_mailbox(tmp_path: Path) -> None:
@@ -712,62 +719,24 @@ async def test_record_older_than_the_tail_is_served_page_by_page(
     assert start.json() == []
 
 
-class ElementIds(HTMLParser):
-    """Collect every id the packaged page declares."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.ids: list[str] = []
-
-    def handle_starttag(
-        self,
-        tag: str,
-        attrs: list[tuple[str, str | None]],  # lup: ignore[tuple-shape] — stdlib API
-    ) -> None:
-        del tag
-        self.ids.extend(
-            value for name, value in attrs if name == "id" and value is not None
-        )
-
-
-def test_every_element_the_script_reaches_for_exists_in_the_markup() -> None:
-    """The zero-build page has no compiler, so a typo is a silent null.
-
-    Nothing else in the suite would notice a renamed id: the routes keep
-    passing and the page simply stops updating that region.
-    """
-    page = (
-        resources.files("lup.devtools.supervisor")
-        .joinpath("assets/index.html")
-        .read_text("utf-8")
-    )
-    parser = ElementIds()
-    parser.feed(page)
-    referenced = re.findall(  # lup: ignore[re-call] — identifiers in packaged JS
-        r"""element\(["']([\w-]+)["']\)""", page
-    )
-
-    assert referenced
-    assert [name for name in referenced if name not in parser.ids] == []
+SURFACE = Path("packages/lup/web/src/supervisor")
+"""The supervisor's TypeScript source, which the roster tests read the arms out of."""
 
 
 def test_the_page_draws_every_event_the_journal_can_record() -> None:
     """A trace that omits what it cannot name is not a record.
 
-    The page switches on `event.type`, so an event union it has never heard
-    of renders as nothing at all: the routes keep passing, the entry is in
-    the journal, and the reader is simply never shown it. Reading the arms
-    back out of the page is what makes adding an event to either union fail
-    here rather than in a trace somebody is trying to read.
+    The page switches on `event.type` in one component, and an event union
+    it has never heard of falls to the arm that draws it raw. Reading the
+    arms back out of the source is what makes adding an event to either
+    union fail here — where the new event is named — rather than in a trace
+    somebody is trying to read, and it is the one thing the type checker
+    cannot hold the page to, since the raw arm accepts anything.
     """
-    page = (
-        resources.files("lup.devtools.supervisor")
-        .joinpath("assets/index.html")
-        .read_text("utf-8")
-    )
+    entries = (SURFACE / "entries.tsx").read_text("utf-8")
     drawn = set(
-        re.findall(  # lup: ignore[re-call] — switch arms in packaged JS
-            r"""case ["'](\w+)["']:""", page
+        re.findall(  # lup: ignore[re-call] — switch arms in the page's source
+            r"""case ["'](\w+)["']:""", entries
         )
     )
     recordable = {
@@ -781,14 +750,13 @@ def test_the_page_draws_every_event_the_journal_can_record() -> None:
 
 
 def test_the_page_posts_only_routes_the_app_serves() -> None:
-    """The page and the app share no schema, so a renamed route is silent."""
-    page = (
-        resources.files("lup.devtools.supervisor")
-        .joinpath("assets/index.html")
-        .read_text("utf-8")
-    )
-    posted = re.findall(  # lup: ignore[re-call] — fetch targets in packaged JS
-        r"""/api/runs/\$\{state\.run_id\}/(\w+)""", page
+    """The routes are spelled once, in the page's API module, and read here.
+
+    The types across the seam are compiled, but a route is a path and not a
+    model: a renamed one still type-checks and answers 404.
+    """
+    posted = re.findall(  # lup: ignore[re-call] — fetch targets in the page's source
+        r"""api/runs/\$\{[^}]+\}/(\w+)""", (SURFACE / "api.ts").read_text("utf-8")
     )
 
     assert sorted(dict.fromkeys(posted)) == [

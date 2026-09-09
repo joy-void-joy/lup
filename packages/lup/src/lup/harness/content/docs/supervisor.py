@@ -160,8 +160,10 @@ cross-origin `fetch` with `application/json` is preflighted, and no CORS
 headers are emitted. Not defended: other processes on this machine, which
 only a token would address.
 
-The page is zero-build — one packaged HTML asset with
-inline CSS and vanilla ES2021, so downstream projects need no Node.
+The page is the `supervisor` surface Vite built into `lup.web`'s package
+data, typed against the projections the routes serve and the journal's own
+entries: a field renamed on the Python side fails the build rather than a
+reader. The wheel carries the bundle, and bun is needed only to change it.
 """
         )
     ],

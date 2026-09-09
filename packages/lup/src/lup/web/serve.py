@@ -139,17 +139,6 @@ def page_app(title: str, url: str, html: str) -> FastAPI:
     return application
 
 
-def local_page_app(title: str, package: str, url: str) -> FastAPI:
-    """A Host-guarded app serving one package's ``assets/index.html`` at ``/``.
-
-    For a page that genuinely is a file somebody edits. A generated one should
-    reach :func:`page_app` directly rather than being written out to be read
-    back, which is the round trip that loses the file on the way to a wheel.
-    """
-    html = resources.files(package).joinpath("assets/index.html").read_text("utf-8")
-    return page_app(title, url, html)
-
-
 def serve_local_page(
     build: Callable[[str], FastAPI],
     surface: str,

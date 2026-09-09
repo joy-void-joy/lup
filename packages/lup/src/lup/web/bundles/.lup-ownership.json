@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "85775078d7cedab936562559111f048888b3adc14a7445ae6a72d993a2d30551",
+  "source_digest": "ef5b5ef370f4109ac20bb8a676ba09686f1adc861d558f0e2a50dee978e04950",
   "target_requirements": [
     "bun"
   ],
@@ -25,6 +25,27 @@
       "category": "generated",
       "sha256": "1879fca512fab752d595fca282721d7d3902519fd98b7c25dd8ae5dafbcc8e43",
       "semantic_id": "web.explorer.index.html",
+      "executable": false
+    },
+    {
+      "path": "packages/lup/src/lup/web/bundles/supervisor/assets/index-BznZIrq5.css",
+      "category": "generated",
+      "sha256": "83358853ef634b8046ef7bfb77645ffd3cd943e7424c09f8110f2d4662915387",
+      "semantic_id": "web.supervisor.assets/index-BznZIrq5.css",
+      "executable": false
+    },
+    {
+      "path": "packages/lup/src/lup/web/bundles/supervisor/assets/index-DaIGyr8Z.js",
+      "category": "generated",
+      "sha256": "2ee49aab6a1088f3844c58991366f8a2e30a1c43eca9611f26d428fa249dec36",
+      "semantic_id": "web.supervisor.assets/index-DaIGyr8Z.js",
+      "executable": false
+    },
+    {
+      "path": "packages/lup/src/lup/web/bundles/supervisor/index.html",
+      "category": "generated",
+      "sha256": "430d6981f12fdb5e58d6d2d145e967f2a0de167d6b13db7d45de036dcf57909c",
+      "semantic_id": "web.supervisor.index.html",
       "executable": false
     },
     {

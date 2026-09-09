@@ -1,5 +1,5 @@
 {
-  "revision": "d23540066fba88d356ccdeee83481bdab3770c19",
+  "revision": "30b9314288902477637f664cb050992a8672a681",
   "roots": [
     "lup",
     "lup_template"
@@ -4406,6 +4406,7 @@
       "declares": [
         "EXPLORER",
         "WIZARD",
+        "SUPERVISOR",
         "LIBRARY_SURFACES"
       ]
     },
@@ -14363,7 +14364,6 @@
         "bundle_app.asset",
         "page_app",
         "page_app.home",
-        "local_page_app",
         "serve_local_page"
       ]
     },
