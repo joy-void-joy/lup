@@ -46,6 +46,8 @@ from lup.devtools.dev.check import (
     scaffold_budget_report,
 )
 from lup.workspace.paths import is_template_scaffold
+from lup.ledger.writeup import WRITEUP_COMMAND
+from lup_template.writeups import WRITEUPS
 from lup.harness.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.generated_paths import GENERATED_PATHS
@@ -328,10 +330,19 @@ def test_every_published_document_is_generated_and_banners_itself() -> None:
     # The three pages a repository writer produces rather than the docs
     # roster: each renders from something walked at generation time — the rule
     # registry, the composed CLI, the compiled trees — so none of them has a
-    # declaring content module to be rostered against.
+    # declaring content module to be rostered against. And the writeups:
+    # documents `ledger writeup` generates from this machine's ledger, outside
+    # the drift-checked generation because the ledger is live state each
+    # machine holds its own copy of, and committed like any other document —
+    # so a declared one that was never generated is missing here.
+    writeups = [Path(writeup.path) for writeup in WRITEUPS]
     assert unmanaged == sorted(
-        [Path(COMMAND_REFERENCE), Path(RULE_REFERENCE), GENERATED_PATHS]
+        [Path(COMMAND_REFERENCE), Path(RULE_REFERENCE), GENERATED_PATHS, *writeups]
     )
+    for writeup in WRITEUPS:
+        banner = GeneratedBanner(source=writeup.source, command=WRITEUP_COMMAND)
+        content = Path(writeup.path).read_text(encoding="utf-8")
+        assert banner.opens(Path(writeup.path), content)
     for document in roster:
         banner = GeneratedBanner(
             source=document.document.declared_source(), command=REGENERATE_COMMAND

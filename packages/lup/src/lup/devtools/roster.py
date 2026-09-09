@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from lup.devtools.coordination.app import create_coordination_app
 from lup.devtools.ledger.app import create_ledger_app
 from lup.ledger.models import LedgerEdge, LedgerNode
+from lup.ledger.writeup import Writeup
 from lup.devtools.dev.app import create_dev_app
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.feedback.app import create_feedback_app
@@ -120,6 +121,13 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
     the project's vocabulary, and a generic `relate` has to know which class
     to validate a spelled kind against."""
 
+    writeups: list[Writeup] = []
+    """The documents this project generates from its ledger.
+
+    Declared in Python the way guidance is, and written by `ledger writeup`
+    rather than by the drift-checked generation, because the ledger is live
+    state each machine holds its own copy of."""
+
     def roster(self, retired: list[str] | None = None) -> list[SubApp]:
         """Every sub-app the library ships, wired over these declarations.
 
@@ -195,7 +203,7 @@ LIBRARY_ROSTER = [
             help="Read and preserve the notes this repository has recorded",
         ),
         build=lambda declared: create_ledger_app(
-            declared.node_classes, declared.edge_classes
+            declared.node_classes, declared.edge_classes, declared.writeups
         ),
     ),
     RosterEntry(

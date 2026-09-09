@@ -36,6 +36,7 @@ Subjects that span the three components, or that are large enough to own a page.
 | [conventions.md](conventions.md) | The lookup behind each code-convention rule: which library, which typed stand-in for a dict, which parser, which resolver tool. |
 | [commands.md](commands.md) | Every command `lup-devtools` serves, walked from the composed CLI rather than listed by hand. |
 | [generated-paths.md](generated-paths.md) | Every file the recipes compile and what each is compiled from, walked from the trees themselves rather than listed by hand. |
+| [corpus-status.md](corpus-status.md) | What this repository has recorded about itself — open questions, claims and where each stands, what waits on a person, corrections — generated from its ledger by `ledger writeup`. |
 | [quality-pipeline.md](quality-pipeline.md) | The three check layers, and what each one uniquely catches. |
 | [dev-tooling-decisions.md](dev-tooling-decisions.md) | The architectural decisions behind the development tooling, each stated against the current system. |
 | [corpus.md](corpus.md) | This repository&#x27;s corpus: claims, evidence, questions and corrections over the ledger, and how each stands. |

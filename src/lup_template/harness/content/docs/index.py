@@ -68,6 +68,16 @@ GENERATED_PATHS = IndexEntry(
 )
 """The third page no module declares: it renders from the compiled trees."""
 
+CORPUS_STATUS = IndexEntry(
+    link="corpus-status.md",
+    answers=(
+        "What this repository has recorded about itself — open questions, "
+        "claims and where each stands, what waits on a person, corrections — "
+        "generated from its ledger by `ledger writeup`."
+    ),
+)
+"""Declared by `lup_template.writeups` and written from this machine's log."""
+
 
 def document(pages: list[models.Document]) -> models.PromptDocument:
     """Compose the index over the pages the adopted modules published.
@@ -160,6 +170,7 @@ def document(pages: list[models.Document]) -> models.PromptDocument:
                     ),
                     COMMAND_REFERENCE,
                     GENERATED_PATHS,
+                    CORPUS_STATUS,
                     *page.rows(
                         "docs.quality-pipeline",
                         "The three check layers, and what each one uniquely catches.",

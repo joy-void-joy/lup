@@ -1,0 +1,321 @@
+"""A document generated from the ledger, declared in Python the way guidance is.
+
+The worked example this came from rewrote one document by hand with every
+correction folded in and left the rest carrying stale figures behind a
+register a reader had to consult first. A writeup is that folding made
+automatic: a Python module declares the document as parts — the author's
+prose, and parts that render from the ledger when the document is generated —
+so a figure in it is the ledger's figure, read at generation with its standing
+beside it, and never a number somebody typed.
+
+**Parts are a union that answers for itself.** The base names one operation,
+`render`, and each variant answers it over the store: prose with figures filled
+in, a listing of nodes chosen by kind or standing or relation, what needs a
+person, a stamp saying what the document was generated from. A new kind of
+part is a new variant, not a branch somewhere else.
+
+**Generated on demand, not drift-checked across machines.** The ledger is live
+state under the repository's own git directory, so the same declaration
+renders differently on a machine that has recorded and one that has not. A
+writeup is therefore written by `ledger writeup` and committed like any other
+document, and `--check` verifies it against *this* machine's log; what keeps
+it honest everywhere is that every figure it renders is a `lup:` cite, which
+the cite check holds to the node wherever the log is. The stamp names the
+newest record rather than the wall clock, so one log renders one document.
+"""
+
+from abc import ABC, abstractmethod
+from datetime import datetime
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+from lup.coordination.identity import mint_member_id
+from lup.coordination.refs import ActorRef
+from lup.coordination.rendering import GROUPS, task_line, user_tasks
+from lup.formats.banner import GeneratedBanner
+from lup.harness.materialization import write_generated_file
+from lup.harness.models import Artifact
+from lup.ledger.journal import LedgerStore
+from lup.ledger.models import LedgerNode
+from lup.workspace.paths import project_root
+
+# lup: ignore[constant-declaration] — the command that regenerates a writeup,
+# which the banner on every generated one has to spell identically
+WRITEUP_COMMAND = "uv run lup-devtools ledger writeup"
+
+
+class WriteupError(Exception):
+    """A declaration names something the ledger does not hold, in the author's words."""
+
+
+def handle(node: LedgerNode) -> str:
+    """How a rendered document points at a node: its slug where it has one."""
+    return node.slug or node.id
+
+
+def figure(store: LedgerStore, classes: list[type[LedgerNode]], spelling: str) -> str:
+    """One node as a figure in prose: what it says, cited, with its standing.
+
+    A sound node renders bold and cited, so the cite check holds the document
+    to it. One that is not sound renders struck through with the reason, so
+    the figure a reader would have copied is visibly not one to copy — and is
+    still cited, so the check reports it too.
+    """
+    node = store.resolve(spelling, classes)
+    if node is None:
+        raise WriteupError(
+            f"no node in this repository has the id or slug {spelling!r}"
+        )
+    where = store.standing(node, classes)
+    link = f"[{node.text or node.title}](lup:{handle(node)})"
+    if where.sound:
+        return f"**{link}**"
+    return f"~~{link}~~ ({where.label}: {where.reason})"
+
+
+class Placeholder(BaseModel, frozen=True):
+    """One `{name}` in a prose part, and the node whose figure fills it."""
+
+    name: str = Field(min_length=1)
+    node: str = Field(min_length=1)
+
+
+class WriteupPart(BaseModel, ABC, frozen=True):
+    """One stretch of a writeup, rendered from the ledger when asked.
+
+    Abstract, because a part that renders nothing is a declaration somebody
+    forgot to finish, and the base saying so is better than an empty section
+    a reader takes for an empty result. Every variant ends its lines with a
+    blank, so joined parts read as paragraphs and the document ends in one
+    newline.
+    """
+
+    kind: str
+
+    @abstractmethod
+    def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
+        """This part as lines of markdown, read from the store now."""
+
+
+class Prose(WriteupPart, frozen=True):
+    """The author's own markdown, with figures filled in where it names them.
+
+    `{name}` in the text is replaced by the figure of the node the placeholder
+    names — through the standard library's formatter, so a document with no
+    placeholders is returned as written and one with a brace to keep spells
+    it `{{`.
+    """
+
+    kind: Literal["prose"] = "prose"
+    text: str
+    figures: list[Placeholder] = []
+
+    def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
+        if not self.figures:
+            return [self.text, ""]
+        filled = {each.name: figure(store, classes, each.node) for each in self.figures}
+        try:
+            return [self.text.format_map(filled), ""]
+        except (KeyError, IndexError, ValueError) as unnamed:
+            raise WriteupError(
+                f"prose names a placeholder no figure fills: {unnamed}"
+            ) from unnamed
+
+
+class Listing(WriteupPart, frozen=True):
+    """A table of nodes chosen by kind, standing, relation, moment, or by name.
+
+    The shape of "the results that matter most", "open questions" and "the
+    correction log" alike: each row a node's figure with its standing read
+    now, ordered by priority and then by age unless the author named the rows.
+    Empty says so in the author's words rather than vanishing, because a
+    section that disappears reads as a section nobody wrote.
+    """
+
+    kind: Literal["listing"] = "listing"
+    heading: str = Field(min_length=1)
+    of: str = ""
+    """Only nodes of this kind."""
+
+    standing: str = ""
+    """Only nodes whose standing has this label right now."""
+
+    since: datetime | None = None
+    """Only nodes with a record newer than this moment."""
+
+    nodes: list[str] = []
+    """Exactly these nodes, in this order, by id or slug."""
+
+    into: str = ""
+    """Only nodes pointing at this one — the claims answering a question."""
+
+    via: str = ""
+    """…through edges of this kind, or through any edge where empty."""
+
+    min_priority: int = 0
+    numbered: bool = False
+    empty: str = "Nothing recorded."
+
+    def chosen(
+        self, store: LedgerStore, classes: list[type[LedgerNode]]
+    ) -> list[LedgerNode]:
+        """The rows, selected and ordered as the declaration asks."""
+        if self.nodes:
+            named = [store.resolve(spelling, classes) for spelling in self.nodes]
+            return [node for node in named if node is not None]
+        if self.into:
+            target = store.resolve(self.into, classes)
+            if target is None:
+                raise WriteupError(
+                    f"no node in this repository has the id or slug {self.into!r}"
+                )
+            sources = [
+                edge.source
+                for edge in store.into(target.id)
+                if not self.via or edge.kind == self.via
+            ]
+            pointing = [store.resolve(source, classes) for source in sources]
+            candidates = [node for node in pointing if node is not None]
+        else:
+            candidates = [
+                node
+                for node in store.all_nodes(classes)
+                if not self.of or node.kind == self.of
+            ]
+        moved = store.moved_since(self.since) if self.since is not None else None
+        kept = [
+            node
+            for node in candidates
+            if node.priority >= self.min_priority
+            and (moved is None or node.id in moved)
+            and (
+                not self.standing
+                or store.standing(node, classes).label == self.standing
+            )
+        ]
+        return sorted(kept, key=lambda node: (-node.priority, node.at))
+
+    def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
+        rows = self.chosen(store, classes)
+        lines = [f"## {self.heading}", ""]
+        if not rows:
+            return [*lines, self.empty, ""]
+        lines.extend(["| # | What | Standing | Node |", "| --- | --- | --- | --- |"])
+        for position, node in enumerate(rows, start=1):
+            where = store.standing(node, classes)
+            what = figure(store, classes, node.id) + (
+                f" — {node.title}" if node.text else ""
+            )
+            number = str(position) if self.numbered else ""
+            lines.append(f"| {number} | {what} | {where.label} | `{handle(node)}` |")
+        return [*lines, ""]
+
+
+class NeedsPerson(WriteupPart, frozen=True):
+    """What is waiting on the person, grouped by what each row costs them.
+
+    The task list whose holder is a person, folded into the document rather
+    than kept as a file beside it — the file is what went missing in the
+    worked example. Grouped by `needs`, so a command to paste and a judgement
+    to make are not one list.
+    """
+
+    kind: Literal["needs_person"] = "needs_person"
+    heading: str = Field(min_length=1)
+
+    def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
+        del classes
+        tasks = user_tasks(store)
+        lines = [f"## {self.heading}", ""]
+        if not tasks:
+            return [*lines, "Nothing is waiting on a person.", ""]
+        for group in GROUPS:
+            rows = [task for task in tasks if task.needs == group.needs]
+            if not rows:
+                continue
+            lines.extend([f"### {group.heading}", ""])
+            lines.extend(task_line(task) for task in rows)
+            lines.append("")
+        return lines
+
+
+class Stamp(WriteupPart, frozen=True):
+    """What this document was generated from, so a reader knows how current it is.
+
+    The newest record's time rather than the wall clock, so one log renders
+    one document and a regeneration that changed nothing changes nothing.
+    """
+
+    kind: Literal["stamp"] = "stamp"
+    counting: list[str] = []
+    """Kinds worth a count of their own beside the totals — corrections, say."""
+
+    def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
+        nodes = store.all_nodes(classes)
+        edges = store.edges()
+        newest = max((node.at for node in nodes), default=None)
+        counted = "; ".join(
+            f"{sum(1 for node in nodes if node.kind == kind)} {kind}"
+            for kind in self.counting
+        )
+        parts = [
+            f"Generated from this repository's ledger: {len(nodes)} node(s),"
+            f" {len(edges)} edge(s)",
+            counted,
+            f"newest record {newest.isoformat()}"
+            if newest is not None
+            else "nothing recorded yet",
+        ]
+        stamped = "; ".join(part for part in parts if part)
+        return [f"{stamped}. Regenerate with `{WRITEUP_COMMAND}`.", ""]
+
+
+class Writeup(BaseModel, frozen=True):
+    """One declared document: where it is written, and the parts it is made of."""
+
+    name: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    """The module declaring it, which the banner names as where to edit."""
+
+    parts: list[WriteupPart] = Field(min_length=1)
+
+
+def render_writeup(
+    store: LedgerStore, classes: list[type[LedgerNode]], writeup: Writeup
+) -> str:
+    """The document as its parts render it now, in declaration order.
+
+    A plain join: every part ends its lines with a blank, so the document ends
+    in exactly one newline without anything being trimmed off it.
+    """
+    return "\n".join(
+        line for part in writeup.parts for line in part.render(store, classes)
+    )
+
+
+def write_writeup(
+    writeup: Writeup,
+    classes: list[type[LedgerNode]],
+    root: Path | None = None,
+    *,
+    check: bool = False,
+) -> Path:
+    """Write one writeup from this machine's ledger, or verify the one on disk.
+
+    Through the same machinery as every other generated repository file, so
+    the banner says where to edit and what to run, and `--check` says stale
+    in the same words — against this machine's log, which is the only one it
+    can see.
+    """
+    base = root or project_root()
+    store = LedgerStore(base, ActorRef(kind="console", id=mint_member_id()))
+    artifact = Artifact.generated(
+        path=Path(writeup.path),
+        body=render_writeup(store, classes, writeup),
+        semantic_id=f"writeup.{writeup.name}",
+        banner=GeneratedBanner(source=writeup.source, command=WRITEUP_COMMAND),
+    )
+    return write_generated_file(artifact, base, WRITEUP_COMMAND, check=check)
