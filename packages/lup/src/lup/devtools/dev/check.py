@@ -42,6 +42,8 @@ from lup.devtools.dev.branches import unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
 from lup.devtools.dev.comments import FoundComment, scan_tracked
+from lup.devtools.dev.commands import CommandSurface
+from lup.devtools.dev.documented import unresolved
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
 from lup.devtools.dev.records import branches_awaiting_adoption, record_location
@@ -731,6 +733,7 @@ def scan_reports(
     repository_writers: list[RepositoryWriter],
     git_guards: list[GitGuard],
     hooks_declaration: HookSet,
+    command_surface: Callable[[], CommandSurface] | None = None,
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them."""
 
@@ -935,6 +938,28 @@ def scan_reports(
             ],
         )
 
+        # The other direction on the same subject. The sweep above asks whether
+        # a command this project runs is still allowed; this asks whether a
+        # command it *tells a reader to run* exists at all. Twenty-two did not,
+        # including the one in the hooks workflow's own step 7, and each was
+        # written beside the command it named — which is why neither the author
+        # nor any reviewer caught it and a session typing it did.
+        written = unresolved(command_surface().admits) if command_surface else []
+        yield CheckReport(
+            name="documented commands",
+            passed=not written,
+            lines=[
+                f"documented commands: FAIL ({len(written)} naming no command)",
+                *(f"  {mention.named()}" for mention in written),
+            ]
+            if written
+            else [
+                "documented commands: ok"
+                if command_surface
+                else "documented commands: skipped, no CLI declared to walk"
+            ],
+        )
+
         # The same reading the commit hook and the pipeline refuse on, asked
         # here rather than recomposed, so a tree cannot be stale at one gate
         # and current at another.
@@ -1039,6 +1064,7 @@ def run_checks(
     repository_writers: list[RepositoryWriter],
     git_guards: list[GitGuard],
     hooks_declaration: HookSet,
+    command_surface: Callable[[], CommandSurface] | None = None,
     scope: list[str] | None = None,
     test_workers: int = TEST_WORKERS,
 ) -> None:
@@ -1071,6 +1097,7 @@ def run_checks(
         repository_writers,
         git_guards,
         hooks_declaration,
+        command_surface,
     )
 
     if fix:

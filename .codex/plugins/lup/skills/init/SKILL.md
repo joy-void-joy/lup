@@ -353,10 +353,6 @@ proposes rather than writes. The template ships `README.md` that way, which is
 right for a file whose words are the author's and wrong for a project that
 wants its README kept current by the agent.
 
-```bash
-uv run lup-devtools dev init ownership
-```
-
 Ask the user directly, offering concrete options, and wait for the answer: which files the human author owns, starting from whether README.md stays locked — then apply the answer with `--lock` / `--unlock` on that same command,
 which rewrites the declaration and regenerates the native trees. Never
 hand-edit `human_owned_files` in the catalog.

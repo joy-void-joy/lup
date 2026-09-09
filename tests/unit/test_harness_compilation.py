@@ -87,6 +87,7 @@ from lup.harness.models import (
     PromptPart,
     RelocateSession,
     WatchOutput,
+    CommandInvocation,
     RequestApproval,
     ResolverEntry,
     RuntimeDocs,
@@ -814,6 +815,13 @@ PART_CONTRACT: dict[str, PartExpectation] = {
         part=WatchOutput(command="lup-devtools resolve status --watch"),
         diverges=True,
     ),
+    # The same words for both, because both reach the same shell: what a
+    # runtime spells differently is how it *asks* for something, and this asks
+    # for nothing — it names a command the reader runs.
+    "CommandInvocation": PartExpectation(
+        part=CommandInvocation(path=["dev", "check"], arguments="--no-test"),
+        diverges=False,
+    ),
     "ResolverEntry": PartExpectation(part=ResolverEntry(), diverges=True),
     "ArgumentsRef": PartExpectation(part=ArgumentsRef(), diverges=True),
 }
@@ -856,7 +864,20 @@ class PartQuestion(BaseModel, frozen=True):
 PART_QUESTIONS: dict[str, PartQuestion] = {
     "text_payload": PartQuestion(
         ask=lambda part: part.text_payload is not None,
-        answered_by=["TextPart", "SpellingExample", "MarkdownTable", "ToolRoster"],
+        answered_by=[
+            "TextPart",
+            "SpellingExample",
+            "MarkdownTable",
+            "ToolRoster",
+            "CommandInvocation",
+        ],
+    ),
+    # What a skill's own `tools` grant is checked against, so a step telling
+    # its reader to run something is one the skill actually granted a shell
+    # for. Both kinds that name a command answer it.
+    "shell_command": PartQuestion(
+        ask=lambda part: part.shell_command is not None,
+        answered_by=["WatchOutput", "CommandInvocation"],
     ),
     "invocation": PartQuestion(
         ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]

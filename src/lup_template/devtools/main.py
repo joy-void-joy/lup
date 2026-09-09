@@ -41,7 +41,7 @@ import lup_template.agent.prompts as prompts
 from lup.providers.claude.usage.reader import claude_usage_entry
 from lup.providers.codex.usage.reader import codex_usage_entry
 from lup.devtools.dev import conflicts
-from lup.devtools.dev.commands import write_command_reference
+from lup.devtools.dev.commands import CommandSurface, write_command_reference
 from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
 from lup.devtools.roster import DevtoolsDeclarations
@@ -84,10 +84,21 @@ def command_reference(root: Path | None = None, *, check: bool = False) -> Path:
     return write_command_reference(app, root, check=check)
 
 
+def command_surface() -> CommandSurface:
+    """Every command this CLI serves, for the gates that judge a written one.
+
+    Reads ``app`` when it runs, for the reason the reference writer does: the
+    declarations below are built before the sub-apps are mounted, so a surface
+    taken as a value here would be taken off half a CLI.
+    """
+    return CommandSurface.of(app)
+
+
 DECLARATIONS = DevtoolsDeclarations(
     dev=dev.declared,
     targets=TARGETS,
     repository_writers=[*REPOSITORY_WIDE, command_reference],
+    command_surface=command_surface,
     prompt=assembled_prompt,
     relocate_roots=[
         Path("src"),

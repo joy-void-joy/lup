@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "83532ed1b7f6999ae20d3311482941fc400ba48330f30809390f07e35f84a9ad",
+  "source_digest": "56a439bde66a9f7bb125b5a7af8d0bfcfd806076ab28bc6c0d349c4d47d348c2",
   "target_requirements": [
     "claude-code"
   ],
@@ -86,7 +86,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "c437df50bb9b8d12cca532d9ab6578b7c2162ecb187b24b9ceec7a7bc39a857d",
+      "sha256": "c4d336ea5535eb645b94867dc445c1dc4dadfb377706b72358a1c964d51160be",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -114,7 +114,7 @@
     {
       "path": ".claude/plugins/lup/commands/create-investigator.md",
       "category": "generated",
-      "sha256": "850b53c3238c4e1e76fed637f50bfdd3f5cdddc9122e9a1878cda6218de918aa",
+      "sha256": "34b1c71ad05a10016d376f9d0fa7a247fa145d9f549d6935d0f715f300bbea2b",
       "semantic_id": "skill.create-investigator",
       "executable": false
     },
@@ -198,7 +198,7 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "bf99dd05402e5dbf5dbc5291b35ee4ae6400277a16aac3af82d885ac4e85eb44",
+      "sha256": "8bca5bb04f564b60b9054953d8dc87c141ef8b6db29233cd38acb1d57766f1cf",
       "semantic_id": "skill.init",
       "executable": false
     },
@@ -233,14 +233,14 @@
     {
       "path": ".claude/plugins/lup/commands/modify-command.md",
       "category": "generated",
-      "sha256": "ad4ffe7c4a75d53894d874fedd7b01599d6f2e9b85971241e44865bbf54d2ae4",
+      "sha256": "76b72c4429250b712157e660bd85809cc3c00494e03658cc3d18b70d9e908023",
       "semantic_id": "skill.modify-command",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/principle.md",
       "category": "generated",
-      "sha256": "e6bac5356ffce7f4f8853e381d247402f6b319a4c857d679164537cc0e48ab7d",
+      "sha256": "3e9805417bbaf242ce278e95544bb5f98c8452df78249228f44ce2947a89d2e6",
       "semantic_id": "skill.principle",
       "executable": false
     },

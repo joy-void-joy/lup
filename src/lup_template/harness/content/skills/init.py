@@ -366,12 +366,15 @@ proposes rather than writes. The template ships `README.md` that way, which is
 right for a file whose words are the author's and wrong for a project that
 wants its README kept current by the agent.
 
-```bash
-uv run lup-devtools dev init ownership
-```
-
 """
             ),
+            # lup: defer: this step told the reader to run `dev init ownership`,
+            # which no command answers and no spelling of which exists — the
+            # capability it names was never built, so the sweep found an
+            # instruction rather than a typo. Either build the command that
+            # moves a file between owned and proposed, or say here which
+            # declaration a domain edits by hand; leaving the step silent is
+            # the smaller wrong of the three.
             models.AskUser(
                 question="which files the human author owns, "
                 "starting from whether README.md stays locked"

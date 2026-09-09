@@ -7,8 +7,8 @@ snapshot are shared; only what is read here is Codex's.
 
 Examples::
 
-    $ uv run lup-devtools dev usagecodex
-    $ uv run lup-devtools dev usagecodex --no-detail
-    $ uv run lup-devtools dev usagecodex --json
-    $ uv run lup-devtools dev usagecodex --watch --interval 300
+    $ uv run lup-devtools dev usage codex
+    $ uv run lup-devtools dev usage codex --no-detail
+    $ uv run lup-devtools dev usage codex --json
+    $ uv run lup-devtools dev usage codex --watch --interval 300
 """
