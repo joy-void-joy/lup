@@ -546,7 +546,7 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     routed_tools=["Bash", "web_fetch", "apply_patch"],
     hook_events=["PermissionRequest", "PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
-    observed_tools=["apply_patch"],
+    observed_tools=["apply_patch", "Bash"],
     failure="stderr_exit",
     runtime_modules=["codex_patch", "policy_data"],
 )

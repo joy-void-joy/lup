@@ -10,7 +10,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Edit|Write"
+        "matcher": "Edit|Write|Bash"
       }
     ],
     "PreToolUse": [

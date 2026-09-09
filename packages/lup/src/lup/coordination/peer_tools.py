@@ -76,6 +76,26 @@ class PeerSayOutput(BaseModel):
     )
 
 
+class PrefixInput(BaseModel):
+    path: str = Field(
+        description=(
+            "What to take or give back, as a path. A directory covers "
+            "everything beneath it; a file covers only itself"
+        )
+    )
+
+
+class ClaimOutput(BaseModel):
+    path: str
+    holders: list[str] = Field(
+        description=(
+            "Every session holding it. More than one means a change nothing "
+            "could attribute — both had a window open over it — and the next "
+            "named edit settles which of them it was"
+        )
+    )
+
+
 class InboxOutput(BaseModel):
     """What was waiting for this session, consumed by the reading."""
 
@@ -199,9 +219,52 @@ def create_peer_tools(
             ]
         )
 
+    @lup_tool(
+        "Take everything beneath a path, before you have touched any of it. "
+        "Reach for it when you are about to rewrite a package or move a tree: "
+        "what your calls change is recorded for you as you go, but that is "
+        "after the fact, and the moment worth telling anybody about is before "
+        "the first write.\n\n"
+        "Another session about to edit under it is asked first, and told your "
+        "name. It is never refused — two sessions in one tree is sometimes "
+        "right — so this makes the collision visible rather than impossible.\n\n"
+        "It expires when this session does. There is nothing to remember to "
+        "release, and releasing early is `coordination_release`. Returns "
+        "{path, holders}.",
+        name="coordination_lock",
+    )
+    async def coordination_lock(params: PrefixInput) -> ClaimOutput:
+        present()
+        held = peers.lock(member_id, Path(params.path).resolve())
+        return ClaimOutput(
+            path=held.path, holders=[holder.id for holder in held.holders]
+        )
+
+    @lup_tool(
+        "Give back a prefix you took, so nobody is asked about it again. Use "
+        "it when you have finished with a tree you locked and expect to keep "
+        "working on other things — otherwise just stop, because a claim ends "
+        "with the session holding it.\n\n"
+        "Only a holder can release: asking to release somebody else's lock "
+        "does nothing, which is what stops one session unlocking another's "
+        "work. Returns {path, holders} for what is still held there.",
+        name="coordination_release",
+    )
+    async def coordination_release(params: PrefixInput) -> ClaimOutput:
+        present()
+        target = Path(params.path).resolve()
+        peers.release(member_id, target)
+        remaining = peers.holding(target)
+        return ClaimOutput(
+            path=str(target),
+            holders=[holder.id for claim in remaining for holder in claim.holders],
+        )
+
     return [
         coordination_peers,
         coordination_describe,
         coordination_send,
         coordination_inbox,
+        coordination_lock,
+        coordination_release,
     ]

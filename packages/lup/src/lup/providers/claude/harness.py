@@ -515,7 +515,7 @@ CLAUDE_DISPATCHER = DispatcherDeclaration(
     routed_tools=["Bash", "WebFetch", "Edit", "Write", "SendMessage", "ListAgents"],
     hook_events=["PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
-    observed_tools=["Edit", "Write"],
+    observed_tools=["Edit", "Write", "Bash"],
     failure="conservative_ask",
     runtime_modules=["policy_data"],
 )

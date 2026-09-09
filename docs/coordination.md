@@ -87,6 +87,41 @@ of* it rather than an alternative. A sender told only that the mail accepted a
 message cannot tell a hook from a file nobody is watching, which is why
 `spawn_say` reports the mode rather than asserting delivery.
 
+## What each session is holding
+
+Nobody declares what they are working on. Asking them to is asking for the one
+thing an agent reliably forgets, and a declaration nobody keeps current is
+worse than none — it reads as current and is not. So it is observed: a hook
+watches what each session's calls actually change, and the record of that is
+the claim.
+
+A **touch** is an exact file some session changed. A **lock** is a prefix a
+session took deliberately, for the case observation cannot reach — an agent
+about to rewrite a package has changed none of it yet, and the moment worth
+telling anybody about is before the first write rather than after it.
+
+A claim is alive while its holder is on the roster and expires with it. There
+is no timeout to tune and no release to forget, which is what makes an observed
+claim safe to act on: the failure mode of the whole mechanism is a session that
+stopped, and a stopped session's claims go with it.
+
+Editing under somebody else's live claim is an approval question naming the
+holder, never a refusal. Two sessions in one file is sometimes exactly right,
+and a policy that decided otherwise would refuse ordinary parallel work. What
+it must not be is silent — the failure this exists for is finding out at merge
+time. Claims are keyed by absolute path, so two sessions in different worktrees
+never collide over the same source; the merge is what reconciles those.
+
+**A claim can have more than one holder, and that is honest rather than
+broken.** A call that names its file attributes exactly. A shell command names
+nothing it will write, so what it changed is read by comparing the tree before
+and after — and that comparison sees every change in its window regardless of
+who made it. Where two sessions had windows open over one path, both names go
+on the record and neither is guessed at: a confident wrong author is worse than
+an honest pair, because the next reader is deciding whether it is safe to
+write. The next named edit or explicit lock settles it, because both of those
+attribute exactly.
+
 ## The other address book
 
 A runtime that can already address another session offers a second way to

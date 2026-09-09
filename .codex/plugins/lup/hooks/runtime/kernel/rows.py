@@ -584,3 +584,7 @@ class PeerPolicyRow(TypedDict):
     names_file: str
     send_reason: str
     listing_note: str
+    touches_file: str
+    windows_dir: str
+    claim_reason: str
+    member_env: str

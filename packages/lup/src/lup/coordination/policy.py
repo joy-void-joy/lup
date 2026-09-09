@@ -1,20 +1,21 @@
-"""What the permission policy is told about this repository's roster.
+"""What the permission policy is told about this repository's sessions.
 
-The hook that judges a native peer call runs as a bare script outside every
-import graph, so it cannot ask this package anything. What it can be handed is
-data, compiled into the plugin beside it — and the one thing it genuinely needs
-is where the roster lives, which is this package's own layout rather than a
-path a policy could be configured with. Handing it over from here is what stops
-that directory being spelled twice: renaming the store moves the hook with it.
+The hook that judges a call runs as a bare script outside every import graph,
+so it cannot ask this package anything. What it can be handed is data, compiled
+into the plugin beside it — and what it genuinely needs is where the roster and
+the claim record live, which is this package's own layout rather than a path a
+policy could be configured with. Handing it over from here is what stops those
+directories being spelled twice: renaming the store moves the hook with it.
 
-The prose is a default rather than a fixture. What a stopped sender should
+The prose is a default rather than a fixture. What a stopped caller should
 reach for is a judgement about the surfaces a project offers, and a project
 that renamed its own is entitled to say so without editing the library.
 """
 
-from lup.coordination.identity import NAMES_FILE
+from lup.coordination.identity import MEMBER_ENV, NAMES_FILE
 from lup.coordination.roster import ROSTER_FILE
 from lup.coordination.store import COORDINATION_DIR, STORE_DIR
+from lup.coordination.touches import TOUCHES_FILE, WINDOWS_DIR
 from lup.policy.peer_policy import PeerPolicy
 
 SEND_REDIRECT = (
@@ -49,15 +50,38 @@ attachment that only offered a tool would read as a correction of the listing
 it rides on.
 """
 
+CLAIM_HELD = (
+    "a live session in this repository has that path, which nobody declared —"
+    " it is there because that session's own calls changed it, or because it"
+    " took the prefix deliberately. Writing under it is how two sessions"
+    " overwrite each other between merges, and the loser finds out at merge"
+    " time. Ask the holder with `coordination_send` first, or go ahead if you"
+    " already know what they are doing. A claim expires with the session"
+    " holding it, so one still standing means that session has not stopped"
+)
+"""What an editor of a path somebody else is in is told, and what to do about it.
+
+An approval question rather than a refusal, because the answer is genuinely
+the operator's: two sessions editing one file is sometimes exactly right, and
+a policy that decided otherwise would refuse ordinary work. What it must not
+be is silent — the failure this exists for is finding out at merge time.
+"""
+
 
 def peer_policy(
-    send_reason: str = SEND_REDIRECT, listing_note: str = LISTING_NOTE
+    send_reason: str = SEND_REDIRECT,
+    listing_note: str = LISTING_NOTE,
+    claim_reason: str = CLAIM_HELD,
 ) -> PeerPolicy:
-    """This repository's roster, as the compiled permission hook reads it."""
+    """This repository's sessions, as the compiled permission hook reads them."""
     return PeerPolicy(
         store=[STORE_DIR, COORDINATION_DIR],
         roster_file=ROSTER_FILE,
         names_file=NAMES_FILE,
+        touches_file=TOUCHES_FILE,
+        windows_dir=WINDOWS_DIR,
         send_reason=send_reason,
         listing_note=listing_note,
+        claim_reason=claim_reason,
+        member_env=MEMBER_ENV,
     )

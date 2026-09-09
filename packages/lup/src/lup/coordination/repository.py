@@ -237,7 +237,7 @@ class RepositoryPeers:
         expiry rule: no timeout to tune, no release to forget, and the failure
         mode is a session that stopped taking its own claims with it.
         """
-        return [member.actor.id for member in self.cohort.live()]
+        return [member.actor.id for member in self.cohort.live() if member.running]
 
     def held(self) -> list[Claim]:
         """Every claim a live session is holding, newest first."""
