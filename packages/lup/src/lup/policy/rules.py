@@ -8,6 +8,7 @@ at generation time, which is how this layer and the generated dispatchers
 stay decision-identical; the shared fixture suite asserts exactly that.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -27,8 +28,11 @@ from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.assets.host import (
     directory_write_targets,
     empty_directory_targets,
+    foreign_repository,
+    outside_this_project,
     recoverable_write_targets,
     repository_worktrees,
+    rewritten_text,
     tracked_write_targets,
 )
 from lup.policy.kernel.effects import STRENGTH
@@ -37,6 +41,7 @@ from lup.policy.kernel.lex import (
     parse_shell_words,
     shell_flag_write_targets,
     shell_path_verb_targets,
+    shell_sed_rewrites,
     shell_write_targets,
 )
 from lup.policy.kernel.rows import (
@@ -45,6 +50,7 @@ from lup.policy.kernel.rows import (
     PathRoleRow,
     PathRuleKind,
     PathRuleRow,
+    RewrittenFileRow,
     UrlScopeRow,
 )
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
@@ -184,10 +190,17 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         recoverable_target_limit: int = 5,
         runner_targets: list[RunnerTargetRule] | None = None,
         relayed: bool = False,
-        authored: DecisionPolicy[EditBatch] | None = None,
+        authored: "EditPolicy | None" = None,
     ) -> None:
         self.authored = authored
         """The edit policy a write carrying its own content is put to.
+
+        Narrowed to the concrete policy rather than the family it implements,
+        because a command that rewrites a file in place is judged by the
+        declarations rather than by the verdict: the kernel puts the document
+        the rewrite would produce through the same gates, and it is handed the
+        rows to do it with. Reading them off this instance is what keeps the
+        promise below true for that route as well.
 
         The same instance the composition gives the edit family, because it is
         the same judgement: one table saying what may be written, reached by
@@ -274,10 +287,81 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
             return None
         return self.authored.decide(EditBatch(changes=changes))
 
+    def rewritten_documents(self, event: ShellCommand) -> list[RewrittenFileRow]:
+        """What every in-place rewrite in this command would leave behind.
+
+        Resolved here and judged in the kernel, which is the arrangement that
+        makes ``dev policy`` and the generated dispatcher answer alike: both
+        halves resolve the same documents on their own side of the boundary
+        and hand them to one classifier, rather than each joining an edit
+        verdict onto a shell verdict in its own words.
+
+        A file this could not produce yields no row, and the classifier turns
+        that absence into a question rather than a grant.
+
+        ``refuted`` is left unanswered here for the reason
+        :meth:`EditPolicy.decide_change` leaves it unanswered: resolving a
+        finding needs a language server, which is a cost the generated
+        dispatcher pays where it can and an in-process reading does not.
+        """
+        root = event.cwd or Path.cwd()
+        # First naming wins, and the fold is written backwards to get it: one
+        # file named by two rewrites is one file, and re-running the second
+        # script over it would answer about a document the first already
+        # replaced.
+        scripts_for = {
+            target: rewrite["scripts"]
+            for rewrite in reversed(shell_sed_rewrites(event.command))
+            for target in reversed(rewrite["targets"])
+        }
+
+        def produced() -> Iterator[RewrittenFileRow]:
+            for target, scripts in scripts_for.items():
+                after = rewritten_text(scripts, target, root)
+                if after is None:
+                    continue
+                try:
+                    before = (root / target).read_text(encoding="utf-8")
+                except (OSError, ValueError, UnicodeDecodeError):
+                    continue
+                yield RewrittenFileRow(
+                    target=target,
+                    path=worktree_path(target),
+                    before=before,
+                    after=after,
+                    foreign=foreign_repository(target, root),
+                    outside_project=outside_this_project(target, root),
+                    refuted=None,
+                )
+
+        return list(produced())
+
+    def rewrite_antipatterns(
+        self, rows: list[RewrittenFileRow]
+    ) -> dict[str, list[AntiPatternRow]]:
+        """The anti-pattern table for exactly the suffixes a rewrite touches.
+
+        Compiled per classification rather than held, because the rules are
+        selected by file suffix and a command that rewrites nothing needs none
+        of them compiled at all.
+        """
+        return {
+            suffix: []
+            if (patterns := patterns_for_suffix(suffix)) is None
+            else [antipattern_row(rule) for rule in patterns]
+            for suffix in {Path(row["path"]).suffix.lower() for row in rows}
+        }
+
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
         acted_on = shell_path_verb_targets(event.command)
         flagged = shell_flag_write_targets(event.command, self.rules)
+        # The edit gates, over the files a rewrite in place would replace. Off
+        # the one edit policy this composition holds rather than a second set
+        # declared here: a rewrite is an edit spelled as a command, and two
+        # tables would be two answers to what may be written.
+        rewritten = self.rewritten_documents(event)
+        edits = self.authored
         verdict = pydantic_decision(
             decide_shell(
                 event.command,
@@ -311,6 +395,14 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,
                 target_tables=self.target_tables,
+                rewritten_documents=rewritten,
+                antipattern_rows=self.rewrite_antipatterns(rewritten),
+                edit_rules=[] if edits is None else edits.edit_rules,
+                import_boundaries=[] if edits is None else edits.import_boundaries,
+                acceptance_guard=None if edits is None else edits.acceptance_guard,
+                maximum_added_lines=3 if edits is None else edits.maximum_added_lines,
+                autonomous=edits is not None and edits.autonomous,
+                allowances=[] if edits is None else edits.grants.granted(),
                 escapable=self.escapable,
                 recovered=self.recovered,
                 contained=self.contained,

@@ -796,7 +796,11 @@ SHELL_POLICY_CASES = [
     # branch is the commonest shape in this work, and all of it was blocked.
     DecisionCase(input="for b in x y; do echo $(git log -1 $b); done", effect="allow"),
     DecisionCase(input="for f in a b; do diff <(cat $f) base; done", effect="allow"),
-    DecisionCase(input="for x in -i; do sed \"$x\" 's/a/b/' f; done", effect="deny"),
+    # `-i` arriving through the loop variable still reads as an in-place
+    # rewrite, and no case here has a filesystem behind it -- so nothing
+    # produced the document the edit gates judge, and the rewrite is asked
+    # about rather than granted.
+    DecisionCase(input="for x in -i; do sed \"$x\" 's/a/b/' f; done", effect="ask"),
     DecisionCase(input='for f in *.txt; do sort "$f"; done', effect="deny"),
     DecisionCase(input='for f in a; do python "$f"; done', effect="deny"),
     DecisionCase(input='for f in a; do wc "$f"', effect="deny"),
@@ -814,7 +818,7 @@ SHELL_POLICY_CASES = [
     # its own question however ordinary the file beside it is.
     DecisionCase(input="sort --compress-program=x -o out f", effect="ask"),
     DecisionCase(input="sed -n '1,5p' f", effect="allow"),
-    DecisionCase(input="sed -i 's/a/b/' f", effect="deny"),
+    DecisionCase(input="sed -i 's/a/b/' f", effect="ask"),
     DecisionCase(input="sed 's/x/y/e' f", effect="deny"),
     DecisionCase(input="awk '{print $1}' f", effect="allow"),
     DecisionCase(input="awk -F: '{print $2}' /etc/passwd", effect="allow"),
@@ -1310,7 +1314,9 @@ SHELL_POLICY_CASES = [
         sandboxed=True,
         escapable=True,
     ),
-    DecisionCase(input="sed -i 's/a/b/' f", effect="deny", sandboxed=True),
+    # A judged question holds inside the boundary: containment settles what
+    # nobody classified, and this was classified.
+    DecisionCase(input="sed -i 's/a/b/' f", effect="ask", sandboxed=True),
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
@@ -4393,17 +4399,21 @@ def test_a_type_check_through_a_package_runner_is_the_read_it_is() -> None:
     assert effect("git status --short && cd frontend && npx tsc --noEmit") == "allow"
 
 
-def test_rewriting_a_restorable_file_costs_what_deleting_it_costs(
+def test_an_in_place_rewrite_is_judged_as_the_edit_it_performs(
     tmp_path: Path,
 ) -> None:
-    """An in-place rewrite is judged on its files, the way a delete already is.
+    """A rewrite meets the gates an edit meets, over the file it would produce.
 
-    Two objections wore one refusal here, and only one survives a boundary
-    beneath it. *Being wrong is unrepairable* is answered by the files: a
-    committed file with no uncommitted change costs a checkout and no
-    information, and the whole change stands in the diff. *It walks past the
-    gates an edit is judged by* is not answered by anything, which is why the
-    grant says so and names `dev check`.
+    Recoverability used to answer this, and it answered a different question.
+    *Being wrong is repairable* is true of a clean tracked file and says
+    nothing about whether the content may be written; the anti-pattern table,
+    the review-note gate and the size gate are the rules that do, and a grant
+    given on the undo let a command past every one of them.
+
+    So the host runs the screened script into a copy and the result goes to
+    `decide_edit`. What survives is a rewrite that would have been a
+    permissible edit, refused where it would not have been -- and the file's
+    Git state stops deciding anything, because it never bore on the question.
     """
     committed_tree(tmp_path, "notes.md", "other.md")
     policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
@@ -4415,18 +4425,73 @@ def test_rewriting_a_restorable_file_costs_what_deleting_it_costs(
     assert decided("sed -i.bak 's/body/text/' notes.md other.md") == "allow"
     assert decided("sed -ni 's/body/text/p' notes.md") == "allow"
 
-    # A file the host can vouch for nothing about costs whatever was in it.
+    # Uncommitted no longer decides anything: the question is what the file
+    # would hold, and an untracked markdown file holding a substitution is as
+    # ordinary an edit as a tracked one. Under recoverability this denied.
     (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
-    assert decided("sed -i 's/a/b/' dirty.md") == "deny"
-    assert decided("sed -i 's/a/b/' absent.md") == "deny"
-    # Naming no file at all establishes nothing to be restorable.
+    assert decided("sed -i 's/a/b/' dirty.md") == "allow"
+
+    # What cannot be produced is asked about rather than granted, which is the
+    # whole of the fail-closed rule: an unjudgeable rewrite must not be the
+    # one that goes through.
+    assert decided("sed -i 's/a/b/' absent.md") == "ask"
+    assert decided("sed -i 's/a/b/' $TARGET") == "ask"
+
+    # Naming no file at all reaches no document and no gate, so the standing
+    # refusal is what answers it.
     assert decided("sed -i 's/a/b/'") == "deny"
-    # A word that names a different path at run time is not established either.
-    assert decided("sed -i 's/a/b/' $TARGET") == "deny"
+
+
+def test_an_in_place_rewrite_meets_the_content_gates_an_edit_meets(
+    tmp_path: Path,
+) -> None:
+    """The hole this closes: a substitution nothing read, into tracked source.
+
+    Measured before the change -- `sed -i` over a clean tracked file was
+    allowed outright, with every content gate skipped, so a suppression an
+    `Edit` is refused went in through the verb that overwrites. The two routes
+    now read one table, which is the property the whole policy is built on.
+    """
+    committed_tree(tmp_path, "module.py")
+    (tmp_path / "module.py").write_text("value = compute()\n", encoding="utf-8")
+    git = sh.Command("git").bake(
+        "-C", str(tmp_path), "-c", "user.email=t@e", "-c", "user.name=t"
+    )
+    git("add", "-A")
+    git("commit", "-qm", "source")
+    edits = EditPolicy([], path_roles=[])
+    policy = ShellPolicy(
+        SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS, authored=edits
+    )
+
+    def decided(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    # The same content, by both routes, earns the same verdict.
+    suppressed = "value = compute()  # noqa\n"
+    assert decided("sed -i 's|compute()|compute()  # noqa|' module.py") != "allow"
+    assert (
+        edits.decide(
+            EditBatch(
+                changes=[
+                    EditChange(
+                        path=tmp_path / "module.py",
+                        before="value = compute()\n",
+                        after=suppressed,
+                    )
+                ]
+            )
+        ).effect
+        != "allow"
+    )
+
+    # And a substitution that introduces nothing the gates refuse still goes
+    # through, so the screen is the content rather than the verb.
+    assert decided("sed -i 's/compute/derive/' module.py") == "allow"
 
 
 def test_an_in_place_rewrite_never_covers_a_protected_path(tmp_path: Path) -> None:
-    """Restorability answers what it costs, never who may replace it."""
+    """Who owns a file decides who may replace it, by either route."""
     committed_tree(tmp_path, "README.md", "notes.md")
     policy = ShellPolicy(
         SHELL_RULES,
@@ -4439,16 +4504,20 @@ def test_an_in_place_rewrite_never_covers_a_protected_path(tmp_path: Path) -> No
 
     assert effect("sed -i 's/a/b/' notes.md") == "allow"
     assert effect("sed -i 's/a/b/' README.md") == "ask"
+    # One protected file among several takes the whole command, because the
+    # strongest verdict is the command's.
+    assert effect("sed -i 's/a/b/' notes.md README.md") == "ask"
 
 
 def test_an_in_place_rewrite_is_still_screened_for_what_the_script_does(
     tmp_path: Path,
 ) -> None:
-    """Recoverability says nothing about a script that writes or executes.
+    """A judgement of the output says nothing about what the script reaches.
 
-    The two screens are independent: one asks what the named files cost, the
-    other what the script reaches. A grant on the first never opens the
-    second, which is what keeps `w` and `e` out of an allowed command.
+    The two screens are independent, and the order matters: a script carrying
+    a write or execute primitive is refused before anything runs it, because
+    producing the document it would leave behind means running exactly what
+    the screen exists to keep from running.
     """
     committed_tree(tmp_path, "notes.md")
     policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)

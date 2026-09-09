@@ -28,6 +28,7 @@ from .words import (
     program_carrying_operands,
     protected_write_target,
     refuses_generated_plugin_target,
+    sed_invocation,
     uv_run_words,
     write_checkpoint,
     write_scope,
@@ -1405,3 +1406,51 @@ def shell_path_verb_targets(command: str) -> list[str]:
         operands = path_verb_operands(words)["operands"]
         targets.extend(operands)
     return targets
+
+
+class SedRewrite(TypedDict):
+    """One in-place rewrite a command carries: what to run, and over what.
+
+    Named here for the reason :func:`shell_patch_operands` is: the words are
+    on this side of the boundary and the files are on the other. A caller that
+    can reach a filesystem runs these scripts over copies of these targets and
+    hands the documents back, so the kernel judges a rewrite by what it would
+    produce without ever having produced it.
+    """
+
+    scripts: list[str]
+    targets: list[str]
+
+
+def shell_sed_rewrites(command: str) -> list[SedRewrite]:
+    """Name every in-place sed this command runs, with the scripts it runs.
+
+    Only the screened ones. A script carrying a write or execute primitive is
+    refused by the classifier on its own terms, and running it to find out
+    what it would produce would be running exactly what the screen exists to
+    keep from running — so an unscreened call yields nothing here and meets
+    its refusal there.
+
+    A command that does not lex yields nothing, on the same terms as every
+    reader beside it: an unparseable line keeps whatever verdict it already
+    earned rather than gaining a relaxation from a reading that failed.
+    """
+    segments = parse_shell_words(command, 0)
+    if isinstance(segments, KernelDecision):
+        return []
+    rewrites: list[SedRewrite] = []
+    for segment in segments:
+        words = effective_command(segment)["words"]
+        if not words or posixpath.basename(words[0]) != "sed":
+            continue
+        invocation = sed_invocation(words)
+        if isinstance(invocation, KernelDecision):
+            continue
+        if not invocation["in_place"] or not invocation["screened"]:
+            continue
+        if not invocation["targets"]:
+            continue
+        rewrites.append(
+            SedRewrite(scripts=invocation["scripts"], targets=invocation["targets"])
+        )
+    return rewrites

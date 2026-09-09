@@ -52,8 +52,10 @@ from kernel.lex import (
     shell_flag_write_targets,
     shell_patch_operands,
     shell_path_verb_targets,
+    shell_sed_rewrites,
     shell_write_targets,
 )
+from kernel.rows import RewrittenFileRow
 from kernel.words import INTERPRETERS
 from kernel.roles import is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
@@ -1344,6 +1346,41 @@ def undo_snapshot(
     return reference
 
 
+def rewritten_text(scripts: list[str], target: str, root: Path) -> str | None:
+    """What one file would hold after these scripts, without touching the file.
+
+    sed is run over the file and its output captured, which is the same
+    computation ``-i`` performs and none of the writing: ``-i`` is exactly
+    "run the script, then replace the file with the result", so dropping it
+    leaves the result on standard output and the file as it was. A command
+    still about to be refused has therefore changed nothing by being judged.
+
+    ``None`` wherever the answer is not established — the path is not a
+    regular file, sed is missing, sed itself rejected the script, or the
+    output is not text this can read. Each of those means nothing read what
+    would land, and the caller turns that into a question rather than a grant.
+
+    The scripts are passed as ``-e`` expressions and the file as an operand
+    after ``--``, so a filename beginning with a dash stays a filename and a
+    script is never re-read as one.
+    """
+    landed = root / target
+    if not landed.is_file():
+        return None
+    expressions = [word for script in scripts for word in ("-e", script)]
+    try:
+        finished = subprocess.run(
+            ["sed", *expressions, "--", str(landed)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    return finished.stdout if finished.returncode == 0 else None
+
+
 def recoverable_write_targets(
     targets: list[str], root: Path | None = None
 ) -> list[str]:
@@ -2166,6 +2203,19 @@ def bash_decision(
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
+        # The edit gates, over the files a rewrite in place would replace.
+        # An in-place rewrite is an edit spelled as a command, so it meets the
+        # rules an edit meets rather than a recoverability grant that answers
+        # whether it could be undone -- a different question, and not the one
+        # the anti-pattern table, the review-note gate and the size gate ask.
+        antipattern_rows=ANTI_PATTERN_ROWS,
+        edit_rules=EDIT_RULES,
+        import_boundaries=IMPORT_BOUNDARIES,
+        acceptance_guard=ACCEPTANCE_GUARD,
+        maximum_added_lines=MAXIMUM_ADDED_LINES,
+        autonomous=autonomous,
+        allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
+        rewritten_documents=rewritten_files(command, cwd or Path.cwd()),
         interactive=interactive,
         # A reviewed worker is non-interactive and not therefore alone: it
         # holds a mailbox reaching the human supervising its run, and a
@@ -2382,6 +2432,68 @@ def placed_edit_text(path_text: str, after: str, start: int, end: int) -> str | 
     if Path(path_text).suffix.lower() not in (".py", ".pyi"):
         return None
     return relocated_edit_text(after, start, end)
+
+
+def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
+    """What every in-place rewrite in this command would leave behind.
+
+    The kernel names which files a screened rewrite would replace and this
+    produces each one, so the classifier judges a rewrite by the document it
+    makes rather than by whether the file could be restored afterwards. The
+    two questions are different, and only this one is the question the edit
+    gates ask.
+
+    A file that could not be produced yields no row, and the classifier turns
+    that absence into a question. So a rewrite is never granted on a reading
+    that failed — which is what makes it safe for a composition to reach this
+    late, or not at all.
+
+    Each row is deduplicated by target, because one file named twice is one
+    file, and the second reading would run the script over the same bytes to
+    reach the same answer.
+    """
+    rows: list[RewrittenFileRow] = []
+    for rewrite in shell_sed_rewrites(command):
+        for target in rewrite["targets"]:
+            if any(row["target"] == target for row in rows):
+                continue
+            after = rewritten_text(rewrite["scripts"], target, cwd)
+            if after is None:
+                continue
+            try:
+                before = (cwd / target).read_text()
+            except (OSError, ValueError, UnicodeDecodeError):
+                continue
+            path_text = worktree_path(target)
+            suffix = Path(path_text).suffix.lower()
+            antipatterns = (
+                ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+            )
+            foreign = foreign_repository(target, cwd)
+            rows.append(
+                RewrittenFileRow(
+                    target=target,
+                    path=path_text,
+                    before=before,
+                    after=after,
+                    foreign=foreign,
+                    outside_project=outside_this_project(target, cwd),
+                    # The same conditional an edit pays: a checker resolves
+                    # another repository's imports against another
+                    # repository's environment, and starting one to answer a
+                    # rule that will not be applied costs a language server's
+                    # second for nothing.
+                    refuted=(
+                        resolved_refutations(path_text, after, RESOLUTION_COMMAND)
+                        if not foreign
+                        and awaits_resolution(
+                            before, after, antipatterns, suffix in (".py", ".pyi")
+                        )
+                        else None
+                    ),
+                )
+            )
+    return rows
 
 
 def edit_decision(

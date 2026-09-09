@@ -1292,6 +1292,41 @@ def undo_snapshot(
     return reference
 
 
+def rewritten_text(scripts: list[str], target: str, root: Path) -> str | None:
+    """What one file would hold after these scripts, without touching the file.
+
+    sed is run over the file and its output captured, which is the same
+    computation ``-i`` performs and none of the writing: ``-i`` is exactly
+    "run the script, then replace the file with the result", so dropping it
+    leaves the result on standard output and the file as it was. A command
+    still about to be refused has therefore changed nothing by being judged.
+
+    ``None`` wherever the answer is not established — the path is not a
+    regular file, sed is missing, sed itself rejected the script, or the
+    output is not text this can read. Each of those means nothing read what
+    would land, and the caller turns that into a question rather than a grant.
+
+    The scripts are passed as ``-e`` expressions and the file as an operand
+    after ``--``, so a filename beginning with a dash stays a filename and a
+    script is never re-read as one.
+    """
+    landed = root / target
+    if not landed.is_file():
+        return None
+    expressions = [word for script in scripts for word in ("-e", script)]
+    try:
+        finished = subprocess.run(
+            ["sed", *expressions, "--", str(landed)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    return finished.stdout if finished.returncode == 0 else None
+
+
 def recoverable_write_targets(
     targets: list[str], root: Path | None = None
 ) -> list[str]:
