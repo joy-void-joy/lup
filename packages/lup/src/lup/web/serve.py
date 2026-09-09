@@ -19,14 +19,68 @@ import webbrowser
 from collections.abc import Callable
 from importlib import resources
 from importlib.resources.abc import Traversable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import typer
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
+from pydantic import BaseModel
 
 from lup.web.loopback import guard_loopback_host, refuse_non_loopback
+
+
+def bundle_root(surface: str, bundles: Path | None = None) -> Traversable:
+    """Where one built surface sits: under ``lup.web``'s package data, or a tree named.
+
+    Refused with the command that builds it where nothing is built, so a
+    missing bundle is a clear sentence rather than a directory listing or a
+    file-not-found somewhere inside a request.
+    """
+    root: Traversable = (
+        bundles / surface
+        if bundles is not None
+        else resources.files("lup.web").joinpath("bundles", surface)
+    )
+    if not root.joinpath("index.html").is_file():
+        raise ValueError(
+            f"no bundle is built for the {surface!r} surface; run"
+            " `uv run lup-devtools harness generate all` with bun installed"
+        )
+    return root
+
+
+class BundleAssets(BaseModel, frozen=True):
+    """The pieces of one built surface a page carries inline: its scripts and styles."""
+
+    scripts: list[str]
+    styles: list[str]
+
+
+def bundle_assets(surface: str, bundles: Path | None = None) -> BundleAssets:
+    """One built surface's scripts and stylesheets, read whole, in name order.
+
+    For a page that has to carry the surface itself — an export opened from a
+    file, with no server to answer for ``assets/``. The build emits one
+    script and one stylesheet per surface, so a name order is an order.
+    """
+    root = bundle_root(surface, bundles)
+    found = sorted(
+        (entry for entry in root.joinpath("assets").iterdir() if entry.is_file()),
+        key=lambda entry: entry.name,
+    )
+    return BundleAssets(
+        scripts=[
+            entry.read_text(encoding="utf-8")
+            for entry in found
+            if PurePosixPath(entry.name).suffix == ".js"
+        ],
+        styles=[
+            entry.read_text(encoding="utf-8")
+            for entry in found
+            if PurePosixPath(entry.name).suffix == ".css"
+        ],
+    )
 
 
 def bundle_app(
@@ -41,17 +95,8 @@ def bundle_app(
     else the package holds — and a missing bundle is a clear refusal naming
     the command that builds it, not a directory listing.
     """
-    root: Traversable = (
-        bundles / surface
-        if bundles is not None
-        else resources.files("lup.web").joinpath("bundles", surface)
-    )
+    root = bundle_root(surface, bundles)
     index = root.joinpath("index.html")
-    if not index.is_file():
-        raise ValueError(
-            f"no bundle is built for the {surface!r} surface; run"
-            " `uv run lup-devtools harness generate all` with bun installed"
-        )
     application = page_app(title, url, index.read_text(encoding="utf-8"))
 
     @application.get("/assets/{name}")

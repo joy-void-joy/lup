@@ -24,6 +24,10 @@ export default defineConfig(({ mode }) => {
       // ships a large one.
       assetsInlineLimit: 1 << 20,
       sourcemap: false,
+      // One script and one stylesheet per surface, so an export can carry a
+      // surface whole: a chunk loaded by relative URL has no server to load
+      // it from once the page is a file.
+      rollupOptions: { output: { inlineDynamicImports: true } },
     },
   };
 });

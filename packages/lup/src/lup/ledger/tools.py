@@ -25,29 +25,23 @@ from pydantic import BaseModel, Field, ValidationError
 from lup.coordination.refs import ActorRef
 from lup.ledger.cite import read_cites
 from lup.ledger.journal import LedgerRefusal, LedgerStore
-from lup.ledger.kinds import by_kind, declared_fields, kind_of, summary_of
+from lup.ledger.kinds import by_kind
 from lup.ledger.models import LedgerEdge, LedgerNode
-from lup.ledger.views import EdgeView, NodeDetail, NodeView, node_detail, node_view
+from lup.ledger.views import (
+    EdgeView,
+    KindsView,
+    NodeDetail,
+    NodeView,
+    kinds_view,
+    node_detail,
+    node_view,
+)
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 from lup.types import JsonObject
 
 
 class NoInput(BaseModel):
     """A tool that asks the log about itself takes no arguments."""
-
-
-class KindInfo(BaseModel, frozen=True):
-    """One declared kind: its name, what it is for, and what it accepts."""
-
-    kind: str
-    name: str
-    summary: str
-    fields: list[str]
-
-
-class TypesOutput(BaseModel, frozen=True):
-    nodes: list[KindInfo]
-    edges: list[KindInfo]
 
 
 class RecordInput(BaseModel):
@@ -148,14 +142,6 @@ def create_ledger_tools(
     def view(held: LedgerStore, node: LedgerNode) -> NodeView:
         return node_view(held, classes, node)
 
-    def info(declared: type[LedgerNode] | type[LedgerEdge]) -> KindInfo:
-        return KindInfo(
-            kind=kind_of(declared),
-            name=declared.__name__,
-            summary=summary_of(declared),
-            fields=declared_fields(declared),
-        )
-
     @lup_tool(
         "List the node and edge kinds this repository records, each with the "
         "fields `ledger_record` and `ledger_relate` accept for it. Call it once "
@@ -165,11 +151,8 @@ def create_ledger_tools(
         "summary, fields}], edges: [...]}.",
         name="ledger_types",
     )
-    async def ledger_types(_params: NoInput) -> TypesOutput:
-        return TypesOutput(
-            nodes=[info(declared) for declared in classes],
-            edges=[info(declared) for declared in edges],
-        )
+    async def ledger_types(_params: NoInput) -> KindsView:
+        return kinds_view(classes, edges)
 
     @lup_tool(
         "Record one node of a declared kind — a claim you can be held to, a "

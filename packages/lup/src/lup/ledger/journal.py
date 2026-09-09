@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from lup.channels.models import utc_now
 from lup.coordination.refs import ActorRef
@@ -51,6 +51,13 @@ def latest[N: LedgerNode](nodes: Iterator[N]) -> list[N]:
     seen = list(nodes)
     current = {node.id: node for node in seen}
     return [current[node_id] for node_id in dict.fromkeys(node.id for node in seen)]
+
+
+class Touch(BaseModel, frozen=True):
+    """One moment the log grew around one node: a record of it, or an edge at it."""
+
+    id: str
+    at: datetime
 
 
 class LedgerRefusal(Exception):
@@ -197,30 +204,49 @@ class LedgerStore:
             standing_of=reader,
         )
 
+    def touches(self) -> list[Touch]:
+        """Every moment the log grew around a node, in log order.
+
+        A node's own record touches it; an edge touches both its ends. Read
+        off the log's own timestamps rather than off any stored standing,
+        because standing is never stored: "moved" means the log grew around
+        the node, which is the one thing an append-only file can say exactly.
+        """
+
+        def touched() -> Iterator[Touch]:
+            for line in self.lines():
+                if "at" not in line:
+                    continue
+                at = datetime.fromisoformat(str(line["at"]))
+                if "id" in line:
+                    yield Touch(id=str(line["id"]), at=at)
+                if "source" in line and "target" in line:
+                    yield Touch(id=str(line["source"]), at=at)
+                    yield Touch(id=str(line["target"]), at=at)
+
+        return list(touched())
+
+    def movements(self) -> dict[str, datetime]:
+        """When the log last grew around each node.
+
+        Folded by writing the touches in time order, so the last one written
+        for an id is the latest.
+        """
+        return {
+            touch.id: touch.at
+            for touch in sorted(self.touches(), key=lambda touch: touch.at)
+        }
+
     def moved_since(self, since: datetime, ids: list[str] | None = None) -> list[str]:
         """Which nodes have a record after this moment — theirs, or an edge touching them.
 
-        Read off the log's own timestamps rather than off any stored standing,
-        because standing is never stored: "moved" means the log grew around
-        the node, which is the one thing an append-only file can say exactly.
-        Narrowed to ``ids`` where given, in that order; every node otherwise.
+        Narrowed to ``ids`` where given, in that order; otherwise every node,
+        in the order the log first touched each after the moment. A naive
+        moment is read as local time, which is what a reader pasting a clock
+        reading means by it.
         """
         marker = since if since.tzinfo is not None else since.astimezone()
-
-        def touched() -> Iterator[str]:
-            for line in self.lines():
-                if (
-                    "at" not in line
-                    or datetime.fromisoformat(str(line["at"])) <= marker
-                ):
-                    continue
-                if "id" in line:
-                    yield str(line["id"])
-                if "source" in line and "target" in line:
-                    yield str(line["source"])
-                    yield str(line["target"])
-
-        moved = dict.fromkeys(touched())
+        moved = dict.fromkeys(touch.id for touch in self.touches() if touch.at > marker)
         if ids is None:
             return list(moved)
         return [node_id for node_id in ids if node_id in moved]

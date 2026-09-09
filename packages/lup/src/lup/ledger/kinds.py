@@ -1,15 +1,25 @@
 """What a declared kind is called and what it accepts, read off its declaration.
 
-Two surfaces take a kind by name and fields by object — the console and the
-tool group — and both have to agree with what the type will validate. So the
-name is the literal the type spells for itself, and the fields are its own
-declaration minus what the store stamps, computed from the class rather than
-written beside it where they could drift.
+Three surfaces take a kind by name and fields by object — the console, the
+tool group and the explorer — and all of them have to agree with what the
+type will validate. So the name is the literal the type spells for itself,
+and the fields are its own declaration minus what the store stamps, computed
+from the class rather than written beside it where they could drift.
 """
 
+from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
 from lup.ledger.models import LedgerEdge, LedgerNode
+
+
+class KindInfo(BaseModel, frozen=True):
+    """One declared kind: its name, what it is for, and what it accepts."""
+
+    kind: str
+    name: str
+    summary: str
+    fields: list[str]
 
 
 def kind_of(declared: type[LedgerNode] | type[LedgerEdge]) -> str:
@@ -53,3 +63,13 @@ def summary_of(declared: type[LedgerNode] | type[LedgerEdge]) -> str:
     """The first line of a type's own docstring, which is what it is for."""
     lines = (declared.__doc__ or "").strip().splitlines()
     return lines[0] if lines else ""
+
+
+def describe(declared: type[LedgerNode] | type[LedgerEdge]) -> KindInfo:
+    """One declared type as a caller reads it, every part read off the class."""
+    return KindInfo(
+        kind=kind_of(declared),
+        name=declared.__name__,
+        summary=summary_of(declared),
+        fields=declared_fields(declared),
+    )

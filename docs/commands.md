@@ -190,6 +190,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `ledger mine` | Print one holder&#x27;s outstanding tasks, grouped by what they cost. |
 | `ledger done` | Mark one task finished, by recording it again as done. |
 | `ledger snapshot` | Commit the store to a branch of its own, for a record worth keeping. |
+| `ledger explore` | Open the log in a browser, or write it as one self-contained page. |
 
 ## `resolve`
 

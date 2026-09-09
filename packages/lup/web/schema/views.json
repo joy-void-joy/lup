@@ -1,6 +1,7 @@
 {
   "$defs": {
     "EdgeCount": {
+      "additionalProperties": false,
       "description": "How many edges of one kind point at a node \u2014 its weight in the log.",
       "properties": {
         "count": {
@@ -20,6 +21,7 @@
       "type": "object"
     },
     "EdgeView": {
+      "additionalProperties": false,
       "properties": {
         "kind": {
           "title": "Kind",
@@ -42,7 +44,40 @@
       "title": "EdgeView",
       "type": "object"
     },
+    "ExportView": {
+      "additionalProperties": false,
+      "description": "Everything a standalone page needs, so it opens with no server behind it.\n\nThe graph, every node's detail and the declared kinds, because a page\nopened from a file cannot ask for more later \u2014 the worked example this\ncame from was an 18 MB single file for exactly this reason, and a memo\nattachment that needed a server would not be one. Stamped with the moment\nit was taken, since what it shows is the log as it was then.",
+      "properties": {
+        "details": {
+          "items": {
+            "$ref": "#/$defs/NodeDetail"
+          },
+          "title": "Details",
+          "type": "array"
+        },
+        "exported_at": {
+          "format": "date-time",
+          "title": "Exported At",
+          "type": "string"
+        },
+        "graph": {
+          "$ref": "#/$defs/GraphView"
+        },
+        "kinds": {
+          "$ref": "#/$defs/KindsView"
+        }
+      },
+      "required": [
+        "graph",
+        "details",
+        "kinds",
+        "exported_at"
+      ],
+      "title": "ExportView",
+      "type": "object"
+    },
     "GraphView": {
+      "additionalProperties": false,
       "description": "The whole log as a graph, with the vocabularies a reader filters by.",
       "properties": {
         "edges": {
@@ -120,7 +155,67 @@
         }
       ]
     },
+    "KindInfo": {
+      "additionalProperties": false,
+      "description": "One declared kind: its name, what it is for, and what it accepts.",
+      "properties": {
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "summary",
+        "fields"
+      ],
+      "title": "KindInfo",
+      "type": "object"
+    },
+    "KindsView": {
+      "additionalProperties": false,
+      "description": "What a project declares: its node kinds and its relations, with their fields.",
+      "properties": {
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/KindInfo"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/KindInfo"
+          },
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "title": "KindsView",
+      "type": "object"
+    },
     "NodeDetail": {
+      "additionalProperties": false,
       "description": "One node in full: its own fields, its weight, and every edge in and out.",
       "properties": {
         "attachments": {
@@ -170,6 +265,7 @@
       "type": "object"
     },
     "NodeView": {
+      "additionalProperties": false,
       "description": "One node as a reader meets it: what it is and where it stands right now.",
       "properties": {
         "id": {
@@ -178,6 +274,11 @@
         },
         "kind": {
           "title": "Kind",
+          "type": "string"
+        },
+        "moved": {
+          "format": "date-time",
+          "title": "Moved",
           "type": "string"
         },
         "priority": {
@@ -218,7 +319,13 @@
         "id",
         "kind",
         "title",
-        "standing"
+        "slug",
+        "text",
+        "priority",
+        "standing",
+        "reason",
+        "sound",
+        "moved"
       ],
       "title": "NodeView",
       "type": "object"
