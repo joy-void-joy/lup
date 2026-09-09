@@ -253,7 +253,15 @@ def ready_to_open(
     refusing a session, so what happens here is a sync and a report: a clean
     checkout is brought level with its own remote, and a base that has moved
     is named on the way in.
+
+    The two lines said here are said before their work rather than after
+    it, for the reason the fetch names itself below: these are the stretches
+    a launch spends silent when everything is current, and a line naming
+    the wait is what separates a slow one from a stopped one. A
+    generate-only invocation reports each tree anyway, so it is not told.
     """
+    if not generate_only:
+        typer.echo("regenerating what this session opens against")
     generate_with_report(composition, in_passing=not generate_only)
     generate_targets(companions, repository_writers, in_passing=not generate_only)
     if generate_only:
@@ -264,6 +272,7 @@ def ready_to_open(
     # exactly the one that did not get to tidy up after itself.
     sweep_ledgers(project_root())
     opening = LaunchOpening()
+    typer.echo("checking the host")
     opening.findings = runtime_preflight(composition, sentinels, opening, contained)
     settle_base_freshness(LocalProcessLauncher(), project_root())
     return opening
