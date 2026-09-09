@@ -34,6 +34,7 @@ src/lup_template/
 │   │   ├── realtime.py      # Real-time MCP tools for persistent agents.
 │   │   └── reflect.py       # Reflection tool — forced self-assessment before output finalization.
 │   └── toolsets.py          # Single source of truth for the agent's MCP tool groups.
+├── corpus.py                # This repository's corpus types: the library's defaults, with its own words.
 ├── devtools/                # Development and analysis CLI tools for lup.
 │   ├── agent/               # Agent introspection and interactive debugging tools.
 │   │   ├── inspect_agent.py # Agent configuration inspection: tools, schemas, prompt, subagents.

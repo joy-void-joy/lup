@@ -97,7 +97,7 @@ property of the relation rather than of any project's epistemics.
 
 `lup.ledger` declares no node type, no edge type and no grade. What counts as
 verified, what grades exist, and what a claim owes are a project's questions —
-`lup.standing` answers them for a project that wants an evidence-based answer,
+`lup.corpus` answers them for a project that wants an evidence-based answer,
 and a project that wants its own declares its own types.
 
 ## The store is untracked
@@ -112,7 +112,13 @@ plumbing over a scratch index, so it never stages uncommitted work.
 
 `dev ledger list` shows every node with its standing read now; `--kind`
 narrows it. `dev ledger show <id>` prints one node with its edges and
-attachments. `dev ledger types` says what node types this project declares.
+attachments. `dev ledger types` says what node and edge types this project
+declares, with the fields each accepts — which is what `ledger record <kind>
+"<title>" --json '{…}'` and `ledger relate <kind> <source> <target>` take.
+Recording is generic: the kind is looked up in what the project declared and
+the type validates the fields, so there is one `record` rather than a command
+per kind, and a kind the project adds tomorrow is recordable today. `ledger
+cite <doc>` holds one hand-written document to the nodes it names.
 
 The console is the one reader whose subject is the log rather than any one
 type, so it is the one place a list of node classes is needed: a record names

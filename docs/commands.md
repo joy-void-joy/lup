@@ -176,7 +176,11 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 
 | Command | What it does |
 | --- | --- |
-| `ledger types` | List the node types this project declares. |
+| `ledger types` | List the node and edge types this project declares, with their fields. |
+| `ledger record` | Record one node of any declared kind; the kind validates the fields. |
+| `ledger relate` | Draw one edge of any declared kind between two nodes. |
+| `ledger amend` | Record a node again with some fields changed; nothing is overwritten. |
+| `ledger cite` | Check every cite in one document against where its node stands now. |
 | `ledger list` | Show every node in this repository, with its standing read now. |
 | `ledger show` | Print one node in full, with its edges and what it attaches. |
 | `ledger delegate` | Record one task, hand it to a peer if there is one, and say what happened. |

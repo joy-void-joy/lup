@@ -546,6 +546,13 @@
       "executable": false
     },
     {
+      "path": "docs/corpus.md",
+      "category": "generated",
+      "sha256": "89b9000454ec50ed935eb4b243084fbd05b9aea71423f84ebdd040dea9993063",
+      "semantic_id": "docs.corpus",
+      "executable": false
+    },
+    {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
       "sha256": "c4452a0865af6338043ead998e19d14160ef63a3b9f3d4fb88723c4e11850fe8",
@@ -562,14 +569,14 @@
     {
       "path": "docs/ledger.md",
       "category": "generated",
-      "sha256": "1202caaf8e8203155d76c70f7019398bd5730653eb30fe6c6e82e8e8eb2083f7",
+      "sha256": "0d8e626d61037757f2342a4fead6a53c48a8ab863e003ff29fa48099c1c6b2d5",
       "semantic_id": "docs.ledger",
       "executable": false
     },
     {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "110f2b302bca11f7b0c2dc6696107cf130cf2cda0344198edcaeaebed1e1e539",
+      "sha256": "f6d87e0969475e314584300d5fd82875805f3eea15963e2c3d40637636ba3d7e",
       "semantic_id": "docs.library",
       "executable": false
     },
@@ -646,7 +653,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "a0466d4a4e384a3cd393e703dc5cb0150aaa6cb215c2ce8db413e0b4fe18a085",
+      "sha256": "3d0bcb3b37e2974de6714a184a115de92a0012215ea789ede27b9b624229a300",
       "semantic_id": "docs.template",
       "executable": false
     },

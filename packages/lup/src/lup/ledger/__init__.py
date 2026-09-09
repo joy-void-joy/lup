@@ -21,6 +21,6 @@ and that question must not span several files which can change between reads.
 **No epistemics.** Nothing here says what counts as verified, what grades
 exist, or what a claim owes before it may be recorded. Those are a project's,
 and a library that answered them would be one every adopter had to argue with:
-:mod:`lup.standing` fills them for a project that wants that answer, and a
+:mod:`lup.corpus` fills them for a project that wants that answer, and a
 project that wants its own declares its own types.
 """

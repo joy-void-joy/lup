@@ -20,6 +20,8 @@ outrun its support, because nothing records that it ever had any.
 """
 
 from datetime import datetime
+from pathlib import Path
+from typing import Self
 
 from pydantic import BaseModel, Field
 
@@ -38,6 +40,16 @@ class Standing(BaseModel, frozen=True):
 
     label: str
     reason: str = ""
+
+    sound: bool = True
+    """Whether a document citing this node may go on citing it.
+
+    A label is a project's vocabulary and a reader outside the project cannot
+    rank one against another; this is the one bit every vocabulary shares. It
+    is what a cite check reads, so a claim that was verified and is now stale
+    fails a build without the check knowing what "stale" means — the type
+    that said so knew.
+    """
 
 
 class LedgerEdge(BaseModel, frozen=True):
@@ -147,6 +159,19 @@ class LedgerNode(BaseModel, frozen=True):
         del around
         return Standing(label="recorded")
 
+    def prepared(self, root: Path) -> Self:
+        """This node with whatever it derives from the working tree filled in.
+
+        Called by the store once, just before a node is appended, so a type
+        whose record depends on the tree as it is *now* — evidence pinned to
+        the digests of the files it was checked against — computes that at the
+        one moment it is true, and a generic `record` never has to know which
+        types need it. The base derives nothing and returns itself, which is
+        every type that is only what somebody wrote.
+        """
+        del root
+        return self
+
 
 class Surroundings(BaseModel, frozen=True):
     """One node's neighbourhood, which is everything its standing may read.
@@ -170,6 +195,16 @@ class Surroundings(BaseModel, frozen=True):
 
     By id rather than by position, because one node may sit at the end of
     several edges and duplicating it would make a count of blockers wrong.
+    """
+
+    root: Path | None = None
+    """The working tree this node's evidence was recorded against, if any.
+
+    Part of the neighbourhood because evidence rots against files: an
+    artifact checked over a scope of paths stops standing the moment one of
+    them changes, and only the tree can say whether one has. Absent where a
+    caller has no tree — a snapshot read on another machine — and a type that
+    needs one says it could not check rather than guessing.
     """
 
     def at(self, node_id: str) -> LedgerNode | None:
