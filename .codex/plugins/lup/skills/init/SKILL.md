@@ -113,7 +113,7 @@ resolves later — decides which files exist at the end. Ask the user directly, 
 
 First, the part that is not a decision. The template ships demonstrations of
 *itself* — `examples/` composing lup's own runtime against lup's own README,
-and the two test modules driving them. A domain that adopted the template is a
+and the test modules driving them. A domain that adopted the template is a
 consumer of that library rather than a demonstrator of it, so what it inherits
 there is a directory it will never run and a suite it has to keep green. Run:
 

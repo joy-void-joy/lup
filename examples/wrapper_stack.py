@@ -3,6 +3,8 @@
 import asyncio
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from lup import create_claude
 from lup.sessions.middleware import (
     BudgetConfig,
@@ -14,7 +16,11 @@ from lup.sessions.middleware import (
 )
 from lup.types import Usage
 
-from examples.common import Summary
+
+class Summary(BaseModel, frozen=True):
+    """A minimal structured result submitted by this example's agent."""
+
+    summary: str = Field(min_length=1)
 
 
 def reported_cost(usage: Usage) -> float:

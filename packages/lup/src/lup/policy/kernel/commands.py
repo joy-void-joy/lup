@@ -44,6 +44,7 @@ from .words import (
     protected_write_target,
     refspec_effects,
     rewrites_only_recoverable_files,
+    uv_run_module_root,
     uv_run_words,
     write_checkpoint,
     write_scope,
@@ -1386,6 +1387,48 @@ def uv_package_source(
     return None
 
 
+def declared_target_decision(
+    declared: RunnerTargetRow,
+    run_words: list[str],
+    target_tables: list[ShellRuleRow] | None,
+    measured: WriteFacts,
+) -> KernelDecision:
+    """What one declared ``uv run`` target earns, from what it says it does.
+
+    Two spellings reach a declared target — the executable itself, and the
+    root package a ``-m`` names — and they are the same declaration, so they
+    read it here rather than each deriving a verdict of its own.
+
+    A target carrying a verb table is judged by that table, which states what
+    each of its operations does. Otherwise the row's own effects answer,
+    against the placement the host measured.
+    """
+    tabled = [
+        row for row in (target_tables or []) if row["command"] == declared["name"]
+    ]
+    if tabled:
+        return decide_command_rows(run_words, tabled, measured)
+    evidence = unresolved_evidence(measured)
+    placement: SandboxPlacement = "inside" if measured["contained"] else "ambient"
+    stated = declared_verdict(
+        declared["effects"], declared["refuses"], evidence, placement
+    )
+    # Only a question carries one, and the refusal is why this asks about the
+    # verdict rather than about the effects alone: a refused spelling denies
+    # whatever its effects would have earned, and a purpose on a deny names a
+    # decision nobody is being asked to make.
+    return KernelDecision(
+        stated,
+        declared["reason"],
+        declared["sandbox"],
+        purpose=(
+            purpose_of(declared["effects"], evidence, placement)
+            if stated == "ask"
+            else None
+        ),
+    )
+
+
 # lup: solved: Re-installing lup still asks. `uv cache clean` and `uv lock` moved below the install line and are allowed, but `uv sync --all-extras` is judged as an install that fetches and runs build code — so the refresh line still puts a question for a dependency the project already declares, without an escalate marker now rather than with one. `decide_uv` argues that half deliberately: the verb that reaches the network to install is a question, every time. A disagreement to settle rather than an oversight to fix.
 def decide_uv(
     words: list[str],
@@ -1458,27 +1501,46 @@ def decide_uv(
         bare_target = "/" not in run_words[0]
         # A script file and an inline program are different questions, and
         # answering them together denied the rung the guidance points at for
-        # computing something once. What the deny is actually about is
-        # reviewability: `-c` leaves nothing behind to read, where a file can
-        # be opened, diffed and run again. So the flags keep the refusal and a
-        # named script does not.
+        # computing something once. One criterion decides every form: an
+        # invocation is refused when it leaves no reviewable artifact behind.
+        # `-c` leaves nothing to read and a bare interpreter runs nothing at
+        # all; a path and a module in a declared root are both openable,
+        # diffable and runnable again, so neither is inline code.
         rest = run_words[1:]
-        inline = [word for word in rest if word in ("-c", "-m")]
+        inline = [word for word in rest if word == "-c"]
         named = [word for word in rest if not word.startswith("-")]
         interpreted = run_command in INTERPRETERS
-        if run_command in ("-c", "-m", "--script") or (
-            interpreted and (inline or not named)
-        ):
-            if run_command in ("-c", "-m", "--script"):
-                subject = f"uv run {run_command}"
-            elif inline:
-                subject = f"uv run {run_command} {inline[0]}"
-            else:
-                subject = f"the bare interpreter uv run {run_command}"
+        # A module is as readable as the file it lives in, so what decides one
+        # is whether this project declares its root — read off the table that
+        # already answers `uv run <target>`, because a blessed module root and
+        # a blessed executable are the same statement: it runs something this
+        # repository declares as its own. One declaration admits every module
+        # beneath the root, and an undeclared root keeps the refusal, which is
+        # what `-m http.server` meets.
+        module_root = uv_run_module_root(run_words)
+        declared_root = next(
+            (row for row in runner_targets if row["name"] == module_root), None
+        )
+        if run_command == "-c" or (interpreted and inline):
+            subject = "uv run -c" if run_command == "-c" else f"uv run {run_command} -c"
             return KernelDecision(
                 "deny",
                 f"{subject}: inline code is not allowed — a named script"
                 " file can be reviewed and run again",
+            )
+        if module_root is not None and declared_root is None:
+            return KernelDecision(
+                "deny",
+                f"uv run -m: `{module_root}` is not a module root this project"
+                " declares — name a script file instead, or declare the root"
+                " as a runner target",
+            )
+        if interpreted and not named:
+            return KernelDecision(
+                "deny",
+                f"the bare interpreter uv run {run_command}: an interpreter with"
+                " nothing to run leaves nothing behind to read — name a script"
+                " file",
             )
         # Between the refusal above and the target's own verdict below, which
         # is where the lattice would put it anyway: a deny outranks an ask,
@@ -1500,6 +1562,14 @@ def decide_uv(
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
+        # Above the interpreter's own allow, because `python -m examples.x`
+        # reaches both and the module root is the more specific statement:
+        # what runs is the module, not a script path the interpreter was
+        # handed.
+        if declared_root is not None:
+            return declared_target_decision(
+                declared_root, run_words, target_tables, measured
+            )
         if interpreted:
             return KernelDecision(
                 "allow", "a script file can be read, where inline code cannot"
@@ -1508,32 +1578,8 @@ def decide_uv(
             (row for row in runner_targets if row["name"] == run_command), None
         )
         if bare_target and declared is not None:
-            tabled = [
-                row for row in (target_tables or []) if row["command"] == run_command
-            ]
-            if tabled:
-                return decide_command_rows(run_words, tabled, measured)
-            evidence = unresolved_evidence(measured)
-            placement: SandboxPlacement = (
-                "inside" if measured["contained"] else "ambient"
-            )
-            stated = declared_verdict(
-                declared["effects"], declared["refuses"], evidence, placement
-            )
-            # Only a question carries one, and the refusal is why this asks
-            # about the verdict rather than about the effects alone: a
-            # refused spelling denies whatever its effects would have earned,
-            # and a purpose on a deny names a decision nobody is being asked
-            # to make.
-            return KernelDecision(
-                stated,
-                declared["reason"],
-                declared["sandbox"],
-                purpose=(
-                    purpose_of(declared["effects"], evidence, placement)
-                    if stated == "ask"
-                    else None
-                ),
+            return declared_target_decision(
+                declared, run_words, target_tables, measured
             )
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")

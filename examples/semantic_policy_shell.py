@@ -12,7 +12,7 @@ and nothing else is left to grant it.
 
 import asyncio
 
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup import create_claude
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
@@ -21,8 +21,6 @@ from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
 from lup_template.harness.catalog import declared_hook_set
-
-from examples.common import Summary
 
 # lup: ignore[constant-declaration] — the one origin this example allows, which
 # is the example's subject rather than a value to pass in
@@ -38,6 +36,12 @@ A rule may place a call outside the sandbox, but only a session that opened
 the channel can carry it there. One object answers both so the two cannot
 disagree — unstated, a placement is rendered and silently dropped.
 """
+
+
+class Summary(BaseModel, frozen=True):
+    """A minimal structured result submitted by this example's agent."""
+
+    summary: str = Field(min_length=1)
 
 
 def policy_hooks() -> LupHooksConfig:

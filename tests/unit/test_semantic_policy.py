@@ -100,7 +100,6 @@ from lup.policy.rules import (
     path_rule_row,
 )
 
-from lup.policy.vocabulary import runner_target_rules
 from lup_template.harness.catalog import (
     application_roots,
     declared_hook_set,
@@ -464,9 +463,13 @@ runtime, and neither is a name this repository actually refuses — what is
 being pinned is the shape, not this project's own judgement."""
 
 FIXTURE_RECOVERABLE_LIMIT = 5
-FIXTURE_RUNNER_TARGETS = runner_target_rules()
+FIXTURE_RUNNER_TARGETS = declared_hook_set().runner_targets
 """What this project declares `uv run <target>` may reach, and where each runs,
-which is what the shell fixtures below are written against."""
+which is what the shell fixtures below are written against.
+
+Asked of the hook set for the reason `SHELL_RULES` is: the table these cases
+are about is the one a session walks, and a module root declared beside the
+executables is on it."""
 """How many restorable files one command may destroy before it asks."""
 
 SHELL_POLICY_CASES = [
@@ -479,10 +482,22 @@ SHELL_POLICY_CASES = [
     # and the session running it is contained.
     DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="allow"),
     DecisionCase(input="uv run python tmp/oneoff.py", effect="allow"),
-    # The flags keep the refusal, because each of them is a program with no
-    # file to open afterwards.
+    # What keeps the refusal is naming nothing readable: inline code leaves
+    # no file behind, and an interpreter handed nothing runs no program at
+    # all. A module whose root nobody declared is the third of them — there
+    # is a file, and no statement that this project owns it.
+    DecisionCase(input="uv run -c 'print(1)'", effect="deny"),
     DecisionCase(input="uv run python -m http.server", effect="deny"),
+    DecisionCase(input="uv run -m http.server", effect="deny"),
     DecisionCase(input="uv run python", effect="deny"),
+    # A declared root admits every module beneath it, in both spellings that
+    # reach one, because what runs is this project's own reviewed source.
+    DecisionCase(input="uv run -m examples.monitored_run plan", effect="allow"),
+    DecisionCase(input="uv run python -m examples.one_shot", effect="allow"),
+    # `-m` belongs to whoever the invocation reached, and pytest's selects a
+    # marker expression: reading that as a module would refuse the way this
+    # project runs a slice of its own tests.
+    DecisionCase(input="uv run pytest -m slow", effect="allow"),
     DecisionCase(input="find . -name '*.py' | xargs grep TODO", effect="allow"),
     DecisionCase(input="echo x | xargs rm -rf", effect="ask"),
     DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),
@@ -2515,6 +2530,70 @@ def test_a_blessed_target_can_still_refuse_one_verb_beneath_it(
     # The target's own effect is the default beneath its verbs, so a verb it
     # never named inherits the blessing rather than falling off the table.
     assert decide("uv run devtools status").effect == "allow"
+
+
+def test_a_declared_module_root_admits_every_module_beneath_it(
+    tmp_path: Path,
+) -> None:
+    """`-m` names a file, so what decides it is whose file that is.
+
+    The refusal `-m` shared with `-c` was about the flag rather than about
+    what the flag named: `-c` leaves nothing behind to read, and a module
+    leaves the file it lives in. So the table that already answers
+    `uv run <target>` answers this too, on the root segment — one declaration
+    for a tree of entry points rather than one per entry point, and a root
+    nobody declared refused with the declaration named.
+    """
+    targets = [
+        RunnerTargetRule(name="pytest", effects=[declare("runs_declared_target")]),
+        RunnerTargetRule(name="demos", effects=[declare("runs_declared_target")]),
+    ]
+    policy = ShellPolicy(SHELL_RULES, runner_targets=targets)
+
+    def decide(command: str) -> Decision:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path))
+
+    assert decide("uv run -m demos.one_shot").effect == "allow"
+    assert decide("uv run -m demos.deeper.two_shot --flag").effect == "allow"
+    assert decide("uv run python -m demos.one_shot").effect == "allow"
+    refused = decide("uv run -m http.server")
+    assert refused.effect == "deny"
+    assert "`http` is not a module root" in refused.reason
+    # `-c` keeps the refusal and the wording that is true only of it.
+    assert "inline code" in decide("uv run -c 'print(1)'").reason
+    # A target's own `-m` stays its own: pytest selects markers with it, and
+    # only uv's `-m` and an interpreter's name a module.
+    assert decide("uv run pytest -m demos").effect == "allow"
+    assert decide("uv run pytest -m slow").effect == "allow"
+
+
+def test_the_long_and_short_spellings_of_the_script_flag_agree(
+    tmp_path: Path,
+) -> None:
+    """`-s` allowed and `--script` denied, which are one flag.
+
+    Both name a path, which is what the criterion is about, so the modifier
+    is stepped over and the file behind it is judged — as `-s` and
+    `--gui-script` already were. Running standalone rather than in the
+    project environment is less capability than the plain path form, so
+    nothing is opened here that `uv run <path>` did not already open.
+    """
+    policy = ShellPolicy(
+        SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS, sandbox_active=True
+    )
+    spellings = [
+        "uv run tmp/once.py",
+        "uv run -s tmp/once.py",
+        "uv run --script tmp/once.py",
+        "uv run --gui-script tmp/once.py",
+    ]
+
+    verdicts = {
+        policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+        for command in spellings
+    }
+
+    assert verdicts == {"allow"}
 
 
 def test_moving_a_recoverable_file_costs_what_deleting_it_costs(

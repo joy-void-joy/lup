@@ -317,12 +317,13 @@ SCAFFOLD_DEMONSTRATIONS = [
     Path("examples"),
     Path("tests/unit/test_policy_examples.py"),
     Path("tests/unit/test_examples_use_the_front_door.py"),
+    Path("tests/unit/test_examples_documented_commands.py"),
 ]
 """What the scaffold ships to demonstrate *itself*, for a caller that does not
 say. Each of these composes lup's own runtime against lup's own README — a
 front door being opened, a wrapper stack, a policy denying the call it declared
 — so a domain that adopted the template inherits a directory of demos for a
-library it is merely a consumer of, and two test modules driving them. Its own
+library it is merely a consumer of, and the test modules driving them. Its own
 examples, if it wants any, are about its own subject and share nothing with
 these but a directory name. A fork shipping different demonstrations passes
 its own list rather than editing this one."""

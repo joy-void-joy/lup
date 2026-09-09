@@ -2,13 +2,17 @@
 
 import asyncio
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lup import TurnRequest, TurnResult, create_claude, turn_request
 from lup.orchestration.background import BackgroundAgent, BackgroundConfig
 from lup.sessions.errors import TurnError
 
-from examples.common import Summary
+
+class Summary(BaseModel, frozen=True):
+    """A minimal structured result submitted by this example's agent."""
+
+    summary: str = Field(min_length=1)
 
 
 class DraftState(BaseModel, frozen=True):

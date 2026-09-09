@@ -662,6 +662,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
 def runner_target_rules(
     ambient: Sequence[str] = ("pyright", "pytest", "ruff"),
     session_opening: Sequence[str] = ("lup-devtools",),
+    also: Sequence[str] = (),
 ) -> list[RunnerTargetRule]:
     """The ``uv run`` targets a project blesses, grouped by what each needs.
 
@@ -703,10 +704,18 @@ def runner_target_rules(
     repository declares as its own. What such a target then goes on to write
     is answered by the rows its own commands match, so nothing is said about
     it twice.
+
+    ``also`` is the direction the three groups cannot reach: a name that is
+    nobody else's. A module root goes there — the table answers
+    ``uv run -m <root>.<module>`` by its root segment, so a project declaring
+    ``examples`` admits every entry point beneath it — and so does a console
+    script no library rule knows. What such a name is worth is the same
+    ``runs_declared_target`` the rest carry, for the same reason: what a
+    project declares as its own is reviewed as source before anything runs it.
     """
     return [
         RunnerTargetRule(name=name, effects=[declare("runs_declared_target")])
-        for name in (*ambient, *session_opening)
+        for name in (*ambient, *session_opening, *also)
     ]
 
 
