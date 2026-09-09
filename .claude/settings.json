@@ -34,7 +34,8 @@
       "mcp__plugin_lup_notes",
       "mcp__plugin_lup_sandbox",
       "mcp__plugin_lup_codeintel",
-      "mcp__plugin_lup_coordination"
+      "mcp__plugin_lup_coordination",
+      "mcp__plugin_lup_ledger"
     ],
     "deny": [
       "Read(./**/.env*.local)",

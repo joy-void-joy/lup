@@ -50,44 +50,45 @@ src/lup_template/
 ├── environment/             # Environment harness — how the outside world reaches the agent.
 │   └── cli/                 # CLI package for the environment client.
 │       └── __main__.py      # Environment CLI for running agent sessions.
-└── harness/                 # What this repository declares about the harness its own sessions run under.
-    ├── catalog.py           # Root of the project-owned harness declaration graph.
-    ├── composition.py       # What this project publishes through each native target, and what writes it.
-    └── content/             # Declaration leaves of the harness graph.
-        ├── assets/          # Typed harness content declarations.
-        ├── catalog.py       # Which modules this repository takes, and what it changed about each.
-        ├── docs/            # Typed source for every document under ``docs/``.
-        │   ├── catalog.py   # Every document this repository publishes under ``docs/``.
-        │   ├── corpus.py    # This repository's corpus: a body of claims, what backs each, and what retired it.
-        │   ├── decisions.py # Architectural decisions behind the development tooling.
-        │   ├── index.py     # The documentation index: what this repository is, and where each part is.
-        │   └── template.py  # Guide to ``src/lup_template``, the application built on the library.
-        ├── guidance.py      # Canonical repository guidance.
-        ├── image.py         # The container this repository's agent sessions run in.
-        ├── modules/
-        │   ├── catalog.py   # The modules only this repository has, each spec beside its builder.
-        │   ├── examples.py  # The scaffold demonstrating itself, which no adopter runs.
-        │   ├── project.py   # What this repository is, and what it expects of a session working in it.
-        │   ├── specs.py     # What the modules only this repository has are called, and what they are for.
-        │   ├── template_init.py # Standing a lup project up, and keeping it configured once it is standing.
-        │   └── upstream.py  # Keeping a project in step with what it was built from.
-        ├── provenance.py    # What a project settles about where its lup came from.
-        ├── requirements.py  # The external programs this repository needs, and what going without costs.
-        ├── settings.py      # What this repository grants, refuses, and enables for itself.
-        ├── shell_vocabulary.py # Where this project's shell vocabulary differs from the one lup offers.
-        ├── skills/          # Typed harness content declarations.
-        │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
-        │   ├── deciding.py  # The decision walk the design-facing skills share.
-        │   ├── discovery.py # The discovery posture the design-facing skills share.
-        │   ├── distill.py   # Canonical declaration for the distill skill.
-        │   ├── import_skill.py # Canonical declaration for the import skill.
-        │   ├── init.py      # Canonical declaration for the init skill.
-        │   ├── install.py   # Canonical declaration for the install skill.
-        │   ├── meta.py      # Canonical declaration for the meta skill.
-        │   └── update.py    # Canonical declaration for the update skill.
-        ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
-        ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
-        └── template_sections.py # Portable downstream-template sections shared by every guidance flavor.
+├── harness/                 # What this repository declares about the harness its own sessions run under.
+│   ├── catalog.py           # Root of the project-owned harness declaration graph.
+│   ├── composition.py       # What this project publishes through each native target, and what writes it.
+│   └── content/             # Declaration leaves of the harness graph.
+│       ├── assets/          # Typed harness content declarations.
+│       ├── catalog.py       # Which modules this repository takes, and what it changed about each.
+│       ├── docs/            # Typed source for every document under ``docs/``.
+│       │   ├── catalog.py   # Every document this repository publishes under ``docs/``.
+│       │   ├── corpus.py    # This repository's corpus: a body of claims, what backs each, and what retired it.
+│       │   ├── decisions.py # Architectural decisions behind the development tooling.
+│       │   ├── index.py     # The documentation index: what this repository is, and where each part is.
+│       │   └── template.py  # Guide to ``src/lup_template``, the application built on the library.
+│       ├── guidance.py      # Canonical repository guidance.
+│       ├── image.py         # The container this repository's agent sessions run in.
+│       ├── modules/
+│       │   ├── catalog.py   # The modules only this repository has, each spec beside its builder.
+│       │   ├── examples.py  # The scaffold demonstrating itself, which no adopter runs.
+│       │   ├── project.py   # What this repository is, and what it expects of a session working in it.
+│       │   ├── specs.py     # What the modules only this repository has are called, and what they are for.
+│       │   ├── template_init.py # Standing a lup project up, and keeping it configured once it is standing.
+│       │   └── upstream.py  # Keeping a project in step with what it was built from.
+│       ├── provenance.py    # What a project settles about where its lup came from.
+│       ├── requirements.py  # The external programs this repository needs, and what going without costs.
+│       ├── settings.py      # What this repository grants, refuses, and enables for itself.
+│       ├── shell_vocabulary.py # Where this project's shell vocabulary differs from the one lup offers.
+│       ├── skills/          # Typed harness content declarations.
+│       │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
+│       │   ├── deciding.py  # The decision walk the design-facing skills share.
+│       │   ├── discovery.py # The discovery posture the design-facing skills share.
+│       │   ├── distill.py   # Canonical declaration for the distill skill.
+│       │   ├── import_skill.py # Canonical declaration for the import skill.
+│       │   ├── init.py      # Canonical declaration for the init skill.
+│       │   ├── install.py   # Canonical declaration for the install skill.
+│       │   ├── meta.py      # Canonical declaration for the meta skill.
+│       │   └── update.py    # Canonical declaration for the update skill.
+│       ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
+│       ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
+│       └── template_sections.py # Portable downstream-template sections shared by every guidance flavor.
+└── kinds.py                 # What this repository records in its ledger, declared once.
 ```
 
 Nothing above is written down. The structure is walked from the checkout when

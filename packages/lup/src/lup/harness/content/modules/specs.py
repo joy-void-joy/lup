@@ -159,6 +159,7 @@ LEDGER = ModuleSpec(
     ),
     default_on=True,
     subapps=["ledger"],
+    tool_groups=["ledger"],
 )
 """On, because what it answers is a failure nobody sees happen.
 

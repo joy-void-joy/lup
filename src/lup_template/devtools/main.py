@@ -44,23 +44,8 @@ from lup.devtools.dev import conflicts
 from lup.devtools.dev.commands import write_command_reference
 from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
-from lup.coordination.handoffs import Handoff, Transfers
-from lup.coordination.tasks import Blocks, Task
 from lup.devtools.roster import DevtoolsDeclarations
-from lup_template.corpus import (
-    Answers,
-    Artifact,
-    Certificate,
-    Claim,
-    Correction,
-    Question,
-    Refutes,
-    RestsOn,
-    Source,
-    Supersedes,
-    Supports,
-    Verifies,
-)
+from lup_template.kinds import EDGE_KINDS, NODE_KINDS
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
 from lup_template.agent.config import engine_for_settings, settings
@@ -125,30 +110,10 @@ DECLARATIONS = DevtoolsDeclarations(
         else None
     ),
     profiles=profile_directory(),
-    # What this repository records. Listed here rather than derived from
-    # the adopted modules, because a union assembled at run time is not
-    # one a type checker can narrow — and the console is the one reader
-    # that needs the list at all.
-    node_classes=[
-        Task,
-        Handoff,
-        Question,
-        Claim,
-        Correction,
-        Artifact,
-        Certificate,
-        Source,
-    ],
-    edge_classes=[
-        Blocks,
-        Transfers,
-        Answers,
-        RestsOn,
-        Supports,
-        Refutes,
-        Verifies,
-        Supersedes,
-    ],
+    # What this repository records, declared once in `lup_template.kinds`
+    # because the tool group a session records through reads the same list.
+    node_classes=NODE_KINDS,
+    edge_classes=EDGE_KINDS,
 )
 """What this repository tells the library's roster about itself.
 

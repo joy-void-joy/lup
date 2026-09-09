@@ -34,6 +34,23 @@
       ],
       "command": "uv"
     },
+    "ledger": {
+      "args": [
+        "run",
+        "--directory",
+        "${CLAUDE_PROJECT_DIR}",
+        "lup-devtools",
+        "agent",
+        "serve-tools",
+        "--runtime",
+        "claude",
+        "--server",
+        "ledger",
+        "--session",
+        "harness"
+      ],
+      "command": "uv"
+    },
     "notes": {
       "args": [
         "run",

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from lup.sandbox.container import Sandbox
 
 ServerGroup = Literal[
-    "notes", "sandbox", "codeintel", "session", "coordination", "example"
+    "notes", "sandbox", "codeintel", "session", "coordination", "ledger", "example"
 ]
 """A tool-group name this registry can build — the group vocabulary every
 consumer shares: server registration (``core.build_session_options``),
@@ -47,6 +47,8 @@ CODEINTEL_GROUP: ServerGroup = "codeintel"
 SESSION_GROUP: ServerGroup = "session"
 # lup: ignore[constant-declaration] — group identity
 COORDINATION_GROUP: ServerGroup = "coordination"
+# lup: ignore[constant-declaration] — group identity
+LEDGER_GROUP: ServerGroup = "ledger"
 # lup: ignore[constant-declaration] — group identity
 EXAMPLE_GROUP: ServerGroup = "example"
 """Placeholder tools with fabricated data — never served to a live agent
@@ -72,6 +74,7 @@ def tool_group_names(*, realtime: bool) -> list[ServerGroup]:
         SANDBOX_GROUP,
         CODEINTEL_GROUP,
         COORDINATION_GROUP,
+        LEDGER_GROUP,
     ]
     return [*base, SESSION_GROUP] if realtime else base
 
@@ -110,9 +113,11 @@ def build_session_toolset(
     Returns:
         The groups plus the shared reflection gate.
     """
-    from lup.coordination.identity import session_member_id
+    from lup.coordination.identity import member_ref, session_member_id
     from lup.coordination.peer_tools import create_peer_tools
     from lup.coordination.repository import RepositoryPeers
+    from lup.ledger.tools import create_ledger_tools
+    from lup_template.kinds import EDGE_KINDS, NODE_KINDS
     from lup.tools.lsp.tools import create_codeintel_tools
     from lup.workspace.paths import project_root
     from lup_template.agent.config import aux_model
@@ -159,6 +164,12 @@ def build_session_toolset(
         working = project_root()
         groups[COORDINATION_GROUP] = create_peer_tools(
             RepositoryPeers(working), member, working
+        )
+        # The same identity stamps what this session records, and for the
+        # same reason the group waits on one: a record with no author is
+        # provenance nobody can read, which is worse than no record.
+        groups[LEDGER_GROUP] = create_ledger_tools(
+            working, member_ref(member), NODE_KINDS, EDGE_KINDS
         )
 
     groups[EXAMPLE_GROUP] = list(EXAMPLE_TOOLS)
