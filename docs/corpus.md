@@ -126,6 +126,18 @@ the file, the line and the reason; `ledger cite <doc>` runs the same reading
 over one file. A document whose figures must never go stale is *generated*
 from the corpus instead, which is what writeups are.
 
+## Writeups
+
+`src/lup_template/writeups.py` declares this repository's generated documents
+the way guidance is declared: as parts. `docs/corpus-status.md` is the worked
+example — the open questions, the claims and where each stands, what waits on
+a person, the corrections, and a stamp naming the newest record it was
+generated from. `uv run lup-devtools ledger writeup` writes it from this
+machine's ledger; `--check` verifies the file on disk. The prose is the
+author's and every figure is the ledger's, cited, so a number in it cannot
+outlive what supports it: a claim that stopped standing renders struck through
+with the reason, and the cite check reports it besides.
+
 ## Recording it
 
 ```sh

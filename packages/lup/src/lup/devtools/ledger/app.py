@@ -40,6 +40,7 @@ from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.kinds import by_kind, declared_fields, kind_of
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.snapshot import snapshot
+from lup.ledger.writeup import Writeup, WriteupError, write_writeup
 from lup.types import JsonObject
 from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
@@ -141,7 +142,9 @@ def parsed_payload(text: str) -> JsonObject:
 
 
 def create_ledger_app(
-    classes: list[type[LedgerNode]], edges: list[type[LedgerEdge]] | None = None
+    classes: list[type[LedgerNode]],
+    edges: list[type[LedgerEdge]] | None = None,
+    writeups: list[Writeup] | None = None,
 ) -> typer.Typer:
     """Wire the command tree for this repository's notes, over these types.
 
@@ -306,6 +309,39 @@ def create_ledger_app(
         typer.echo(f"{len(readings) - len(failing)} of {len(readings)} cite(s) hold")
         if failing:
             raise typer.Exit(1)
+
+    @app.command("writeup")
+    def writeup_cmd(
+        name: Annotated[
+            str, typer.Argument(help="Which declared writeup; every one when omitted")
+        ] = "",
+        check: Annotated[
+            bool,
+            typer.Option("--check", help="Verify the file on disk against this ledger"),
+        ] = False,
+    ) -> None:
+        """Generate the documents this project declares over its ledger.
+
+        Written from this machine's log and committed like any document,
+        rather than drift-checked by `dev check`: the log is live state under
+        the git directory, so the same declaration renders differently where
+        nothing has been recorded. `--check` asks whether the file on disk is
+        what this machine would render, which is the question a person about
+        to commit one has.
+        """
+        declared = list(writeups or [])
+        chosen = [each for each in declared if not name or each.name == name]
+        if not chosen:
+            names = ", ".join(each.name for each in declared) or "none"
+            typer.echo(f"No writeup named {name!r} is declared; declared: {names}.")
+            raise typer.Exit(1)
+        for each in chosen:
+            try:
+                written = write_writeup(each, classes, project_root(), check=check)
+            except (RuntimeError, WriteupError) as problem:
+                typer.echo(str(problem))
+                raise typer.Exit(1) from problem
+            typer.echo(f"{'verified' if check else 'written'} {written}")
 
     @app.command("list")
     def list_cmd(

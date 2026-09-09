@@ -205,15 +205,6 @@ class Question(LedgerNode, frozen=True):
 
     kind: Literal["corpus:question"] = "corpus:question"
 
-    priority: int = 0
-    """How much this matters, higher first — a manual property, and meant to be.
-
-    A number rather than a word, because no vocabulary of importance is
-    imposed; map your own words onto it. What the log can tell about a
-    question's weight — how much rests on it, how many claims address it — is
-    shown beside this rather than folded into it.
-    """
-
     closed: str = ""
     """Why nobody should work on this any more, empty while it is live."""
 

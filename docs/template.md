@@ -88,7 +88,8 @@ src/lup_template/
 │       ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
 │       ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
 │       └── template_sections.py # Portable downstream-template sections shared by every guidance flavor.
-└── kinds.py                 # What this repository records in its ledger, declared once.
+├── kinds.py                 # What this repository records in its ledger, declared once.
+└── writeups.py              # This repository's writeups: documents generated from its own ledger.
 ```
 
 Nothing above is written down. The structure is walked from the checkout when

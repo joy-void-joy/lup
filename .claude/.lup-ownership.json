@@ -513,7 +513,7 @@
     {
       "path": "docs/README.md",
       "category": "generated",
-      "sha256": "8bb282d88cb72e3c13f1e935f3dc6233f672f76627275eeb4061f728f01f5ec5",
+      "sha256": "4fb17bbe505775fc2a49bf9f261c062860714fda97f6daea9dc1a642ddb355e5",
       "semantic_id": "docs.README",
       "executable": false
     },
@@ -548,7 +548,7 @@
     {
       "path": "docs/corpus.md",
       "category": "generated",
-      "sha256": "16fabb321de1606f8d423093e95a167a0880476b7d46efb8d3a5a9f5ba5e26bf",
+      "sha256": "5098d4a61aef2f282d53cb5907cb06cde436c6fb24e88dc5f04ae635b20ca6c1",
       "semantic_id": "docs.corpus",
       "executable": false
     },
@@ -569,7 +569,7 @@
     {
       "path": "docs/ledger.md",
       "category": "generated",
-      "sha256": "efe9a2354c64069c57d49eb19560da575f02a31c316470bf8a9d82d435be159b",
+      "sha256": "ba73a28b05913411fd089d4c9654bda3a56205b8828d33f88ce454bd4deef715",
       "semantic_id": "docs.ledger",
       "executable": false
     },
@@ -653,7 +653,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "dcaa855b07b0a2dac3d71136e25ea0d02c69f29ae6b07eadd2028ca2b53a09de",
+      "sha256": "dc1bb0d4f4de06c0723a7687d8b801280a32a392a1965974f216768058fd5ed2",
       "semantic_id": "docs.template",
       "executable": false
     },

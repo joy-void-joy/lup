@@ -181,6 +181,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `ledger relate` | Draw one edge of any declared kind between two nodes. |
 | `ledger amend` | Record a node again with some fields changed; nothing is overwritten. |
 | `ledger cite` | Check every cite in one document against where its node stands now. |
+| `ledger writeup` | Generate the documents this project declares over its ledger. |
 | `ledger list` | Show every node in this repository, with its standing read now. |
 | `ledger show` | Print one node in full, with its edges and what it attaches. |
 | `ledger delegate` | Record one task, hand it to a peer if there is one, and say what happened. |

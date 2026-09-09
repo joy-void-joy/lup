@@ -81,15 +81,6 @@ class Task(LedgerNode, frozen=True):
     """
 
     needs: Needs = ""
-    priority: int = 0
-    """How much this matters, higher first — a manual property, and meant to be.
-
-    Orthogonal to ``needs``: that says what class of input a task waits on,
-    this says how much it matters that it gets done. A number rather than a
-    word, because the library owns no vocabulary of importance; a project maps
-    its own words onto it.
-    """
-
     paths: list[str] = []
     """What this work touches, taken as locks when somebody claims it.
 

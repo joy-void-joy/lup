@@ -134,6 +134,17 @@ class LedgerNode(BaseModel, frozen=True):
     nobody can maintain by eye.
     """
 
+    priority: int = 0
+    """How much this matters, higher first — a manual property, and meant to be.
+
+    On the base rather than on the kinds that most often carry it, because a
+    listing that orders a mixed page — questions beside tasks beside claims —
+    has to read one number off every row. A number rather than a word,
+    because the library owns no vocabulary of importance; a project maps its
+    own words onto it. What the log itself can say about a node's weight is
+    read fresh and shown beside this, never folded into it.
+    """
+
     def finished(self) -> bool:
         """Whether this node is done with, for whatever it means to be done.
 

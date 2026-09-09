@@ -46,6 +46,7 @@ from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
 from lup.devtools.roster import DevtoolsDeclarations
 from lup_template.kinds import EDGE_KINDS, NODE_KINDS
+from lup_template.writeups import WRITEUPS
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
 from lup_template.agent.config import engine_for_settings, settings
@@ -114,6 +115,7 @@ DECLARATIONS = DevtoolsDeclarations(
     # because the tool group a session records through reads the same list.
     node_classes=NODE_KINDS,
     edge_classes=EDGE_KINDS,
+    writeups=WRITEUPS,
 )
 """What this repository tells the library's roster about itself.
 

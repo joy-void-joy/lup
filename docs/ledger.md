@@ -136,6 +136,25 @@ shell out to write down what it learned writes it down less often, and a
 corpus nobody records into answers nothing; the tools exist so recording is
 one call at the moment something is learned, not a chore at the end.
 
+## Writeups are declared documents
+
+A document whose figures must never go stale is generated from the log rather
+than written by hand: a Python module declares it as parts — the author's
+prose, and parts that render from the ledger when the document is generated.
+`Prose` fills `{placeholders}` with a node's figure, cited and bold, or struck
+through with the reason where the node no longer stands. `Listing` is a table
+of nodes chosen by kind, standing, relation, moment, or by name, ordered by
+priority. `NeedsPerson` is the person's task list grouped by what each row
+costs. `Stamp` says what the document was generated from, naming the newest
+record rather than the clock, so one log renders one document.
+
+`ledger writeup` writes every declared document, and `--check` verifies the
+file on disk against this machine's log. They are not drift-checked by `dev
+check`, deliberately: the log is live state under the git directory, so the
+same declaration renders differently where nothing has been recorded. What
+keeps a writeup honest everywhere is that every figure in it is a `lup:` cite,
+which the cite check holds to its node wherever the log is.
+
 ## Standing reaches through the log
 
 A type's `standing()` reads its neighbourhood, and the neighbourhood carries
