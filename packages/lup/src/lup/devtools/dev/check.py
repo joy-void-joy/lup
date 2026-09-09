@@ -59,7 +59,7 @@ from lup.devtools.harness.drift import (
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.utils import decode_stderr, uv
 from lup.execution.shell import git
-from lup.web.build import BUN
+from lup.web.build import BUN, restore_dependencies
 
 # The suite waits on git subprocesses and hook scripts far more than it
 # computes — its system time runs to roughly twice its user time — so it
@@ -116,11 +116,20 @@ def ran(name: str, command: Callable[[], object], ok: str = "ok") -> CheckReport
     a caller catches rather than a kind of it. Escaping here takes the whole
     gate down: the checks that had already passed go unreported, and a
     condition of the environment reads as a crash in the checker. So the two
-    are reported the same way and told apart by what the row says.
+    are reported the same way and told apart by what the row says — as is a
+    tool the check ran on its way to its own, the restore before `bun test`,
+    which refuses in words naming the command and carrying its output.
     """
     started = perf_counter()
     try:
         command()
+    except RuntimeError as error:
+        return CheckReport(
+            name=name,
+            passed=False,
+            lines=[f"{name}: FAIL", *str(error).splitlines()],
+            elapsed=perf_counter() - started,
+        )
     except sh.ErrorReturnCode as error:
         # Both streams, because the tools disagree about where a verdict
         # goes: pytest and the type checker write theirs to stdout, bun's
@@ -325,6 +334,16 @@ class TestRoot(BaseModel):
     name: str
     directory: Path
 
+    def restored_workspaces(self) -> list[Path]:
+        """The toolchain workspaces this suite restores from a lockfile before it runs.
+
+        What a fresh worktree readies beside the environment `uv sync`
+        builds. A pytest suite runs against that environment and restores
+        nothing of its own, which is the answer for every suite but the
+        bun workspace's.
+        """
+        return []
+
     def absent(self) -> CheckReport:
         """The verdict a root naming a directory this checkout lacks earns.
 
@@ -385,10 +404,16 @@ class BunTestRoot(TestRoot):
 
     The frontend's pure functions — how a page narrows and searches a graph it
     holds — are held to the server's semantics here, beside the pytest
-    suites, so a gate that is green ran them. Where bun is missing this
-    fails the way the bundle check does: a repository that builds surfaces
-    has the toolchain as a dependency of its gate.
+    suites, so a gate that is green ran them. The workspace's dependencies
+    are restored first where they are behind its lockfile, as `uv run`
+    restores the environment before pytest; a restore that fails is the
+    row's verdict, naming the command with bun's output. Where bun is
+    missing this fails the way the bundle build does: a repository that
+    builds surfaces has the toolchain as a dependency of its gate.
     """
+
+    def restored_workspaces(self) -> list[Path]:
+        return [self.directory]
 
     def run(
         self,
@@ -400,6 +425,7 @@ class BunTestRoot(TestRoot):
         # Workers and the ignored roots are pytest's vocabulary; bun runs the
         # workspace's tests in its own way and reads neither.
         del workers, excluded_roots
+        restore_dependencies(self.directory)
         BUN("test", *paths, _cwd=str(self.directory), _fg=foreground)
 
 

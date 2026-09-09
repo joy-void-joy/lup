@@ -8,6 +8,8 @@ declaration, so leaving it beside any one of them would make the other two
 import that one for a type.
 """
 
+from pathlib import Path
+
 from pydantic import BaseModel
 
 import lup.devtools.dev.check as check
@@ -34,3 +36,16 @@ class DevDeclarations(BaseModel, frozen=True):
     A default rather than a fixture: the pair lup arms is what most projects
     want, and one that guards a third moment — or runs its gate under another
     name — says so here instead of forking the module that writes them."""
+
+    def restored_workspaces(self) -> list[Path]:
+        """The toolchain workspaces a fresh worktree restores beside `uv sync`.
+
+        Derived from the suites rather than declared again: the suite that
+        runs in a workspace is the one that knows it has to be restored, and
+        a second list naming the same directories would drift from the first.
+        """
+        return [
+            workspace
+            for root in self.test_roots
+            for workspace in root.restored_workspaces()
+        ]

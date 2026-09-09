@@ -376,6 +376,7 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     write_flags: list[str] = []
     read_verbs: list[str] = []
     probe_flags: list[str] = []
+    frozen_flags: list[str] = []
     guarded_keys: list[str] = []
     operations: list[ShellOperationRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
@@ -483,6 +484,16 @@ class ShellCommandRule(SelectableRule, frozen=True):
     the row's own effects. What it does not stand down is destination
     grammar — a probe still contacts the repository it names, so where the
     work would go stays guarded as a place rather than as a write.
+    """
+    frozen_flags: list[str] = []
+    """Flags that pin a dependency restore to what its lockfile already declares.
+
+    `bun install --frozen-lockfile` fetches nothing the lock does not pin by
+    integrity hash, which is the restore `uv run` performs before running
+    anything, unasked — so the flag de-escalates the row to allow, on the
+    terms a read verb is honored: legible, and among words free of guarded
+    flags. Without it the same verb is free to rewrite the lockfile first,
+    which resolves what the project depends on anew and keeps the question.
     """
     write_markers: list[str] = []
     """Argument prefixes whose *absence* makes this command read-only.
@@ -659,6 +670,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 allow_flags=[],
                 read_verbs=[],
                 probe_flags=[],
+                frozen_flags=[],
                 write_markers=[],
                 guarded_keys=[],
                 setting_flags=[],
@@ -683,6 +695,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
             probe_flags=list(subcommand.probe_flags),
+            frozen_flags=list(subcommand.frozen_flags),
             write_markers=[],
             guarded_keys=list(subcommand.guarded_keys),
             setting_flags=[],
@@ -709,6 +722,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
             probe_flags=list(command.probe_flags),
+            frozen_flags=list(command.frozen_flags),
             write_markers=list(command.write_markers),
             guarded_keys=list(command.guarded_keys),
             setting_flags=list(command.setting_flags),

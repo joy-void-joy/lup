@@ -298,14 +298,20 @@ uv run lup-devtools dev rules --check      # the generated rule reference
 ```
 
 The generated trees include the frontend bundles under `lup.web`'s package
-data, built from `packages/lup/web/` by Vite. The gate rebuilds them to compare
-against what is committed, so it needs `bun` and the workspace's dependencies:
-`bun install --frozen-lockfile` in `packages/lup/web/`, once, and again when
-`bun.lock` moves. Without them `dev check` fails naming that command rather
-than passing over what it could not build. A dependency is added with
-`bun add`, which the policy asks about the way it asks about `uv add`. The
-workspace's own tests are a third suite beside the two pytest roots, run by
-`bun test` from the workspace, so a green gate ran the frontend's tests too.
+data, built from `packages/lup/web/` by Vite, so the gate needs `bun`. The
+workspace's dependencies it restores itself, the way `uv run` syncs the
+environment before running: where `packages/lup/web/node_modules` is missing
+or older than `bun.lock`, the bundle build and the `bun test` row run
+`bun install --frozen-lockfile` first, and `git worktree create` runs it
+beside `uv sync` (both skipped by `--no-sync`), so a fresh worktree is ready.
+A restore that fails is the row's verdict, carrying bun's own output. The
+policy allows that frozen restore, and `uv sync --frozen` and `uv sync
+--locked` on the same reasoning — a frozen lockfile pins every package by
+integrity hash, which is what `uv run` already fetches unasked — while
+`bun install` without the flag, `bun add`, `uv sync` without a freeze flag and
+`uv add` ask, since each can rewrite the lockfile. The workspace's own tests
+are a third suite beside the two pytest roots, run by `bun test` from the
+workspace, so a green gate ran the frontend's tests too.
 
 [quality-pipeline.md](quality-pipeline.md) explains which of the three
 automated layers catches what. The short version: `git hooks install`

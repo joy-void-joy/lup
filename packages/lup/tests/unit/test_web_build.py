@@ -7,16 +7,24 @@ the rest is exercised over a bundle written by hand.
 """
 
 import json
+import os
 import shutil
 import tomllib
 from pathlib import Path
 
 import pytest
+import sh
 from fastapi.testclient import TestClient
 
 from lup.devtools.surfaces import EXPLORER, LIBRARY_SURFACES
 from lup.harness.ownership import OWNERSHIP_FILENAME, load_manifest
-from lup.web.build import Surface, source_digest, write_web_bundles
+from lup.web.build import (
+    Surface,
+    dependencies_behind,
+    restore_dependencies,
+    source_digest,
+    write_web_bundles,
+)
 from lup.web.schema import view_schema, write_view_schema
 from lup.web.serve import bundle_app
 
@@ -146,12 +154,111 @@ def test_write_web_bundles_builds_owns_and_verifies(tmp_path: Path) -> None:
         write_web_bundles(WORKSPACE, bundles, [EXPLORER], tmp_path, check=True)
 
 
-def test_a_workspace_without_dependencies_is_refused_naming_the_install(
+def recorded_restores(
+    monkeypatch: pytest.MonkeyPatch, refusing: str = ""
+) -> list[tuple[str, ...]]:
+    """Bun as the restore sees it: each install recorded, `node_modules` laid
+    down the way a real one lays it — or refused with ``refusing`` as bun's
+    own stderr."""
+    calls: list[tuple[str, ...]] = []  # lup: ignore[empty-collection] — call record
+
+    def bun(*args: str, _cwd: str) -> None:
+        calls.append(args)
+        if refusing:
+            raise sh.ErrorReturnCode_1(
+                "bun install --frozen-lockfile", b"", refusing.encode("utf-8")
+            )
+        (Path(_cwd) / "node_modules").mkdir(exist_ok=True)
+
+    monkeypatch.setattr("lup.web.build.BUN", bun)
+    return calls
+
+
+def test_missing_dependencies_are_restored_and_current_ones_left_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "web"
+    workspace.mkdir()
+    (workspace / "bun.lock").write_text("{}\n", encoding="utf-8")
+    restores = recorded_restores(monkeypatch)
+
+    assert dependencies_behind(workspace)
+    assert restore_dependencies(workspace)
+    assert restores == [("install", "--frozen-lockfile")]
+    assert not dependencies_behind(workspace)
+    assert not restore_dependencies(workspace)
+    assert len(restores) == 1
+
+
+def test_dependencies_older_than_the_lockfile_are_restored_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lockfile that moved after the install — a checkout, a merge — is what
+    a copied `node_modules` is behind; the restore dates it current again."""
+    workspace = tmp_path / "web"
+    installed = workspace / "node_modules"
+    installed.mkdir(parents=True)
+    lockfile = workspace / "bun.lock"
+    lockfile.write_text("{}\n", encoding="utf-8")
+    earlier = lockfile.stat().st_mtime - 60
+    os.utime(installed, (earlier, earlier))
+    restores = recorded_restores(monkeypatch)
+
+    assert dependencies_behind(workspace)
+    assert restore_dependencies(workspace)
+    assert not dependencies_behind(workspace)
+    assert not restore_dependencies(workspace)
+    assert len(restores) == 1
+
+
+def test_a_workspace_without_a_lockfile_is_behind_only_while_bare(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "web").mkdir()
-    with pytest.raises(RuntimeError, match="bun install --frozen-lockfile"):
-        write_web_bundles(Path("web"), Path("bundles"), HANDMADE, tmp_path)
+    workspace = tmp_path / "web"
+    workspace.mkdir()
+
+    assert dependencies_behind(workspace)
+    (workspace / "node_modules").mkdir()
+    assert not dependencies_behind(workspace)
+
+
+def test_a_failed_restore_names_the_command_and_carries_buns_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "web"
+    workspace.mkdir()
+    recorded_restores(
+        monkeypatch, refusing="error: lockfile had changes, but lockfile is frozen\n"
+    )
+
+    with pytest.raises(RuntimeError, match="bun install --frozen-lockfile") as failed:
+        restore_dependencies(workspace)
+
+    assert str(workspace) in str(failed.value)
+    assert "lockfile is frozen" in str(failed.value)
+
+
+def test_the_build_restores_a_workspace_without_dependencies_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "web"
+    (workspace / "src" / "explorer").mkdir(parents=True)
+    (workspace / "package.json").write_text("{}\n", encoding="utf-8")
+    restores = recorded_restores(monkeypatch)
+
+    def built(home: Path, surface: str, out: Path) -> list[Path]:
+        assert (home / "node_modules").is_dir()
+        out.mkdir(parents=True, exist_ok=True)
+        page = out / "index.html"
+        page.write_text(f"<!doctype html>{surface}\n", encoding="utf-8")
+        return [page]
+
+    monkeypatch.setattr("lup.web.build.built_files", built)
+
+    landed = write_web_bundles(Path("web"), Path("bundles"), HANDMADE, tmp_path)
+
+    assert restores == [("install", "--frozen-lockfile")]
+    assert (landed / "explorer" / "index.html").is_file()
 
 
 def test_the_build_runs_where_the_proof_no_longer_holds_and_nowhere_else(

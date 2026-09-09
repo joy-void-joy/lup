@@ -276,6 +276,106 @@ def test_an_opted_out_step_is_not_owed(
     assert not (tree_dir / "topic" / ".venv").exists()
 
 
+def create_with_workspace(name: str, no_sync: bool = False) -> None:
+    """Create a worktree declaring one bun workspace at `web`, as the CLI would."""
+    worktree.create(
+        name,
+        no_sync=no_sync,
+        no_copy_data=True,
+        base_branch=None,
+        launcher=relocation_hint,
+        workspaces=[Path("web")],
+    )
+
+
+def built_environment(path: Path) -> None:
+    """Stand in for `uv sync`, leaving the environment it would have built."""
+    (path / ".venv").mkdir()
+
+
+def test_the_bun_workspace_is_restored_beside_the_environment(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
+) -> None:
+    """One flag, two toolchains: a worktree readied with its environment has
+    its bun workspace restored too, and the step is read off the worktree the
+    way the sync is, so a finished restore is not repeated."""
+    worktree_path = interrupted_creation(repo, tree_dir, "topic")
+    monkeypatch.chdir(repo)
+    restored: list[Path] = []  # lup: ignore[empty-collection] — restore record
+
+    def restore(workspace: Path) -> bool:
+        (workspace / "node_modules").mkdir(parents=True)
+        restored.append(workspace)
+        return True
+
+    monkeypatch.setattr(worktree, "sync_dependencies", built_environment)
+    monkeypatch.setattr(worktree, "restore_dependencies", restore)
+
+    create_with_workspace("topic")
+
+    assert restored == [worktree_path / "web"]
+    assert worktree.RestoredWorkspace(
+        worktree=worktree_path, workspace=Path("web")
+    ).satisfied()
+
+
+def test_no_sync_skips_the_workspace_restore_too(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
+) -> None:
+    interrupted_creation(repo, tree_dir, "topic")
+    monkeypatch.chdir(repo)
+
+    def refuse(_workspace: Path) -> bool:
+        raise AssertionError("a bun workspace was restored under --no-sync")
+
+    monkeypatch.setattr(worktree, "restore_dependencies", refuse)
+
+    create_with_workspace("topic", no_sync=True)
+
+    assert not (tree_dir / "topic" / "web" / "node_modules").exists()
+
+
+def test_a_workspace_that_cannot_be_restored_leaves_the_worktree_usable(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    the_worktree_holds_its_own_environment: None,
+) -> None:
+    """The gate restores what it finds behind, so a restore the registry
+    refused is said out loud and the worktree is handed over anyway."""
+    interrupted_creation(repo, tree_dir, "topic")
+    monkeypatch.chdir(repo)
+
+    def refuse(workspace: Path) -> bool:
+        raise RuntimeError(
+            f"`bun install --frozen-lockfile` in {workspace} failed:\n"
+            "error: ConnectionRefused downloading tarball js-yaml@4.3.2"
+        )
+
+    monkeypatch.setattr(worktree, "sync_dependencies", built_environment)
+    monkeypatch.setattr(worktree, "restore_dependencies", refuse)
+
+    create_with_workspace("topic")
+
+    printed = capsys.readouterr().out
+    assert "Warning: `bun install --frozen-lockfile`" in printed
+    assert "ConnectionRefused" in printed
+    assert "Without the restored bun workspace (web)" in printed
+
+
+def test_the_template_declares_its_bun_workspace_for_restoring() -> None:
+    from lup_template.devtools.dev.app import declared
+
+    assert declared().restored_workspaces() == [Path("packages/lup/web")]
+
+
 def test_a_recorded_base_is_left_as_it_was(
     repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
