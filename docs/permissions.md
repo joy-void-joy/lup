@@ -243,8 +243,11 @@ the subcommand that has one.
 opaque result rides only argument-safe commands; command position, deep
 nesting, and backticks stay conservative. File writes (redirection, `rm`)
 auto-allow only into a repo `tmp/` — the one at the top or any a package
-opened beside itself — and the scratchpad (`$TMPDIR`,
-`/tmp/claude-*`; reassigning `TMPDIR` asks); discards and fd dups strip.
+opened beside itself — and the machine's temporary root, the session
+scratchpad (`$TMPDIR`, `/tmp/claude-*`) with the rest of `/tmp` around it,
+which no review pass reads and no capture holds (reassigning `TMPDIR` asks,
+and a suffix climbing clear of `/tmp` leaves the grant behind); discards and
+fd dups strip.
 Loops, conditionals, case
 arms, subshells, and brace groups classify recursively over frozen bindings —
 literal assignments instantiate, opaque ones (`read`, globs) gate

@@ -113,8 +113,8 @@ def test_traversal_cannot_carry_a_role_out_of_its_root() -> None:
 
 def test_an_absolute_path_holds_no_repository_role() -> None:
     """Roots are repository-relative, so an absolute path is never one of them."""
-    assert path_role("/tmp/x", ROLES) == "production"
     assert path_role("/home/user/tests/x.py", ROLES) == "production"
+    assert path_role("/var/lib/tmp/x", ROLES) == "production"
 
 
 def test_traversal_that_lands_back_inside_a_root_keeps_its_role() -> None:
@@ -139,9 +139,31 @@ def test_the_scratchpad_role_survives_no_traversal_out_of_it() -> None:
     assert path_role("$TMPDIR/$OTHER/x", ROLES) == "production"
 
 
-def test_a_scratchpad_lookalike_is_not_the_scratchpad() -> None:
-    assert path_role("/tmp/claudex/x", ROLES) == "production"
-    assert path_role("/tmp/x", ROLES) == "production"
+def test_a_scratchpad_lookalike_is_scratch_by_the_root_it_sits_in() -> None:
+    """Nothing turns on which of the two absolute roots granted the role.
+
+    The session spelling does not match, and the file is under the temporary
+    root either way — which is the whole of what makes it disposable.
+    """
+    assert path_role("/tmp/claudex/x", ROLES) == "scratch"
+
+
+def test_the_machines_temporary_root_is_scratch_wherever_a_session_put_it() -> None:
+    """No review pass walks `/tmp` and no capture of this checkout holds it.
+
+    So a file there carries none of the conventions, and the container
+    boundary that decides whether a write escapes its lease decides nothing
+    here.
+    """
+    assert path_role("/tmp/x", ROLES) == "scratch"
+    assert path_role("/tmp/fix_runs.py", ROLES) == "scratch"
+    assert path_role("/tmp/nested/deep/note.md", ROLES) == "scratch"
+
+
+def test_no_traversal_carries_the_temporary_root_out_of_itself() -> None:
+    assert path_role("/tmp/../etc/passwd", ROLES) == "production"
+    assert path_role("/tmpfile", ROLES) == "production"
+    assert path_role("/tmp/$OTHER/x", ROLES) == "production"
 
 
 PATTERN_ROLES = [

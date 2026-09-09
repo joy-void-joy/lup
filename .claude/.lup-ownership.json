@@ -408,7 +408,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/roles.py",
       "category": "generated",
-      "sha256": "53f7353b718c79df62280bc7f99c69bbc82539f067f15a286a07e3682f237ec2",
+      "sha256": "13495503a772473424bd8e0eb8d1a6d5ff4a14995c07c952381fe95db669bff0",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -576,7 +576,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "c15fa169a46a992f30f66868db34b106e3c346d27e524f125472e25e4e892ebe",
+      "sha256": "d302bc802a907ac4010c985ba3e7ea07533ed984d378cb2d9a98f579ddf9c7e6",
       "semantic_id": "docs.permissions",
       "executable": false
     },

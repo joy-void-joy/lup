@@ -573,20 +573,23 @@ SHELL_POLICY_CASES = [
     # and its role is read before the path is spelled — which is what keeps an
     # absolute root from reading as somewhere outside the checkout.
     # Reassigning TMPDIR is a security-sensitive assignment, and a suffix that
-    # climbs out of the root leaves the root's grant behind: unresolvable it
-    # asks for having no path to answer about, and resolvable it asks for
-    # naming one the checkout does not cover.
+    # climbs clear of every temporary root leaves their grant behind:
+    # unresolvable it asks for having no path to answer about, and resolvable
+    # it asks for naming one the checkout does not cover.
     DecisionCase(input="echo x > $TMPDIR/out.txt", effect="allow"),
     DecisionCase(input='sort f > "${TMPDIR}/sorted.txt"', effect="allow"),
     DecisionCase(input="echo x > /tmp/claude-1000/scratch/out.txt", effect="allow"),
     DecisionCase(input="cat <<'EOF' > $TMPDIR/notes.md\nbody\nEOF", effect="allow"),
     DecisionCase(input="echo x > $TMPDIR/../etc/crontab", effect="ask"),
-    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="ask"),
-    # A /tmp path outside the session root is not scratch and not in the
-    # checkout either, so it asks for the same reason any write beyond the
-    # tree does — the boundary is what would have confined it, and none was
-    # measured here.
-    DecisionCase(input="echo x > /tmp/other/file", effect="ask"),
+    # Climbing out of the scratchpad lands in the temporary root that holds
+    # it, which is scratch on its own account, so the grant the traversal left
+    # behind is not the only one there was.
+    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="allow"),
+    # A /tmp path outside the session root is scratch for the root it is in:
+    # no review pass walks it and no capture of the checkout holds it, which
+    # is the whole of what the role asks. The boundary decides a different
+    # question — whether the write escapes a lease — and not this one.
+    DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
     # Publishing is how work becomes reviewable, so the verbs that put a
@@ -813,7 +816,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="sort f", effect="allow"),
     DecisionCase(input="sort -o out f", effect="allow"),
     DecisionCase(input="sort -o .git/HEAD f", effect="ask"),
-    DecisionCase(input="sort -o /tmp/other/file f", effect="ask"),
+    DecisionCase(input="sort -o /tmp/other/file f", effect="allow"),
     # A flag that runs a program is not a flag that writes a file, and keeps
     # its own question however ordinary the file beside it is.
     DecisionCase(input="sort --compress-program=x -o out f", effect="ask"),
@@ -952,18 +955,18 @@ SHELL_POLICY_CASES = [
     # It follows forwarding rather than only the verbs that document the flag:
     # `stash list`, `stash show` and `bisect view` reach it by handing their
     # arguments to `log` or `diff`. Bare, each still reports and allows.
-    DecisionCase(input="git stash show --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git stash list --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git bisect view --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git shortlog --output=/tmp/f HEAD", effect="ask"),
+    DecisionCase(input="git stash show --output=/etc/f", effect="ask"),
+    DecisionCase(input="git stash list --output=/etc/f", effect="ask"),
+    DecisionCase(input="git bisect view --output=/etc/f", effect="ask"),
+    DecisionCase(input="git shortlog --output=/etc/f HEAD", effect="ask"),
     DecisionCase(input="git stash show", effect="allow"),
     DecisionCase(input="git stash list", effect="allow"),
     DecisionCase(input="git bisect view", effect="allow"),
     DecisionCase(input="git shortlog HEAD", effect="allow"),
-    DecisionCase(input="git diff-tree --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git diff-index --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git diff-pairs --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git range-diff --output=/tmp/f a b", effect="ask"),
+    DecisionCase(input="git diff-tree --output=/etc/f", effect="ask"),
+    DecisionCase(input="git diff-index --output=/etc/f", effect="ask"),
+    DecisionCase(input="git diff-pairs --output=/etc/f", effect="ask"),
+    DecisionCase(input="git range-diff --output=/etc/f a b", effect="ask"),
     DecisionCase(input="git diff-tree HEAD", effect="allow"),
     DecisionCase(input="git diff-files", effect="allow"),
     DecisionCase(input="git diff-index HEAD", effect="allow"),
@@ -973,7 +976,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git rebase --exec 'touch x' HEAD~2", effect="ask"),
     DecisionCase(input="git fetch --upload-pack=/tmp/x origin", effect="ask"),
     DecisionCase(input="git grep -Ovim pattern", effect="ask"),
-    DecisionCase(input="git log --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git log --output=/etc/f", effect="ask"),
     DecisionCase(input="git reflog", effect="allow"),
     DecisionCase(input="git reflog expire --expire=now --all", effect="ask"),
     DecisionCase(input="git pull", effect="allow"),
