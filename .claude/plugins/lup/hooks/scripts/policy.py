@@ -57,9 +57,9 @@ from kernel.lex import (
     shell_sed_rewrites,
     shell_write_targets,
 )
-from kernel.rows import RewrittenFileRow
+from kernel.rows import DisplacedTargetRow, RewrittenFileRow
 from kernel.words import INTERPRETERS
-from kernel.roles import is_session_scratch_target
+from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
 from kernel.tools import decide_tool
 from policy_data import (
@@ -1112,6 +1112,48 @@ def existing_write_targets(targets: list[str], root: Path | None = None) -> list
     """
     where = Path.cwd() if root is None else root
     return [target for target in targets if (where / target).exists()]
+
+
+def resolved_write_targets(
+    targets: list[str],
+    root: Path | None = None,
+    # lup: ignore[dict-str-payload] — the keys are the caller's own write
+    # targets, an open set, and this half compiles into a bare script that can
+    # declare no row to carry them: the kernel's `DisplacedTargetRow` is what
+    # the composition root turns these pairs into
+) -> dict[str, str]:
+    """Report which write targets resolve somewhere other than they spell.
+
+    Every grant in the kernel reads a path lexically — a role names a tree,
+    and a spelling sits under it or does not. A symlink is what breaks that
+    step, and resolving it is filesystem work, so it happens here and crosses
+    as a fact.
+
+    ``lands`` is spelled in the vocabulary the kernel classifies in: relative
+    to the checkout when the real path is inside it, absolute otherwise. That
+    is what lets the kernel ask its own question — whether the role of where
+    this lands is the role its spelling claimed — without resolving anything.
+
+    A word carrying an expansion is skipped, because the path it names at run
+    time is not the one standing here. Resolution covers a target that does
+    not exist yet: the directories above it are what a symlink would sit in.
+    """
+    where = Path.cwd() if root is None else root
+    # lup: ignore[dict-str-payload] — the write targets the caller named
+    reported: dict[str, str] = {}
+    for target in targets:
+        if "$" in target:
+            continue
+        try:
+            real = (where / target).resolve()
+            spelled = (where / target).absolute()
+        except OSError:
+            continue
+        if real == spelled:
+            continue
+        inside = real.is_relative_to(where)
+        reported[target] = str(real.relative_to(where) if inside else real)
+    return reported
 
 
 def git_answers(
@@ -2280,6 +2322,19 @@ def bash_decision(
             boundary,
             cwd,
         ),
+        # Where a target really lands, for the grants above that read a role
+        # off its spelling. The host resolves the links because the kernel
+        # reads no filesystem, and the kernel says whether the landing changes
+        # what the path is, because the host holds no role table.
+        displaced_targets=displaced_targets(
+            [
+                DisplacedTargetRow(path=path, lands=lands)
+                for path, lands in resolved_write_targets(
+                    [*shell_write_targets(command), *acted_on, *flagged], cwd
+                ).items()
+            ],
+            PATH_ROLES,
+        ),
         recovered=bool(reference),
     )
     # The gates an edit is judged by, over the writes this command carries the
@@ -2567,6 +2622,20 @@ def edit_decision(
         import_boundaries=IMPORT_BOUNDARIES,
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
+        displaced=next(
+            iter(
+                displaced_targets(
+                    [
+                        DisplacedTargetRow(path=path, lands=lands)
+                        for path, lands in resolved_write_targets(
+                            [path_text], cwd
+                        ).items()
+                    ],
+                    PATH_ROLES,
+                )
+            ),
+            None,
+        ),
     )
 
 

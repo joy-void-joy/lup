@@ -32,6 +32,7 @@ from lup.policy.assets.host import (
     outside_this_project,
     recoverable_write_targets,
     repository_worktrees,
+    resolved_write_targets,
     rewritten_text,
     tracked_write_targets,
 )
@@ -44,9 +45,11 @@ from lup.policy.kernel.lex import (
     shell_sed_rewrites,
     shell_write_targets,
 )
+from lup.policy.kernel.roles import displaced_targets
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
+    DisplacedTargetRow,
     PathRoleRow,
     PathRuleKind,
     PathRuleRow,
@@ -388,6 +391,20 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 ),
                 recoverable_targets=recoverable_write_targets(
                     [*shell_write_targets(event.command), *acted_on], root
+                ),
+                displaced_targets=displaced_targets(
+                    [
+                        DisplacedTargetRow(path=path, lands=lands)
+                        for path, lands in resolved_write_targets(
+                            [
+                                *shell_write_targets(event.command),
+                                *acted_on,
+                                *flagged,
+                            ],
+                            root,
+                        ).items()
+                    ],
+                    self.path_roles,
                 ),
                 directory_targets=directory_write_targets(acted_on, root),
                 empty_directories=empty_directory_targets(acted_on, root),

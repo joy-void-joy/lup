@@ -20,7 +20,7 @@ import posixpath
 from pathlib import PurePosixPath
 
 from .decision import SUBSTITUTION_SENTINEL
-from .rows import PathRoleKind, PathRoleName, PathRoleRow
+from .rows import PathRoleKind, PathRoleName, PathRoleRow, DisplacedTargetRow
 
 # lup: ignore[library-default] — the native runtimes' own plugin directory names
 GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
@@ -143,6 +143,34 @@ def is_temporary_root_target(word: str) -> bool:
     return "$" not in word and posixpath.normpath(word).startswith("/tmp/")
 
 
+def displaced_targets(
+    candidates: list[DisplacedTargetRow], rows: list[PathRoleRow]
+) -> list[DisplacedTargetRow]:
+    """Which resolved targets land under a role other than the one they claim.
+
+    The kernel's half of the answer a symlink makes necessary. The host says
+    where a path really lands; this says whether that changes what the path
+    is, which is the only part of it a role table can decide.
+
+    A spelling that claims nothing has nothing to lose, so a production path
+    is not reported however far it resolves: its write is judged where it
+    reads either way, and no relaxation was granted to be taken back. What is
+    reported is a grant that would have been read off the wrong file — a
+    scratch spelling landing in production, a test root landing outside it.
+
+    Where the two roles agree the link changed nothing this table can see:
+    ``tmp/a`` pointing at ``tmp/b`` is scratch either way, and the machine's
+    temporary root resolving to its own real name — ``/private/tmp`` on a
+    system that spells it that way — is the same root it always was.
+    """
+    return [
+        row
+        for row in candidates
+        if (claimed := path_role(row["path"], rows)) != "production"
+        and path_role(row["lands"], rows) != claimed
+    ]
+
+
 def role_pattern_covers(pattern: str, path: str) -> bool:
     """Whether a declared role pattern reaches a repository-relative path.
 
@@ -221,9 +249,11 @@ def path_role(path: str, rows: list[PathRoleRow]) -> PathRoleName:
 
     Resolution is lexical, so it needs no filesystem call and ``..`` cannot
     climb out of a declared root into a role it was never given. A symlink
-    inside a root that points beyond it is not settleable without a syscall
-    and stays a known limit; it is narrow, because a role only ever relaxes
-    verbs acting on paths already inside the root and never grants execution.
+    inside a root that points beyond it needs the syscall this will not make,
+    and is answered instead by the fact :func:`displaced_targets` reads: the
+    host resolves the link, and a landing under another role takes the grant
+    back. Nothing here consults that — a role says what a spelling claims,
+    which is the question with a lexical answer.
 
     How far each declaration reaches is the row's own, through
     :func:`role_pattern_covers`: a bare root is anchored at the repository

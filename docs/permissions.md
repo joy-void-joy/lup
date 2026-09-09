@@ -105,6 +105,7 @@ The rows, in order, each stating its own claim:
 | `sandbox-escalation` | `SandboxEscalation` | The agent asked for the launcher&#x27;s host, which is always reviewed. |
 | `trapped-placement` | `TrappedPlacement` | An operation that has to reach the host where nothing can carry it. |
 | `unleased-write` | `UnleasedWrite` | A write the measured boundary does not cover, wherever the session sits. |
+| `displaced-write` | `DisplacedWrite` | A write whose target does not land where its spelling says it does. |
 | `provider-native` | `ProviderNative` | A rule looked and handed the decision to the provider&#x27;s own mode. |
 | `recovered-loss` | `RecoveredLoss` | A question about a loss a proven capture already put somewhere safe. |
 | `unreachable-reviewer` | `UnreachableReviewer` | A question in a session no eligible reviewer can be reached from. |

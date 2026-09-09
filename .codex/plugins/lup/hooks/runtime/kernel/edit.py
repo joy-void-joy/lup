@@ -26,6 +26,7 @@ from .roles import (
 from .rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
+    DisplacedTargetRow,
     EditRuleRow,
     ImportBoundaryRow,
     PathRoleRow,
@@ -3354,6 +3355,7 @@ def decide_edit(
     edit_rules: list[EditRuleRow] | None = None,
     foreign: bool = False,
     outside_project: bool = False,
+    displaced: DisplacedTargetRow | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
@@ -3432,6 +3434,22 @@ def decide_edit(
             hard=True,
             rule="edit:generated-plugin",
             evaluator="edit-gate",
+        )
+
+    # Whether this path is the file it names is prior to every gate below,
+    # which all read the role off the spelling. A symlink is what separates
+    # the two, and the host is what resolved it: the relaxations a role grants
+    # would otherwise be read off one file and spent on another.
+    if displaced is not None:
+        return judged(
+            "displaced-path",
+            KernelDecision(
+                "ask",
+                f"{path} resolves through a symlink to {displaced['lands']}, so"
+                " the conventions this edit is judged against are not the ones"
+                " covering the file it would write",
+                purpose="quality_review",
+            ),
         )
 
     # Below the plugin refusal, which is about a universal fact -- a build
