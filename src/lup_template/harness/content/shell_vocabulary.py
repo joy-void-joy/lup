@@ -91,11 +91,19 @@ def lup_devtools_rule() -> ShellCommandRule:
     )
 
 
-RUNNER_TARGETS: list[RunnerTargetRule] = runner_target_rules()
+# lup: template: which module roots this domain runs `uv run -m` against, if
+# any. `examples` is the scaffold's own, and goes with the tree
+# `dev init drop-examples` removes.
+RUNNER_TARGETS: list[RunnerTargetRule] = runner_target_rules(also=("examples",))
 """What `uv run <target>` may reach here, and where each target has to run.
 
-Taken as the library offers it: the checkers are this project's, and
-`lup-devtools` is the toolchain the group places outside the sandbox.
+The three groups are taken as the library offers them: the checkers are this
+project's, and `lup-devtools` is the toolchain the group places outside the
+sandbox. `examples` is the one name that is nobody else's — the module root
+this repository's runnable exemplars live under, which admits
+`uv run -m examples.<name>` for every one of them and is the spelling each
+example's own docstring documents. A domain adopting this scaffold drops the
+tree and this name with it.
 """
 
 

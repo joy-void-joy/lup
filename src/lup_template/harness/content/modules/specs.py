@@ -13,7 +13,7 @@ all happen before anything is built, and none of them should import a skill.
 saying: a project built from this scaffold still calls ``/lup:init``, still
 installs the plugin, and still opens a design conversation. What it drops the
 moment it is stood up is ``examples`` — a directory composing lup's own
-runtime against lup's own README, plus the two test modules driving it, which
+runtime against lup's own README, plus the test modules driving it, which
 an adopter inherits as a suite it must keep green and will never run. That is
 what ``dev init drop-examples`` removes, and the only module here that a
 project built from this one is never even offered.

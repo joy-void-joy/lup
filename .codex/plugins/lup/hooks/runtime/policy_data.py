@@ -17912,6 +17912,21 @@ RUNNER_TARGETS: list[RunnerTargetRow] = [
         "refuses": "",
         "reason": "",
     },
+    {
+        "name": "examples",
+        "sandbox": "ambient",
+        "effects": [
+            {
+                "kind": "runs_declared_target",
+                "scope": "",
+                "write": "",
+                "reviewed": False,
+                "reason": "",
+            },
+        ],
+        "refuses": "",
+        "reason": "",
+    },
 ]
 
 RUNNER_TARGET_TABLES: list[ShellRuleRow] = []

@@ -166,10 +166,44 @@ def uv_run_words(words: list[str]) -> list[str]:
     )
     while position < len(words) and words[position].startswith("-"):
         option = words[position]
-        if option in ("-c", "-m", "--script"):
+        # `-c` and `-m` stand where a file would, so the form is handed on
+        # whole and judged by what it names. `--script` is the long spelling
+        # of `-s` and names a path just as `-s` and `--gui-script` do, so it
+        # is stepped over and the path behind it is what gets judged.
+        if option in ("-c", "-m"):
             return words[position:]
         position += 2 if option in value_options else 1
     return words[position:]
+
+
+def uv_run_module_root(run_words: list[str]) -> str | None:
+    """The root package a ``-m`` names, or ``None`` where nothing names one.
+
+    Only two interpreters are asked: ``uv`` itself, whose ``-m`` is the first
+    word of the executable portion, and a Python spelled after it, whose
+    ``-m`` sits among its own options. Every other target keeps its ``-m`` —
+    ``uv run pytest -m slow`` selects a marker expression, and reading that as
+    a module would refuse the way a project runs its own tests.
+
+    The root segment rather than the whole name, because that is what a
+    project declares: ``examples`` on the table admits every module beneath
+    it, one declaration for a tree rather than one per entry point. A ``-m``
+    carrying no module names nothing, which is the interpreter's own usage
+    error rather than a root to look up, so it reads as ``None`` too.
+    """
+    if not run_words:
+        return None
+    if run_words[0] == "-m":
+        return run_words[1].partition(".")[0] if len(run_words) > 1 else None
+    if posixpath.basename(run_words[0]) not in INTERPRETERS:
+        return None
+    for position, word in enumerate(run_words[1:], start=1):
+        if word == "-c":
+            return None
+        if word == "-m":
+            following = run_words[position + 1 :]
+            return following[0].partition(".")[0] if following else None
+    return None
 
 
 # Every verb that acts on paths, paired with the short flags whose presence

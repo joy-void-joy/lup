@@ -87,8 +87,8 @@ def init_drop_examples_cmd(
 ) -> None:
     """Remove the scaffold's demonstrations of itself, which no adopter wants.
 
-    `examples/` composes lup's own runtime against lup's own README, and two
-    test modules drive it. A domain that adopted the template is a consumer of
+    `examples/` composes lup's own runtime against lup's own README, and the
+    test modules beside it drive it. A domain that adopted the template is a consumer of
     that library rather than a demonstrator of it, so what it inherits here is
     a directory it will never run and a suite it has to keep green.
 

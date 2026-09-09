@@ -1,7 +1,7 @@
 """The scaffold demonstrating itself, which no adopter runs.
 
-``examples/`` composes lup's own runtime against lup's own README, and two
-test modules drive it, and the ``example`` tool group is the toolset that
+``examples/`` composes lup's own runtime against lup's own README, and the
+test modules beside it drive it, and the ``example`` tool group is the toolset that
 exercise serves. A domain that adopted this template is a consumer of the
 library rather than a demonstrator of it, so what it would inherit here is a
 directory it will never run and a suite it has to keep green.

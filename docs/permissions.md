@@ -221,6 +221,18 @@ Leaving it off is not the same answer: an undeclared target reaches no
 judgment, which denies unsandboxed and defers under the boundary, where the
 policy has stated nothing and the runtime's own permissions decide.
 
+That table also answers `uv run -m <root>.<module>`, on the root segment, and
+one criterion settles every `uv run` form: an invocation is refused when it
+leaves no reviewable artifact behind. `-c` leaves nothing to read and an
+interpreter handed nothing runs no program at all, so those keep the refusal.
+A path is judged as that path, spelled plainly, after `-s`, or after
+`--script`. A module is judged by whether the project declares the root it
+lives under, because a module is as openable, diffable and re-runnable as the
+file it lives in — so one declaration admits every entry point beneath a root,
+and an undeclared root is refused with the declaration to extend named. An
+`-m` a declared target owns stays that target's: `uv run pytest -m slow`
+selects a marker expression, not a module.
+
 A target may also carry subcommands, because a toolchain reached through
 `uv run` is one target and many commands — a devtools CLI that mostly reads
 a repository may have one verb beneath it that opens a paid agent session,

@@ -3,6 +3,8 @@
 import asyncio
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from lup.providers.claude.config import (
     ClaudeProfileRegistry,
     ClaudeProfileSelection,
@@ -10,7 +12,11 @@ from lup.providers.claude.config import (
 )
 from lup.providers.claude.runtime import ClaudeSessionConfig
 
-from examples.common import Summary
+
+class Summary(BaseModel, frozen=True):
+    """A minimal structured result submitted by this example's agent."""
+
+    summary: str = Field(min_length=1)
 
 
 async def main() -> None:

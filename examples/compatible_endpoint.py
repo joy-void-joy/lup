@@ -2,9 +2,15 @@
 
 import asyncio
 
+from pydantic import BaseModel, Field
+
 from lup import create_claude
 
-from examples.common import Summary
+
+class Summary(BaseModel, frozen=True):
+    """A minimal structured result submitted by this example's agent."""
+
+    summary: str = Field(min_length=1)
 
 
 async def main() -> None:

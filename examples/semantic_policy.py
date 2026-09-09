@@ -12,7 +12,7 @@ and nothing else is left to grant it.
 
 import asyncio
 
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup import create_claude
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
@@ -21,14 +21,18 @@ from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import FetchPolicy, UrlScope
 
-from examples.common import Summary
-
 # lup: ignore[constant-declaration] — the one origin this example allows, which
 # is the example's subject rather than a value to pass in
 DOCS_ORIGIN = AnyHttpUrl("https://docs.example.com")
 # lup: ignore[constant-declaration] — the one URL this example demonstrates a
 # denial on, which is the example's subject rather than a value to pass in
 DENIED_URL = "https://docs.example.com/private/token"
+
+
+class Summary(BaseModel, frozen=True):
+    """A minimal structured result submitted by this example's agent."""
+
+    summary: str = Field(min_length=1)
 
 
 def policy_hooks() -> LupHooksConfig:
