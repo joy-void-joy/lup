@@ -561,7 +561,7 @@ class EditRuleRow(TypedDict):
     reason: str
 
 
-class PeerRedirectRow(TypedDict):
+class PeerPolicyRow(TypedDict):
     """Where this project's sessions find each other, and what a sender is told.
 
     ``store``, ``roster_file`` and ``names_file`` say where the roster lives —

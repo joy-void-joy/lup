@@ -369,8 +369,8 @@ so the dispatcher's host half folds it — `peer_addresses` and `peer_listing` i
 `lup.policy.assets.host` — and hands the kernel the spellings it found, exactly
 the way an edit rule marked `resolution: required` is answered from a resolver
 the dispatcher ran. The kernel still reads no filesystem and still decides from
-its inputs alone. What is *declared* is only where to look: `HookSet.peer_redirect`,
-built by `lup.coordination.redirect.peer_redirect` from the store's own layout,
+its inputs alone. What is *declared* is only where to look: `HookSet.peer_policy`,
+built by `lup.coordination.policy.peer_policy` from the store's own layout,
 so renaming the coordination directory moves the compiled hook with it. A
 project declaring none has both calls left entirely to the runtime's own
 permissions, which is what a repository whose sessions never coordinate should

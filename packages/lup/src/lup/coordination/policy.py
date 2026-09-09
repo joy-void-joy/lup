@@ -15,7 +15,7 @@ that renamed its own is entitled to say so without editing the library.
 from lup.coordination.identity import NAMES_FILE
 from lup.coordination.roster import ROSTER_FILE
 from lup.coordination.store import COORDINATION_DIR, STORE_DIR
-from lup.policy.peer_policy import PeerRedirect
+from lup.policy.peer_policy import PeerPolicy
 
 SEND_REDIRECT = (
     "that address is a session on this repository's roster, and a native send"
@@ -50,11 +50,11 @@ it rides on.
 """
 
 
-def peer_redirect(
+def peer_policy(
     send_reason: str = SEND_REDIRECT, listing_note: str = LISTING_NOTE
-) -> PeerRedirect:
+) -> PeerPolicy:
     """This repository's roster, as the compiled permission hook reads it."""
-    return PeerRedirect(
+    return PeerPolicy(
         store=[STORE_DIR, COORDINATION_DIR],
         roster_file=ROSTER_FILE,
         names_file=NAMES_FILE,

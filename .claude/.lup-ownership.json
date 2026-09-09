@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "00c16e2d21d9a4e62fc970f4c84d4ab8364bee8e26469b5a131a94263df88998",
+  "source_digest": "5eabcf9b887500ddd5b7681f982747a09ad3fde59783f37f09e14578835dc10a",
   "target_requirements": [
     "claude-code"
   ],
@@ -401,7 +401,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/peers.py",
       "category": "generated",
-      "sha256": "438942c9a8716195c91a3d8aba4050ca7ce5bc9cdd4df2caf6dafdc8ddabcbfc",
+      "sha256": "f938c469c534b3d7e40d41366a0c755e162fa3685437f6c26f629e6173402f03",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -415,7 +415,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "59d0d31ad73114201812dde94cd8c57dc484b3c2dd422418f08110bbb83590a8",
+      "sha256": "dd4e7b6ba9df1d4f3cea924633ae1d38daffd1748888b65e455bee66d33466a1",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -457,7 +457,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "df17372bc4b1ae1aabf354d343e0f8a04b98894a5bc2cc966bc7bf61003b647f",
+      "sha256": "5b16703c8f1bb9cb6e2a730e8814843576502914b8d2fdcac1ac35b602b33dd9",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -471,7 +471,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "f9d11ba0d8a5c547e18d3a43df15e1858588da4fca5ccb9a061ca8ce41be73a9",
+      "sha256": "03a32e7a6773620f6ba4c82de0ffe069cfd9317b631b118346b47d5fe971e3cc",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -576,7 +576,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "6da14cb30be5c2c8e795b688cb136b940979cf34dcd464ed4ac07bbd37abd4ac",
+      "sha256": "c15fa169a46a992f30f66868db34b106e3c346d27e524f125472e25e4e892ebe",
       "semantic_id": "docs.permissions",
       "executable": false
     },

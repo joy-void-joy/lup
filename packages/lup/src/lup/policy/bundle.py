@@ -30,7 +30,7 @@ from lup.policy.kernel.rows import (
     ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
-    PeerRedirectRow,
+    PeerPolicyRow,
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
@@ -40,7 +40,7 @@ from lup.policy.kernel.rows import (
 )
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
-from lup.policy.peer_policy import PeerRedirect, erase_peer_redirect
+from lup.policy.peer_policy import PeerPolicy, erase_peer_policy
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -300,7 +300,7 @@ def acceptance_guard_literal(guard: AcceptanceGuardRow | None) -> str:
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
 
 
-def peer_redirect_literal(redirect: PeerRedirectRow | None) -> str:
+def peer_policy_literal(redirect: PeerPolicyRow | None) -> str:
     """Render the declared roster the peer calls are judged against, or its absence.
 
     Spelled here rather than through ``json.dumps`` for the reason the
@@ -533,7 +533,7 @@ def render_policy_data(
     shell_rules: list[ShellCommandRule],
     edit_rules: list[EditRule],
     refused_tools: list[RefusedTool],
-    peer_redirect: PeerRedirect | None,
+    peer_policy: PeerPolicy | None,
     recoverable_target_limit: int,
     runner_targets: list[RunnerTargetRule],
     sandbox_excluded_commands: list[str],
@@ -575,8 +575,8 @@ def render_policy_data(
             ),
             "REFUSED_TOOLS: list[RefusedToolRow] = "
             + refused_tool_rows_literal(erase_refused_tools(refused_tools)),
-            "PEER_REDIRECT: PeerRedirectRow | None = "
-            + peer_redirect_literal(erase_peer_redirect(peer_redirect)),
+            "PEER_POLICY: PeerPolicyRow | None = "
+            + peer_policy_literal(erase_peer_policy(peer_policy)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
@@ -608,7 +608,7 @@ def render_policy_data(
         "    ImportBoundaryRow,\n"
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
-        "    PeerRedirectRow,\n"
+        "    PeerPolicyRow,\n"
         "    RefusedToolRow,\n"
         "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"

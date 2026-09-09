@@ -19,7 +19,7 @@ the reader did not ask.
 """
 
 from .decision import KernelDecision
-from .rows import PeerRedirectRow
+from .rows import PeerPolicyRow
 from .tools import TOOL_ESCALATE_HINT, escalated_reason
 
 
@@ -49,7 +49,7 @@ def addressed_peer(values: list[str], addresses: list[str]) -> str:
 
 
 def decide_peer_send(
-    values: list[str], addresses: list[str], row: PeerRedirectRow | None
+    values: list[str], addresses: list[str], row: PeerPolicyRow | None
 ) -> KernelDecision:
     """Judge one native send against who this repository's roster holds.
 
@@ -69,7 +69,7 @@ def decide_peer_send(
     return KernelDecision("deny", f"{named}: {row['send_reason']}" + TOOL_ESCALATE_HINT)
 
 
-def decide_peer_listing(row: PeerRedirectRow | None) -> KernelDecision:
+def decide_peer_listing(row: PeerPolicyRow | None) -> KernelDecision:
     """Judge one native listing, which is to say leave it alone.
 
     Always a deferral. The call answers a question this repository's roster
@@ -82,7 +82,7 @@ def decide_peer_listing(row: PeerRedirectRow | None) -> KernelDecision:
     return KernelDecision("defer", "a wider population than this repository's roster")
 
 
-def peer_listing_context(listing: list[str], row: PeerRedirectRow | None) -> str:
+def peer_listing_context(listing: list[str], row: PeerPolicyRow | None) -> str:
     """This repository's roster, framed so a reader can tell it from the wider one.
 
     Empty where nothing has joined, because an attachment saying a roster is

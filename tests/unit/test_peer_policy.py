@@ -14,7 +14,7 @@ from pathlib import Path
 import sh
 
 from lup.coordination.identity import mint_member_id
-from lup.coordination.redirect import peer_redirect
+from lup.coordination.policy import peer_policy
 from lup.coordination.repository import RepositoryPeers
 from lup.coordination.roster import Delivery
 from lup.policy.assets.host import peer_addresses, peer_listing
@@ -23,13 +23,13 @@ from lup.policy.kernel.peers import (
     decide_peer_send,
     peer_listing_context,
 )
-from lup.policy.peer_policy import erase_peer_redirect
+from lup.policy.peer_policy import erase_peer_policy
 from lup.types import JsonObject
 from tests.unit.repos import initialized_repo
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
 
-DECLARED = erase_peer_redirect(peer_redirect())
+DECLARED = erase_peer_policy(peer_policy())
 """The row this repository actually compiles, rather than a fixture beside it.
 
 Written against the declaration so these cases pin the behaviour and not the

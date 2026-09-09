@@ -65,7 +65,7 @@ from policy_data import (
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
-    PEER_REDIRECT,
+    PEER_POLICY,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
@@ -2009,23 +2009,23 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     recipient in is that runtime's business and this half answers for all of
     them.
     """
-    if PEER_REDIRECT is None:
+    if PEER_POLICY is None:
         return decide_peer_send(values, [], None)
     return decide_peer_send(
         values,
         peer_addresses(
             cwd,
-            PEER_REDIRECT["store"],
-            PEER_REDIRECT["roster_file"],
-            PEER_REDIRECT["names_file"],
+            PEER_POLICY["store"],
+            PEER_POLICY["roster_file"],
+            PEER_POLICY["names_file"],
         ),
-        PEER_REDIRECT,
+        PEER_POLICY,
     )
 
 
 def peer_listing_decision() -> KernelDecision:
     """Judge one native listing of who this session can reach, which defers."""
-    return decide_peer_listing(PEER_REDIRECT)
+    return decide_peer_listing(PEER_POLICY)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:
@@ -2036,16 +2036,16 @@ def peer_listing_attachment(cwd: Path | None) -> str:
     acts on rather than a condition of the call happening — folding it into
     a reason would make it visible only where something refused.
     """
-    if PEER_REDIRECT is None:
+    if PEER_POLICY is None:
         return ""
     return peer_listing_context(
         peer_listing(
             cwd,
-            PEER_REDIRECT["store"],
-            PEER_REDIRECT["roster_file"],
-            PEER_REDIRECT["names_file"],
+            PEER_POLICY["store"],
+            PEER_POLICY["roster_file"],
+            PEER_POLICY["names_file"],
         ),
-        PEER_REDIRECT,
+        PEER_POLICY,
     )
 
 

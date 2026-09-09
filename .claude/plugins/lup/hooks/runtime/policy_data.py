@@ -10,7 +10,7 @@ from kernel.rows import (
     ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
-    PeerRedirectRow,
+    PeerPolicyRow,
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
@@ -17816,7 +17816,7 @@ REFUSED_TOOLS: list[RefusedToolRow] = [
     },
 ]
 
-PEER_REDIRECT: PeerRedirectRow | None = {
+PEER_POLICY: PeerPolicyRow | None = {
     "store": ["lup", "coordination"],
     "roster_file": "roster.jsonl",
     "names_file": "names.jsonl",
