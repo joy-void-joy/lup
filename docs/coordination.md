@@ -219,6 +219,26 @@ on one runtime it can only be: the session identifiers in its environment are
 not what peers address it by, and the address is discoverable only by asking
 the runtime from inside the session.
 
+## Watching the repository
+
+Everything here is an append-only file, and nothing pushes: a session folds
+the files again on its own next call, which serves a session and nobody else.
+`coordination watch` is the fold run on a clock, saying only what is different
+from the last look — who arrived and left, what a session now says it is on,
+and what reached whose inbox. It consumes nothing: mail is read the way a peek
+reads it, so a person watching a peer's inbox is never the reason the peer did
+not see a message. The first look is a baseline rather than a replay, the same
+convention a run follower keeps when attaching to work already under way.
+
+The same watcher is a **run** for the case where nobody is at the terminal.
+`coordination watch --as-run <dir>` declares it as a pipeline, so it survives
+its launcher, is followed with `run monitor <dir> --events`, and reports a
+stall as a stall. It nudges — a process nobody reads exists to act — by
+whatever path each member declared, and lands when the roster is empty,
+because a watcher with nobody to watch is finished. Started against an empty
+roster it lands at once, which is the truth rather than a process idling for a
+population that may never arrive.
+
 ## The other address book
 
 A runtime that can already address another session offers a second way to
