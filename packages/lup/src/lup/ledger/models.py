@@ -19,6 +19,7 @@ allowed to answer something weaker than it did yesterday. A claim cannot
 outrun its support, because nothing records that it ever had any.
 """
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Self
@@ -123,6 +124,16 @@ class LedgerNode(BaseModel, frozen=True):
     attachments: list[str] = []
     """Content digests of the blobs this node carries, in the order attached."""
 
+    slug: str = ""
+    """A readable handle the project chose, accepted wherever an id is.
+
+    Optional everywhere: a task is often one line and naming it is a cost,
+    while a claim somebody means to cite will get one. Unique across the log
+    once taken — the store refuses a second node under the same slug — so a
+    cite reads `lup:renewal-prefix-ceiling` rather than twelve hex characters
+    nobody can maintain by eye.
+    """
+
     def finished(self) -> bool:
         """Whether this node is done with, for whatever it means to be done.
 
@@ -207,9 +218,33 @@ class Surroundings(BaseModel, frozen=True):
     needs one says it could not check rather than guessing.
     """
 
+    standing_of: Callable[[str], Standing] | None = None
+    """How to ask any node in the log where it stands, as deep as that goes.
+
+    Supplied by the store, which remembers each answer and refuses to loop.
+    Without it a neighbour can be asked only about itself over an empty
+    neighbourhood — one hop — which is enough for evidence and not for a claim
+    resting on a claim resting on a refuted claim. The transitive reading is
+    what let one landing invalidate ten keystone claims at once in the
+    repository this came from, and it has to reach the whole chain.
+    """
+
     def at(self, node_id: str) -> LedgerNode | None:
         """The neighbour with this id, or nothing where it was not resolved."""
         return next((node for node in self.neighbours if node.id == node_id), None)
+
+    def standing_at(self, node_id: str) -> Standing | None:
+        """Where a neighbour stands, as deep as this asker can see.
+
+        Through the store's reader where there is one, so a premise's own
+        premises count; otherwise the neighbour over an empty neighbourhood,
+        which is the one-hop reading a caller without a store still gets.
+        Nothing where the id resolves to no neighbour at all.
+        """
+        if self.standing_of is not None:
+            return self.standing_of(node_id)
+        node = self.at(node_id)
+        return node.standing(Surroundings(root=self.root)) if node is not None else None
 
     def held_by(self, kind: str) -> list[LedgerEdge]:
         """Every incoming edge of one relation whose far end is not finished.

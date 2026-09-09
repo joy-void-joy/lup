@@ -20,7 +20,7 @@ import lup_template.harness.content.guidance as guidance
 from lup.harness.content.application import ApplicationLayout
 from lup.harness.content.docs.catalog import page
 from lup.harness.modules import Module
-from lup_template.harness.content.docs import decisions
+from lup_template.harness.content.docs import corpus, decisions
 from lup_template.harness.content.modules.specs import PROJECT
 
 
@@ -48,6 +48,11 @@ def module(layout: ApplicationLayout) -> Module:
                 "dev-tooling-decisions.md",
                 lambda _: decisions.DOCUMENT,
                 layout.docs(),
-            )
+            ),
+            # The corpus is this repository's worked example of knowledge
+            # kinds over the ledger, and its page sits here with the rest of
+            # what this project declares about itself rather than in the
+            # library, which ships the mechanism and no epistemics.
+            page("corpus", "corpus.md", lambda _: corpus.DOCUMENT, layout.docs()),
         ],
     )

@@ -89,7 +89,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/contributing.md` | lup.harness.content.docs.contributing |
 | `docs/conventions.md` | lup.harness.content.docs.conventions |
 | `docs/coordination.md` | lup.harness.content.docs.coordination |
-| `docs/corpus.md` | lup.harness.content.docs.corpus |
+| `docs/corpus.md` | lup_template.harness.content.docs.corpus |
 | `docs/dev-tooling-decisions.md` | lup_template.harness.content.docs.decisions |
 | `docs/harness.md` | lup.harness.content.docs.harness |
 | `docs/ledger.md` | lup.harness.content.docs.ledger |

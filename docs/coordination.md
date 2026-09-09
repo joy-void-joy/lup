@@ -186,6 +186,13 @@ question, the same one the ledger refuses to answer about node types.
 costs the receiver exactly what it cost the sender, and it is invisible in the
 tasks, the locks and the diff.
 
+`watch` names the nodes the work rests on, by id or slug. The brief opens with
+which of them have a record newer than the handoff — a premise refuted, a
+question answered, a task closed — read off the log's own timestamps rather
+than any stored standing, so the receiver meets a moved premise before the
+established results that rested on it. A research repository wrote this list
+by hand in every direction file and nothing ever read it; here it is read.
+
 **Locks move only where the sender held them.** Only a holder can release a
 lock, which is an invariant rather than an accident. A scope naming a path
 somebody else holds neither takes it from them nor refuses the handoff: the

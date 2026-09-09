@@ -38,6 +38,7 @@ Subjects that span the three components, or that are large enough to own a page.
 | [generated-paths.md](generated-paths.md) | Every file the recipes compile and what each is compiled from, walked from the trees themselves rather than listed by hand. |
 | [quality-pipeline.md](quality-pipeline.md) | The three check layers, and what each one uniquely catches. |
 | [dev-tooling-decisions.md](dev-tooling-decisions.md) | The architectural decisions behind the development tooling, each stated against the current system. |
+| [corpus.md](corpus.md) | This repository&#x27;s corpus: claims, evidence, questions and corrections over the ledger, and how each stands. |
 
 ## Every page here is generated
 

@@ -16,6 +16,7 @@ file, which is why a session recording flat out does not delay a console
 reading it, and a console cannot wedge a session.
 """
 
+from datetime import datetime
 from typing import Annotated
 
 import typer
@@ -35,7 +36,7 @@ from lup.coordination.repository import RepositoryPeers
 from lup.coordination.tasks import NEEDS_NAMES, Needs, Task
 from lup.coordination.refs import ActorRef
 from lup.ledger.cite import read_cites
-from lup.ledger.journal import LedgerStore
+from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.snapshot import snapshot
 from lup.types import JsonObject
@@ -223,6 +224,9 @@ def create_ledger_app(
             typer.Option("--json", help="The kind's other fields, as a JSON object"),
         ] = "",
         text: Annotated[str, typer.Option("--text", help="What it says")] = "",
+        slug: Annotated[
+            str, typer.Option("--slug", help="A readable handle, unique in this log")
+        ] = "",
         attach: Annotated[
             list[Path] | None,
             typer.Option("--attach", help="A file whose bytes this node carries"),
@@ -239,17 +243,24 @@ def create_ledger_app(
             raise typer.BadParameter(
                 f"{kind!r} is not a declared node kind; `ledger types` lists them"
             )
+        fields = parsed_payload(payload)
+        if slug:
+            fields = {**fields, "slug": slug}
         try:
             node = store().record_fields(
                 declared,
                 title,
-                parsed_payload(payload),
+                fields,
                 text=text,
                 attachments=[path.read_bytes() for path in attach or []],
             )
         except ValidationError as invalid:
             raise typer.BadParameter(str(invalid)) from invalid
-        typer.echo(f"{node.id}: {node.title}")
+        except LedgerRefusal as refused:
+            raise typer.BadParameter(str(refused)) from refused
+        typer.echo(
+            f"{node.id}: {node.title}" + (f"  ({node.slug})" if node.slug else "")
+        )
 
     @app.command("relate")
     def relate_cmd(
@@ -281,6 +292,8 @@ def create_ledger_app(
             )
         except ValidationError as invalid:
             raise typer.BadParameter(str(invalid)) from invalid
+        except LedgerRefusal as refused:
+            raise typer.BadParameter(str(refused)) from refused
         typer.echo(f"{edge.kind}: {edge.source} -> {edge.target}")
 
     @app.command("amend")
@@ -324,6 +337,12 @@ def create_ledger_app(
         kind: Annotated[
             str, typer.Option("--kind", help="Show only nodes of this kind")
         ] = "",
+        since: Annotated[
+            str,
+            typer.Option(
+                "--since", help="Only nodes with a record after this ISO 8601 moment"
+            ),
+        ] = "",
     ) -> None:
         """Show every node in this repository, with its standing read now.
 
@@ -331,11 +350,25 @@ def create_ledger_app(
         reading the record wants what is there — and a node whose type this
         build does not declare is exactly the row worth seeing, since it means
         another session recorded something. It reads as the base class and
-        says its kind, rather than being hidden.
+        says its kind, rather than being hidden. `--since` is how a reader
+        opens on what moved: nodes with a record — theirs, or an edge touching
+        them — newer than the moment they last looked.
         """
         held = store()
+        # ISO 8601 through the standard library's own parser, because the
+        # option type's fixed formats refuse the offsets and microseconds a
+        # node's own `at` prints — and that is exactly what a reader pastes.
+        try:
+            moment = datetime.fromisoformat(since) if since else None
+        except ValueError as invalid:
+            raise typer.BadParameter(
+                f"--since must be ISO 8601: {invalid}"
+            ) from invalid
+        moved = held.moved_since(moment) if moment is not None else None
         rows = [
-            node for node in held.all_nodes(classes) if not kind or node.kind == kind
+            node
+            for node in held.all_nodes(classes)
+            if (not kind or node.kind == kind) and (moved is None or node.id in moved)
         ]
         if not rows:
             typer.echo(
@@ -360,9 +393,18 @@ def create_ledger_app(
         typer.echo(node_line(held, found))
         if found.text:
             typer.echo(found.text)
+        if found.slug:
+            typer.echo(f"  slug {found.slug}")
+        incoming = held.into(found.id)
+        # Counted by kind before they are listed, because the count is what a
+        # reader weighs a node by — how much rests on it, how many answer it —
+        # and it is shown rather than folded into any stored importance.
+        for kind in dict.fromkeys(edge.kind for edge in incoming):
+            count = sum(1 for edge in incoming if edge.kind == kind)
+            typer.echo(f"  {count} incoming {kind}")
         for edge in held.out_of(found.id):
             typer.echo(f"  out  {edge.kind} -> {edge.target}")
-        for edge in held.into(found.id):
+        for edge in incoming:
             typer.echo(f"  in   {edge.kind} <- {edge.source}")
         for digest in found.attachments:
             missing = "" if held.blobs.holds(digest) else "  (not on this machine)"
@@ -437,6 +479,12 @@ def create_ledger_app(
             list[str] | None,
             typer.Option("--path", help="A path in scope, whose lock moves with it"),
         ] = None,
+        watch: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--watch", help="A node the work rests on; the brief says if it moved"
+            ),
+        ] = None,
     ) -> None:
         """Move a body of work to a peer, and say exactly what crossed.
 
@@ -457,6 +505,7 @@ def create_ledger_app(
             not_again=list(not_again or []),
             tasks=list(task or []),
             paths=list(path or []),
+            watch=list(watch or []),
             root=root,
         )
         typer.echo(f"{result_of.handoff.id}: {result_of.handoff.title}")
@@ -504,7 +553,24 @@ def create_ledger_app(
             for edge in held.out_of(found.id)
             if edge.kind == "coordination:transfers" and edge.target in carried
         ]
-        typer.echo(render_brief(found, moved, validated_audience(for_whom)))
+        changed = held.moved_since(found.at, found.watch)
+
+        def watched_line(spelling: str) -> str:
+            node = held.resolve(spelling, classes)
+            if node is None:
+                return f"- `{spelling}` — no such node"
+            where = held.standing(node, classes)
+            moved_note = " — **moved since this handoff**" if node.id in changed else ""
+            return f"- `{spelling}` — {where.label}: {where.reason}{moved_note}"
+
+        typer.echo(
+            render_brief(
+                found,
+                moved,
+                validated_audience(for_whom),
+                watched=[watched_line(spelling) for spelling in found.watch],
+            )
+        )
 
     @app.command("mine")
     def mine_cmd(

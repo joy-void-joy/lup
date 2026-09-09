@@ -103,8 +103,9 @@ property of the relation rather than of any project's epistemics.
 
 `lup.ledger` declares no node type, no edge type and no grade. What counts as
 verified, what grades exist, and what a claim owes are a project's questions —
-`lup.corpus` answers them for a project that wants an evidence-based answer,
-and a project that wants its own declares its own types.
+the scaffold's corpus (`docs/corpus.md`) is one project's answer, declared in
+its `node_classes` beside its tasks, and a project that wants its own declares
+its own types the same way.
 
 ## The store is untracked
 
@@ -125,6 +126,23 @@ Recording is generic: the kind is looked up in what the project declared and
 the type validates the fields, so there is one `record` rather than a command
 per kind, and a kind the project adds tomorrow is recordable today. `ledger
 cite <doc>` holds one hand-written document to the nodes it names.
+
+`ledger list --since <moment>` is how a reader opens on what moved: the nodes
+with a record newer than the moment they last looked — theirs, or an edge
+touching them — read off the log's own timestamps, since standing is never
+stored. A node may carry a `slug`, unique once taken, and every command that
+takes an id takes a slug. `ledger show` counts the edges pointing at a node by
+kind before listing them, because the count is what a reader weighs a node by.
+
+## Standing reaches through the log
+
+A type's `standing()` reads its neighbourhood, and the neighbourhood carries
+`standing_of`: a reader the store supplies that answers for *any* node, as
+deep as the log goes, remembering each answer and reporting a cycle rather
+than following it. A type that only needs one hop — a task reading whether
+its blockers finished — never calls it; a type whose standing depends on a
+neighbour's standing calls `standing_at(id)` and gets the whole chain. That is
+the mechanism; what a chain means is the project's, declared in its kinds.
 
 The console is the one reader whose subject is the log rather than any one
 type, so it is the one place a list of node classes is needed: a record names

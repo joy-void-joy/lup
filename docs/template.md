@@ -34,7 +34,7 @@ src/lup_template/
 │   │   ├── realtime.py      # Real-time MCP tools for persistent agents.
 │   │   └── reflect.py       # Reflection tool — forced self-assessment before output finalization.
 │   └── toolsets.py          # Single source of truth for the agent's MCP tool groups.
-├── corpus.py                # This repository's corpus types: the library's defaults, with its own words.
+├── corpus.py                # This repository's corpus: claims, what backs them, and what retired them.
 ├── devtools/                # Development and analysis CLI tools for lup.
 │   ├── agent/               # Agent introspection and interactive debugging tools.
 │   │   ├── inspect_agent.py # Agent configuration inspection: tools, schemas, prompt, subagents.
@@ -58,6 +58,7 @@ src/lup_template/
         ├── catalog.py       # Which modules this repository takes, and what it changed about each.
         ├── docs/            # Typed source for every document under ``docs/``.
         │   ├── catalog.py   # Every document this repository publishes under ``docs/``.
+        │   ├── corpus.py    # This repository's corpus: a body of claims, what backs each, and what retired it.
         │   ├── decisions.py # Architectural decisions behind the development tooling.
         │   ├── index.py     # The documentation index: what this repository is, and where each part is.
         │   └── template.py  # Guide to ``src/lup_template``, the application built on the library.

@@ -117,6 +117,16 @@ class Handoff(LedgerNode, frozen=True):
     tried nothing has nothing to say.
     """
 
+    watch: list[str] = []
+    """The nodes this work rests on, so the receiver opens on what moved.
+
+    Ids or slugs. The shape a research repository wrote by hand as
+    ``watch = [...]`` in every direction file and nothing ever read; here the
+    brief reads it, and says which of these have a record newer than the
+    handoff — a premise refuted, a question answered, a task closed — before
+    the receiver carries a stale one forward.
+    """
+
     def standing(self, around: Surroundings) -> Standing:
         """Whether the work this carried is done, still moving, or unclaimed.
 
@@ -191,6 +201,7 @@ def hand_off(
     not_again: list[str] | None = None,
     tasks: list[str] | None = None,
     paths: list[str] | None = None,
+    watch: list[str] | None = None,
     root: Path | None = None,
 ) -> Handover:
     """Move a body of work to a peer, and say exactly what crossed.
@@ -207,6 +218,7 @@ def hand_off(
     questions: list[JsonValue] = list(open_questions)
     results: list[JsonValue] = [entry.model_dump() for entry in established or []]
     dead_ends: list[JsonValue] = list(not_again or [])
+    watched: list[JsonValue] = list(watch or [])
     handoff = store.record(
         Handoff,
         title,
@@ -215,6 +227,7 @@ def hand_off(
         open_questions=questions,
         established=results,
         not_again=dead_ends,
+        watch=watched,
     )
 
     # The typed read rather than resolving each id, so what comes back is a
