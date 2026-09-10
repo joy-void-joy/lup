@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "8736b4170bb53294ed7dc18a738c68d1ad090963191c29b4bd94e76650d3d303",
+  "source_digest": "9e328b1f8a734ad432869c3e1a632efeae0faf64ff6f99612d3358eaf27a90b6",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -296,7 +296,7 @@
     {
       "path": ".codex/plugins/lup/skills/debug/SKILL.md",
       "category": "generated",
-      "sha256": "5fd9c4fb922aec028c46a168b014d1c6ff311bdb043afd2c98f4efe83277391d",
+      "sha256": "bba722af227e9dec7300bbb91f4a82b8d79022580f6d0b1f43f111690d8f7932",
       "semantic_id": "skill.debug",
       "executable": false
     },
@@ -401,7 +401,7 @@
     {
       "path": ".codex/plugins/lup/skills/land/SKILL.md",
       "category": "generated",
-      "sha256": "d11abd0352b0e576f08c90ddc1d62e8b525c0458f1041b362e6922a26599caea",
+      "sha256": "59c67329874d07588779430b2d0529f16dfb828d061937a197ab38ce28a61069",
       "semantic_id": "skill.land",
       "executable": false
     },

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "8736b4170bb53294ed7dc18a738c68d1ad090963191c29b4bd94e76650d3d303",
+  "source_digest": "9e328b1f8a734ad432869c3e1a632efeae0faf64ff6f99612d3358eaf27a90b6",
   "target_requirements": [
     "claude-code"
   ],
@@ -121,7 +121,7 @@
     {
       "path": ".claude/plugins/lup/commands/debug.md",
       "category": "generated",
-      "sha256": "06a032b5ad3463fd117ae276feef50b6410209a332f73e60f2721e380ae5405a",
+      "sha256": "9e311871fdba2d3c84e36581dca8573d011ad053586a1a5f0108afa5d507ddec",
       "semantic_id": "skill.debug",
       "executable": false
     },
@@ -226,7 +226,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "007cfecbef3a7fb03181bde2233c2517471b64d1fdf28fd3c62d7e218ce7be18",
+      "sha256": "17faa352ecbb61909cfe11fd2edc1d266c929e73cc1f82ca6a3e32b79f9a31d7",
       "semantic_id": "skill.land",
       "executable": false
     },

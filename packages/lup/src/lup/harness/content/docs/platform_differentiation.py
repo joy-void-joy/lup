@@ -26,6 +26,38 @@ def document(
     """
     claude_decoded = contained("|".join(claude_decodes))
     codex_decoded = contained("|".join(codex_decodes))
+    # The resolver's entry is described only where a project declares one:
+    # a project that declined the module serves no `resolve` command, and a
+    # row telling its reader to run one would document a command it lacks.
+    has_resolver = any(skill.name == "resolve" for skill in skills)
+    resolver_entry: list[models.PromptPart] = (
+        [
+            models.SpellingExample(
+                text=(
+                    "| Resolver entry | `/lup:resolve` instructs `uv run "
+                    "lup-devtools resolve --adapter claude` | "
+                    "`$lup:resolve` instructs the same command with "
+                    "`--adapter codex` |"
+                )
+            ),
+            models.TextPart(
+                text=r""" Both entries only launch the shared persisted Python resolver, and differ solely in the adapter they name — `ResolverEntry` is deliberately undifferentiated because workflow scripts execute in an isolated VM with no shell, leaving the Claude entry nothing to wrap. The entry contract is the CLI's: optional `--run-id <id>` (resume) and repeatable `--answer <question-id>=<value>`, through which the reserved `integration-assembly` gate is approved like any other question. Both rendered entries document it (pinned by `test_generated_resolver_entries_only_launch_the_shared_python_core`, which also asserts no `Workflow(` wrapper appears). |
+"""
+            ),
+        ]
+        if has_resolver
+        else []
+    )
+    resolver_parity: list[models.PromptPart] = (
+        [
+            models.TextPart(
+                text=r"""| Resolver entry | skill instructs the CLI directly | skill instructs the CLI directly | Parity — neither tree generates a launcher artifact; the shared `resolve --adapter <runtime>` CLI is the entry on both sides. |
+"""
+            )
+        ]
+        if has_resolver
+        else []
+    )
     return models.PromptDocument(
         source=__name__,
         parts=[
@@ -98,17 +130,9 @@ Generated files are one surface, not the boundary of the audit. Launch readiness
 | Forge credential | Selected once by `GitAccess.select` and carried into the container both runtimes launch through, identically: the same rung, the same rewrite direction, the same mounts, the same bare `-e NAME` | Same, from the same declaration | The credential is a property of the container, and one `Image` declaration starts every runtime — so there is nothing here for a runtime to spell differently. What does differ is only how far the *denial* beside it is enforced: `credential_paths` reaches Claude's native per-path credential sandbox and has no Codex equivalent, so on Codex the read denial is the semantic policy alone. Neither is a syscall boundary, and neither stops `ssh` or `git` using the identity that was lent — `docs/permissions.md` says so in those words rather than implying a stronger boundary. |
 """
             ),
-            models.SpellingExample(
-                text=(
-                    "| Resolver entry | `/lup:resolve` instructs `uv run "
-                    "lup-devtools resolve --adapter claude` | "
-                    "`$lup:resolve` instructs the same command with "
-                    "`--adapter codex` |"
-                )
-            ),
+            *resolver_entry,
             models.TextPart(
-                text=rf""" Both entries only launch the shared persisted Python resolver, and differ solely in the adapter they name — `ResolverEntry` is deliberately undifferentiated because workflow scripts execute in an isolated VM with no shell, leaving the Claude entry nothing to wrap. The entry contract is the CLI's: optional `--run-id <id>` (resume) and repeatable `--answer <question-id>=<value>`, through which the reserved `integration-assembly` gate is approved like any other question. Both rendered entries document it (pinned by `test_generated_resolver_entries_only_launch_the_shared_python_core`, which also asserts no `Workflow(` wrapper appears). |
-| Downstream template guidance | `.claude/plugins/lup/TEMPLATE_CLAUDE.md` from `content/template_claude.py` | `.codex/plugins/lup/TEMPLATE_AGENTS.md` from `content/template_codex.py` | Both flavors compose the portable sections in `content/template_sections.py`; only platform slices (guidance-file names, meta-agent naming, edit-hook vs opaque-patch guidance, LSP vs CLI diagnostics, settings, communication idiom) differ. |
+                text=rf"""| Downstream template guidance | `.claude/plugins/lup/TEMPLATE_CLAUDE.md` from `content/template_claude.py` | `.codex/plugins/lup/TEMPLATE_AGENTS.md` from `content/template_codex.py` | Both flavors compose the portable sections in `content/template_sections.py`; only platform slices (guidance-file names, meta-agent naming, edit-hook vs opaque-patch guidance, LSP vs CLI diagnostics, settings, communication idiom) differ. |
 | Launch and trust | Launches the verified local plugin directory with `--plugin-dir`; `CLAUDE_CONFIG_DIR` selects the profile | Seeds a persistent per-worktree home from personal authentication and settings, materializes the Claude daltonized theme without selecting it, and publishes a verified content-addressed plugin revision; explicit `--codex-home`/`CODEX_HOME` overrides bypass isolation | Codex installs in a temporary home, verifies the native output, then publishes the revision and only its marketplace/plugin registration. Native installation never runs against the live home: its cache pruning would remove earlier revisions. Concurrent Lup publishers serialize, unrelated settings survive, and existing revision paths remain available. |
 | A launched session's coordination identity | The durable id is exported as `LUP_COORDINATION_MEMBER`, and `--name <worktree>` makes the runtime's own display agree with the roster | The same variable, exported by the same code; the launch takes no name flag, so nothing is displayed by the runtime | Both halves are minted in `session_argv`, the one place either launcher passes through, so the id is a fact about having been launched rather than about which CLI was. Measured against Codex 0.153.4, whose launch options are `-c/--config`, `--enable`, `--disable`, `--remote`, `--remote-auth-token-env`, `--strict-config`, `-i/--image`, `-m/--model`, `--oss`, `--local-provider`, `-p/--profile`, `-s/--sandbox`, `--approve-for-me`, the two `--dangerously-` forms, `--add-dir`, `-a/--ask-for-approval`, `--search` and `--no-alt-screen` — none of which names a session. The difference costs a peer nothing: what addressing resolves through is lup's own `names.jsonl`, so the roster answers to the same derived worktree name on both runtimes and `dev coordination rename` changes it on both. Only the CLI's own chrome differs, and only on the runtime that has chrome to put it in. |
 | Mail reaching a peer mid-session | A second `PreToolUse` group whose matcher is empty, so it fires before every tool: a shell guard comparing the mailbox's length to this member's delivered position, handing over to a verbatim `delivery_runtime` only where it has grown | Nothing extra; the policy matcher already names the tool every read goes through | The gap is one runtime's, because the tool rosters differ rather than the delivery does. Claude reads through native `Read`/`Grep`/`Glob`, which the policy matcher does not name and must not: every entry in `routed_tools` is proved to have a branch deciding it, so naming `Read` there would make `Read` a tool a policy could refuse. Codex "reads a document only by running a shell command over it", and `Bash` is already routed — so a peer there hears everything at the same moments without a second artifact. Both halves are measured rather than assumed: `PreToolUse` was observed firing for `Read`, `Grep`, `Glob` and `SendMessage` under an empty matcher, which the vendor documents for none of them. The guard costs 7.85ms per call with nothing waiting, against 107ms for the dispatcher, and fails open at every step — the opposite of the policy guard, because a permission that cannot be decided must not be granted, while mail that cannot be read must not stop the work it was meant to inform. |
@@ -136,8 +160,11 @@ Every family in `.claude/` vs `.codex/`/`.agents/`, with an explicit decision.
 | Guidance | `.claude/CLAUDE.md` | `AGENTS.md` + `.codex/config.toml` | Parity — one document, native locations. |
 | Ownership proof | `.claude/.lup-ownership.json` | `.codex/.lup-ownership.json` | Parity — same mechanism per tree. |
 | Template guidance | `TEMPLATE_CLAUDE.md` | `TEMPLATE_AGENTS.md` | Parity — shared portable sections, platform slices per flavor. |
-| Resolver entry | skill instructs the CLI directly | skill instructs the CLI directly | Parity — neither tree generates a launcher artifact; the shared `resolve --adapter <runtime>` CLI is the entry on both sides. |
-| `docs/` | rendered by the Claude recipe | none | Intentional single copy — repository documentation at a neutral location, which neither runtime reads from its own tree. Each page renders identically under both prompt renderers, so a second copy would be a byte duplicate and would additionally give two ownership manifests the same paths to manage. The set is declared once in `content/docs/catalog.py`. |
+"""
+            ),
+            *resolver_parity,
+            models.TextPart(
+                text=r"""| `docs/` | rendered by the Claude recipe | none | Intentional single copy — repository documentation at a neutral location, which neither runtime reads from its own tree. Each page renders identically under both prompt renderers, so a second copy would be a byte duplicate and would additionally give two ownership manifests the same paths to manage. The set is declared once in `content/docs/catalog.py`. |
 | `settings.json` | `.claude/settings.json` | none | Intentional — Claude-native project settings (plugin enablement, marketplace, permissions, file suggestion). The Codex counterparts are the generated `.codex/config.toml` plus uncommitted personal `config.local.toml`. |
 | `scripts/file_suggest.sh` | `.claude/plugins/lup/scripts/file_suggest.sh` | none | Intentional — wired to Claude's native `fileSuggestion` setting; Codex has no equivalent feature. |
 | Codex-only files | none | `.codex/config.toml`, `.agents/plugins/marketplace.json` | Intentional — native Codex requirements with no Claude analogue (Claude's marketplace lives inside `.claude/plugins/`). |
