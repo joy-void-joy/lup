@@ -38,6 +38,8 @@ from lup.providers.codex.native import (
 )
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
 from lup.harness.models import HookSet
+from lup.harness.codescan.boundaries import native_import_boundaries
+from lup.harness.codescan.common import RuleSelection
 from lup.types import JsonObject
 from lup.policy.chain import UnknownToolPolicy
 from lup.policy.grants import LeaseGrants, write_allowance_grants
@@ -58,6 +60,7 @@ from lup.policy.kernel.decision import (
     SandboxPlacement,
     sandbox_escaped,
 )
+from lup.policy.kernel.commands import decide_command_rows, decide_uv
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import (
     PathRoleRow,
@@ -98,8 +101,12 @@ from lup.policy.rules import (
     path_rule_row,
 )
 
-from lup.policy.vocabulary import runner_target_rules
-from lup_template.devtools.harness.catalog import declared_hook_set, portable_harness
+from lup.policy.vocabulary import bun_rule
+from lup_template.harness.catalog import (
+    application_roots,
+    declared_hook_set,
+    portable_harness,
+)
 
 SHELL_RULES = declared_hook_set().resolved_shell_rules()
 """This project's vocabulary as the runtime resolves it, not as it is declared.
@@ -175,6 +182,250 @@ class EditDecisionCase(BaseModel, frozen=True):
     path_exists: bool = True
 
 
+NATIVE_IMPORT_CASES = [
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="from lup.providers import codex\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="from lup.providers import *\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import claude_agent_sdk as sdk\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/lup_template/agent/core.py",
+        before="",
+        after="import openai\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/lup_template/agent/core.py",
+        before="",
+        after="from lup.providers.codex.runtime import create_codex\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="packages/lup/src/lup/providers/codex/example.py",
+        before="",
+        after="import openai\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="tests/test_example.py",
+        before="",
+        after="import claude_agent_sdk\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after='tools = ["Read", "WebSearch"]\nruntime = "codex"\n',
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after='"""Claude and Codex: from openai import AsyncOpenAI"""\n',
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import openai_settings\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="packages/lup/src/lup/orchestration/example.py",
+        before="",
+        after="from ..providers import claude\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="from lup.providers import (\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import openai  # lup: ignore[seam-boundary]\n",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="# lup: ignore[seam-boundary]\nimport openai\n",
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after=(
+            "def run() -> None:\n"
+            "    # lup: ignore[seam-boundary]\n"
+            "    import \\\n"
+            "        openai\n"
+        ),
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="value = 1  # lup: ignore[seam-boundary]\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import openai\nvalue = cast(str, raw)  # lup: ignore[cast]\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="# lup: ignore[seam-boundary]\nimport openai\n",
+        after="import openai\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="import openai  # lup: ignore[seam-boundary]\n",
+        after="import openai  # lup: ignore[seam-boundary]\nvalue = 1\n",
+        effect="allow",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="from lup.providers import (\n    capabilities,\n)\n",
+        after="from lup.providers import (\n    capabilities,\n    codex,\n)\n",
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/worker.py",
+        before="",
+        after="import openai\n",
+        effect="deny",
+        autonomous=True,
+    ),
+]
+
+
+@pytest.mark.parametrize("case", NATIVE_IMPORT_CASES)
+def test_import_ownership_has_one_canonical_and_hermetic_verdict(
+    tmp_path: Path, case: EditDecisionCase
+) -> None:
+    boundaries = native_import_boundaries(application_roots())
+    policy = EditPolicy(
+        protected=[],
+        path_roles=FIXTURE_PATH_ROLES,
+        autonomous=case.autonomous,
+        import_boundaries=boundaries,
+    )
+    change = EditChange(path=Path(case.path), before=case.before, after=case.after)
+    canonical = policy.decide(EditBatch(changes=[change]))
+    bundled = load_bundled_kernel(tmp_path, "edit")
+    generated = bundled.decide_edit(
+        case.path,
+        case.before,
+        case.after,
+        path_exists=case.path_exists,
+        path_rules=[],
+        antipattern_rows=antipattern_rows(change),
+        path_roles=FIXTURE_PATH_ROLES,
+        autonomous=case.autonomous,
+        python_source=True,
+        import_boundaries=[boundary.erased() for boundary in boundaries],
+    )
+    assert canonical.effect == generated.effect == case.effect
+    if case.effect == "deny":
+        assert "seam-boundary" in canonical.reason
+        assert "seam-boundary" in generated.reason
+
+
+def test_import_boundary_allowance_cannot_admit_an_unsuppressed_dependency() -> None:
+    boundaries = [
+        item.erased() for item in native_import_boundaries(application_roots())
+    ]
+    for after, effect in (
+        ("import openai\n", "deny"),
+        ("import openai  # lup: ignore[seam-boundary]\n", "allow"),
+    ):
+        decision = decide_edit(
+            "src/worker.py",
+            "",
+            after,
+            path_exists=True,
+            path_rules=[],
+            antipattern_rows=[],
+            python_source=True,
+            allowances=["antipattern-suppression"],
+            import_boundaries=boundaries,
+        )
+        assert decision.effect == effect
+
+
+@pytest.mark.parametrize(
+    "path,effect",
+    [
+        ("packages/lup/src/lup/providers/codex/example.py", "allow"),
+        ("src/lup_template/agent/core.py", "deny"),
+        ("packages/lup/src/lup/orchestration/example.py", "deny"),
+    ],
+)
+def test_import_ownership_resolves_absolute_paths_in_their_own_worktree(
+    tmp_path: Path, path: str, effect: str
+) -> None:
+    repository = tmp_path / "sibling"
+    marker = repository / ".git"
+    marker.mkdir(parents=True)
+    (marker / "HEAD").write_text("ref: refs/heads/fixture\n", encoding="utf-8")
+    policy = EditPolicy(
+        protected=[], import_boundaries=native_import_boundaries(application_roots())
+    )
+    decision = policy.decide(
+        EditBatch(
+            changes=[
+                EditChange(
+                    path=repository / path,
+                    before="",
+                    after="import openai\n",
+                )
+            ]
+        )
+    )
+    assert decision.effect == effect
+
+
+def test_import_boundary_retirement_reaches_the_canonical_policy() -> None:
+    hooks = HookSet(
+        id="fixture",
+        policy_ids=["edit"],
+        rules=RuleSelection(retired=["seam-boundary"]),
+        import_boundaries=native_import_boundaries(application_roots()),
+    )
+    policy = semantic_policy_for(hooks)
+    decision = policy.decide(
+        EditBatch(
+            changes=[
+                EditChange(
+                    path=Path("src/worker.py"),
+                    before="",
+                    after="import openai\n",
+                )
+            ]
+        )
+    )
+    assert decision.effect == "allow"
+
+
 # The roles this repository declares, mirrored so the fixtures judge the same
 # vocabulary the generated runtime is rendered with.
 FIXTURE_PATH_ROLES = [
@@ -214,9 +465,13 @@ runtime, and neither is a name this repository actually refuses — what is
 being pinned is the shape, not this project's own judgement."""
 
 FIXTURE_RECOVERABLE_LIMIT = 5
-FIXTURE_RUNNER_TARGETS = runner_target_rules()
+FIXTURE_RUNNER_TARGETS = declared_hook_set().runner_targets
 """What this project declares `uv run <target>` may reach, and where each runs,
-which is what the shell fixtures below are written against."""
+which is what the shell fixtures below are written against.
+
+Asked of the hook set for the reason `SHELL_RULES` is: the table these cases
+are about is the one a session walks, and a module root declared beside the
+executables is on it."""
 """How many restorable files one command may destroy before it asks."""
 
 SHELL_POLICY_CASES = [
@@ -229,13 +484,43 @@ SHELL_POLICY_CASES = [
     # and the session running it is contained.
     DecisionCase(input="uv run pytest | uv run python tmp/oneoff.py", effect="allow"),
     DecisionCase(input="uv run python tmp/oneoff.py", effect="allow"),
-    # The flags keep the refusal, because each of them is a program with no
-    # file to open afterwards.
+    # What keeps the refusal is naming nothing readable: inline code leaves
+    # no file behind, and an interpreter handed nothing runs no program at
+    # all. A module whose root nobody declared is the third of them — there
+    # is a file, and no statement that this project owns it.
+    DecisionCase(input="uv run -c 'print(1)'", effect="deny"),
     DecisionCase(input="uv run python -m http.server", effect="deny"),
+    DecisionCase(input="uv run -m http.server", effect="deny"),
     DecisionCase(input="uv run python", effect="deny"),
+    # A declared root admits every module beneath it, in both spellings that
+    # reach one, because what runs is this project's own reviewed source.
+    DecisionCase(input="uv run -m examples.monitored_run plan", effect="allow"),
+    DecisionCase(input="uv run python -m examples.one_shot", effect="allow"),
+    # `-m` belongs to whoever the invocation reached, and pytest's selects a
+    # marker expression: reading that as a module would refuse the way this
+    # project runs a slice of its own tests.
+    DecisionCase(input="uv run pytest -m slow", effect="allow"),
     DecisionCase(input="find . -name '*.py' | xargs grep TODO", effect="allow"),
     DecisionCase(input="echo x | xargs rm -rf", effect="ask"),
     DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),
+    # A frozen restore fetches nothing the lockfile does not pin by integrity
+    # hash, which is what `uv run` restores before running, unasked; the
+    # forms free to rewrite a lockfile resolve anew and keep asking, as does
+    # a frozen one pointed at a source this project never declared.
+    DecisionCase(input="uv sync --frozen", effect="allow"),
+    DecisionCase(input="uv sync --locked", effect="allow"),
+    DecisionCase(input="uv sync --locked --all-extras", effect="allow"),
+    DecisionCase(input="uv sync", effect="ask"),
+    DecisionCase(input="uv sync --all-extras", effect="ask"),
+    DecisionCase(input="uv sync --frozen --index-url https://x", effect="ask"),
+    DecisionCase(input="uv sync --frozen $FLAG", effect="ask"),
+    DecisionCase(input="uv add httpx", effect="ask"),
+    DecisionCase(input="bun install --frozen-lockfile", effect="allow"),
+    DecisionCase(input="bun install", effect="ask"),
+    DecisionCase(input="bun install --frozen-lockfile $FLAG", effect="ask"),
+    DecisionCase(input="bun add zod", effect="ask"),
+    DecisionCase(input="bun test", effect="allow"),
+    DecisionCase(input="bun run build", effect="allow"),
     DecisionCase(input="git status\ncurl https://example.com", effect="ask"),
     DecisionCase(input="find . -name '*.tmp' -delete", effect="ask"),
     DecisionCase(input="cat x |& rm -rf ~", effect="ask"),
@@ -323,20 +608,23 @@ SHELL_POLICY_CASES = [
     # and its role is read before the path is spelled — which is what keeps an
     # absolute root from reading as somewhere outside the checkout.
     # Reassigning TMPDIR is a security-sensitive assignment, and a suffix that
-    # climbs out of the root leaves the root's grant behind: unresolvable it
-    # asks for having no path to answer about, and resolvable it asks for
-    # naming one the checkout does not cover.
+    # climbs clear of every temporary root leaves their grant behind:
+    # unresolvable it asks for having no path to answer about, and resolvable
+    # it asks for naming one the checkout does not cover.
     DecisionCase(input="echo x > $TMPDIR/out.txt", effect="allow"),
     DecisionCase(input='sort f > "${TMPDIR}/sorted.txt"', effect="allow"),
     DecisionCase(input="echo x > /tmp/claude-1000/scratch/out.txt", effect="allow"),
     DecisionCase(input="cat <<'EOF' > $TMPDIR/notes.md\nbody\nEOF", effect="allow"),
     DecisionCase(input="echo x > $TMPDIR/../etc/crontab", effect="ask"),
-    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="ask"),
-    # A /tmp path outside the session root is not scratch and not in the
-    # checkout either, so it asks for the same reason any write beyond the
-    # tree does — the boundary is what would have confined it, and none was
-    # measured here.
-    DecisionCase(input="echo x > /tmp/other/file", effect="ask"),
+    # Climbing out of the scratchpad lands in the temporary root that holds
+    # it, which is scratch on its own account, so the grant the traversal left
+    # behind is not the only one there was.
+    DecisionCase(input="echo x > /tmp/claude-1000/../shadow", effect="allow"),
+    # A /tmp path outside the session root is scratch for the root it is in:
+    # no review pass walks it and no capture of the checkout holds it, which
+    # is the whole of what the role asks. The boundary decides a different
+    # question — whether the write escapes a lease — and not this one.
+    DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
     # Publishing is how work becomes reviewable, so the verbs that put a
@@ -546,7 +834,11 @@ SHELL_POLICY_CASES = [
     # branch is the commonest shape in this work, and all of it was blocked.
     DecisionCase(input="for b in x y; do echo $(git log -1 $b); done", effect="allow"),
     DecisionCase(input="for f in a b; do diff <(cat $f) base; done", effect="allow"),
-    DecisionCase(input="for x in -i; do sed \"$x\" 's/a/b/' f; done", effect="deny"),
+    # `-i` arriving through the loop variable still reads as an in-place
+    # rewrite, and no case here has a filesystem behind it -- so nothing
+    # produced the document the edit gates judge, and the rewrite is asked
+    # about rather than granted.
+    DecisionCase(input="for x in -i; do sed \"$x\" 's/a/b/' f; done", effect="ask"),
     DecisionCase(input='for f in *.txt; do sort "$f"; done', effect="deny"),
     DecisionCase(input='for f in a; do python "$f"; done', effect="deny"),
     DecisionCase(input='for f in a; do wc "$f"', effect="deny"),
@@ -559,12 +851,12 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="sort f", effect="allow"),
     DecisionCase(input="sort -o out f", effect="allow"),
     DecisionCase(input="sort -o .git/HEAD f", effect="ask"),
-    DecisionCase(input="sort -o /tmp/other/file f", effect="ask"),
+    DecisionCase(input="sort -o /tmp/other/file f", effect="allow"),
     # A flag that runs a program is not a flag that writes a file, and keeps
     # its own question however ordinary the file beside it is.
     DecisionCase(input="sort --compress-program=x -o out f", effect="ask"),
     DecisionCase(input="sed -n '1,5p' f", effect="allow"),
-    DecisionCase(input="sed -i 's/a/b/' f", effect="deny"),
+    DecisionCase(input="sed -i 's/a/b/' f", effect="ask"),
     DecisionCase(input="sed 's/x/y/e' f", effect="deny"),
     DecisionCase(input="awk '{print $1}' f", effect="allow"),
     DecisionCase(input="awk -F: '{print $2}' /etc/passwd", effect="allow"),
@@ -637,9 +929,19 @@ SHELL_POLICY_CASES = [
     # A redirect is judged before the subcommand word is even found, so it
     # cannot be answered by the row that would otherwise reason about this
     # worktree — `commit` is reversible here, where the reflog lives.
-    DecisionCase(input="git -C /other status", effect="ask"),
+    #
+    # Where the redirect points is not part of that: a verb that only reads
+    # changes which tree is read and nothing about what the command does, and
+    # the `cd` case two lines below is the same read already allowed. Asking
+    # about the redirect and allowing the `cd` deterred nothing and cost a
+    # turn on every sibling worktree and every mounted project, both of which
+    # are addressed by absolute path.
+    DecisionCase(input="git -C /other status", effect="allow"),
+    DecisionCase(input="git -C /other log --oneline", effect="allow"),
+    DecisionCase(input="git -C ../sibling diff", effect="allow"),
     DecisionCase(input="git -C /tmp/other commit -am x", effect="ask"),
     DecisionCase(input="git -C /tmp/o merge --abort", effect="ask"),
+    DecisionCase(input="git -C /other push", effect="ask"),
     DecisionCase(input="git --git-dir=/tmp/x --work-tree=/tmp add .", effect="ask"),
     DecisionCase(input="git --namespace=other push", effect="ask"),
     DecisionCase(input="git --super-prefix=x/ status", effect="ask"),
@@ -688,18 +990,18 @@ SHELL_POLICY_CASES = [
     # It follows forwarding rather than only the verbs that document the flag:
     # `stash list`, `stash show` and `bisect view` reach it by handing their
     # arguments to `log` or `diff`. Bare, each still reports and allows.
-    DecisionCase(input="git stash show --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git stash list --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git bisect view --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git shortlog --output=/tmp/f HEAD", effect="ask"),
+    DecisionCase(input="git stash show --output=/etc/f", effect="ask"),
+    DecisionCase(input="git stash list --output=/etc/f", effect="ask"),
+    DecisionCase(input="git bisect view --output=/etc/f", effect="ask"),
+    DecisionCase(input="git shortlog --output=/etc/f HEAD", effect="ask"),
     DecisionCase(input="git stash show", effect="allow"),
     DecisionCase(input="git stash list", effect="allow"),
     DecisionCase(input="git bisect view", effect="allow"),
     DecisionCase(input="git shortlog HEAD", effect="allow"),
-    DecisionCase(input="git diff-tree --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git diff-index --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git diff-pairs --output=/tmp/f", effect="ask"),
-    DecisionCase(input="git range-diff --output=/tmp/f a b", effect="ask"),
+    DecisionCase(input="git diff-tree --output=/etc/f", effect="ask"),
+    DecisionCase(input="git diff-index --output=/etc/f", effect="ask"),
+    DecisionCase(input="git diff-pairs --output=/etc/f", effect="ask"),
+    DecisionCase(input="git range-diff --output=/etc/f a b", effect="ask"),
     DecisionCase(input="git diff-tree HEAD", effect="allow"),
     DecisionCase(input="git diff-files", effect="allow"),
     DecisionCase(input="git diff-index HEAD", effect="allow"),
@@ -709,7 +1011,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git rebase --exec 'touch x' HEAD~2", effect="ask"),
     DecisionCase(input="git fetch --upload-pack=/tmp/x origin", effect="ask"),
     DecisionCase(input="git grep -Ovim pattern", effect="ask"),
-    DecisionCase(input="git log --output=/tmp/f", effect="ask"),
+    DecisionCase(input="git log --output=/etc/f", effect="ask"),
     DecisionCase(input="git reflog", effect="allow"),
     DecisionCase(input="git reflog expire --expire=now --all", effect="ask"),
     DecisionCase(input="git pull", effect="allow"),
@@ -1050,7 +1352,9 @@ SHELL_POLICY_CASES = [
         sandboxed=True,
         escapable=True,
     ),
-    DecisionCase(input="sed -i 's/a/b/' f", effect="deny", sandboxed=True),
+    # A judged question holds inside the boundary: containment settles what
+    # nobody classified, and this was classified.
+    DecisionCase(input="sed -i 's/a/b/' f", effect="ask", sandboxed=True),
     DecisionCase(input="ssh-add -D", effect="deny", sandboxed=True),
     DecisionCase(input="frobnicate; ssh host", effect="ask", sandboxed=True),
     DecisionCase(input="python -c 'x'", effect="deny", sandboxed=True),
@@ -1363,9 +1667,12 @@ EDIT_POLICY_CASES = [
         effect="ask",
     ),
     EditDecisionCase(
-        path="downstream.json",
+        # The gitignored half, protected for what it can now say rather than
+        # for being config: an entry there carries the `mount` deciding what
+        # the next launch opens, so writing one is widening the boundary.
+        path="sync.json.local",
         before='{"projects": []}',
-        after='{"projects": [{"name": "fleet-app"}]}',
+        after='{"projects": [{"name": "fleet-app", "mount": "rw"}]}',
         effect="ask",
         path_exists=False,
     ),
@@ -1530,7 +1837,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                 ".claude",
                 "pyproject.toml",
                 "sync.json",
-                "downstream.json",
+                "sync.json.local",
             ],
             human_owned_files=["README.md"],
             autonomous_agent_identities=["resolver-worker"],
@@ -1538,13 +1845,16 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             acceptance_guard=None,
             shell_rules=SHELL_RULES,
             edit_rules=FIXTURE_EDIT_RULES,
+            import_boundaries=native_import_boundaries(application_roots()),
             refused_tools=FIXTURE_REFUSED_TOOLS,
+            peer_policy=None,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
             sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
             auto_escape_prefixes=[],
             diagnostics_command=[],
             resolution_command=[],
+            repair_command=[],
         ),
         encoding="utf-8",
     )
@@ -1557,7 +1867,10 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                     for item in SHELL_POLICY_CASES
                 ],
                 "fetch": [item.model_dump() for item in FETCH_POLICY_CASES],
-                "edit": [item.model_dump() for item in EDIT_POLICY_CASES],
+                "edit": [
+                    item.model_dump()
+                    for item in [*EDIT_POLICY_CASES, *NATIVE_IMPORT_CASES]
+                ],
             }
         ),
         encoding="utf-8",
@@ -1574,9 +1887,11 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "from policy_data import (\n"
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
         "    EDIT_RULES, MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES,\n"
+        "    IMPORT_BOUNDARIES,\n"
         "    RUNNER_TARGETS, SANDBOX_EXCLUDED_COMMANDS, SHELL_RULES,\n"
         ")\n"
         "assert EDIT_RULES, 'the declared edit table did not reach the runtime'\n"
+        "assert IMPORT_BOUNDARIES, 'import ownership did not reach the runtime'\n"
         "fixtures = json.loads(\n"
         "    (Path(__file__).parent / 'fixtures.json').read_text(encoding='utf-8')\n"
         ")\n"
@@ -1609,6 +1924,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        autonomous=case['autonomous'],\n"
         "        python_source=suffix in ('.py', '.pyi'),\n"
         "        suffix=suffix, edit_rules=EDIT_RULES,\n"
+        "        import_boundaries=IMPORT_BOUNDARIES,\n"
         "    )\n"
         "    assert decision.effect == case['effect'], case\n",
         encoding="utf-8",
@@ -1641,6 +1957,39 @@ def test_equivalent_multi_file_native_edits_decode_identically() -> None:
     )
 
     assert claude.tool == codex.tool == EditBatch(changes=changes)
+
+
+def test_native_edit_batches_cannot_hide_a_dependency_breach_behind_an_ask() -> None:
+    changes = [
+        EditChange(path=Path("README.md"), before="", after="Review this\n"),
+        EditChange(
+            path=Path("src/worker.py"),
+            before="",
+            after="from lup.providers import codex\n",
+        ),
+    ]
+    events = [
+        ClaudeEventDecoder().decode(
+            ClaudeBeforeToolEvent(operation=ClaudeEditBatchOperation(changes=changes))
+        ),
+        CodexEventDecoder().decode(
+            CodexBeforeToolEvent(
+                operation=CodexFileChangeOperation(
+                    changes=[
+                        CodexFileChange(
+                            path=change.path, before=change.before, after=change.after
+                        )
+                        for change in changes
+                    ]
+                )
+            )
+        ),
+    ]
+    policy = semantic_policy_for(declared_hook_set())
+    for event in events:
+        decision = policy.decide(event.tool)
+        assert decision.effect == "deny"
+        assert "seam-boundary" in decision.reason
 
 
 def test_unknown_tools_remain_auditable_and_ask() -> None:
@@ -1873,6 +2222,54 @@ def test_fetch_policy_normalizes_origin_and_rejects_lookalikes() -> None:
         ).effect
         == "ask"
     )
+
+
+def test_the_declared_scopes_admit_the_host_a_documentation_route_starts_at() -> None:
+    """The origin an agent types is judged, not the one it lands on.
+
+    docs.anthropic.com answers the Claude Code paths with a 301 to
+    code.claude.com and the API paths with one to platform.claude.com, both
+    declared. Undeclared, it puts an approval question on the first hop of a
+    route whose destination this project already reads, and the reader has
+    no way to tell that from an origin nobody vetted.
+
+    What that admits is the redirecting host itself. A lookalike
+    registration under it and the marketing site beside it are outside, so
+    the egress this table also grants stays the documentation surface rather
+    than the domain.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("https://docs.anthropic.com/en/docs/claude-code/settings") == "allow"
+    assert effect("https://docs.anthropic.com/en/api/messages") == "allow"
+    assert effect("https://docs.anthropic.com.evil.test/en/api/messages") == "ask"
+    assert effect("https://www.anthropic.com/news") == "ask"
+
+
+def test_the_declared_scopes_carry_the_product_pages_no_manual_answers() -> None:
+    """What the product is and costs is declared as itself, not as a redirect.
+
+    A reference manual answers how a thing is called and what it returns. What
+    it is, what it costs and what it claims are answered on the product's own
+    pages and nowhere in the scopes beside them, so a question about the
+    product rather than the API otherwise buys an approval prompt on every
+    hop. Both spellings are named because a site that redirects apex to www,
+    or the reverse, would put the ask back on the redirect.
+
+    This one widens rather than tidies: the origin is admitted for its own
+    content, and the same table grants it egress.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    def effect(url: str) -> str:
+        return policy.decide(FetchUrl(url=AnyHttpUrl(url))).effect
+
+    assert effect("https://claude.com/product/overview") == "allow"
+    assert effect("https://www.claude.com/pricing") == "allow"
+    assert effect("https://claude.com.evil.test/pricing") == "ask"
 
 
 def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) -> None:
@@ -2163,6 +2560,70 @@ def test_a_blessed_target_can_still_refuse_one_verb_beneath_it(
     # The target's own effect is the default beneath its verbs, so a verb it
     # never named inherits the blessing rather than falling off the table.
     assert decide("uv run devtools status").effect == "allow"
+
+
+def test_a_declared_module_root_admits_every_module_beneath_it(
+    tmp_path: Path,
+) -> None:
+    """`-m` names a file, so what decides it is whose file that is.
+
+    The refusal `-m` shared with `-c` was about the flag rather than about
+    what the flag named: `-c` leaves nothing behind to read, and a module
+    leaves the file it lives in. So the table that already answers
+    `uv run <target>` answers this too, on the root segment — one declaration
+    for a tree of entry points rather than one per entry point, and a root
+    nobody declared refused with the declaration named.
+    """
+    targets = [
+        RunnerTargetRule(name="pytest", effects=[declare("runs_declared_target")]),
+        RunnerTargetRule(name="demos", effects=[declare("runs_declared_target")]),
+    ]
+    policy = ShellPolicy(SHELL_RULES, runner_targets=targets)
+
+    def decide(command: str) -> Decision:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path))
+
+    assert decide("uv run -m demos.one_shot").effect == "allow"
+    assert decide("uv run -m demos.deeper.two_shot --flag").effect == "allow"
+    assert decide("uv run python -m demos.one_shot").effect == "allow"
+    refused = decide("uv run -m http.server")
+    assert refused.effect == "deny"
+    assert "`http` is not a module root" in refused.reason
+    # `-c` keeps the refusal and the wording that is true only of it.
+    assert "inline code" in decide("uv run -c 'print(1)'").reason
+    # A target's own `-m` stays its own: pytest selects markers with it, and
+    # only uv's `-m` and an interpreter's name a module.
+    assert decide("uv run pytest -m demos").effect == "allow"
+    assert decide("uv run pytest -m slow").effect == "allow"
+
+
+def test_the_long_and_short_spellings_of_the_script_flag_agree(
+    tmp_path: Path,
+) -> None:
+    """`-s` allowed and `--script` denied, which are one flag.
+
+    Both name a path, which is what the criterion is about, so the modifier
+    is stepped over and the file behind it is judged — as `-s` and
+    `--gui-script` already were. Running standalone rather than in the
+    project environment is less capability than the plain path form, so
+    nothing is opened here that `uv run <path>` did not already open.
+    """
+    policy = ShellPolicy(
+        SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS, sandbox_active=True
+    )
+    spellings = [
+        "uv run tmp/once.py",
+        "uv run -s tmp/once.py",
+        "uv run --script tmp/once.py",
+        "uv run --gui-script tmp/once.py",
+    ]
+
+    verdicts = {
+        policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+        for command in spellings
+    }
+
+    assert verdicts == {"allow"}
 
 
 def test_moving_a_recoverable_file_costs_what_deleting_it_costs(
@@ -2909,7 +3370,33 @@ def test_a_creation_names_the_suppressions_it_arrives_carrying() -> None:
         "line 3 silences any-type: value: Any = 1  # lup: ignore[any-type]"
         in decision.reason
     )
-    assert policy.decide(plain).reason == "full-file writes require approval"
+    assert policy.decide(plain).reason == (
+        "full-file writes require approval — src/new.py arrives whole, 1 line at once"
+    )
+
+
+def test_a_creation_names_only_the_suppressions_that_silence_something() -> None:
+    """A directive guarding no rule is not part of what is being approved.
+
+    Naming one spends the reader's attention on a line the audit deletes
+    unread, and a listing that mixes a dead directive in with a live one
+    teaches that the listing is noise — which costs the live one its reader.
+    """
+    policy = EditPolicy(protected=[])
+    mixed = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("src/new.py"),
+                after='"""Doc."""\n\n'
+                "value: Any = 1  # lup: ignore[any-type]\n"
+                'other: str = "x"  # lup: ignore\n',
+            )
+        ]
+    )
+    decision = policy.decide(mixed)
+
+    assert "line 3 silences any-type" in decision.reason
+    assert "line 4" not in decision.reason
 
 
 def test_dropping_one_rule_from_a_suppression_needs_no_approval() -> None:
@@ -2963,18 +3450,28 @@ def test_widening_a_suppression_still_asks() -> None:
 
 
 def test_a_named_suppression_going_bare_still_asks() -> None:
-    """Dropping the names widens the directive to every rule."""
+    """Dropping the names widens the directive to every rule.
+
+    Over something, or over nothing. A bare directive standing above a line
+    that trips no rule silences no rule, and the audit reports that one
+    spurious — so the gate leaves it to the sweep that deletes it rather than
+    spending an approval on a directive that is about to go.
+    """
     policy = EditPolicy(protected=[])
-    widened = EditBatch(
-        changes=[
-            EditChange(
-                path=Path("a.py"),
-                before="# lup: ignore[any-type]\nvalue = 1\n",
-                after="# lup: ignore\nvalue = 1\n",
-            )
-        ]
-    )
-    assert policy.decide(widened).effect == "ask"
+
+    def widened(guarded: str) -> EditBatch:
+        return EditBatch(
+            changes=[
+                EditChange(
+                    path=Path("a.py"),
+                    before=f"# lup: ignore[any-type]\n{guarded}\n",
+                    after=f"# lup: ignore\n{guarded}\n",
+                )
+            ]
+        )
+
+    assert policy.decide(widened("value: Any = 1")).effect == "ask"
+    assert policy.decide(widened("value = 1")).effect == "allow"
 
 
 def test_prose_mentioning_a_suppression_is_not_declaring_one() -> None:
@@ -3261,7 +3758,7 @@ def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
         ),
         PathRule(
             kind="subtree",
-            value="downstream.json",
+            value="sync.json.local",
             reason="protected path requires approval",
             allow_autonomous=True,
         ),
@@ -3306,7 +3803,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             ),
             PathRule(
                 kind="subtree",
-                value="downstream.json",
+                value="sync.json.local",
                 reason="protected path requires approval",
                 allow_autonomous=True,
             ),
@@ -3333,7 +3830,7 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
             case.path,
             case.before,
             case.after,
-            [".claude", "pyproject.toml", "sync.json", "downstream.json"],
+            [".claude", "pyproject.toml", "sync.json", "sync.json.local"],
             ["README.md"],
         )
         assert canonical.effect == generated.effect == case.effect
@@ -3403,7 +3900,7 @@ def test_edit_policy_bundle_embeds_canonical_ast_refinement(tmp_path: Path) -> N
 
 
 def test_content_prose_examples_do_not_trip_code_or_marker_gates() -> None:
-    path = Path("packages/lup/src/lup/devtools/harness/content/skills/commit.py")
+    path = Path("packages/lup/src/lup/harness/content/skills/commit.py")
     before = path.read_text(encoding="utf-8")
     after = before + (
         '\nPROSE_GATE_EXAMPLE = """Any and # lup: examples remain prose."""\n'
@@ -3938,12 +4435,12 @@ def test_installing_asks_and_the_verbs_that_fetch_nothing_do_not() -> None:
     """Where the line sits, and that clearing a cache was never on it.
 
     Fetching a package runs its build code, which is the escape a
-    supply-chain compromise arrives through — so both verbs that install ask,
-    and the packages having been declared earlier does not answer it, because
-    what changed is what the index now serves. Writing a lockfile and
-    dropping a dependency fetch nothing to execute, and a cache is rebuilt by
-    the command that reads it. That verb reached no rule at all, which is why
-    a refresh line asked with it among the reasons.
+    supply-chain compromise arrives through — so the verbs that resolve anew
+    ask: an add, and a sync free to rewrite the lockfile. A sync pinned by
+    its lockfile is the other side of the line, allowed with the reason
+    `uv run` earns, since it fetches nothing the lock does not pin by
+    integrity hash. Writing a lockfile and dropping a dependency fetch
+    nothing to execute, and a cache is rebuilt by the command that reads it.
     """
     policy = ShellPolicy(SHELL_RULES)
 
@@ -3952,9 +4449,40 @@ def test_installing_asks_and_the_verbs_that_fetch_nothing_do_not() -> None:
 
     assert effect("uv add httpx") == "ask"
     assert effect("uv sync --all-extras") == "ask"
+    assert effect("uv sync --frozen") == "allow"
+    assert effect("uv sync --locked --all-extras") == "allow"
     assert effect("uv lock --upgrade-package lup") == "allow"
     assert effect("uv cache clean lup") == "allow"
     assert effect("uv remove ruff") == "allow"
+
+
+def test_a_frozen_restore_is_allowed_for_every_package_manager_alike() -> None:
+    """One judgement, stated once, reached from the row walk and the uv parser.
+
+    The bun row reaches it through `frozen_flags`, uv through its own
+    parser, and both say the same sentence: what `uv run` restores before
+    running is what a frozen install restores, so asking about one and not
+    the other was the same act answered two ways. Bare, the install stays a
+    question whose reason names the frozen spelling that is not one.
+    """
+    pinned = (
+        "a frozen lockfile pins every package to what this project already declares"
+    )
+    bun_rows = erase_shell_rules([bun_rule()])
+
+    assert decide_uv(["uv", "sync", "--frozen"], []).reason == pinned
+    assert decide_uv(["uv", "sync", "--locked"], []).reason == pinned
+    assert decide_uv(["uv", "sync"], []).effect == "ask"
+    assert decide_uv(["uv", "sync", "--frozen", "--index-url", "x"], []).effect == "ask"
+
+    bun = decide_command_rows(["bun", "install", "--frozen-lockfile"], bun_rows)
+    assert (bun.effect, bun.reason) == ("allow", pinned)
+    bare = decide_command_rows(["bun", "install"], bun_rows)
+    assert bare.effect == "ask"
+    assert "free to rewrite the lockfile" in bare.reason
+    assert "`--frozen-lockfile`" in bare.reason
+    added = decide_command_rows(["bun", "add", "zod"], bun_rows)
+    assert added.effect == "ask" and "adding a dependency" in added.reason
 
 
 def test_a_verb_pointed_at_another_index_is_not_the_verb_it_rides_on() -> None:
@@ -4004,17 +4532,21 @@ def test_a_type_check_through_a_package_runner_is_the_read_it_is() -> None:
     assert effect("git status --short && cd frontend && npx tsc --noEmit") == "allow"
 
 
-def test_rewriting_a_restorable_file_costs_what_deleting_it_costs(
+def test_an_in_place_rewrite_is_judged_as_the_edit_it_performs(
     tmp_path: Path,
 ) -> None:
-    """An in-place rewrite is judged on its files, the way a delete already is.
+    """A rewrite meets the gates an edit meets, over the file it would produce.
 
-    Two objections wore one refusal here, and only one survives a boundary
-    beneath it. *Being wrong is unrepairable* is answered by the files: a
-    committed file with no uncommitted change costs a checkout and no
-    information, and the whole change stands in the diff. *It walks past the
-    gates an edit is judged by* is not answered by anything, which is why the
-    grant says so and names `dev check`.
+    Recoverability used to answer this, and it answered a different question.
+    *Being wrong is repairable* is true of a clean tracked file and says
+    nothing about whether the content may be written; the anti-pattern table,
+    the review-note gate and the size gate are the rules that do, and a grant
+    given on the undo let a command past every one of them.
+
+    So the host runs the screened script into a copy and the result goes to
+    `decide_edit`. What survives is a rewrite that would have been a
+    permissible edit, refused where it would not have been -- and the file's
+    Git state stops deciding anything, because it never bore on the question.
     """
     committed_tree(tmp_path, "notes.md", "other.md")
     policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
@@ -4026,18 +4558,73 @@ def test_rewriting_a_restorable_file_costs_what_deleting_it_costs(
     assert decided("sed -i.bak 's/body/text/' notes.md other.md") == "allow"
     assert decided("sed -ni 's/body/text/p' notes.md") == "allow"
 
-    # A file the host can vouch for nothing about costs whatever was in it.
+    # Uncommitted no longer decides anything: the question is what the file
+    # would hold, and an untracked markdown file holding a substitution is as
+    # ordinary an edit as a tracked one. Under recoverability this denied.
     (tmp_path / "dirty.md").write_text("uncommitted\n", encoding="utf-8")
-    assert decided("sed -i 's/a/b/' dirty.md") == "deny"
-    assert decided("sed -i 's/a/b/' absent.md") == "deny"
-    # Naming no file at all establishes nothing to be restorable.
+    assert decided("sed -i 's/a/b/' dirty.md") == "allow"
+
+    # What cannot be produced is asked about rather than granted, which is the
+    # whole of the fail-closed rule: an unjudgeable rewrite must not be the
+    # one that goes through.
+    assert decided("sed -i 's/a/b/' absent.md") == "ask"
+    assert decided("sed -i 's/a/b/' $TARGET") == "ask"
+
+    # Naming no file at all reaches no document and no gate, so the standing
+    # refusal is what answers it.
     assert decided("sed -i 's/a/b/'") == "deny"
-    # A word that names a different path at run time is not established either.
-    assert decided("sed -i 's/a/b/' $TARGET") == "deny"
+
+
+def test_an_in_place_rewrite_meets_the_content_gates_an_edit_meets(
+    tmp_path: Path,
+) -> None:
+    """The hole this closes: a substitution nothing read, into tracked source.
+
+    Measured before the change -- `sed -i` over a clean tracked file was
+    allowed outright, with every content gate skipped, so a suppression an
+    `Edit` is refused went in through the verb that overwrites. The two routes
+    now read one table, which is the property the whole policy is built on.
+    """
+    committed_tree(tmp_path, "module.py")
+    (tmp_path / "module.py").write_text("value = compute()\n", encoding="utf-8")
+    git = sh.Command("git").bake(
+        "-C", str(tmp_path), "-c", "user.email=t@e", "-c", "user.name=t"
+    )
+    git("add", "-A")
+    git("commit", "-qm", "source")
+    edits = EditPolicy([], path_roles=[])
+    policy = ShellPolicy(
+        SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS, authored=edits
+    )
+
+    def decided(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    # The same content, by both routes, earns the same verdict.
+    suppressed = "value = compute()  # noqa\n"
+    assert decided("sed -i 's|compute()|compute()  # noqa|' module.py") != "allow"
+    assert (
+        edits.decide(
+            EditBatch(
+                changes=[
+                    EditChange(
+                        path=tmp_path / "module.py",
+                        before="value = compute()\n",
+                        after=suppressed,
+                    )
+                ]
+            )
+        ).effect
+        != "allow"
+    )
+
+    # And a substitution that introduces nothing the gates refuse still goes
+    # through, so the screen is the content rather than the verb.
+    assert decided("sed -i 's/compute/derive/' module.py") == "allow"
 
 
 def test_an_in_place_rewrite_never_covers_a_protected_path(tmp_path: Path) -> None:
-    """Restorability answers what it costs, never who may replace it."""
+    """Who owns a file decides who may replace it, by either route."""
     committed_tree(tmp_path, "README.md", "notes.md")
     policy = ShellPolicy(
         SHELL_RULES,
@@ -4050,16 +4637,20 @@ def test_an_in_place_rewrite_never_covers_a_protected_path(tmp_path: Path) -> No
 
     assert effect("sed -i 's/a/b/' notes.md") == "allow"
     assert effect("sed -i 's/a/b/' README.md") == "ask"
+    # One protected file among several takes the whole command, because the
+    # strongest verdict is the command's.
+    assert effect("sed -i 's/a/b/' notes.md README.md") == "ask"
 
 
 def test_an_in_place_rewrite_is_still_screened_for_what_the_script_does(
     tmp_path: Path,
 ) -> None:
-    """Recoverability says nothing about a script that writes or executes.
+    """A judgement of the output says nothing about what the script reaches.
 
-    The two screens are independent: one asks what the named files cost, the
-    other what the script reaches. A grant on the first never opens the
-    second, which is what keeps `w` and `e` out of an allowed command.
+    The two screens are independent, and the order matters: a script carrying
+    a write or execute primitive is refused before anything runs it, because
+    producing the document it would leave behind means running exactly what
+    the screen exists to keep from running.
     """
     committed_tree(tmp_path, "notes.md")
     policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)

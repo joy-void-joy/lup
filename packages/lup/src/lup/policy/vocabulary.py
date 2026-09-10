@@ -45,6 +45,7 @@ from pydantic import BaseModel
 
 from lup.policy.kernel.decision import CheckpointRequirement, SandboxPlacement
 from lup.policy.kernel.effects import EffectRow, declare
+from lup.policy.kernel.rows import DestinationForm
 from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -71,7 +72,14 @@ class JudgedCommand(BaseModel, frozen=True):
 
     The question this row asks exists because a loss is permanent, so naming
     the capture that makes it impermanent is naming when the question stops
-    being worth a person's attention. Silence keeps the question."""
+    being worth a person's attention. Silence keeps the question.
+
+    Only a loss made of *paths in this checkout* has a capture to name. A
+    process, a package database, a unit's state and a crontab are none of
+    them, so a row claiming one reached an unprompted allow against its own
+    stated reason -- and reached it on every invocation, since the settlement
+    layer is told a capture completed once per session rather than once per
+    command."""
     read_verbs: list[str] = []
     """This command's own spellings of its query action, which de-escalate it.
 
@@ -89,6 +97,13 @@ class JudgedCommand(BaseModel, frozen=True):
     Where `write_markers` still needs a word to find no marker in, this needs
     every word to be absent: `mount` alone prints the mount table, and each
     form that acts names a device or a mountpoint."""
+    write_flags: list[str] = []
+    """Options whose value is the path this command lands on.
+
+    What `write_markers` says about the *form* said in terms of the path, for
+    the same word: `dd of=x` writes `x`, and a row that only knew a marker was
+    present left the scope column claiming a capture covered wherever it
+    pointed. Named here, the path is read like any other destination."""
 
 
 def read_only_rules(
@@ -230,6 +245,7 @@ def judged_ask_rules(
             # in it. No verb list can name that, which is why every
             # `dd if=x` stopped for approval as a write.
             write_markers=["of="],
+            write_flags=["of"],
             reason="raw device or file writes require approval",
             checkpoint="boundary_wide",
         ),
@@ -248,16 +264,8 @@ def judged_ask_rules(
             reason="truncating files requires approval",
             checkpoint="boundary_wide",
         ),
-        JudgedCommand(
-            name="kill",
-            reason="terminating processes requires approval",
-            checkpoint="boundary_wide",
-        ),
-        JudgedCommand(
-            name="pkill",
-            reason="terminating processes requires approval",
-            checkpoint="boundary_wide",
-        ),
+        JudgedCommand(name="kill", reason="terminating processes requires approval"),
+        JudgedCommand(name="pkill", reason="terminating processes requires approval"),
         JudgedCommand(
             name="command",
             # Reached only in the query shape: every other spelling runs the
@@ -324,36 +332,12 @@ def judged_ask_rules(
             name="yarn",
             reason="package tools fetch and execute code — requires approval",
         ),
-        JudgedCommand(
-            name="apt",
-            reason="system package changes require approval",
-            checkpoint="boundary_wide",
-        ),
-        JudgedCommand(
-            name="apt-get",
-            reason="system package changes require approval",
-            checkpoint="boundary_wide",
-        ),
-        JudgedCommand(
-            name="pacman",
-            reason="system package changes require approval",
-            checkpoint="boundary_wide",
-        ),
-        JudgedCommand(
-            name="brew",
-            reason="system package changes require approval",
-            checkpoint="boundary_wide",
-        ),
-        JudgedCommand(
-            name="systemctl",
-            reason="service management requires approval",
-            checkpoint="boundary_wide",
-        ),
-        JudgedCommand(
-            name="crontab",
-            reason="schedule changes require approval",
-            checkpoint="boundary_wide",
-        ),
+        JudgedCommand(name="apt", reason="system package changes require approval"),
+        JudgedCommand(name="apt-get", reason="system package changes require approval"),
+        JudgedCommand(name="pacman", reason="system package changes require approval"),
+        JudgedCommand(name="brew", reason="system package changes require approval"),
+        JudgedCommand(name="systemctl", reason="service management requires approval"),
+        JudgedCommand(name="crontab", reason="schedule changes require approval"),
     ),
 ) -> list[ShellCommandRule]:
     """Commands that ask on every production path, with the reason each carries.
@@ -371,6 +355,7 @@ def judged_ask_rules(
             effects=[declare("destroys_uncaptured", scope=command.checkpoint)],
             read_verbs=command.read_verbs,
             write_markers=command.write_markers,
+            write_flags=command.write_flags,
             bare_reads=command.bare_reads,
             checkpoint=command.checkpoint,
             reason=command.reason,
@@ -677,6 +662,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
 def runner_target_rules(
     ambient: Sequence[str] = ("pyright", "pytest", "ruff"),
     session_opening: Sequence[str] = ("lup-devtools",),
+    also: Sequence[str] = (),
 ) -> list[RunnerTargetRule]:
     """The ``uv run`` targets a project blesses, grouped by what each needs.
 
@@ -718,10 +704,18 @@ def runner_target_rules(
     repository declares as its own. What such a target then goes on to write
     is answered by the rows its own commands match, so nothing is said about
     it twice.
+
+    ``also`` is the direction the three groups cannot reach: a name that is
+    nobody else's. A module root goes there — the table answers
+    ``uv run -m <root>.<module>`` by its root segment, so a project declaring
+    ``examples`` admits every entry point beneath it — and so does a console
+    script no library rule knows. What such a name is worth is the same
+    ``runs_declared_target`` the rest carry, for the same reason: what a
+    project declares as its own is reviewed as source before anything runs it.
     """
     return [
         RunnerTargetRule(name=name, effects=[declare("runs_declared_target")])
-        for name in (*ambient, *session_opening)
+        for name in (*ambient, *session_opening, *also)
     ]
 
 
@@ -839,16 +833,39 @@ name the middle segment. `credential.*.helper` is listed beside
 spelling of the same one, and it runs a program just as readily.
 """
 
+GIT_CONFIG_RETARGETING_KEYS = (
+    "remote.*.url",
+    "remote.*.pushurl",
+)
+"""The git settings that name which repository a later command talks to.
+
+A second class beside the executing keys, guarded by the same absence test
+because it answers the same question about a write: is what this sets read
+back by something that then acts on the caller's behalf. `remote.<name>.url`
+is where a push lands and where a fetch comes from, and it is also how `gh`
+resolves which repository an issue comment, a close, or a pull request is
+about — so a write here moves the whole compensable band of forge operations
+onto a repository nobody approved, without touching one of them.
+
+Only the keys that name a destination outright. `remote.pushdefault` and
+`branch.<name>.pushremote` choose among the remotes the table already holds,
+and every way of putting one there — `git remote add`, `git remote rename`,
+`git remote set-url` and these keys — asks, so choosing between destinations
+somebody approved is not the retarget.
+"""
+
 
 def git_rule(
     guard_force_push: bool = True,
     redirect_checkout: bool = False,
     sandbox: SandboxPlacement = "ambient",
     config_executing_keys: tuple[str, ...] = GIT_CONFIG_EXECUTING_KEYS,
+    config_retargeting_keys: tuple[str, ...] = GIT_CONFIG_RETARGETING_KEYS,
+    push_destinations: tuple[DestinationForm, ...] = ("url", "path"),
 ) -> ShellCommandRule:
     """Compile the git surface: reads and reversible work allow, losses ask.
 
-    Three judgements a project can reasonably differ on are parameters rather
+    The judgements a project can reasonably differ on are parameters rather
     than a reason to fork the table.
 
     ``guard_force_push`` decides whether replacing what a remote ref points
@@ -892,7 +909,33 @@ def git_rule(
     other means can pass fewer. Passing none makes every config write allow,
     which is a coherent answer for a project whose config is not writable
     from where the agent runs; it is not the default, because it usually is.
+
+    ``config_retargeting_keys`` are the settings that decide which repository
+    a later command talks to, guarded through the same absence test and kept
+    separate because the two classes are separate claims: one is about what
+    runs, the other about where the work goes. A project whose forge access
+    is scoped elsewhere -- a token that reaches one repository and no other --
+    can pass none of them and lose nothing.
+
+    ``push_destinations`` are the ways of naming a repository inline that a
+    push has to ask about. `git push <url> main` needs no remote and writes
+    no configuration, so every guard over the remote table looks straight
+    past it -- and the table is worth trusting precisely because putting a
+    destination in it asks. Both forms are guarded by default. A project that
+    mirrors into a bare repository beside its checkout drops ``path`` and
+    keeps the one that leaves the machine; a project whose network is closed
+    to everything but its forge can drop ``url`` on the same reasoning, and
+    one that passes neither is saying its push has nowhere unapproved to go.
+
+    Structural, and only structural: whether a bare word is a remote this
+    repository holds is a question for `git remote`, which the kernel reading
+    this is hermetic in order not to run. A bare name that is not configured
+    reaches nothing -- git fails before any object moves -- so the forms that
+    do reach somewhere are the whole of what is left to guard.
     """
+    # One statement of which settings are worth a question, read by both
+    # spellings that reach them: the `config` verb and the `-c` global.
+    guarded_config = [*config_executing_keys, *config_retargeting_keys]
     leaf = [
         *[
             ShellSubcommandRule(
@@ -914,7 +957,13 @@ def git_rule(
             reason="merging puts work on a branch other people build on",
         ),
     ]
-    push_flags = ["--delete", "--mirror", "--prune"]
+    # `--repo` is the one spelling of a destination the operand reading below
+    # cannot reach: it carries the repository as a flag value, and a flag is
+    # exactly what that reading skips. It asks whatever it names, because the
+    # flag is legacy — git documents it as relevant only when no repository
+    # operand is passed — and a question on an invocation nobody writes costs
+    # less than a second reader for one word.
+    push_flags = ["--delete", "--mirror", "--prune", "--repo"]
     guarded = [
         *[
             ShellSubcommandRule(
@@ -1001,16 +1050,20 @@ def git_rule(
         ShellSubcommandRule(
             name="push",
             effects=[declare("publishes", scope="branch")],
+            ask_destinations=list(push_destinations),
             ask_refspecs=(["delete", "force"] if guard_force_push else ["delete"]),
             ask_flags=(
                 [*push_flags, "-f", "--force", "--force-with-lease"]
                 if guard_force_push
                 else push_flags
             ),
+            probe_flags=["-n", "--dry-run"],
             reason=(
-                "rewriting or removing a remote ref requires approval"
+                "rewriting or removing a remote ref, or aiming the push"
+                " elsewhere, requires approval"
                 if guard_force_push
-                else "removing a remote ref requires approval"
+                else "removing a remote ref, or aiming the push elsewhere,"
+                " requires approval"
             ),
         ),
         # The same arrival `gh repo clone` is, reached by the other spelling:
@@ -1060,6 +1113,7 @@ def git_rule(
         ShellSubcommandRule(
             name="rm",
             effects=[declare("destroys_uncaptured", scope="targeted")],
+            probe_flags=["-n", "--dry-run"],
             checkpoint="targeted",
             reason="removing tracked files requires approval",
         ),
@@ -1072,6 +1126,9 @@ def git_rule(
             # command whose whole purpose is destroying what nothing holds.
             name="clean",
             effects=[declare("destroys_uncaptured", scope="unrecoverable")],
+            # Only the literal spellings: `-fdxn` is a cluster this cannot
+            # read, and it keeps asking rather than trusting the `n`.
+            probe_flags=["-n", "--dry-run"],
             reason="deleting untracked files is destructive — requires approval",
         ),
         ShellSubcommandRule(
@@ -1083,8 +1140,11 @@ def git_rule(
             # Where the write lands, when the key says nothing about it. The
             # guarded keys below judge a write to this repository's own
             # configuration; these flags aim the same write at a file the
-            # caller names, so a key that reads as ordinary is not.
-            ask_flags=["--file", "-f", "--blob"],
+            # caller names, so a key that reads as ordinary is not. `--edit`
+            # defeats the same test from the other side: it opens every key
+            # in the file while naming none, so absence of a guarded word is
+            # not absence of a guarded write.
+            ask_flags=["--file", "-f", "--blob", "--edit", "-e"],
             read_verbs=[
                 "--get",
                 "--get-all",
@@ -1095,10 +1155,11 @@ def git_rule(
                 "--list",
                 "-l",
             ],
-            guarded_keys=list(config_executing_keys),
+            guarded_keys=guarded_config,
             reason=(
-                "git config can set what program git runs — this names such a"
-                " key, redirects the write to a named file, or cannot be read"
+                "git config can set what program git runs or which repository"
+                " it talks to — this names such a key, redirects the write to"
+                " a named file, or cannot be read"
             ),
         ),
         ShellSubcommandRule(
@@ -1350,8 +1411,27 @@ def git_rule(
                     effects=[declare("destroys_uncaptured", scope="targeted")],
                     reason="removing a remote requires approval",
                 ),
-                # Destroys nothing and changes where every later push lands,
-                # which is the configured-path question rather than the loss.
+                # Destroys nothing and decides where a later command sends
+                # this repository, which is the configured-path question
+                # rather than the loss. `add` puts a destination in the table
+                # that was not there — `git push <name>` at a named remote
+                # allows, so the approval a repository-wide copy needs is
+                # this one — and `rename` moves which destination answers to
+                # `origin`, which is the name `gh` follows.
+                ShellOperationRule(
+                    name="add",
+                    effects=[
+                        declare("writes_path", scope="protected", write="overwrite")
+                    ],
+                    reason="adding a remote requires approval",
+                ),
+                ShellOperationRule(
+                    name="rename",
+                    effects=[
+                        declare("writes_path", scope="protected", write="overwrite")
+                    ],
+                    reason="renaming a remote requires approval",
+                ),
                 ShellOperationRule(
                     name="set-url",
                     effects=[
@@ -1410,11 +1490,11 @@ def git_rule(
         value_flags=directory_flags,
         # The two globals that set a setting, judged by the same keys the
         # `config` verb is judged by — one statement about which settings hand
-        # over execution, answering for both spellings that reach them. Only
+        # over execution or a destination, answering both spellings. Only
         # `-c` and `--config-env` are here: the directory flags carry a path,
         # and `--exec-path` and `--super-prefix` carry one too.
         setting_flags=["-c", "--config-env"],
-        guarded_settings=list(config_executing_keys),
+        guarded_settings=guarded_config,
         sandbox=sandbox,
         subcommands=[*leaf, *guarded],
         reason="this git subcommand is not classified as read-only or reversible",
@@ -1936,11 +2016,13 @@ def bun_rule() -> ShellCommandRule:
     `--eval`, `-p`, a bare `-` reading stdin, and on a sibling runtime an
     `eval` *subcommand* that no flag list could have caught.
 
-    The split between allow and ask is what a verb does to the manifest
-    rather than to the filesystem: restoring dependencies somebody already
-    declared is the ordinary case, while adding one, removing one, or
-    fetching a package that is not declared at all changes what this project
-    depends on and is worth a question.
+    The split between allow and ask is what a verb does to the lockfile
+    rather than to the filesystem: restoring what it already pins, as
+    `install --frozen-lockfile` does, is the ordinary case and the act
+    `uv run` performs unasked, while an install free to rewrite the lock,
+    adding a dependency, removing one, or fetching a package that is not
+    declared at all changes what this project depends on and is worth a
+    question.
     """
     return ShellCommandRule(
         name="bun",
@@ -1953,18 +2035,21 @@ def bun_rule() -> ShellCommandRule:
         # the default deny, which is the wrong answer for a pure read.
         allow_flags=["--version", "--revision"],
         subcommands=[
-            # Turns a lockfile into code on disk, which is what `uv sync` and
-            # `npm ci` do -- and both of those already ask. Allowing here was
-            # the same act answered two ways, and a lock pins a version rather
-            # than vouching for it: what a sync fetches is as unreviewed as
-            # what an add fetches, and a pin written before a release was
-            # compromised resolves to the compromised artefact unchanged.
+            # Turns a lockfile into code on disk. Bare, it is free to rewrite
+            # the lockfile first wherever the manifest moved, which resolves
+            # what this project depends on anew and asks the way `uv sync`
+            # does. Frozen, it fetches nothing the lock does not pin by
+            # integrity hash — the restore `uv run` performs before running,
+            # and the one the gate performs before `bun test` — so the flag
+            # answers it, on the terms `uv sync --frozen` is answered.
             ShellSubcommandRule(
                 name="install",
                 effects=[declare("materializes_lockfile", scope="bun lockfile")],
                 refuses="",
-                reason="restoring declared dependencies fetches code this"
-                " project has not reviewed — requires approval",
+                frozen_flags=["--frozen-lockfile"],
+                reason="an install free to rewrite the lockfile resolves what"
+                " this project depends on anew — requires approval; a frozen"
+                " one (`--frozen-lockfile`) restores what it already pins",
             ),
             *[
                 ShellSubcommandRule(

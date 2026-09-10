@@ -14,6 +14,7 @@ from functools import cache
 from typing import NotRequired, TypedDict
 
 from .decision import KernelDecision, handed_over
+from .imports import ResolvedImportRule, resolved_import_rules
 from .roles import (
     FOREIGN_REPOSITORY_REFERRAL,
     GENERATED_PLUGIN_REFUSAL,
@@ -25,9 +26,12 @@ from .roles import (
 from .rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
+    DisplacedTargetRow,
     EditRuleRow,
+    ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
+    ResolutionRow,
 )
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
@@ -633,6 +637,294 @@ def python_code_lines(source: str) -> list[str]:
     return ["".join(line) for line in lines]
 
 
+# lup: ignore[library-default] — the suffixes the TypeScript-family rule table reads; the kernel carries no config
+TYPESCRIPT_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
+"""The files whose text the TypeScript-family maskers below read.
+
+The one family `lup.harness.codescan.antipatterns` checks against its
+TypeScript table: the hook deriving the language from this tuple and the
+audit from another would mask the same file two ways and judge it twice.
+"""
+
+
+class ScriptSpan(TypedDict):
+    """One run of TypeScript-family text that is not code.
+
+    ``start`` and ``end`` are character offsets into the source, half-open.
+    ``kind`` is "string" for a string, template or regex literal and
+    "comment" for a `//` or `/* */` comment.
+    """
+
+    start: int
+    end: int
+    kind: str
+
+
+def typescript_spans(
+    source: str,
+    expression_openers: str = "(,=:[!&|?{};+-*%<>~^",
+    expression_words: tuple[str, ...] = (
+        "return",
+        "typeof",
+        "case",
+        "do",
+        "else",
+        "in",
+        "of",
+        "instanceof",
+        "new",
+        "delete",
+        "void",
+        "throw",
+        "yield",
+        "await",
+    ),
+) -> list[ScriptSpan]:
+    """Every string, template, regex and comment run of TypeScript-family text.
+
+    A scan rule reads code, and in this family the prose sits where the
+    Python tokenizer cannot see it: `//` and `/* */` comments, `'`, `"` and
+    backtick literals, and the body of a regex literal. Each is returned as
+    an offset span so a masker can blank it while every line and column
+    stays where it was.
+
+    One pass, character by character. A template literal's `${ }` holes are
+    code, so the literal is cut around them, and the braces inside a hole
+    are counted so its closing brace is told from one of its own. A `/` is a
+    regex literal where an expression can start — after an operator, an
+    opening bracket, a separator, or one of the words the grammar puts before
+    an expression — and a division everywhere else, the reading every lexer
+    without a parser settles for; a `/` misread as a regex blanks the rest of
+    its line and never more. A `'` or `"` literal ends at its line, as the
+    grammar has it, so an unbalanced quote in a `.vue` template costs one
+    line rather than the file.
+    """
+    spans: list[ScriptSpan] = []
+    holes: list[int] = []
+    length = len(source)
+    # The last code character and the word it ends, which is all a `/` needs
+    # to know whether an expression can start where it stands.
+    last_code = ""
+    word = ""
+
+    def literal_end(quote: str, start: int) -> int:
+        """One past the quote closing a literal opened at `start`, or its line's end."""
+        index = start + 1
+        while index < length:
+            match source[index]:
+                case "\\":
+                    index += 2
+                case "\n":
+                    return index
+                case character if character == quote:
+                    return index + 1
+                case _:
+                    index += 1
+        return length
+
+    def regex_end(start: int) -> int:
+        """One past the flags of a regex literal opened at `start`, or its line's end."""
+        index = start + 1
+        in_class = False
+        while index < length:
+            match source[index]:
+                case "\\":
+                    index += 2
+                case "\n":
+                    return index
+                case "[":
+                    in_class = True
+                    index += 1
+                case "]":
+                    in_class = False
+                    index += 1
+                case "/" if not in_class:
+                    index += 1
+                    while index < length and source[index].isalpha():
+                        index += 1
+                    return index
+                case _:
+                    index += 1
+        return length
+
+    def template_piece(start: int) -> int:
+        """Record the template text from `start` and return where code resumes.
+
+        `start` is the opening backtick or the `}` closing a hole; the piece
+        runs to the closing backtick, taken with it, or to the `${` opening
+        the next hole, which is left to the code scan.
+        """
+        index = start + 1
+        while index < length:
+            match source[index]:
+                case "\\":
+                    index += 2
+                case "`":
+                    spans.append(ScriptSpan(start=start, end=index + 1, kind="string"))
+                    return index + 1
+                case "$" if source.startswith("${", index):
+                    spans.append(ScriptSpan(start=start, end=index, kind="string"))
+                    holes.append(0)
+                    return index + 2
+                case _:
+                    index += 1
+        spans.append(ScriptSpan(start=start, end=length, kind="string"))
+        return length
+
+    position = 0
+    while position < length:
+        character = source[position]
+        match character:
+            case "/" if source.startswith("//", position):
+                newline = source.find("\n", position)
+                end = length if newline < 0 else newline
+                spans.append(ScriptSpan(start=position, end=end, kind="comment"))
+                position = end
+            case "/" if source.startswith("/*", position):
+                close = source.find("*/", position + 2)
+                end = length if close < 0 else close + 2
+                spans.append(ScriptSpan(start=position, end=end, kind="comment"))
+                position = end
+            case "'" | '"':
+                end = literal_end(character, position)
+                spans.append(ScriptSpan(start=position, end=end, kind="string"))
+                position = end
+                last_code, word = character, ""
+            case "`":
+                position = template_piece(position)
+                last_code, word = character, ""
+            case "/" if (
+                not last_code
+                or last_code in expression_openers
+                or word in expression_words
+            ):
+                end = regex_end(position)
+                spans.append(ScriptSpan(start=position, end=end, kind="string"))
+                position = end
+                last_code, word = "/", ""
+            case "{" if holes:
+                holes[-1] += 1
+                position += 1
+                last_code, word = character, ""
+            case "}" if holes and not holes[-1]:
+                holes.pop()
+                position = template_piece(position)
+                last_code, word = "`", ""
+            case "}" if holes:
+                holes[-1] -= 1
+                position += 1
+                last_code, word = character, ""
+            case _ if character.isspace():
+                position += 1
+            case _ if character.isalnum() or character in "_$":
+                position += 1
+                last_code, word = character, word + character
+            case _:
+                position += 1
+                last_code, word = character, ""
+    return spans
+
+
+def masked_typescript_lines(source: str, comments: bool) -> list[str]:
+    """The lines of TypeScript-family text with its prose blanked, columns kept.
+
+    String, template and regex text always goes, leaving the character that
+    opened it so a rule can still see that a literal stood there; ``comments``
+    says whether `//` and `/* */` runs go too, which is the difference
+    between what a "code" rule and a "comment" rule read.
+    """
+    spans = [
+        span
+        for span in typescript_spans(source)
+        if comments or span["kind"] == "string"
+    ]
+    lines: list[str] = []
+    offset = 0
+    index = 0
+    for line in source.splitlines(keepends=True):
+        content = line.splitlines()[0]
+        chars = list(content)
+        stop = offset + len(content)
+        while index < len(spans) and spans[index]["end"] <= offset:
+            index += 1
+        cursor = index
+        while cursor < len(spans) and spans[cursor]["start"] < stop:
+            span = spans[cursor]
+            kept = 1 if span["kind"] == "string" else 0
+            first = max(span["start"] + kept, offset)
+            last = min(span["end"], stop)
+            if first < last:
+                chars[first - offset : last - offset] = [" "] * (last - first)
+            cursor += 1
+        lines.append("".join(chars))
+        offset += len(line)
+    return lines
+
+
+def typescript_comment_columns(source: str) -> dict[int, int]:
+    """Map TypeScript-family line numbers to the column a comment opens at.
+
+    The last opening on each line, because a `//` runs to the end of its
+    line and nothing opens after it: a directive is written with `//`, so
+    the column that can hold one is the last. A block comment is recorded
+    where it opens and on no later line, so a `//` written inside one is
+    comment text rather than a comment.
+    """
+    columns: dict[int, int] = {}
+    openers = [span for span in typescript_spans(source) if span["kind"] == "comment"]
+    offset = 0
+    cursor = 0
+    for number, line in enumerate(source.splitlines(keepends=True), start=1):
+        stop = offset + len(line)
+        while cursor < len(openers) and openers[cursor]["start"] < stop:
+            columns[number] = openers[cursor]["start"] - offset
+            cursor += 1
+        offset = stop
+    return columns
+
+
+class MaskedSource(TypedDict):
+    """One document's lines as each rule context reads them, and where comments open.
+
+    ``commented`` blanks string text and keeps comments — the surface a
+    "comment" rule scans; ``code`` blanks both — the surface a "code" rule
+    scans. ``comment_columns`` is where a real comment opens on each line,
+    and ``None`` where no grammar mapped the text, which is what puts every
+    rule back on the raw line.
+    """
+
+    commented: list[str]
+    code: list[str]
+    comment_columns: dict[int, int] | None
+
+
+def masked_source(
+    source: str, python_source: bool, typescript_source: bool
+) -> MaskedSource:
+    """Project a document into the surfaces its rules read, by its grammar.
+
+    Python is read through its tokenizer, and where a fragment will not
+    tokenize the raw lines stand in with no comment map. The TypeScript
+    family is read through :func:`typescript_spans`, which has no failure
+    case: what it cannot classify it leaves as code. Text of neither family
+    is its own projection, every rule reading the whole line.
+    """
+    if python_source:
+        return MaskedSource(
+            commented=mask_python_string_literals(source),
+            code=python_code_lines(source),
+            comment_columns=python_comment_columns(source),
+        )
+    if typescript_source:
+        return MaskedSource(
+            commented=masked_typescript_lines(source, comments=False),
+            code=masked_typescript_lines(source, comments=True),
+            comment_columns=typescript_comment_columns(source),
+        )
+    lines = source.splitlines()
+    return MaskedSource(commented=lines, code=lines, comment_columns=None)
+
+
 def quoted_example(line: str, position: int) -> bool:
     """Whether a match at ``position`` sits inside a backtick code span.
 
@@ -816,25 +1108,32 @@ def spent_notes(
     was_open: list[LocatedNote],
     is_open: list[LocatedNote],
     python_source: bool,
-) -> str | None:
-    """The first note this edit dropped while its subject stands, or `None`.
+) -> list[str]:
+    """Every note this edit dropped while its subject stands.
 
     A note leaves a file honestly three ways: it is still open under the same
-    words, it was converted into a claim this edit added, or the code it
-    annotated went with it. Anything else is feedback stripped off code that
-    is still there, which is the one act the gate exists to refuse.
+    words, its words stand as a `solved:` claim in the revision, or the code
+    it annotated went with it. Anything else is feedback stripped off code
+    that is still there, which is the one act the gate exists to refuse. All
+    of them are returned rather than the first, because the denial quotes
+    what was lost and a reader repairing the edit repairs it once.
 
     Survival is asked of the words, not of each copy of them. A file holding
     the same note twice holds one piece of feedback written in two places, so
     a reader who finds either has it — and counting copies would make tidying
-    a duplicate read as a deletion, freezing the code that carried it.
+    a duplicate read as a deletion, freezing the code that carried it. The
+    same reading spans the lifecycle: a merge conflict can hold one note as
+    `defer:` on one side and `solved:` on the other, and resolving it keeps
+    one spelling of the same words — the verify pass still finds the claim
+    to check, so nothing a reader needs has left the file.
     """
-    added_claims = note_bodies(
+    standing_claims = note_bodies(
         notes_in_prose(updated, SOLVED_NOTE_RE, python_source) or []
-    ) - note_bodies(notes_in_prose(previous, SOLVED_NOTE_RE, python_source) or [])
-    survived = note_bodies(is_open) + added_claims
+    )
+    survived = note_bodies(is_open) + standing_claims
     lines = previous.splitlines()
     removed = deleted_lines(previous, updated)
+    lost: list[str] = []
     for note in was_open:
         body = note_body(note["text"])
         if survived[body] > 0:
@@ -848,8 +1147,8 @@ def spent_notes(
             else note["line"] in removed and subject in removed
         )
         if not spent:
-            return note["text"]
-    return None
+            lost.append(note["text"])
+    return lost
 
 
 class MarkerVerdict(TypedDict):
@@ -916,13 +1215,20 @@ def marker_decision(
     ):
         return None
     lost = spent_notes(previous, updated, was_open, is_open, python_source)
-    if lost is not None:
+    if lost:
+        spelled = "\n".join(lost)
+        removes = (
+            "this edit removes inline review feedback that still has a subject"
+            if len(lost) == 1
+            else f"this edit removes {len(lost)} pieces of inline review"
+            " feedback that still have a subject"
+        )
         return MarkerVerdict(
             gate="feedback-removed",
             decision=KernelDecision(
                 "deny",
-                "this edit removes inline review feedback that still has a "
-                f"subject — {lost}. Resolving a note means replacing `# lup:` "
+                f"{removes} — {spelled}\n"
+                "Resolving a note means replacing `# lup:` "
                 "with `# lup: solved:` and keeping its text, so the claim can be "
                 "checked against what was asked; deleting it leaves nothing to "
                 "check. Where the note was mistaken rather than answered, "
@@ -932,23 +1238,47 @@ def marker_decision(
     # Asked of the words, as survival is for open notes: a claim is lost when
     # nothing in the revision still carries it. A second copy tidied away
     # retires nothing, because the review pass still finds the claim standing
-    # and can still check it against what was asked.
-    surviving_claims = note_bodies(claimed_now)
-    if any(surviving_claims[note_body(note["text"])] == 0 for note in claimed_before):
+    # and can still check it against what was asked. An open note with the
+    # same words counts too — dropping the claim then is not retiring the
+    # ask but re-opening it, which is the stronger obligation and the other
+    # honest way out of a conflict holding one note in two lifecycle states.
+    surviving_claims = note_bodies(claimed_now) + note_bodies(is_open)
+    dropped_claims = [
+        note["text"]
+        for note in claimed_before
+        if surviving_claims[note_body(note["text"])] == 0
+    ]
+    if dropped_claims:
+        spelled = "\n".join(dict.fromkeys(dropped_claims))
+        claims = (
+            "a `# lup: solved:` claim"
+            if len(dropped_claims) == 1
+            else (f"{len(dropped_claims)} `# lup: solved:` claims")
+        )
         return MarkerVerdict(
             gate="claim-removed",
             decision=KernelDecision(
                 "deny",
-                "this edit removes a `# lup: solved:` claim. Only the review pass "
+                f"this edit removes {claims} — {spelled}\n"
+                "Only the review pass "
                 "retires one — it either confirms the claim and removes the note "
                 "(`dev comments --retire file:line`), or restores it to open "
                 "feedback (`dev comments --restore file:line`)",
             ),
         )
-    if note_bodies(is_open) - note_bodies(was_open):
+    added_bodies = note_bodies(is_open) - note_bodies(was_open)
+    if added_bodies:
+        added = [
+            f"line {note['line']}: {note['text']}"
+            for note in is_open
+            if added_bodies[note_body(note["text"])] > 0
+        ]
         return MarkerVerdict(
             gate="feedback-added",
-            decision=KernelDecision("ask", "edit adds inline review feedback"),
+            decision=KernelDecision(
+                "ask",
+                "edit adds inline review feedback — " + "; ".join(added),
+            ),
         )
     return None
 
@@ -2594,11 +2924,17 @@ def suppression_site(number: int, line: str) -> str:
 def suppression_reason(sites: list[str], creation: bool = False) -> str:
     """Name every suppression this edit declares, not merely that it declares one.
 
-    A permission prompt carries the reason and nothing else, so a verdict
-    that said only what kind of thing happened left the reviewer to find the
-    line themselves — in a diff they were being asked to approve precisely
-    because it needed reading. Every site is listed rather than the first,
-    since approving is one decision over the whole batch.
+    A verdict that said only what kind of thing happened left the reviewer to
+    find the line themselves — in a diff they were being asked to approve
+    precisely because it needed reading. Every site is listed rather than the
+    first, since approving is one decision over the whole batch.
+
+    Where the sites are read is the runtime's to answer and not this
+    function's. One of them puts the reason in the prompt for a command and
+    drops it in the dialog for a write, so the adapter repeats what its own
+    prompt will not carry; another writes the reason out whole and needs
+    nothing. What is owed here is that the words name the sites, in terms any
+    of them can render.
 
     A creation is the case where that matters most and reads least. The whole
     file arrives at once, so its directives are approved along with everything
@@ -2620,6 +2956,53 @@ class AntiPatternHit(TypedDict):
 
     line: int
     row: AntiPatternRow
+
+
+class WithdrawnGuard(TypedDict):
+    """One line this edit stopped suppressing, and the rule it stopped for."""
+
+    rule: str
+    text: str
+
+
+def withdrawn_guards(
+    before: str | None, after: str, known_ids: list[str]
+) -> Iterator[WithdrawnGuard]:
+    """Every line whose suppression this edit took away, once per rule.
+
+    Deleting a directive adds no line, so the violation it was covering is
+    byte-identical across the edit and the added-line scan never reaches it —
+    the one way past this gate that costs nothing to write, since the guard
+    and the guarded thing are separate lines and only one of them has to move.
+    What the directive reached is read from *before*, where it still stands,
+    through `suppression_reaches` — the same placement policy every other
+    reader here consults, so the marker shape valid on the way in is the shape
+    whose removal is noticed on the way out.
+
+    Lines are carried as text rather than as numbers because an edit moves
+    them: an insertion above renumbers everything below it, and matching what
+    a violation says survives that where matching where it sat does not.
+
+    A bare directive named no rule and silenced all of them, so it comes back
+    once per rule these rows carry. A directive whose text still stands in
+    *after* was re-sited rather than withdrawn, which `resites_a_suppression`
+    already governs and this leaves to it.
+    """
+    previous = (before or "").splitlines()
+    remaining = after.splitlines()
+    for number, line in enumerate(previous, start=1):
+        if line in remaining:
+            remaining.remove(line)
+            continue
+        directive = IGNORE_RE.search(line)
+        if directive is None:
+            continue
+        named = ignore_rule_ids(directive)
+        for candidate in range(number, len(previous) + 1):
+            if not suppression_reaches(previous, number, candidate):
+                continue
+            for rule in named if named is not None else known_ids:
+                yield WithdrawnGuard(rule=rule, text=previous[candidate - 1])
 
 
 def anti_pattern_hits(
@@ -2674,6 +3057,24 @@ def anti_pattern_denial(number: int, row: AntiPatternRow) -> KernelDecision:
     return KernelDecision(
         "deny",
         f"line {number}: {row['message']}{placement} "
+        f"(rule {row['id']} — see docs/rules.md)",
+    )
+
+
+def withdrawn_suppression_denial(number: int, row: AntiPatternRow) -> KernelDecision:
+    """Deny a line the edit stopped covering rather than one it wrote.
+
+    Said differently from the ordinary denial because the remedy is: the line
+    is not new, so reading it as one sends whoever gets this looking at code
+    they did not touch. What they did touch is the directive, and either half
+    of the pair they broke is a fix — put the marker back, or make the line it
+    was covering stop tripping the rule.
+    """
+    return KernelDecision(
+        "deny",
+        f"line {number}: this edit removes the `# lup: ignore[{row['id']}]` "
+        f"covering it, and the line still trips the rule: {row['message']} "
+        f"— restore the directive or clear what it was silencing "
         f"(rule {row['id']} — see docs/rules.md)",
     )
 
@@ -2767,15 +3168,19 @@ def antipattern_decision(
     rows: list[AntiPatternRow],
     python_source: bool,
     allowances: list[str] | None = None,
-    refuted: dict[str, list[int]] | None = None,
+    resolution: ResolutionRow | None = None,
+    resolved: list[ResolvedImportRule] | None = None,
+    typescript_source: bool = False,
 ) -> KernelDecision | None:
     """Reject newly added unsuppressed anti-patterns and ask on suppressions.
 
     Each row carries the syntactic context it inspects: a "code" rule is
-    matched against token-masked Python (string literals and comments both
+    matched against masked source (string literals and comments both
     blanked) so prose never trips it, while a "comment" rule targets comment
-    directives and sees comments intact. Without a tokenizer (non-Python
-    files, fragments that fail to tokenize) every rule scans the raw line.
+    directives and sees comments intact. Python is masked through its
+    tokenizer and the TypeScript family through :func:`typescript_spans`;
+    without either (a file of neither family, a Python fragment that fails
+    to tokenize) every rule scans the raw line.
 
     A declared suppression is judged before it is asked about. One naming a
     rule that nothing it guards trips is refused outright: it silences
@@ -2797,24 +3202,65 @@ def antipattern_decision(
     asks into allows, because a human already approved the plan that needs
     them. It reaches neither denial: an allowance justifies a typed, argued
     suppression, never a bare anti-pattern and never a dead directive.
+
+    ``resolution`` is what a checker settled about the receivers this text
+    names, where one ran. A line it refuted resolved outside its rule's
+    family: it trips nothing, and a directive naming the rule there is
+    refused as dead. A line it left unresolved is one nothing could be shown
+    about: the rule demands no directive there and this gate denies none,
+    and a directive written there stands, because a verdict nobody can
+    substantiate is no verdict against the marker either. The audit reads
+    the same two answers off the same resolution, so neither gate can call
+    dead what the other demands. None means no checker answered, and a
+    resolution-required rule is then asked about rather than decided.
     """
     suppression = "allow" if "antipattern-suppression" in (allowances or []) else "ask"
     added = added_line_numbers(before, after)
     original_lines = after.splitlines()
-    scanned_lines = (
-        mask_python_string_literals(after) if python_source else original_lines
-    )
-    code_lines = python_code_lines(after) if python_source else original_lines
+    masked = masked_source(after, python_source, typescript_source)
+    scanned_lines = masked["commented"]
+    code_lines = masked["code"]
     exempt: dict[str, set[int]] = {}
     matched = matched_lines(after, rows) if python_source else {}
-    for rule_id, lines in (refuted or {}).items():
+    rows = [*rows, *(selection["row"] for selection in resolved or [])]
+    matched.update(
+        {
+            selection["row"]["id"]: set(selection["spans"])
+            for selection in resolved or []
+        }
+    )
+    refuted = resolution["refuted"] if resolution is not None else {}
+    for rule_id, lines in refuted.items():
         exempt[rule_id] = (
             exempt[rule_id] | set(lines) if rule_id in exempt else set(lines)
         )
-    comment_columns = python_comment_columns(after) if python_source else None
+    # Hits nothing could be shown about. They stay hits, so a directive over
+    # one is read as guarding something, and they are neither denied nor asked.
+    unresolved = resolution["unresolved"] if resolution is not None else {}
+    open_lines = {
+        (rule_id, line) for rule_id, lines in unresolved.items() for line in lines
+    }
+    comment_columns = masked["comment_columns"]
     file_level = file_ignore(after)
     has_file_ignore = file_level["present"]
     disabled_ids = file_level["ids"]
+    changed = set(added)
+    for selection in resolved or []:
+        rule_id = selection["row"]["id"]
+        for line, end_line in selection["spans"].items():
+            holder = covering_suppression_line(original_lines, line)
+            directive = IGNORE_RE.search(original_lines[holder - 1]) if holder else None
+            covered_ids = ignore_rule_ids(directive) if directive is not None else []
+            covered = (
+                has_file_ignore and (disabled_ids is None or rule_id in disabled_ids)
+            ) or (
+                directive is not None
+                and (covered_ids is None or rule_id in covered_ids)
+            )
+            if not covered or any(
+                number in changed for number in range(line, end_line + 1)
+            ):
+                added[line] = True
     gone = removed_lines(before, after)
     declared: list[int] = []
     for number in added:
@@ -2824,8 +3270,7 @@ def antipattern_decision(
             directive is not None
             and not resites_a_suppression(original, gone)
             and (
-                not python_source
-                or comment_columns is None
+                comment_columns is None
                 or (
                     number in comment_columns
                     and comment_columns[number] == directive.start()
@@ -2931,14 +3376,58 @@ def antipattern_decision(
                     continue
                 covering[holder] = True
                 continue
+        # A receiver the checker looked at and could not type is not a
+        # violation this gate can state: the audit demands no directive there,
+        # so denying one here would be the split this gate exists to prevent.
+        if (rule_id, number) in open_lines:
+            continue
         # A verdict this gate cannot support is asked about rather than
         # stated. The regex is wider than the defect for a resolution-required
         # rule, and what settles the difference is a declaration nothing here
         # resolved — so a denial would be the audit's opposite, and the two
         # would block on states no version of the file satisfies at once.
-        if refuted is None and hit["row"]["resolution"] == "required":
+        if resolution is None and hit["row"]["resolution"] == "required":
             return unresolved_anti_pattern_ask(number, hit["row"])
         return anti_pattern_denial(number, hit["row"])
+
+    # The mirror of the loop above, for the violation an edit exposes without
+    # touching it. Withdrawing a directive leaves the line it covered exactly
+    # as it was, so `added` is empty of it and every scan keyed on added lines
+    # is blind to it by construction — the file goes out tripping a rule that
+    # `dev check` then reports missing, which is the split this gate exists to
+    # prevent.
+    #
+    # Scoped twice over, because a rescan is the one reader here that can see
+    # lines the edit never proposed. Only the rules some withdrawn directive
+    # named are consulted, and within those only the lines that directive was
+    # actually covering — so debt the file was already carrying, uncovered
+    # before this edit and uncovered after it, is left to the audit that owns
+    # it rather than charged to whoever happened to edit the file next.
+    withdrawn = list(withdrawn_guards(before, after, [row["id"] for row in rows]))
+    if withdrawn:
+        everywhere = {number: True for number in range(1, len(original_lines) + 1)}
+        for hit in anti_pattern_hits(
+            everywhere, rows, code_lines, scanned_lines, exempt, tokenized, matched
+        ):
+            number = hit["line"]
+            rule_id = hit["row"]["id"]
+            text = original_lines[number - 1]
+            if not any(
+                guard["rule"] == rule_id and guard["text"] == text
+                for guard in withdrawn
+            ):
+                continue
+            if has_file_ignore and (disabled_ids is None or rule_id in disabled_ids):
+                continue
+            holder = covering_suppression_line(original_lines, number)
+            directive = IGNORE_RE.search(original_lines[holder - 1]) if holder else None
+            if directive is not None:
+                covered = ignore_rule_ids(directive)
+                if covered is None or rule_id in covered:
+                    continue
+            if (rule_id, number) in open_lines:
+                continue
+            return withdrawn_suppression_denial(number, hit["row"])
 
     def sites_at(numbers: list[int]) -> list[str]:
         """The directives written on these lines, rendered for the prompt."""
@@ -2946,12 +3435,37 @@ def antipattern_decision(
             suppression_site(number, original_lines[number - 1]) for number in numbers
         ]
 
+    def silences_nothing(number: int) -> bool:
+        """Whether the bare directive on this line guards no rule these rows see.
+
+        Only the untyped form is answerable here. A typed directive naming an
+        id no row owns belongs to the scanner that does own it, and the
+        refusal loop above has already taken out every typed one this table
+        can call dead — so what is left is the bare form, which the audit
+        reports spurious on exactly this test and `--fix` then deletes.
+
+        Asked only where the tree parsed, because a rule that reads the tree
+        contributes no hit when it did not: without that guard a directive
+        standing over a live violation would look dead for the gate's own
+        blindness, and be dropped from the prompt that exists to name it.
+        """
+        directive = IGNORE_RE.search(original_lines[number - 1])
+        if directive is None or ignore_rule_ids(directive) is not None:
+            return False
+        return not guarded_hits(number)
+
     # Every violation the edit added is covered, so what is left to decide is
     # the suppressions themselves: the ones this edit declares, or the standing
-    # one an added line has moved under.
-    if declared:
+    # one an added line has moved under. A directive that silences nothing is
+    # not among them: naming it would spend the reader's attention on a line
+    # the audit deletes unread, and the listing exists so that what is read
+    # there is what the approval is actually about.
+    listed = [
+        number for number in declared if not (decidable and silences_nothing(number))
+    ]
+    if listed:
         return KernelDecision(
-            suppression, suppression_reason(sites_at(declared), before is None)
+            suppression, suppression_reason(sites_at(listed), before is None)
         )
     if covering:
         return KernelDecision(suppression, suppression_reason(sites_at(list(covering))))
@@ -2993,6 +3507,22 @@ def path_rule_matches(path: str, path_exists: bool, row: PathRuleRow) -> bool:
             )
         case _:
             raise ValueError(f"invalid path rule kind {kind!r}")
+
+
+def protected_path_reason(path: str, matched: PathRuleRow) -> str:
+    """One protected-path question, naming the path and the rule it tripped.
+
+    The row's reason states the category; the path and the pattern are what
+    the evaluator matched on, and a reviewer answering from the reason alone
+    needs all three to know what they are approving. Beside
+    :func:`path_rule_matches` so the words a question uses and the match that
+    raised it come from one module, for the edit gate and the shell path
+    alike.
+    """
+    return (
+        f"{path} matches the protected-path rule {matched['value']!r}:"
+        f" {matched['reason']}"
+    )
 
 
 PACKAGE_MARKER_FILES = ("__init__.py",)
@@ -3093,7 +3623,7 @@ def edit_verdict(
     effect = decided["effect"]
     if effect not in ("allow", "ask", "deny", "defer"):
         return default
-    return KernelDecision(effect, decided["reason"] or default.reason)
+    return default.revised(effect=effect, reason=decided["reason"] or default.reason)
 
 
 def edit_threshold(
@@ -3134,11 +3664,14 @@ def decide_edit(
     python_source: bool = False,
     acceptance_guard: AcceptanceGuardRow | None = None,
     marker_files: tuple[str, ...] = PACKAGE_MARKER_FILES,
-    refuted: dict[str, list[int]] | None = None,
+    resolution: ResolutionRow | None = None,
     suffix: str = "",
     operation: str = "modify",
     edit_rules: list[EditRuleRow] | None = None,
     foreign: bool = False,
+    outside_project: bool = False,
+    displaced: DisplacedTargetRow | None = None,
+    import_boundaries: list[ImportBoundaryRow] | None = None,
 ) -> KernelDecision:
     """Apply anti-pattern, path, marker, full-write, deletion, and size gates.
 
@@ -3166,13 +3699,17 @@ def decide_edit(
     Each gate reaches as far as its own reason. Anti-patterns, the size gate
     and the full-write gate are all about how production code reads and how
     much of it a reviewer can hold at once, so all three stop at production;
-    the marker gate follows the feedback instead and stops only at scratch,
-    where nothing persists to be read. A full write only ever asks about
-    creating a file — an overwrite carries its predecessor as ``before`` —
-    and creating one where the conventions do not reach costs a reviewer
-    nothing, which pure deletion already assumed everywhere. ``marker_files``
-    is the other end of that same reasoning: a file whose content is nothing
-    but its own docstring costs a reviewer nothing either, wherever it sits.
+    the marker gate follows the feedback instead and stops where nobody of
+    ours reads it — at scratch, where nothing persists, and at
+    ``outside_project``, a tree this repository's review passes never walk.
+    That fact says whose code a file is and nothing about what may be done to
+    it, so the gates below answer without consulting it. A full write only
+    ever asks about creating a file — an overwrite carries its predecessor as
+    ``before`` — and creating one where the conventions do not reach costs a
+    reviewer nothing, which pure deletion already assumed everywhere.
+    ``marker_files`` is the other end of that same reasoning: a file whose
+    content is nothing but its own docstring costs a reviewer nothing either,
+    wherever it sits.
     """
     granted = allowances or []
     previous = before or ""
@@ -3214,6 +3751,22 @@ def decide_edit(
             evaluator="edit-gate",
         )
 
+    # Whether this path is the file it names is prior to every gate below,
+    # which all read the role off the spelling. A symlink is what separates
+    # the two, and the host is what resolved it: the relaxations a role grants
+    # would otherwise be read off one file and spent on another.
+    if displaced is not None:
+        return judged(
+            "displaced-path",
+            KernelDecision(
+                "ask",
+                f"{path} resolves through a symlink to {displaced['lands']}, so"
+                " the conventions this edit is judged against are not the ones"
+                " covering the file it would write",
+                purpose="quality_review",
+            ),
+        )
+
     # Below the plugin refusal, which is about a universal fact -- a build
     # product is overwritten by the next generation, in anybody's repository
     # -- and above everything else, which is not. The gates that follow
@@ -3253,7 +3806,16 @@ def decide_edit(
     # neither is judged against them.
     if after is not None and role == "production":
         antipattern = antipattern_decision(
-            before, after, antipattern_rows, python_source, granted, refuted
+            before,
+            after,
+            antipattern_rows,
+            python_source,
+            granted,
+            resolution,
+            resolved_import_rules(path, after, import_boundaries or [])
+            if python_source and not outside_project
+            else None,
+            typescript_source=suffix in TYPESCRIPT_SUFFIXES,
         )
         # A granted suppression answers this gate and no other, so an allow
         # falls through to the rest of the lattice rather than ending it.
@@ -3281,13 +3843,23 @@ def decide_edit(
         # person the declaration names.
         return judged(
             "protected-path",
-            KernelDecision("ask", protected["reason"], purpose="quality_review"),
+            KernelDecision(
+                "ask",
+                protected_path_reason(path, protected),
+                purpose="quality_review",
+            ),
         )
     # Feedback is feedback wherever it is left, so this gate follows the file
     # rather than the conventions: a note on a test still names work somebody
-    # owes. Scratch is the exception, and only because nothing there persists
-    # to be read — a note in a disposable tree has no reader to protect.
-    if role != "scratch":
+    # owes. Two exceptions, and both are about who reads the note rather than
+    # about how the code reads. Scratch, because nothing there persists to be
+    # read. And a file outside this project, because a `# lup:` marker there
+    # sits in a tree `dev check` and `dev comments` never walk: no pass of
+    # ours will surface it, so there is no reader to protect and nothing the
+    # claim could be checked against. Held to paths settled as outside — an
+    # absolute or `..` spelling of a file in this repository relativizes back
+    # inside and is judged here like any other.
+    if role != "scratch" and not outside_project:
         marker = marker_decision(previous, updated, python_source)
         if marker is not None:
             return judged(
@@ -3317,11 +3889,14 @@ def decide_edit(
         # reads, which is what a supervisor reads. The classification is
         # semantic and independent of which native call carried the write —
         # a whole file arriving at once is what makes it a checkpoint.
+        count = len(updated.splitlines())
+        arriving = "1 line" if count == 1 else f"{count} lines"
         return judged(
             "full-write",
             KernelDecision(
                 "ask",
-                "full-file writes require approval",
+                f"full-file writes require approval — {path} arrives whole,"
+                f" {arriving} at once",
                 purpose="quality_review",
                 reviewer="supervisor_allowed",
             ),

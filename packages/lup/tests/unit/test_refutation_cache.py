@@ -172,10 +172,34 @@ def test_an_unreadable_store_is_a_miss(tmp_path: Path) -> None:
     assert RefutationStore.read(store).entries == {}
 
 
+def test_a_refutation_that_does_not_say_whether_it_settled_is_a_miss(
+    tmp_path: Path,
+) -> None:
+    """An entry written before refutations carried a verdict is not served.
+
+    Served as settled, it would call a marker dead that the checker never
+    settled; served as unsettled, it would demand nothing where a declaration
+    did refute. Neither is the answer that was recorded, so the store is read
+    as empty and the checker is asked again.
+    """
+    store = tmp_path / "refutations.json"
+    store.write_text(
+        '{"entries": {"top.py": {"key": "k", "refutations": [{"rule_id": '
+        '"dict-get", "line": 3, "subject": "value", "evidence": "older shape"}]}}}',
+        encoding="utf-8",
+    )
+
+    assert RefutationStore.read(store).entries == {}
+
+
 def test_a_remembered_refutation_comes_back_unasked(tmp_path: Path) -> None:
     store = tmp_path / "refutations.json"
     kept = Refutation(
-        rule_id="dict-get", line=3, subject="value", evidence="resolves elsewhere"
+        rule_id="dict-get",
+        line=3,
+        subject="value",
+        evidence="resolves elsewhere",
+        settled=True,
     )
     # Keyed under the environment the reader will compute, not a stand-in:
     # the fingerprint is part of what an entry rests on, so an entry written

@@ -30,11 +30,7 @@ CONSTRUCTORS = {"create_claude", "create_codex"}
 
 
 def example_sources() -> list[Path]:
-    found = sorted(
-        path
-        for path in EXAMPLES.glob("*.py")
-        if path.name not in {"__init__.py", "common.py"}
-    )
+    found = sorted(path for path in EXAMPLES.glob("*.py") if path.name != "__init__.py")
     assert found, "no examples found to check"
     return found
 

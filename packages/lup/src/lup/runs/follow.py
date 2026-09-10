@@ -16,20 +16,110 @@ failure as loudly as a landing.
 
 import time
 from collections.abc import Iterator
+from itertools import count
 from pathlib import Path
 
+from pydantic import BaseModel
 from tqdm import tqdm
 
-from lup.runs.ledger import RunDirectory
-from lup.runs.models import UnitResult
+from lup.runs.directory import RunDirectory, RunningUnit
+from lup.runs.models import UnitProgress, UnitResult
 from lup.runs.progress import (
+    RateTracker,
     RunProgress,
     StepState,
+    UnitRate,
     default_log,
     describe_summary,
     read_progress,
+    render_count,
     render_span,
+    unit_postfix,
 )
+
+UNIT_LINES = 12
+"""How many running units get a line of their own before the rest are counted.
+
+A sweep of thousands cannot have a line each, and the units worth looking at
+are the ones running longest, which is the order a reading already arrives in.
+The rest are counted on the activity line rather than dropped silently, so a
+screen never implies it is showing everything.
+"""
+
+
+class UnitLine(BaseModel, arbitrary_types_allowed=True):
+    """One running unit's line on the screen, and which row it holds."""
+
+    bar: tqdm
+    position: int
+
+
+class UnitLines(BaseModel, arbitrary_types_allowed=True):
+    """The per-unit lines a screen is showing, and the rows they occupy.
+
+    Rows are recycled rather than grown: a unit that lands frees its row for
+    whichever unit takes its place, so a long sweep redraws in place instead
+    of walking off the bottom of the terminal.
+    """
+
+    below: int
+    """The first row free under the run's own lines."""
+
+    limit: int
+
+    lines: dict[str, UnitLine] = {}
+
+    def take(self) -> int:
+        """The lowest free row, so a landed unit's row is the next one used."""
+        held = {line.position for line in self.lines.values()}
+        return next(row for row in count(self.below) if row not in held)
+
+    def retire(self, slug: str) -> None:
+        """Give one unit's row back, clearing what it was showing."""
+        self.lines.pop(slug).bar.close()
+
+    def open(self, slug: str) -> UnitLine:
+        """A row for a unit that has none, drawn where the last one was given up."""
+        row = self.take()
+        line = UnitLine(
+            bar=tqdm(position=row, dynamic_ncols=True, smoothing=0, leave=False),
+            position=row,
+        )
+        self.lines[slug] = line
+        return line
+
+    def draw(self, unit: RunningUnit, rate: UnitRate | None) -> None:
+        """Redraw one unit's line: a bar when it declared a budget, else a count."""
+        record = unit.progress
+        if record is None:
+            return
+        line = self.lines.get(unit.slug) or self.open(unit.slug)
+        line.bar.bar_format = (
+            "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}{postfix}"
+            if record.total is not None
+            else "{desc}: {n_fmt}{postfix}"
+        )
+        line.bar.total = record.total
+        line.bar.n = record.done
+        line.bar.set_description_str(unit.attempt.item)
+        line.bar.set_postfix_str(unit_postfix(record, rate))
+        line.bar.refresh()
+
+    def refresh(self, units: list[RunningUnit], rates: dict[str, UnitRate]) -> int:
+        """Draw a line per reporting unit, and say how many did not get one."""
+        reporting = [unit for unit in units if unit.progress is not None]
+        shown = reporting[: self.limit]
+        keep = {unit.slug for unit in shown}
+        for slug in [slug for slug in self.lines if slug not in keep]:
+            self.retire(slug)
+        for unit in shown:
+            self.draw(unit, rates.get(unit.slug))
+        return len(reporting) - len(shown)
+
+    def close(self) -> None:
+        """Give every row back, deepest first so the cursor ends where it began."""
+        for slug in sorted(self.lines, key=lambda slug: -self.lines[slug].position):
+            self.retire(slug)
 
 
 def render_steps(progress: RunProgress) -> str:
@@ -59,13 +149,16 @@ def follow(
     log: Path | None = None,
     interval: float = 2.0,
     once: bool = False,
+    unit_lines: int = UNIT_LINES,
 ) -> RunProgress:
     """Render the run in place until it ends; return the last reading.
 
     Three lines: the units landed against the units scheduled with the
     monitor's own elapsed and time-left, the steps and where each stands, and
-    what the run is doing right now. None of them reproduces the runner's own
-    smoothed estimate.
+    what the run is doing right now. Then one line per running unit that
+    reports its own progress, which is the difference between a unit forty
+    percent through and one spinning at zero. None of them reproduces the
+    runner's own smoothed estimate.
     """
     resolved_log = log if log is not None else default_log(directory)
     reading = read_progress(directory, resolved_log)
@@ -77,10 +170,13 @@ def follow(
         position=0,
         dynamic_ncols=True,
         smoothing=0,
-        bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} {postfix}",
+        bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}{postfix}",
     )
     steps_line = tqdm(total=0, bar_format="{desc}", position=1, dynamic_ncols=True)
     activity_line = tqdm(total=0, bar_format="{desc}", position=2, dynamic_ncols=True)
+    own = [units_bar, steps_line, activity_line]
+    lines = UnitLines(below=len(own), limit=unit_lines)
+    tracker = RateTracker()
     try:
         while True:
             units_bar.total = max(reading.total, reading.landed)
@@ -88,16 +184,59 @@ def follow(
             units_bar.set_postfix_str(reading.postfix())
             units_bar.refresh()
             steps_line.set_description_str(render_steps(reading))
-            activity_line.set_description_str(reading.describe_activity())
+            hidden = lines.refresh(
+                reading.running, tracker.rates(reading.running, time.monotonic())
+            )
+            activity_line.set_description_str(
+                describe_screen(reading.describe_activity(), hidden)
+            )
             if once or reading.finished:
                 break
             time.sleep(interval)
             reading = read_progress(directory, resolved_log)
     finally:
+        lines.close()
         activity_line.close()
         steps_line.close()
         units_bar.close()
     return reading
+
+
+def describe_screen(activity: str, hidden: int) -> str:
+    """What the run is doing, and what the screen had no room to show.
+
+    Counted rather than dropped: a screen showing twelve of forty reporting
+    units and saying nothing about it is a screen that reads as forty.
+    """
+    if not hidden:
+        return activity
+    return f"{activity} · {hidden} more reporting"
+
+
+def reporting_units(reading: RunProgress) -> dict[str, UnitProgress]:
+    """What each running unit that reports last said about itself, by unit."""
+    return {
+        unit.slug: unit.progress
+        for unit in reading.running
+        if unit.progress is not None
+    }
+
+
+def phase_events(reading: RunProgress, known: dict[str, UnitProgress]) -> Iterator[str]:
+    """One line per unit that has entered a phase it was not in before.
+
+    Per phase rather than per tick, because a watcher woken on every sample of
+    every unit is a watcher that stops reading. A phase change is the unit
+    saying it is doing something else now, which is the one inner change worth
+    a line — the counts between them are a screen's business, or ``--once``'s.
+    """
+    for slug, record in reporting_units(reading).items():
+        previous = known.get(slug)
+        if not record.phase or (
+            previous is not None and previous.phase == record.phase
+        ):
+            continue
+        yield f"{slug} entered {record.phase} at {render_count(record)}"
 
 
 def follow_events(
@@ -110,14 +249,20 @@ def follow_events(
 
     The first line is a baseline rather than a replay: attaching to a run that
     already landed four hundred units should say so once, not four hundred
-    times. Everything after it is a change — a unit landing, a step moving, the
-    run ending, or nothing happening for longer than ``quiet_limit``, which on
-    a run whose heartbeat has stopped is the only evidence there will ever be.
+    times. Everything after it is a change — a unit landing, a step moving, a
+    unit entering a new phase of its own work, the run ending, or nothing
+    happening for longer than ``quiet_limit``, which on a run whose heartbeat
+    has stopped is the only evidence there will ever be.
+
+    A unit's own count never yields a line, however often it is reported: an
+    agent following a thousand-unit sweep would be flooded by samples it can
+    read at any moment with ``--once``.
     """
     resolved_log = log if log is not None else default_log(directory)
     reading = read_progress(directory, resolved_log)
     landed = {result.slug: result for result in directory.read().results}
     states: dict[str, StepState] = {step.id: step.state for step in reading.steps}
+    phases = reporting_units(reading)
     yield f"attached {reading.landed}/{reading.total} landed · {reading.postfix()}"
     reported_stall = False
     while True:
@@ -139,4 +284,6 @@ def follow_events(
             if states.get(step.id) is not step.state:
                 states[step.id] = step.state
                 yield f"step {step.render()}"
+        yield from phase_events(reading, phases)
+        phases = reporting_units(reading)
         reported_stall = reported_stall and reading.stalled(quiet_limit)

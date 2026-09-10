@@ -12,6 +12,16 @@ two tests hold it there against the live tree.
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
+import lup.devtools.dev.boundaries as boundary_scan
+from lup.devtools.project import DevProject
+from lup.harness.codescan.common import RuleSelection
+from lup.policy.imports import ImportBoundary
+from lup.policy.models import EditBatch, EditChange
+from lup.policy.rules import EditPolicy
+
 from lup.harness.codescan.boundaries import (
     CONSTANT_DECLARATION_RULE_ID,
     LIBRARY_DEFAULT_RULE_ID,
@@ -32,7 +42,7 @@ from lup.harness.codescan.boundaries import (
     path_is_sanctioned,
 )
 
-from lup_template.devtools.harness.catalog import (
+from lup_template.harness.catalog import (
     NATIVE_RUNTIMES,
     application_roots,
     dev_project,
@@ -41,6 +51,7 @@ from lup.harness.codescan.common import PythonSource
 from lup.harness.codescan.project import RuleFinding
 from lup.policy.kernel.roles import path_role
 from lup.devtools.dev.boundaries import (
+    TrackedSource,
     library_sources,
     overridable_names,
     scan_boundaries,
@@ -72,6 +83,104 @@ def test_seam_surface_does_not_breach() -> None:
         "from lup.providers.harness import compile_codex\n"
     )
     assert not find_boundary_breaches(text)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from lup.providers import codex\n",
+        "from lup.providers import claude as provider\n",
+        "from lup import providers\nfrom lup.providers import codex\n",
+        "import claude_agent_sdk as sdk\n",
+        "from anthropic import AsyncAnthropic\n",
+        "from openai import AsyncOpenAI\n",
+    ],
+)
+def test_native_dependencies_cannot_bypass_the_adapter_boundary(source: str) -> None:
+    assert find_boundary_breaches(source)
+
+
+def test_canonical_vocabulary_and_provider_mentions_remain_valid() -> None:
+    source = (
+        '"""Compare Claude and Codex through Lup contracts."""\n'
+        'tools = ["Read", "Glob", "Grep", "Bash", "WebSearch", "WebFetch"]\n'
+        'runtime = "codex"\n'
+        'description = "Claude and Codex support different native facilities"\n'
+    )
+    assert audit_boundaries(source) == []
+
+
+def test_application_composition_uses_adapters_instead_of_sdks() -> None:
+    path = Path("src/lup_template/agent/core.py")
+    roots = application_roots()
+    assert audit_path_boundaries(path, BREACHING, roots) == []
+    findings = audit_path_boundaries(path, "import claude_agent_sdk\n", roots)
+    assert [(item.rule_id, item.module) for item in findings] == [
+        ("seam-boundary", "claude_agent_sdk")
+    ]
+
+
+@pytest.mark.parametrize("retired", [False, True])
+def test_custom_import_ownership_and_retirement_reach_the_repository_scan(
+    monkeypatch: pytest.MonkeyPatch, retired: bool
+) -> None:
+    source = TrackedSource(
+        path=Path("src/worker.py"), rel="src/worker.py", text="import vendor.native\n"
+    )
+    boundary = ImportBoundary(
+        modules=["vendor.native"],
+        owners=["src/bootstrap.py"],
+        rule_id="seam-boundary",
+        message="Use the application contract",
+    )
+    project = DevProject(
+        package="adopter",
+        import_boundaries=[boundary],
+        rules=RuleSelection(retired=["seam-boundary"] if retired else []),
+    )
+    monkeypatch.setattr(
+        boundary_scan, "tracked_python_sources", lambda _project: [source]
+    )
+    findings = boundary_scan.scan_boundaries(project)
+    assert bool(findings) is not retired
+    policy = EditPolicy(
+        protected=[], import_boundaries=project.resolved_import_boundaries()
+    )
+    decision = policy.decide(
+        EditBatch(
+            changes=[
+                EditChange(
+                    path=source.path,
+                    before="",
+                    after=source.text,
+                )
+            ]
+        )
+    )
+    assert decision.effect == ("allow" if retired else "deny")
+
+
+@pytest.mark.parametrize(
+    "modules,owners",
+    [
+        ([], []),
+        ([""], []),
+        (["openai as sdk"], []),
+        (["openai; import os"], []),
+        (["openai"], ["../outside/"]),
+        (["openai"], ["/absolute/"]),
+    ],
+)
+def test_malformed_import_ownership_cannot_silently_disable_a_guard(
+    modules: list[str], owners: list[str]
+) -> None:
+    with pytest.raises(ValidationError):
+        ImportBoundary(
+            modules=modules,
+            owners=owners,
+            rule_id="seam-boundary",
+            message="Use an adapter",
+        )
 
 
 def test_inline_ignore_excepts_the_line() -> None:
@@ -161,7 +270,7 @@ def test_a_generated_tree_is_sanctioned_by_the_runtime_that_spells_it() -> None:
 
 
 def test_portable_content_is_scanned_for_native_spellings() -> None:
-    path = Path("src/lup_template/devtools/harness/content/skills/example.py")
+    path = Path("src/lup_template/harness/content/skills/example.py")
     text = (
         "from lup.providers.claude.runtime import ClaudeSessionFactory\n"
         'method = "turn/start"\n'
@@ -260,7 +369,7 @@ def test_a_directive_two_lines_above_a_table_stays_spurious() -> None:
     assert sorted(item.kind for item in findings) == ["missing", "spurious"]
 
 
-SHELL_VOCABULARY = Path("src/lup_template/devtools/harness/content/shell_vocabulary.py")
+SHELL_VOCABULARY = Path("src/lup_template/harness/content/shell_vocabulary.py")
 """Where this project's shell command tables live, outside the library."""
 
 MOVED_TABLES: list[str] = []

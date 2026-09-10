@@ -9,13 +9,21 @@ the library to learn an API it has no business knowing.
 
 import json
 import logging
+import shlex
 from collections.abc import Iterator
+from typing import Literal
 from html import escape
 
 import sh
 from pydantic import BaseModel, Field
 
-from lup.devtools.utils import decode_stderr, gh, repository_slug
+from lup.devtools.project import Tracker
+from lup.devtools.utils import (
+    decode_stderr,
+    gh,
+    names_same_repository,
+    repository_slug,
+)
 from lup.resolver.models import IssueEvidence
 
 logger = logging.getLogger(__name__)
@@ -31,6 +39,160 @@ caller passes its own.
 # lup: ignore[constant-declaration] — the fields the models below parse, spelled
 # as `gh issue list --json` names them
 ISSUE_FIELDS = "number,url,title,body,labels"
+
+
+type TrackerVerb = Literal["comment", "close", "reopen"]
+"""The operations `dev tracker` performs, closed by what restores each one.
+
+A comment is answered, a close is reopened, a reopen is closed. Everything
+else a forge offers -- merging, publishing, editing a repository's settings,
+deleting a branch on the way out -- is left to `gh`, where the permission
+policy asks about it in front of somebody. The list is short on purpose: this
+command runs inside an allowed devtools invocation, so nothing downstream of
+it can ask, and a verb added here is a verb nobody is consulted about.
+"""
+
+# lup: ignore[constant-declaration] — gh's own words, quoted to be recognized
+DISABLED_ISSUES = "has disabled issues"
+"""What gh says when the repository accepts no issues at all.
+
+Matched on the phrase rather than an exit code, which is the same for every
+refusal gh makes. A phrase gh rewords stops being recognized and the failure
+reads as it did before this, which is the safe direction for a message that
+only ever adds advice.
+"""
+
+
+class TrackerRoutes(BaseModel, frozen=True):
+    """Every repository this checkout's tooling may name, and the way past it.
+
+    `origin` answers for the first, and it answers alone: a fork whose origin
+    is the fork reports to the fork, which is where work done in a fork
+    belongs. What makes the upstream reachable is that somebody declared it,
+    not that a remote happens to carry a conventional name.
+    """
+
+    own: str = ""
+    declared: list[Tracker] = []
+
+    def owning(self, component: str) -> str:
+        """The declared tracker whose components claim this one, if any."""
+        return next(
+            (entry.repository for entry in self.declared if entry.claims(component)),
+            "",
+        )
+
+    def chosen(self, route: list[str], named: str = "", component: str = "") -> str:
+        """Where this operation lands, refusing a repository nobody declared.
+
+        Unnamed, the owning component decides and this checkout answers for
+        whatever no tracker claims -- which is the routing a report needs: a
+        defect in a dependency this tree cannot edit belongs to whoever can
+        edit it, and everything else belongs here.
+
+        Named, the repository has to be this one or a declared tracker.
+        Returned in the spelling that was declared rather than the one that
+        was typed, so a URL and a bare pair reach gh identically.
+        """
+        if not named:
+            return self.owning(component) or self.own
+        reachable = [self.own, *(entry.repository for entry in self.declared)]
+        found = next(
+            (
+                candidate
+                for candidate in reachable
+                if candidate and names_same_repository(named, candidate)
+            ),
+            "",
+        )
+        if not found:
+            raise RuntimeError(self.refusal(named, route))
+        return found
+
+    def refusal(self, named: str, route: list[str]) -> str:
+        """Why that repository is out of reach here, and what does reach it.
+
+        The route matters more than the refusal. What this declines is
+        reaching another repository *unsupervised* -- it runs inside an
+        allowed devtools call, where nothing further can ask. `gh` reaches it
+        under the permission policy, which does ask, so the way out is not
+        blocked and the answer says so.
+
+        Spelled with the arguments already given rather than described,
+        because a refusal reading "use gh instead" leaves somebody rebuilding
+        an invocation they had written correctly the first time.
+        """
+        listed = [f"  {entry.repository} — {entry.what}" for entry in self.declared]
+        return "\n".join(
+            [
+                f"{named} is neither this checkout's repository"
+                f" ({self.own or 'which origin does not name'}) nor a tracker"
+                " this project declares.",
+                *(
+                    ["Declared trackers:", *listed]
+                    if listed
+                    else ["This project declares no other tracker."]
+                ),
+                "To reach it deliberately, run gh directly — the permission"
+                " policy asks about that:",
+                f"  {shlex.join(['gh', *route, '--repo', named])}",
+            ]
+        )
+
+
+def issue_arguments(verb: TrackerVerb, number: int, note: str = "") -> list[str]:
+    """The gh words one compensable operation is spelled with, less its repository.
+
+    Built apart from the call that runs them because a refusal has to print
+    the same invocation it declined to make: the way past this command is to
+    run gh directly, and a route rebuilt by hand beside the one performed is
+    a route that goes stale the first time either moves.
+
+    A note is the whole point of a comment and optional on the other two,
+    where it is the sentence that explains a state change to whoever was
+    watching the issue. gh spells both the same way, so the only difference
+    is which of them may be empty.
+    """
+    match verb:
+        case "comment":
+            return ["issue", "comment", str(number), "--body", note]
+        case "close" | "reopen":
+            carried = ["--comment", note] if note else []
+            return ["issue", verb, str(number), *carried]
+
+
+def act_on_issue(
+    verb: TrackerVerb, number: int, repository: str, note: str = ""
+) -> str:
+    """Perform one compensable operation on an issue, and say where it landed."""
+    return gh.out(*issue_arguments(verb, number, note), "--repo", repository).strip()
+
+
+def disabled_issues_advice(failure: str, routes: TrackerRoutes) -> str:
+    """What to add when the repository a report was routed to takes no issues.
+
+    Measured downstream: a friction report was lost outright, and the
+    recovery was to run the reporter from another checkout and explain by
+    hand where the evidence had come from. The route existed the whole time,
+    because this project declares trackers.
+
+    Named rather than taken. Re-filing somebody's report on another project's
+    tracker unasked moves it out of sight of everyone watching the first one,
+    and a command that did that quietly would be deciding whose problem this
+    is.
+
+    Empty for every other failure, which leaves the message gh gave exactly
+    as it was.
+    """
+    if DISABLED_ISSUES not in failure or not routes.declared:
+        return ""
+    return "\n".join(
+        [
+            "That repository accepts no issues. This project declares these"
+            " trackers, and `--repo` names one:",
+            *(f"  {entry.repository} — {entry.what}" for entry in routes.declared),
+        ]
+    )
 
 
 class FrictionReport(BaseModel, frozen=True, extra="forbid"):

@@ -41,28 +41,35 @@ def checkpoint(events: list[str]) -> launch.LaunchCheckpoint:
     return record
 
 
+@pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
 def test_claude_checkpoints_before_preflight_and_after_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: launch.LaunchSandbox
 ) -> None:
     events: list[str] = []
     profiles = Mock()
     profiles.launch_home.return_value = None
+    preflight = Mock(
+        side_effect=lambda *a, **k: events.append("ready") or launch.LaunchOpening()
+    )
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda *_args: events.append("ready") or launch.LaunchOpening(),
+        preflight,
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
     monkeypatch.setattr(launch, "session_argv", lambda name, *a, **k: [name])
     monkeypatch.setattr(
-        launch, "claude_sandbox_arguments", lambda _plugin, contained=False: []
+        launch,
+        "claude_sandbox_arguments",
+        lambda _plugin, sandbox=launch.LaunchSandbox.INNER, accessible=[]: [],
     )
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _env: {})
     monkeypatch.setattr(
         launch, "apply_sandbox_environment", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(launch, "ClaudeTranscripts", lambda _home: Mock())
+    monkeypatch.setattr(launch, "accessible_roots", lambda: [])
     monkeypatch.setattr(
         launch,
         "start_harness_transcript",
@@ -75,9 +82,19 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     )
 
     launch.launch_claude(
-        composition(), [], profiles, None, None, False, checkpoint=checkpoint(events)
+        composition(),
+        [],
+        profiles,
+        None,
+        None,
+        False,
+        checkpoint=checkpoint(events),
+        sandbox=sandbox,
     )
 
+    assert preflight.call_args.kwargs["contained"] == (
+        sandbox is launch.LaunchSandbox.OUTER
+    )
     assert events == [
         "checkpoint:claude",
         "ready",
@@ -87,18 +104,22 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     ]
 
 
+@pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
 def test_codex_checkpoints_before_preflight_and_after_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: launch.LaunchSandbox
 ) -> None:
     events: list[str] = []
     home = Mock(path=tmp_path / "home", isolated=False)
     installer = Mock()
     installer.temporary.return_value = nullcontext(Mock(installed_root=tmp_path))
     store = Mock()
+    preflight = Mock(
+        side_effect=lambda *a, **k: events.append("ready") or launch.LaunchOpening()
+    )
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda *_args: events.append("ready") or launch.LaunchOpening(),
+        preflight,
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
@@ -107,13 +128,14 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "codex_sandbox_arguments",
-        lambda _plugin, _environment, _args, contained=False: [],
+        lambda _plugin, _environment, _args, sandbox=launch.LaunchSandbox.INNER, accessible=[]: [],
     )
     monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda: store)
     monkeypatch.setattr(launch, "select_codex_home", lambda *args: home)
     monkeypatch.setattr(launch, "codex_login_preflight", lambda *args: None)
     monkeypatch.setattr(launch, "CodexPluginInstaller", lambda _config: installer)
     monkeypatch.setattr(launch, "CodexTranscripts", lambda _home: Mock())
+    monkeypatch.setattr(launch, "accessible_roots", lambda: [])
     monkeypatch.setattr(
         launch,
         "start_harness_transcript",
@@ -134,8 +156,12 @@ def test_codex_checkpoints_before_preflight_and_after_close(
         False,
         False,
         checkpoint=checkpoint(events),
+        sandbox=sandbox,
     )
 
+    assert preflight.call_args.kwargs["contained"] == (
+        sandbox is launch.LaunchSandbox.OUTER
+    )
     assert events == [
         "checkpoint:codex",
         "ready",
@@ -150,7 +176,7 @@ def test_generate_only_never_checkpoints(
     provider: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     events: list[str] = []
-    monkeypatch.setattr(launch, "ready_to_open", lambda *args: None)
+    monkeypatch.setattr(launch, "ready_to_open", lambda *args, **kwargs: None)
     if provider == "claude":
         launch.launch_claude(
             composition(),
@@ -206,3 +232,30 @@ def test_opening_one_runtime_generates_every_declared_tree(
         is None
     )
     assert generated == [opened, sibling, writer]
+
+
+def test_a_launch_names_the_waits_it_spends_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One line before each quiet stretch, and none when only generation was asked."""
+    monkeypatch.setattr(
+        launch, "generate_with_report", lambda composition, in_passing=False: None
+    )
+    monkeypatch.setattr(
+        launch,
+        "generate_targets",
+        lambda compositions, writers, in_passing=False: None,
+    )
+    monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch, "sweep_ledgers", lambda root: 0)
+    monkeypatch.setattr(launch, "runtime_preflight", lambda *a, **k: [])
+    monkeypatch.setattr(launch, "settle_base_freshness", lambda *a, **k: None)
+
+    assert launch.ready_to_open(composition(), True, LaunchSentinels()) is None
+    assert capsys.readouterr().out == ""
+
+    assert launch.ready_to_open(composition(), False, LaunchSentinels()) is not None
+    assert capsys.readouterr().out.splitlines() == [
+        "regenerating what this session opens against",
+        "checking the host",
+    ]

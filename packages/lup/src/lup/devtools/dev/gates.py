@@ -59,6 +59,7 @@ from pydantic import BaseModel
 from lup.harness.codescan.markers import MarkerComment, find_feedback, scan_mode_for
 from lup.devtools.dev.branches import get_integration_branch, is_ancestor
 from lup.devtools.dev.comments import FoundComment
+from lup.devtools.dev.records import read_record
 from lup.execution.shell import git
 from lup.workspace.paths import project_root
 
@@ -138,8 +139,16 @@ class BranchInPlay(Gate, frozen=True):
     feature branch in the repository is missing there. Firing on absence
     therefore turns every build red for conditions none of which came true,
     which is precisely the branch a reader learns to ignore. So absence stays
-    dormant and says it could not see, and the landing case is caught while
-    the ref is still there or not at all.
+    dormant and says it could not see.
+
+    Which left one branch silent forever: landed, deleted in the same sweep,
+    and asked about afterwards. The answer is not to read absence harder but
+    to have written the answer down while it was still readable — `git delete`
+    judges containment off the ref it is about to remove, and records the
+    verdict beside the branch. So a missing ref is asked of that record, and
+    fires only where something in this clone once watched the branch land. A
+    CI clone that never fetched the branch never deleted it either and holds
+    no such record, so it stays dormant for the reason it always did.
     """
 
     keyword: ClassVar[str] = "branch"
@@ -161,6 +170,31 @@ class BranchInPlay(Gate, frozen=True):
             return ref
         return ""
 
+    def recorded(self) -> GateVerdict:
+        """The verdict for a ref this checkout cannot read, from what lup kept.
+
+        Asked of the same checkout the ref questions are asked of, because a
+        branch's record is shared by every worktree of the repository the
+        deletion happened in — and a clone where it did not happen holds
+        nothing, which is the dormant answer the ruling above requires.
+        """
+        landed = read_record(self.argument).landed_in
+        if landed:
+            return GateVerdict(
+                fired=True,
+                evidence=(
+                    f"{self.argument} is gone, and reached {landed} before it "
+                    "was deleted"
+                ),
+            )
+        return GateVerdict(
+            fired=False,
+            evidence=(
+                f"{self.argument} is not in this checkout, which says "
+                "nothing about whether it landed"
+            ),
+        )
+
     def asked(self) -> GateVerdict:
         if not self.argument:
             return GateVerdict(fired=True, evidence="names no branch")
@@ -175,13 +209,7 @@ class BranchInPlay(Gate, frozen=True):
         integration = get_integration_branch()
         readable = self.visible()
         if not readable:
-            return GateVerdict(
-                fired=False,
-                evidence=(
-                    f"{self.argument} is not in this checkout, which says "
-                    "nothing about whether it landed"
-                ),
-            )
+            return self.recorded()
         if is_ancestor(readable, integration):
             return GateVerdict(
                 fired=True, evidence=f"{readable} has reached {integration}"

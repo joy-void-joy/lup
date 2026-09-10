@@ -26,6 +26,7 @@ from datetime import UTC, datetime, timedelta
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def sandbox_active() -> bool:
@@ -97,6 +98,18 @@ def delivers(measured: dict[str, list[str]], capability: str) -> bool:
     return capability in (measured["delivered"] if "delivered" in measured else [])
 
 
+def launched(measured: dict[str, list[str]]) -> list[str]:
+    """The invocation the launch that opened this session recorded for itself.
+
+    What lets a session spell its own reopening — a mount registered
+    mid-session takes effect only at the next launch, and this record is the
+    only thing that remembers which launch that is. Empty wherever nothing
+    was recorded (an older launcher, or no measurement at all), and every
+    caller reads empty as "no reopening can be spelled".
+    """
+    return measured["launch"] if "launch" in measured else []
+
+
 def defers_unjudged(measured: dict[str, list[str]]) -> bool:
     """Whether this profile hands legible work nothing judged to the runtime.
 
@@ -119,6 +132,41 @@ def append_hook_evidence(path: Path, encoded: str) -> None:
         stream.write(encoded + "\n")
 
 
+def fetch_origin(payload: dict) -> str:
+    """The scheme, host and port a fetch names, with the path left behind.
+
+    A journal that omits tool input entirely leaves a refused fetch
+    unattributable: the record says a URL was outside the declared scopes,
+    and which URL has to be inferred from whatever the session did next.
+    The origin closes that without reopening what the omission protects. It
+    is the coarse half of a URL and the one a scope is written against,
+    while the path and the query are where a token, a document id or a
+    search phrase ride -- so those are read to parse the origin out and are
+    never written. Userinfo goes the same way: the hostname and port come
+    from the parse rather than the netloc, which would carry a credential
+    spelled into the URL.
+
+    Empty for a tool whose input names no URL, which is what keeps the
+    omission whole everywhere but the fetch surface, and empty for a URL no
+    scope could have matched either -- an unparseable one reaches its
+    verdict on being unparseable, not on an origin.
+    """
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    named = isinstance(tool_input, dict) and "url" in tool_input
+    url = tool_input["url"] if named else ""
+    if not isinstance(url, str):
+        return ""
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return ""
+    if not parsed.scheme or hostname is None:
+        return ""
+    return f"{parsed.scheme}://{hostname}" + (f":{port}" if port else "")
+
+
 def record_hook_evidence(
     data_root: Path | None,
     payload: dict,
@@ -126,7 +174,13 @@ def record_hook_evidence(
     outcome: str | None = None,
     detail: str | None = None,
 ) -> None:
-    """Append hook metadata without retaining a tool's input or output."""
+    """Append hook metadata, keeping of a tool's input only a fetch origin.
+
+    Input and output stay out of a record because they carry commands,
+    patches and credentials. A fetch's origin is the one part that does not:
+    it is what the verdict was reached against, and :func:`fetch_origin`
+    bounds it to the scheme, host and port.
+    """
     if data_root is None:
         return
     record = {
@@ -147,6 +201,8 @@ def record_hook_evidence(
             if field in payload and isinstance(payload[field], str)
         }
     )
+    origin = fetch_origin(payload)
+    record.update({"fetch_origin": origin} if origin else {})
     record.update({"outcome": outcome} if outcome is not None else {})
     record.update({"detail": detail} if detail is not None else {})
     encoded = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
@@ -588,6 +644,37 @@ def boundary_refusal(failure: str, described: dict[str, list[str]]) -> str:
     )
 
 
+def outside_this_project(path_text: str, root: Path | None) -> bool:
+    """Whether this path sits outside the repository the session is working in.
+
+    Wider than :func:`foreign_repository` by exactly the case that needs no
+    second repository to be decidable: a path belonging to no checkout at all.
+    Where the session's own repository is known, a file in somebody's home
+    directory or under a runtime's scratch root is known not to be in it, and
+    is no more this project's code than another checkout's is.
+
+    The undecidable half stays undecidable. A session in no repository and an
+    unreadable ``.git`` leave this end blank, and nothing can be established
+    to be outside a boundary that could not be read, so both say no.
+
+    A relative path is anchored on the session's own directory before it is
+    asked about, which is where the tool that carried it will resolve it. Any
+    other reading answers "outside" for the ordinary spelling of a file in
+    this repository — the one every gate here exists for — and a ``..`` that
+    genuinely climbs out is settled by the same anchoring rather than by a
+    separate rule.
+
+    What this settles is deliberately narrow: whose code a file is, and never
+    what may be done to it. Only the gates whose subject is this project's own
+    conventions read it; everything about the act itself -- a protected path,
+    a whole-file write, the size of the change -- is answered without it.
+    """
+    if root is None:
+        return False
+    here = shared_git_directory(str(root))
+    return bool(here) and here != shared_git_directory(str(root / path_text))
+
+
 def foreign_repository(path_text: str, root: Path | None) -> bool:
     """Whether this path belongs to a repository other than the session's.
 
@@ -598,17 +685,18 @@ def foreign_repository(path_text: str, root: Path | None) -> bool:
     this project is worked on. :func:`shared_git_directory` is the answer both
     ends can name alike, whichever worktree either of them is sitting in.
 
-    Undecidable answers say no. A path in no repository, a session in no
-    repository, and an unreadable ``.git`` all leave one side blank, and the
-    honest reading of "cannot tell" is that this project's rules still apply:
-    lifting them on a guess would silence the gates on this repository's own
-    files, where keeping them costs friction somewhere that is not ours.
+    A path in no repository says no, because the question here is which
+    *other* repository owns the file and there is none for the referral to
+    name; whether it is this project's code at all is the wider
+    :func:`outside_this_project`. A session in no repository and an unreadable
+    ``.git`` say no because nothing was established, and the honest reading of
+    "cannot tell" is that this project's rules still apply: lifting them on a
+    guess would silence the gates on this repository's own files, where
+    keeping them costs friction somewhere that is not ours.
     """
-    if root is None:
-        return False
-    here = shared_git_directory(str(root))
-    there = shared_git_directory(path_text)
-    return bool(here) and bool(there) and here != there
+    return bool(shared_git_directory(path_text)) and outside_this_project(
+        path_text, root
+    )
 
 
 def publish_edition(path_text: str) -> None:
@@ -712,16 +800,24 @@ def declared_program(root: str, declared: str) -> str:
     POSIX, ``Scripts`` on Windows — because that is a property of how Python
     is installed rather than of any project, and reading it is what keeps
     this from being a second layout assumption behind the one it replaces.
+    It is read as a candidate rather than as the answer: a hook runs under
+    whichever ``python3`` the runtime found, and one installed in ``sbin``
+    names a directory no environment has, which resolved every declared
+    program to a bare name and left the gate silent on a machine where it
+    was installed all along. The conventional pair follows it, so the
+    interpreter still decides where it can and never decides alone.
     """
     located = Path(root) / declared
     if located.is_file():
         return str(located)
     if "/" in declared or "\\" in declared:
         return ""
-    installed = (
-        project_environment(Path(root)) / Path(sys.executable).parent.name / declared
-    )
-    return str(installed) if installed.is_file() else declared
+    environment = project_environment(Path(root))
+    for scripts in dict.fromkeys([Path(sys.executable).parent.name, "bin", "Scripts"]):
+        installed = environment / scripts / declared
+        if installed.is_file():
+            return str(installed)
+    return declared
 
 
 def conflicted(path_text: str) -> bool:
@@ -830,9 +926,72 @@ def file_diagnostics(
     except (OSError, subprocess.SubprocessError, ValueError, KeyError):
         return []
     return [
-        f"{item['severity']} {item['range']['start']['line'] + 1}: {item['message']}"
+        f"{Path(edited).relative_to(Path(root).resolve())}:"
+        f"{item['range']['start']['line'] + 1}: {item['severity']}: {item['message']}"
         for item in reported
         if item["file"] == edited and item["severity"] != "information"
+    ]
+
+
+def repaired_directives(
+    path_text: str,
+    command: list[str],
+    suffixes: tuple[str, ...] = (".py", ".pyi"),
+    timeout_seconds: float = 30.0,
+) -> list[str]:
+    """Take the dead `# lup: ignore` directives out of one written file.
+
+    A directive guarding nothing is the one audit finding whose fix is not a
+    judgement — there is a single correct edit and this is it — so the gate
+    ahead of the write neither refuses it nor spends an approval naming it,
+    and it goes afterwards instead. That pairing is what lets the prompt leave
+    it unmentioned: unlisted and removed is one behaviour, while unlisted and
+    kept would be a directive nobody ever reads.
+
+    Reported back rather than done in silence. The agent wrote the directive
+    believing it did something, and a line that disappears without a word is
+    one it writes again on the next file.
+
+    Anything that goes wrong is nothing repaired, exactly as an unreadable
+    checker is no diagnostics: this runs after the tool, so the alternative
+    to saying nothing is failing a write that has already happened.
+    """
+    if not command or Path(path_text).suffix.lower() not in suffixes:
+        return []
+    if conflicted(path_text):
+        return []
+    root = worktree_root(path_text)
+    if not root:
+        return []
+    located = declared_program(root, command[0])
+    if not located:
+        return []
+    # Named the way the sweep names its own files, which is how the request
+    # and the report come back in one spelling. It is also the only spelling
+    # every sweep must understand: a project declares its own program here,
+    # and one that selects by repository-relative prefix is the shape this
+    # can count on rather than one it would have to assume.
+    try:
+        named = str(Path(path_text).resolve().relative_to(Path(root).resolve()))
+    except ValueError:
+        return []
+    try:
+        finished = subprocess.run(
+            [located, *command[1:], "--path", named],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        reported = json.loads(finished.stdout)["repaired"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return []
+    return [
+        f"line {item['line']}: removed `# lup: ignore"
+        + (f"[{item['rule_id']}]" if item["rule_id"] else "")
+        + "` — it guarded no rule, so it silenced nothing"
+        for item in reported
     ]
 
 
@@ -841,13 +1000,21 @@ def resolved_refutations(
     proposed: str,
     command: list[str],
     timeout_seconds: float = 30.0,
-) -> dict[str, list[int]] | None:
+) -> dict[str, dict[str, list[int]]] | None:
     """What a checker refutes in the text about to be written, or None.
 
     The kernel decides from primitive rows and reads nothing, which is what
     keeps a verdict a pure function of its inputs. Resolving a receiver's
     declaration is not a decision — it is a fact about the machine, the same
     kind this half already resolves — so it is answered here and passed in.
+
+    Two maps come back, each rule id to lines, under the names the kernel's
+    resolution row gives them: ``refuted`` for the lines whose receiver
+    resolved outside the rule's family, and ``unresolved`` for the lines the
+    checker looked at and could type nothing for. They are kept apart because
+    the gate treats them oppositely — a directive on a refuted line is dead,
+    one on an unresolved line stands — and this half may name no kernel type,
+    so the caller builds the row from the primitives.
 
     Run in the checkout holding the file, like every other checker this half
     starts, and handed the proposed text on stdin: the change is judged before
@@ -883,7 +1050,10 @@ def resolved_refutations(
         reported = json.loads(finished.stdout)
         if not reported["resolved"]:
             return None
-        return {rule: list(lines) for rule, lines in reported["refuted"].items()}
+        return {
+            verdict: {rule: list(lines) for rule, lines in reported[verdict].items()}
+            for verdict in ("refuted", "unresolved")
+        }
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -897,6 +1067,48 @@ def existing_write_targets(targets: list[str], root: Path | None = None) -> list
     """
     where = Path.cwd() if root is None else root
     return [target for target in targets if (where / target).exists()]
+
+
+def resolved_write_targets(
+    targets: list[str],
+    root: Path | None = None,
+    # lup: ignore[dict-str-payload] — the keys are the caller's own write
+    # targets, an open set, and this half compiles into a bare script that can
+    # declare no row to carry them: the kernel's `DisplacedTargetRow` is what
+    # the composition root turns these pairs into
+) -> dict[str, str]:
+    """Report which write targets resolve somewhere other than they spell.
+
+    Every grant in the kernel reads a path lexically — a role names a tree,
+    and a spelling sits under it or does not. A symlink is what breaks that
+    step, and resolving it is filesystem work, so it happens here and crosses
+    as a fact.
+
+    ``lands`` is spelled in the vocabulary the kernel classifies in: relative
+    to the checkout when the real path is inside it, absolute otherwise. That
+    is what lets the kernel ask its own question — whether the role of where
+    this lands is the role its spelling claimed — without resolving anything.
+
+    A word carrying an expansion is skipped, because the path it names at run
+    time is not the one standing here. Resolution covers a target that does
+    not exist yet: the directories above it are what a symlink would sit in.
+    """
+    where = Path.cwd() if root is None else root
+    # lup: ignore[dict-str-payload] — the write targets the caller named
+    reported: dict[str, str] = {}
+    for target in targets:
+        if "$" in target:
+            continue
+        try:
+            real = (where / target).resolve()
+            spelled = (where / target).absolute()
+        except OSError:
+            continue
+        if real == spelled:
+            continue
+        inside = real.is_relative_to(where)
+        reported[target] = str(real.relative_to(where) if inside else real)
+    return reported
 
 
 def git_answers(
@@ -1133,6 +1345,41 @@ def undo_snapshot(
     return reference
 
 
+def rewritten_text(scripts: list[str], target: str, root: Path) -> str | None:
+    """What one file would hold after these scripts, without touching the file.
+
+    sed is run over the file and its output captured, which is the same
+    computation ``-i`` performs and none of the writing: ``-i`` is exactly
+    "run the script, then replace the file with the result", so dropping it
+    leaves the result on standard output and the file as it was. A command
+    still about to be refused has therefore changed nothing by being judged.
+
+    ``None`` wherever the answer is not established — the path is not a
+    regular file, sed is missing, sed itself rejected the script, or the
+    output is not text this can read. Each of those means nothing read what
+    would land, and the caller turns that into a question rather than a grant.
+
+    The scripts are passed as ``-e`` expressions and the file as an operand
+    after ``--``, so a filename beginning with a dash stays a filename and a
+    script is never re-read as one.
+    """
+    landed = root / target
+    if not landed.is_file():
+        return None
+    expressions = [word for script in scripts for word in ("-e", script)]
+    try:
+        finished = subprocess.run(
+            ["sed", *expressions, "--", str(landed)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    return finished.stdout if finished.returncode == 0 else None
+
+
 def recoverable_write_targets(
     targets: list[str], root: Path | None = None
 ) -> list[str]:
@@ -1233,6 +1480,35 @@ def tracked_write_targets(targets: list[str], root: Path | None = None) -> list[
         target
         for target in targets
         if git_answers(["ls-files", "--error-unmatch", "--", target], where) is not None
+    ]
+
+
+def repository_worktrees(root: Path | None = None) -> list[str]:
+    """Every checkout of the repository this session is in, as absolute paths.
+
+    Resolved here rather than in the kernel because the kernel is pure: it
+    holds `posixpath` and `re` and reaches no filesystem, so a question about
+    what git considers one repository cannot be asked from inside it. This is
+    the same arrangement every other host fact in this module uses -- the
+    reading is taken out here and threaded in as data.
+
+    Which is also why the first version of the `-C` guard tested a path
+    *prefix* and got it wrong: containment is all a pure evaluator can do
+    alone, and it read every absolute path as outside. Asked of git, the
+    question is one of identity instead, and a sibling worktree answers yes
+    wherever it happens to sit on disk.
+
+    An empty list wherever git cannot answer, which leaves every redirect
+    asking exactly as it does now. That is the safe direction: the cost of an
+    unanswerable question is one approval, and the cost of guessing yes is a
+    redirect into a repository nobody here vouched for.
+    """
+    where = Path.cwd() if root is None else root
+    listed = git_answers(["worktree", "list", "--porcelain"], where)
+    return [
+        str(Path(line.removeprefix("worktree ")).resolve())
+        for line in listed or []
+        if line.startswith("worktree ")
     ]
 
 
@@ -1359,3 +1635,483 @@ def granted_allowances(grants_env: str, known: list[str]) -> list[str]:
     return document_allowances(
         environ[grants_env] if grants_env in environ else "", known
     )
+
+
+def peer_store(root: Path | None, store: list[str]) -> Path | None:
+    """Where this repository's sessions meet, or nothing outside a repository.
+
+    The parts arrive as data rather than spelled here, because the directory
+    belongs to whichever module put a roster in it. A dispatcher compiled for
+    a project whose sessions never coordinate carries this same code and is
+    handed nothing to read, which is the difference between a capability a
+    project declined and a path this half decided for it.
+
+    The shared git directory rather than a worktree, so every checkout of one
+    clone resolves the same roster and a branch cannot change what a peer
+    reads.
+    """
+    if root is None:
+        return None
+    shared = shared_git_directory(str(root))
+    if not shared:
+        return None
+    return Path(shared).joinpath(*store)
+
+
+def stream_records(path: Path) -> list[dict]:
+    """Every legible JSON object an append-only record holds, oldest first.
+
+    A line that does not parse is skipped rather than raised on. These files
+    are appended to by other sessions while this one reads them, so a torn
+    final line is the ordinary state of a healthy store — and a reader that
+    failed on it would stop judging peer calls for the duration of somebody
+    else's write.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    def legible():
+        """Each line that is a JSON object, skipping whatever is not one."""
+        for line in raw.splitlines():
+            try:
+                loaded = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(loaded, dict):
+                yield loaded
+
+    return list(legible())
+
+
+def peer_members(directory: Path, roster_file: str) -> list[dict]:
+    """Every member the roster still holds, folded from its own record.
+
+    Keyed by kind and id rather than by the printed address, because a member
+    taken through a second round is that member further on and not a second
+    one — which is what the roster's own fold says, and a reader answering
+    differently would show one session twice.
+
+    A record about nobody standing is dropped rather than inventing a member,
+    so a description or a finish arriving before its join says nothing.
+    """
+    # lup: ignore[empty-collection] — a fold whose every step reads what the
+    # steps before it left, which is the one shape a comprehension has no
+    # spelling for: a description updates a member an earlier record created
+    standing: dict = {}
+    for record in stream_records(directory / roster_file):
+        actor = record["actor"] if "actor" in record else {}
+        if not isinstance(actor, dict) or "id" not in actor or "kind" not in actor:
+            continue
+        held = f"{actor['kind']}-{actor['id']}"
+        match record["type"] if "type" in record else "":
+            case "spawned" | "joined":
+                standing[held] = {**record, "running": True}
+            case "described" | "finished" if held in standing:
+                standing[held] = {
+                    **standing[held],
+                    **record,
+                    "running": record["type"] != "finished",
+                }
+            case _:
+                continue
+    return [member for member in standing.values() if member["running"]]
+
+
+def peer_name_claims(directory: Path, names_file: str) -> dict:
+    """Which member each name reaches now, the newest claim on a name winning.
+
+    Every name ever recorded rather than only the current ones: a name
+    somebody wrote down before a rename goes on reaching the session it named
+    until something else claims it, which is what the record is kept
+    append-only for. A sender typing the older name is typing what was correct
+    when they read it, and there is no error they could have been shown.
+
+    Newest wins by construction — a later record for one name replaces the
+    earlier entry as the comprehension walks the stream in order.
+    """
+    return {
+        record["cli_name"]: record["id"]
+        for record in stream_records(directory / names_file)
+        if "cli_name" in record and "id" in record
+    }
+
+
+def peer_addresses(
+    root: Path | None, store: list[str], roster_file: str, names_file: str
+) -> list[str]:
+    """Every spelling that currently reaches a live member of this roster.
+
+    Ids, the kind-qualified label a door prints, and whatever each member is
+    called now, because a sender types whichever of those it last read — a
+    check knowing only one of them would let the others through, which is the
+    failure that made a redirect reach nobody.
+
+    Live members only. A session that has left is not somewhere a durable
+    message would arrive either, so redirecting a send to it would trade one
+    call reaching nobody for another.
+    """
+    directory = peer_store(root, store)
+    if directory is None:
+        return []
+    members = peer_members(directory, roster_file)
+    live = [member["actor"]["id"] for member in members]
+    return sorted(
+        {
+            *live,
+            *[
+                f"{member['actor']['kind']}:{member['actor']['id']}"
+                for member in members
+            ],
+            *[
+                name
+                for name, held in peer_name_claims(directory, names_file).items()
+                if held in live
+            ],
+        }
+    )
+
+
+def peer_listing(
+    root: Path | None, store: list[str], roster_file: str, names_file: str
+) -> list[str]:
+    """One line per live member, as somebody choosing who to reach reads it.
+
+    The same four facts a console prints — who, which checkout they are in,
+    what they are on, and what carries a message to them — because a listing
+    naming members without saying what reaches them leaves a reader to guess
+    which of them will hear anything.
+    """
+    directory = peer_store(root, store)
+    if directory is None:
+        return []
+    names = peer_name_claims(directory, names_file)
+
+    def described(member: dict) -> list[str]:
+        """The parts one member's line is joined from, blanks included."""
+        actor = member["actor"]
+        called = [name for name, held in names.items() if held == actor["id"]]
+        worktree = member["worktree"] if "worktree" in member else ""
+        saying = member["description"] if "description" in member else ""
+        return [
+            called[-1] if called else actor["id"],
+            Path(worktree).name if worktree else "",
+            saying or (member["task"] if "task" in member else ""),
+            member["delivery"] if "delivery" in member else "",
+        ]
+
+    return [
+        " — ".join(part for part in described(member) if part)
+        for member in peer_members(directory, roster_file)
+    ]
+
+
+def claim_covers(claim: dict, candidate: str) -> bool:
+    """Whether a path about to be written falls under one standing claim."""
+    held = claim["path"]
+    if not claim["prefix"]:
+        return candidate == held
+    return candidate == held or candidate.startswith(held + "/")
+
+
+def peer_claims(directory: Path, touches_file: str) -> list[dict]:
+    """Every claim standing on the record, alive or not, folded in order.
+
+    Keyed by the kind as well as the path, because locking a directory and
+    touching a file of that name are different claims and a later record must
+    not silently convert one into the other.
+    """
+    # lup: ignore[empty-collection] — a fold whose every step reads what the
+    # steps before it left: a release answers against the claim an earlier
+    # record created, which is the one shape a comprehension cannot spell
+    standing: dict = {}
+    for record in stream_records(directory / touches_file):
+        actor = record["actor"] if "actor" in record else {}
+        path = record["path"] if "path" in record else ""
+        if not isinstance(actor, dict) or "id" not in actor or not path:
+            continue
+        kind = record["type"] if "type" in record else ""
+        subject = f"{'under' if kind in ('locked', 'released') else 'at'} {path}"
+        match kind:
+            case "touched" | "contested":
+                rivals = record["rivals"] if "rivals" in record else []
+                standing[subject] = {
+                    "path": path,
+                    "prefix": False,
+                    "holders": [
+                        actor,
+                        *[rival for rival in rivals if isinstance(rival, dict)],
+                    ],
+                }
+            case "locked":
+                standing[subject] = {"path": path, "prefix": True, "holders": [actor]}
+            case "released" if subject in standing:
+                if actor["id"] in [
+                    holder["id"] for holder in standing[subject]["holders"]
+                ]:
+                    del standing[subject]
+            case _:
+                continue
+    return list(standing.values())
+
+
+def claim_holders(
+    root: Path | None,
+    store: list[str],
+    roster_file: str,
+    names_file: str,
+    touches_file: str,
+    path_text: str,
+    mine: str,
+) -> list[str]:
+    """Who else, still working here, is holding the path a write would land on.
+
+    Live holders other than the asker. A claim expires with the session that
+    made it, so a departed holder is nobody to ask; and a session meeting its
+    own claim on every edit would be asked about its own work.
+
+    Named where a session has a name and identified by id otherwise, because
+    this reaches somebody deciding whom to ask, and an id is what you fall
+    back on when nothing has been called anything yet.
+    """
+    directory = peer_store(root, store)
+    if directory is None:
+        return []
+    live = [member["actor"]["id"] for member in peer_members(directory, roster_file)]
+    names = peer_name_claims(directory, names_file)
+    target = str(Path(path_text).resolve())
+    holding = [
+        holder["id"]
+        for claim in peer_claims(directory, touches_file)
+        if claim_covers(claim, target)
+        for holder in claim["holders"]
+        if holder["id"] in live and holder["id"] != mine
+    ]
+    return sorted(
+        {
+            next(
+                (name for name, held in names.items() if held == member),
+                member,
+            )
+            for member in holding
+        }
+    )
+
+
+def writable_snapshot(root: Path) -> dict:
+    """What every file Git reports as moved looks like right now, by size and time.
+
+    Two questions asked as two invocations that each answer in one path per
+    line, rather than one status report this half would have to take apart:
+    what differs from the commit, and what is not tracked at all. Between them
+    they cover every path a command could write that anybody could later
+    attribute.
+
+    Size and modification time rather than a digest. A digest of every moved
+    file before every shell call is paid on the whole working set, where these
+    two are a stat each — and what the snapshot is for is telling *which* files
+    moved, after which digesting the few that did is cheap.
+    """
+    moved = git_answers(["diff", "--name-only", "HEAD"], root) or []
+    fresh = git_answers(["ls-files", "--others", "--exclude-standard"], root) or []
+    return {
+        path: [stat.st_size, stat.st_mtime_ns]
+        for path in dict.fromkeys([*moved, *fresh])
+        for stat in [file_stat(root / path)]
+        if stat is not None
+    }
+
+
+def file_stat(path: Path):
+    """One file's stat, or nothing where it cannot be read.
+
+    A path Git reported and the filesystem will not stat is a file deleted
+    between the two calls, which is a race rather than a failure: it simply
+    does not appear in this snapshot, and the comparison treats it the way it
+    treats anything else absent from one side.
+    """
+    try:
+        return path.stat()
+    except OSError:
+        return None
+
+
+def open_claim_window(
+    root: Path | None, store: list[str], windows_dir: str, mine: str
+) -> None:
+    """Record what this session's tree looked like before a command ran.
+
+    The file's presence is the window: another session listing this directory
+    while its own command runs learns that somebody else's was open over the
+    same moment, which is the whole of what tier three needs to know.
+    """
+    directory = peer_store(root, store)
+    if directory is None or not mine or root is None:
+        return
+    windows = directory / windows_dir
+    try:
+        windows.mkdir(parents=True, exist_ok=True)
+        (windows / f"{mine}.json").write_text(
+            json.dumps(
+                {
+                    "root": str(root),
+                    "at": datetime.now(UTC).timestamp(),
+                    "entries": writable_snapshot(root),
+                }
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        return
+
+
+def stale_window(window: Path, stale_after_seconds: float) -> bool:
+    """Whether a window has been open too long to be anybody"'s live command.
+
+    A window is opened before a call and closed after it, so one left standing
+    is a call that never ran — refused at the prompt, or a session that died
+    holding it. Left counted, that session would make every change any other
+    session made afterwards read as contested, for as long as the file sat
+    there. An unreadable stamp reads as stale for the same reason.
+    """
+    try:
+        opened = json.loads(window.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    if not isinstance(opened, dict) or "at" not in opened:
+        return True
+    return datetime.now(UTC).timestamp() - opened["at"] > stale_after_seconds
+
+
+def close_claim_window(
+    root: Path | None,
+    store: list[str],
+    windows_dir: str,
+    mine: str,
+    stale_after_seconds: float = 300.0,
+) -> dict:
+    """What changed while this session's command ran, and who else was watching.
+
+    ``paths`` are the files whose size or modification time differs from the
+    snapshot, plus the ones that were not in it at all. ``rivals`` are the
+    other sessions whose own windows were open across this one — the case a
+    before-and-after comparison cannot attribute, because it sees every change
+    in its window regardless of who made it.
+    """
+    empty = {"paths": [], "rivals": []}
+    directory = peer_store(root, store)
+    if directory is None or not mine or root is None:
+        return empty
+    windows = directory / windows_dir
+    opened = windows / f"{mine}.json"
+    try:
+        before = json.loads(opened.read_text(encoding="utf-8"))
+        opened.unlink()
+    except (OSError, ValueError):
+        return empty
+    if not isinstance(before, dict) or "entries" not in before:
+        return empty
+    entries = before["entries"]
+    after = writable_snapshot(root)
+    try:
+        rivals = [
+            other.stem
+            for other in windows.glob("*.json")
+            if other.stem != mine and not stale_window(other, stale_after_seconds)
+        ]
+    except OSError:
+        rivals = []
+    return {
+        "paths": sorted(
+            str(root / path)
+            for path, stamp in after.items()
+            if path not in entries or entries[path] != stamp
+        ),
+        "rivals": sorted(rivals),
+    }
+
+
+def file_digest(path_text: str) -> str:
+    """What one file's bytes hash to, or nothing where they cannot be read.
+
+    Carried on the claim so a later reader can tell the content this session
+    left from whatever stands there now — which is what makes a claim evidence
+    of a change rather than only an assertion that one happened.
+    """
+    try:
+        return sha256(Path(path_text).read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def member_actor(directory: Path, roster_file: str, member: str) -> dict | None:
+    """This session's own address as the roster holds it, or nothing.
+
+    Read rather than composed. A session that never joined has no address to
+    write claims under, and inventing one here would put a holder on the
+    record that no listing shows and nothing can ask.
+    """
+    return next(
+        (
+            found["actor"]
+            for found in peer_members(directory, roster_file)
+            if found["actor"]["id"] == member
+        ),
+        None,
+    )
+
+
+def record_claims(
+    root: Path | None,
+    store: list[str],
+    roster_file: str,
+    touches_file: str,
+    mine: str,
+    paths: list[str],
+    rivals: list[str],
+) -> None:
+    """Write down what this session's call changed, and who else it could be.
+
+    A claim per path. Where another session had a window open across the same
+    moment, every name goes on the record instead of one being guessed at: a
+    before-and-after comparison sees the change and cannot see who made it,
+    and a confident wrong author is worse than an honest pair, because the
+    next reader is deciding whether it is safe to write.
+
+    Silent on every failure. This runs after the work has already happened, so
+    the call it belongs to cannot be undone by refusing — and a claim nobody
+    could record costs a later reader an attribution, while a raised exception
+    here costs the session its ability to work.
+    """
+    directory = peer_store(root, store)
+    if directory is None or not mine or not paths:
+        return
+    actor = member_actor(directory, roster_file, mine)
+    if actor is None:
+        return
+    contenders = [
+        found
+        for other in rivals
+        for found in [member_actor(directory, roster_file, other)]
+        if found is not None
+    ]
+    stamped = datetime.now(UTC).isoformat()
+    lines = [
+        json.dumps(
+            {
+                "type": "contested" if contenders else "touched",
+                "actor": actor,
+                "at": stamped,
+                "path": path,
+                "digest": file_digest(path),
+                "rivals": contenders,
+            }
+        )
+        for path in paths
+    ]
+    try:
+        with (directory / touches_file).open("a", encoding="utf-8") as record:
+            record.write("".join(f"{line}\n" for line in lines))
+    except OSError:
+        return

@@ -348,7 +348,9 @@ def build_history(root: Path, launcher: LocalProcessLauncher) -> Path:
         return status.stdout.strip()
 
     def reserve(branch: str) -> None:
-        """Cut a branch and record where it stood, as `worktree create` does."""
+        """Cut a branch and record where it stood, in the config keys a clone
+        whose records were never adopted still carries.
+        """
         run(*git_in, "branch", branch)
         run(*git_in, "config", f"branch.{branch}.lup-base", "dev")
         run(

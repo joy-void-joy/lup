@@ -66,7 +66,7 @@ class UpstreamReport(BaseModel, frozen=True):
         """
         target = f" --repo {self.repository}" if self.repository else ""
         return (
-            f"uv run lup-devtools dev upstream {self.slug} | "
+            f"uv run lup-devtools sync upstream {self.slug} | "
             f"gh issue create{target} --title {self.title!r} --body-file -"
         )
 

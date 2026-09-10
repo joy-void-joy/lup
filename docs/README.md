@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.index by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.index by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Lup documentation
 
@@ -36,15 +36,17 @@ Subjects that span the three components, or that are large enough to own a page.
 | [conventions.md](conventions.md) | The lookup behind each code-convention rule: which library, which typed stand-in for a dict, which parser, which resolver tool. |
 | [commands.md](commands.md) | Every command `lup-devtools` serves, walked from the composed CLI rather than listed by hand. |
 | [generated-paths.md](generated-paths.md) | Every file the recipes compile and what each is compiled from, walked from the trees themselves rather than listed by hand. |
+| [corpus-status.md](corpus-status.md) | What this repository has recorded about itself — open questions, claims and where each stands, what waits on a person, corrections — generated from its ledger by `ledger writeup`. |
 | [quality-pipeline.md](quality-pipeline.md) | The three check layers, and what each one uniquely catches. |
 | [dev-tooling-decisions.md](dev-tooling-decisions.md) | The architectural decisions behind the development tooling, each stated against the current system. |
+| [corpus.md](corpus.md) | This repository&#x27;s corpus: claims, evidence, questions and corrections over the ledger, and how each stands. |
 
 ## Every page here is generated
 
 Files under `docs/` are compiler output from typed Python — the pages about
-the library from `packages/lup/src/lup/devtools/harness/content/docs/`, the
+the library from `packages/lup/src/lup/harness/content/docs/`, the
 pages about this repository from
-`src/lup_template/devtools/harness/content/docs/` — the same way the native
+`src/lup_template/harness/content/docs/` — the same way the native
 trees are. Each opens with a banner naming its source module. Edit the module
 and regenerate; a hand-edit is preserved and reported as a conflict rather
 than silently overwritten. [harness.md](harness.md) is the whole story.

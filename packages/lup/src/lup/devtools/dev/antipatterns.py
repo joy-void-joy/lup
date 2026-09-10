@@ -58,6 +58,7 @@ from lup.harness.codescan.common import (
     module_name,
 )
 from lup.harness.codescan.dispatch import audit_own_model_dispatch
+from lup.policy.kernel.edit import TYPESCRIPT_SUFFIXES
 from lup.harness.codescan.resolution import refute
 from lup.devtools.dev.refutations import remembered_refutations
 from lup.workspace.paths import project_root, refutation_cache_path
@@ -72,6 +73,7 @@ from lup.policy.kernel.edit import (
     standalone_suppression,
 )
 from lup.policy.kernel.roles import path_role
+from lup.policy.kernel.rows import ResolutionRow
 from lup.devtools.dev.pyright_oracle import default_oracle
 from lup.devtools.project import DevProject
 from lup.devtools.utils import output_json
@@ -139,8 +141,31 @@ def within_scope(rel: str, paths: Sequence[str] | None) -> bool:
     """
     if paths is None:
         return True
+
+    def scoped(path: str) -> PurePosixPath:
+        """One scope as the walk spells the files it is compared against.
+
+        Those come from `git ls-files`, which names them relative to the
+        repository, and the walk runs where that command runs. An absolute
+        path names the same file in a spelling the other side never takes, so
+        it matched nothing and the sweep reported a clean tree — an answer,
+        rather than a scope that caught no files. That is the same failure a
+        trailing separator used to cause, reached from the other direction.
+
+        One outside this checkout keeps its spelling and goes on matching
+        nothing, which is not the same bug: it names a file the sweep is not
+        answerable for, and no relative form of it would be true.
+        """
+        named = Path(path)
+        if not named.is_absolute():
+            return PurePosixPath(path)
+        try:
+            return PurePosixPath(named.resolve().relative_to(Path.cwd().resolve()))
+        except ValueError:
+            return PurePosixPath(path)
+
     subject = PurePosixPath(rel)
-    return any(subject.is_relative_to(PurePosixPath(path)) for path in paths)
+    return any(subject.is_relative_to(scoped(path)) for path in paths)
 
 
 def declared_rules(project: DevProject) -> AntiPatternSet:
@@ -196,11 +221,11 @@ def scan_antipatterns(
     ``paths`` narrows the sweep to the files under the given repository-relative
     prefixes, for the fix-one-file loop where a whole-repository resolve is the
     dominant cost, and for a caller answerable only for what it changed. It
-    only decides which files are read: each one still audits against the same
-    tables, and the oracle still resolves them against the whole project, so a
-    scoped verdict matches the sweep's verdict for that file. ``None`` is the
-    whole repository; naming no path scopes the sweep to nothing, which is
-    what a tree that changed nothing is answerable for.
+    decides which files are reported and type-checked. Declaration-based rules
+    retain the whole project's class index, and the oracle resolves against
+    the whole project, so a scoped verdict matches the sweep's verdict for that
+    file. ``None`` is the whole repository; naming no path scopes the sweep to
+    nothing, which is what a tree that changed nothing is answerable for.
 
     The audit reads the same declared path roles the edit hook does, so a rule
     the hook never enforces in a test or scratch tree is not reported there
@@ -214,15 +239,23 @@ def scan_antipatterns(
     it every run; where the checker is absent the grammar refutes nothing and
     every broad regex verdict stands.
     """
-    scanned = scanned_files(project, paths)
-    sources = [
+    if paths is not None and not paths:
+        return AntiPatternScan(findings=[], refuted=[])
+    all_scanned = scanned_files(project)
+    scanned = [item for item in all_scanned if within_scope(item.rel, paths)]
+    declaration_sources = [
         PythonSource(
             path=item.path,
             module=module_name(item.path, scanned_roots(project)),
             text=item.text,
         )
-        for item in scanned
+        for item in all_scanned
         if item.path.suffix.lower() in {".py", ".pyi"}
+    ]
+    sources = [
+        source
+        for source in declaration_sources
+        if within_scope(source.path.as_posix(), paths)
     ]
     # A whole-repository sweep remembers what the checker said, because it
     # holds every module a refutation could resolve through and can therefore
@@ -250,17 +283,20 @@ def scan_antipatterns(
     with ThreadPoolExecutor(max_workers=1) as pool:
         resolving = pool.submit(resolving_refutations)
         declared = [
-            *audit_capabilities(sources),
-            *audit_abstract_declarations(sources),
-            *audit_own_model_dispatch(sources),
-            *audit_isinstance_chains(sources),
-            *audit_constant_declarations(sources, project.roots),
+            *audit_capabilities(declaration_sources),
+            *audit_abstract_declarations(declaration_sources),
+            *audit_own_model_dispatch(declaration_sources),
+            *audit_isinstance_chains(declaration_sources),
+            *audit_constant_declarations(declaration_sources, project.roots),
         ]
         boundary_findings = [
             (source.path, finding)
             for source in sources
             for finding in audit_path_boundaries(
-                source.path, source.text, project.roots
+                source.path,
+                source.text,
+                project.roots,
+                project.resolved_import_boundaries(),
             )
         ]
         refuted = resolving.result()
@@ -272,6 +308,7 @@ def scan_antipatterns(
             item.text,
             item.patterns,
             refuted[item.path.as_posix()] if item.path.as_posix() in refuted else None,
+            typescript=item.path.suffix.lower() in TYPESCRIPT_SUFFIXES,
         )
     ]
     results.extend(
@@ -284,6 +321,7 @@ def scan_antipatterns(
             rule_id=finding.rule_id,
         )
         for finding in declared
+        if within_scope(finding.path.as_posix(), paths)
     )
     foreign_untyped = {
         (path.as_posix(), finding.line)
@@ -660,15 +698,20 @@ def report(
     would claim to have fixed something it had just moved.
     """
     scan = scan_antipatterns(project, paths)
+    repaired: list[RepairedDirective] = []
     if fix:
         repaired = repair_spurious(project, scan.findings)
-        for item in repaired:
+        # Under --json the same report is a payload key. Echoing it here as
+        # well would put prose in front of the document, which is the one
+        # thing a caller reading this as data cannot recover from.
+        for item in repaired if not as_json else []:
             named = f"[{item.rule_id}]" if item.rule_id else ""
             typer.echo(
                 f"{item.file}:{item.line} [repaired] removed dead `# lup: ignore{named}`"
             )
         if repaired:
-            typer.echo(f"{len(repaired)} dead directive(s) removed\n")
+            if not as_json:
+                typer.echo(f"{len(repaired)} dead directive(s) removed\n")
             scan = scan_antipatterns(project, paths)
     found = scan.findings
     blocking = [finding for finding in found if finding.kind not in advisory]
@@ -677,14 +720,16 @@ def report(
             {
                 "findings": [finding.model_dump() for finding in found],
                 "refuted": [refutation.model_dump() for refutation in scan.refuted],
+                "repaired": [item.model_dump() for item in repaired],
             }
         )
         if blocking:
             raise typer.Exit(1)
         return
     for refutation in scan.refuted:
+        verdict = "refuted" if refutation.settled else "unresolved"
         typer.echo(
-            f"{refutation.file}:{refutation.line} [refuted {refutation.rule_id}] "
+            f"{refutation.file}:{refutation.line} [{verdict} {refutation.rule_id}] "
             f"{refutation.evidence}"
         )
     if not found:
@@ -715,22 +760,35 @@ def report_refutations(project: DevProject, path: Path, text: str) -> None:
     and has to ask rather than refuse, so a session with no language server
     must not report an empty refutation: that reads as "resolved, and nothing
     was refuted", which is the one wrong answer of the three available.
+
+    The refutations go out as the kernel's own resolution row, settled and
+    unsettled apart, because the gate reads them oppositely: a directive on a
+    refuted line is dead, one on an unresolved line stands. This is the same
+    `refute` the sweep runs, so what the gate is told is what `dev check`
+    will say — the hook may know less than the sweep, and knowing less comes
+    out here as unresolved, never as refuted.
     """
     oracle = default_oracle()
     if oracle is None:
-        output_json({"resolved": False, "refuted": {}})
+        output_json({"resolved": False, **ResolutionRow(refuted={}, unresolved={})})
         return
     source = PythonSource(
         path=path, module=module_name(path, scanned_roots(project)), text=text
     )
     found = refute([source], oracle, declared_rules(project).python)
     rows = found[path.as_posix()] if path.as_posix() in found else []
+
+    def lines_where(settled: bool) -> dict[str, list[int]]:
+        """Each rule's refuted lines, on the side of the verdict named."""
+        chosen = [row for row in rows if row.settled is settled]
+        return {
+            rule: [row.line for row in chosen if row.rule_id == rule]
+            for rule in dict.fromkeys(row.rule_id for row in chosen)
+        }
+
     output_json(
         {
             "resolved": True,
-            "refuted": {
-                rule: [row.line for row in rows if row.rule_id == rule]
-                for rule in dict.fromkeys(row.rule_id for row in rows)
-            },
+            **ResolutionRow(refuted=lines_where(True), unresolved=lines_where(False)),
         }
     )

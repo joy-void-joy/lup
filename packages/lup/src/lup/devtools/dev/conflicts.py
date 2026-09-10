@@ -7,7 +7,7 @@ After a failed merge or rebase, classifies conflicted files as in-scope
 (touched by this branch) or out-of-scope (only changed on the other side).
 
 The `conflicts`, `conflict_status`, `conflict_audit`, and `conflict_complete`
-entry points back the `lup-devtools dev conflict` subcommands wired in
+entry points back the `lup-devtools git conflict` subcommands wired in
 `lup.devtools.dev.app`.
 
 Alone among this project's commands these are spelled without ``uv run``,
@@ -21,11 +21,11 @@ and reads no manifest.
 Examples, spelled as a project keeping its environment inside the checkout
 reaches them; one keeping it anywhere else gets the bare name instead::
 
-    $ .venv/bin/lup-devtools dev conflict list
-    $ .venv/bin/lup-devtools dev conflict list --json
-    $ .venv/bin/lup-devtools dev conflict status --json
-    $ .venv/bin/lup-devtools dev conflict audit src/lup/agent/core.py --json
-    $ .venv/bin/lup-devtools dev conflict complete --dry-run
+    $ .venv/bin/lup-devtools git conflict list
+    $ .venv/bin/lup-devtools git conflict list --json
+    $ .venv/bin/lup-devtools git conflict status --json
+    $ .venv/bin/lup-devtools git conflict audit src/lup/agent/core.py --json
+    $ .venv/bin/lup-devtools git conflict complete --dry-run
 """
 
 import logging
@@ -104,7 +104,7 @@ def conflicted_manifest_notice(root: Path) -> str:
         f"{MANIFEST} holds conflict markers, so `uv` cannot parse it and every "
         f"`uv run ...` command will fail to start until the merge is settled. "
         f"Reach this toolchain as `{launcher} ...` meanwhile — "
-        f"`{invocation(launcher, 'dev', 'conflict', 'status', '--json')}`."
+        f"`{invocation(launcher, 'git', 'conflict', 'status', '--json')}`."
     )
 
 

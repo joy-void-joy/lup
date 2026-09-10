@@ -8,11 +8,11 @@ scratch carries nothing at all because every file there is disposable by
 construction.
 
 Roles inside the repository are declared by the application, never the kernel
-— that path vocabulary belongs to whoever laid out the tree. The session
-scratchpad is the one root the kernel knows unaided, because the harness names
-it rather than the repository: it lives outside every worktree, so no
-repo-relative declaration could reach it, and its spelling is fixed by the
-runtime that provides it.
+— that path vocabulary belongs to whoever laid out the tree. Two scratch roots
+the kernel knows unaided, both because they sit outside every worktree where no
+repo-relative declaration could reach them: the session scratchpad, whose
+spelling the harness fixes, and the machine's temporary root that holds it,
+where nothing is reviewed and nothing is meant to last.
 """
 
 import fnmatch
@@ -20,7 +20,7 @@ import posixpath
 from pathlib import PurePosixPath
 
 from .decision import SUBSTITUTION_SENTINEL
-from .rows import PathRoleKind, PathRoleName, PathRoleRow
+from .rows import PathRoleKind, PathRoleName, PathRoleRow, DisplacedTargetRow
 
 # lup: ignore[library-default] — the native runtimes' own plugin directory names
 GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
@@ -116,6 +116,61 @@ def is_session_scratch_target(word: str) -> bool:
     return "$" not in word and posixpath.normpath(word).startswith("/tmp/claude-")
 
 
+def is_temporary_root_target(word: str) -> bool:
+    """Recognize a path under the machine's temporary root.
+
+    A file here is disposable by construction: no review pass walks the
+    temporary root, no capture of this checkout holds it, and nothing written
+    there is meant to outlive the process that wrote it. That is what
+    :func:`path_role` reads it for, and it is the same fact on either side of
+    a container boundary, so the role is granted without one.
+
+    Containment still decides a different question, which is why the two
+    readings stay separate. Inside a measured container this root is the
+    launch's own and disappears with it, so a write here escapes no lease;
+    uncontained, the same directory is shared with every other process on the
+    machine, and :meth:`SettlementFacts.container_private` is the fact that
+    row supplies. The cost of joining them is carried openly: a delete or an
+    overwrite here is allowed unprompted, and on a shared host the file it
+    replaces may belong to somebody who never saw the question.
+
+    Wider than :func:`is_session_scratch_target`, which the harness mints per
+    session and owns at every placement — this one is the whole root, held to
+    it by the same two tests: a word carrying an expansion stays
+    unrecognized, and a suffix that climbs back out fails the same way —
+    ``/tmp/../etc`` normalizes to a path this does not claim.
+    """
+    return "$" not in word and posixpath.normpath(word).startswith("/tmp/")
+
+
+def displaced_targets(
+    candidates: list[DisplacedTargetRow], rows: list[PathRoleRow]
+) -> list[DisplacedTargetRow]:
+    """Which resolved targets land under a role other than the one they claim.
+
+    The kernel's half of the answer a symlink makes necessary. The host says
+    where a path really lands; this says whether that changes what the path
+    is, which is the only part of it a role table can decide.
+
+    A spelling that claims nothing has nothing to lose, so a production path
+    is not reported however far it resolves: its write is judged where it
+    reads either way, and no relaxation was granted to be taken back. What is
+    reported is a grant that would have been read off the wrong file — a
+    scratch spelling landing in production, a test root landing outside it.
+
+    Where the two roles agree the link changed nothing this table can see:
+    ``tmp/a`` pointing at ``tmp/b`` is scratch either way, and the machine's
+    temporary root resolving to its own real name — ``/private/tmp`` on a
+    system that spells it that way — is the same root it always was.
+    """
+    return [
+        row
+        for row in candidates
+        if (claimed := path_role(row["path"], rows)) != "production"
+        and path_role(row["lands"], rows) != claimed
+    ]
+
+
 def role_pattern_covers(pattern: str, path: str) -> bool:
     """Whether a declared role pattern reaches a repository-relative path.
 
@@ -194,22 +249,26 @@ def path_role(path: str, rows: list[PathRoleRow]) -> PathRoleName:
 
     Resolution is lexical, so it needs no filesystem call and ``..`` cannot
     climb out of a declared root into a role it was never given. A symlink
-    inside a root that points beyond it is not settleable without a syscall
-    and stays a known limit; it is narrow, because a role only ever relaxes
-    verbs acting on paths already inside the root and never grants execution.
+    inside a root that points beyond it needs the syscall this will not make,
+    and is answered instead by the fact :func:`displaced_targets` reads: the
+    host resolves the link, and a landing under another role takes the grant
+    back. Nothing here consults that — a role says what a spelling claims,
+    which is the question with a lexical answer.
 
     How far each declaration reaches is the row's own, through
     :func:`role_pattern_covers`: a bare root is anchored at the repository
     top, and a leading ``**/`` recognizes the directory wherever it sits.
 
-    The session scratchpad answers first, because it is the one scratch root
-    that is absolute — reaching the declared roots below would mean passing
-    the guard that keeps an absolute path from claiming a role by prefix.
-    Every other path outside the repository stays production: a file in some
-    other tree is not disposable merely for being elsewhere.
+    The two absolute scratch roots answer first — the session scratchpad the
+    harness mints, and the machine's temporary root around it — because
+    reaching the declared roots below would mean passing the guard that keeps
+    an absolute path from claiming a role by prefix. Every other path outside
+    the repository stays production: a file in some other tree is not
+    disposable merely for being elsewhere, while one under ``/tmp`` is
+    disposable by what that root is for.
     """
     normalized = posixpath.normpath(path)
-    if is_session_scratch_target(path):
+    if is_session_scratch_target(path) or is_temporary_root_target(path):
         return "scratch"
     if normalized.startswith(("/", "../")) or normalized == "..":
         return "production"

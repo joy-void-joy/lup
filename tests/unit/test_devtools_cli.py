@@ -14,13 +14,22 @@ print its MergeResult even when the tree-dir lookup raises ``typer.Exit``.
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import sh
 import typer
 from typer.testing import CliRunner
 
-from lup.devtools.dev import pr
+from lup.devtools.dev import policy_explain, pr
+from lup.devtools.harness import launch
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.codex.home import CodexWorktreeHomeStore
+from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.login import ProviderLogin
+from lup.workspace.paths import project_root
+from lup.harness.enforcement import MeasuredContainment
+from lup_template.harness.catalog import declared_hook_set
 from lup_template.devtools.main import app
 from lup.devtools.sync import load_json
 
@@ -59,8 +68,56 @@ COMMAND_PATHS = sorted(iter_command_paths(app))
 def test_command_tree_is_walked() -> None:
     flattened = {" ".join(path) for path in COMMAND_PATHS}
     assert "trace list" in flattened
-    assert "dev pr merge" in flattened
-    assert "dev worktree create" in flattened
+    assert "git pr merge" in flattened
+    assert "git worktree create" in flattened
+
+
+@pytest.mark.parametrize("launch_only", [False, True])
+@pytest.mark.parametrize(
+    "target, login", [("claude", CLAUDE_LOGIN), ("codex", CODEX_LOGIN)]
+)
+def test_container_requirements_respect_launch_only(
+    monkeypatch: pytest.MonkeyPatch,
+    launch_only: bool,
+    target: str,
+    login: ProviderLogin,
+    tmp_path: Path,
+) -> None:
+    checks = Mock(return_value=[])
+    monkeypatch.setattr(launch, "report_inside_requirements", checks)
+    monkeypatch.setenv(login.config_home_env, str(tmp_path))
+    arguments = ["harness", "requirements", target, "--inside"]
+
+    if launch_only:
+        arguments.append("--launch-only")
+    result = runner.invoke(app, arguments)
+
+    assert result.exit_code == 0, result.output
+    checks.assert_called_once()
+    assert checks.call_args.kwargs["setting_up"] == (not launch_only)
+    assert checks.call_args.args[2] == tmp_path
+    assert checks.call_args.args[3] == login
+
+    assert "No container requirements selected." in result.output
+
+
+def test_all_container_requirements_select_each_runtimes_default_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checks = Mock(return_value=[])
+    monkeypatch.setattr(launch, "report_inside_requirements", checks)
+    monkeypatch.delenv(CLAUDE_LOGIN.config_home_env, raising=False)
+    monkeypatch.delenv(CODEX_LOGIN.config_home_env, raising=False)
+
+    result = runner.invoke(
+        app, ["harness", "requirements", "all", "--inside", "--launch-only"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert [(call.args[2], call.args[3]) for call in checks.call_args_list] == [
+        (Path.home() / ".claude", CLAUDE_LOGIN),
+        (CodexWorktreeHomeStore().home_for(project_root()), CODEX_LOGIN),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -234,10 +291,10 @@ def test_a_merge_that_did_not_happen_still_fails(
         pr.merge(42, dry_run=False)
 
 
-def test_annotated_downstream_config_raises_a_typed_recovery_error(
+def test_annotated_registry_raises_a_typed_recovery_error(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "downstream.json"
+    path = tmp_path / "sync.json"
     assert load_json(path) == {"projects": []}
 
     path.write_text('{"projects": []}\n# a trailing annotation\n', encoding="utf-8")
@@ -254,12 +311,12 @@ def test_ending_a_run_needs_no_adapter_but_driving_one_still_does() -> None:
     run in trouble most needs.
     """
     ended = runner.invoke(
-        app, ["harness", "resolve", "--abort", "reason", "--run-id", "absent-run"]
+        app, ["resolve", "--abort", "reason", "--run-id", "absent-run"]
     )
     assert "--adapter is required" not in ended.output
     assert "no resolver run 'absent-run' to abort" in ended.output
 
-    driven = runner.invoke(app, ["harness", "resolve", "--run-id", "absent-run"])
+    driven = runner.invoke(app, ["resolve", "--run-id", "absent-run"])
     assert "--adapter is required" in driven.output
 
 
@@ -303,6 +360,40 @@ def test_dev_policy_answers_for_every_placement_rather_than_one() -> None:
         "unsandboxed",
     ]
     assert [reading["effect"] for reading in readings] == ["allow", "ask"]
+
+
+def test_the_unsandboxed_reading_ignores_the_container_around_this_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row that answers for no boundary, asked from behind one.
+
+    Not hypothetical, and not reachable from a clean checkout: containment is
+    measured from the `.lup/preflight` ledger the launch wrote, so the case
+    above passed everywhere except the one place `dev policy` is actually
+    read -- inside a contained session, which is where the guidance sends an
+    agent before it spends a turn. Both rows reported the bounded answer,
+    under two headings, and the row a reader consults to find out what the
+    boundary is doing for them said it was doing nothing.
+
+    Measured here rather than left to the environment, for the same reason
+    the case above pins the sandbox flag: a suite that reads the session's own
+    ledger passes or fails on where it was run.
+    """
+    monkeypatch.setattr(
+        policy_explain,
+        "measured_containment",
+        lambda _cwd: MeasuredContainment(contained=True, inside_placement=True),
+    )
+
+    verdict = policy_explain.verdict_for(
+        "frobnicate",
+        "shell",
+        autonomous=False,
+        cwd=Path.cwd(),
+        hooks=declared_hook_set(),
+    )
+
+    assert [reading.effect for reading in verdict.readings] == ["allow", "ask"]
 
 
 def test_either_boundary_stays_askable_for_explicitly() -> None:

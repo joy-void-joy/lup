@@ -21,16 +21,16 @@ Examples::
 
     $ uv run lup-devtools --help
     $ uv run lup-devtools agent inspect --json
-    $ uv run lup-devtools py info requests
+    $ uv run lup-devtools dev py info requests
     $ uv run lup-devtools trace show <session_id>
     $ uv run lup-devtools feedback status
-    $ uv run lup-devtools dev branches
-    $ uv run lup-devtools dev worktree create feat-name
+    $ uv run lup-devtools git branches
+    $ uv run lup-devtools git worktree create feat-name
     $ uv run lup-devtools dev check --no-test
-    $ uv run lup-devtools report
+    $ uv run lup-devtools dev report
     $ uv run lup-devtools version
     $ uv run lup-devtools sync status
-    $ uv run lup-devtools usage claude --no-detail
+    $ uv run lup-devtools dev usage claude --no-detail
 """
 
 from pathlib import Path
@@ -41,22 +41,24 @@ import lup_template.agent.prompts as prompts
 from lup.providers.claude.usage.reader import claude_usage_entry
 from lup.providers.codex.usage.reader import codex_usage_entry
 from lup.devtools.dev import conflicts
-from lup.devtools.dev.commands import write_command_reference
+from lup.devtools.dev.commands import CommandSurface, write_command_reference
 from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
 from lup.devtools.roster import DevtoolsDeclarations
+from lup_template.kinds import EDGE_KINDS, NODE_KINDS, PLACEMENT
+from lup_template.writeups import WRITEUPS
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
-from lup_template.agent.config import engine_for_model, settings
+from lup_template.agent.config import engine_for_settings, settings
 from lup_template.devtools.agent import app as agent_app
 import lup_template.devtools.dev.app as dev
-from lup_template.devtools.harness.composition import (
+from lup_template.harness.composition import (
     REPOSITORY_WIDE,
     TARGETS,
     profile_directory,
 )
 from lup_template.devtools.setup import INTEGRATIONS
-from lup_template.devtools.subapps import APPLICATION_SPECS, SELECTION
+from lup_template.harness.content.catalog import APPLICATION_SPECS, SUBAPP_SELECTION
 
 
 def assembled_prompt() -> AgentPrompt:
@@ -84,10 +86,21 @@ def command_reference(root: Path | None = None, *, check: bool = False) -> Path:
     return write_command_reference(app, root, check=check)
 
 
+def command_surface() -> CommandSurface:
+    """Every command this CLI serves, for the gates that judge a written one.
+
+    Reads ``app`` when it runs, for the reason the reference writer does: the
+    declarations below are built before the sub-apps are mounted, so a surface
+    taken as a value here would be taken off half a CLI.
+    """
+    return CommandSurface.of(app)
+
+
 DECLARATIONS = DevtoolsDeclarations(
     dev=dev.declared,
     targets=TARGETS,
     repository_writers=[*REPOSITORY_WIDE, command_reference],
+    command_surface=command_surface,
     prompt=assembled_prompt,
     relocate_roots=[
         Path("src"),
@@ -103,10 +116,19 @@ DECLARATIONS = DevtoolsDeclarations(
     ],
     integrations=INTEGRATIONS,
     usage_entries=[claude_usage_entry(), codex_usage_entry()],
-    model=ConfiguredModel(
-        name=settings.model, adapter=engine_for_model(settings.model)
+    model=(
+        ConfiguredModel(name=settings.model, adapter=engine_for_settings())
+        if settings.model is not None
+        else None
     ),
     profiles=profile_directory(),
+    # What this repository records and where, declared once in
+    # `lup_template.kinds` because the tool group a session records through
+    # reads the same list and opens the same log.
+    node_classes=NODE_KINDS,
+    edge_classes=EDGE_KINDS,
+    writeups=WRITEUPS,
+    ledger=PLACEMENT,
 )
 """What this repository tells the library's roster about itself.
 
@@ -137,8 +159,8 @@ app = typer.Typer(
 
 ROSTER = {
     entry.spec.name: entry
-    for entry in SELECTION.over(
-        DECLARATIONS.roster(SELECTION.retired),
+    for entry in SUBAPP_SELECTION.over(
+        DECLARATIONS.roster(SUBAPP_SELECTION.retired),
         [
             SubApp(spec=spec, app=APPLICATION_APPS[spec.name])
             for spec in APPLICATION_SPECS

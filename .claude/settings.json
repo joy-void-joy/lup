@@ -1,5 +1,5 @@
 {
-  "coauthorship": false,
+  "coauthorship": true,
   "enabledPlugins": {
     "agent-sdk-dev@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
@@ -9,7 +9,8 @@
   },
   "env": {
     "CLAUDE_CODE_THISTLE_GREBE": "default",
-    "ENABLE_TOOL_SEARCH": "false"
+    "ENABLE_TOOL_SEARCH": "true",
+    "MCP_TIMEOUT": "60000"
   },
   "extraKnownMarketplaces": {
     "lup-template-repository": {
@@ -30,10 +31,11 @@
       "ExitWorktree",
       "Read(./.claude/settings.json.local*)",
       "Read(./sync.json.local)",
-      "Read(./downstream.json.local)",
       "mcp__plugin_lup_notes",
       "mcp__plugin_lup_sandbox",
-      "mcp__plugin_lup_codeintel"
+      "mcp__plugin_lup_codeintel",
+      "mcp__plugin_lup_coordination",
+      "mcp__plugin_lup_ledger"
     ],
     "deny": [
       "Read(./**/.env*.local)",
@@ -65,10 +67,11 @@
       "git *",
       "gh *",
       "uv run lup-devtools harness *",
-      "uv run lup-devtools dev worktree *",
-      "uv run lup-devtools dev pr *",
-      "uv run lup-devtools dev conflict *",
-      "uv run lup-devtools dev git-hooks *",
+      "uv run lup-devtools resolve *",
+      "uv run lup-devtools git worktree *",
+      "uv run lup-devtools git pr *",
+      "uv run lup-devtools git conflict *",
+      "uv run lup-devtools git hooks *",
       "uv run lup-devtools dev undo *"
     ],
     "filesystem": {
@@ -84,6 +87,9 @@
         "docs.claude.com",
         "code.claude.com",
         "platform.claude.com",
+        "docs.anthropic.com",
+        "claude.com",
+        "www.claude.com",
         "claude.ai",
         "ai.pydantic.dev",
         "learn.chatgpt.com",

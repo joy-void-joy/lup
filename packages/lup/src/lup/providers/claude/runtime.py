@@ -177,6 +177,17 @@ class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
         ),
     )
     setting_sources: list[ClaudeSettingSource] | None = None
+    cli_path: Path | None = Field(
+        default=None,
+        description=(
+            "The program this session's CLI is started as, where the default "
+            "is whichever `claude` the SDK finds on PATH. Named so a session "
+            "can be opened through a wrapper that execs the real CLI inside a "
+            "container: the SDK spawns whatever is here and passes it the "
+            "same arguments, so a worker gets its own boundary without this "
+            "adapter learning anything about containers"
+        ),
+    )
     extra_args: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
 
 
@@ -965,6 +976,7 @@ def build_claude_options(
     import claude_agent_sdk as claude
     from claude_agent_sdk import types as claude_types
     from lup.providers.claude.hooks import lup_hooks_to_claude
+    from lup.providers.claude.subagents import model_alias, subagent_tools
 
     servers = dict(config.tool_servers)
     allowed = list(config.allowed_tools)
@@ -983,7 +995,8 @@ def build_claude_options(
         subprocess shape.
         """
         match server:
-            case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam
+            # lup: ignore[own-model-dispatch] — SDK projection belongs in this adapter, not the neutral entry
+            case LupMcpServerConfig():
                 return claude_types.McpSdkServerConfig(
                     type="sdk", name=server.name, instance=server.server
                 )
@@ -1025,8 +1038,9 @@ def build_claude_options(
             spec.name: claude_types.AgentDefinition(
                 description=spec.description,
                 prompt=spec.prompt,
-                tools=spec.tools,
-                model=spec.model,
+                tools=subagent_tools(spec),
+                model=model_alias(spec.model),
+                maxTurns=spec.max_turns,
             )
             for spec in config.subagents
         }
@@ -1054,6 +1068,7 @@ def build_claude_options(
         output_format=None,
         max_buffer_size=config.max_buffer_size,
         setting_sources=config.setting_sources,
+        cli_path=config.cli_path,
         extra_args=dict(config.extra_args),
     )
 

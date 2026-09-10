@@ -36,11 +36,22 @@ from host import (
     foreign_repository,
     granted_allowances,
     managed_script_roots,
+    outside_this_project,
     patch_write_targets,
+    peer_addresses,
+    peer_listing,
+    claim_holders,
+    close_claim_window,
+    declared_identity,
+    open_claim_window,
+    record_claims,
     recoverable_write_targets,
+    resolved_write_targets,
+    rewritten_text,
     record_deferral,
     record_question,
     committed_text,
+    repository_worktrees,
     resolved_refutations,
     tracked_write_targets,
     undo_snapshot,
@@ -55,15 +66,25 @@ from kernel.edit import (
 )
 from kernel.effects import STRENGTH
 from kernel.fetch import decide_fetch
+from kernel.peers import (
+    decide_foreign_claim,
+    decide_peer_listing,
+    decide_peer_send,
+    peer_listing_context,
+    settled_with_claim,
+)
 from kernel.lex import (
     authored_writes,
     python_script_targets,
     shell_flag_write_targets,
     shell_patch_operands,
     shell_path_verb_targets,
+    shell_sed_rewrites,
     shell_write_targets,
 )
+from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
 from kernel.words import INTERPRETERS
+from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
 from kernel.tools import decide_tool
 from policy_data import (
@@ -74,10 +95,12 @@ from policy_data import (
     RESOLUTION_COMMAND,
     DENIED_FETCH_SCOPES,
     EDIT_RULES,
+    IMPORT_BOUNDARIES,
     KNOWN_ALLOWANCES,
     MAXIMUM_ADDED_LINES,
     PATH_ROLES,
     PATH_RULES,
+    PEER_POLICY,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
@@ -168,9 +191,23 @@ def bash_decision(
         ),
         directory_targets=directory_write_targets(acted_on, cwd),
         empty_directories=empty_directory_targets(acted_on, cwd),
+        repository_worktrees=repository_worktrees(cwd),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
+        # The edit gates, over the files a rewrite in place would replace.
+        # An in-place rewrite is an edit spelled as a command, so it meets the
+        # rules an edit meets rather than a recoverability grant that answers
+        # whether it could be undone -- a different question, and not the one
+        # the anti-pattern table, the review-note gate and the size gate ask.
+        antipattern_rows=ANTI_PATTERN_ROWS,
+        edit_rules=EDIT_RULES,
+        import_boundaries=IMPORT_BOUNDARIES,
+        acceptance_guard=ACCEPTANCE_GUARD,
+        maximum_added_lines=MAXIMUM_ADDED_LINES,
+        autonomous=autonomous,
+        allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
+        rewritten_documents=rewritten_files(command, cwd or Path.cwd()),
         interactive=interactive,
         # A reviewed worker is non-interactive and not therefore alone: it
         # holds a mailbox reaching the human supervising its run, and a
@@ -203,8 +240,48 @@ def bash_decision(
         # Resolved against what this launch mounted writable, so a write into a
         # worktree cut after the container started reaches a reviewer instead of
         # the writable base no overlay covers.
+        #
+        # The session scratchpad is taken out first, because the lease is not
+        # the question there. A lease enumerates what the launch mounted from
+        # the host, so anything else reads as uncovered -- and the scratchpad
+        # is uncovered in the direction that makes it safe: the harness's own
+        # root, container-private where a container is running, holding
+        # nothing any capture was meant to protect. The role layer already
+        # had this right, and an edit to the same path allows; only the
+        # measured layer disagreed, so a write there asked while a write
+        # beside it in the checkout did not.
+        #
+        # Filtered here rather than inside `unleased_write_targets`, which is
+        # compiled into a bare script that may not reach the kernel where
+        # `is_session_scratch_target` says what a scratchpad path is.
+        #
+        # The temporary root around it is exempt too, and is not filtered
+        # here, because that one is only safe where the launch is a measured
+        # container -- a fact this site does not hold and the settlement row
+        # does. So the two sit apart by what each needs to know: this
+        # scratchpad is the harness's at every placement, and `/tmp` is
+        # nobody's until something confines it.
         unleased_targets=unleased_write_targets(
-            [*shell_write_targets(command), *acted_on], boundary, cwd
+            [
+                target
+                for target in [*shell_write_targets(command), *acted_on]
+                if not is_session_scratch_target(target)
+            ],
+            boundary,
+            cwd,
+        ),
+        # Where a target really lands, for the grants above that read a role
+        # off its spelling. The host resolves the links because the kernel
+        # reads no filesystem, and the kernel says whether the landing changes
+        # what the path is, because the host holds no role table.
+        displaced_targets=displaced_targets(
+            [
+                DisplacedTargetRow(path=path, lands=lands)
+                for path, lands in resolved_write_targets(
+                    [*shell_write_targets(command), *acted_on, *flagged], cwd
+                ).items()
+            ],
+            PATH_ROLES,
         ),
         recovered=bool(reference),
     )
@@ -243,18 +320,17 @@ def bash_decision(
     # it is not written down anywhere.
     if verdict.effect == "defer":
         record_deferral(cwd, command, verdict.reason, verdict.checkpoint != "nothing")
-    pointed = undo_point(verdict, reference)
-    if pointed.effect != "allow":
-        return pointed
+    if verdict.effect != "allow":
+        return verdict
     nudge = script_run_nudge(python_script_targets(command, INTERPRETERS), cwd)
     if not nudge:
-        return pointed
+        return verdict
     return KernelDecision(
-        pointed.effect,
-        pointed.reason + nudge,
-        pointed.sandbox,
-        pointed.escalated,
-        checkpoint=pointed.checkpoint,
+        verdict.effect,
+        verdict.reason + nudge,
+        verdict.sandbox,
+        verdict.escalated,
+        checkpoint=verdict.checkpoint,
     )
 
 
@@ -269,35 +345,20 @@ def unconfined_by_declaration(command: str) -> bool:
     return sandbox_excluded(command, SANDBOX_EXCLUDED_COMMANDS)
 
 
-def undo_point(verdict: KernelDecision, reference: str) -> KernelDecision:
-    """Say the tree was snapshotted, on the one verdict that changes for it.
+def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
+    """Judge one outbound fetch against the declared scopes.
 
-    The snapshot itself is taken above, before the verdict, because the
-    verdict reads it. What is left here is what the human is told.
-
-    On an approval question, which is the one moment the information changes
-    an answer: somebody deciding whether to permit something destructive is
-    weighing exactly whether it can be undone. On an allowed command the
-    snapshot is silent, because a line appended to every mutating command is
-    one nobody reads by the third time — and ``dev undo`` is where a snapshot
-    is looked for anyway. On a deferral the reason reaches no human at all;
-    it reaches the record, which is where the relaxation is reviewed.
+    The profile's answer for an origin no scope names is read from the same
+    ledger the shell family reads it from, so one declaration answers on both
+    surfaces. Read here rather than passed, because this entry point is what
+    a dispatcher calls and a dispatcher holds nothing but the call.
     """
-    if not reference or verdict.effect != "ask":
-        return verdict
-    return KernelDecision(
-        verdict.effect,
-        f"{verdict.reason} — the tree was snapshotted first; "
-        f"`lup-devtools dev undo` lists it as {reference}",
-        verdict.sandbox,
-        verdict.escalated,
-        checkpoint=verdict.checkpoint,
+    return decide_fetch(
+        url,
+        ALLOWED_FETCH_SCOPES,
+        DENIED_FETCH_SCOPES,
+        "defer" if defers_unjudged(measured_boundary(root)) else "ask",
     )
-
-
-def fetch_decision(url: str) -> KernelDecision:
-    """Judge one outbound fetch against the declared scopes."""
-    return decide_fetch(url, ALLOWED_FETCH_SCOPES, DENIED_FETCH_SCOPES)
 
 
 def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:
@@ -308,6 +369,55 @@ def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None
     what it approved — an unmentioned tool is still unclassified.
     """
     return decide_tool(name, values, REFUSED_TOOLS)
+
+
+def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
+    """Judge one native send against who this repository's roster holds.
+
+    The kernel reads no filesystem, so the roster is folded here and passed as
+    the spellings it currently answers to. Every string the call carries is
+    offered rather than a named field, because which field a runtime spells a
+    recipient in is that runtime's business and this half answers for all of
+    them.
+    """
+    if PEER_POLICY is None:
+        return decide_peer_send(values, [], None)
+    return decide_peer_send(
+        values,
+        peer_addresses(
+            cwd,
+            PEER_POLICY["store"],
+            PEER_POLICY["roster_file"],
+            PEER_POLICY["names_file"],
+        ),
+        PEER_POLICY,
+    )
+
+
+def peer_listing_decision() -> KernelDecision:
+    """Judge one native listing of who this session can reach, which defers."""
+    return decide_peer_listing(PEER_POLICY)
+
+
+def peer_listing_attachment(cwd: Path | None) -> str:
+    """This repository's roster, as a listing carries it, or nothing to carry.
+
+    Beside the verdict rather than inside it. A deferral says the runtime
+    decides this call, and what the roster has to add is context a reader
+    acts on rather than a condition of the call happening — folding it into
+    a reason would make it visible only where something refused.
+    """
+    if PEER_POLICY is None:
+        return ""
+    return peer_listing_context(
+        peer_listing(
+            cwd,
+            PEER_POLICY["store"],
+            PEER_POLICY["roster_file"],
+            PEER_POLICY["names_file"],
+        ),
+        PEER_POLICY,
+    )
 
 
 def placed_document(path_text: str, after: str) -> str:
@@ -329,6 +439,82 @@ def placed_edit_text(path_text: str, after: str, start: int, end: int) -> str | 
     return relocated_edit_text(after, start, end)
 
 
+def resolution_of(
+    reply: dict[str, dict[str, list[int]]] | None,
+) -> ResolutionRow | None:
+    """The kernel's row for what a checker answered, or None where none did.
+
+    The host half returns the checker's two verdict maps as the primitives it
+    read off the wire, because it may name no kernel type; this is where they
+    become the row the kernel reads, and the only place the two are joined.
+    """
+    if reply is None:
+        return None
+    return ResolutionRow(refuted=reply["refuted"], unresolved=reply["unresolved"])
+
+
+def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
+    """What every in-place rewrite in this command would leave behind.
+
+    The kernel names which files a screened rewrite would replace and this
+    produces each one, so the classifier judges a rewrite by the document it
+    makes rather than by whether the file could be restored afterwards. The
+    two questions are different, and only this one is the question the edit
+    gates ask.
+
+    A file that could not be produced yields no row, and the classifier turns
+    that absence into a question. So a rewrite is never granted on a reading
+    that failed — which is what makes it safe for a composition to reach this
+    late, or not at all.
+
+    Each row is deduplicated by target, because one file named twice is one
+    file, and the second reading would run the script over the same bytes to
+    reach the same answer.
+    """
+    rows: list[RewrittenFileRow] = []
+    for rewrite in shell_sed_rewrites(command):
+        for target in rewrite["targets"]:
+            if any(row["target"] == target for row in rows):
+                continue
+            after = rewritten_text(rewrite["scripts"], target, cwd)
+            if after is None:
+                continue
+            try:
+                before = (cwd / target).read_text()
+            except (OSError, ValueError, UnicodeDecodeError):
+                continue
+            path_text = worktree_path(target)
+            suffix = Path(path_text).suffix.lower()
+            antipatterns = (
+                ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+            )
+            foreign = foreign_repository(target, cwd)
+            rows.append(
+                RewrittenFileRow(
+                    target=target,
+                    path=path_text,
+                    before=before,
+                    after=after,
+                    foreign=foreign,
+                    outside_project=outside_this_project(target, cwd),
+                    # The same conditional an edit pays: a checker resolves
+                    # another repository's imports against another
+                    # repository's environment, and starting one to answer a
+                    # rule that will not be applied costs a language server's
+                    # second for nothing.
+                    resolution=resolution_of(
+                        resolved_refutations(path_text, after, RESOLUTION_COMMAND)
+                        if not foreign
+                        and awaits_resolution(
+                            before, after, antipatterns, suffix in (".py", ".pyi")
+                        )
+                        else None
+                    ),
+                )
+            )
+    return rows
+
+
 def edit_decision(
     path_text: str,
     before: str | None,
@@ -344,6 +530,12 @@ def edit_decision(
     directory the runtime started in, because every repo-relative rule matches
     on that answer and a session may be launched anywhere.
 
+    Two facts about where the file sits are read here rather than in the
+    kernel, which sees a path and no filesystem. Another repository's file
+    answers to that repository's conventions and gets the referral; a file in
+    no repository of ours is not this project's code either, which is all the
+    gates about this project's own review notes need to decline it.
+
     The gates this lease holds are read here, per call, rather than resolved
     when the session started: a grant is answered by a human while the session
     that asked for it is still running, and one resolved at launch could not
@@ -357,6 +549,7 @@ def edit_decision(
     edit and one that costs a second on the edits that need it.
     """
     outside_this_repository = foreign_repository(path_text, cwd)
+    beyond_this_project = outside_this_project(path_text, cwd)
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
     rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
@@ -364,7 +557,7 @@ def edit_decision(
     # has nothing to say about. It would resolve another repository's imports
     # against another repository's environment to answer a rule that will not
     # be applied, and pay a language server's second for the privilege.
-    refuted = (
+    resolution = resolution_of(
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
         if not outside_this_repository
         and after is not None
@@ -384,11 +577,27 @@ def edit_decision(
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
         python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
-        refuted=refuted,
+        resolution=resolution,
         suffix=suffix,
         operation=operation,
         edit_rules=EDIT_RULES,
+        import_boundaries=IMPORT_BOUNDARIES,
         foreign=outside_this_repository,
+        outside_project=beyond_this_project,
+        displaced=next(
+            iter(
+                displaced_targets(
+                    [
+                        DisplacedTargetRow(path=path, lands=lands)
+                        for path, lands in resolved_write_targets(
+                            [path_text], cwd
+                        ).items()
+                    ],
+                    PATH_ROLES,
+                )
+            ),
+            None,
+        ),
     )
 
 
@@ -516,3 +725,96 @@ def written_review(command: str, cwd: Path) -> list[str]:
         if verdict.effect != "allow":
             findings.append(f"{target}: {verdict.reason}")
     return findings
+
+
+def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision | None:
+    """Whether a live session other than this one is already in the named file.
+
+    The roster and the claim record are both live, so both are folded here and
+    handed over as the names they resolve to — the kernel reads no filesystem
+    and decides from what it is given.
+    """
+    if PEER_POLICY is None:
+        return None
+    return decide_foreign_claim(
+        path_text,
+        claim_holders(
+            cwd,
+            PEER_POLICY["store"],
+            PEER_POLICY["roster_file"],
+            PEER_POLICY["names_file"],
+            PEER_POLICY["touches_file"],
+            path_text,
+            declared_identity(PEER_POLICY["member_env"]),
+        ),
+        PEER_POLICY,
+    )
+
+
+def claim_window_opened(cwd: Path | None) -> None:
+    """Snapshot the tree before a command whose writes no input names.
+
+    Only a command needs this. Every other writing call says which file it is
+    about, and a call that names its own target is attributed from the target
+    rather than from a comparison.
+    """
+    if PEER_POLICY is None:
+        return
+    open_claim_window(
+        cwd,
+        PEER_POLICY["store"],
+        PEER_POLICY["windows_dir"],
+        declared_identity(PEER_POLICY["member_env"]),
+    )
+
+
+def claim_window_closed(cwd: Path | None) -> None:
+    """Attribute what a command changed, contested where nothing could tell."""
+    if PEER_POLICY is None:
+        return
+    mine = declared_identity(PEER_POLICY["member_env"])
+    closed = close_claim_window(
+        cwd, PEER_POLICY["store"], PEER_POLICY["windows_dir"], mine
+    )
+    record_claims(
+        cwd,
+        PEER_POLICY["store"],
+        PEER_POLICY["roster_file"],
+        PEER_POLICY["touches_file"],
+        mine,
+        closed["paths"],
+        closed["rivals"],
+    )
+
+
+def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
+    """Attribute a change to the exact file the call named.
+
+    The tier that needs no comparison and admits no contest: the call said
+    which file, so the claim it leaves is the one record another session can
+    act on without qualification, and it settles a path an earlier comparison
+    could only guess at.
+    """
+    if PEER_POLICY is None or not path_text:
+        return
+    record_claims(
+        cwd,
+        PEER_POLICY["store"],
+        PEER_POLICY["roster_file"],
+        PEER_POLICY["touches_file"],
+        declared_identity(PEER_POLICY["member_env"]),
+        [str(Path(path_text).resolve())],
+        [],
+    )
+
+
+def edit_claim_decision(
+    verdict: KernelDecision, path_text: str, cwd: Path | None
+) -> KernelDecision:
+    """One edit's own verdict, settled together with any claim over its path.
+
+    The join lives here rather than in either runtime, so both reach the same
+    answer about the same file: what the content gates decided, and whether
+    somebody else is already in it, are two questions and one approval.
+    """
+    return settled_with_claim(verdict, foreign_claim_decision(path_text, cwd))

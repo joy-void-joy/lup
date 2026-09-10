@@ -12,7 +12,7 @@ from pathlib import Path
 from lup.providers.harness import claude_prompt_renderer
 from lup.harness.codescan.markers import NoteKind
 from lup.devtools.dev.comments import FoundComment
-from lup.devtools.harness.content.skills.report import SKILL
+from lup.harness.content.skills.report import SKILL
 from lup.devtools.report.build import authored_headings, note_items
 from lup.devtools.report.models import (
     DEFAULT_SCRATCH_ROOT,

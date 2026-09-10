@@ -21,6 +21,8 @@ cannot be gets a refusal naming what was missing, and the operator decides.
 import hashlib
 import json
 import os
+import shlex
+import stat
 import time
 from collections import deque
 from contextlib import nullcontext
@@ -35,14 +37,28 @@ from rich.live import Live
 from rich.text import Text
 
 from lup.devtools.harness.preflight import LaunchSentinels
-from lup.harness.credential import committer, remote_rewrites
+from lup.harness.credential import committer, fleet_rewrites
 from lup.harness.egress import PROXY_LABEL, SessionEgress
-from lup.harness.image import ContainerEngine, Image, detected_client
+from lup.harness.image import (
+    ContainerEngine,
+    Image,
+    SessionStreams,
+    detected_client,
+)
 from lup.harness.notice import Banner, Notice
+from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.providers.login import ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
-from lup.sandbox.rail import Lease, lease_for, repository_layout
+from lup.sandbox.rail import (
+    AccessibleRoot,
+    Lease,
+    demoted,
+    fleet_lease,
+    hold_pruning_across,
+    repository_layout,
+    worker_lease,
+)
 
 
 def image_tag(dockerfile: str) -> str:
@@ -102,6 +118,30 @@ def state_volume_name(root: Path) -> str:
     claiming to have made all along.
     """
     return f"lup-cfg-{repository_layout(root).name()}"
+
+
+def environment_directory(root: Path, cache: Path | None = None) -> Path:
+    """Where one project root's container-side environment lives on the host.
+
+    Per root rather than per repository, unlike the config home above, and for
+    the opposite reason: that one holds decisions worth sharing across
+    worktrees, and this one holds an environment that *is* the checkout it was
+    synced from -- a venv records absolute interpreter paths and the project
+    installed into it, so two worktrees sharing one is the collision again at
+    a smaller scale.
+
+    Named by the directory and a digest of its whole path, because the
+    readable half is not unique: the documented workflow makes worktrees named
+    for their branch, and two repositories both holding a `dev` would land on
+    one directory. The digest settles that, and the name in front is what
+    makes a listing legible to whoever has to clear one out.
+
+    Outside every checkout, so nothing here is reachable from a session's own
+    tree or visible to the host's git.
+    """
+    held = cache or Path.home() / ".cache" / "lup" / "environments"
+    digest = hashlib.sha256(str(root).encode()).hexdigest()[:12]
+    return held / f"{root.name}-{digest}"
 
 
 def superseded_volume_name(root: Path) -> str:
@@ -602,11 +642,8 @@ def start_egress(
     ):
         Notice(
             text=(
-                f"{network} was created under an older declaration of this "
-                "boundary — a network keeps the posture it was created with, "
-                "so its resolver, its isolation and everything a container "
-                "inherits by joining it are that older answer. Rebuilding it "
-                "and the proxy on it."
+                f"Rebuilding {network} and its proxy because the network "
+                "configuration changed."
             ),
             urgency="progress",
         ).say()
@@ -630,14 +667,10 @@ def start_egress(
             client(*egress.connect_arguments(project))
         except sh.ErrorReturnCode as error:
             raise typer.BadParameter(
-                f"{egress.proxy_name(project)} is running but is not on "
-                f"{egress.network_name(project)}, and joining it failed: "
-                f"{error.stderr.decode('utf-8', 'replace').strip()}. A session "
-                "opened now would have no address to send to — the proxy is "
-                "reached at the address it holds on that network, and it "
-                "holds none. Remove the pair with `harness egress --down` and "
-                "let the next launch rebuild them, or open the session with "
-                "--unsandboxed."
+                f"Could not attach proxy {egress.proxy_name(project)} to network "
+                f"{egress.network_name(project)}. Launch stopped.\n"
+                f"Error: {error.stderr.decode('utf-8', 'replace').strip()}\n"
+                "Inspect `uv run lup-devtools harness egress` before retrying."
             ) from error
         return proxy_address(egress, project, engine)
     # A proxy that is here and not being kept is one this has to account for
@@ -662,12 +695,11 @@ def start_egress(
         client(*egress.connect_arguments(project))
     except sh.ErrorReturnCode as error:
         raise typer.BadParameter(
-            f"Could not start {egress.proxy_name(project)}, so this session "
-            "would open on an internal network with no way out of it. The "
-            "policy it was given is at "
-            f"{configuration}; open the session with --unsandboxed, or "
-            "declare `mode='bridge'` on the image's egress to run without "
-            "an egress boundary."
+            f"Could not start or connect proxy {egress.proxy_name(project)}. "
+            "Launch stopped.\n"
+            f"Error: {error.stderr.decode('utf-8', 'replace').strip()}\n"
+            f"Proxy configuration: {configuration}\n"
+            "Inspect `uv run lup-devtools harness egress` before retrying."
         ) from error
     settled(egress, project, engine, configuration)
     return proxy_address(egress, project, engine)
@@ -701,10 +733,9 @@ def settled(
         return
     spoken = proxy_log(name, engine)
     raise typer.BadParameter(
-        f"{name} started and then stopped within {grace:g}s, so this session "
-        "would open on an internal network with nothing bridged out of it. "
-        f"The configuration it was given is at {configuration}. What it said "
-        "before it stopped:\n" + (spoken or "nothing at all")
+        f"Proxy {name} exited within {grace:g}s of starting. Launch stopped.\n"
+        f"Check its configuration: {configuration}\n"
+        "Proxy log:\n" + (spoken or "No log output was available.")
     )
 
 
@@ -930,7 +961,7 @@ class EgressState(BaseModel, frozen=True):
             Notice(text=f"network {self.network}", urgency="detail"),
             Notice(
                 text=f"exists: {self.network_exists}, dns: {self.dns_enabled}",
-                urgency="ready" if self.dns_enabled else "refusal",
+                urgency="ready" if self.network_exists else "refusal",
                 indent=1,
             ),
             Notice(text=f"proxy {self.proxy}", urgency="detail"),
@@ -975,20 +1006,17 @@ class EgressState(BaseModel, frozen=True):
             *(
                 [
                     Notice(
-                        text=(
-                            "default route: "
-                            + (self.route or "none — it reaches only its own networks")
-                        ),
+                        text=("default route: " + (self.route or "none")),
                         urgency="ready" if self.route else "refusal",
                         indent=1,
                     ),
                     Notice(
-                        text=f"resolving through: {self.resolver or 'nothing it names'}",
+                        text=f"DNS resolvers: {self.resolver or 'none reported'}",
                         urgency="detail",
                         indent=1,
                     ),
                     Notice(
-                        text=f"a public name resolves to: {self.upstream}",
+                        text=f"public DNS lookup: {self.upstream}",
                         urgency="ready" if self.reached else "refusal",
                         indent=1,
                     ),
@@ -1016,7 +1044,7 @@ class EgressState(BaseModel, frozen=True):
                 else []
             ),
             *(
-                [Notice(text="what it last said:", urgency="detail", indent=1)]
+                [Notice(text="proxy log:", urgency="detail", indent=1)]
                 if self.log
                 else []
             ),
@@ -1041,29 +1069,15 @@ class EgressState(BaseModel, frozen=True):
         return bool(self.route)
 
     def shadowed(self) -> list[Notice]:
-        """Name the one fault the facts above single out, when they do.
-
-        A route out, a resolver list holding a working server, names of its
-        own network resolving, and a public name not: that combination has
-        one explanation. glibc takes the first authoritative answer it gets
-        and stops, so a resolver that says NXDOMAIN for everything outside
-        its own network hides every server listed after it — including the
-        one that would have answered.
-
-        Said only when every clause holds. A verdict that guessed from two of
-        them would be the sixth theory this boundary has produced by reading,
-        and the previous five were all refuted by measuring.
-        """
+        """Suggest checking resolver responses when only internal DNS succeeds."""
         if not (self.route and self.answers_locally and self.resolver):
             return []
         return [
             Notice(
                 text=(
-                    "It has a route out and a working nameserver in its list, "
-                    "and it resolves its own network's names — so the chain is "
-                    "answering and stopping early. The first resolver refuses "
-                    "public names authoritatively, which hides every server "
-                    "after it."
+                    "The proxy resolves internal names but its public DNS "
+                    "lookup failed. Test the listed nameservers individually "
+                    "to identify which one cannot resolve the public name."
                 ),
                 urgency="detail",
                 indent=1,
@@ -1082,8 +1096,8 @@ class EgressState(BaseModel, frozen=True):
         """
         recovery = Notice(
             text=(
-                "`harness egress --down` removes both pieces so the next "
-                "launch rebuilds them; `--unsandboxed` opens on the host."
+                "To recreate the proxy and network, run "
+                "`uv run lup-devtools harness egress --down`, then rerun the launcher."
             ),
             urgency="detail",
             indent=1,
@@ -1092,10 +1106,8 @@ class EgressState(BaseModel, frozen=True):
             return [
                 Notice(
                     text=(
-                        "A session has no address for the proxy on this "
-                        "network, so every request in it fails before it is "
-                        "sent — which the runtime reports as the operator's "
-                        "own internet or DNS being down."
+                        f"No running proxy with an address was found on {self.network}. "
+                        "Check the network and proxy status above."
                     ),
                     urgency="refusal",
                 ),
@@ -1105,11 +1117,8 @@ class EgressState(BaseModel, frozen=True):
             return [
                 Notice(
                     text=(
-                        f"A session can reach the proxy at {self.address}, "
-                        "and the proxy cannot reach the world — so requests "
-                        "arrive and are "
-                        "answered 503 rather than refused. The boundary is "
-                        "standing; what is behind it is not."
+                        f"Proxy {self.proxy} has address {self.address}, "
+                        "but its public DNS lookup failed."
                     ),
                     urgency="refusal",
                 ),
@@ -1118,14 +1127,11 @@ class EgressState(BaseModel, frozen=True):
                     or [
                         Notice(
                             text=(
-                                "It holds no default route, so it reaches only "
-                                "its own networks — which is why it resolves "
-                                "nothing: every nameserver it lists is "
-                                "unreachable."
+                                "The proxy has no default route. Check its "
+                                "external network attachment."
                                 if not self.routes()
-                                else "That is the proxy's own resolution or "
-                                "its route out, not the session's network. "
-                                "Its log above and its networks say which."
+                                else "Check the proxy's DNS error, resolver "
+                                "settings and log above."
                             ),
                             urgency="detail",
                             indent=1,
@@ -1136,8 +1142,7 @@ class EgressState(BaseModel, frozen=True):
         return [
             Notice(
                 text=(
-                    f"A session reaches the proxy at {self.address} and is "
-                    "carried out through it."
+                    f"Proxy address: {self.address}; its public DNS lookup succeeded."
                 ),
                 urgency="ready",
             )
@@ -1298,7 +1303,7 @@ def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
     client = detected_client()
     if client is None:
         Notice(
-            text="No container client answered, so nothing of this is running.",
+            text="No working Docker or Podman client was found. Network status is unknown.",
             urgency="warning",
         ).say()
         return
@@ -1404,7 +1409,7 @@ def build_image(
         str(scratch),
     ]
     Notice(text=f"Building {tag} from {dockerfile}", urgency="progress").say()
-    Notice(text=f"Its output: {log}", urgency="artifact").say()
+    Notice(text=f"Build log: {log}", urgency="artifact").say()
     console = Console()
     recent: deque[str] = deque(maxlen=shown)
     with log.open("w", encoding="utf-8") as handle:
@@ -1433,10 +1438,107 @@ def build_image(
             for line in recent:
                 typer.echo(line)
             raise typer.BadParameter(
-                f"Could not build {tag} from {dockerfile}. The declaration is "
-                f"in the project's Image; {log} holds every line of the build, "
-                "and its last ones say which layer failed."
+                f"Image build failed: {tag} (exit code {error.exit_code}).\n"
+                f"Dockerfile: {dockerfile}\nFull build log: {log}\n"
+                "Fix the error in the build log, then rerun the launcher."
             ) from error
+
+
+def fleet_notice(accessible: list[AccessibleRoot]) -> list[Notice]:
+    """What this session can reach beyond its own checkout, and in which mode.
+
+    Said because a mount nobody announced is one that gets debugged rather
+    than used: an operator who does not know another project is open will
+    work around its absence, and one who does not know it is read-only reads
+    the refusal as a broken checkout.
+
+    Whole paths rather than the registry's short names. The name is what the
+    symlink under `refs/` is called, and the thing a reader has to be able to
+    check is which directory on their machine this session can now write.
+    """
+    if not accessible:
+        return []
+    return [
+        Notice(
+            text="Reachable projects: "
+            + ", ".join(
+                f"{item.path} {'read-write' if item.writable else 'read-only'}"
+                for item in sorted(accessible, key=lambda item: item.path)
+            ),
+            urgency="boundary",
+        )
+    ]
+
+
+def pruning_notice(refused: list[Path]) -> list[Notice]:
+    """What to say when a repository would not take the prune guard.
+
+    Not a refusal to launch. The mounts are the guard that matters and they
+    stand either way; this is the one behind them, and it covers the case
+    where they are subtly wrong. Silence would leave a session one `git gc`
+    away from removing a worktree's administrative state in a repository
+    nobody here owns, with nothing having said so.
+    """
+    if not refused:
+        return []
+    return [
+        Notice(
+            text=", ".join(str(path) for path in refused)
+            + " would not take `gc.worktreePruneExpire`, so a `git gc` in this "
+            "session could remove the administrative state of a worktree it "
+            "cannot see. The mounts still hold; this is the guard behind them.",
+            urgency="boundary",
+        )
+    ]
+
+
+def held_environments(
+    root: Path,
+    accessible: list[AccessibleRoot],
+    name: str,
+    cache: Path | None = None,
+) -> dict[Path, Path]:
+    """A host directory per project root the session may sync, created here.
+
+    The session's own checkout and every root declared writable. A read-only
+    root is left out deliberately rather than skipped for tidiness: `uv sync`
+    writes, so a root nobody may write is one no environment can be built in,
+    and binding a directory inside it would advertise a place to sync that
+    refuses the sync when it is tried.
+
+    Created on the host, which is the whole reason the launcher does this
+    rather than the declaration: a bind mount arrives owned by whoever owns
+    its source, so making these as the operator is what hands the session a
+    directory its own uid can write. A source that does not exist is one the
+    engine refuses the entire container for, so this runs before any argv is
+    assembled rather than lazily beside it.
+
+    The mount *point* is made here too, at ``name`` inside each root, and that
+    is the half worth stating. An engine asked to bind onto a path that is not
+    there creates it under its own mapping: measured on rootless podman 6.1.0
+    with ``--userns=keep-id``, the directory left in the checkout afterwards
+    belonged to uid 100000 -- `nobody` to the operator, who could then neither
+    write it nor sync into it, and whose own `uv` failed on `Permission
+    denied` for a path in their own tree. Made by the launcher first, it
+    belongs to the operator and stays writable. It outlives the container
+    either way; this decides whose it is.
+
+    So a session leaves one empty directory per root behind, at that name.
+    This repository gitignores it; a registered project that does not will
+    show it as untracked, which is the visible cost of keying the environment
+    per project, and cheaper than the sync that would otherwise land in the
+    `.venv` the operator is using.
+    """
+
+    def prepared(project: Path) -> Path:
+        """One root's directory and its mount point, before anything binds them."""
+        directory = environment_directory(project, cache)
+        directory.mkdir(parents=True, exist_ok=True)
+        (project / name).mkdir(exist_ok=True)
+        return directory
+
+    roots = [root, *[item.path for item in accessible if item.writable]]
+    return {project: prepared(project) for project in dict.fromkeys(roots)}
 
 
 def contained_argv(
@@ -1448,10 +1550,12 @@ def contained_argv(
     credential: Path | None,
     login: ProviderLogin,
     engine: ContainerEngine | None = None,
-    interactive: bool = True,
+    streams: SessionStreams = "terminal",
     banner: Banner | None = None,
     sentinels: LaunchSentinels = LaunchSentinels(),
     inherited_environment: list[str] | None = None,
+    accessible: list[AccessibleRoot] = [],
+    lease: Lease | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1470,6 +1574,15 @@ def contained_argv(
     caller with nothing to add passes nothing and each line is printed as it
     is produced, which is what a probe wants: its notices interleave with the
     build they describe rather than arriving after it.
+
+    ``lease`` is the mount table this container runs under, defaulting to the
+    one a session gets over its own repository. A worker passes
+    :func:`~lup.sandbox.rail.worker_lease` instead and reaches everything else
+    here unchanged -- the same image, egress, credential, identity and
+    same-path mounting -- because the only thing that differs between an
+    operator's container and a worker's is which checkouts it may write. A
+    second builder for that one difference would be a second declaration of
+    everything it has in common, free to drift from this one.
     """
     said = banner if banner is not None else Banner()
     if engine is not None:
@@ -1478,13 +1591,19 @@ def contained_argv(
         found = detected_client()
         if found is None:
             raise typer.BadParameter(
-                "No container client answered, so this session cannot be "
-                "contained. Install docker or podman, or open the session with "
-                "--unsandboxed to run on the host under the semantic policy alone."
+                "No working Docker or Podman client was found. Install one to "
+                "launch in a container. To run on the host using the runtime's "
+                "sandbox, choose `--sandbox inner`."
             )
         if not found.drives_its_server():
             raise typer.BadParameter(found.consequence())
         client = found.engine()
+    # Rebound before rendering, so the tag, the build, and the session all
+    # read the same resolved copy -- and only they: the declaration the
+    # ownership digests hash never carries a resolved version.
+    resolution = resolved_agent_clis(image)
+    image = resolution.image
+    said.add(resolution.said)
     rendered = image.dockerfile(manifest)
     tag = image_tag(rendered)
     if not image_matches(tag, rendered, client):
@@ -1505,7 +1624,11 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
-    lease = lease_for(root, human_owned)
+    lease = lease if lease is not None else fleet_lease(root, human_owned, accessible)
+    said.add(fleet_notice(accessible))
+    said.add(
+        pruning_notice(hold_pruning_across([root, *(item.path for item in accessible)]))
+    )
     record_boundary(lease, image.egress, root)
     # Read on the host and passed in, never resolved inside: the file that
     # answers "where does this remote point" is `.git/config`, which the
@@ -1521,8 +1644,10 @@ def contained_argv(
     # cannot use an ssh credential however good the credential is.
     forge = image.forge.select(dict(environ), image.egress.carries_ssh(), Path.home())
     granted = image.forge.granted(dict(environ))
-    rewrites = remote_rewrites(
-        root, image.forge.host, forge.transport(image.forge.ssh_user)
+    rewrites = fleet_rewrites(
+        [root, *(item.path for item in accessible)],
+        image.forge.host,
+        forge.transport(image.forge.ssh_user),
     )
     # Read on the host for the same reason the rewrites are: `.git/config` is
     # writable from inside, so an identity resolved in there would be one the
@@ -1557,6 +1682,7 @@ def contained_argv(
         config_home_env=login.config_home_env,
         credential_file=login.credentials_file,
         credential_renewable=login.renewable,
+        credential_fields=login.credential_fields,
         credential=credential,
         host_config_home=host_config_home,
         engine=client,
@@ -1567,8 +1693,165 @@ def contained_argv(
         browser_directory=handing,
         clipboard_directory=copying,
         terminal=terminal.environment,
-        interactive=interactive,
+        streams=streams,
         proxy_address=reached_at,
         boundary=sentinels.within(),
         inherited_environment=inherited_environment,
+        environments=held_environments(root, accessible, image.project_environment),
     )
+
+
+def engine_absence() -> str | None:
+    """Why this host cannot open a worker container, or ``None`` if it can.
+
+    Asked of the client rather than of whether this session is itself
+    contained, because the absence is what actually blocks the launch and it
+    has more than one cause: a session inside a container has no engine to
+    reach, and neither does a host that never installed one. Both need the
+    same thing done about them, and naming the engine says so without this
+    having to work out which side of a boundary it is standing on.
+
+    Mounting the host's engine socket into a contained session is the obvious
+    way to make this answer yes, and it is why the question is asked at all: a
+    confined session holding that socket can start a sibling with the whole
+    host bound into it, which is a total escape and defeats the containment
+    that asked for the worker boundary in the first place. Degrading silently
+    to unconfined workers is the other way, and it is worse -- the run looks
+    identical and the boundary is simply not there.
+    """
+    if detected_client() is not None:
+        return None
+    return (
+        "No container client answered, so this run cannot give its workers "
+        "their own boundary. A session inside a container has no engine to "
+        "reach: start the run from an uncontained session (`harness claude "
+        "--sandbox inner`, or a plain shell) so each worker gets a container of "
+        "its own. Mounting the engine's socket into a contained session would "
+        "let it start a sibling with the whole host bound in, which is why "
+        "that is not the answer here."
+    )
+
+
+def wrapper_script(argv: list[str], program: str) -> str:
+    """The shell that execs one worker's CLI inside its container.
+
+    ``exec`` rather than a call, so the container replaces this shell instead
+    of running under it: what the runtime holds is then the engine's own
+    process, and a signal sent to the worker reaches the thing actually running
+    rather than a parent that would have to forward it.
+
+    ``"$@"`` is the one thing here that must not be quoted as a unit -- the
+    runtime appends its own arguments, and a wrapper folding them into a single
+    word would hand the CLI one long argument instead of the flags it was
+    given. Everything this writes itself goes through :func:`shlex.quote`,
+    which is what keeps a path with a space in it from becoming two arguments.
+    """
+    quoted = " ".join(shlex.quote(argument) for argument in [*argv, program])
+    return (
+        "#!/bin/sh\n"
+        "# Generated by lup: opens one resolver actor inside its own container.\n"
+        f'exec {quoted} "$@"\n'
+    )
+
+
+def written_wrapper(path: Path, argv: list[str], program: str) -> Path:
+    """Write one actor's wrapper where its runtime can start it, and mark it runnable.
+
+    Executable because that is what being named as a program means: the runtime
+    spawns this path directly rather than handing it to a shell, so a file
+    without the bit set fails as a permission error naming a path, which reads
+    as a broken install rather than as a file written a moment ago.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(wrapper_script(argv, program))
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def worker_cli(
+    wrapper: Path,
+    image: Image,
+    manifest: Manifest,
+    lease_root: Path,
+    human_owned: list[Path],
+    host_config_home: Path | None,
+    credential: Path | None,
+    login: ProviderLogin,
+    program: str,
+    read_only: bool = False,
+    sentinels: LaunchSentinels = LaunchSentinels(),
+    accessible: list[AccessibleRoot] = [],
+) -> Path:
+    """The program to start one resolver actor as, so it runs in its own container.
+
+    :mod:`lup.sandbox.rail` argues that confinement has to be a mount fact
+    rather than a judgement, because deciding from a command's text where it
+    will act is undecidable and ``cd ../other && git commit`` walks past any
+    policy that tries. That argument is right and was being applied to the
+    wrong population: a table computed when a *session* starts covers the
+    checkouts existing at that instant, which is every branch an operator is
+    landing and no worktree a run leases, since those are cut afterwards. The
+    concurrency the rail was built for is between actors, and this is where
+    their boundary is taken.
+
+    The seam is the program, on both runtimes. Claude's SDK spawns whatever
+    ``cli_path`` names and hands it the arguments it would have handed
+    ``claude``; Codex takes the same question as ``executable``. So an actor is
+    opened by pointing that field at the wrapper this writes, and neither
+    adapter learns anything about containers -- from where they stand a program
+    was named and started.
+
+    ``program`` is required rather than defaulted because a CLI's own name is
+    that provider's vocabulary, and this builder is neutral between them. The
+    caller naming it is already the composition root that picked the adapter,
+    so the name is spelled where the runtime is chosen instead of a second
+    place that would have to be kept agreeing with it.
+
+    ``lease_root`` is both the tree this actor was given and the checkout its
+    container opens on, which is not two decisions that happen to agree: every
+    path is mounted at its own absolute location because a linked worktree's
+    ``.git`` is a file holding an absolute ``gitdir:`` pointer, so the tree an
+    actor works in is the only place its container can open it.
+
+    ``read_only`` is what a reviewer sets, and its lease is the worker's with
+    nothing writable rather than a table of its own -- built from the same
+    call, the two cannot come to hold different ideas of which checkouts exist.
+
+    Everything but the mount table is the session's: :func:`contained_argv`
+    resolves the image and its shared layers, the egress network, the
+    credential, the git identity and remote rewrites, and the same-path
+    mounting the rail depends on. The streams are fixed at ``piped`` rather
+    than offered, because an actor has no terminal and does not capture -- it
+    speaks a protocol over stdin, and either other state would leave its
+    runtime talking to a stream nothing reads.
+    """
+    lease = worker_lease(lease_root, human_owned)
+    return written_wrapper(
+        wrapper,
+        contained_argv(
+            image,
+            manifest,
+            lease_root,
+            human_owned,
+            host_config_home,
+            credential,
+            login,
+            streams="piped",
+            sentinels=sentinels,
+            accessible=accessible,
+            lease=demoted(lease) if read_only else lease,
+        ),
+        program,
+    )
+
+
+def worker_wrapper_path(run_dir: Path, concern_id: str, actor: str) -> Path:
+    """Where one actor's wrapper is written, named for the actor that runs it.
+
+    Under the run directory rather than inside the lease, because the lease is
+    a worktree the run deletes when it is done and the wrapper has to outlive
+    the turn that spawned it. Named for both the concern and the actor since
+    one concern opens more than one -- a worker and the reviewer that judges it
+    -- whose leases differ in exactly the way a shared filename would hide.
+    """
+    return run_dir / "workers" / f"{concern_id}-{actor}.sh"

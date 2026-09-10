@@ -224,6 +224,55 @@ def clipboard_probes(
     ]
 
 
+def reachable_backend(tools: tuple[ClipboardTool, ...] = CLIPBOARD_TOOLS) -> str:
+    """Which backend this machine's clipboard actually answers through.
+
+    Reachability rather than content, and that distinction is the whole of why
+    this exists: an empty clipboard and a backend that cannot reach a display
+    both print nothing, so only the exit status separates them. A caller
+    reading the output would call a working machine broken every time the
+    operator happened to have copied nothing.
+
+    Named rather than counted, because which one answered is what an operator
+    can act on and it is not guessable from the platform. A Wayland session
+    commonly also answers through XWayland; an X11 session over a forwarded
+    display answers only while that display is reachable from the process
+    asking -- which is exactly how a machine with a working clipboard hands a
+    session an empty one.
+
+    The order is :data:`CLIPBOARD_TOOLS`', so what comes back is the backend
+    the reads and writes will actually use rather than whichever happens to be
+    installed. Empty means none answered: a real state on a headless host, and
+    a statement about this process rather than about any desktop.
+
+    **Ask this on the host.** Inside a session the image links every one of
+    these names at the bridge's own shim, which forwards to the broker and
+    exits zero whatever the broker found -- so in there this reports the shim
+    and says nothing about the machine. Measured: run from a contained
+    session it answers ``wl-paste`` on a host that has no Wayland at all.
+    """
+    for tool in tools:
+        if not tool.reader:
+            continue
+        try:
+            sh.Command(tool.reader)(*(tool.list_arguments or tool.text_arguments))
+        except (sh.ErrorReturnCode, sh.CommandNotFound):
+            continue
+        return tool.reader
+    return ""
+
+
+def readable_backends(tools: tuple[ClipboardTool, ...] = CLIPBOARD_TOOLS) -> list[str]:
+    """Every backend that would be tried, in order, whatever this host has.
+
+    For a diagnostic to name rather than for a decision. An operator told
+    "no clipboard" cannot tell an absent tool from an unreachable display,
+    and the list is what makes the next step obvious on a machine whose
+    desktop this repository knows nothing about.
+    """
+    return [tool.reader for tool in tools if tool.reader]
+
+
 def copy_to_clipboard(
     text: str, tools: tuple[ClipboardTool, ...] = CLIPBOARD_TOOLS
 ) -> bool:

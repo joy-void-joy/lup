@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.runs by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.runs by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Runs
 
@@ -15,6 +15,7 @@ fully readable — and reading it cannot perturb what it is reading.
   units/<step>/<item>.json   one result per landed unit, written atomically
   attempts/<step>/<item>.json  one claim per unit currently running
   artifacts/<step>/<item>/     whatever a unit produces besides its result
+  artifacts/<step>/<item>/progress.json  how far into its own work a unit is
   run.log                a line each time something happens
   summary.json           how the run ended, written whatever the ending
 ```
@@ -29,6 +30,42 @@ waiting forever. It is written from a `finally`, so it appears whether the run
 succeeded, failed, or was interrupted — and its absence beside a directory
 nothing is touching is exactly the evidence that the runner was killed.
 
+## A claim is a lease
+
+A killed runner — a power cut, an OOM, a `kill -9` — leaves its claims on disk
+with no result beside them and no process to finish them. On disk that is
+indistinguishable from a unit that is simply taking a long time, and age
+cannot separate them: it grows for a healthy unit exactly as fast.
+
+So a claim carries `renewed_at` as well as `started_at`, and the runner
+re-stamps it from the same heartbeat that writes the log line. The interval
+sits well inside the lease, so a runner that stopped writing lines has also
+stopped renewing and the two readings cannot disagree. A claim nobody has
+renewed within the lease is one nobody holds:
+
+- `run monitor` reports it as `abandoned=` rather than counting it as running,
+  and says so outright when every claim has lapsed and no summary was written.
+- A resumed run frees the lapsed claims and re-runs those units, naming each in
+  the log. Claims whose lease is live are left alone, so two runners sharing a
+  directory do not free each other's work.
+
+The process table is not consulted, here or anywhere in this package. Under a
+sandbox `/proc` is PID-isolated, so a healthy run is indistinguishable there
+from a dead one — a liveness answer that asks it is no answer at all on the
+host a long job most often runs on. The `pid` on a claim is there for a person
+diagnosing the machine they are standing on, and nothing decides on it.
+
+## Resuming
+
+A pipeline is resumable by default, and nothing has to be arranged for it. Each
+unit's result lands in its own file as it completes, and reuse is decided by
+fingerprint — a step's own declaration folded together with the fingerprints of
+everything it depends on. Re-running the same pipeline over the same directory
+reuses every unit whose fingerprint still stands and re-runs the rest, so an
+interrupted run costs only what never landed. Editing a step changes its
+fingerprint, which reruns it and everything downstream without anybody
+maintaining the list of what that is.
+
 Nothing here consults the process table. Under a sandbox `/proc` is
 PID-isolated, so a healthy run is indistinguishable there from a dead one; a
 liveness answer that asks the process table is no answer at all on the host a
@@ -36,11 +73,11 @@ long job most often runs on.
 
 ## Watching one
 
-`dev monitor <run-dir>` redraws a reading in place: the units landed against
+`run monitor <run-dir>` redraws a reading in place: the units landed against
 the units scheduled, where each step stands, and what is being worked on. That
 is for a person at a second terminal.
 
-`dev monitor <run-dir> --events` emits one line per landing, step change,
+`run monitor <run-dir> --events` emits one line per landing, step change,
 failure and stall, and exits when the run ends. That is for a watcher, which
 sees lines rather than a screen — it is how an agent follows a job instead of
 asking whether it is done. The first line is a baseline rather than a replay:
@@ -62,6 +99,82 @@ twenty-nine seconds about thirty-six two-hour cells. The estimate here divides
 everything landed so far by the whole elapsed time, which is the only estimate
 bursty landings support. A runtime writing its own bar sets `smoothing=0` for
 the same reason.
+
+## What a unit says while it runs
+
+A claim says a unit started and is still held. It cannot separate a unit forty
+percent through from one spinning at step zero: from outside those read alike,
+and age grows for both at the same rate. So a unit publishes the one thing only
+it knows, into its own workspace:
+
+```
+artifacts/<step>/<item>/progress.json
+```
+
+`done`, an optional `total`, a `phase` — a word, never a number — and a
+`detail` in the unit's own vocabulary. Never a rate and never an estimate:
+those take two readings and the clock between them, and the reader is what
+holds two readings.
+
+The record sits in the workspace rather than beside the claim because it
+outlives the claim: a unit that died at 2870 of 3000 in phase `fit` leaves that
+reading next to its traceback, where whoever comes back to the failure is
+already looking.
+
+### Three doorways, one writer
+
+- A callable step calls `context.report(done=…, total=…, phase=…, detail=…)`.
+  The context knows the workspace, so the body names no path.
+- A shell unit that can import this library calls
+  `lup.runs.report.report_progress(workspace, done=…)`, taking the workspace
+  from `$LUP_RUN_WORKSPACE` at the call site.
+- A unit in any language at all spawns `uv run lup-devtools run report --done N
+  [--total N] [--phase word] [--detail key=value ...]`, which reads
+  `$LUP_RUN_WORKSPACE` itself. A `--detail` value is read as JSON where it is
+  JSON — `supports=41`, `ok=true`, `shape={"k":1}` — and as text where it is
+  not. A process per report, which is right at one report a second and wrong at
+  a thousand.
+
+All three write through `report_progress`, so the record cannot drift between
+them.
+
+Call it from the loop that does the work rather than at chosen milestones. A
+report landing within a second of the one before it for the same workspace is
+dropped, because progress is a sample rather than a log and the monitor reads
+every two seconds — so the cheapest call site is the right one, and the unit's
+result records how it ended whatever the last sample was.
+
+### What the reader makes of it
+
+`run monitor` draws one line per reporting unit, under the run's own three:
+
+```
+family-3:  41%|████      | 2460/6000, fit · supports=41 · 41 steps/min · eta 0:12:30
+```
+
+The rate and the time left are the monitor's, taken from two readings that
+share a clock. That estimate is honest at this grain in a way the run-level one
+is not: one unit's own work advances steadily, where a run's landings come in
+bursts. A unit that declared no `total` gets a count rather than a bar.
+`detail` renders as sent — the unit's keys, in its order, nothing filtered and
+nothing cut. At most twelve units get a line and the rest are counted on the
+activity line, so a screen never implies it is showing everything.
+
+A unit that reports nothing falls back to the last line it printed, so a shell
+step is readable without cooperating at all. That line is only as fresh as the
+unit's own buffering: one printing without `flush=True` shows a stale line,
+which is the unit's to fix rather than the reader's.
+
+`--events` yields a line when a unit enters a new phase — `solve/family-3
+entered fit at 1200/6000` — and never per sample, so an agent following a
+thousand-unit sweep is woken by changes rather than flooded by counts.
+`--once` prints every running unit's line, which is where a watcher goes for
+the counts themselves.
+
+A landed unit needs nothing new. `outcome` already tallies whatever word a unit
+lands under, so a step setting `outcome="certified"` reads as `certified=6
+failed=2` with nothing added — and a per-key breakdown of `detail` is the
+project's own command over its own results, not the monitor's.
 
 ## Declaring the work
 
@@ -160,6 +273,6 @@ items is the shape to watch.
 
 A project with its own runner does not need `Pipeline`. Writing
 `manifest.json`, a result per unit under `units/`, and a heartbeat line makes
-that runner followable by the same `dev monitor`, because the monitor reads
-the layout rather than the runtime. `lup.runs.ledger.RunDirectory` is where
+that runner followable by the same `run monitor`, because the monitor reads
+the layout rather than the runtime. `lup.runs.directory.RunDirectory` is where
 every path is spelled, so both ends meet there instead of drifting.

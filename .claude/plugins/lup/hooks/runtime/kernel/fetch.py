@@ -4,6 +4,7 @@ import urllib.parse
 
 from .decision import KernelDecision
 from .rows import UrlScopeRow
+from .semantics import UnjudgedAmbient
 
 
 def host_matches_scope(hostname: str, expected_host: str, subdomains: bool) -> bool:
@@ -34,20 +35,58 @@ def url_matches_scope(
     )
 
 
+def scope_text(scope: UrlScopeRow) -> str:
+    """One declared scope, spelled the way a URL it would admit is spelled.
+
+    Rendered into the reason a fetch outside every scope carries, so the
+    reviewer reads what was checked without opening the declaration: the URL
+    on one side of the sentence and each scope it missed on the other is the
+    whole comparison the classifier just made.
+    """
+    host = ("*." if scope["include_subdomains"] else "") + scope["host"]
+    port = "" if scope["any_port"] or scope["port"] is None else f":{scope['port']}"
+    return f"{scope['scheme']}://{host}{port}{scope['path_prefix']}"
+
+
 def decide_fetch(
     url: str,
     allowed_scopes: list[UrlScopeRow],
     denied_scopes: list[UrlScopeRow],
+    unjudged_ambient: UnjudgedAmbient = "ask",
 ) -> KernelDecision:
-    """Deny matching scopes first, allow declared scopes, and ask otherwise."""
+    """Deny matching scopes first, allow declared scopes, and ask otherwise.
+
+    The last of those is the profile's answer rather than this function's.
+    An origin no scope names is the fetch surface's version of a command the
+    vocabulary has no row for, and the shell has read a declaration about
+    that since :class:`~lup.policy.kernel.settlement.UnjudgedAmbientPolicy`
+    was written: ``ask`` keeps unjudged work visible, ``defer`` hands the
+    long tail to provider-native judgement. This said ``ask`` in its own
+    right, which made a profile that had declared the seamless posture get
+    it on one surface and not the other -- one declaration, two answers.
+
+    Only that half is taken. The rest of the settlement order is not
+    consulted here, and the reason is specific to fetch: the rule that
+    settles unjudged work inside a boundary does so because every effect the
+    operation can have is confined there, and the effect of a fetch is a
+    document entering the agent's context. No filesystem or process boundary
+    bounds that. A container is exactly as exposed to what an unlisted origin
+    says as a bare host is, so containment is not an argument for reading
+    one.
+    """
     try:
         parsed = urllib.parse.urlsplit(url)
         hostname = parsed.hostname
         port = parsed.port
-    except ValueError:
-        return KernelDecision("ask", "malformed URL requires approval")
+    except ValueError as error:
+        return KernelDecision(
+            "ask", f"the URL {url!r} does not parse ({error}) — requires approval"
+        )
     if not parsed.scheme or hostname is None:
-        return KernelDecision("ask", "malformed URL requires approval")
+        missing = "scheme" if not parsed.scheme else "host"
+        return KernelDecision(
+            "ask", f"the URL {url!r} names no {missing} — requires approval"
+        )
     denied = next(
         (
             scope
@@ -68,4 +107,9 @@ def decide_fetch(
     )
     if allowed is not None:
         return KernelDecision("allow", allowed["reason"])
-    return KernelDecision("ask", "URL is outside the declared documentation scopes")
+    checked = ", ".join(scope_text(scope) for scope in allowed_scopes)
+    against = f" ({checked})" if checked else " (none are declared)"
+    outside = f"{url} is outside the declared documentation scopes{against}"
+    if unjudged_ambient == "defer":
+        return KernelDecision("defer", outside, abstention="provider_native")
+    return KernelDecision("ask", outside)

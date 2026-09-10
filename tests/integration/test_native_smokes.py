@@ -29,7 +29,7 @@ from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
 from lup.tools.mcp import create_mcp_server, server_tool_names
 from lup.channels.models import utc_now
-from lup.orchestration.actors.mailbox import AnswerDoor, AnswerOffer
+from lup.coordination.mailbox import AnswerDoor, AnswerOffer
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.tools import create_question_tools
 from lup.resolver.models import (
@@ -248,7 +248,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             )
         )
 
-    from lup_template.devtools.harness.catalog import portable_harness
+    from lup_template.harness.catalog import portable_harness
 
     core = ResolverCore(
         ResolverConfig(
@@ -321,7 +321,7 @@ def test_codex_plugin_blocks_a_forbidden_apply_patch(tmp_path: Path) -> None:
     if auth.exists():
         codex_home.mkdir(parents=True)
         shutil.copy(auth, codex_home / "auth.json")
-    from lup_template.devtools.harness.catalog import portable_harness
+    from lup_template.harness.catalog import portable_harness
 
     plugin = portable_harness().plugins[0]
     CodexPluginInstaller(

@@ -29,6 +29,22 @@ WORKFLOW_COMMAND = REGENERATE_COMMAND
 already tell a reader to type so the two cannot name different things."""
 
 
+class FrontendSpec(BaseModel, frozen=True):
+    """A bun workspace the gate has to install before it can check bundles.
+
+    Declared rather than assumed because most projects have none, and the
+    one that does needs two steps on the runner — bun itself, and the
+    workspace's dependencies from its lockfile — before `dev check` can
+    rebuild the bundles it compares against what is committed.
+    """
+
+    workspace: str
+    """Where `package.json` and `bun.lock` live, relative to the repository."""
+
+    bun_version: str = "latest"
+    """Which bun the runner installs; pin it to what the lockfile was made with."""
+
+
 class WorkflowSpec(BaseModel, frozen=True):
     """The choices a project makes about running its own gate.
 
@@ -47,6 +63,9 @@ class WorkflowSpec(BaseModel, frozen=True):
 
     sync_flags: list[str] = ["--all-extras"]
     """What `uv sync` is given before the gate runs."""
+
+    frontend: FrontendSpec | None = None
+    """The bun workspace to install first, for a project that builds bundles."""
 
     system_packages: list[str] = []
     """Distribution packages the gate needs that `uv sync` cannot install.
@@ -70,6 +89,18 @@ class WorkflowSpec(BaseModel, frozen=True):
         }
 """
 
+    def frontend_steps(self) -> str:
+        """The bun steps, or nothing where the project declares no workspace."""
+        if self.frontend is None:
+            return ""
+        return f"""      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: {self.frontend.bun_version}
+      - name: Frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: {self.frontend.workspace}
+"""
+
     def body(self) -> str:
         """Render the workflow YAML from these declared choices."""
         return f"""name: Quality
@@ -87,7 +118,9 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-{self.install_step()}      - run: uv sync {" ".join(self.sync_flags)}
+{self.install_step()}{self.frontend_steps()}      - run: uv sync {" ".join(self.sync_flags)}
+      - name: Merge driver
+        run: uv run lup-devtools git merge-driver
       - name: Generated artifact drift
         run: {DRIFT_COMMAND}
       - name: Quality gate

@@ -9,12 +9,23 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.devtools.dev.git_guards import DECLARED_GUARDS, GitGuard, arm, read_guards
+import lup.devtools.dev.records as records
+from lup.devtools.dev.git_guards import (
+    DECLARED_GUARDS,
+    GitGuard,
+    arm,
+    arming_is_refused,
+    blocked_arming,
+    hooks_directory,
+    read_guards,
+)
 from lup.policy.assets.host import project_environment
+from lup.web.build import dependencies_behind, restore_dependencies
 from lup.devtools.layout import get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
 from lup.execution.shell import git
 from lup.devtools.utils import (
+    attributed_stderr,
     decode_stderr,
     format_table,
     refuse_blocked_config_writes,
@@ -38,7 +49,6 @@ type WorktreeLauncher = Callable[[Path], RelocationHint]
 GITIGNORED_EXTRAS = [
     ".env.local",
     "sync.json.local",
-    "downstream.json.local",  # legacy sync.json.local name, still read via fallback
     ".claude/settings.local.json",
     ".codex/config.local.toml",
     "logs",
@@ -95,6 +105,21 @@ def worktree_is_registered(path: Path) -> bool:
     )
 
 
+def adopt_records() -> None:
+    """Empty lup's own keys out of the shared config, saying what moved.
+
+    Reads answer from either place, so a clone that never runs this behaves
+    exactly as one that did. What it buys is a shared ``config`` holding
+    nothing lup wrote — which is what lets that file, whose keys name
+    programs git runs on the host, stop having to be writable by a worker.
+    """
+    refuse_blocked_config_writes()
+    moved = list(records.adopt_legacy_records())
+    for line in moved:
+        typer.echo(line)
+    typer.echo(f"Adopted {len(moved)} record(s) out of the shared config.")
+
+
 # lup: ignore[constant-declaration] — the driver name `.gitattributes` and this
 # registration must spell alike for git to find one from the other
 OWNERSHIP_MERGE_DRIVER = "lup-ownership"
@@ -111,6 +136,71 @@ def register_merge_driver() -> None:
     """
     git("config", f"merge.{OWNERSHIP_MERGE_DRIVER}.name", "keep one side, regenerate")
     git("config", f"merge.{OWNERSHIP_MERGE_DRIVER}.driver", "true")
+
+
+def merge_driver_registered(root: Path | None = None) -> bool:
+    """Whether this clone can already resolve the driver `.gitattributes` names."""
+    return all(
+        git.out(
+            *records.at(root),
+            "config",
+            "--get",
+            f"merge.{OWNERSHIP_MERGE_DRIVER}.{setting}",
+            _ok_code=[0, 1],
+        )
+        for setting in ("name", "driver")
+    )
+
+
+def refuse_a_blocked_registration(root: Path | None = None) -> None:
+    """Stop before a merge-driver registration that cannot take its lock.
+
+    Registering the driver is the one config write left in making a worktree,
+    and it is a once-per-clone one: git resolves a driver name from config
+    alone, so no repository can ship it and the clone that first cut a
+    worktree registered it for every worktree after.
+
+    Which makes the refusal conditional on the write being outstanding. A
+    clone that already resolves the driver writes nothing here, and refusing
+    it regardless denied a worktree over a write nobody was going to make —
+    while a clone that has never registered still meets the diagnosis up
+    front rather than as `File exists` against a half-created worktree.
+    """
+    if merge_driver_registered(root):
+        return
+    refuse_blocked_config_writes(root)
+
+
+def report_a_blocked_arming(
+    guards: list[GitGuard] = DECLARED_GUARDS, root: Path | None = None
+) -> None:
+    """Name the guards this clone has not armed, without stopping over them.
+
+    The same pre-flight moment as :func:`refuse_a_blocked_registration`, over
+    the other thing under the shared directory whose contents name a program
+    the host runs, and answered differently. `<common>/hooks/` holds scripts git executes at the operator's
+    next commit in any worktree of this repository, so it is held read-only —
+    and holding it costs nothing, because arming is a once-per-clone act too:
+    hooks resolve through that shared directory, so a guard armed on the host
+    covers every worktree cut after it.
+
+    Reported rather than refused, because refusing protects nothing it names.
+    Hooks resolve through the shared directory, so the worktree about to be
+    cut inherits exactly the arming every existing worktree of this clone
+    already commits under: if the guard is stale, every checkout here has been
+    running the stale one all along, and stopping this one creates no exposure
+    it did not already have. What refusing does reach is the work — a clone
+    whose `<common>/hooks/` is read-only cannot arm from inside the sandbox at
+    all, so the gate would stand on every worktree forever, and the way past
+    it is to stop using the command that records a base.
+
+    So the outstanding moment is named and the run continues. The reader is
+    told which host command settles it, which is the whole of what refusing
+    communicated, and keeps the checkout that the refusal cost them.
+    """
+    diagnosis = blocked_arming(guards, root if root is not None else Path.cwd())
+    if diagnosis:
+        typer.echo(diagnosis, err=True)
 
 
 class SetupStep(BaseModel, ABC, frozen=True):
@@ -157,15 +247,7 @@ class MergeDriver(SetupStep, frozen=True):
         return f"the {OWNERSHIP_MERGE_DRIVER} merge driver"
 
     def satisfied(self) -> bool:
-        return all(
-            git.out(
-                "config",
-                "--get",
-                f"merge.{OWNERSHIP_MERGE_DRIVER}.{setting}",
-                _ok_code=[0, 1],
-            )
-            for setting in ("name", "driver")
-        )
+        return merge_driver_registered()
 
     def run(self) -> None:
         register_merge_driver()
@@ -199,6 +281,76 @@ class ArmedGitGuards(SetupStep, frozen=True):
     def run(self) -> None:
         for line in arm(self.guards, self.worktree):
             typer.echo(line)
+
+    def required(self) -> bool:
+        """Whether a worktree this step could not finish is unusable.
+
+        Arming writes into `<common>/hooks/`, which every worktree of the
+        clone resolves to and which a confined session may be unable to write
+        at all. Where it is held, no run from here can satisfy this step, and
+        the worktree being cut inherits exactly the arming every other
+        worktree here already commits under — so failing the command would
+        withhold a checkout on every run, permanently, while arming nothing.
+
+        Answered from the directory rather than declared, because the two
+        cases are genuinely different: a clone that can arm and did not is a
+        worktree whose commits would skip the drift gate, and that is worth
+        refusing over. The report names the outstanding moment and the host
+        command that settles it either way.
+        """
+        return not arming_is_refused(hooks_directory(self.worktree))
+
+
+class BranchBase(BaseModel, frozen=True):
+    """What a worktree's branch is cut from, and what is recorded as its base.
+
+    A worktree is routinely created from another worktree, which stands on a
+    branch holding nothing but its own work. Reading the base off that
+    checkout gave the new branch commits its own pull request never asked
+    for — the request opens conflicting against the integration branch, no
+    CI runs on it, and the repair is a rebase and a force-push after the
+    fact, on work that was correct.
+
+    So a branch being cut takes the integration branch, which is the one
+    answer that holds however many worktrees deep the caller is. Stacking on
+    the checkout they are standing in is a real intent and stays available as
+    ``--base``, said out loud by :meth:`notice` in exactly the case where the
+    two differ, because a default that overrides an intent silently strands
+    work as surely as one that inherits it silently.
+
+    A branch that already exists is not cut at all: ``worktree add <path>
+    <branch>`` takes it where it stands, and a base could only reach it by
+    moving it. Nothing here moves one, so the record for a re-attached branch
+    stays what a caller named or what the checkout says.
+    """
+
+    named: str | None
+    current: str
+    integration: str
+    fresh: bool
+
+    def cut_from(self) -> str | None:
+        """The ref the branch starts at; ``None`` starts it where HEAD is."""
+        if self.named:
+            return self.named
+        if self.fresh and self.current:
+            return self.integration
+        return None
+
+    def recorded(self) -> str:
+        """The name written as this branch's base, empty where nobody can say."""
+        return self.cut_from() or self.current
+
+    def notice(self) -> str:
+        """What to tell a caller whose checkout is not what the branch was cut from."""
+        if self.named or not self.fresh or self.current in ("", self.integration):
+            return ""
+        return (
+            f"Cut from {self.integration}, not from {self.current}, which this ran "
+            f"in: work lands on {self.integration}, and a branch cut anywhere else "
+            f"carries commits its own pull request never asked for. --base "
+            f"{self.current} stacks it on this checkout instead."
+        )
 
 
 class RecordedBase(SetupStep, frozen=True):
@@ -244,11 +396,7 @@ class RecordedBase(SetupStep, frozen=True):
 
     def already_recorded(self) -> bool:
         """Whether a base is written for this branch, whoever wrote it."""
-        return bool(
-            git.out(
-                "config", "--get", f"branch.{self.branch}.lup-base", _ok_code=[0, 1]
-            )
-        )
+        return bool(records.recorded_base(self.branch))
 
     def satisfied(self) -> bool:
         if self.origin == self.branch:
@@ -256,60 +404,11 @@ class RecordedBase(SetupStep, frozen=True):
         return self.already_recorded()
 
     def run(self) -> None:
-        git("config", f"branch.{self.branch}.lup-base", self.origin)
-        if self.cut_fresh:
-            git(
-                "config",
-                f"branch.{self.branch}.lup-base-commit",
-                git.out("rev-parse", self.branch).strip(),
-            )
-
-
-class PushedBranch(SetupStep, frozen=True):
-    """The branch given a remote to track, from the moment it exists.
-
-    An upstream is what lets a later session keep this checkout level without
-    asking anybody: a fast-forward pull and a push both name a remote branch,
-    and a branch that has none has nothing to be kept level with and no copy
-    anywhere but this disk until a pull request is opened. Pushed at creation
-    rather than at that point, because the whole span between them is when
-    the work happens.
-    """
-
-    branch: str
-
-    def label(self) -> str:
-        return f"the remote branch tracking {self.branch}"
-
-    def satisfied(self) -> bool:
-        return bool(
-            git.out("config", "--get", f"branch.{self.branch}.merge", _ok_code=[0, 1])
+        reserved = git.out("rev-parse", self.branch).strip() if self.cut_fresh else ""
+        records.remember(
+            self.branch,
+            records.BranchRecord(base=self.origin, base_commit=reserved),
         )
-
-    def carries_unpushed_work(self) -> bool:
-        """Whether this branch holds commits no remote does, unknown counting as yes."""
-        counted = git.out(
-            "rev-list", "--count", self.branch, "--not", "--remotes", _ok_code=[0, 1]
-        )
-        return not counted.isdigit() or bool(int(counted))
-
-    def run(self) -> None:
-        if self.carries_unpushed_work():
-            typer.echo(
-                f"Not pushing {self.branch}: it holds commits no remote does, "
-                "and setting a checkout up does not publish somebody's work. "
-                "`dev pr push` sends them."
-            )
-            return
-        # This push carries a tip some remote already holds, so there is
-        # nothing in it for a guard to judge — and a project declaring one at
-        # this moment would make setup wait through its whole gate for that
-        # nothing. Which is why the branch is only ever given its remote here
-        # while that is still true of it.
-        git("push", "--no-verify", "-u", "origin", self.branch)
-
-    def required(self) -> bool:
-        return False
 
 
 class CopiedExtras(SetupStep, frozen=True):
@@ -349,11 +448,71 @@ class SyncedEnvironment(SetupStep, frozen=True):
         return f"the synced environment ({project_environment(self.worktree).name})"
 
     def satisfied(self) -> bool:
-        return project_environment(self.worktree).is_dir()
+        """Whether this worktree has an environment of its own.
+
+        Its own, which ``is_dir()`` alone does not ask: that call follows the
+        link, so an environment symlinked to a sibling worktree's answers yes
+        and the sync is skipped. What the worktree then holds is a name
+        pointing at somebody else's environment, and a ``uv sync`` reached
+        through it repoints *that* worktree's editable install at this one's
+        source — two checkouts import one tree, and the branch under test is
+        whichever synced last. Nothing reports it, which is the expensive
+        failure this class names, arrived at from the other side.
+
+        A link is unsatisfied rather than an error, because the step's whole
+        job is to build the environment: a run that builds a real one over the
+        link leaves the worktree in the state the step promised.
+        """
+        environment = project_environment(self.worktree)
+        return environment.is_dir() and not environment.is_symlink()
 
     def run(self) -> None:
+        """Build this worktree's own environment, clearing a link left in its place.
+
+        The link goes first because syncing through it is the failure rather
+        than the repair: `uv` resolves the path, finds the sibling's
+        environment at the end of it, and rewrites that one's editable install
+        to point here. Only the link is removed — what it named belongs to
+        another worktree and is left exactly as it is.
+        """
+        environment = project_environment(self.worktree)
+        if environment.is_symlink():
+            typer.echo(f"Removing {environment}, a link to {environment.readlink()}")
+            environment.unlink()
         typer.echo("Running uv sync...")
         sync_dependencies(self.worktree)
+
+
+class RestoredWorkspace(SetupStep, frozen=True):
+    """A bun workspace's dependencies, restored from its lockfile in the worktree.
+
+    The restore the gate runs before `bun test` and the bundle build, done
+    once at creation so the first `dev check` is not the run that pays for
+    it. Not required, and not only because it reaches the registry for what
+    the cache lacks: the gate restores whatever it finds behind, so a worktree
+    without this step is one to work in, where one without its environment
+    is not.
+    """
+
+    worktree: Path
+    workspace: Path
+    """Where `package.json` and `bun.lock` live, relative to the worktree."""
+
+    def label(self) -> str:
+        return f"the restored bun workspace ({self.workspace})"
+
+    def satisfied(self) -> bool:
+        return not dependencies_behind(self.worktree / self.workspace)
+
+    def run(self) -> None:
+        typer.echo(f"Running bun install --frozen-lockfile in {self.workspace}...")
+        try:
+            restore_dependencies(self.worktree / self.workspace)
+        except RuntimeError as failed:
+            typer.echo(f"Warning: {failed}")
+
+    def required(self) -> bool:
+        return False
 
 
 def finish(steps: Sequence[SetupStep]) -> Iterator[SetupStep]:
@@ -434,32 +593,45 @@ def create(
     clipboard: bool = False,
     extras: list[str] = GITIGNORED_EXTRAS,
     guards: list[GitGuard] = DECLARED_GUARDS,
+    workspaces: Sequence[Path] = (),
 ) -> None:
-    """Create a git worktree, re-attach one, or finish one left half-made."""
-    # Three config writes follow — the two merge-driver settings and the
-    # recorded base — and `worktree add` takes the same lock before any of
-    # them, so a confinement that owns `config.lock` is said once here rather
-    # than discovered as `File exists` against a half-created worktree.
-    #
-    refuse_blocked_config_writes()
+    """Create a git worktree, re-attach one, or finish one left half-made.
+
+    ``workspaces`` are the bun workspaces restored beside the environment,
+    relative to the worktree; ``no_sync`` skips both, since both are the
+    same act for two toolchains.
+
+    Nothing here reaches origin. A branch that has no commits of its own can
+    only publish a ref holding what origin already had, and rebuilding the
+    branch on a different base then meets that ref as a non-fast-forward —
+    an obstacle to the work, on a remote where it read as noise. The branch
+    is given its remote by the first push that carries something, which is
+    `git pr push` and which the pre-push guard judges.
+    """
+    refuse_a_blocked_registration()
+    report_a_blocked_arming(guards)
     current_dir = Path.cwd()
 
     tree_dir = get_tree_dir()
     worktree_path = tree_dir / name
     resuming = worktree_path.exists() and worktree_is_registered(worktree_path)
 
-    # What a base is recorded from, settled before anything is created. The
-    # fallback reads this checkout's current branch, which answers only while
-    # there is one: on a detached HEAD the read comes back empty, the record
-    # is skipped, and nothing says so — which is why `sync base` reports "Base
+    from lup.devtools.dev.branches import get_integration_branch
+
+    # What the branch comes from and what is recorded of it, settled before
+    # anything is created. Neither answers on a detached HEAD that is
+    # re-attaching a branch: there is no current branch to read, the record is
+    # skipped, and nothing says so — which is why `sync base` reports "Base
     # guessed" long afterwards, on a topology that has since moved. A base
     # nobody can name is refused here instead, where the answer is a flag
     # rather than archaeology.
-    recorded = RecordedBase(
-        branch=name,
-        origin=base_branch or git.out("branch", "--show-current"),
-        cut_fresh=not branch_exists(name),
+    base = BranchBase(
+        named=base_branch,
+        current=git.out("branch", "--show-current"),
+        integration=get_integration_branch(),
+        fresh=not branch_exists(name),
     )
+    recorded = RecordedBase(branch=name, origin=base.recorded(), cut_fresh=base.fresh)
     if not recorded.origin and not no_record and not recorded.already_recorded():
         typer.echo(
             f"Cannot tell what {name} would be cut from: {current_dir} is not on "
@@ -483,7 +655,10 @@ def create(
         shutil.rmtree(worktree_path)
 
     if not resuming:
-        register_worktree(name, worktree_path, base_branch)
+        register_worktree(name, worktree_path, base.cut_from())
+        elsewhere = base.notice()
+        if elsewhere:
+            typer.echo(elsewhere)
 
     def setup() -> Iterator[SetupStep]:
         """Everything that has to hold before this worktree can be used."""
@@ -491,13 +666,14 @@ def create(
         yield ArmedGitGuards(guards=guards, worktree=worktree_path)
         if not no_record:
             yield recorded
-        yield PushedBranch(branch=name)
         if not no_copy_data:
             yield CopiedExtras(
                 source=current_dir, worktree=worktree_path, extras=extras
             )
         if not no_sync:
             yield SyncedEnvironment(worktree=worktree_path)
+            for workspace in workspaces:
+                yield RestoredWorkspace(worktree=worktree_path, workspace=workspace)
 
     pending = [step for step in setup() if not step.satisfied()]
 
@@ -606,10 +782,16 @@ def list_worktrees() -> None:
 
 
 def remove(name: str, force: bool) -> None:
-    """Remove a git worktree."""
-    # `worktree remove` rewrites the admin directory the same lock guards, so
-    # it fails exactly as `create` does and gets the same diagnosis.
-    refuse_blocked_config_writes()
+    """Remove a git worktree.
+
+    Nothing here writes git config: the removal rewrites the entry under the
+    shared directory's ``worktrees/`` and touches ``config`` at no point. A
+    config-lock diagnosis up front therefore refused a removal that would
+    have worked wherever the shared config alone was held, which is the
+    arrangement a session that cannot configure the host's git runs under.
+    Where the shared directory as a whole is unwritable, git says so and the
+    failure is attributed to the mount that caused it.
+    """
     path = Path(name)
 
     if not path.is_absolute():
@@ -627,7 +809,7 @@ def remove(name: str, force: bool) -> None:
         git(*args)
         typer.echo(f"Removed worktree: {path}")
     except sh.ErrorReturnCode as e:
-        typer.echo(f"Error removing worktree: {decode_stderr(e)}", err=True)
+        typer.echo(f"Error removing worktree: {attributed_stderr(e)}", err=True)
         if not force:
             typer.echo("Use --force to remove even if dirty")
         raise typer.Exit(1)

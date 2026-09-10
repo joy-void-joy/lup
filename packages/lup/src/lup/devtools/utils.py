@@ -12,6 +12,9 @@ from pydantic import BaseModel
 
 from lup.execution.shell import LazyCommand, git
 from lup.execution.writability import admin_dirs, diagnose_git_admin, inspect_git_admin
+from lup.sandbox.attribution import attribute_filesystem
+from lup.sandbox.observed import observed_topology
+from lup.sandbox.translation import MountTopology
 
 logger = logging.getLogger(__name__)
 
@@ -26,23 +29,115 @@ gh = LazyCommand("gh", tty_out=False)
 uv = LazyCommand("uv")
 
 
+def repository_segments(value: str) -> list[str]:
+    """Every path segment a forge reference or a remote URL carries.
+
+    One reading for every spelling a repository is written in: the
+    ``owner/name`` a ``--repo`` takes, the ``host/owner/name`` gh also
+    accepts, an ``https://`` URL, and the scp-like ``git@host:owner/name``
+    that is not a URL and has no parser in the standard library. A trailing
+    ``.git`` is framing rather than name, so it comes off first, and the
+    colon of the scp form separates an authority from a path rather than a
+    host from a port.
+
+    Returned whole rather than trimmed to the interesting end, because how
+    many segments there were is itself the answer to a question: a reference
+    a caller typed is well-formed at two or three, and a remote URL is
+    whatever the forge's paths look like.
+    """
+    trimmed = value.removesuffix(".git")
+    # The scp form has no parser in the standard library: `git@host:owner/name`
+    # is not a URL, and its colon separates an authority from a path rather
+    # than a host from a port. So the two separators are read here, in the one
+    # order that tells them apart — scheme first, then whatever colon is left.
+    # lup: ignore[string-split] — no parser reads the scp form
+    addressed = trimmed.partition("://")
+    # lup: ignore[string-split] — no parser reads the scp form
+    located = (addressed[2] or addressed[0]).partition(":")
+    return [
+        part
+        for half in (located[0], located[2])
+        for part in PurePosixPath(half).parts
+        if part != "/"
+    ]
+
+
+def repository_reference(value: str) -> str:
+    """The ``[host/]owner/name`` a forge reference or a remote URL points at.
+
+    The pair is the last two segments in every shape a repository is written
+    in, and the host — where one is written at all — is the segment before
+    them. Userinfo in front of the host is addressing rather than identity,
+    so it comes off too.
+
+    Empty where fewer than two segments are there to read, which every caller
+    takes as "this names no repository I can weigh" rather than as a match.
+    """
+    named = repository_segments(value)
+    if len(named) < 2:
+        return ""
+    pair = "/".join(named[-2:])
+    if len(named) < 3:
+        return pair
+    # lup: ignore[string-split] — userinfo is separated from a host by `@` and
+    # by nothing else, which no URL parser reaches for a bare authority word
+    return f"{named[-3].rpartition('@')[2]}/{pair}"
+
+
+def names_same_repository(value: str, other: str) -> bool:
+    """Whether two forge references point at one repository.
+
+    Both have to be *well-formed* references first: `[host/]owner/name` and
+    nothing longer, which is exactly what gh's ``--repo`` takes. Anything
+    with more segments in it is refused rather than read from the end —
+    otherwise `github.com/decoy/acme/widget` wears `acme/widget`'s name in
+    the middle of itself and passes for it. A remote URL with a deeper path
+    is read by :func:`repository_segments` for its own reasons and is not
+    something a caller types here.
+
+    Case-blind on both sides. A forge resolves an owner and a repository name
+    without regard to case and DNS resolves a hostname the same way, so
+    folding turns away nobody but the caller who meant this repository all
+    along.
+
+    A host is compared when *both* references name one, and ignored when
+    either does not. That is the lever rather than an omission: a project on
+    two forges writes `host/owner/name` and gets the discrimination, and one
+    on a single forge writes the pair and needs none. The asymmetric reading
+    — a named host on one side refusing a bare pair on the other — was tried
+    and is the defect this whole surface exists to remove: it refuses the
+    caller who wrote the *more* precise form, which teaches everybody to
+    write the vaguer one.
+    """
+    named = PurePosixPath(repository_reference(value).casefold()).parts
+    theirs = PurePosixPath(repository_reference(other).casefold()).parts
+    if not 2 <= len(repository_segments(value)) <= 3:
+        return False
+    if not 2 <= len(repository_segments(other)) <= 3:
+        return False
+    if named[-2:] != theirs[-2:]:
+        return False
+    return len(named) < 3 or len(theirs) < 3 or named[-3] == theirs[-3]
+
+
 def slug_from_remote(url: str) -> str:
     """The ``owner/name`` a remote names, empty when it names none.
 
-    Read here rather than left to `gh` to infer, because a remote written
-    through an SSH alias — ``<alias>:owner/name.git``, whose host ssh resolves
-    from its own config — names no host `gh` recognizes, and every query then
-    fails with "no known GitHub host" as though the repository were
-    unreachable.
+    The pair alone, taken from the fuller reading
+    :func:`lup.policy.kernel.words.repository_reference` gives, because the
+    pair is what `gh --repo` takes and what this project passes it.
 
-    The pair is the last two path segments in every shape a remote is written
-    in, and nothing before a colon is ever one of them — which is what reads
-    the scp-like form (``git@host:owner/name``) that is not a URL and has no
-    parser in the standard library.
+    Read there rather than here so one parser answers for every shape a
+    remote is written in — the scp-like ``git@host:owner/name`` among them,
+    whose host ssh resolves from its own config and which is not a URL and
+    has no parser in the standard library. That shape is why this is read at
+    all rather than left to `gh` to infer: a remote written through an SSH
+    alias names no host `gh` recognizes, and every query then fails with "no
+    known GitHub host" as though the repository were unreachable. The policy
+    that judges a ``--repo`` reads the same parser, so the guard and the
+    tooling that has to satisfy it cannot come to read one remote two ways.
     """
-    trimmed = url.removesuffix(".git")
-    located = trimmed.rpartition(":")[2]  # lup: ignore[string-split] — no parser
-    named = PurePosixPath(located).parts
+    named = PurePosixPath(repository_reference(url)).parts
     return "/".join(named[-2:]) if len(named) >= 2 else ""
 
 
@@ -80,6 +175,37 @@ def decode_stderr(e: sh.ErrorReturnCode) -> str:
     """
     raw = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
     return raw.strip()
+
+
+def attributed_stderr(
+    e: sh.ErrorReturnCode, topology: MountTopology | None = None
+) -> str:
+    """A failed command's words, plus the boundary's where the boundary is why.
+
+    `Read-only file system` is what the kernel says when a lease refuses a
+    write, and it is indistinguishable from what it says about a genuinely
+    read-only disk. :mod:`lup.sandbox.rail` argues that leaving it at that is
+    worse than having no rail at all, because the reader debugs a filesystem
+    instead of learning they hold a lease -- so where the mount table agrees
+    that this boundary made the path unwritable, the account is appended to
+    the tool's own message rather than replacing it. Both halves are wanted:
+    the command's words say what it was doing, and the attribution says why it
+    was refused.
+
+    Where nothing attributes, this is :func:`decode_stderr` exactly. That is
+    the common case and the one worth keeping cheap: a caller can reach for
+    this in place of the plain decode without deciding first whether a
+    boundary is involved.
+
+    ``topology`` is read from the running system when a caller does not pass
+    one, which is what every caller here wants and what no test can rely on:
+    the machine's own mounts are not a fixture. Overridable so the judgement
+    reaches its caller rather than being sealed inside the call.
+    """
+    reported = decode_stderr(e)
+    observed = topology if topology is not None else observed_topology()
+    account = attribute_filesystem(reported, observed)
+    return f"{reported}\n{account.sentence()}" if account.explains() else reported
 
 
 def git_admin_dirs(cwd: Path | None = None) -> list[Path]:

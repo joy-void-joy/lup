@@ -1,0 +1,449 @@
+"""The command tree for moving work through git: branches, worktrees, PRs.
+
+Its own sub-app rather than a corner of ``dev`` because a sub-app is a surface
+of a module, and every command here is the git-workflow module's. While they
+sat under ``dev`` they were owned by ``core``, so a project declining the git
+loop kept all of them — the failure the module system exists to end, surviving
+inside it.
+
+The bodies are the same closures they were: what one repository declares about
+itself arrives as :class:`~lup.devtools.dev.app.DevDeclarations`, read when a
+command runs rather than when the CLI is composed, because each of these
+resolves against a working directory a CLI is imported long before anyone
+points it at.
+"""
+
+from collections.abc import Callable
+from pathlib import Path
+from typing import Annotated
+
+import typer
+
+import lup.devtools.dev.branches as branches
+import lup.devtools.dev.git_guards as git_guards_mod
+import lup.devtools.dev.pr as pr
+import lup.devtools.dev.worktree as worktree
+from lup.devtools.dev.conflict_app import create_conflict_app
+from lup.devtools.dev.declarations import DevDeclarations
+from lup.devtools.harness.launch import relocation_hint
+from lup.harness.process import LocalProcessLauncher
+from lup.workspace.paths import project_root
+
+
+def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
+    """Wire the git command tree over what one repository declares about itself."""
+    app = typer.Typer(no_args_is_help=True)
+    worktree_app = typer.Typer(no_args_is_help=True)
+    pr_app = typer.Typer(no_args_is_help=True)
+    guard_app = typer.Typer(no_args_is_help=True)
+    app.add_typer(worktree_app, name="worktree", help="Worktree management")
+    app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
+    app.add_typer(
+        create_conflict_app(), name="conflict", help="Merge/rebase conflict resolution"
+    )
+    app.add_typer(
+        guard_app,
+        name="hooks",
+        help="The git hooks refusing stale artifacts and a failing gate",
+    )
+
+    # -- worktree commands --
+
+    @worktree_app.command("create")
+    def worktree_create_cmd(
+        name: Annotated[
+            str, typer.Argument(help="Name for the worktree (e.g., feat-name)")
+        ],
+        no_sync: Annotated[
+            bool,
+            typer.Option(
+                "--no-sync",
+                help="Skip restoring the environment (uv sync) and the bun workspaces",
+            ),
+        ] = False,
+        no_copy_data: Annotated[
+            bool,
+            typer.Option("--no-copy-data", help="Skip copying gitignored extras"),
+        ] = False,
+        base_branch: Annotated[
+            str | None,
+            typer.Option(
+                "--base",
+                "-b",
+                help="Branch to cut from (default: the integration branch)",
+            ),
+        ] = None,
+        force: Annotated[
+            bool,
+            typer.Option(
+                "--force",
+                help="Delete an existing unregistered directory at the worktree path",
+            ),
+        ] = False,
+        no_record: Annotated[
+            bool,
+            typer.Option(
+                "--no-record",
+                help="Create with no base recorded, instead of refusing to guess",
+            ),
+        ] = False,
+        clipboard: Annotated[
+            bool,
+            typer.Option(
+                "--clipboard",
+                help="Also copy the shell line to your clipboard, for pasting",
+            ),
+        ] = False,
+    ) -> None:
+        """Create or re-attach a git worktree."""
+        worktree.create(
+            name,
+            no_sync,
+            no_copy_data,
+            base_branch,
+            relocation_hint,
+            force=force,
+            no_record=no_record,
+            clipboard=clipboard,
+            guards=declared().git_guards,
+            workspaces=declared().restored_workspaces(),
+        )
+
+    @worktree_app.command("list")
+    def worktree_list_cmd() -> None:
+        """List all git worktrees with branch and status info."""
+        worktree.list_worktrees()
+
+    @worktree_app.command("remove")
+    def worktree_remove_cmd(
+        name: Annotated[str, typer.Argument(help="Worktree name or path to remove")],
+        force: Annotated[
+            bool,
+            typer.Option("--force", help="Force removal even if dirty"),
+        ] = False,
+    ) -> None:
+        """Remove a git worktree."""
+        worktree.remove(name, force)
+
+    @worktree_app.command("adopt-records")
+    def worktree_adopt_records_cmd() -> None:
+        """Move lup's `branch.*.lup-*` config keys into the shared `lup/` directory.
+
+        Once per clone, and on the host: it is the one step that writes the
+        shared config, and reads answer from either place until it has run.
+
+        Every worktree of the clone answers from the records afterwards, so
+        run it once each of them is at a version that reads them: a checkout
+        older than the records reads the config alone, and a branch it was
+        cut from is a fact it stops finding once that config is empty.
+        """
+        worktree.adopt_records()
+
+    # -- branch commands --
+
+    @app.command("branches")
+    def branches_cmd(
+        branch: Annotated[
+            str | None,
+            typer.Argument(help="Specific branch to check (default: all)"),
+        ] = None,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Analyze branch containment, PR status, and worktree info."""
+        branches.branch_status(branch, as_json)
+
+    @app.command("base-branch")
+    def base_branch_cmd(
+        branch: Annotated[
+            str | None,
+            typer.Argument(help="Branch to analyze (default: current)"),
+        ] = None,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Detect the base branch for the current (or specified) branch."""
+        branches.base_branch(branch, as_json)
+
+    @app.command("freshness")
+    def freshness_cmd(
+        settle: Annotated[
+            bool,
+            typer.Option(
+                "--settle",
+                help="Settle a clean checkout rather than only reporting: pull "
+                "what the remote holds, then push what it lacks",
+            ),
+        ] = False,
+    ) -> None:
+        """Report how far this checkout sits behind its own remote and its base.
+
+        The reading a session is opened on, asked on its own — a checkout
+        cannot tell from its own contents that either has moved, and the
+        answer otherwise only appears in front of a session nobody asked for.
+        """
+        if settle:
+            branches.settle_base_freshness(
+                LocalProcessLauncher(), project_root(), publish=True
+            )
+            return
+        typer.echo(
+            branches.probe_base_freshness(
+                LocalProcessLauncher(), project_root()
+            ).report()
+        )
+
+    # -- pr-body command --
+
+    @app.command("pr-body")
+    def pr_body_cmd(
+        base: Annotated[
+            str | None,
+            typer.Option("--base", "-b", help="Override base branch"),
+        ] = None,
+    ) -> None:
+        """Generate a PR body (summary, commits, test plan) from branch commits."""
+        branches.pr_body(base)
+
+    # -- branch survey and delete --
+
+    @app.command("survey")
+    def survey_cmd(
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Full branch inventory: containment, PRs, unique commits, diff sizes."""
+        branches.survey(as_json)
+
+    @app.command("merge-driver")
+    def merge_driver_cmd() -> None:
+        """Register the ownership-manifest merge driver `.gitattributes` names."""
+        worktree.register_merge_driver()
+        typer.echo(f"Registered merge driver: {worktree.OWNERSHIP_MERGE_DRIVER}")
+
+    @app.command("delete")
+    def delete_cmd(
+        name: Annotated[str, typer.Argument(help="Branch name to delete")],
+        dry_run: Annotated[
+            bool,
+            typer.Option("--dry-run", "-n", help="Show what would happen"),
+        ] = False,
+        force: Annotated[
+            bool,
+            typer.Option(
+                "--force",
+                "-f",
+                help="Force delete the branch and a worktree holding modified files",
+            ),
+        ] = False,
+        remote: Annotated[
+            bool | None,
+            typer.Option(
+                "--remote/--no-remote",
+                help="Delete origin's copy too (default: only if merged)",
+            ),
+        ] = None,
+    ) -> None:
+        """Delete a branch and its worktree, and origin's copy if it is spent.
+
+        Its session records are archived first, since the worktree usually holds
+        the only copy; a deletion whose archive fails is refused.
+        """
+        branches.delete_branch(name, dry_run, force, remote)
+
+    @app.command("retire")
+    def retire_cmd(
+        name: Annotated[str, typer.Argument(help="Branch name to retire")],
+        reason: Annotated[
+            str,
+            typer.Option("--reason", help="Why this work is not being landed"),
+        ],
+        dry_run: Annotated[
+            bool,
+            typer.Option("--dry-run", "-n", help="Show what would happen"),
+        ] = False,
+        base: Annotated[
+            str | None,
+            typer.Option("--base", help="Branch the request targets"),
+        ] = None,
+    ) -> None:
+        """Retire a branch through a pull request, so its commits outlive it.
+
+        For work that is not being landed and is not in the integration
+        branch either — where a plain delete leaves the commits reachable
+        from nothing. Pushes, opens a request, closes it without merging,
+        and then deletes: the head stays at `refs/pull/<number>/head`, which
+        outlives both the branch and origin's copy of it.
+        """
+        branches.retire_branch(name, reason, dry_run, base)
+
+    # -- git hook commands --
+
+    @guard_app.command("install")
+    def guard_install_cmd(
+        force: Annotated[
+            bool,
+            typer.Option("--force", help="Replace a hook written elsewhere"),
+        ] = False,
+    ) -> None:
+        """Install every git hook this repository declares.
+
+        Idempotent, and shared by every worktree of the clone it is run from,
+        so re-running it after a library upgrade refreshes an older body.
+
+        One occupied hook path stops the whole command rather than half of
+        it: `--force` is an answer about a file somebody wrote deliberately,
+        and installing the rest first would leave the reader working out
+        which of them the error was about.
+        """
+        root = project_root()
+        try:
+            installed = git_guards_mod.install_guards(
+                declared().git_guards, root, force=force
+            )
+        except git_guards_mod.GuardConflict as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(1) from error
+        except OSError as error:
+            # One clone's hooks directory is shared by every worktree cut from
+            # it and sits outside all of them, so a sandbox confining writes to
+            # the checkout refuses this — as an errno naming a path, which says
+            # nothing about hooks to whoever reads it out of a traceback.
+            typer.echo(f"the hooks could not be written: {error}", err=True)
+            raise typer.Exit(1) from error
+        for state in installed:
+            typer.echo(state.describe())
+
+    @guard_app.command("status")
+    def guard_status_cmd() -> None:
+        """Report what this clone refuses, at every moment a hook sits at.
+
+        Both directions, because either alone reads as fully armed: a moment
+        this declares with nothing installed at it, and a hook this installed
+        at a moment nothing declares any more.
+        """
+        hooks = git_guards_mod.read_hooks(declared().git_guards, project_root())
+        for state in [*hooks.guards, *hooks.orphaned]:
+            typer.echo(state.describe())
+
+    @guard_app.command("uninstall")
+    def guard_uninstall_cmd() -> None:
+        """Remove them, leaving hooks written elsewhere alone."""
+        removed = git_guards_mod.uninstall_guards(declared().git_guards, project_root())
+        for state in removed:
+            typer.echo(state.describe())
+
+    # -- pr commands --
+
+    @pr_app.command("status")
+    def pr_status_detail_cmd(
+        branch: Annotated[
+            str | None,
+            typer.Option("--branch", "-b", help="Branch name (default: current)"),
+        ] = None,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Fetch PR review status, checks, and comments for a branch."""
+        pr.status(branch, as_json)
+
+    @pr_app.command("merge")
+    def pr_merge_cmd(
+        pr_number: Annotated[int, typer.Argument(help="PR number to merge")],
+        dry_run: Annotated[
+            bool,
+            typer.Option("--dry-run", "-n", help="Show what would happen"),
+        ] = False,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+        method: Annotated[
+            pr.MergeMethod,
+            typer.Option("--method", help="How the commits reach the base branch"),
+        ] = pr.MergeMethod.merge,
+        gh_args: Annotated[
+            list[str] | None,
+            typer.Option("--gh", help="Further flag handed to `gh pr merge` untouched"),
+        ] = None,
+        retarget: Annotated[
+            bool,
+            typer.Option(
+                "--retarget",
+                help="Point a stacked PR's base at the integration branch first",
+            ),
+        ] = False,
+    ) -> None:
+        """Merge a PR and pull changes into the integration branch."""
+        pr.merge(pr_number, dry_run, as_json, method, tuple(gh_args or ()), retarget)
+
+    @pr_app.command("sync-base")
+    def pr_sync_base_cmd(
+        base: Annotated[
+            str | None,
+            typer.Option("--base", "-b", help="Base branch (default: auto-detect)"),
+        ] = None,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Sync the base branch and merge it into the current feature branch."""
+        pr.sync_base(base, as_json)
+
+    @pr_app.command("push")
+    def pr_push_cmd(
+        force: Annotated[
+            bool,
+            typer.Option("--force", "-f", help="Force push"),
+        ] = False,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Push the current branch and report any existing PR."""
+        pr.push(force, as_json)
+
+    @pr_app.command("create")
+    def pr_create_cmd(
+        base: Annotated[str, typer.Option("--base", help="Target branch for PR")],
+        title: Annotated[str, typer.Option("--title", help="PR title")],
+        body: Annotated[
+            str | None, typer.Option("--body", help="PR body (markdown)")
+        ] = None,
+        body_file: Annotated[
+            Path | None,
+            typer.Option("--body-file", help="Read the PR body from this file"),
+        ] = None,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Create a new PR."""
+        pr.create(base, title, pr.resolve_body(body, body_file), as_json)
+
+    @pr_app.command("update")
+    def pr_update_cmd(
+        pr_number: Annotated[int, typer.Argument(help="PR number to update")],
+        body: Annotated[
+            str | None, typer.Option("--body", help="New PR body (markdown)")
+        ] = None,
+        body_file: Annotated[
+            Path | None,
+            typer.Option("--body-file", help="Read the new PR body from this file"),
+        ] = None,
+    ) -> None:
+        """Update a PR body."""
+        pr.update(pr_number, pr.resolve_body(body, body_file))
+
+    return app

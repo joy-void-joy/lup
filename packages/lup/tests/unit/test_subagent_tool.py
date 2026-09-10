@@ -19,7 +19,7 @@ RESEARCHER = SubagentSpec(
     description="Researches questions",
     prompt="You research.",
     tools=["WebSearch"],
-    model="haiku",
+    model="fast",
 )
 
 

@@ -3,12 +3,18 @@
 """Word-level shell helpers: expansion safety, flags, and payloads."""
 
 import posixpath
+from collections.abc import Sequence
 from fnmatch import fnmatchcase
 from typing import TypedDict
 
 from .archives import archive_targets, archive_write
-from .decision import CheckpointRequirement, KernelDecision, SUBSTITUTION_SENTINEL
-from .edit import path_rule_matches
+from .decision import (
+    CheckpointRequirement,
+    KernelDecision,
+    SUBSTITUTION_SENTINEL,
+    unjudged,
+)
+from .edit import path_rule_matches, protected_path_reason
 from .roles import (
     GENERATED_PLUGIN_REFUSAL,
     is_generated_plugin_target,
@@ -18,10 +24,14 @@ from .rows import PathRoleRow, PathRuleRow
 
 
 class EffectiveCommand(TypedDict):
-    """The words the shell finally executes, and whether a binding was dangerous."""
+    """The words the shell finally executes, and the dangerous names it binds.
+
+    The names rather than a flag, because the verdict they earn has to say
+    which variable tripped it: the reviewer reads the reason and nothing else.
+    """
 
     words: list[str]
-    dangerous: bool
+    dangerous: list[str]
 
 
 class VerbOperands(TypedDict):
@@ -108,13 +118,14 @@ def effective_command(segment: list[str]) -> EffectiveCommand:
     ``env`` with nothing to wrap is itself the command, and ``command -v`` asks
     where a program is rather than running one, so it is the command too.
     """
-    dangerous = False
+    dangerous: list[str] = []
     position = 0
     while position < len(segment):
         word = segment[position]
         name, separator, _value = word.partition("=")
         if separator and name.isidentifier():
-            dangerous = dangerous or dangerous_env_name(name)
+            if dangerous_env_name(name) and name not in dangerous:
+                dangerous.append(name)
             position += 1
             continue
         executable = posixpath.basename(word)
@@ -155,10 +166,44 @@ def uv_run_words(words: list[str]) -> list[str]:
     )
     while position < len(words) and words[position].startswith("-"):
         option = words[position]
-        if option in ("-c", "-m", "--script"):
+        # `-c` and `-m` stand where a file would, so the form is handed on
+        # whole and judged by what it names. `--script` is the long spelling
+        # of `-s` and names a path just as `-s` and `--gui-script` do, so it
+        # is stepped over and the path behind it is what gets judged.
+        if option in ("-c", "-m"):
             return words[position:]
         position += 2 if option in value_options else 1
     return words[position:]
+
+
+def uv_run_module_root(run_words: list[str]) -> str | None:
+    """The root package a ``-m`` names, or ``None`` where nothing names one.
+
+    Only two interpreters are asked: ``uv`` itself, whose ``-m`` is the first
+    word of the executable portion, and a Python spelled after it, whose
+    ``-m`` sits among its own options. Every other target keeps its ``-m`` —
+    ``uv run pytest -m slow`` selects a marker expression, and reading that as
+    a module would refuse the way a project runs its own tests.
+
+    The root segment rather than the whole name, because that is what a
+    project declares: ``examples`` on the table admits every module beneath
+    it, one declaration for a tree rather than one per entry point. A ``-m``
+    carrying no module names nothing, which is the interpreter's own usage
+    error rather than a root to look up, so it reads as ``None`` too.
+    """
+    if not run_words:
+        return None
+    if run_words[0] == "-m":
+        return run_words[1].partition(".")[0] if len(run_words) > 1 else None
+    if posixpath.basename(run_words[0]) not in INTERPRETERS:
+        return None
+    for position, word in enumerate(run_words[1:], start=1):
+        if word == "-c":
+            return None
+        if word == "-m":
+            following = run_words[position + 1 :]
+            return following[0].partition(".")[0] if following else None
+    return None
 
 
 # Every verb that acts on paths, paired with the short flags whose presence
@@ -166,7 +211,14 @@ def uv_run_words(words: list[str]) -> list[str]:
 # cluster falls through to the verb's own effect. Membership is about taking
 # paths, not about asking: `mkdir` and `touch` are allowed and still listed,
 # because the refusals that read this map — a write inside a generated plugin
-# tree, above all — are owed by every verb that names a path.
+# tree, above all — are owed by every verb that names a path. A verb that
+# overwrites one in place belongs here for the same reason a verb that removes
+# one does: what is at the path afterwards is not what was there before.
+#
+# A flag that consumes the following word is left out rather than modelled, so
+# `truncate -s 0 f` reads as non-inert. Callers widen to every operand there,
+# which names the size as a target — harmless, since no size spells a path any
+# scope reading grades beyond this checkout.
 # lup: ignore[library-default] — each verb's own POSIX flags, fixed by what the utility does rather than by who is asking
 SCRATCH_VERB_FLAGS = {
     "rm": "rfv",
@@ -175,6 +227,9 @@ SCRATCH_VERB_FLAGS = {
     "cp": "aprRvL",
     "mkdir": "pv",
     "touch": "acm",
+    "ln": "sfnvrihTPL",
+    "tee": "aip",
+    "truncate": "co",
 }
 
 
@@ -255,6 +310,16 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     question exists for. Nothing declares this, because a checkout that did
     not hold it would not be a checkout.
 
+    Read as a segment anywhere rather than as a leading ``.git``, because a
+    linked worktree has no leading one: its ``.git`` is a *file* pointing at
+    ``<somewhere>/repo.git/worktrees/<name>``, and the config and hooks it
+    shares live under that ``repo.git`` directory. So the repository these
+    sessions run out of was reachable by absolute path and graded ``outside``,
+    where a contained placement writes freely — and the measured rule that
+    catches an unleased write cannot hold it either, since a launch mounts the
+    shared administrative directory writable on purpose. A hook written there
+    runs on the operator's next Git command, outside whatever granted it.
+
     A declared role is read before either spelling, because a role is somebody
     saying where a path belongs and a spelling is only this reading guessing.
     The session scratchpad is the case that settles it: it is absolute, so the
@@ -263,7 +328,7 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     """
     if path_role(path_text, path_roles) == "scratch":
         return "scratch"
-    if path_text == ".git" or path_text.startswith(".git/"):
+    if any(segment.endswith(".git") for segment in path_text.split("/")):
         return "protected"
     if leaves_the_checkout(path_text):
         return "outside"
@@ -499,29 +564,48 @@ def written_operands(executable: str, operands: list[str]) -> list[str]:
     """The operands a path verb modifies, as opposed to the ones it reads.
 
     Copying reads every source and writes only the destination, so a path
-    named as a source is an ordinary read however protected it is. Every other
-    verb here removes or creates each path it is given.
+    named as a source is an ordinary read however protected it is. Linking
+    reads its source the same way -- the link stands where the last operand
+    does. Every other verb here removes or creates each path it is given.
     """
-    if executable == "cp" and len(operands) > 1:
+    if executable in ("cp", "ln") and len(operands) > 1:
         return operands[-1:]
     return operands
 
 
-def written_targets(words: list[str]) -> list[str] | None:
+def written_targets(
+    words: list[str], write_flags: Sequence[str] = ()
+) -> list[str] | None:
     """Every path this line would write over, or ``None`` where none can be named.
 
-    Two grammars answer one question. A path verb takes paths and nothing
-    else, so its operands are its targets; an archive verb states separately
-    where it authors, what it consumes and which directory it unpacks into.
-    What a caller wants of either is the same list, because what it asks of
-    that list is the same question -- where the loss lands.
+    Three grammars answer one question. A row that names the options carrying
+    its destination has already said where it writes, so that column is read
+    before anything here guesses; a path verb takes paths and nothing else, so
+    its operands are its targets; an archive verb states separately where it
+    authors, what it consumes and which directory it unpacks into. What a
+    caller wants of any of them is the same list, because what it asks of that
+    list is the same question -- where the loss lands.
 
-    ``None`` for an unmodelled line and for a verb whose flags could move
-    which paths are touched, which leaves every caller with the answer it had
-    before it asked.
+    The declared column wins outright rather than adding to the others: a row
+    saying ``of=`` is where ``dd`` lands is also saying its remaining words are
+    not paths, and reading them as operands would name ``if=/dev/zero`` as a
+    write. A row that declares nothing there falls through, which is every row
+    whose destination is positional.
+
+    A flag this cannot read could move which paths are touched, so the
+    positions stop meaning what they read and every operand is named instead.
+    Widening is the reading a caller that *refuses* something owes, and every
+    caller here is one: ``rm --interactive=never /etc/hosts`` names a path no
+    capture of this checkout holds whatever the flag turns out to do, and
+    declining to answer would have left the row claiming otherwise.
+
+    ``None`` only for an unmodelled line, which leaves every caller with the
+    answer it had before it asked.
     """
     if not words:
         return None
+    if write_flags:
+        return flag_write_targets(words, list(write_flags))
     archived = archive_write(words)
     if archived is not None:
         return archive_targets(archived)
@@ -530,7 +614,7 @@ def written_targets(words: list[str]) -> list[str] | None:
         return None
     verb = path_verb_operands(words)
     if not verb["inert"]:
-        return None
+        return verb["operands"]
     return written_operands(executable, verb["operands"])
 
 
@@ -617,14 +701,33 @@ def asks_before_removing_a_directory(
     path_roles: list[PathRoleRow],
     directory_targets: list[str] | None = None,
 ) -> KernelDecision | None:
-    """Ask before a verb destroys a directory, naming the way through.
+    """Ask before a verb takes a whole directory, and let a capture answer it.
 
-    Git restores a file it tracks, so a delete confined to files is bounded by
-    the files named. A directory is not: its size is whatever it happens to
-    hold, nothing in the command says what that is, and untracked work inside
-    it is restored by nothing. The ask says which route is open rather than
-    leaving a refusal the agent can only guess at. A scratch root keeps its
-    own grant, because there the tree is disposable by declaration.
+    A delete confined to files is bounded by the files named. A directory is
+    not: its size is whatever it happens to hold, and nothing in the command
+    says what that is. That is the question, and it is a question rather than
+    a wall -- the earlier wording said the operation "is never granted" and
+    then offered approval in the same sentence, which reads as a refusal and
+    was worked around as one.
+
+    Recoverable in exactly the sense a file delete is, so it settles the same
+    way. The reasoning this replaces held that untracked work inside a
+    directory is restored by nothing, which was true of `git stash create`
+    and is why :mod:`lup.devtools.dev.undo` does not use it: that module
+    captures tracked content *and* untracked files, and names ``rm -rf src/``
+    as the case it exists for. Carrying the purpose and the requirement lets
+    the settlement layer discharge this against a capture that completed, and
+    keep the question where one did not -- rather than opting out of that
+    layer by returning a bare verdict, which is what left a proven capture
+    unable to answer the one operation it was built for.
+
+    What stays outside any capture is ignored content, which is not a fact
+    about directories: a path rule guards `.env`, and `git clean -fdx` keeps
+    its own question for being the command whose whole purpose is destroying
+    what this cannot restore.
+
+    A scratch root keeps its own grant, because there the tree is disposable
+    by declaration.
     """
     executable = posixpath.basename(words[0])
     if executable not in ("rm", "mv"):
@@ -638,62 +741,36 @@ def asks_before_removing_a_directory(
     ]
     if not named:
         return None
+    # `mv` is not a removal and saying it was is how a reader learns to
+    # distrust the reason: the directory leaves the path it was at, which is
+    # the fact worth stating, and it is the same fact `rm` states in stronger
+    # words.
+    taken = "deleting" if executable == "rm" else "moving"
+    spelled = ", ".join(named)
+    directory = (
+        f"the whole directories {spelled}"
+        if len(named) > 1
+        else f"the whole directory {spelled}"
+    )
+    what = "they hold" if len(named) > 1 else "it holds"
+    # Read off the targets rather than asserted, which is the same correction
+    # :func:`verb_loss_scope` makes for the row this sits beside and for the
+    # same measured reason: a directory outside the checkout is one no capture
+    # of it has ever held, and a requirement stated by the rule rather than by
+    # the paths settled `rm -rf /etc/ssl` as "captured and restorable".
     return KernelDecision(
         "ask",
-        "removing a directory is never granted, because nothing in the command"
-        " bounds what it holds — name the files instead, or approve this",
-    )
-
-
-def rewrites_only_recoverable_files(
-    targets: list[str],
-    path_roles: list[PathRoleRow],
-    recoverable_targets: list[str] | None = None,
-    recoverable_target_limit: int = 5,
-    path_rules: list[PathRuleRow] | None = None,
-) -> KernelDecision | None:
-    """Grant a rewrite in place whose every named file could be brought back.
-
-    The same question :func:`confined_to_recoverable_roots` asks of a delete,
-    asked of a command that overwrites: what would this cost if it were
-    wrong. A scratch file costs nothing by declaration; a committed file with
-    no uncommitted change costs a checkout and no information. Past the cap
-    it is a sweep rather than an edit, and a sweep is worth a question even
-    where every file in it could be restored.
-
-    What this does *not* answer is the other half of why an in-place rewrite
-    is gated: it walks past the gates an edit is judged by — the anti-pattern
-    table, the review-note gate, the size gate. Those are reviewability, and
-    no boundary and no undo layer answers them. What recoverability does
-    settle is that being wrong is repairable and the whole change stands in
-    the diff, so the grant says which half it granted.
-
-    ``None`` wherever the answer is not established — no targets, a word that
-    expands at run time, a file the host reported nothing about — and ``None``
-    leaves the caller's own refusal standing.
-    """
-    if not targets:
-        return None
-    if any(opaque_argument(word) or "$" in word for word in targets):
-        return None
-    disposable = [word for word in targets if path_role(word, path_roles) == "scratch"]
-    restorable = [
-        word
-        for word in targets
-        if word not in disposable and word in (recoverable_targets or [])
-    ]
-    if len(disposable) + len(restorable) != len(targets):
-        return None
-    if len(restorable) > recoverable_target_limit:
-        return None
-    protected = protected_write_target(targets, path_rules or [], True)
-    if protected is not None:
-        return protected
-    return KernelDecision(
-        "allow",
-        "every file this rewrites is restorable, and the whole change is in the"
-        " diff — but the edit gates did not read it, so the anti-pattern, note"
-        " and size rules are `dev check`'s to catch",
+        f"{taken} {directory} requires approval: nothing in the command"
+        f" bounds what {what}",
+        checkpoint=(
+            "unrecoverable"
+            if any(
+                write_checkpoint(write_scope(target, path_roles)) == "unrecoverable"
+                for target in named
+            )
+            else "boundary_wide"
+        ),
+        purpose="unrecovered_local_mutation",
     )
 
 
@@ -721,7 +798,7 @@ def protected_write_target(
             None,
         )
         if matched is not None:
-            return KernelDecision("ask", matched["reason"])
+            return KernelDecision("ask", protected_path_reason(word, matched))
     return None
 
 
@@ -873,6 +950,24 @@ def dangerous_env_name(name: str) -> bool:
     """Recognize an environment variable that can redirect a command's execution."""
     return name in DANGEROUS_ENV_NAMES or any(
         name.startswith(prefix) for prefix in DANGEROUS_ENV_PREFIXES
+    )
+
+
+def dangerous_assignment_reason(verb: str, names: list[str]) -> str:
+    """The question a security-sensitive binding earns, naming every name it binds.
+
+    The variable is the fact the classifier matched on, so the reason says it:
+    a reviewer reads this sentence and nothing else, and "an environment
+    assignment" told them only that some sentence could have been printed for
+    any call. Every name is listed rather than the first, since approving is
+    one decision over the whole segment.
+    """
+    spelled = ", ".join(names)
+    variables = f"variables {spelled}" if len(names) > 1 else f"variable {spelled}"
+    subject = "they" if len(names) > 1 else "it"
+    return (
+        f"{verb} the security-sensitive {variables} requires approval"
+        f" — {subject} can redirect how commands execute"
     )
 
 
@@ -1042,3 +1137,281 @@ def refspec_effects(word: str) -> list[str]:
     source = word[1:] if forced else word
     effects = ["force"] if forced else []
     return [*effects, "delete"] if source.startswith(":") else effects
+
+
+def destination_form(word: str) -> str:
+    """How one ``git push`` operand names the repository it lands in.
+
+    The destination is the first operand a push takes, and git accepts two
+    kinds of word for it: the name of a remote this repository has configured,
+    or the repository itself spelled out — a URL in any of git's transports,
+    or a path to a checkout on this machine. The first is a destination
+    somebody put in the remote table; the second names one inline and reaches
+    it without the table having heard of it, which is why the two are told
+    apart here at all.
+
+    Read structurally, and that is the whole of what this can do. Whether a
+    bare word is a remote this repository holds is a question about the
+    repository rather than about the word, and answering it means running
+    `git remote` — which this kernel is stdlib-only and hermetic in order not
+    to do. So the test is the other half: a word carrying a transport is a
+    repository named inline whatever the remote table says, and a bare name
+    that is not in the table makes git fail before it reaches anything.
+
+    The url form is every transport in one test, because they agree on where
+    the colon falls: `https://host/p`, `ssh://host/p`, `git://host/p`,
+    `file:///p` and the scp-style `git@host:p` all put a colon in the word
+    with no slash before it, and no remote name may contain a colon at all.
+    The path form is what is left that is not a bare name: a slash anywhere,
+    or a leading `.` or `~` for the checkout beside this one.
+
+    Returns the empty string for a bare name, which is the operand a push
+    normally carries and the reading that leaves `git push origin main` alone.
+    """
+    if ":" in word and "/" not in word.partition(":")[0]:
+        return "url"
+    if "/" in word or word.startswith((".", "~")):
+        return "path"
+    return ""
+
+
+# lup: ignore[constant-declaration] — sed's own short flags, spelled as sed does
+SED_SAFE_SHORT_FLAGS = "nErsuz"
+# lup: ignore[library-default] — sed's own long spellings of the short flags above
+SED_SAFE_LONG_OPTIONS = (
+    "--quiet",
+    "--silent",
+    "--regexp-extended",
+    "--separate",
+    "--null-data",
+)
+# lup: ignore[constant-declaration] — the flag characters sed's own `s///` takes
+SED_SUBSTITUTE_FLAG_CHARS = "0123456789gpiImM"
+
+
+def scan_sed_delimited(script: str, position: int, parts: int) -> int | None:
+    """Scan ``parts`` sections after the delimiter at ``position``.
+
+    The delimiter is whatever character sits at ``position``; backslash
+    escapes are honored inside sections.
+    """
+    if position >= len(script):
+        return None
+    delimiter = script[position]
+    if delimiter.isalnum() or delimiter in " \t\n;\\":
+        return None
+    cursor = position + 1
+    seen = 0
+    while cursor < len(script) and seen < parts:
+        character = script[cursor]
+        if character == "\\":
+            cursor += 2
+            continue
+        if character == delimiter:
+            seen += 1
+        cursor += 1
+    return cursor if seen == parts else None
+
+
+def scan_sed_address(script: str, position: int) -> int | None:
+    """Scan one address: a line-number form, ``$``, or a regex form."""
+    character = script[position]
+    if character == "$":
+        return position + 1
+    if character.isdigit():
+        cursor = position + 1
+        while cursor < len(script) and script[cursor].isdigit():
+            cursor += 1
+        if cursor < len(script) and script[cursor] == "~":
+            cursor += 1
+            while cursor < len(script) and script[cursor].isdigit():
+                cursor += 1
+        return cursor
+    if character == "+":
+        cursor = position + 1
+        while cursor < len(script) and script[cursor].isdigit():
+            cursor += 1
+        return cursor if cursor > position + 1 else None
+    end = (
+        scan_sed_delimited(script, position, 1)
+        if character == "/"
+        else scan_sed_delimited(script, position + 1, 1)
+        if character == "\\" and position + 1 < len(script)
+        else None
+    )
+    if end is None:
+        return None
+    while end < len(script) and script[end] in "IM":
+        end += 1
+    return end
+
+
+def scan_sed_command(script: str, position: int) -> int | None:
+    """Scan one address-guarded command, returning the position after it.
+
+    Accepted commands read the input and write standard output only: print,
+    delete, hold-space, branching, labels, blocks, line numbering, text
+    insertion, file reading, transliteration, and flag-screened substitution.
+    The write and execute forms (``w``, ``W``, ``e``, ``s///e``, ``s///w``)
+    fall out as unrecognized trailing characters.
+    """
+    length = len(script)
+    address = scan_sed_address(script, position)
+    if address is not None:
+        position = address
+        while position < length and script[position] in " \t":
+            position += 1
+        if position < length and script[position] == ",":
+            position += 1
+            while position < length and script[position] in " \t":
+                position += 1
+            if position >= length:
+                return None
+            second = scan_sed_address(script, position)
+            if second is None:
+                return None
+            position = second
+    while position < length and script[position] in " \t!":
+        position += 1
+    if position >= length:
+        return None
+    command = script[position]
+    if command in "pPdDnNgGhHxz=F{}":
+        return position + 1
+    if command in "qQl":
+        cursor = position + 1
+        while cursor < length and (script[cursor].isdigit() or script[cursor] == " "):
+            cursor += 1
+        return cursor
+    if command in "btT:":
+        cursor = position + 1
+        while cursor < length and script[cursor] in " \t":
+            cursor += 1
+        while cursor < length and (script[cursor].isalnum() or script[cursor] == "_"):
+            cursor += 1
+        return cursor
+    if command in "aicrR":
+        newline = script.find("\n", position)
+        return length if newline == -1 else newline
+    if command == "s":
+        end = scan_sed_delimited(script, position + 1, 2)
+        if end is None:
+            return None
+        while end < length and script[end] in SED_SUBSTITUTE_FLAG_CHARS:
+            end += 1
+        return end
+    if command == "y":
+        return scan_sed_delimited(script, position + 1, 2)
+    return None
+
+
+def safe_sed_script(script: str) -> bool:
+    """Accept only scripts whose every command reads input and prints output."""
+    length = len(script)
+    position = 0
+    while position < length:
+        if script[position] in " \t\n;":
+            position += 1
+            continue
+        end = scan_sed_command(script, position)
+        if end is None:
+            return False
+        position = end
+    return True
+
+
+class SedInvocation(TypedDict):
+    """One `sed` call read the way sed reads it: scripts, files, and mode.
+
+    Parsed here rather than inside the classifier so that both readers of an
+    in-place rewrite work from one answer. The classifier asks what this would
+    do to each named file; the host runs these same screened scripts over
+    those same files to produce the documents that question is answered from.
+    A second parse would be a second answer to "which files does this
+    rewrite", and the two would part company the first time one of them
+    learned a flag the other had not.
+    """
+
+    scripts: list[str]
+    targets: list[str]
+    in_place: bool
+    screened: bool
+    """Whether every script only reads its input and writes standard output.
+
+    ``--sandbox`` makes sed itself refuse the write and execute commands, so a
+    call carrying it is screened by sed rather than by the grammar above, and
+    reads as screened here without the grammar having to accept it.
+    """
+
+
+def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
+    """Read one sed call's flags into its scripts, its files, and its mode.
+
+    A refusal rather than an invocation wherever the reading itself fails: a
+    script this cannot see is a script nothing screens, and an option nothing
+    classified is a mode nobody has decided about. Both are stronger than
+    "no files", which is why they come back as decisions instead of as an
+    empty parse a caller could mistake for a harmless call.
+    """
+    scripts: list[str] = []
+    positional: list[str] = []
+    script_expected = False
+    script_from_options = False
+    sandbox = False
+    in_place = False
+    for word in words[1:]:
+        if script_expected:
+            scripts.append(word)
+            script_expected = False
+            continue
+        if word.startswith("--"):
+            name, separator, value = word.partition("=")
+            if name in ("--in-place", "--inplace"):
+                in_place = True
+                continue
+            if name == "--file":
+                return KernelDecision(
+                    "deny", "sed script files are not screened — inline the script"
+                )
+            if name == "--sandbox" and not separator:
+                sandbox = True
+                continue
+            if name == "--expression":
+                if separator:
+                    scripts.append(value)
+                script_expected = not separator
+                script_from_options = True
+                continue
+            if name in SED_SAFE_LONG_OPTIONS and not separator:
+                continue
+            return unjudged(f"sed option {name!r} is not classified")
+        if word.startswith("-") and len(word) > 1:
+            flags = word[1:]
+            if "i" in flags:
+                # `-i` takes its backup suffix attached, so everything after
+                # it is that suffix rather than more flags — which is also
+                # sed's own reading of `-ie`.
+                in_place = True
+                flags = flags[: flags.index("i")]
+            if "f" in flags:
+                return KernelDecision(
+                    "deny", "sed script files are not screened — inline the script"
+                )
+            if flags.endswith("e"):
+                script_expected = True
+                script_from_options = True
+                flags = flags[:-1]
+            if any(flag not in SED_SAFE_SHORT_FLAGS for flag in flags):
+                return unjudged(f"sed option {word!r} is not classified")
+            continue
+        positional.append(word)
+    if script_expected:
+        return unjudged("sed expression flag has no script")
+    if not script_from_options and positional:
+        scripts.append(positional.pop(0))
+    return SedInvocation(
+        scripts=scripts,
+        targets=positional,
+        in_place=in_place,
+        screened=sandbox or all(safe_sed_script(script) for script in scripts),
+    )

@@ -8,13 +8,13 @@ import typer
 
 from lup.harness.codescan.markers import NoteKind
 from lup.channels.models import utc_now
-from lup.orchestration.actors.mailbox import (
+from lup.coordination.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
     RecordedAnswer,
 )
-from lup.orchestration.actors.questions import QuestionAnswer
+from lup.coordination.questions import QuestionAnswer
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.core import planned_evidence
 from lup.resolver.models import (
@@ -500,7 +500,7 @@ DETACH_CARRIES = [
     "max_parallel_workers",
     "recheck_standing_per_join",
 ]
-"""Every `harness resolve` option a detached relaunch reproduces."""
+"""Every `resolve` option a detached relaunch reproduces."""
 
 DETACH_DECLINES = {
     "context": "typer's own handle, not an option anybody passes",
@@ -530,9 +530,7 @@ def test_every_resolver_option_is_carried_or_declined_by_a_detached_launch() -> 
     scope. So the guard belongs on the whole option list rather than on
     whichever one was dropped most recently.
     """
-    callback = registered_group(
-        registered_group(app, "harness"), "resolve"
-    ).registered_callback
+    callback = registered_group(app, "resolve").registered_callback
 
     assert callback is not None and callback.callback is not None
     assert sorted(inspect.signature(callback.callback).parameters) == sorted(
@@ -541,7 +539,7 @@ def test_every_resolver_option_is_carried_or_declined_by_a_detached_launch() -> 
 
 
 def declared_spellings() -> dict[str, list[str]]:
-    """Every option `harness resolve` declares, and the flags that reach it.
+    """Every option `resolve` declares, and the flags that reach it.
 
     Read off the command rather than listed beside the renderer. A spelling
     kept by hand can drift from the one the parser accepts — typer decouples
@@ -550,10 +548,9 @@ def declared_spellings() -> dict[str, list[str]]:
     that rejects its own command line where nobody is listening.
     """
     group = get_group(app)
-    for name in ("harness", "resolve"):
-        found = group.commands[name]
-        assert isinstance(found, TyperGroup)
-        group = found
+    found = group.commands["resolve"]
+    assert isinstance(found, TyperGroup)
+    group = found
     return {
         parameter.name: [*parameter.opts, *parameter.secondary_opts]
         for parameter in group.params

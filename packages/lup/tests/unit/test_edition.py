@@ -19,6 +19,7 @@ from lup.policy.assets.host import (
     declared_program,
     file_diagnostics,
     publish_edition,
+    repaired_directives,
     shared_git_directory,
     worktree_root,
 )
@@ -247,6 +248,28 @@ def test_a_bare_name_is_asked_of_the_checkout_environment_before_the_path(
     assert declared_program(str(work), "pyright") == str(program)
 
 
+def test_an_interpreter_outside_the_conventional_directory_still_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hook runs under whichever `python3` the runtime found.
+
+    One installed in `sbin` names a scripts directory no environment has, so
+    every declared program resolved to a bare name and went to `PATH` — where
+    a project's own toolchain is exactly what is not installed. Measured, that
+    left both the checker and the repair sweep silent on a machine holding
+    both, which is the failure this gate was built to stop being.
+    """
+    monkeypatch.delenv(ENVIRONMENT_VARIABLE, raising=False)
+    monkeypatch.setattr(sys, "executable", "/usr/sbin/python3")
+    work = checkout(tmp_path / "repo")
+    scripts = work / ".venv" / "bin"
+    scripts.mkdir(parents=True)
+    program = scripts / "pyright"
+    program.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert declared_program(str(work), "pyright") == str(program)
+
+
 def test_a_redirected_environment_is_where_a_bare_name_resolves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -300,8 +323,82 @@ def test_a_diagnostic_for_the_edited_file_is_reported(tmp_path: Path) -> None:
     command = checker(work, report(file))
 
     assert file_diagnostics(str(file), command) == [
-        "error 1: something is wrong",
+        "module.py:1: error: something is wrong",
     ]
+
+
+def sweep(root: Path, payload: str) -> list[str]:
+    """A stand-in repair sweep emitting *payload*, recording how it was called."""
+    script = root / "fake-sweep"
+    script.write_text(
+        f'#!/bin/sh\necho "$@" > "{root / "sweep-arguments"}"\ncat <<\'JSON\'\n'
+        f"{payload}\nJSON\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return ["fake-sweep", "--fix"]
+
+
+def removals(file: str, line: int = 3, rule_id: str = "") -> str:
+    return json.dumps({"repaired": [{"file": file, "line": line, "rule_id": rule_id}]})
+
+
+def test_a_removed_directive_is_reported_back(tmp_path: Path) -> None:
+    """A directive the sweep deletes is one the agent wrote on purpose.
+
+    Removing it in silence teaches nothing, and the same directive is written
+    again on the next file — so the one channel this event has carries what
+    went and why it silenced nothing.
+    """
+    work = checkout(tmp_path / "repo")
+    file = edited(work)
+    command = sweep(work, removals("module.py"))
+
+    assert repaired_directives(str(file), command) == [
+        "line 3: removed `# lup: ignore` — it guarded no rule, so it silenced nothing"
+    ]
+
+
+def test_a_removed_directive_names_the_rule_it_claimed(tmp_path: Path) -> None:
+    """What a typed directive said it silenced is the whole of why it is gone."""
+    work = checkout(tmp_path / "repo")
+    file = edited(work)
+    command = sweep(work, removals("module.py", rule_id="any-type"))
+
+    assert repaired_directives(str(file), command) == [
+        "line 3: removed `# lup: ignore[any-type]` — it guarded no rule, so it"
+        " silenced nothing"
+    ]
+
+
+def test_the_sweep_is_given_the_file_the_way_it_names_its_own(
+    tmp_path: Path,
+) -> None:
+    """The sweep is asked in the spelling it answers in.
+
+    Which is also the only spelling a project's own declared sweep must
+    understand: selecting by repository-relative prefix is the shape this can
+    count on, where anything else is a shape it would have to assume.
+    """
+    work = checkout(tmp_path / "repo")
+    (work / "package").mkdir()
+    file = edited(work, "package/module.py")
+    command = sweep(work, removals("package/module.py"))
+    repaired_directives(str(file), command)
+
+    recorded = (work / "sweep-arguments").read_text(encoding="utf-8")
+
+    assert "--path package/module.py" in recorded
+    assert str(work) not in recorded
+
+
+def test_a_file_outside_the_checkout_is_not_swept(tmp_path: Path) -> None:
+    """Nothing anchors it, so nothing about it can be asked of the sweep."""
+    checkout(tmp_path / "repo")
+    outside = tmp_path / "elsewhere.py"
+    outside.write_text("x = 1\n", encoding="utf-8")
+
+    assert repaired_directives(str(outside), ["fake-sweep"]) == []
 
 
 def test_the_checker_leads_the_path_with_its_own_environment(tmp_path: Path) -> None:
@@ -378,7 +475,7 @@ def test_a_file_quoting_one_marker_is_still_checked(tmp_path: Path) -> None:
     command = checker(work, report(file))
 
     assert file_diagnostics(str(file), command) == [
-        "error 1: something is wrong",
+        "module.py:1: error: something is wrong",
     ]
 
 
@@ -390,7 +487,7 @@ def test_the_readable_suffixes_are_the_callers_to_choose(tmp_path: Path) -> None
 
     assert file_diagnostics(str(file), command) == []
     assert file_diagnostics(str(file), command, suffixes=(".qs",)) == [
-        "error 1: something is wrong",
+        "module.qs:1: error: something is wrong",
     ]
 
 

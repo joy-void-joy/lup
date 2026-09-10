@@ -1,4 +1,4 @@
-"""Behavior tests for `lup-devtools dev conflict` during a real rebase.
+"""Behavior tests for `lup-devtools git conflict` during a real rebase.
 
 Builds a throwaway git repo with a genuine rebase conflict and pins that
 the conflict commands use REBASE_HEAD (MERGE_HEAD and CHERRY_PICK_HEAD do
@@ -23,7 +23,7 @@ from lup.providers.harness import claude_prompt_renderer
 from lup.types import JsonObject
 from lup.workspace import paths
 from lup.devtools.dev import conflicts
-from lup.devtools.harness.content.skills.merge import SKILL as MERGE_SKILL
+from lup.harness.content.skills.merge import SKILL as MERGE_SKILL
 from tests.unit.repos import commit_file, git_in, initialized_repo
 
 
@@ -220,7 +220,7 @@ def test_whole_conflict_workflow_runs_against_a_conflicted_manifest(
     """Every command the merge skill needs before the conflict is settled."""
 
     def report(*words: str) -> JsonObject:
-        return json.loads(str(documented_launcher("dev", "conflict", *words)))
+        return json.loads(str(documented_launcher("git", "conflict", *words)))
 
     status = report("status", "--json")
     assert status["operation"] == "merge"
@@ -247,7 +247,7 @@ def test_whole_conflict_workflow_runs_against_a_conflicted_manifest(
 
     remaining = io.StringIO()
     with pytest.raises(sh.ErrorReturnCode):
-        documented_launcher("dev", "conflict", "complete", "--dry-run", _err=remaining)
+        documented_launcher("git", "conflict", "complete", "--dry-run", _err=remaining)
     assert conflicts.MANIFEST in remaining.getvalue()
 
     manifest = conflicted_manifest_repo / conflicts.MANIFEST
@@ -256,7 +256,7 @@ def test_whole_conflict_workflow_runs_against_a_conflicted_manifest(
         "add", conflicts.MANIFEST
     )
 
-    completion = str(documented_launcher("dev", "conflict", "complete", "--dry-run"))
+    completion = str(documented_launcher("git", "conflict", "complete", "--dry-run"))
     assert "git commit --no-edit" in completion
 
 
@@ -311,13 +311,13 @@ def test_a_started_command_names_the_launcher_to_reach_it_by(
 ) -> None:
     """A worker never has to read a `uv` parse error to find the fallback."""
     diagnostics = io.StringIO()
-    documented_launcher("dev", "conflict", "status", "--json", _err=diagnostics)
+    documented_launcher("git", "conflict", "status", "--json", _err=diagnostics)
 
     notice = diagnostics.getvalue()
     assert conflicts.MANIFEST in notice
     assert (
         conflicts.invocation(
-            conflicts.DOCUMENTED_LAUNCHER, "dev", "conflict", "status", "--json"
+            conflicts.DOCUMENTED_LAUNCHER, "git", "conflict", "status", "--json"
         )
         in notice
     )
@@ -326,9 +326,9 @@ def test_a_started_command_names_the_launcher_to_reach_it_by(
 @pytest.mark.parametrize(
     "command",
     [
-        ["dev", "conflict", "status", "--json"],
-        ["dev", "conflict", "audit", "<conflicted-files>", "--json"],
-        ["dev", "conflict", "complete"],
+        ["git", "conflict", "status", "--json"],
+        ["git", "conflict", "audit", "<conflicted-files>", "--json"],
+        ["git", "conflict", "complete"],
     ],
 )
 def test_merge_skill_documents_the_launcher_the_commands_declare(

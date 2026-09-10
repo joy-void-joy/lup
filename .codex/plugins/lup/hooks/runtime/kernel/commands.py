@@ -4,6 +4,7 @@
 
 import posixpath
 import re
+from collections.abc import Sequence
 from typing import TypedDict
 
 from .decision import (
@@ -15,24 +16,32 @@ from .decision import (
     unlisted,
 )
 from .rows import (
+    AcceptanceGuardRow,
+    AntiPatternRow,
+    EditRuleRow,
+    ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
+    RewrittenFileRow,
     RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
 )
+from .edit import decide_edit
 from .effects import (
     STRENGTH,
     EffectEvidence,
     EffectRow,
     declare,
     declared_verdict,
+    member_for,
     purpose_of,
     verdict_for,
 )
 from .words import (
     INTERPRETERS,
     carried_setting,
+    destination_form,
     flag_matches,
     flag_write_targets,
     git_restore_operands,
@@ -40,13 +49,15 @@ from .words import (
     opaque_argument,
     protected_write_target,
     refspec_effects,
-    rewrites_only_recoverable_files,
+    sed_invocation,
+    uv_run_module_root,
     uv_run_words,
     write_checkpoint,
     write_scope,
     written_targets,
 )
 from .fetch import decide_fetch
+from .semantics import UnjudgedAmbient
 
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 IN_PLACE_SED_REFUSAL = (
@@ -56,18 +67,6 @@ IN_PLACE_SED_REFUSAL = (
     " exact-string substitution cannot tell apart; otherwise make the change"
     " through the edit tool, which is what those gates read"
 )
-# lup: ignore[constant-declaration] — sed's own short flags, spelled as sed does
-SED_SAFE_SHORT_FLAGS = "nErsuz"
-# lup: ignore[library-default] — sed's own long spellings of the short flags above
-SED_SAFE_LONG_OPTIONS = (
-    "--quiet",
-    "--silent",
-    "--regexp-extended",
-    "--separate",
-    "--null-data",
-)
-# lup: ignore[constant-declaration] — the flag characters sed's own `s///` takes
-SED_SUBSTITUTE_FLAG_CHARS = "0123456789gpiImM"
 
 
 def row_verdict(
@@ -76,8 +75,17 @@ def row_verdict(
     reason: str,
     checkpoint: CheckpointRequirement | None = None,
     effects: list[EffectRow] | None = None,
+    arguments: list[str] | None = None,
 ) -> KernelDecision:
     """One row's verdict, carrying every fact the row states about itself.
+
+    ``arguments`` are the operand words the row was matched against, and an
+    ask or a deny appends the invocation they spell to the reason. A row's
+    sentence states the category — "deleting files requires approval" — and
+    the reviewer reads the reason and nothing else, so the words that tripped
+    the row travel with it: in a compound command they are what says *which*
+    segment the question is about. Composed here once rather than templated
+    into each of the hundred-odd rows that ask.
 
     The purpose comes from the effect that decided, because the effect is the
     thing being weighed. It used to be inferred from two other columns -- an
@@ -109,6 +117,9 @@ def row_verdict(
     settled = row["checkpoint"] if checkpoint is None else checkpoint
     declared = row["effects"] if effects is None else effects
     purpose = purpose_of(declared, EffectEvidence()) if effect == "ask" else None
+    if arguments is not None and effect in ("ask", "deny"):
+        prefix = [row["command"]] + ([row["subcommand"]] if row["subcommand"] else [])
+        reason = f"{reason} — `{' '.join([*prefix, *arguments])}`"
     return KernelDecision(
         effect,
         reason,
@@ -142,6 +153,47 @@ class WriteFacts(TypedDict):
     anything confines the write is the whole of the answer.
     """
 
+    worktrees: list[str]
+    """Every checkout git calls part of this repository, measured on the host.
+
+    Read by the `-C` guard below, and measured rather than derived for exactly
+    the reason that sank the first version of it: this module is pure, so the
+    only test it can make alone is a path prefix, and a prefix read every
+    absolute spelling as outside. Asked of git on the host and handed down
+    here, the question becomes one of identity, which a sibling worktree
+    answers wherever it happens to sit on disk.
+    """
+
+
+class SedContext(TypedDict):
+    """Everything judging an in-place rewrite as an edit needs, in this shape.
+
+    Beside :class:`WriteFacts` and for its reason: the edit gates are declared
+    above this module, so the classifier is handed what they read rather than
+    reaching up for it. What arrives is the declarations an ``Edit`` is judged
+    against — unchanged, so the two cannot come to disagree about a file — and
+    the documents the host produced by running the rewrite into a copy.
+    """
+
+    path_roles: list[PathRoleRow]
+    path_rules: list[PathRuleRow]
+    antipattern_rows: dict[str, list[AntiPatternRow]]
+    """The anti-pattern table by file suffix, as the edit gate reads it."""
+
+    edit_rules: list[EditRuleRow]
+    import_boundaries: list[ImportBoundaryRow]
+    acceptance_guard: AcceptanceGuardRow | None
+    maximum_added_lines: int
+    autonomous: bool
+    allowances: list[str]
+    rewritten_documents: list[RewrittenFileRow]
+    """What each named file would hold afterwards, where the host could say.
+
+    A list rather than a mapping because it crosses the same boundary every
+    other host reading crosses, and one absent row is the fact the classifier
+    acts on: a rewrite nothing read is asked about rather than granted.
+    """
+
 
 class WriteAnswer(TypedDict):
     """What one write target earned, beside the scope that decided it."""
@@ -159,7 +211,12 @@ def no_write_facts() -> WriteFacts:
     than the permissive one.
     """
     return WriteFacts(
-        existing=None, tracked=[], path_roles=[], path_rules=[], contained=False
+        existing=None,
+        tracked=[],
+        path_roles=[],
+        path_rules=[],
+        contained=False,
+        worktrees=[],
     )
 
 
@@ -190,7 +247,12 @@ def flag_write_verdict(
     """
     targets = flag_write_targets([row["command"], *arguments], row["write_flags"])
     if not targets:
-        return row_verdict(row, "ask", row["reason"] or "this flag writes a file")
+        return row_verdict(
+            row,
+            "ask",
+            row["reason"] or "this flag writes a file",
+            arguments=arguments,
+        )
 
     def judged(target: str) -> WriteAnswer:
         """What one named path earns, beside the scope that earned it.
@@ -246,11 +308,12 @@ def flag_write_verdict(
         answered["effect"],
         row["reason"] or "this flag writes a file",
         write_checkpoint(answered["scope"]),
+        arguments=arguments,
     )
 
 
 def verb_loss_scope(
-    words: list[str], facts: WriteFacts
+    words: list[str], facts: WriteFacts, write_flags: Sequence[str] = ()
 ) -> CheckpointRequirement | None:
     """What a verb's own targets say the loss is, read one target at a time.
 
@@ -270,17 +333,20 @@ def verb_loss_scope(
     reads is an ordinary read however far outside it sits.
 
     Which verbs those are is :func:`written_targets`' question rather than
-    this one's, and it answers for the archives too. They read their targets
+    this one's, and the row's declared ``write_flags`` go with the words so a
+    command naming its destination in an option is read from the column that
+    already states it rather than from a second table saying the same thing.
+
+    It answers for the archives too. They read their targets
     already -- to grant an extraction that lands on nothing -- and where the
     grant did not apply the row's own claim stood: ``gzip /etc/hosts`` and
     ``tar -xf a.tgz -C /etc`` were settled by a capture that has never held
     either path, which is the same defect the delete verbs were fixed for.
 
-    ``None`` leaves the row's own scope standing -- an unmodelled verb, a line
-    whose flags could move which paths are touched, or targets that are all
-    inside the checkout, where the row was already right.
+    ``None`` leaves the row's own scope standing -- an unmodelled verb, or
+    targets that are all inside the checkout, where the row was already right.
     """
-    targets = written_targets(words)
+    targets = written_targets(words, write_flags)
     if targets is None:
         return None
     if any(
@@ -317,6 +383,33 @@ def unresolved_evidence(facts: WriteFacts) -> EffectEvidence:
     )
 
 
+def frozen_restore(
+    arguments: list[str], frozen_flags: list[str], guarded: list[str]
+) -> KernelDecision | None:
+    """The allow a dependency restore earns when a frozen flag pins it.
+
+    One judgement for every package manager, which is why it is a function
+    the row walk and the uv parser both reach rather than a sentence each
+    carries: a restore that may not touch the lockfile fetches nothing the
+    lock does not already pin by integrity hash, which is what `uv run`
+    fetches before running anything, unasked. The flag has to be legible and
+    stand among unguarded words, on the terms a read verb is honored — an
+    unresolved expansion might be a guarded flag, and a guarded flag beside
+    the freeze would still act. Nothing pinned answers ``None``, leaving the
+    row's own verdict to stand.
+    """
+    if not arguments or not frozen_flags:
+        return None
+    if any(opaque_argument(word) or flag_matches(word, guarded) for word in arguments):
+        return None
+    if not any(word in frozen_flags for word in arguments):
+        return None
+    return KernelDecision(
+        "allow",
+        "a frozen lockfile pins every package to what this project already declares",
+    )
+
+
 def apply_command_row(
     row: ShellRuleRow, arguments: list[str], facts: WriteFacts | None = None
 ) -> KernelDecision:
@@ -328,7 +421,13 @@ def apply_command_row(
     argument is exactly one of those flags — the command's declared pure
     read-only form. One with ``read_verbs`` de-escalates when a declared
     verb appears and every word is a literal free of guarded flags — the
-    verb pins the invocation to its query action. One with ``write_markers``
+    verb pins the invocation to its query action. One with ``probe_flags``
+    de-escalates on a literal probe flag even beside guarded words, because
+    the dry-run form performs none of what they guard — destination grammar
+    alone stands, being about where the probe reaches. One with ``frozen_flags``
+    de-escalates on a literal frozen flag among unguarded words, because a
+    restore that may not touch the lockfile fetches only what it already
+    pins. One with ``write_markers``
     states that de-escalation negatively, for a command whose read-only form
     is the one carrying nothing extra: it allows when no legible word carries
     a marker. One with ``bare_reads`` carries that to its limit, for a command
@@ -389,6 +488,19 @@ def apply_command_row(
             return row_verdict(
                 row, "allow", "a declared read-only verb pins the query action"
             )
+    if stated != "allow":
+        pinned = frozen_restore(arguments, row["frozen_flags"], row["ask_flags"])
+        if pinned is not None:
+            return row_verdict(row, pinned.effect, pinned.reason)
+    # Unlike a read verb, a probe stands beside guarded flags: what they guard
+    # is an effect the dry-run form does not perform. Only the literal
+    # spelling counts — a cluster (`git clean -fdn`) keeps the row's effect,
+    # which costs a question rather than an unperformed loss.
+    if stated != "allow" and row["probe_flags"] and arguments:
+        if any(word in row["probe_flags"] for word in arguments):
+            return row_verdict(
+                row, "allow", "a declared dry-run flag makes this a probe"
+            )
     if stated != "allow" and row["write_markers"] and arguments:
         # Absence is the test, so every word has to be legible: one this
         # cannot read might carry the marker, and "no marker found" would
@@ -425,6 +537,11 @@ def apply_command_row(
     # naming it is what lets the write be judged where every other spelling
     # of a write is judged rather than by this row's single verdict.
     guarding = [*row["ask_flags"], *row["write_flags"]]
+    # A literal probe flag says the invocation performs nothing, so the flag-
+    # and refspec-earned questions below stand down. The opacity bounce stays:
+    # an unreadable word could name a destination, and destination grammar is
+    # about where the probe reaches rather than what it writes.
+    probing = any(word in row["probe_flags"] for word in arguments)
     if stated == "allow" and guarding:
         opaque = next(
             (word for word in arguments if opaque_argument(word)),
@@ -436,7 +553,11 @@ def apply_command_row(
                 " it to a literal value first"
             )
         guarded = next(
-            (word for word in arguments if flag_matches(word, row["ask_flags"])),
+            (
+                word
+                for word in arguments
+                if not probing and flag_matches(word, row["ask_flags"])
+            ),
             None,
         )
         if guarded is not None:
@@ -445,6 +566,7 @@ def apply_command_row(
                 "ask",
                 row["reason"] or f"{guarded} requires approval",
                 effects=[*row["effects"], *row["flag_effects"]],
+                arguments=arguments,
             )
         # After the ask-flags, so a command carrying both keeps the stronger
         # question: `sort --compress-program=x -o out.txt` runs a program
@@ -453,7 +575,27 @@ def apply_command_row(
             return flag_write_verdict(
                 row, arguments, no_write_facts() if facts is None else facts
             )
-    if stated == "allow" and row["ask_refspecs"]:
+    if stated == "allow" and row["ask_destinations"]:
+        # The first word that is not a flag, which is where git reads the
+        # repository from and nowhere else: every later operand is a refspec.
+        # A flag's separate value can land here instead — `-o <option>` — and
+        # a bare option word reads as a remote name, so the miss costs a
+        # question that was not asked rather than one that was owed.
+        #
+        # No opacity test, on the same grounds as the block below: a row
+        # declaring destination forms declares flag effects too, so an
+        # unreadable word has already been bounced above.
+        named = next((word for word in arguments if not word.startswith("-")), "")
+        form = destination_form(named)
+        if form in row["ask_destinations"]:
+            return row_verdict(
+                row,
+                "ask",
+                f"{named} names the destination by {form} rather than by a"
+                " remote this repository holds — sending work there requires"
+                " approval",
+            )
+    if stated == "allow" and row["ask_refspecs"] and not probing:
         # No opacity test of its own: a row declaring refspec effects declares
         # flag effects too, so the block above has already bounced every word
         # this one could not read.
@@ -471,12 +613,13 @@ def apply_command_row(
                 row,
                 "ask",
                 row["reason"] or f"{carried[0]} would {carried[1]} a ref",
+                arguments=arguments,
             )
     # Read after every de-escalation above and before the row's own answer,
     # because it changes what the loss *is* rather than whether the row asks:
     # a scratch grant is still a scratch grant, and a delete reaching outside
     # the checkout is a loss no capture of this session holds.
-    loss = verb_loss_scope([row["command"], *arguments], measured)
+    loss = verb_loss_scope([row["command"], *arguments], measured, row["write_flags"])
     if loss is not None:
         return row_verdict(
             row,
@@ -484,8 +627,9 @@ def apply_command_row(
             row["reason"],
             checkpoint=loss,
             effects=[declare("destroys_uncaptured", scope=loss)],
+            arguments=arguments,
         )
-    return row_verdict(row, stated, row["reason"])
+    return row_verdict(row, stated, row["reason"], arguments=arguments)
 
 
 class Subcommand(TypedDict):
@@ -499,8 +643,93 @@ class Subcommand(TypedDict):
     remainder: list[str]
 
 
+def redirected_verb_only_reads(
+    arguments: list[str],
+    value_flags: list[str],
+    rows: list[ShellRuleRow],
+) -> bool:
+    """Whether a directory redirect leads to a verb that only reads.
+
+    The guard on `-C` exists because the verb behind it is answered by a row
+    reasoning about *this* worktree: ``git -C /elsewhere commit`` reads as
+    reversible on the strength of a reflog that is somewhere else. That
+    premise is about mutation. A verb that only reads has no reflog in it to
+    be somebody else's, so the redirect changes which tree is read and
+    nothing about what the command does.
+
+    Where the redirect *points* is deliberately not asked, where a first
+    version required it to stay inside the checkout. The argument for asking
+    was that ``git -C /elsewhere log`` is an outside read, which a row
+    declaring one `project` scope for its verb cannot raise. What refutes it
+    is that no other spelling of the same read raises it either: ``cd
+    /elsewhere && git log`` is two allowed segments and ``cat
+    /elsewhere/file`` is an allowed read, both measured. So the question
+    deterred nothing and cost a turn every time, and its own text said as
+    much -- it named `cd` into that tree as the way through. A question
+    whose remedy is the unguarded spelling of the same act is friction
+    wearing a boundary's clothes.
+
+    Which leaves it costing most exactly where reading elsewhere is the
+    work: a sibling worktree, and a project the sync registry mounts for a
+    session to commit in. Both are addressed by absolute path, and the test
+    it used read every absolute path as outside.
+
+    The verb is judged by its own declared effects rather than by a list of
+    names kept here. A list would be a second statement of what `git log`
+    does, free to disagree with the table that already says it, and wrong
+    the first time a verb is reclassified.
+
+    Read as "observes", not as "allowed", and the difference is the whole
+    correctness of this: a commit is allowed for being reversible, so a first
+    version asking the verdict let ``git -C elsewhere commit`` through -- the
+    one case the guard was written for, and the one this still holds.
+    """
+    position = 0
+    while position < len(arguments):
+        word = arguments[position]
+        if not word.startswith("-"):
+            named = [row for row in rows if row["subcommand"] == word]
+            return bool(named) and all(
+                member_for(effect["kind"]).observes
+                for row in named
+                for effect in row["effects"]
+            )
+        position += 2 if word in value_flags else 1
+    return False
+
+
+def redirect_stays_in_this_repository(value: str, worktrees: list[str]) -> bool:
+    """Whether a directory redirect lands in a checkout of this same repository.
+
+    The `-C` guard exists because the verb behind it is answered by a row
+    reasoning about *this* worktree: `git -C /elsewhere commit` reads as
+    reversible on the strength of a reflog somewhere else. Inside this
+    repository that premise is satisfied rather than dodged -- linked worktrees
+    share one object store and one reflog, so the reversibility the row asserts
+    is the reflog that is actually there.
+
+    Compared against what git called a worktree rather than against a prefix of
+    this directory, which is the distinction the first version of this missed.
+    Worktrees of one repository sit wherever somebody put them, so a
+    containment test read every absolute spelling as outside and cost a turn on
+    exactly the case where reaching another checkout is the work.
+
+    An unresolvable or relative value answers no. A redirect this cannot settle
+    keeps its question, which is the direction that costs an approval rather
+    than a boundary.
+    """
+    if opaque_argument(value) or not posixpath.isabs(value):
+        return False
+    resolved = posixpath.normpath(value)
+    return any(resolved == worktree for worktree in worktrees)
+
+
 def split_subcommand(
-    executable: str, arguments: list[str], default: ShellRuleRow | None
+    executable: str,
+    arguments: list[str],
+    default: ShellRuleRow | None,
+    rows: list[ShellRuleRow] = [],
+    worktrees: list[str] = [],
 ) -> Subcommand | KernelDecision:
     """Find the subcommand word, honoring global value-taking and guarded flags.
 
@@ -540,6 +769,30 @@ def split_subcommand(
             ):
                 position += named["words"]
                 continue
+            if flag_matches(word, value_flags):
+                # Asked before the question is raised rather than after it is
+                # answered, because the answer here was the whole verdict: the
+                # flag returned before the subcommand word had been read, so
+                # `git -C . log` was a question about a redirect to nowhere in
+                # front of a verb that reads. The guard stands for everything
+                # else, and the redirect it names still applies.
+                following = arguments[position + 2 :]
+                if redirected_verb_only_reads(following, value_flags, rows):
+                    position += 2
+                    continue
+                # A redirect that stays inside this repository leaves the
+                # guard's own premise intact: what it protects is a row
+                # reasoning about this worktree's reflog, and every checkout of
+                # one repository shares that reflog. The verb behind it is
+                # judged exactly as it would be here, which is what the guard
+                # was asking to be sure of.
+                if position + 1 < len(arguments) and (
+                    redirect_stays_in_this_repository(
+                        arguments[position + 1], worktrees
+                    )
+                ):
+                    position += 2
+                    continue
             redirect = (
                 " — or cd into that tree and run it there"
                 if flag_matches(word, value_flags)
@@ -601,7 +854,9 @@ def decide_command_rows(
             next(row for row in matches if not row["subcommand"]), arguments, measured
         )
     default = next((row for row in matches if not row["subcommand"]), None)
-    split = split_subcommand(executable, arguments, default)
+    split = split_subcommand(
+        executable, arguments, default, matches, measured["worktrees"]
+    )
     if isinstance(split, KernelDecision):
         return split
     subword = split["word"]
@@ -623,242 +878,111 @@ def decide_command_rows(
     return apply_command_row(subrows[0], remainder, measured)
 
 
-def scan_sed_delimited(script: str, position: int, parts: int) -> int | None:
-    """Scan ``parts`` sections after the delimiter at ``position``.
-
-    The delimiter is whatever character sits at ``position``; backslash
-    escapes are honored inside sections.
-    """
-    if position >= len(script):
-        return None
-    delimiter = script[position]
-    if delimiter.isalnum() or delimiter in " \t\n;\\":
-        return None
-    cursor = position + 1
-    seen = 0
-    while cursor < len(script) and seen < parts:
-        character = script[cursor]
-        if character == "\\":
-            cursor += 2
-            continue
-        if character == delimiter:
-            seen += 1
-        cursor += 1
-    return cursor if seen == parts else None
-
-
-def scan_sed_address(script: str, position: int) -> int | None:
-    """Scan one address: a line-number form, ``$``, or a regex form."""
-    character = script[position]
-    if character == "$":
-        return position + 1
-    if character.isdigit():
-        cursor = position + 1
-        while cursor < len(script) and script[cursor].isdigit():
-            cursor += 1
-        if cursor < len(script) and script[cursor] == "~":
-            cursor += 1
-            while cursor < len(script) and script[cursor].isdigit():
-                cursor += 1
-        return cursor
-    if character == "+":
-        cursor = position + 1
-        while cursor < len(script) and script[cursor].isdigit():
-            cursor += 1
-        return cursor if cursor > position + 1 else None
-    end = (
-        scan_sed_delimited(script, position, 1)
-        if character == "/"
-        else scan_sed_delimited(script, position + 1, 1)
-        if character == "\\" and position + 1 < len(script)
-        else None
-    )
-    if end is None:
-        return None
-    while end < len(script) and script[end] in "IM":
-        end += 1
-    return end
-
-
-def scan_sed_command(script: str, position: int) -> int | None:
-    """Scan one address-guarded command, returning the position after it.
-
-    Accepted commands read the input and write standard output only: print,
-    delete, hold-space, branching, labels, blocks, line numbering, text
-    insertion, file reading, transliteration, and flag-screened substitution.
-    The write and execute forms (``w``, ``W``, ``e``, ``s///e``, ``s///w``)
-    fall out as unrecognized trailing characters.
-    """
-    length = len(script)
-    address = scan_sed_address(script, position)
-    if address is not None:
-        position = address
-        while position < length and script[position] in " \t":
-            position += 1
-        if position < length and script[position] == ",":
-            position += 1
-            while position < length and script[position] in " \t":
-                position += 1
-            if position >= length:
-                return None
-            second = scan_sed_address(script, position)
-            if second is None:
-                return None
-            position = second
-    while position < length and script[position] in " \t!":
-        position += 1
-    if position >= length:
-        return None
-    command = script[position]
-    if command in "pPdDnNgGhHxz=F{}":
-        return position + 1
-    if command in "qQl":
-        cursor = position + 1
-        while cursor < length and (script[cursor].isdigit() or script[cursor] == " "):
-            cursor += 1
-        return cursor
-    if command in "btT:":
-        cursor = position + 1
-        while cursor < length and script[cursor] in " \t":
-            cursor += 1
-        while cursor < length and (script[cursor].isalnum() or script[cursor] == "_"):
-            cursor += 1
-        return cursor
-    if command in "aicrR":
-        newline = script.find("\n", position)
-        return length if newline == -1 else newline
-    if command == "s":
-        end = scan_sed_delimited(script, position + 1, 2)
-        if end is None:
-            return None
-        while end < length and script[end] in SED_SUBSTITUTE_FLAG_CHARS:
-            end += 1
-        return end
-    if command == "y":
-        return scan_sed_delimited(script, position + 1, 2)
-    return None
-
-
-def safe_sed_script(script: str) -> bool:
-    """Accept only scripts whose every command reads input and prints output."""
-    length = len(script)
-    position = 0
-    while position < length:
-        if script[position] in " \t\n;":
-            position += 1
-            continue
-        end = scan_sed_command(script, position)
-        if end is None:
-            return False
-        position = end
-    return True
-
-
-def decide_sed_words(
-    words: list[str],
-    path_roles: list[PathRoleRow] | None = None,
-    recoverable_targets: list[str] | None = None,
-    recoverable_target_limit: int = 5,
-    path_rules: list[PathRuleRow] | None = None,
-) -> KernelDecision:
-    """Allow only read-only sed: safe flags plus a safe script grammar.
+def decide_sed_words(words: list[str], context: "SedContext") -> KernelDecision:
+    """Allow read-only sed; judge an in-place rewrite as the edit it performs.
 
     ``--sandbox`` makes sed itself reject the write and execute commands, so
     the script screen is skipped under it; a script file stays denied toward
     an inline script, because nothing screens what is in it.
 
-    In-place editing is two objections wearing one refusal, and only one of
-    them survives a boundary. *Being wrong is unrepairable* is answered by
-    the files themselves: a scratch file costs nothing, a committed file with
-    no uncommitted change costs a checkout, and the whole change stands in
-    the diff either way — the same question a delete is already granted on,
-    asked of the verb that overwrites instead of the one that removes. So a
-    rewrite whose every named file could be brought back is allowed, with the
-    grant saying what it granted.
+    In-place editing was two objections wearing one refusal, and only one of
+    them was ever answered. *Being wrong is unrepairable* is answered by the
+    files themselves, and a rewrite whose every named file could be brought
+    back was allowed on that ground alone. *It walks past the gates an edit
+    is judged by* was answered by nothing — so the grant it produced was a
+    grant to bypass the anti-pattern table, the review-note gate and the size
+    gate, given on the strength of an undo that answers a different question.
 
-    *It walks past the gates an edit is judged by* is not answered by
-    anything: the anti-pattern table, the review-note gate and the size gate
-    are reviewability, and no container and no undo layer enforces them. That
-    is what remains once recoverability is established, and it is why the
-    grant names `dev check` as where those rules will still be read.
+    So the after-document is judged instead. The host runs the screened
+    script over a copy of each named file and hands back what would land;
+    each goes to :func:`~lup.policy.kernel.edit.decide_edit`, the same gate an
+    ``Edit`` meets, and the strongest verdict is this command's. A rewrite
+    that introduces nothing those rules refuse allows because it is a
+    permissible edit, not because it could be undone.
 
-    Where recoverability is not established — a file the host reported
-    nothing about, a word that expands at run time, more restorable files
-    than a rewrite should sweep — the refusal stands and names the tool that
-    does the job it is usually reached for: a rename across many sites is
-    `rename_symbol`, which resolves scopes an exact-string substitution
-    cannot tell apart. A stated reason still turns that refusal into the
-    question it asks for.
+    **A target with no document asks.** A word that expands at run time, a
+    file the host could not read, a script sed itself refused — each leaves
+    a rewrite about to happen that nothing has read, and an unjudgeable
+    rewrite is exactly the one that must not go through unasked. Composition
+    paths that forget to resolve the documents therefore ask rather than
+    allow, which is the only arrangement in which forgetting is safe.
     """
-    scripts: list[str] = []
-    positional: list[str] = []
-    script_expected = False
-    script_from_options = False
-    sandbox = False
-    in_place = False
-    for word in words[1:]:
-        if script_expected:
-            scripts.append(word)
-            script_expected = False
-            continue
-        if word.startswith("--"):
-            name, separator, value = word.partition("=")
-            if name in ("--in-place", "--inplace"):
-                in_place = True
-                continue
-            if name == "--file":
-                return KernelDecision(
-                    "deny", "sed script files are not screened — inline the script"
-                )
-            if name == "--sandbox" and not separator:
-                sandbox = True
-                continue
-            if name == "--expression":
-                if separator:
-                    scripts.append(value)
-                script_expected = not separator
-                script_from_options = True
-                continue
-            if name in SED_SAFE_LONG_OPTIONS and not separator:
-                continue
-            return unjudged(f"sed option {name!r} is not classified")
-        if word.startswith("-") and len(word) > 1:
-            flags = word[1:]
-            if "i" in flags:
-                # `-i` takes its backup suffix attached, so everything after
-                # it is that suffix rather than more flags — which is also
-                # sed's own reading of `-ie`.
-                in_place = True
-                flags = flags[: flags.index("i")]
-            if "f" in flags:
-                return KernelDecision(
-                    "deny", "sed script files are not screened — inline the script"
-                )
-            if flags.endswith("e"):
-                script_expected = True
-                script_from_options = True
-                flags = flags[:-1]
-            if any(flag not in SED_SAFE_SHORT_FLAGS for flag in flags):
-                return unjudged(f"sed option {word!r} is not classified")
-            continue
-        positional.append(word)
-    if script_expected:
-        return unjudged("sed expression flag has no script")
-    if not script_from_options and positional:
-        scripts.append(positional.pop(0))
-    if not sandbox and not all(safe_sed_script(script) for script in scripts):
+    invocation = sed_invocation(words)
+    if isinstance(invocation, KernelDecision):
+        return invocation
+    if not invocation["screened"]:
         return unjudged("sed script is not classified as read-only")
-    if not in_place:
+    if not invocation["in_place"]:
         return KernelDecision("allow", "read-only sed script")
-    granted = rewrites_only_recoverable_files(
-        positional,
-        path_roles or [],
-        recoverable_targets,
-        recoverable_target_limit,
-        path_rules,
+    if not invocation["targets"]:
+        return KernelDecision("deny", IN_PLACE_SED_REFUSAL)
+    documents = {row["target"]: row for row in context["rewritten_documents"]}
+    verdicts = [
+        rewrite_verdict(target, documents[target], context)
+        if target in documents
+        else KernelDecision(
+            "ask",
+            f"sed would rewrite {target} in place and nothing read the result:"
+            " the edit gates judge the file this would produce, and that file"
+            " could not be produced. Make the change through the edit tool,"
+            " which carries its own content",
+            purpose="quality_review",
+        )
+        for target in invocation["targets"]
+    ]
+    stopped = [verdict for verdict in verdicts if verdict.effect != "allow"]
+    if not stopped:
+        return KernelDecision(
+            "allow",
+            "every file this rewrites was judged as the edit it performs, and"
+            " the edit gates passed it",
+        )
+    return max(stopped, key=lambda verdict: STRENGTH.index(verdict.effect))
+
+
+def rewrite_verdict(
+    target: str, document: RewrittenFileRow, context: "SedContext"
+) -> KernelDecision:
+    """What the edit gates say about one file an in-place rewrite would produce.
+
+    The path the rules match on is the document's, not the word's: a rule
+    anchored at the repository top has to be asked about where the file sits,
+    and the word is spelled relative to wherever the session was launched.
+    The word is still what the reason names, because that is what the writer
+    typed and what they would have to change.
+    """
+    suffix = posixpath.splitext(document["path"])[1].lower()
+    verdict = decide_edit(
+        document["path"],
+        document["before"],
+        document["after"],
+        path_exists=True,
+        path_rules=context["path_rules"],
+        antipattern_rows=context["antipattern_rows"].get(suffix, []),
+        path_roles=context["path_roles"],
+        maximum_added_lines=context["maximum_added_lines"],
+        autonomous=context["autonomous"],
+        allowances=context["allowances"],
+        python_source=suffix in (".py", ".pyi"),
+        acceptance_guard=context["acceptance_guard"],
+        resolution=document["resolution"],
+        suffix=suffix,
+        operation="modify",
+        edit_rules=context["edit_rules"],
+        foreign=document["foreign"],
+        outside_project=document["outside_project"],
+        import_boundaries=context["import_boundaries"],
     )
-    return (
-        granted if granted is not None else KernelDecision("deny", IN_PLACE_SED_REFUSAL)
+    if verdict.effect == "allow":
+        return verdict
+    return KernelDecision(
+        verdict.effect,
+        f"sed would rewrite {target} in place, and the edit gates refuse what"
+        f" it would produce: {verdict.reason}",
+        checkpoint=verdict.checkpoint,
+        purpose=verdict.purpose,
+        rule=verdict.rule,
+        reviewer=verdict.reviewer,
     )
 
 
@@ -991,12 +1115,22 @@ def decide_curl_words(
     words: list[str],
     allowed_scopes: list[UrlScopeRow],
     denied_scopes: list[UrlScopeRow],
+    unjudged_ambient: UnjudgedAmbient = "ask",
 ) -> KernelDecision:
     """Allow only read-method curl against the declared fetch scopes.
 
-    Every positional word must be a URL the fetch policy allows; unlisted
-    origins stay an approval question and denied origins deny. Flags that
+    Every positional word must be a URL the fetch policy allows; denied
+    origins deny, and an origin no scope names is the profile's to answer --
+    the same declaration `WebFetch` reads, so one spelling of reaching an
+    undeclared origin cannot answer differently from the other. Flags that
     write files, send data, or carry credentials are not classified.
+
+    A `defer` returned from here is settled by `ProviderNative`, which is read
+    before the rule that would otherwise allow unjudged work inside a
+    boundary. That ordering is what makes this safe to thread: the contained
+    reading never sees it, and it must not, because its argument is that every
+    effect is confined there -- true of a command's writes and false of a
+    document entering the agent's context.
     """
     urls: list[str] = []
     expect_value = False
@@ -1039,7 +1173,9 @@ def decide_curl_words(
     if not urls:
         return unjudged("curl has no URL")
     for url in urls:
-        verdict = decide_fetch(curl_url(url), allowed_scopes, denied_scopes)
+        verdict = decide_fetch(
+            curl_url(url), allowed_scopes, denied_scopes, unjudged_ambient
+        )
         if verdict.effect != "allow":
             return verdict
     return KernelDecision("allow", "read-only curl within declared scopes")
@@ -1154,6 +1290,17 @@ that pins its own index, or that has a reason to build without isolation,
 says so by naming a different set here.
 """
 
+UV_FROZEN_FLAGS = ("--frozen", "--locked")
+"""The spellings under which `uv sync` may not touch the lockfile.
+
+Both restore exactly what the lock pins — `--frozen` without reading the
+manifest again, `--locked` refusing where the lock is behind it — which is
+the restore `uv run` performs before running anything. The spellings are
+uv's; that they answer the install question is the judgement
+:func:`frozen_restore` states, so a project reading the flags differently
+names a different set here.
+"""
+
 
 def uv_package_source(
     arguments: list[str], guarded: tuple[str, ...] = UV_FOREIGN_SOURCE_FLAGS
@@ -1178,12 +1325,55 @@ def uv_package_source(
     return None
 
 
-# lup: Re-installing lup still asks. `uv cache clean` and `uv lock` moved below the install line and are allowed, but `uv sync --all-extras` is judged as an install that fetches and runs build code — so the refresh line still puts a question for a dependency the project already declares, without an escalate marker now rather than with one. `decide_uv` argues that half deliberately: the verb that reaches the network to install is a question, every time. A disagreement to settle rather than an oversight to fix.
+def declared_target_decision(
+    declared: RunnerTargetRow,
+    run_words: list[str],
+    target_tables: list[ShellRuleRow] | None,
+    measured: WriteFacts,
+) -> KernelDecision:
+    """What one declared ``uv run`` target earns, from what it says it does.
+
+    Two spellings reach a declared target — the executable itself, and the
+    root package a ``-m`` names — and they are the same declaration, so they
+    read it here rather than each deriving a verdict of its own.
+
+    A target carrying a verb table is judged by that table, which states what
+    each of its operations does. Otherwise the row's own effects answer,
+    against the placement the host measured.
+    """
+    tabled = [
+        row for row in (target_tables or []) if row["command"] == declared["name"]
+    ]
+    if tabled:
+        return decide_command_rows(run_words, tabled, measured)
+    evidence = unresolved_evidence(measured)
+    placement: SandboxPlacement = "inside" if measured["contained"] else "ambient"
+    stated = declared_verdict(
+        declared["effects"], declared["refuses"], evidence, placement
+    )
+    # Only a question carries one, and the refusal is why this asks about the
+    # verdict rather than about the effects alone: a refused spelling denies
+    # whatever its effects would have earned, and a purpose on a deny names a
+    # decision nobody is being asked to make.
+    return KernelDecision(
+        stated,
+        declared["reason"],
+        declared["sandbox"],
+        purpose=(
+            purpose_of(declared["effects"], evidence, placement)
+            if stated == "ask"
+            else None
+        ),
+    )
+
+
+# lup: solved: Re-installing lup still asks. `uv cache clean` and `uv lock` moved below the install line and are allowed, but `uv sync --all-extras` is judged as an install that fetches and runs build code — so the refresh line still puts a question for a dependency the project already declares, without an escalate marker now rather than with one. `decide_uv` argues that half deliberately: the verb that reaches the network to install is a question, every time. A disagreement to settle rather than an oversight to fix.
 def decide_uv(
     words: list[str],
     runner_targets: list[RunnerTargetRow],
     target_tables: list[ShellRuleRow] | None = None,
     facts: WriteFacts | None = None,
+    frozen: tuple[str, ...] = UV_FROZEN_FLAGS,
 ) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms.
 
@@ -1200,13 +1390,16 @@ def decide_uv(
     hands them on to the walk that reads it. Nothing measured is the cautious
     reading rather than the permissive one.
 
-    Installing is where a decision was asked for and refused. Fetching a
-    package runs its build code, and that code is the escape a supply-chain
-    compromise arrives through — so `add` and `sync` both ask, and the fact
-    that the packages were declared earlier does not answer it, because the
-    thing that changed is not the declaration but what the index now serves
-    under it. What is written down here rather than re-argued: the verb that
-    reaches the network to install is a question, every time.
+    Installing is where the line sits. Fetching a package runs its build
+    code, and that code is the escape a supply-chain compromise arrives
+    through — so `add`, and a `sync` free to rewrite the lockfile, both ask:
+    each resolves anew, and what the index serves under a name today is not
+    what was reviewed when the name was declared. A sync pinned by one of
+    ``frozen`` is the other side of that line, and :func:`frozen_restore`
+    says why once for every package manager: it fetches nothing the lock
+    does not already pin by integrity hash, which is exactly what `uv run`
+    restores before running anything, unasked. Asking about the frozen
+    spelling and not about the run was the same act answered two ways.
 
     Two verbs sit below that line and one sat above it by omission. `lock`
     and `remove` write files and fetch nothing to execute. A cache is
@@ -1225,6 +1418,10 @@ def decide_uv(
     """
     measured = no_write_facts() if facts is None else facts
     subcommand = words[1]
+    if subcommand == "sync" and uv_package_source(words[2:]) is None:
+        pinned = frozen_restore(words[2:], list(frozen), list(UV_FOREIGN_SOURCE_FLAGS))
+        if pinned is not None:
+            return pinned
     if subcommand in ("add", "sync"):
         return KernelDecision(
             "ask", "installing a package fetches and runs its build code"
@@ -1250,18 +1447,47 @@ def decide_uv(
         bare_target = "/" not in run_words[0]
         # A script file and an inline program are different questions, and
         # answering them together denied the rung the guidance points at for
-        # computing something once. What the deny is actually about is
-        # reviewability: `-c` leaves nothing behind to read, where a file can
-        # be opened, diffed and run again. So the flags keep the refusal and a
-        # named script does not.
+        # computing something once. One criterion decides every form: an
+        # invocation is refused when it leaves no reviewable artifact behind.
+        # `-c` leaves nothing to read and a bare interpreter runs nothing at
+        # all; a path and a module in a declared root are both openable,
+        # diffable and runnable again, so neither is inline code.
         rest = run_words[1:]
-        inline = [word for word in rest if word in ("-c", "-m")]
+        inline = [word for word in rest if word == "-c"]
         named = [word for word in rest if not word.startswith("-")]
         interpreted = run_command in INTERPRETERS
-        if run_command in ("-c", "-m", "--script") or (
-            interpreted and (inline or not named)
-        ):
-            return KernelDecision("deny", "inline code is not allowed")
+        # A module is as readable as the file it lives in, so what decides one
+        # is whether this project declares its root — read off the table that
+        # already answers `uv run <target>`, because a blessed module root and
+        # a blessed executable are the same statement: it runs something this
+        # repository declares as its own. One declaration admits every module
+        # beneath the root, and an undeclared root keeps the refusal, which is
+        # what `-m http.server` meets.
+        module_root = uv_run_module_root(run_words)
+        declared_root = next(
+            (row for row in runner_targets if row["name"] == module_root), None
+        )
+        if run_command == "-c" or (interpreted and inline):
+            subject = "uv run -c" if run_command == "-c" else f"uv run {run_command} -c"
+            return KernelDecision(
+                "deny",
+                f"{subject}: inline code is not allowed — a named script"
+                " file can be reviewed and run again",
+            )
+        if module_root is not None and declared_root is None:
+            return KernelDecision(
+                "deny",
+                f"uv run -m: `{module_root}` is not a module root this project"
+                " declares — name a script file instead, or declare the root"
+                " as a runner target",
+            )
+        if interpreted and not named:
+            return KernelDecision(
+                "deny",
+                f"the bare interpreter uv run {run_command}: an interpreter with"
+                " nothing to run leaves nothing behind to read — name a script"
+                " file",
+            )
         # Between the refusal above and the target's own verdict below, which
         # is where the lattice would put it anyway: a deny outranks an ask,
         # and an ask outranks whatever the target says about itself. These
@@ -1282,6 +1508,14 @@ def decide_uv(
             return KernelDecision(
                 "ask", "uv run --with fetches and executes external code"
             )
+        # Above the interpreter's own allow, because `python -m examples.x`
+        # reaches both and the module root is the more specific statement:
+        # what runs is the module, not a script path the interpreter was
+        # handed.
+        if declared_root is not None:
+            return declared_target_decision(
+                declared_root, run_words, target_tables, measured
+            )
         if interpreted:
             return KernelDecision(
                 "allow", "a script file can be read, where inline code cannot"
@@ -1290,32 +1524,8 @@ def decide_uv(
             (row for row in runner_targets if row["name"] == run_command), None
         )
         if bare_target and declared is not None:
-            tabled = [
-                row for row in (target_tables or []) if row["command"] == run_command
-            ]
-            if tabled:
-                return decide_command_rows(run_words, tabled, measured)
-            evidence = unresolved_evidence(measured)
-            placement: SandboxPlacement = (
-                "inside" if measured["contained"] else "ambient"
-            )
-            stated = declared_verdict(
-                declared["effects"], declared["refuses"], evidence, placement
-            )
-            # Only a question carries one, and the refusal is why this asks
-            # about the verdict rather than about the effects alone: a
-            # refused spelling denies whatever its effects would have earned,
-            # and a purpose on a deny names a decision nobody is being asked
-            # to make.
-            return KernelDecision(
-                stated,
-                declared["reason"],
-                declared["sandbox"],
-                purpose=(
-                    purpose_of(declared["effects"], evidence, placement)
-                    if stated == "ask"
-                    else None
-                ),
+            return declared_target_decision(
+                declared, run_words, target_tables, measured
             )
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")

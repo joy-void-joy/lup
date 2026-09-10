@@ -19,6 +19,8 @@ from lup.providers.claude.runtime import (
     ClaudeSessionConfig,
     create_claude,
 )
+from lup.providers.claude.subagents import model_alias as claude_model_alias
+from lup.providers.claude.subagents import subagent_tools as claude_subagent_tools
 from lup.providers.codex.config import (
     CodexCompatibilityTransform,
     CodexCompatibleEndpoint,
@@ -28,6 +30,8 @@ from lup.providers.codex.runtime import (
     CodexSessionConfig,
     create_codex,
 )
+from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
+from lup.providers.codex.subagents import subagent_tools as codex_subagent_tools
 from lup.sessions.client import Client
 from lup.sessions.composition import submission_gate_resolver
 from lup.policy.hooks import LupHooksConfig
@@ -61,7 +65,9 @@ from lup.observability.metrics import (
 from lup.observability.trace import TraceLogger
 from lup.types import (
     PayloadText,
+    SubagentCapability,
     SubagentSpec,
+    ToolGrant,
     Usage,
     UsageCost,
 )
@@ -128,9 +134,9 @@ def reflection_submission_gate(gate: "ReviewGate") -> SubmissionGate[AgentOutput
     return decide
 
 
-def build_usage_cost() -> UsageCost | None:
+def build_usage_cost(model: str | None = None) -> UsageCost | None:
     """Build configured token pricing without coupling it to an adapter."""
-    if engine_for_settings() in ("claude", "claude-compat"):
+    if engine_for_settings(model) in ("claude", "claude-compat"):
         return reported_usage_cost
     if (
         settings.codex_usd_per_mtok_input is None
@@ -153,7 +159,7 @@ def reported_usage_cost(usage: Usage) -> float:
 
 def provider_factory(
     *,
-    model: str,
+    model: str | None,
     system_prompt: str,
     cwd: Path,
     tools: list[str] | None = None,
@@ -169,13 +175,14 @@ def provider_factory(
     subagents: list[SubagentSpec] | None = None,
     thinking_budget: int | None = None,
     max_turns: int | None = None,
+    role: SubagentSpec | None = None,
 ) -> Client:
     """The one application-owned provider selection boundary.
 
     Native identifiers are intentionally confined to this concrete composition
     root. Every caller above it receives only a configured ``Client``.
     """
-    engine = engine_for_settings()
+    engine = engine_for_settings(model)
     logger.info(
         "Engine %s runs model %s (AGENT_SDK %s)",
         engine,
@@ -183,6 +190,19 @@ def provider_factory(
         settings.agent_sdk or "unset — routed by model",
     )
     if engine in ("claude", "claude-compat"):
+        if role is not None:
+            tools = claude_subagent_tools(role)
+            allowed_tools = tools
+            if role.model != "inherit":
+                if compat_base_url() is not None:
+                    raise ValueError(
+                        "compatible endpoints require inherited role models"
+                    )
+                model = claude_model_alias(role.model)
+        if model is None:
+            if compat_base_url() is not None:
+                raise ValueError("AGENT_MODEL is required for a compatible endpoint")
+            model = claude_model_alias("strongest")
         config = ClaudeSessionConfig(
             model=model,
             system_prompt=system_prompt,
@@ -197,12 +217,18 @@ def provider_factory(
                 if session_defaults
                 else None
             ),
-            max_turns=max_turns if max_turns is not None else settings.max_turns,
+            max_turns=(
+                max_turns
+                if max_turns is not None
+                else settings.max_turns
+                if session_defaults
+                else None
+            ),
             max_thinking_tokens=(
                 thinking_budget
                 if thinking_budget is not None
                 else settings.max_thinking_tokens
-                if settings.max_thinking_tokens is not None
+                if session_defaults and settings.max_thinking_tokens is not None
                 else SESSION_THINKING_TOKENS
                 if session_defaults
                 else None
@@ -219,6 +245,7 @@ def provider_factory(
             hooks=hooks,
             submission_gate_resolver=submission_gate,
             subagents=subagents or [],
+            setting_sources=[] if role is not None else None,
         )
         endpoint = compat_base_url()
         if endpoint is not None:
@@ -238,31 +265,64 @@ def provider_factory(
         unsupported = [
             name
             for name, value in [
-                ("AGENT_PERMISSION_MODE", settings.permission_mode),
-                ("AGENT_MAX_TURNS", settings.max_turns),
-                ("AGENT_MAX_THINKING_TOKENS", settings.max_thinking_tokens),
+                (
+                    "AGENT_PERMISSION_MODE",
+                    settings.permission_mode if session_defaults else None,
+                ),
+                ("AGENT_MAX_TURNS", settings.max_turns if session_defaults else None),
+                (
+                    "AGENT_MAX_THINKING_TOKENS",
+                    settings.max_thinking_tokens if session_defaults else None,
+                ),
+                ("max_turns", max_turns),
+                ("thinking_budget", thinking_budget),
             ]
             if value is not None
         ]
         if tools:
             unsupported.append("tools")
+        if allowed_tools:
+            unsupported.append("allowed_tools")
+        if tool_servers:
+            unsupported.append("in-process tool_servers (declare codex_mcp_servers)")
+        if subagents:
+            unsupported.append("native subagents (serve run_subagent instead)")
         if unsupported:
             raise ValueError(
                 "Codex app-server cannot honor configured option(s): "
                 + ", ".join(unsupported)
             )
+        delegated_tools = (
+            codex_subagent_tools(role)
+            if role is not None
+            else CodexSubagentTools()
+            if tools == []
+            else None
+        )
+        if role is not None and role.model != "inherit":
+            if engine != "codex":
+                raise ValueError("compatible endpoints require inherited role models")
+            model = CodexModelTiers().resolve(role.model)
+        if model is None:
+            if engine != "codex":
+                raise ValueError("AGENT_MODEL is required for a compatible endpoint")
+            model = CodexModelTiers().strongest
         config = CodexSessionConfig(
             model=model,
             developer_instructions=system_prompt,
             cwd=cwd,
             sandbox=(
-                normalize_codex_sandbox(settings.codex_sandbox)
+                "read-only"
+                if delegated_tools is not None
+                else normalize_codex_sandbox(settings.codex_sandbox)
                 or ("workspace-write" if session_defaults else None)
             ),
             # Hooks are what the app-server puts its approval requests to, so
             # a session carrying them asks and a session without them cannot.
             approval_policy=(
-                normalize_codex_approval(settings.codex_approval_policy)
+                "never"
+                if delegated_tools is not None
+                else normalize_codex_approval(settings.codex_approval_policy)
                 or ("on-request" if hooks is not None else "never")
             ),
             hooks=hooks,
@@ -272,6 +332,7 @@ def provider_factory(
             submission_gate_resolver=submission_gate,
             mcp_servers=codex_mcp_servers or {},
             writable_roots=writable_roots or [],
+            delegated_tools=delegated_tools,
         )
         endpoint = compat_base_url()
         if engine in ("openai", "openai-compat"):
@@ -365,9 +426,11 @@ def decorate_factory(
     *,
     notes: NotesConfig | None = None,
     trace_logger: TraceLogger | None = None,
+    timeout_seconds: float | None = None,
+    model: str | None = None,
 ) -> Client:
     """Apply complete-logical-turn governance in its explicit order."""
-    usage_cost = build_usage_cost()
+    usage_cost = build_usage_cost(model)
     budget = None
     if settings.max_budget_usd is not None:
         if usage_cost is None:
@@ -379,11 +442,12 @@ def decorate_factory(
             maximum_usd=settings.max_budget_usd,
             usage_cost=usage_cost,
         )
-    timeout = (
-        TimeoutConfig(seconds=settings.turn_timeout_seconds)
-        if settings.turn_timeout_seconds is not None
-        else None
+    seconds = (
+        timeout_seconds
+        if timeout_seconds is not None
+        else settings.turn_timeout_seconds
     )
+    timeout = TimeoutConfig(seconds=seconds) if seconds is not None else None
     persistence = None
     tracing = None
     display = None
@@ -462,7 +526,7 @@ def build_session_factory(
     hooks = create_permission_hooks(notes.rw, notes.ro)
     tools: list[str] | None = [] if toolless else None
     sandbox: Sandbox | None = None
-    engine = engine_for_settings()
+    engine = engine_for_settings(model)
     if not toolless and engine in ("claude", "claude-compat"):
         policy = ToolPolicy(settings)
         realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
@@ -472,6 +536,7 @@ def build_session_factory(
             outputs_dir=notes.output.parent,
             sandbox=sandbox,
             realtime_dir=realtime_dir,
+            session_id=session_id,
         )
         servers = [
             create_mcp_server(name, tools=policy.filter_tools(group_tools))
@@ -518,9 +583,10 @@ def build_session_factory(
         environment = {
             **context.to_env(),
             "AGENT_SDK": engine,
-            "AGENT_MODEL": model or settings.model,
             "AGENT_SANDBOX_ENABLED": str(settings.sandbox_enabled).lower(),
         }
+        if (selected_model := model or settings.model) is not None:
+            environment["AGENT_MODEL"] = selected_model
         if settings.aux_model is not None:
             environment["AGENT_AUX_MODEL"] = settings.aux_model
         codex_mcp_servers = {
@@ -558,7 +624,7 @@ def build_session_factory(
         submission_gate=resolver,
         codex_mcp_servers=codex_mcp_servers,
         writable_roots=writable_roots,
-        subagents=subagents,
+        subagents=subagents if engine in ("claude", "claude-compat") else None,
     )
     if sandbox is not None:
         factory = cleaning_session_factory(factory, sandbox.stop)
@@ -582,6 +648,7 @@ def build_session_factory(
             factory,
             notes=notes,
             trace_logger=trace_logger,
+            model=model,
         ),
         notes=notes,
         trace_logger=trace_logger,
@@ -590,11 +657,13 @@ def build_session_factory(
 
 def build_auxiliary_factory(
     *,
-    model: str,
+    model: str | None,
     system_prompt: str = "",
-    tools: list[str] | None = None,
+    tools: list[ToolGrant] | None = None,
+    capabilities: list[SubagentCapability] | None = None,
     thinking_budget: int | None = None,
     max_turns: int | None = None,
+    timeout_seconds: float | None = None,
 ) -> Client:
     """Build a one-shot nested/reviewer factory through the same route.
 
@@ -607,12 +676,36 @@ def build_auxiliary_factory(
             model=model,
             system_prompt=system_prompt,
             cwd=Path.cwd(),
-            tools=tools,
-            allowed_tools=tools,
+            role=SubagentSpec(
+                name="auxiliary",
+                description="One-shot auxiliary role",
+                prompt=system_prompt,
+                tools=tools or [],
+                capabilities=capabilities or [],
+            )
+            if tools is not None or capabilities is not None
+            else None,
             coding_harness_preset=False,
             session_defaults=False,
             thinking_budget=thinking_budget,
             max_turns=max_turns,
+        ),
+        timeout_seconds=timeout_seconds,
+        model=model,
+    )
+
+
+def build_subagent_factory(spec: SubagentSpec) -> Client:
+    """Compile a declared role through the same engine as its parent session."""
+    return decorate_factory(
+        provider_factory(
+            model=settings.model,
+            system_prompt=spec.prompt,
+            cwd=Path.cwd(),
+            role=spec,
+            coding_harness_preset=False,
+            session_defaults=False,
+            max_turns=spec.max_turns,
         )
     )
 

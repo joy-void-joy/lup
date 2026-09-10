@@ -32,10 +32,9 @@ from lup.policy.kernel.edit import (
     MatchSite,
     file_level_line,
     docstring_lines as python_docstring_lines,
-    mask_python_string_literals,
-    python_code_lines,
+    masked_source,
     python_comment_columns,
-    python_tokens,
+    typescript_comment_columns,
 )
 
 type RuleStrength = Literal["soft", "strong"]
@@ -172,9 +171,10 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
     rule is matched against token-masked source — string literals and comments
     both blanked — so an identifier quoted in prose never trips it; a
     "comment" rule targets comment directives (`# type: ignore`, `# noqa`) and
-    is matched with comments intact. Where no tokenizer applies (the
-    TypeScript-family table, text that fails to tokenize) every rule scans the
-    raw line — those rules are genuinely text-shaped.
+    is matched with comments intact. Python is masked through its tokenizer
+    and the TypeScript family through the kernel's own span scan; where
+    neither applies (text of another family, a Python fragment that fails to
+    tokenize) every rule scans the raw line.
 
     ``matcher`` is present when the tree decides the rule outright: it selects
     the violating lines itself, and ``pattern`` is what the gate falls back to
@@ -444,7 +444,7 @@ class Refutation(BaseModel, frozen=True):
     empty-collection defaults and the receiver resolution both speak this
     shape, so the audit
     has one mechanism for "matched, but refuted" — and a `# lup: ignore` left
-    guarding a refuted line becomes a dead directive the audit reports.
+    guarding a settled line becomes a dead directive the audit reports.
 
     ``subject`` is the source expression the verdict is about and ``evidence``
     the sentence that justifies it, so a dropped finding is always accountable.
@@ -454,14 +454,29 @@ class Refutation(BaseModel, frozen=True):
     line: int
     subject: str
     evidence: str
+    settled: bool
+    """Whether a declaration settled the line, or nothing could be shown about it.
+
+    Settled, the subject resolved to a declaration outside the family: the
+    line trips nothing, and a directive naming the rule there guards nothing
+    and is reported spurious. Unsettled, the checker inferred no type for the
+    subject: the rule demands no directive there, and one written there
+    stands, because what a checker failed to learn is no evidence against
+    the marker either — a gate deleting it on that would be answering from
+    its own blindness, and a fuller sweep resolving the receiver would demand
+    it straight back. A line carrying several sites of one rule is settled
+    only when every one of them is.
+    """
 
 
 class PythonContext(BaseModel):
-    """Where prose can live in a Python file: comment columns and docstrings.
+    """Where prose can live in a source file: comment columns and docstrings.
 
-    Built once per file by :meth:`parse`. ``comment_columns is None`` means the
-    source did not tokenize; both queries then fall back to treating a position
-    as prose so a note is never missed.
+    Built once per file by :meth:`parse` for Python, whose tokenizer fills
+    both fields, or :meth:`parse_typescript` for that family, which has
+    comments and no docstrings. ``comment_columns is None`` means Python
+    source did not tokenize; both queries then fall back to treating a
+    position as prose so a note is never missed.
     """
 
     comment_columns: dict[int, int] | None
@@ -487,6 +502,19 @@ class PythonContext(BaseModel):
             docstring_lines=python_docstring_lines(text),
         )
 
+    @classmethod
+    @cache
+    def parse_typescript(cls, text: str) -> Self:
+        """One TypeScript-family file's prose map, remembered like Python's.
+
+        Where `//` and `/* */` open is the whole of it: the family has no
+        docstring, and its span scan has no failure case, so the map is
+        never ``None``.
+        """
+        return cls(
+            comment_columns=typescript_comment_columns(text), docstring_lines=set()
+        )
+
     def comment_at(self, line_no: int, col: int) -> bool:
         """Whether a real `#` comment opens at (`line_no`, `col`)."""
         if self.comment_columns is None:
@@ -504,10 +532,11 @@ class LineProjections(BaseModel):
     ``code`` blanks string-literal and comment tokens — the surface a
     "code"-context rule scans, so identifiers quoted in prose never trip it.
     ``commented`` blanks only string literals, keeping comments visible for
-    "comment"-context directive rules. When the text does not tokenize as
-    Python — a non-Python file or an incomplete fragment — both views fall
-    back to the raw lines and ``tokenized`` is False, so a scanner can keep
-    the conservative whole-line scan.
+    "comment"-context directive rules. Python is read through its tokenizer
+    and the TypeScript family, asked for by ``typescript``, through the
+    kernel's span scan. When Python text does not tokenize — an incomplete
+    fragment — both views fall back to the raw lines and ``tokenized`` is
+    False, so a scanner can keep the conservative whole-line scan.
     """
 
     tokenized: bool
@@ -515,11 +544,12 @@ class LineProjections(BaseModel):
     commented: list[str]
 
     @classmethod
-    def parse(cls, text: str) -> Self:
+    def parse(cls, text: str, typescript: bool = False) -> Self:
+        masked = masked_source(text, not typescript, typescript)
         return cls(
-            tokenized=python_tokens(text) is not None,
-            code=python_code_lines(text),
-            commented=mask_python_string_literals(text),
+            tokenized=masked["comment_columns"] is not None,
+            code=masked["code"],
+            commented=masked["commented"],
         )
 
     def scan_text(self, line_no: int, context: RuleContext) -> str:

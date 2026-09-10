@@ -3,7 +3,7 @@
 # the honest type, each display branch casts after its isinstance/inspect
 # check, and TypedDict's own key-introspection API hands back frozensets;
 # all three rules are opted out file-wide.
-"""Helpers for ``py info`` — unified object introspection."""
+"""Helpers for ``dev py info`` — unified object introspection."""
 
 import dataclasses  # lup: ignore[dataclass] — inspected, not used for modeling
 import enum
@@ -311,8 +311,8 @@ def show_callable_info(obj: object, name: str) -> None:
 
 
 # A repr can be arbitrarily large (a loaded dataframe, a deep dict); this caps
-# the inline preview so `py info` doesn't flood the terminal, and reports the
-# full length so the truncation is never silent. Use `py source` for the whole
+# the inline preview so `dev py info` doesn't flood the terminal, and reports the
+# full length so the truncation is never silent. Use `dev py source` for the whole
 # value.
 REPR_PREVIEW_CHARS = 2000
 

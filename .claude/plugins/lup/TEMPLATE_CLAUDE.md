@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.template_claude by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup_template.harness.content.template_claude by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # CLAUDE.md Template
 
@@ -31,6 +31,8 @@ The security envelope is capability-specific: Claude uses normalized SDK hooks
 plus its sandbox and permission mode; Codex uses generated command hooks where
 the installed CLI supports them plus its workspace sandbox. Unsupported
 approval effects fail closed and are recorded as explicit capability gaps.
+
+Every supported runtime must provide equivalent user-visible behavior, validation, diagnostics, tests, and documentation for each capability. Runtime-specific implementations are valid only when their semantic differences are explicit and evidence-backed.
 
 ### Naming Convention
 
@@ -268,14 +270,17 @@ Edit `src/<project>/devtools/feedback/`:
 
 ## Scaffolding Is a Menu, Not a Mandate
 
-The template ships with **every** pattern wired so each is *available* — but a given domain uses a **subset**. Deleting a file or leaving a capability unwired is a **first-class outcome, not a failure**: the goal is the smallest scaffold that fits the domain, not the fullest. Treat these patterns as **opt-in** — default them off and remove the files unless the domain clearly needs them:
+Everything lup ships belongs to a **module** — one subject as one value, carrying its skills, its agents, its page under `docs/`, its paragraph in this document, its command tree and its tool group. A module is taken or declined whole, so declining is a name in `DECLINED` rather than files to hunt down, and there is no keeping a subject's skills while deleting its page. `dev modules` prints the roster with what each contributes and what its prose costs; a module left unnamed keeps its own default, including the ones lup grows after that line was last edited.
 
-| Pattern | Keep it when… | Delete it when… |
+Declining is a **first-class outcome, not a failure**: a module this domain has no subject for spends guidance budget and session context every session and earns nothing. The goal is the smallest roster that fits, not the fullest. Three ship off by default and are the ones most worth a deliberate answer:
+
+| Module | Take it when… | Decline it when… |
 | --- | --- | --- |
-| **Reflection** (`agent/tools/reflect.py` + gate) | the agent commits a consequential, judgment-bearing output where self-critique improves calibration (a forecast, a diagnosis, a scored decision) | the task is mechanical/trivial/high-volume, or there is no discrete final output to reflect on — then the gated `review` tool is dead code |
-| **Realtime / persistent** (`lup.orchestration.realtime*`, sleep/wake) | the agent is a presence over time — a conversation, a monitor, a long game — that controls its own attention | the agent is one-shot request→output (most domains); the relay/Scheduler are pure dead weight |
-| **Feedback loop** (`devtools/feedback/`) | ground truth or a feedback signal resolves over time to drive iteration | there is no ground truth and the agent is not iterated against outcomes — `load_outcomes` stays an empty stub |
-| **Commit loop** (`environment/cli` auto-commit) | each run yields a data artifact worth versioning per session | the agent is interactive or produces no per-session artifact worth a checkpoint |
+| **`reflection`** | the agent commits a consequential, judgment-bearing output where self-critique improves calibration (a forecast, a diagnosis, a scored decision) | the task is mechanical, trivial or high-volume, or there is no discrete final output to reflect on — then the gated `review` tool is dead weight |
+| **`realtime`** | the agent is a presence over time — a conversation, a monitor, a long game — that controls its own attention | the agent is one-shot request→output, which is most domains; the relay and the Scheduler are pure cost |
+| **`feedback-loop`** | ground truth or a feedback signal resolves over time to drive iteration | there is no ground truth and the agent is not iterated against outcomes — `load_outcomes` stays an empty stub |
+
+One pattern here is not a module, because it is this template's own wiring rather than a subject lup ships: the **commit loop** (`environment/cli` auto-commit) is kept when each run yields a data artifact worth versioning per session, and dropped when the agent is interactive or produces no per-session artifact worth a checkpoint.
 
 The same logic governs native subagents (harness-dispatched roles sharing the main session), background agents, and nested agents (tool-subagents opened inside a tool handler via `query()`): wire them only where the domain needs that shape. `docs/orchestration.md` carries the full catalog. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
 
@@ -316,10 +321,10 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 
 1. **Create a worktree** (if the user hasn't already created one):
    ```bash
-   uv run lup-devtools dev worktree create feat-name
+   uv run lup-devtools git worktree create feat-name
    ```
    This creates the worktree as a sibling under `tree/` (e.g., `tree/feat-name` alongside `tree/main`) and syncs dependencies; `lup-devtools harness claude` regenerates and launches the verified local plugin, so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
-2. **Relocate this session into the worktree** -- work in <the absolute path step 1 prints> by whichever of these you can reach: launch a session rooted there; or, already running, keep working where you are and address files under <the absolute path step 1 prints> by absolute path. `EnterWorktree(path=<the absolute path step 1 prints>)` reaches any worktree from anywhere and is refused for it: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you truly need it, and leave with `ExitWorktree(action="keep")`. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale.
+2. **Relocate this session into the worktree** -- work in <the absolute path step 1 prints> by whichever of these you can reach: launch a session rooted there; or, already running, address its files by absolute path, where that tree is writable. `EnterWorktree` is refused, and takes a `tree/` path only as a session's first switch: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you must, and leave with `ExitWorktree(action="keep")`. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale.
 3. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
 4. Push the branch when the feature is complete (or periodically for backup)
 5. **`/lup:rebase`** -- Pushes the branch, opens a PR, then cleans up the commit history with `git reset --soft main` and force-pushes.
@@ -328,15 +333,13 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 
 ### Merge Conflict Resolution
 
-**Never silently drop code during conflict resolution.** Keeping both sides is safer than losing features, and a rename on one side must not swallow an addition on the other. Before completing any merge, **audit for deletions**: compare the result against both parents and verify that every removed function, parameter, or command went deliberately, not as a side effect of choosing one side.
-
-Use `/lup:merge` for guided conflict resolution; the command carries the decision tree.
+**Never silently drop code during conflict resolution** — keeping both sides is safer than losing features, and a rename on one side must not swallow an addition on the other. Before completing any merge, **audit for deletions**: compare the result against both parents and verify every removed function, parameter, or command went deliberately, not as a side effect of choosing one side. `/lup:merge` carries the decision tree.
 
 ### Commit Guidelines
 
 - **Commit before responding**, and often — frequent commits are checkpoints
 - **Keep commits atomic** — if you need "and" in the message, it is two commits
-- **History will be rebased**, so a message need not be perfect while developing; after rebasing, each commit should tell what changed and why
+- **History will be rebased**, so a message need not be perfect while developing; after rebasing, each should tell what changed and why
 
 **Format:** `type(scope): description`
 
@@ -567,8 +570,8 @@ Run `uv run lup-devtools --help` for the full command tree.
 
 `lup-devtools harness claude` regenerates, verifies, and runs Claude Code with
 the local Lup plugin and the active profile's account (`CLAUDE_CONFIG_DIR`).
-`lup-devtools usage claude` reports usage for the chosen profile, and
-`lup-devtools usage codex` reports the other backend's. This repository keeps
+`lup-devtools dev usageclaude` reports usage for the chosen profile, and
+`lup-devtools dev usagecodex` reports the other backend's. This repository keeps
 its accounts as directories under `.lup/profiles/`, curated with either
 `lup-devtools harness profile` or `lup-devtools setup profile` — the same
 roster through both.

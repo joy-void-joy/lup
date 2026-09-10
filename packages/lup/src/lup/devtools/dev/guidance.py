@@ -18,8 +18,8 @@ from pydantic import BaseModel
 
 from lup.providers.harness import guidance_artifacts
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
-    TEMPLATE_GUIDANCE_HEADROOM,
+    GUIDANCE_BUDGET,
+    GuidanceBudget,
     document_byte_size,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
@@ -27,8 +27,14 @@ from lup.devtools.harness.generate import NativeHarnessComposition
 parser = MarkdownIt()
 
 
-class GuidanceSection(BaseModel, frozen=True):
-    """One heading of the rendered document, and what it costs a session."""
+class HeadingSection(BaseModel, frozen=True):
+    """One heading of the rendered document, and what it costs a session.
+
+    Named for the heading rather than for the section because that is what it
+    is measured against: a :class:`~lup.harness.models.GuidanceSection` is the
+    declaration, and the two do not have to line up — several declared
+    sections open no heading at all, and one can open two.
+    """
 
     heading: str
     level: int
@@ -40,7 +46,7 @@ class GuidanceSection(BaseModel, frozen=True):
         return f"{self.used:{widest}d}  {indent}{self.heading}"
 
 
-def guidance_sections(document: str) -> list[GuidanceSection]:
+def heading_sections(document: str) -> list[HeadingSection]:
     """Split a rendered document into its headings, with the bytes under each.
 
     Parsed rather than scanned for lines starting with ``#``: a fenced code
@@ -57,13 +63,13 @@ def guidance_sections(document: str) -> list[GuidanceSection]:
         if token.type == "heading_open" and token.map is not None
     ]
     bounds = [start for start, _, _ in starts] + [len(lines)]
-    preamble = GuidanceSection(
+    preamble = HeadingSection(
         heading="(banner)",
         level=1,
         used=document_byte_size("".join(lines[: bounds[0]])),
     )
     sections = [
-        GuidanceSection(
+        HeadingSection(
             heading=content,
             level=int(tag.removeprefix("h")),
             used=document_byte_size("".join(lines[start : bounds[index + 1]])),
@@ -77,7 +83,7 @@ def report(
     compositions: list[NativeHarnessComposition],
     scaffold: bool,
     by_size: bool,
-    headroom: int = TEMPLATE_GUIDANCE_HEADROOM,
+    budget: GuidanceBudget = GUIDANCE_BUDGET,
 ) -> None:
     """Print every guidance artifact's sections against the budget it answers to.
 
@@ -85,10 +91,10 @@ def report(
     typed parts differently and a section can be the largest in one and not
     the other — which is exactly the section worth reading twice.
     """
-    ceiling = GUIDANCE_BYTE_BUDGET - headroom if scaffold else GUIDANCE_BYTE_BUDGET
+    ceiling = budget.scaffold_ceiling if scaffold else budget.ceiling
     for composition in compositions:
         for artifact in guidance_artifacts(composition.recipe.desired):
-            sections = guidance_sections(artifact.content)
+            sections = heading_sections(artifact.content)
             used = document_byte_size(artifact.content)
             widest = len(str(max(section.used for section in sections)))
             ordered = (
@@ -105,6 +111,7 @@ def report(
             typer.echo(f"  {used:{widest}d}  total — {verdict} of {ceiling}")
     if scaffold:
         typer.echo(
-            f"\nCeiling is the scaffold's: {GUIDANCE_BYTE_BUDGET} runtime budget "
-            f"less {headroom} reserved for the domain that adopts this template."
+            f"\nCeiling is the scaffold's: {budget.ceiling} runtime budget "
+            f"less {budget.template_headroom} reserved for the domain that "
+            "adopts this template."
         )

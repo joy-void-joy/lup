@@ -14,12 +14,22 @@ result per landed unit, and a summary. A follower that found none of those
 would be watching a run it could never report on.
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
-from lup.runs.ledger import RunDirectory
-from lup.runs.models import UnitStatus
+from lup.channels.models import utc_now
+from lup.devtools.run.app import create_run_app
+from lup.runs.directory import (
+    CLAIM_LEASE_SECONDS,
+    WORKSPACE_ENV,
+    RunDirectory,
+    progress_in,
+)
+from lup.runs.models import UnitAttempt, UnitProgress, UnitStatus
+from lup.runs.progress import read_progress
 from lup.runs.pipeline import (
     CallableStep,
     ComputedItems,
@@ -262,3 +272,194 @@ def test_a_step_whose_input_never_landed_refuses_rather_than_guessing(
 ) -> None:
     with pytest.raises(PipelineError, match="cannot run middle: first has landed"):
         chain().execute(RunRequest(directory=tmp_path, only=["middle"]))
+
+
+def killed_claim(run: RunDirectory, step: str, renewed_ago: float) -> UnitAttempt:
+    """A claim on disk with nothing landed beside it, last renewed some time ago.
+
+    What a killed runner leaves behind: the file is written, the process is
+    gone, and nothing will ever renew it or write the result that releases it.
+    """
+    stamp = utc_now() - timedelta(seconds=renewed_ago)
+    attempt = UnitAttempt(step=step, pid=999999, started_at=stamp, renewed_at=stamp)
+    run.claim(attempt)
+    return attempt
+
+
+def test_a_claim_nobody_renews_reads_as_stale(tmp_path: Path) -> None:
+    """The reading a power cut produces, and the one age alone cannot give.
+
+    A unit running for an hour and a unit whose runner died an hour ago have
+    the same age. Only the renewal separates them, which is the whole reason a
+    claim is a lease rather than a note.
+    """
+    run = RunDirectory(root=tmp_path)
+    killed_claim(run, "abandoned", renewed_ago=CLAIM_LEASE_SECONDS * 2)
+    killed_claim(run, "working", renewed_ago=0.0)
+
+    standing = {unit.attempt.step: unit for unit in run.running()}
+
+    assert standing["abandoned"].stale
+    assert not standing["working"].stale
+
+
+def test_a_long_unit_that_keeps_renewing_is_not_stale(tmp_path: Path) -> None:
+    """Slow is not dead, and the lease is what stops one reading as the other."""
+    run = RunDirectory(root=tmp_path)
+    attempt = killed_claim(run, "slow", renewed_ago=CLAIM_LEASE_SECONDS * 2)
+    run.renew(attempt.step)
+
+    [unit] = run.running()
+
+    assert not unit.stale
+    assert unit.age_seconds > CLAIM_LEASE_SECONDS
+    assert unit.since_renewed_seconds < CLAIM_LEASE_SECONDS
+
+
+def test_resuming_reclaims_only_the_leases_that_lapsed(tmp_path: Path) -> None:
+    """A resumed run frees what nobody holds and leaves a live sibling's alone.
+
+    Dropping every claim is right exactly once — when this is the only runner
+    and the last one is gone — and frees units another runner is working the
+    moment two share a directory.
+    """
+    run = RunDirectory(root=tmp_path)
+    killed_claim(run, "abandoned", renewed_ago=CLAIM_LEASE_SECONDS * 2)
+    killed_claim(run, "held-by-a-sibling", renewed_ago=0.0)
+
+    assert run.clear_claims() == ["abandoned/once"]
+    assert [unit.attempt.step for unit in run.running()] == ["held-by-a-sibling"]
+
+
+def test_a_renewal_does_not_resurrect_a_claim_that_landed(tmp_path: Path) -> None:
+    """The unit finished while the heartbeat was mid-tick; it stays finished."""
+    run = RunDirectory(root=tmp_path)
+    attempt = killed_claim(run, "landed", renewed_ago=0.0)
+    run.release(attempt.step)
+
+    run.renew(attempt.step)
+
+    assert run.running() == []
+
+
+def test_a_run_that_finishes_leaves_no_claim_behind(tmp_path: Path) -> None:
+    """The ordinary path, pinned because a lease only shows when it is not taken."""
+    chain().execute(RunRequest(directory=tmp_path))
+
+    assert RunDirectory(root=tmp_path).running() == []
+
+
+def test_a_killed_run_reads_as_abandoned_rather_than_working(tmp_path: Path) -> None:
+    """What the monitor says about the directory a power cut leaves.
+
+    The failure this exists to stop is a reader taking "4 running" from four
+    claims nobody holds, and settling in to wait on a process that is gone.
+    """
+    run = RunDirectory(root=tmp_path)
+    killed_claim(run, "one", renewed_ago=CLAIM_LEASE_SECONDS * 3)
+    killed_claim(run, "two", renewed_ago=CLAIM_LEASE_SECONDS * 3)
+
+    reading = read_progress(run)
+
+    assert len(reading.abandoned) == 2
+    assert "no runner holds this" in reading.describe_activity()
+    assert "abandoned=2" in reading.postfix()
+    assert "running=" not in reading.postfix()
+
+
+def crawls(context: StepContext) -> StepOutcome:
+    """A body that says how far into its own work it is before it finishes."""
+    CALLS[context.step] = CALLS.get(context.step, 0) + 1
+    context.report(done=3, total=10, phase="fit", detail={"supports": 41})
+    return StepOutcome(outcome="done")
+
+
+def test_a_body_reports_through_the_context_it_was_already_given(
+    tmp_path: Path,
+) -> None:
+    """The context knows the workspace, so a body names no path to get this wrong."""
+    Pipeline(name="crawl", steps=[CallableStep(id="solve", body=crawls)]).execute(
+        RunRequest(directory=tmp_path)
+    )
+    record = RunDirectory(root=tmp_path).read_progress_record("solve")
+    assert record is not None
+    assert (record.done, record.total, record.phase) == (3, 10, "fit")
+    assert record.detail == {"supports": 41}
+
+
+def test_a_units_last_reading_outlives_the_claim_that_carried_it(
+    tmp_path: Path,
+) -> None:
+    """A unit that died at 2870 of 3000 leaves that reading beside its traceback."""
+    run = RunDirectory(root=tmp_path)
+    Pipeline(name="crawl", steps=[CallableStep(id="solve", body=crawls)]).execute(
+        RunRequest(directory=tmp_path)
+    )
+    assert run.running() == []
+    assert run.progress_path("solve").is_file()
+    assert run.read_result("solve") is not None
+
+
+def test_a_shell_unit_is_told_where_to_report(tmp_path: Path) -> None:
+    """The doorway for a unit in any language is one environment variable."""
+    step = ShellStep(id="solve", command="true")
+    script = step.script(StepContext(run=RunDirectory(root=tmp_path), step="solve"))
+    assert f"{WORKSPACE_ENV}=" in script
+
+
+def test_run_report_writes_the_file_report_progress_writes(tmp_path: Path) -> None:
+    """A unit in any language reaches the same record, parsed the same way."""
+    workspace = tmp_path / "unit"
+    result = CliRunner().invoke(
+        create_run_app(),
+        [
+            "report",
+            "--workspace",
+            str(workspace),
+            "--done",
+            "41",
+            "--total",
+            "300",
+            "--phase",
+            "fit",
+            "--detail",
+            "supports=41",
+            "--detail",
+            "note=alpha",
+            "--detail",
+            'shape={"k":1}',
+        ],
+    )
+    assert result.exit_code == 0
+    written = UnitProgress.model_validate_json(
+        progress_in(workspace).read_text(encoding="utf-8")
+    )
+    assert (written.done, written.total, written.phase) == (41, 300, "fit")
+    assert written.detail == {"supports": 41, "note": "alpha", "shape": {"k": 1}}
+
+
+def test_run_report_takes_the_workspace_the_runtime_gave_the_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(WORKSPACE_ENV, str(tmp_path / "unit"))
+    assert (
+        CliRunner().invoke(create_run_app(), ["report", "--done", "7"]).exit_code == 0
+    )
+    assert progress_in(tmp_path / "unit").is_file()
+
+
+def test_run_report_refuses_a_detail_that_is_not_a_pair(tmp_path: Path) -> None:
+    """A flag grammar that guessed would put a unit's own words somewhere odd."""
+    failed = CliRunner().invoke(
+        create_run_app(),
+        ["report", "--workspace", str(tmp_path), "--done", "1", "--detail", "oops"],
+    )
+    assert failed.exit_code != 0
+
+
+def test_run_report_says_so_when_nothing_told_it_where_to_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(WORKSPACE_ENV, raising=False)
+    failed = CliRunner().invoke(create_run_app(), ["report", "--done", "1"])
+    assert failed.exit_code != 0

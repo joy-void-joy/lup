@@ -9,7 +9,7 @@ launched detached, from another session, or before this shell existed is
 observable without being touched — and following one cannot perturb it.
 
 - :mod:`lup.runs.models` — the records that layout consists of.
-- :mod:`lup.runs.ledger` — the directory itself: where each record goes and
+- :mod:`lup.runs.directory` — the directory itself: where each record goes and
   how it is written, which is the one place both ends meet.
 - :mod:`lup.runs.progress` — one reading of a run, taken from the directory
   alone, including the honest estimate of the time left.

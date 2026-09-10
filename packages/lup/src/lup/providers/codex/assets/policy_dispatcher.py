@@ -35,6 +35,8 @@ from decisions import (
     unconfined_by_declaration,
     bash_decision,
     edit_decision,
+    claim_window_closed,
+    claim_window_opened,
     fetch_decision,
     refused_tool_decision,
     written_review,
@@ -46,7 +48,7 @@ from host import (
     record_hook_evidence,
     sandbox_active,
 )
-from kernel.decision import KernelDecision, SANDBOX_TRAPPED_REASON
+from kernel.decision import KernelDecision
 from kernel.shell import auto_escape_matches
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
@@ -206,6 +208,12 @@ def dispatch(payload, permission_request=False):
     autonomous = declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
         requested_escape = spent_escape(tool_input)
+        # The snapshot a comparison afterwards is read against, taken only on
+        # the event that runs immediately before the call: a permission
+        # request runs before the prompt, and a window opened there would span
+        # however long somebody took to answer it.
+        if not permission_request:
+            claim_window_opened(session_directory)
         escaped = requested_escape or auto_escape_matches(
             tool_input["command"], AUTO_ESCAPE_PREFIXES
         )
@@ -230,7 +238,7 @@ def dispatch(payload, permission_request=False):
         # PreToolUse can neither see nor place every native escape. Let Codex's
         # sandbox run a confined call or raise the PermissionRequest where this
         # same policy can judge the requested escape instead of preempting it.
-        if not permission_request and decision.reason == SANDBOX_TRAPPED_REASON:
+        if not permission_request and decision.capability == "host_executor":
             return KernelDecision("defer", decision.reason)
         if (
             requested_escape
@@ -244,7 +252,10 @@ def dispatch(payload, permission_request=False):
             )
         return decision
     if name == "web_fetch":
-        return fetch_decision(tool_input["url"])
+        # The same directory the shell branch reads its boundary from: the
+        # profile's answer for what nothing classified is one declaration,
+        # not one per surface.
+        return fetch_decision(tool_input["url"], session_directory)
     if name == "apply_patch":
         return joined(
             [
@@ -306,6 +317,9 @@ def observe(payload):
     command = tool_input["command"] if "command" in tool_input else ""
     if not command:
         return []
+    # What the command changed, read against the snapshot its own PreToolUse
+    # took, and contested where another session had a window open across it.
+    claim_window_closed(Path(root) if root else None)
     return written_review(command, Path(root) if root else Path.cwd())
 
 
@@ -321,10 +335,8 @@ def main():
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
             found = observe(payload)
-            # The same one channel Claude's half has, for the same reason:
-            # the call has run, so a clean exit says nothing anybody reads.
-            # Silence when the result checks out, so the channel means
-            # something when it is used.
+            # Codex receives post-tool findings through stderr and exit 2.
+            # A clean result needs no feedback.
             if found:
                 detail = "\n".join(found)
                 record_hook_evidence(
@@ -393,8 +405,10 @@ def main():
     # read identically without this, which is how #180 reads as the first
     # when it is the second.
     detail = decision.reason + uncorrelated(payload)
+    # The journal is metadata-only: the reason names the refused input, which
+    # for a fetch is the full URL, so only the correlation diagnosis is kept.
     record_hook_evidence(
-        plugin_data_root(), payload, "completed", decision.effect, detail
+        plugin_data_root(), payload, "completed", decision.effect, uncorrelated(payload)
     )
     sys.stderr.write(detail)
     raise SystemExit(2)

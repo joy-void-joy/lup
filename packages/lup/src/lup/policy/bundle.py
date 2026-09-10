@@ -22,13 +22,16 @@ from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
 from lup.policy.identity import AGENT_IDENTITY_ENV
 import lup.policy.kernel as kernel
+from lup.policy.kernel.edit import TYPESCRIPT_SUFFIXES
 from lup.policy.kernel.effects import EffectRow, effect_row_values
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
     EditRuleRow,
+    ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
+    PeerPolicyRow,
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
@@ -37,6 +40,8 @@ from lup.policy.kernel.rows import (
     shell_row_values,
 )
 from lup.policy.edit_rules import EditRule, erase_edit_rules
+from lup.policy.imports import ImportBoundary
+from lup.policy.peer_policy import PeerPolicy, erase_peer_policy
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -89,12 +94,7 @@ def bundled_antipattern_rows(
     return {
         ".py": python_rows,
         ".pyi": python_rows,
-        ".ts": typescript_rows,
-        ".tsx": typescript_rows,
-        ".js": typescript_rows,
-        ".jsx": typescript_rows,
-        ".vue": typescript_rows,
-        ".svelte": typescript_rows,
+        **{suffix: typescript_rows for suffix in TYPESCRIPT_SUFFIXES},
     }
 
 
@@ -296,6 +296,30 @@ def acceptance_guard_literal(guard: AcceptanceGuardRow | None) -> str:
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
 
 
+def peer_policy_literal(redirect: PeerPolicyRow | None) -> str:
+    """Render the declared roster the peer calls are judged against, or its absence.
+
+    Spelled here rather than through ``json.dumps`` for the reason the
+    acceptance guard is: JSON's ``null`` is not a Python name, and a data file
+    carrying one fails at import — which in a generated dispatcher means every
+    permission decision stops happening at once.
+    """
+    if redirect is None:
+        return "None"
+    entries = [
+        f'"store": {json.dumps(redirect["store"])}',
+        f'"roster_file": {json.dumps(redirect["roster_file"])}',
+        f'"names_file": {json.dumps(redirect["names_file"])}',
+        f'"send_reason": {json.dumps(redirect["send_reason"])}',
+        f'"listing_note": {json.dumps(redirect["listing_note"])}',
+        f'"touches_file": {json.dumps(redirect["touches_file"])}',
+        f'"windows_dir": {json.dumps(redirect["windows_dir"])}',
+        f'"claim_reason": {json.dumps(redirect["claim_reason"])}',
+        f'"member_env": {json.dumps(redirect["member_env"])}',
+    ]
+    return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
+
+
 def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
     """Render declared tool refusals as primitive runtime rows."""
     return dict_rows_literal(
@@ -472,6 +496,31 @@ POLICY_DATA_BANNER = GeneratedBanner(source=__name__, command=REGENERATE_COMMAND
 """Provenance every adapter's rendered policy-data module opens with."""
 
 
+def import_boundary_rows_literal(rows: list[ImportBoundaryRow]) -> str:
+    """Render the dependency ownership read by both native edit gates."""
+    if not rows:
+        return "[]"
+    lines = ["["]
+    for row in rows:
+        lines.append("    {")
+        for name, values in (
+            ("modules", row["modules"]),
+            ("owners", row["owners"]),
+            ("source_roots", row["source_roots"]),
+        ):
+            if values:
+                lines.append(f'        "{name}": [')
+                lines.extend(f"            {json.dumps(value)}," for value in values)
+                lines.append("        ],")
+            else:
+                lines.append(f'        "{name}": [],')
+        lines.append(f'        "rule_id": {json.dumps(row["rule_id"])},')
+        lines.append(f'        "message": {json.dumps(row["message"])},')
+        lines.append("    },")
+    lines.append("]")
+    return "\n".join(lines)
+
+
 def render_policy_data(
     *,
     allowed_fetch_scopes: list[UrlScopeRow],
@@ -484,13 +533,16 @@ def render_policy_data(
     shell_rules: list[ShellCommandRule],
     edit_rules: list[EditRule],
     refused_tools: list[RefusedTool],
+    peer_policy: PeerPolicy | None,
     recoverable_target_limit: int,
     runner_targets: list[RunnerTargetRule],
     sandbox_excluded_commands: list[str],
     auto_escape_prefixes: list[list[str]],
     diagnostics_command: list[str],
     resolution_command: list[str],
+    repair_command: list[str],
     rules: AntiPatternSet | None = None,
+    import_boundaries: list[ImportBoundary] | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
 
@@ -517,8 +569,14 @@ def render_policy_data(
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
             "EDIT_RULES: list[EditRuleRow] = "
             + edit_rule_rows_literal(erase_edit_rules(edit_rules)),
+            "IMPORT_BOUNDARIES: list[ImportBoundaryRow] = "
+            + import_boundary_rows_literal(
+                [boundary.erased() for boundary in import_boundaries or []]
+            ),
             "REFUSED_TOOLS: list[RefusedToolRow] = "
             + refused_tool_rows_literal(erase_refused_tools(refused_tools)),
+            "PEER_POLICY: PeerPolicyRow | None = "
+            + peer_policy_literal(erase_peer_policy(peer_policy)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
@@ -538,6 +596,7 @@ def render_policy_data(
             + string_rows_literal(diagnostics_command),
             "RESOLUTION_COMMAND: list[str] = "
             + string_rows_literal(resolution_command),
+            "REPAIR_COMMAND: list[str] = " + string_rows_literal(repair_command),
         ]
     )
     return (
@@ -546,8 +605,10 @@ def render_policy_data(
         "    AcceptanceGuardRow,\n"
         "    AntiPatternRow,\n"
         "    EditRuleRow,\n"
+        "    ImportBoundaryRow,\n"
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
+        "    PeerPolicyRow,\n"
         "    RefusedToolRow,\n"
         "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"

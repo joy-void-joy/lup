@@ -19,6 +19,8 @@ from lup.devtools.dev.antipatterns import scan_antipatterns
 from lup.devtools.dev.check import changed_paths
 from lup.devtools.project import DevProject
 from lup.observability.trace import TraceLogger
+from lup.sandbox.models import Mount
+from lup.sandbox.translation import MountTopology
 from lup.workspace.paths import configure, project_root
 from lup.types import LupTextBlock, LupToolResultBlock, LupToolUseBlock
 from tests.unit.repos import commit_file, git_in, initialized_repo
@@ -132,6 +134,70 @@ class TestDecodeStderr:
         # runs when it holds text rather than the bytes the type promises.
         object.__setattr__(err, "stderr", "already text")
         assert decode_stderr(err) == "already text"
+
+
+# ── a refusal by the lease says so, instead of reading as a broken disk ───
+
+
+class TestAttributedStderr:
+    """`Read-only file system` is what a lease refusing a write looks like.
+
+    It is also what a genuinely read-only disk looks like, which is the whole
+    difficulty: the words are identical and only the mount table tells them
+    apart. These pin both directions, because a wrong boundary claim sends a
+    reader looking for a rail that was not involved.
+    """
+
+    def refusal(self, message: str) -> sh.ErrorReturnCode:
+        """A failed command carrying this stderr, built as the tests above do."""
+        err = sh.ErrorReturnCode.__new__(sh.ErrorReturnCode)
+        err.stderr = message.encode()
+        return err
+
+    def leased(self) -> MountTopology:
+        """A session's own tree, with a sibling present and unwritable."""
+        return MountTopology(
+            mounts=[
+                Mount(
+                    container_path="/repo",
+                    source="/host/repo",
+                    kind="bind",
+                    mode="rw",
+                    purpose="the worktree this session owns",
+                ),
+                Mount(
+                    container_path="/repo/siblings",
+                    source="/host/siblings",
+                    kind="bind",
+                    mode="ro",
+                    purpose="other worktrees, present and unwritable",
+                ),
+            ]
+        )
+
+    def test_a_refusal_under_a_leased_mount_gains_the_account(self) -> None:
+        from lup.devtools.utils import attributed_stderr
+
+        said = attributed_stderr(
+            self.refusal(
+                "error: failed to delete '/repo/siblings/dev': Read-only file system"
+            ),
+            self.leased(),
+        )
+        assert "Read-only file system" in said
+        assert "This is confinement, not a broken filesystem" in said
+
+    def test_a_refusal_the_table_cannot_explain_is_left_alone(self) -> None:
+        from lup.devtools.utils import attributed_stderr
+
+        message = "error: failed to delete '/elsewhere/x': Read-only file system"
+        assert attributed_stderr(self.refusal(message), self.leased()) == message
+
+    def test_an_ordinary_failure_is_reported_as_itself(self) -> None:
+        from lup.devtools.utils import attributed_stderr
+
+        message = "fatal: not a valid ref"
+        assert attributed_stderr(self.refusal(message), self.leased()) == message
 
 
 # ── fix 9: remote parsing distinguishes https from scp/ssh ────────────────
@@ -489,6 +555,41 @@ class TestTheAntiPatternSweepIsScopedToWhatATreeChanged:
         scan = scan_antipatterns(project, [])
 
         assert scan.findings == []
+
+    @pytest.mark.parametrize(
+        "suppression", ["", "    # lup: ignore[own-model-dispatch]\n"]
+    )
+    def test_scoped_dispatch_uses_declarations_outside_its_scope(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suppression: str
+    ) -> None:
+        work = tmp_path / "repo"
+        git = initialized_repo(work, tmp_path / "no-hooks")
+        (work / "models.py").write_text(
+            "from pydantic import BaseModel\n\nclass Entry(BaseModel):\n    pass\n",
+            encoding="utf-8",
+        )
+        (work / "adapter.py").write_text(
+            "from models import Entry\n\ndef convert(value: Entry) -> bool:\n"
+            f"{suppression}    return isinstance(value, Entry)\n",
+            encoding="utf-8",
+        )
+        git("add", "-A")
+        monkeypatch.chdir(work)
+        project = DevProject(package="app")
+
+        whole = scan_antipatterns(project)
+        scoped = scan_antipatterns(project, ["adapter.py"])
+        expected = [
+            finding for finding in whole.findings if finding.file == "adapter.py"
+        ]
+
+        assert scoped.findings == expected
+        dispatch = [
+            finding for finding in expected if finding.rule_id == "own-model-dispatch"
+        ]
+        assert [finding.kind for finding in dispatch] == (
+            [] if suppression else ["missing"]
+        )
 
     def test_a_ref_git_cannot_resolve_refuses_instead_of_scoping_to_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

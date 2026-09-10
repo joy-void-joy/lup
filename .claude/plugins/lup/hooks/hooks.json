@@ -1,28 +1,38 @@
 {
-  "description": "Lup semantic permission policy",
+  "description": "Lup semantic permission policy and peer delivery",
   "hooks": {
     "PostToolUse": [
       {
         "hooks": [
           {
-            "command": "python3 \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it\" >&2; exit 2; }",
+            "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.sh\" || exit 2",
             "timeout": 30,
             "type": "command"
           }
         ],
-        "matcher": "Edit|Write"
+        "matcher": "Edit|Write|Bash"
       }
     ],
     "PreToolUse": [
       {
         "hooks": [
           {
-            "command": "python3 \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.py\" || { status=$?; [ \"$status\" -eq 2 ] || echo \"lup policy: dispatcher exited $status without judging this call; refusing rather than passing it\" >&2; exit 2; }",
+            "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/policy.sh\" || exit 2",
             "timeout": 30,
             "type": "command"
           }
         ],
-        "matcher": "Bash|WebFetch|Edit|Write|Artifact|Skill|EnterWorktree"
+        "matcher": "Bash|WebFetch|Edit|Write|SendMessage|ListAgents|Artifact|Skill|EnterWorktree"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/coordination_delivery.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
       }
     ]
   }

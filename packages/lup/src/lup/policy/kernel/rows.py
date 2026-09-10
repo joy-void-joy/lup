@@ -57,6 +57,19 @@ class PathRuleRow(TypedDict):
     allow_autonomous: bool
 
 
+class DisplacedTargetRow(TypedDict):
+    """One write target whose real location is not the one it spells.
+
+    A role is read off a spelling, and only the filesystem can say whether the
+    file is in the root that spelling names. Where a symlink says otherwise,
+    this carries both halves: a question naming only the path the caller typed
+    would be asking about the wrong file.
+    """
+
+    path: str
+    lands: str
+
+
 type PathRoleName = Literal["production", "test", "data", "scratch"]
 
 type PathRoleKind = Literal["subtree", "contains_part"]
@@ -103,6 +116,62 @@ class AcceptanceGuardRow(TypedDict):
 
     ask_reason: str
     autonomous_reason: str
+
+
+class ResolutionRow(TypedDict):
+    """What a checker settled about one text's receivers, per rule id.
+
+    ``refuted`` holds the lines whose receiver resolved to a declaration
+    outside the rule's family: no violation is there, and a directive naming
+    the rule there guards nothing. ``unresolved`` holds the lines nothing
+    could be shown about: the rule demands no directive there and refuses
+    none, and a directive written there stands, because a gate that learned
+    nothing about a receiver has no evidence against the line or against the
+    marker on it. The audit reads the same two verdicts off the same
+    resolution, so neither gate can call dead what the other demands.
+    """
+
+    refuted: dict[str, list[int]]
+    unresolved: dict[str, list[int]]
+
+
+class RewrittenFileRow(TypedDict):
+    """One file an in-place rewrite names, as it stands and as it would stand.
+
+    The host produces this by running the screened script over a *copy*, never
+    over the file, so a command still refused has changed nothing — and the
+    classifier reads the result as the ``before`` and ``after`` of an ordinary
+    edit, which is what lets one gate answer for both spellings of a write.
+
+    ``target`` and ``path`` differ because two readers need different
+    spellings of the same file. The rules match on ``path``, relative to the
+    worktree that holds it, since a rule anchored at the repository top has to
+    be asked about where the file sits; a refusal names ``target``, the word
+    the writer actually typed and the one they would have to change.
+    """
+
+    target: str
+    path: str
+    before: str
+    after: str
+    foreign: bool
+    """Whether the file belongs to a repository that is not this one."""
+
+    outside_project: bool
+    """Whether it sits in no checkout whose conventions these rules are."""
+
+    resolution: ResolutionRow | None
+    """What a checker settled about the rewritten text, where one was worth running."""
+
+
+class ImportBoundaryRow(TypedDict):
+    """Module families whose dependencies belong in declared repository roots."""
+
+    modules: list[str]
+    owners: list[str]
+    source_roots: list[str]
+    rule_id: str
+    message: str
 
 
 class AntiPatternRow(TypedDict):
@@ -230,7 +299,20 @@ class ShellRuleRow(TypedDict):
     action at a time (``git config --get``): a non-allow row de-escalates to
     allow when a declared verb appears among words that are all literal and
     free of guarded flags, because the verb pins the invocation to its query
-    action regardless of the other words. ``write_markers`` are the same
+    action regardless of the other words. ``probe_flags`` name the flags after
+    which the command performs nothing (``git push --dry-run``): unlike a read
+    verb, a literal probe flag stands even beside guarded flags and refspec
+    grammar, because what those guard is an effect the probe form does not
+    perform — so a non-allow row de-escalates to allow, and an allow row keeps
+    its verdict past its ``ask_flags`` and ``ask_refspecs``. Destination
+    grammar still asks: a probe still contacts the repository it names, and
+    where the work would land is guarded as a place, not as a write.
+    ``frozen_flags`` name the flags that pin a dependency restore to what its
+    lockfile already declares (``bun install --frozen-lockfile``): a non-allow
+    row de-escalates to allow when one appears among literal words free of
+    guarded flags, because a frozen restore fetches nothing the lock does not
+    pin by integrity hash — the restore ``uv run`` performs unasked.
+    ``write_markers`` are the same
     de-escalation stated negatively, for a command whose read-only form is the
     one with nothing extra in it (``dd if=x`` with no ``of=``): a non-allow row
     de-escalates when no literal word carries a declared marker. Stated as
@@ -297,6 +379,16 @@ class ShellRuleRow(TypedDict):
     content, and a flag adding something else belongs to a rule that says so
     rather than to a longer list here. Empty is the common case — most guarded
     flags escalate an operation whose effects already describe them.
+
+    ``ask_destinations`` names the forms of inline repository this row asks
+    about, read off the first operand that is not a flag — the one word a
+    push takes to say where it lands. A destination reached through the
+    remote table is a destination somebody approved, because every way of
+    putting one in that table asks; a URL or a path in the command line
+    reaches a repository the table never heard of, and no key guard can see
+    it because there is no key and no configuration write. Declared as forms
+    rather than as spellings for the reason below it: the transports are
+    open-ended and the grammar is not.
 
     ``ask_refspecs`` names the effects a refspec operand may carry that this
     row asks about — the same downgrade ``ask_flags`` states, about a word
@@ -375,12 +467,15 @@ class ShellRuleRow(TypedDict):
     effects: list[EffectRow]
     effects_source: RuleLevel
     refuses: str
+    ask_destinations: list[str]
     ask_refspecs: list[str]
     ask_flags: list[str]
     flag_effects: list[EffectRow]
     write_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]
+    probe_flags: list[str]
+    frozen_flags: list[str]
     write_markers: list[str]
     guarded_keys: list[str]
     setting_flags: list[str]
@@ -403,12 +498,15 @@ type ShellRowField = Literal[
     "effects",
     "effects_source",
     "refuses",
+    "ask_destinations",
     "ask_refspecs",
     "ask_flags",
     "flag_effects",
     "write_flags",
     "allow_flags",
     "read_verbs",
+    "probe_flags",
+    "frozen_flags",
     "write_markers",
     "guarded_keys",
     "setting_flags",
@@ -453,12 +551,15 @@ def shell_row_values(
         "effects": row["effects"],
         "effects_source": row["effects_source"],
         "refuses": row["refuses"],
+        "ask_destinations": row["ask_destinations"],
         "ask_refspecs": row["ask_refspecs"],
         "ask_flags": row["ask_flags"],
         "flag_effects": row["flag_effects"],
         "write_flags": row["write_flags"],
         "allow_flags": row["allow_flags"],
         "read_verbs": row["read_verbs"],
+        "probe_flags": row["probe_flags"],
+        "frozen_flags": row["frozen_flags"],
         "write_markers": row["write_markers"],
         "guarded_keys": row["guarded_keys"],
         "setting_flags": row["setting_flags"],
@@ -467,6 +568,17 @@ def shell_row_values(
         "value_flags": row["value_flags"],
         "reason": row["reason"],
     }
+
+
+type DestinationForm = Literal["url", "path"]
+"""How an operand names the repository a command sends its work to.
+
+The two ways of naming one inline, kept apart because a project can
+reasonably guard them separately: a URL leaves this machine, and a path stays
+on it. A remote this repository has configured is neither, and is spelled as
+absence rather than as a third word — a table declares the forms it asks
+about, and the bare name every ordinary push carries is the one it does not.
+"""
 
 
 type RefspecEffect = Literal["delete", "force"]
@@ -514,3 +626,32 @@ class EditRuleRow(TypedDict):
     effect: str
     maximum_added_lines: int | None
     reason: str
+
+
+class PeerPolicyRow(TypedDict):
+    """Where this project's sessions find each other, and what a sender is told.
+
+    ``store``, ``roster_file`` and ``names_file`` say where the roster lives —
+    parts beneath the repository's shared git directory rather than a joined
+    path, because the dispatcher rebuilds it with the host's own separator and
+    a compiled literal carrying one platform's answers on one platform.
+
+    ``send_reason`` is the whole of what a stopped sender is told, so it names
+    the surface reaching the same peer durably rather than only refusing.
+    ``listing_note`` frames the roster attached to a listing that speaks for a
+    wider population, so a reader can tell the two apart.
+
+    No native tool name is carried. Which call sends and which lists is what a
+    runtime spells for itself, and the branch recognizing one belongs to that
+    runtime's own dispatcher — this row answers what to do once it has.
+    """
+
+    store: list[str]
+    roster_file: str
+    names_file: str
+    send_reason: str
+    listing_note: str
+    touches_file: str
+    windows_dir: str
+    claim_reason: str
+    member_env: str

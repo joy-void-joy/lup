@@ -14,66 +14,42 @@ from typing import Annotated
 
 import sh
 import typer
-from pydantic import BaseModel
 
 import lup.devtools.dev.antipatterns as antipatterns_mod
 import lup.devtools.dev.boundaries as boundaries_mod
-import lup.devtools.dev.branches as branches
 import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
-import lup.devtools.dev.git_guards as git_guards_mod
 import lup.devtools.dev.guidance as guidance
 import lup.devtools.dev.issues as issues_mod
-import lup.devtools.dev.traces as traces
+import lup.devtools.dev.history as history
 import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
-import lup.devtools.dev.monitor as monitor
+import lup.devtools.dev.environment as environment_mod
 import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.questions as questions_mod
 import lup.devtools.dev.preservation as preservation
+import lup.devtools.dev.modules as modules
 import lup.devtools.dev.seams as seams
-import lup.devtools.dev.pr as pr
 import lup.devtools.dev.relocate as relocate_mod
-import lup.devtools.dev.resolve_review as resolve_review
 import lup.devtools.dev.rules as rules
-import lup.devtools.dev.worktree as worktree
-import lup.devtools.harness.content.docs.upstream_reports as upstream_reports
 from lup.harness.codescan.markers import NoteKind
 from lup.harness.codescan.registry import all_rules
-from lup.devtools.dev.conflict_app import create_conflict_app
-from lup.devtools.utils import output_json, repository_slug
+import lup.devtools.py.app as py
+from lup.devtools.dev.commands import CommandSurface
+from lup.devtools.dev.declarations import DevDeclarations
+from lup.devtools.hooks.app import create_hooks_app
+from lup.devtools.report.app import create_report_app
+from lup.observability.usage.app import UsageEntry, create_usage_app
+from lup.devtools.utils import decode_stderr, output_json, repository_slug
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
-from lup.devtools.harness.launch import relocation_hint
-from lup.devtools.project import DevProject
-from lup.harness.models import HookSet, Plugin
-from lup.harness.process import LocalProcessLauncher
+from lup.ledger.models import LedgerNode
+from lup.ledger.store import LedgerPlacement, SharedStore
 from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.policy.vocabulary import default_vocabulary
-from lup.runs.ledger import RunDirectory
 from lup.workspace.paths import is_template_scaffold, project_root
-
-
-class DevDeclarations(BaseModel, frozen=True):
-    """Everything the dev tree reads about the repository it is running in.
-
-    Read when a command runs rather than when the CLI is composed: each of
-    these resolves against the working directory, and a CLI is imported long
-    before anyone knows which repository it will be pointed at.
-    """
-
-    project: DevProject
-    hooks: HookSet
-    plugin: Plugin
-    test_roots: list[check.TestRoot]
-    git_guards: list[git_guards_mod.GitGuard] = git_guards_mod.DECLARED_GUARDS
-    """Which checks this repository installs as git hooks.
-
-    A default rather than a fixture: the pair lup arms is what most projects
-    want, and one that guards a third moment — or runs its gate under another
-    name — says so here instead of forking the module that writes them."""
 
 
 def create_dev_app(
@@ -81,30 +57,32 @@ def create_dev_app(
     native_targets: NativeTargets,
     repository_writers: list[RepositoryWriter],
     relocate_roots: list[Path],
+    usage_entries: list[UsageEntry] | None = None,
+    node_classes: list[type[LedgerNode]] | None = None,
+    ledger: LedgerPlacement = SharedStore(),
+    command_surface: Callable[[], CommandSurface] | None = None,
 ) -> typer.Typer:
     """Wire the dev command tree over what one repository declares about itself."""
     app = typer.Typer(no_args_is_help=True)
-    worktree_app = typer.Typer(no_args_is_help=True)
-    pr_app = typer.Typer(no_args_is_help=True)
-    conflict_app = create_conflict_app()
     plugin_app = typer.Typer(no_args_is_help=True)
-    guard_app = typer.Typer(no_args_is_help=True)
     preserve_app = typer.Typer(no_args_is_help=True)
-    app.add_typer(worktree_app, name="worktree", help="Worktree management")
-    app.add_typer(pr_app, name="pr", help="PR lifecycle (status, merge, push, checks)")
+    env_app = typer.Typer(no_args_is_help=True)
+    tracker_app = typer.Typer(no_args_is_help=True)
     app.add_typer(
-        conflict_app, name="conflict", help="Merge/rebase conflict resolution"
+        env_app,
+        name="env",
+        help="This project's own environment, and who else is installed in it",
     )
     app.add_typer(plugin_app, name="plugin", help="Local plugin marketplace wiring")
     app.add_typer(
-        guard_app,
-        name="git-hooks",
-        help="The git hooks refusing stale artifacts and a failing gate",
+        tracker_app,
+        name="tracker",
+        help="Answer an issue here or on a declared tracker (comment, close, reopen)",
     )
     app.add_typer(
         preserve_app,
         name="preserve",
-        help="The capability ledger a reorganisation is measured against",
+        help="The capability capture a reorganisation is measured against",
     )
     app.add_typer(
         model_config_mod.create_model_config_app(),
@@ -116,197 +94,175 @@ def create_dev_app(
         name="questions",
         help="The parked asks a reviewer answers, and what each is waiting on",
     )
+    # Three trees that were top-level and are core's either way, so being
+    # top-level bought nothing and cost a reader three names to learn instead
+    # of one. Each is a way of reading this repository rather than a workflow
+    # over it — what the policy decides, what a name resolves to, what is left
+    # to implement — which is the same subject `dev` already is.
+    app.add_typer(
+        create_hooks_app(lambda: declared().hooks),
+        name="hooks",
+        help="Query the permission policy",
+    )
+    app.add_typer(py.SUBAPP.app, name="py", help=py.SUBAPP.spec.help)
+    app.add_typer(
+        create_report_app(native_targets, repository_writers),
+        name="report",
+        help="Everything left to implement, in one place",
+    )
+    # Not with the trace tree, though "what a session spent" reads like the
+    # third of a set with "what it did" and "where its records went". Those two
+    # read what a session wrote into this repository; this reads the backend's
+    # own metered account, which answers whether or not a session ever ran
+    # here. A project that stopped reading traces would still want its spend.
+    app.add_typer(
+        create_usage_app(usage_entries or []),
+        name="usage",
+        help="What this project has spent, per backend account",
+    )
 
-    # -- worktree commands --
+    # -- tracker commands --
 
-    @worktree_app.command("create")
-    def worktree_create_cmd(
-        name: Annotated[
-            str, typer.Argument(help="Name for the worktree (e.g., feat-name)")
-        ],
-        no_sync: Annotated[
-            bool,
-            typer.Option("--no-sync", help="Skip running uv sync"),
-        ] = False,
-        no_copy_data: Annotated[
-            bool,
-            typer.Option("--no-copy-data", help="Skip copying gitignored extras"),
-        ] = False,
-        base_branch: Annotated[
-            str | None,
-            typer.Option("--base", "-b", help="Base branch (default: current branch)"),
-        ] = None,
-        force: Annotated[
-            bool,
-            typer.Option(
-                "--force",
-                help="Delete an existing unregistered directory at the worktree path",
-            ),
-        ] = False,
-        no_record: Annotated[
-            bool,
-            typer.Option(
-                "--no-record",
-                help="Create with no base recorded, instead of refusing to guess",
-            ),
-        ] = False,
-        clipboard: Annotated[
-            bool,
-            typer.Option(
-                "--clipboard",
-                help="Also copy the shell line to your clipboard, for pasting",
-            ),
-        ] = False,
-    ) -> None:
-        """Create or re-attach a git worktree."""
-        worktree.create(
-            name,
-            no_sync,
-            no_copy_data,
-            base_branch,
-            relocation_hint,
-            force=force,
-            no_record=no_record,
-            clipboard=clipboard,
-            guards=declared().git_guards,
+    def tracker_routes() -> issues_mod.TrackerRoutes:
+        """Where a forge operation may land, read when the command runs.
+
+        `origin` answers for this checkout and the declaration answers for
+        everywhere else, both resolved here rather than held on the app: a
+        CLI is imported long before anybody knows which repository it will be
+        pointed at, and a worktree created mid-session is a different answer
+        to the first question.
+        """
+        return issues_mod.TrackerRoutes(
+            own=repository_slug(), declared=list(declared().project.trackers)
         )
 
-    @worktree_app.command("list")
-    def worktree_list_cmd() -> None:
-        """List all git worktrees with branch and status info."""
-        worktree.list_worktrees()
-
-    @worktree_app.command("remove")
-    def worktree_remove_cmd(
-        name: Annotated[str, typer.Argument(help="Worktree name or path to remove")],
-        force: Annotated[
-            bool,
-            typer.Option("--force", help="Force removal even if dirty"),
-        ] = False,
+    def answer(
+        verb: issues_mod.TrackerVerb, number: int, note: str, repository: str
     ) -> None:
-        """Remove a git worktree."""
-        worktree.remove(name, force)
+        """Run one compensable verb, saying where it landed or why it did not.
 
-    # -- branch commands --
-
-    @app.command("branches")
-    def branches_cmd(
-        branch: Annotated[
-            str | None,
-            typer.Argument(help="Specific branch to check (default: all)"),
-        ] = None,
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Analyze branch containment, PR status, and worktree info."""
-        branches.branch_status(branch, as_json)
-
-    @app.command("base-branch")
-    def base_branch_cmd(
-        branch: Annotated[
-            str | None,
-            typer.Argument(help="Branch to analyze (default: current)"),
-        ] = None,
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Detect the base branch for the current (or specified) branch."""
-        branches.base_branch(branch, as_json)
-
-    @app.command("freshness")
-    def freshness_cmd(
-        settle: Annotated[
-            bool,
-            typer.Option(
-                "--settle",
-                help="Settle a clean checkout rather than only reporting: pull "
-                "what the remote holds, then push what it lacks",
-            ),
-        ] = False,
-    ) -> None:
-        """Report how far this checkout sits behind its own remote and its base.
-
-        The reading a session is opened on, asked on its own — a checkout
-        cannot tell from its own contents that either has moved, and the
-        answer otherwise only appears in front of a session nobody asked for.
+        The three verbs differ only in the word, so they share this rather
+        than restating the resolution, the failure handling and the refusal
+        three times — which is where a fourth verb would have quietly skipped
+        one of them.
         """
-        if settle:
-            branches.settle_base_freshness(
-                LocalProcessLauncher(), project_root(), publish=True
+        routes = tracker_routes()
+        try:
+            target = routes.chosen(
+                issues_mod.issue_arguments(verb, number, note), named=repository
             )
-            return
-        typer.echo(
-            branches.probe_base_freshness(
-                LocalProcessLauncher(), project_root()
-            ).report()
-        )
+        except RuntimeError as refused:
+            typer.echo(str(refused), err=True)
+            raise typer.Exit(1) from refused
+        if not target:
+            typer.echo(
+                "No repository to reach: origin names none and no tracker was"
+                " given. `--repo <owner/name>` names one this project declares.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        try:
+            typer.echo(issues_mod.act_on_issue(verb, number, target, note))
+        except sh.ErrorReturnCode as failure:
+            typer.echo(decode_stderr(failure), err=True)
+            raise typer.Exit(1) from failure
 
-    # -- pr-body command --
-
-    @app.command("pr-body")
-    def pr_body_cmd(
-        base: Annotated[
-            str | None,
-            typer.Option("--base", "-b", help="Override base branch"),
-        ] = None,
+    @tracker_app.command("comment")
+    def tracker_comment_cmd(
+        number: Annotated[int, typer.Argument(min=1, help="Issue number")],
+        body: Annotated[str, typer.Option("--body", help="What to say")],
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which repository, if not this checkout's"),
+        ] = "",
     ) -> None:
-        """Generate a PR body (summary, commits, test plan) from branch commits."""
-        branches.pr_body(base)
+        """Say something on an issue, here or on a declared tracker.
 
-    @app.command("monitor")
-    def monitor_cmd(
-        run_directory: Annotated[
-            Path,
-            typer.Argument(help="A run directory holding manifest.json and units/"),
-        ],
-        log: Annotated[
-            Path | None,
-            typer.Option(
-                "--log",
-                help="The runner's log; defaults to run.log inside the directory",
-            ),
-        ] = None,
-        interval: Annotated[
-            float,
-            typer.Option("--interval", help="Seconds between readings"),
-        ] = 2.0,
-        events: Annotated[
-            bool,
-            typer.Option("--events", help="One line per change, for a watcher"),
-        ] = False,
-        one_shot: Annotated[
-            bool,
-            typer.Option("--once", help="Print one reading and exit"),
-        ] = False,
-        quiet_limit: Annotated[
-            float,
-            typer.Option(
-                "--quiet-limit", help="Seconds of silence that reads as a stall"
-            ),
-        ] = 900.0,
-    ) -> None:
-        """Follow a background run: its landed units, their statuses, its heartbeat.
-
-        Works on a run launched detached or from another session, because it
-        reads only what the runner writes. `--events` emits one line per thing
-        that happens and ends when the run does, which is the shape a watcher
-        is woken by; without it the reading is redrawn in place for a person.
-        Nothing about the run is touched either way.
+        Compensable: a comment that was wrong is answered by the next one.
+        What this will not do is anything a follow-up does not restore — the
+        surface is these three verbs, and reaching further means `gh`, which
+        the permission policy asks about.
         """
-        directory = RunDirectory(root=run_directory)
-        if events:
-            monitor.stream(directory, log, interval, quiet_limit)
-            return
-        if one_shot:
-            typer.echo(monitor.once(directory, log))
-            return
-        typer.echo(monitor.report(directory, log, interval))
+        answer("comment", number, body, repository)
 
-    # -- branch survey and delete --
+    @tracker_app.command("close")
+    def tracker_close_cmd(
+        number: Annotated[int, typer.Argument(min=1, help="Issue number")],
+        comment: Annotated[
+            str,
+            typer.Option("--comment", help="Why it is being closed"),
+        ] = "",
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which repository, if not this checkout's"),
+        ] = "",
+    ) -> None:
+        """Close an issue, here or on a declared tracker.
+
+        Reopening restores it, which is what puts closing in reach at all. A
+        comment is optional and worth writing: whoever was watching sees the
+        state change either way, and only the note says why.
+        """
+        answer("close", number, comment, repository)
+
+    @tracker_app.command("reopen")
+    def tracker_reopen_cmd(
+        number: Annotated[int, typer.Argument(min=1, help="Issue number")],
+        comment: Annotated[
+            str,
+            typer.Option("--comment", help="Why it is being reopened"),
+        ] = "",
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which repository, if not this checkout's"),
+        ] = "",
+    ) -> None:
+        """Reopen an issue, here or on a declared tracker."""
+        answer("reopen", number, comment, repository)
+
+    @tracker_app.command("list")
+    def tracker_list_cmd() -> None:
+        """Which repositories this project may reach, and what each is for.
+
+        The same list a refusal reads out, answerable before meeting one:
+        where a report can go is a question with an answer, and finding it
+        by being told no is a worse way to learn it.
+        """
+        routes = tracker_routes()
+        typer.echo(f"this checkout: {routes.own or 'origin names no repository'}")
+        for entry in routes.declared:
+            claimed = f"  components: {', '.join(entry.components)}"
+            typer.echo(f"declared: {entry.repository} — {entry.what}")
+            if entry.components:
+                typer.echo(claimed)
+        if not routes.declared:
+            typer.echo("declared: none — every other repository goes through gh")
+
+    # -- environment commands --
+
+    @env_app.command("status")
+    def env_status_cmd() -> None:
+        """Where this project's environment is, and who is installed in it."""
+        environment_mod.environment_status()
+
+    @env_app.command("sync")
+    def env_sync_cmd(
+        take_over: Annotated[
+            bool,
+            typer.Option(
+                "--take-over",
+                help="Sync even where another project is installed, uninstalling it",
+            ),
+        ] = False,
+    ) -> None:
+        """Install this project's dependencies into its own environment.
+
+        `uv sync` with the one question `uv` cannot ask asked first: an
+        absolute ``UV_PROJECT_ENVIRONMENT`` names a single directory for
+        every project on the machine, and a sync into a shared one
+        uninstalls whoever was there.
+        """
+        environment_mod.sync_environment(take_over)
 
     @app.command("pending")
     def pending_cmd(
@@ -317,217 +273,6 @@ def create_dev_app(
     ) -> None:
         """Report the real pending changes, excluding sandbox-masked device paths."""
         pending_mod.report(as_json)
-
-    @app.command("survey")
-    def survey_cmd(
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Full branch inventory: containment, PRs, unique commits, diff sizes."""
-        branches.survey(as_json)
-
-    @app.command("merge-driver")
-    def merge_driver_cmd() -> None:
-        """Register the ownership-manifest merge driver `.gitattributes` names."""
-        worktree.register_merge_driver()
-        typer.echo(f"Registered merge driver: {worktree.OWNERSHIP_MERGE_DRIVER}")
-
-    @app.command("delete")
-    def delete_cmd(
-        name: Annotated[str, typer.Argument(help="Branch name to delete")],
-        dry_run: Annotated[
-            bool,
-            typer.Option("--dry-run", "-n", help="Show what would happen"),
-        ] = False,
-        force: Annotated[
-            bool,
-            typer.Option(
-                "--force",
-                "-f",
-                help="Force delete the branch and a worktree holding modified files",
-            ),
-        ] = False,
-        remote: Annotated[
-            bool | None,
-            typer.Option(
-                "--remote/--no-remote",
-                help="Delete origin's copy too (default: only if merged)",
-            ),
-        ] = None,
-    ) -> None:
-        """Delete a branch and its worktree, and origin's copy if it is spent.
-
-        Its session records are archived first, since the worktree usually holds
-        the only copy; a deletion whose archive fails is refused.
-        """
-        branches.delete_branch(name, dry_run, force, remote)
-
-    @app.command("retire")
-    def retire_cmd(
-        name: Annotated[str, typer.Argument(help="Branch name to retire")],
-        reason: Annotated[
-            str,
-            typer.Option("--reason", help="Why this work is not being landed"),
-        ],
-        dry_run: Annotated[
-            bool,
-            typer.Option("--dry-run", "-n", help="Show what would happen"),
-        ] = False,
-        base: Annotated[
-            str | None,
-            typer.Option("--base", help="Branch the request targets"),
-        ] = None,
-    ) -> None:
-        """Retire a branch through a pull request, so its commits outlive it.
-
-        For work that is not being landed and is not in the integration
-        branch either — where a plain delete leaves the commits reachable
-        from nothing. Pushes, opens a request, closes it without merging,
-        and then deletes: the head stays at `refs/pull/<number>/head`, which
-        outlives both the branch and origin's copy of it.
-        """
-        branches.retire_branch(name, reason, dry_run, base)
-
-    @app.command("archive-traces")
-    def archive_traces_cmd(
-        name: Annotated[
-            str,
-            typer.Argument(help="Branch whose worktree records should be kept"),
-        ],
-        dry_run: Annotated[
-            bool,
-            typer.Option("--dry-run", "-n", help="Report what would be copied"),
-        ] = False,
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Copy a worktree's session records into the archive beside the repository.
-
-        `delete` already does this, so reach for it to read what a deletion
-        would keep before deciding one, or to archive a worktree that is staying.
-        """
-        traces.report(name, dry_run, as_json)
-
-    @app.command("resolve-branch")
-    def resolve_branch_cmd(
-        concern_id: Annotated[
-            str, typer.Argument(help="Concern slug; becomes the resolve/<id> branch")
-        ],
-    ) -> None:
-        """Create + switch to the resolve/<id> branch (a resolve editor's first step).
-
-        Runs through the allowlisted `uv run lup-devtools` path so the bash hook
-        needs no special case for the editor — autonomy for the editor lives in
-        the edit hook.
-        """
-        branches.create_resolve_branch(concern_id)
-
-    @app.command("resolve-review")
-    def resolve_review_cmd(
-        manifest: Annotated[
-            Path,
-            typer.Argument(help="Manifest JSON: workflow task output or a bare array"),
-        ],
-        base: Annotated[
-            str,
-            typer.Option(
-                "--base", help="Snapshot base ref the resolve branches diff against"
-            ),
-        ],
-        out: Annotated[
-            Path,
-            typer.Option("--out", help="Output HTML path"),
-        ] = Path("tmp/resolve-review.html"),
-        intro: Annotated[
-            Path | None,
-            typer.Option(
-                "--intro", help="HTML fragment prepended as a run-specific header"
-            ),
-        ] = None,
-    ) -> None:
-        """Render a resolve manifest and its branch diffs into one static HTML review.
-
-        One section per concern: the generalized spec, each original note paired
-        with the verifier's per-note finding, the editor summary, the verdict, and
-        the full colored diff against the base. The resolve skill runs this in
-        its human gate so review reads concrete diffs instead of prose.
-        """
-        resolve_review.build_review(manifest, base, out, intro)
-
-    @app.command("resolve-summary")
-    def resolve_summary_cmd(
-        manifest: Annotated[
-            Path,
-            typer.Argument(help="Manifest JSON: workflow task output or a bare array"),
-        ],
-    ) -> None:
-        """Print per-concern verdicts from a resolve manifest.
-
-        The terminal companion to resolve-review: one block per concern with the
-        committed/accepted flags, verdict reason, and residual, for planning merge
-        order and approval batches before opening the HTML page.
-        """
-        resolve_review.summarize(manifest)
-
-    # -- git-hooks commands --
-
-    @guard_app.command("install")
-    def guard_install_cmd(
-        force: Annotated[
-            bool,
-            typer.Option("--force", help="Replace a hook written elsewhere"),
-        ] = False,
-    ) -> None:
-        """Install every git hook this repository declares.
-
-        Idempotent, and shared by every worktree of the clone it is run from,
-        so re-running it after a library upgrade refreshes an older body.
-
-        One occupied hook path stops the whole command rather than half of
-        it: `--force` is an answer about a file somebody wrote deliberately,
-        and installing the rest first would leave the reader working out
-        which of them the error was about.
-        """
-        root = project_root()
-        try:
-            installed = git_guards_mod.install_guards(
-                declared().git_guards, root, force=force
-            )
-        except git_guards_mod.GuardConflict as error:
-            typer.echo(str(error), err=True)
-            raise typer.Exit(1) from error
-        except OSError as error:
-            # One clone's hooks directory is shared by every worktree cut from
-            # it and sits outside all of them, so a sandbox confining writes to
-            # the checkout refuses this — as an errno naming a path, which says
-            # nothing about hooks to whoever reads it out of a traceback.
-            typer.echo(f"the hooks could not be written: {error}", err=True)
-            raise typer.Exit(1) from error
-        for state in installed:
-            typer.echo(state.describe())
-
-    @guard_app.command("status")
-    def guard_status_cmd() -> None:
-        """Report what this clone refuses, at every moment a hook sits at.
-
-        Both directions, because either alone reads as fully armed: a moment
-        this declares with nothing installed at it, and a hook this installed
-        at a moment nothing declares any more.
-        """
-        hooks = git_guards_mod.read_hooks(declared().git_guards, project_root())
-        for state in [*hooks.guards, *hooks.orphaned]:
-            typer.echo(state.describe())
-
-    @guard_app.command("uninstall")
-    def guard_uninstall_cmd() -> None:
-        """Remove them, leaving hooks written elsewhere alone."""
-        removed = git_guards_mod.uninstall_guards(declared().git_guards, project_root())
-        for state in removed:
-            typer.echo(state.describe())
 
     # -- check command --
 
@@ -608,9 +353,27 @@ def create_dev_app(
                 "the fix-one-file loop. Repeatable",
             ),
         ] = None,
+        changed: Annotated[
+            bool,
+            typer.Option(
+                "--changed",
+                help="Run ruff and pyright over the Python files changed since "
+                "--since (default: the integration branch) and no tests at all — "
+                "the loop while a change is moving, not the bar a commit passes",
+            ),
+        ] = False,
     ) -> None:
         """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
         declarations = declared()
+        if changed:
+            from lup.devtools.dev.branches import get_integration_branch
+
+            check.run_changed(
+                declarations.project,
+                since if since is not None else get_integration_branch(),
+                fix=fix,
+            )
+            return
         if antipatterns:
             if profiled:
                 antipatterns_mod.profile(declarations.project, path)
@@ -634,7 +397,31 @@ def create_dev_app(
             repository_writers=repository_writers,
             git_guards=declarations.git_guards,
             hooks_declaration=declarations.hooks,
+            command_surface=command_surface,
             scope=check.changed_paths(since) if since is not None else None,
+            node_classes=node_classes or [],
+            ledger=ledger,
+        )
+
+    # -- test command --
+
+    @app.command("test")
+    def test_cmd(
+        paths: Annotated[
+            list[str] | None,
+            typer.Argument(
+                help="Test files or directories to run. Each is dispatched to the "
+                "declared test root that installs it; with none, every root runs "
+                "its whole suite"
+            ),
+        ] = None,
+    ) -> None:
+        """Run named tests in the suite that installs each, one run per suite."""
+        declarations = declared()
+        check.run_selected(
+            test_roots=declarations.test_roots,
+            selections=paths or [],
+            excluded_roots=check.non_code_roots(declarations.project),
         )
 
     # -- comments command --
@@ -799,7 +586,8 @@ def create_dev_app(
         command that guessed at them would be answering for a layout it does
         not own.
         """
-        catalog = declared().project.catalog
+        project = declared().project
+        catalog = project.catalog
         answers = seams.Answers(
             own=own or [],
             disown=disown or [],
@@ -808,7 +596,7 @@ def create_dev_app(
             retire_all=retire_all,
         )
         if not answers.given():
-            for line in seams.survey(catalog):
+            for line in seams.survey(catalog, project.seams):
                 typer.echo(line)
             return
         if catalog is None:
@@ -903,8 +691,22 @@ def create_dev_app(
         state: Annotated[str, typer.Option("--state")],
         recovery_cost: Annotated[str, typer.Option("--recovery-cost")],
         issue: Annotated[int | None, typer.Option("--issue", min=1)] = None,
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which tracker, if not the one routing picks"),
+        ] = "",
     ) -> None:
-        """File or correct workflow friction in this checkout's repository."""
+        """File or correct workflow friction, on the tracker that owns the fix.
+
+        Routed by the component the report names rather than by where the
+        session was standing. A project consuming a library as a dependency
+        meets most of its friction in machinery it cannot edit, and a report
+        filed here about code that is not here is worse than misplaced: the
+        resolver takes every open issue in this repository as evidence, so
+        the next run plans a repair it cannot make. A component no declared
+        tracker claims stays here, which is every defect this tree owns.
+        """
+        routes = tracker_routes()
         report = issues_mod.FrictionReport(
             summary=summary,
             component=component,
@@ -914,43 +716,21 @@ def create_dev_app(
             recovery_cost=recovery_cost,
         )
         try:
-            url = report.file(issue=issue)
-        except (RuntimeError, sh.ErrorReturnCode) as failure:
-            typer.echo(str(failure), err=True)
+            target = routes.chosen(
+                ["issue", "create", "--title", summary],
+                named=repository,
+                component=component,
+            )
+            url = report.file(repository=target, issue=issue)
+        except RuntimeError as refused:
+            typer.echo(str(refused), err=True)
+            raise typer.Exit(1) from refused
+        except sh.ErrorReturnCode as failure:
+            spoken = decode_stderr(failure)
+            advice = issues_mod.disabled_issues_advice(spoken, routes)
+            typer.echo(spoken if not advice else f"{spoken}\n{advice}", err=True)
             raise typer.Exit(1) from failure
         typer.echo(url)
-
-    @app.command("upstream")
-    def upstream_cmd(
-        slug: Annotated[
-            str,
-            typer.Argument(help="Which report to print; omit to list what is declared"),
-        ] = "",
-    ) -> None:
-        """Print a measured upstream defect, or list the ones declared.
-
-        The body goes to stdout alone so it pipes: each report's own section
-        in `docs/upstream-reports.md` carries the `gh issue create` line that
-        consumes it. Filing is deliberately not done here — an account is the
-        person's, not the tooling's.
-        """
-        roster = upstream_reports.ROSTER
-        if not slug:
-            for report in roster.reports:
-                typer.echo(
-                    f"{report.slug}  ({report.component} {report.version}, "
-                    f"{report.status()})"
-                )
-                typer.echo(f"    {report.title}")
-            return
-        report = roster.named(slug)
-        if report is None:
-            typer.echo(
-                f"No upstream report named {slug!r}; declared: {roster.handles()}",
-                err=True,
-            )
-            raise typer.Exit(1)
-        typer.echo(report.body)
 
     @app.command("undo")
     def undo_cmd(
@@ -998,21 +778,74 @@ def create_dev_app(
             typer.echo(f"{item.taken_at:%Y-%m-%d %H:%M}  {item.reason}")
             typer.echo(f"    {item.restore_command()}")
 
+    @app.command("history")
+    def history_cmd(
+        text: Annotated[str, typer.Argument(help="The symbol or literal to trace")],
+        regex: Annotated[
+            bool,
+            typer.Option("--regex", help="Read the text as a regular expression"),
+        ] = False,
+        path: Annotated[
+            list[Path] | None,
+            typer.Option("--path", help="Limit the search to these paths"),
+        ] = None,
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """Trace a symbol through every branch, past this tree's own snapshots.
+
+        `git log --all -S <symbol>` cannot answer this in a guarded checkout.
+        The permission dispatcher snapshots the tree before every command
+        under `refs/lup/undo`, each snapshot a parentless commit whose whole
+        tree reads as an addition -- so the pickaxe matches every symbol the
+        checkout holds, once per snapshot, and the first match is the one
+        taken in front of the search. Those refs are left out of the
+        traversal here and nothing they recorded is disturbed.
+
+        Examples::
+
+            $ uv run lup-devtools dev history undo_retention_count
+            $ uv run lup-devtools dev history 'def parse' --path packages/lup
+            $ uv run lup-devtools dev history 'Hook(Set|Rule)' --regex
+        """
+        found = history.commits_matching(project_root(), text, regex, path)
+        if as_json:
+            output_json([hit.model_dump(mode="json") for hit in found])
+            return
+        for hit in found:
+            typer.echo(hit.line())
+        typer.echo(
+            f"{len(found)} commit(s), snapshots under {history.SNAPSHOT_REFS} aside"
+        )
+
     @app.command("issues")
     def issues_cmd(
         excluded: Annotated[
             str,
             typer.Option("--excluded", help="Label that withholds an issue"),
         ] = issues_mod.EXCLUDED_LABEL,
+        repository: Annotated[
+            str,
+            typer.Option("--repo", help="Which repository, if not this checkout's"),
+        ] = "",
     ) -> None:
         """List the open issues a resolver run would take as evidence.
 
         Answerable without starting a run, which is the whole point: a run
         leases a worktree per concern, so "what would this plan from?" should
         not cost one.
+
+        A declared tracker can be read the same way. Reading somebody else's
+        issues is a read wherever it points, and asking what is open upstream
+        is how a session finds out that the defect in front of it is already
+        filed.
         """
-        found = issues_mod.fetch_open_issues(excluded)
-        slug = repository_slug()
+        routes = tracker_routes()
+        try:
+            slug = routes.chosen(["issue", "list", "--state", "open"], named=repository)
+        except RuntimeError as refused:
+            typer.echo(str(refused), err=True)
+            raise typer.Exit(1) from refused
+        found = issues_mod.fetch_open_issues(excluded, repository=slug)
         typer.echo(f"{len(found)} open issue(s) in {slug or 'this repository'}")
         for issue in found:
             typer.echo(f"  {issue.reference()}  {issue.title}")
@@ -1042,6 +875,24 @@ def create_dev_app(
             raise typer.Exit(1) from error
         verb = "verified" if check_only else "written"
         typer.echo(f"Lup rule reference {verb}: {destination}")
+
+    @app.command("modules")
+    def modules_cmd(
+        verbose: Annotated[
+            bool,
+            typer.Option("--verbose", "-v", help="What each module is and contributes"),
+        ] = False,
+    ) -> None:
+        """Report which modules this project takes, and what each one's prose costs.
+
+        The roster is the one selection with no surface of its own: a retired
+        sub-app is missing from `--help` and a retired rule from the rule
+        reference, but a module is five surfaces at once, so what a project
+        settled is otherwise readable only out of its catalog against defaults
+        held in the reader's head.
+        """
+        project = declared().project
+        modules.report(project.coverage.modules, project.modules, verbose)
 
     @app.command("guidance")
     def guidance_cmd(
@@ -1097,22 +948,24 @@ def create_dev_app(
         for mention in relocate_mod.surviving_mentions(roots, declared):
             typer.echo(f"still mentions a moved module: {mention}", err=True)
 
-    # -- preservation ledger --
+    # -- preservation capture --
 
-    def walked(ctx: typer.Context) -> preservation.Ledger:
+    def walked(ctx: typer.Context) -> preservation.SurfaceCapture:
         """The surface the tree offers right now, as this CLI can see it."""
         return preservation.capture(preservation.operations(ctx), declared().project)
 
-    def against(ctx: typer.Context, ledger: Path) -> preservation.Divergence:
+    def against(ctx: typer.Context, capture: Path) -> preservation.Divergence:
         """What the live tree does and does not still answer for a capture."""
-        return preservation.compare(preservation.Ledger.read(ledger), walked(ctx))
+        return preservation.compare(
+            preservation.SurfaceCapture.read(capture), walked(ctx)
+        )
 
     @preserve_app.command("capture")
     def preserve_capture_cmd(
         ctx: typer.Context,
-        ledger: Annotated[
-            Path, typer.Option("--ledger", help="The capture to read or write")
-        ] = preservation.LEDGER_FILE,
+        capture: Annotated[
+            Path, typer.Option("--capture", help="The capture to read or write")
+        ] = preservation.CAPTURE_FILE,
     ) -> None:
         """Record the surface this repository offers, as a checked-in fixture.
 
@@ -1121,19 +974,19 @@ def create_dev_app(
         reads, which is the only place a dropped capability is ever noticed.
         """
         captured = walked(ctx)
-        captured.write(ledger)
+        captured.write(capture)
         exports = sum(len(surface.declares) for surface in captured.modules)
         typer.echo(
-            f"{ledger}: {len(captured.commands)} operation(s), {exports} export(s) "
+            f"{capture}: {len(captured.commands)} operation(s), {exports} export(s) "
             f"across {len(captured.modules)} module(s), at {captured.revision}"
         )
 
     @preserve_app.command("check")
     def preserve_check_cmd(
         ctx: typer.Context,
-        ledger: Annotated[
-            Path, typer.Option("--ledger", help="The capture to read or write")
-        ] = preservation.LEDGER_FILE,
+        capture: Annotated[
+            Path, typer.Option("--capture", help="The capture to read or write")
+        ] = preservation.CAPTURE_FILE,
         as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
     ) -> None:
         """Resolve every captured capability against the tree as it stands.
@@ -1142,7 +995,7 @@ def create_dev_app(
         declared somewhere else is reported and does not: a move is what a
         reorganisation is, and telling the two apart is the whole point.
         """
-        divergence = against(ctx, ledger)
+        divergence = against(ctx, capture)
         if as_json:
             output_json(divergence)
         else:
@@ -1158,9 +1011,9 @@ def create_dev_app(
     @preserve_app.command("migration")
     def preserve_migration_cmd(
         ctx: typer.Context,
-        ledger: Annotated[
-            Path, typer.Option("--ledger", help="The capture to read or write")
-        ] = preservation.LEDGER_FILE,
+        capture: Annotated[
+            Path, typer.Option("--capture", help="The capture to read or write")
+        ] = preservation.CAPTURE_FILE,
     ) -> None:
         """Print the relocation that repoints an importer of the captured tree.
 
@@ -1168,7 +1021,7 @@ def create_dev_app(
         from the same difference that proved nothing was lost. Add `--root` to
         aim it at the checkout being migrated.
         """
-        moves = against(ctx, ledger).module_moves()
+        moves = against(ctx, capture).module_moves()
         if not moves:
             typer.echo("no module moved since the capture")
             return
@@ -1263,105 +1116,5 @@ def create_dev_app(
         marketplace after the project fixes that.
         """
         plugin_mod.name_marketplace(declared().plugin, name, dry_run)
-
-    # -- pr commands --
-
-    @pr_app.command("status")
-    def pr_status_detail_cmd(
-        branch: Annotated[
-            str | None,
-            typer.Option("--branch", "-b", help="Branch name (default: current)"),
-        ] = None,
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Fetch PR review status, checks, and comments for a branch."""
-        pr.status(branch, as_json)
-
-    @pr_app.command("merge")
-    def pr_merge_cmd(
-        pr_number: Annotated[int, typer.Argument(help="PR number to merge")],
-        dry_run: Annotated[
-            bool,
-            typer.Option("--dry-run", "-n", help="Show what would happen"),
-        ] = False,
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-        method: Annotated[
-            pr.MergeMethod,
-            typer.Option("--method", help="How the commits reach the base branch"),
-        ] = pr.MergeMethod.merge,
-        gh_args: Annotated[
-            list[str] | None,
-            typer.Option("--gh", help="Further flag handed to `gh pr merge` untouched"),
-        ] = None,
-    ) -> None:
-        """Merge a PR and pull changes into the integration branch."""
-        pr.merge(pr_number, dry_run, as_json, method, tuple(gh_args or ()))
-
-    @pr_app.command("sync-base")
-    def pr_sync_base_cmd(
-        base: Annotated[
-            str | None,
-            typer.Option("--base", "-b", help="Base branch (default: auto-detect)"),
-        ] = None,
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Sync the base branch and merge it into the current feature branch."""
-        pr.sync_base(base, as_json)
-
-    @pr_app.command("push")
-    def pr_push_cmd(
-        force: Annotated[
-            bool,
-            typer.Option("--force", "-f", help="Force push"),
-        ] = False,
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Push the current branch and report any existing PR."""
-        pr.push(force, as_json)
-
-    @pr_app.command("create")
-    def pr_create_cmd(
-        base: Annotated[str, typer.Option("--base", help="Target branch for PR")],
-        title: Annotated[str, typer.Option("--title", help="PR title")],
-        body: Annotated[
-            str | None, typer.Option("--body", help="PR body (markdown)")
-        ] = None,
-        body_file: Annotated[
-            Path | None,
-            typer.Option("--body-file", help="Read the PR body from this file"),
-        ] = None,
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Output as JSON"),
-        ] = False,
-    ) -> None:
-        """Create a new PR."""
-        pr.create(base, title, pr.resolve_body(body, body_file), as_json)
-
-    @pr_app.command("update")
-    def pr_update_cmd(
-        pr_number: Annotated[int, typer.Argument(help="PR number to update")],
-        body: Annotated[
-            str | None, typer.Option("--body", help="New PR body (markdown)")
-        ] = None,
-        body_file: Annotated[
-            Path | None,
-            typer.Option("--body-file", help="Read the new PR body from this file"),
-        ] = None,
-    ) -> None:
-        """Update a PR body."""
-        pr.update(pr_number, pr.resolve_body(body, body_file))
 
     return app

@@ -83,7 +83,7 @@ def test_the_rerun_recipe_names_only_what_is_still_open(
     recipe = [
         line
         for line in capsys.readouterr().out.splitlines()
-        if "harness resolve" in line
+        if "lup-devtools resolve" in line
     ]
     assert recipe
     assert "settled=" not in recipe[0]

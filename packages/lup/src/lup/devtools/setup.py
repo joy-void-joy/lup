@@ -283,6 +283,21 @@ def create_setup_app(
     app.add_typer(create_conversation_setup_app(profiles), name="conversation")
     if profiles is not None:
         app.add_typer(create_profile_app(profiles), name="profile")
+    # The dashboard is this wizard seen through a browser — the same declared
+    # integrations rendered for somebody who would rather click than answer
+    # prompts. Beneath it rather than beside it because neither is usable
+    # without the other: the page serves this wizard's declarations, and a
+    # project that kept the page and dropped the wizard would be hosting a
+    # form over nothing. Imported where it is mounted, because serving it is
+    # the `web` extra and a module-level import would make that extra a
+    # requirement of running `setup` at all.
+    from lup.devtools.dashboard.app import create_dashboard_app
+
+    app.add_typer(
+        create_dashboard_app(integrations),
+        name="dashboard",
+        help="Host the local setup dashboard",
+    )
 
     @app.command("status")
     def status() -> None:

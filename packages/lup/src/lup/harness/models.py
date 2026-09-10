@@ -33,13 +33,15 @@ from lup.policy.boundary import BoundaryCapability
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
+from lup.policy.peer_policy import PeerPolicy
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
+from lup.policy.imports import ImportBoundary
 from lup.policy.everyday import CommandFamily
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
-from lup.seams import Selection
-from lup.types import JsonValue, ToolGrant, ToolName
+from lup.seams import SelectableRule, Selection
+from lup.types import JsonValue, ModelTier, ToolGrant, ToolName
 
 if TYPE_CHECKING:
     from lup.harness.contracts import NativeSpellings, PromptRenderer
@@ -454,6 +456,52 @@ class WatchOutput(SemanticPart, frozen=True):
         return self.command
 
 
+class CommandInvocation(SemanticPart, frozen=True):
+    """One `lup-devtools` command, named by its path rather than spelled out.
+
+    A document telling its reader to run something is issuing an instruction,
+    and one naming a command that does not exist fails for whoever follows it.
+    Twenty-two of those shipped at once — `dev hookssweep` in the hooks
+    workflow's own step 7, `py info` without its `dev` group in the
+    introspection tools' own docstring — each written beside the command it
+    named, which is why nobody reading either noticed.
+
+    Declared the way this document declares a plugin path or a skill it
+    invokes: the part holds what it means and the harness spells it, so the
+    executable's name is written once and the path is a value the walked CLI
+    can be asked about. ``arguments`` is whatever follows, which is the
+    reader's to fill in as often as not — placeholders belong there and are
+    resolved against nothing.
+
+    What this cannot reach is a docstring or a checked-in Markdown file, where
+    most of those twenty-two lived. The sweep in
+    :mod:`lup.devtools.dev.documented` covers those, and covers this too.
+    """
+
+    type: Literal["command_invocation"] = "command_invocation"
+    path: list[str] = Field(min_length=1)
+    """The command's own words, as the CLI mounts them: ``["dev", "check"]``."""
+
+    arguments: PortableText = ""
+    """Whatever follows the command — flags, operands, a placeholder."""
+
+    def spelled(self) -> str:
+        """This invocation as a reader types it, executable and all."""
+        return " ".join(["uv run lup-devtools", *self.path, self.arguments]).strip()
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        """The same words for every runtime, which all reach the same shell."""
+        return self.spelled()
+
+    @property
+    def text_payload(self) -> str:
+        return self.spelled()
+
+    @property
+    def shell_command(self) -> str:
+        return self.spelled()
+
+
 class ResolverEntry(SemanticPart, frozen=True):
     type: Literal["resolver_entry"] = "resolver_entry"
 
@@ -487,6 +535,7 @@ type PromptPart = Annotated[
     | RequestApproval
     | RelocateSession
     | WatchOutput
+    | CommandInvocation
     | ResolverEntry
     | ArgumentsRef,
     Discriminator("type"),
@@ -524,13 +573,17 @@ class PromptDocument(BaseModel, frozen=True):
         return sum(document_byte_size(text) for text in self.prose())
 
 
-class Document(BaseModel, frozen=True):
+class Document(SelectableRule, frozen=True):
     """One generated repository document and where it renders.
 
     Separate from the roster that lists them: which documents a project
     publishes is its own decision, but that each is a prompt document with a
     path, an identity, and a declaring module is what makes the roster
     renderable by machinery no project writes.
+
+    Selectable under its semantic id, which is the name ownership records it
+    under — so a project declining a page, and the manifest saying no file
+    there is owned, answer to one string.
     """
 
     path: Path
@@ -538,53 +591,108 @@ class Document(BaseModel, frozen=True):
     source: str
     document: PromptDocument
 
+    def selection_id(self) -> str:
+        return self.semantic_id
 
-GUIDANCE_BYTE_BUDGET = 32_768
-"""Default ceiling, in UTF-8 bytes, on the always-loaded guidance document.
 
-Codex stops adding project documentation once the combined size reaches
-``project_doc_max_bytes``, whose own default is 32 KiB — so exceeding this is
-not an error a reader ever sees, it is *silent truncation*. The unit is bytes
-for the same reason: that is what the vendor limits, and UTF-8 punctuation
-makes a document's byte count exceed its character count, so a character-based
-check runs looser than the real cap and passes documents that would be cut.
+class GuidanceBudget(BaseModel, frozen=True):
+    """What the always-loaded document may weigh, and what a scaffold keeps back.
 
-Claude has no equivalent setting — its guidance file is loaded in full
-whatever its length. Lup applies one number to both trees anyway, so the two
-runtimes read the same document rather than one reading a longer one.
+    One declaration rather than two numbers, because the third value is the one
+    every caller actually wants and neither number carries it: what a *template*
+    may spend is the ceiling less the reserve, and that subtraction was written
+    out by hand at every site that needed it. Derived here instead, so a project
+    that moves either number moves the answer everywhere rather than moving it
+    at seven sites and missing the eighth.
 
-This is a default rather than a constant: the number mirrors a real vendor
-default, but which ceiling a given project wants is its own call. Pass
-``budget`` to the checks below to state a different one. See § A Constant
-Should Probably Be An Overridable Default in ``docs/patterns.md``.
+    Field defaults rather than module constants for the reason
+    ``docs/patterns.md`` § *A Constant Should Probably Be An Overridable
+    Default* gives: both are judgements a project may make differently, and
+    ``ge=0`` is what the fields buy over integers — a negative reserve is not a
+    stricter scaffold, it is a check that passes whatever the document weighs.
+    """
 
-What a session pays for is the rendered document, so that is what the adapters
-check as they compile it. A typed part costs whatever its adapter spells it as,
-however little literal text the declaration holds. Reference material that a
-skill or a denial message surfaces at the right moment belongs in a generated
-document under ``docs/`` instead, reached by a file-path pointer."""
+    ceiling: int = Field(default=32_768, ge=0)
+    """Ceiling, in UTF-8 bytes, on the always-loaded guidance document.
 
-TEMPLATE_GUIDANCE_HEADROOM = 11_776
-"""Bytes a scaffold holds back, out of the budget above, for its adopter.
+    Codex stops adding project documentation once the combined size reaches
+    ``project_doc_max_bytes``, whose own default is 32 KiB — so exceeding this
+    is not an error a reader ever sees, it is *silent truncation*. The unit is
+    bytes for the same reason: that is what the vendor limits, and UTF-8
+    punctuation makes a document's byte count exceed its character count, so a
+    character-based check runs looser than the real cap and passes documents
+    that would be cut.
 
-The ceiling above is what a *runtime* will load. This is what a **template**
-may spend of it, and the difference is the whole point: a repository that is
-still the scaffold is writing guidance every domain built on it inherits, and
-that domain then has to describe its own architecture, conventions and
-workflow inside whatever is left. A scaffold that fills the runtime's ceiling
-has not passed its budget on, it has spent it — and the adopter discovers this
-by writing three paragraphs about its own project and being refused.
+    Claude has no equivalent setting — its guidance file is loaded in full
+    whatever its length. Lup applies one number to both trees anyway, so the two
+    runtimes read the same document rather than one reading a longer one.
 
-11.5 KiB, half a kilobyte under what this repository's own architecture,
-conventions and tooling sections cost together: a scaffold that also has to
-tell every domain how to answer its runtime's ambient instructions spends
-that much of the reserve on their behalf. Enough for a domain to say the
-equivalent about itself, rather than a round number that sounds generous.
+    What a session pays for is the rendered document, so that is what the
+    adapters check as they compile it. A typed part costs whatever its adapter
+    spells it as, however little literal text the declaration holds. Reference
+    material that a skill or a denial message surfaces at the right moment
+    belongs in a generated document under ``docs/`` instead, reached by a
+    file-path pointer."""
 
-Only ``dev check`` weighs this, and only while ``[tool.lup] template = true``.
-It must never reach ``budget`` on the checks above: those decide what a real
-runtime is told to load, and a scaffold's self-restraint is not a fact about
-any runtime's ceiling."""
+    template_headroom: int = Field(default=11_776, ge=0)
+    """Bytes a scaffold holds back, out of the ceiling above, for its adopter.
+
+    The ceiling is what a *runtime* will load. This is what a **template** may
+    not spend of it, and the difference is the whole point: a repository that is
+    still the scaffold is writing guidance every domain built on it inherits,
+    and that domain then has to describe its own architecture, conventions and
+    workflow inside whatever is left. A scaffold that fills the runtime's
+    ceiling has not passed its budget on, it has spent it — and the adopter
+    discovers this by writing three paragraphs about its own project and being
+    refused.
+
+    11.5 KiB, half a kilobyte under what this repository's own architecture,
+    conventions and tooling sections cost together: a scaffold that also has to
+    tell every domain how to answer its runtime's ambient instructions spends
+    that much of the reserve on their behalf. Enough for a domain to say the
+    equivalent about itself, rather than a round number that sounds generous.
+
+    Only ``dev check`` weighs this, and only while ``[tool.lup] template =
+    true``. It never reaches :attr:`ceiling`: that decides what a real runtime
+    is told to load, and a scaffold's self-restraint is not a fact about any
+    runtime's ceiling."""
+
+    @property
+    def scaffold_ceiling(self) -> int:
+        """What a repository still shipping as a template may spend.
+
+        The value every caller subtracted for itself. A derived property rather
+        than a third field, because it is not a judgement anybody makes — it is
+        what the two judgements above already imply, and a field would let a
+        project set three numbers that disagree.
+        """
+        return self.ceiling - self.template_headroom
+
+    @model_validator(mode="after")
+    def reserve_fits_inside_the_ceiling(self) -> "GuidanceBudget":
+        """A reserve larger than the ceiling leaves a scaffold negative room.
+
+        Refused rather than clamped, because both readings of a clamp are
+        wrong: silently keeping nothing back abandons the reserve a project
+        asked for, and silently lowering the ceiling tells a runtime to load
+        less than it will. The project stated two numbers that cannot both
+        hold, and only the project can say which it meant.
+        """
+        if self.template_headroom > self.ceiling:
+            raise ValueError(
+                f"a scaffold reserve of {self.template_headroom} bytes does not "
+                f"fit inside a {self.ceiling}-byte ceiling"
+            )
+        return self
+
+
+GUIDANCE_BUDGET = GuidanceBudget()
+"""The budget a project that has said nothing about it carries.
+
+Named so every default argument reads the same value rather than constructing
+its own, which is the one thing a bare default would get wrong here: a project
+that replaced the budget would have to be threaded to each of them, and a site
+that constructed its own would go on answering with the library's."""
 
 
 def document_byte_size(text: str) -> int:
@@ -630,7 +738,7 @@ class BashGrant(BaseModel, frozen=True):
         return cls(prefixes=[scope.strip().removesuffix(":*") for scope in specifiers])
 
 
-class Skill(BaseModel, frozen=True):
+class Skill(SelectableRule, frozen=True):
     id: str
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
@@ -638,6 +746,9 @@ class Skill(BaseModel, frozen=True):
     tools: list[ToolGrant] = []
     argument_hint: PortableText | None = None
     prompt: PromptDocument
+
+    def selection_id(self) -> str:
+        return self.id
 
     @model_validator(mode="after")
     def coherent_arguments(self) -> "Skill":
@@ -695,15 +806,7 @@ type AgentColor = Literal[
 """The closed agent accent-color palette native runtimes accept."""
 
 
-type ModelTier = Literal["inherit", "strongest", "balanced", "fast"]
-"""Portable model preference for one role.
-
-Runtimes name and version their own model lineups, so a declaration states the
-need and each adapter spells whichever tier it can honor — or omits the choice
-where it has no proven vocabulary to spell it in."""
-
-
-class Agent(BaseModel, frozen=True):
+class Agent(SelectableRule, frozen=True):
     id: str
     name: NativeName
     description: PortableText = Field(min_length=1, max_length=1024)
@@ -712,24 +815,154 @@ class Agent(BaseModel, frozen=True):
     model: ModelTier | None = None
     color: AgentColor | None = None
 
+    def selection_id(self) -> str:
+        return self.id
+
 
 class ContentSelection(BaseModel, frozen=True):
     """Which of the skills and agents a library ships a project's plugin carries.
 
-    Subtractive for the reason ``RuleSelection`` and ``SubAppSelection`` are: a
-    project declining two should name those two, because a restated roster is
-    re-copied on every addition and the copy that fell behind looks like a
-    decision. Skills and agents share one selection because they share one
-    namespace of stable ids, and a project retiring a skill that a retired
-    agent existed to serve should not have to say so in two places.
+    Subtractive first and additive second, which is :class:`~lup.seams.Selection`
+    read over two lists rather than one. A project declining two should name
+    those two, because a restated roster is re-copied on every addition and the
+    copy that fell behind looks like a decision — and a project that wants one
+    skill's prose to read differently declares a skill under that id, which
+    *replaces* the library's in place instead of sitting beside it.
+
+    Skills and agents share one ``retired`` because they share one namespace of
+    stable ids: a project retiring a skill that a retired agent existed to serve
+    should not have to say so in two places. They do not share one override
+    list, because a roster is a pair everywhere else and folding them into a
+    discriminated union would buy one field at the price of taking the pair
+    apart again at every reader.
     """
 
     retired: list[str] = []
     """Declaration ids this project's plugin does not ship."""
 
+    skills: list[Skill] = []
+    """Skills this project declares — replacing a library skill of the same id."""
+
+    agents: list[Agent] = []
+    """Agents this project declares — replacing a library agent of the same id."""
+
     def keeps(self, declaration_id: str) -> bool:
         """Whether a declaration is live here, for a roster composing itself."""
         return declaration_id not in self.retired
+
+    def over_skills(self) -> Selection[Skill]:
+        """This selection as the skill half of the algebra resolves it."""
+        return Selection(retired=self.retired, overrides=self.skills)
+
+    def over_agents(self) -> Selection[Agent]:
+        """This selection as the agent half of the algebra resolves it."""
+        return Selection(retired=self.retired, overrides=self.agents)
+
+    def declared(self) -> list[str]:
+        """Every id this project declares itself, whether replacing or adding."""
+        return [declaration.id for declaration in [*self.skills, *self.agents]]
+
+
+type GuidanceChapter = Literal[
+    "orientation",
+    "gates",
+    "workflow",
+    "code",
+    "tooling",
+    "process",
+    "meta",
+]
+"""Where in the always-loaded document one section belongs.
+
+The document has a spine — orient the reader, tell them what will stop them,
+the change loop, how to write code, what to run, how to report, and the loop
+over all of it — and that spine crosses ownership constantly: what to run is
+three subjects in a row. Naming the chapter is what lets a subject place its
+own prose without reading the whole document or asking anyone to sequence it.
+"""
+
+
+def default_chapters() -> list[GuidanceChapter]:
+    """The spine in reading order — the batteries-included sequence.
+
+    Offered rather than imposed: which part of a document an agent should meet
+    first is a judgement, and a project whose reader needs its domain before
+    its gates is answering a question this library had no standing to close.
+    A project with no opinion composes this; one that has an opinion passes
+    its own order to the composition rather than editing this call.
+    """
+    return [
+        "orientation",
+        "gates",
+        "workflow",
+        "code",
+        "tooling",
+        "process",
+        "meta",
+    ]
+
+
+class GuidanceSection(SelectableRule, frozen=True):
+    """One identified stretch of the always-loaded document.
+
+    Named, so a project can retire one, replace one, or add its own beside
+    them through the same algebra every other table here resolves through, and
+    so a report can attribute bytes to something a reader can act on.
+
+    The parts are a rendered stretch rather than a heading and a body, because
+    that is what a section is: several open no heading at all — a pointer
+    paragraph folded under the heading above — and requiring one would put a
+    heading in the document that nobody wrote.
+    """
+
+    id: str
+    """The name this section is retired, replaced, or reported under."""
+
+    chapter: GuidanceChapter
+    """Which part of the spine it belongs to, which is where it renders."""
+
+    parts: list[PromptPart]
+    """What it contributes, in the order it contributes it."""
+
+    def selection_id(self) -> str:
+        return self.id
+
+    @property
+    def text(self) -> str:
+        """The portable prose this section carries, for a weigher or a search."""
+        return "".join(
+            payload for part in self.parts if (payload := part.text_payload) is not None
+        )
+
+
+def sectioned(sections: list[GuidanceSection]) -> list[PromptPart]:
+    """One document's parts, in the order its sections were resolved.
+
+    The flattening is here rather than at each composition root so that a
+    reader wanting the sections and a reader wanting the parts take the same
+    list through one function, instead of one of them re-deriving what the
+    other already had.
+
+    The tail is normalised to exactly one newline, which is what the artifact
+    rule requires and what no section can answer for. A section ends with the
+    blank line separating it from the next, so whichever lands last would
+    otherwise decide whether the document is well-formed — and which section
+    that is depends on the modules a project took, so a document valid here
+    would stop being valid for whoever declined the subject that closed it.
+    """
+    parts = [part for section in sections for part in section.parts]
+    match parts:
+        # lup: ignore[own-model-dispatch] — not a behaviour each variant
+        # answers for: only a text part can carry a trailing blank line, so
+        # asking every part how to trim one would put a rendering concern on
+        # the parts that render no text at all
+        case [*earlier, TextPart(text=tail)]:
+            # lup: ignore[string-strip] — prose, not structured data: the
+            # subject is how many blank lines a rendered document ends with,
+            # which no parser has an opinion about
+            return [*earlier, TextPart(text=tail.rstrip("\n") + "\n")]
+        case _:
+            return parts
 
 
 class ContentRoster(BaseModel, frozen=True):
@@ -745,22 +978,22 @@ class ContentRoster(BaseModel, frozen=True):
     agents: list[Agent] = []
 
     def selected(self, selection: ContentSelection) -> "ContentRoster":
-        """This roster with what a project retired taken out of both lists.
+        """This roster as one project resolved it: retired, replaced, extended.
 
         Narrowing the roster rather than filtering at each surface is what
         keeps a retired declaration from reaching any of them: it is not
         compiled, not rendered into the documents that say what the plugin
         ships, and not named by prose describing a skill nobody can invoke.
+
+        One call rather than a narrowing followed by an extension, because the
+        two were never independent: a project replacing a skill had to retire
+        the id and re-add the declaration, and forgetting the retirement left
+        two declarations answering to one name. The algebra resolves that by
+        id in one pass, so the second step cannot be the one that was skipped.
         """
         return ContentRoster(
-            skills=[skill for skill in self.skills if selection.keeps(skill.id)],
-            agents=[agent for agent in self.agents if selection.keeps(agent.id)],
-        )
-
-    def extended(self, skills: list[Skill], agents: list[Agent]) -> "ContentRoster":
-        """This roster followed by what only one project has."""
-        return ContentRoster(
-            skills=[*self.skills, *skills], agents=[*self.agents, *agents]
+            skills=selection.over_skills().over(self.skills),
+            agents=selection.over_agents().over(self.agents),
         )
 
 
@@ -798,7 +1031,18 @@ class ProjectRootWord(McpWord, frozen=True):
         return runtime.project_root()
 
 
-type McpCommandWord = Annotated[LiteralWord | ProjectRootWord, Discriminator("type")]
+class RuntimeWord(McpWord, frozen=True):
+    """The engine that owns the tool server, independent of ambient settings."""
+
+    type: Literal["runtime"] = "runtime"
+
+    def spell_in(self, runtime: "NativeSpellings") -> str:
+        return runtime.runtime_key()
+
+
+type McpCommandWord = Annotated[
+    LiteralWord | ProjectRootWord | RuntimeWord, Discriminator("type")
+]
 
 
 class McpServer(BaseModel, frozen=True):
@@ -838,11 +1082,13 @@ class McpServer(BaseModel, frozen=True):
     own default is chosen for a server already installed. Unset leaves that
     default in force, which is right for a server whose start costs nothing.
 
-    Only a runtime that spawns under a deadline reads it; one that waits
-    renders nothing. What makes the deadline worth declaring is the shape of
-    missing it — the server is dropped and the session keeps the rest, so it
-    arrives as a group that is simply absent rather than as an error naming a
-    limit.
+    Both runtimes spawn under a deadline; what differs is the spelling. One
+    offers it per server and receives this number as written; the other reads
+    a single environment variable covering every server it starts, so its
+    settings artifact renders the widest declared deadline and nothing per
+    server. What makes the deadline worth declaring is the shape of missing
+    it — the server is dropped and the session keeps the rest, so it arrives
+    as a group that is simply absent rather than as an error naming a limit.
     """
 
     def command_line(self, runtime: "NativeSpellings") -> list[str]:
@@ -989,6 +1235,7 @@ class HookSet(BaseModel, frozen=True):
     allowed_fetch: list[HookUrlScope] = []
     denied_fetch: list[HookUrlScope] = []
     protected_edit_roots: list[Path] = []
+    import_boundaries: list[ImportBoundary] = []
     path_roles: list[HookPathRole] = Field(
         default=[],
         description=(
@@ -1052,6 +1299,16 @@ class HookSet(BaseModel, frozen=True):
             "turns on a declaration then asks rather than refusing"
         ),
     )
+    repair_command: list[str] = Field(
+        default=[],
+        description=(
+            "How to take the dead suppression directives out of one written "
+            "file, run from the checkout that holds it with the file named by "
+            "--path and its report on stdout as JSON. Empty declares no "
+            "repair, and a directive that silences nothing is left standing "
+            "for the audit to report instead"
+        ),
+    )
     refused_tools: list[RefusedTool] = Field(
         default=[],
         description=(
@@ -1059,6 +1316,18 @@ class HookSet(BaseModel, frozen=True):
             "carrying the surface to reach for instead. Whether a tool is "
             "against the point of a project is that project's judgement, so "
             "an empty list — the library's own answer — refuses nothing"
+        ),
+    )
+    peer_policy: PeerPolicy | None = Field(
+        default=None,
+        description=(
+            "Where this project's sessions find each other, so a native call "
+            "reaching one is judged against the roster it would bypass. None "
+            "is a project whose sessions do not coordinate, and leaves every "
+            "such call entirely to the runtime's own permissions. "
+            "`lup.coordination.policy.peer_policy` builds one from the "
+            "store's own layout, so the directory is spelled in the module "
+            "that owns it rather than again in a compiled hook"
         ),
     )
     runner_targets: list[RunnerTargetRule] = Field(
@@ -1168,6 +1437,7 @@ class HookSet(BaseModel, frozen=True):
         for field, command in (
             ("diagnostics_command", self.diagnostics_command),
             ("resolution_command", self.resolution_command),
+            ("repair_command", self.repair_command),
         ):
             program = PurePosixPath(command[0] if command else "")
             if DEFAULT_ENVIRONMENT in program.parts:
@@ -1207,6 +1477,14 @@ class HookSet(BaseModel, frozen=True):
         """
         return self.edit_rules.over([])
 
+    def resolved_import_boundaries(self) -> list[ImportBoundary]:
+        """The dependency rules retained by the same selection as the auditor."""
+        return [
+            boundary
+            for boundary in self.import_boundaries
+            if self.rules.keeps(boundary.rule_id)
+        ]
+
 
 class ResolveSpec(BaseModel, frozen=True):
     id: str
@@ -1218,6 +1496,25 @@ class ResolveSpec(BaseModel, frozen=True):
     worker_skill: SkillInvocation
     review_skill: SkillInvocation
     merge_skill: SkillInvocation
+
+    contain_actors: bool = True
+    """Whether each actor a run opens gets a container, and a lease, of its own.
+
+    Declared rather than assumed because it decides what a run *requires*: with
+    this set, a host with no container engine cannot start one and is told so,
+    rather than quietly running its actors on the host. That refusal is the
+    point. Two actors sharing a repository is the concurrency the mount rail
+    exists for, and a run that silently dropped the boundary would look exactly
+    like one that held it.
+
+    True because the alternative was never a decision anybody made. Actors ran
+    unconfined for as long as the lease was a launch-time snapshot, which
+    covered the checkouts a lone operator was landing and none of the worktrees
+    a run leases -- so the protection reached the sessions working alone and
+    missed the ones working at once. A project that means to run its actors on
+    the host overrules this here, in one place, where it reads as the posture
+    it is.
+    """
 
 
 class Plugin(BaseModel, frozen=True):
@@ -1469,11 +1766,11 @@ class Harness(BaseModel, frozen=True):
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
 
         used = self.guidance.text_size()
-        if used > GUIDANCE_BYTE_BUDGET:
+        if used > GUIDANCE_BUDGET.ceiling:
             raise ValueError(
                 f"always-loaded guidance is {used} bytes, over the "
-                f"{GUIDANCE_BYTE_BUDGET} budget by "
-                f"{used - GUIDANCE_BYTE_BUDGET}. Move a section to a "
+                f"{GUIDANCE_BUDGET.ceiling} budget by "
+                f"{used - GUIDANCE_BUDGET.ceiling}. Move a section to a "
                 "generated document under docs/ and leave a file-path pointer, "
                 "the way Self-Improvement Loop and Permission Hooks were split."
             )

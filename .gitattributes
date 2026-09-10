@@ -1,11 +1,22 @@
-# The ownership manifests are generated digest proofs: every field is derived
-# from the sources, so merging their text is meaningless — two branches always
-# disagree on source_digest and on every sha256 a regeneration touched. The
-# `lup-ownership` driver keeps one side so the merge resolves, and the next
-# `lup-devtools harness generate` settles the digests against the merged tree.
+# Every tracked file under these trees is a build product lup owns: compiled
+# from typed source, proven by the `.lup-ownership.json` digest manifest beside
+# it, and regenerated rather than hand-merged. Merging their text is meaningless
+# — two branches always disagree on source_digest and on every sha256 a
+# regeneration touched — and for one file it is worse than meaningless. The
+# compiled hook dispatcher, `plugins/lup/hooks/scripts/policy.py`, is executed
+# by the runtime rather than read: conflict markers in it leave a script that
+# will not parse, and the permission boundary answers every Bash and Edit call
+# in that session by refusing, so the merge cannot even be aborted from inside.
+#
+# The `lup-ownership` driver keeps one side so the merge resolves, and the next
+# `lup-devtools harness generate all` settles the tree against the merged source.
 #
 # The driver is per-clone git config, which no repository can ship. Register it
 # with `lup-devtools dev merge-driver`; without it git falls back to the text
-# merge and these files conflict as they did before.
-.claude/.lup-ownership.json merge=lup-ownership
-.codex/.lup-ownership.json merge=lup-ownership
+# merge and these files conflict as they did before. A merge performed on a
+# forge's server rather than in a clone reads no git config either, so nothing
+# declared here reaches it.
+.claude/** merge=lup-ownership
+.codex/** merge=lup-ownership
+.agents/** merge=lup-ownership
+packages/lup/src/lup/web/bundles/** merge=lup-ownership

@@ -16,12 +16,14 @@ every rule) but the auditor surfaces it as "untyped" so the migration to typed
 directives is gradual.
 
 The set is a syntax-aware linter pass, not a raw grep: every rule declares the
-syntactic ``context`` it inspects, and Python source is tokenized once (via
-`lup.harness.codescan.common.LineProjections`) so "code" rules scan lines with string
-literals and comments blanked while "comment" directive rules see comments
-intact. Every Python rule selects its violations from the tree; the regex it
-also carries is the fallback for source no tree can be had from, and the sole
-detector for the TypeScript table, which this grammar is not for. Neither
+syntactic ``context`` it inspects, and source is masked once (via
+`lup.harness.codescan.common.LineProjections` — Python through its tokenizer,
+the TypeScript family through the kernel's span scan) so "code" rules scan
+lines with string literals and comments blanked while "comment" directive
+rules see comments intact. Every Python rule selects its violations from the
+tree; the regex it also carries is the fallback for source no tree can be had
+from, and the sole detector for the TypeScript table, which this grammar is
+not for. Neither
 gate reaches for a lint engine to do it: ruff has no plugin API, and the ones
 that do — flake8, pylint, semgrep — could not run inside the hook.
 
@@ -82,6 +84,7 @@ from lup.harness.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
+    TYPESCRIPT_SUFFIXES,
     namedtuple_sites,
     noqa_sites,
     pyright_ignore_sites,
@@ -407,7 +410,13 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             "about — an unannotated parameter, a value the checker infers "
             "nothing for — because a rule about mappings has nothing to say "
             "about a value nobody can show is one, and a denial nobody can "
-            "substantiate leaves a directive as the only way past it. A "
+            "substantiate leaves a directive as the only way past it. The two "
+            "are refuted differently: a receiver resolved outside the family "
+            "makes a marker there spurious, while one nothing can be shown "
+            "about leaves a marker standing — what a checker failed to learn "
+            "is no evidence against it, and a hook knowing less than the sweep "
+            "has to come out unresolved rather than spurious, or the two would "
+            "trade one marker back and forth. A "
             "`TypedDict` resolves to its own class and is refuted there: it "
             "is already the modelling this rule asks for. What the tree "
             "settles it settles alone, so a key computed at runtime, a route "
@@ -439,10 +448,12 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "fields (BaseModel/TypedDict). Nothing else is this rule's subject and none "
         "of it takes a directive: a key computed at runtime is a lookup into a map "
         "whose keys are data, a receiver the checker resolves outside the mapping "
-        "family or cannot resolve at all is refuted by the audit, and a `TypedDict` "
-        "is already the modelling this asks for — `.get` is how an optional key is "
-        "read out of one. A marker at any of those is reported spurious. Where the "
-        "literal is genuinely one key of an open dict, add `# lup: ignore[dict-get]`",
+        "family is refuted by the audit, and a `TypedDict` is already the "
+        "modelling this asks for — `.get` is how an optional key is read out of "
+        "one. A marker at any of those is reported spurious. A receiver the "
+        "checker cannot resolve at all is refuted too, and a marker there stands. "
+        "Where the literal is genuinely one key of an open dict, add "
+        "`# lup: ignore[dict-get]`",
     ),
     AntiPattern(
         id="bare-object",
@@ -1152,6 +1163,10 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
             RuleExample(
                 code="const session = raw as SessionPayload;", verdict="cleared"
             ),
+            RuleExample(
+                code="// the cast read `raw as any` before the guard existed",
+                verdict="cleared",
+            ),
         ],
         message="Never use `as any` — use proper types or type guards",
     ),
@@ -1171,10 +1186,17 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
         pattern=re.compile(r":\s*any\b"),
         examples=[
             RuleExample(code="function load(payload: any) {}", verdict="flagged"),
+            RuleExample(code="const session: any = raw;", verdict="flagged"),
             RuleExample(
                 code="function load(payload: SessionPayload) {}", verdict="cleared"
             ),
             RuleExample(code="function load(payload: unknown) {}", verdict="cleared"),
+            RuleExample(
+                code="/** Whether a node answers a search: any of its readable fields carries the words. */",
+                verdict="cleared",
+            ),
+            RuleExample(code="// TODO: any of these", verdict="cleared"),
+            RuleExample(code='const label: string = ": any";', verdict="cleared"),
         ],
         message="Never use `any` type annotation — use specific types, generics, or `unknown`",
     ),
@@ -1184,6 +1206,9 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
         examples=[
             RuleExample(code="const session = <any>raw;", verdict="flagged"),
             RuleExample(code="const session = <SessionPayload>raw;", verdict="cleared"),
+            RuleExample(
+                code='const note = "a <any> cast hides the shape";', verdict="cleared"
+            ),
         ],
         message="Never use `<any>` type assertion — use proper types",
     ),
@@ -1310,8 +1335,6 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
 
 # lup: ignore[library-default] — Python's own source suffixes
 PY_SUFFIXES = (".py", ".pyi")
-# lup: ignore[library-default] — the suffixes those ecosystems compile
-TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
 
 # lup: ignore[library-default] — the ids other codescan scanners own, so the set
 # follows those rules' own identities rather than any taste of this module's
@@ -1355,7 +1378,7 @@ class AntiPatternSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
         """
         if suffix in PY_SUFFIXES:
             return self.python
-        if suffix in TS_SUFFIXES:
+        if suffix in TYPESCRIPT_SUFFIXES:
             return self.typescript
         return None
 
@@ -1444,12 +1467,13 @@ def line_hits(
     whose text would not parse, which is what puts that rule back on its
     pattern.
 
-    Tokenized Python is scanned per rule context: a "code" rule sees string
+    Masked source is scanned per rule context: a "code" rule sees string
     literals and comments blanked, so identifiers in prose never match, while
     a "comment" directive rule sees comments intact — a standalone `# noqa`
-    line included. Untokenized text (a non-Python file, a fragment) keeps the
-    conservative whole-line scan, skipping blank lines and pure comments that
-    carry no `type:` directive — aligned with what the hook would decide.
+    line included. Text no grammar masked (a Python fragment that will not
+    tokenize, a file of neither family) keeps the conservative whole-line
+    scan, skipping blank lines and pure comments that carry no `type:`
+    directive — aligned with what the hook would decide.
 
     There are two contexts and forty-odd rules, so both projections of the
     line are taken once and the table reads whichever one it declared —
@@ -1500,8 +1524,13 @@ def audit_text(
     text: str,
     patterns: list[AntiPattern],
     refutations: list[Refutation] | None = None,
+    typescript: bool = False,
 ) -> list[AntiPatternFinding]:
     """Audit one file's current text for per-rule ignore-marker health.
+
+    ``typescript`` says the text is of that family, read through the
+    kernel's span scan rather than the Python tokenizer — the same split the
+    hook makes from the file's suffix, so both gates mask one file one way.
 
     A bare file-level `# lup: ignore` opts the whole file out (matching the
     hook); the audit reports it as a single advisory "untyped" finding and
@@ -1520,12 +1549,17 @@ def audit_text(
       bare ignore on a line that trips nothing -> "spurious";
     - a bare `# lup: ignore` that does silence the line -> "untyped".
 
-    A hit a resolution refuted is not a trip at all, so a directive naming
+    A hit a resolution settled is not a trip at all, so a directive naming
     that rule there reports "spurious" — the audit drives the cleanup of
     markers the refinement made unnecessary. These arrive as `refutations`
-    the caller resolved: the typed grammar in `lup.harness.codescan.grammar` passes
-    the sites whose receiver a type oracle proved outside the rule's family.
-    With none supplied and no oracle behind them, every selected line stands.
+    the caller resolved: `lup.harness.codescan.resolution` passes the sites
+    whose receiver a type oracle proved outside the rule's family. One it
+    refuted without settling — the checker inferred no type for the receiver
+    — drops the demand and nothing else: the line is not reported missing,
+    and a directive there stands, because a marker deleted on what a checker
+    failed to learn is one the next sweep, resolving the receiver, demands
+    straight back. With none supplied and no oracle behind them, every
+    selected line stands.
 
     An ignore counts as a guard only where a comment actually starts (per the
     tokenizer), so a docstring or string literal that merely *mentions*
@@ -1555,14 +1589,28 @@ def audit_text(
             ]
         file_disabled = file_ignore.rule_ids
 
-    context = PythonContext.parse(text)
+    context = (
+        PythonContext.parse_typescript(text)
+        if typescript
+        else PythonContext.parse(text)
+    )
     refuted = {
-        (refutation.rule_id, refutation.line) for refutation in refutations or []
+        (refutation.rule_id, refutation.line)
+        for refutation in refutations or []
+        if refutation.settled
+    }
+    # Refuted without being settled: the checker inferred no type for the
+    # receiver. These hits stay in `hits_by_line` so a directive written over
+    # one is read as reached rather than dead, and are never reported missing.
+    unresolved = {
+        (refutation.rule_id, refutation.line)
+        for refutation in refutations or []
+        if not refutation.settled
     }
 
     file_ignore_line = file_ignore.line if file_ignore is not None else 0
     original_lines = text.splitlines()
-    projections = LineProjections.parse(text)
+    projections = LineProjections.parse(text, typescript)
     selected = selected_lines(text, patterns)
 
     def written_directive(line_no: int) -> re.Match[str] | None:
@@ -1660,7 +1708,12 @@ def audit_text(
         directive = guarding_directive(index)
         covered_ids = ignore_rule_ids(directive) if directive is not None else None
         for ap in hits:
-            if ap.strength == "strong":
+            # Nothing shown about the receiver: the rule demands no directive
+            # here and this audit reports none missing. The hit itself stays,
+            # so a directive over it keeps a file-level opt-out live below and
+            # is graded as reached rather than dead further down.
+            open_question = (ap.id, index) in unresolved
+            if ap.strength == "strong" and not open_question:
                 # No directive reaches this one. A soft rule's suppression is a
                 # reasoned exception the audit then grades; a strong rule has a
                 # replacement that is right every time, so the same comment
@@ -1684,6 +1737,8 @@ def audit_text(
                     file_live.add(ap.id)
                 continue
             if directive is not None and (covered_ids is None or ap.id in covered_ids):
+                continue
+            if open_question:
                 continue
             findings.append(
                 AntiPatternFinding(

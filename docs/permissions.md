@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.permissions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.permissions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Permission Policy
 
@@ -9,7 +9,7 @@ carries the mechanism a denial sends you to.
 ## Sources of truth
 
 Permissions come from the canonical semantic policies in `lup.policy` and the
-application-owned `HookSet` in `devtools/harness/catalog.py`. Harness
+application-owned `HookSet` in `harness/catalog.py`. Harness
 generation compiles one hermetic dispatcher and runtime for each native
 plugin. Never edit generated dispatcher or runtime files — change the
 canonical source and regenerate.
@@ -18,7 +18,7 @@ canonical source and regenerate.
 
 The policy classifies each shell command against
 `lup.policy.vocabulary.default_vocabulary` as
-`devtools/harness/content/shell_vocabulary.py` selects it, every URL scope,
+`harness/content/shell_vocabulary.py` selects it, every URL scope,
 and each edit in a batch. `lup.policy.shell_rules` owns the shape that table
 takes and its erasure into the rows the kernel reads, never the words; the
 project states only where it differs from what the library offers — a
@@ -76,9 +76,10 @@ question the row alone cannot:
 | `ask_flags` | the spellings that escalate this row |
 | `flag_effects` | what the escalation is *about* — `git reset --hard` discards working-tree content, which the bare verb never did |
 | `write_flags` | options whose value is a path this command writes, so the path is resolved and judged by the write row every other spelling reaches |
-| `allow_flags`, `read_verbs`, `write_markers`, `bare_reads`, `guarded_keys` | the de-escalations: a pure read-only form, a verb that pins the query action, a marker whose absence means it only reads, the argument-less form, a setting that does not redirect execution |
-| `setting_flags`, `guarded_settings` | the same absence test about a global that carries a setting — `git -c color.ui=false` turns off colour, `git -c core.pager=x` runs a program, and only the second is worth interrupting about |
+| `allow_flags`, `read_verbs`, `frozen_flags`, `write_markers`, `bare_reads`, `guarded_keys` | the de-escalations: a pure read-only form, a verb that pins the query action, a flag that pins a dependency restore to what its lockfile already declares (`bun install --frozen-lockfile`, and `uv sync --frozen` or `--locked` by the same judgement), a marker whose absence means it only reads, the argument-less form, a setting that redirects neither execution nor the repository this checkout talks to |
+| `setting_flags`, `guarded_settings` | the same absence test about a global that carries a setting — `git -c color.ui=false` turns off colour, `git -c core.pager=x` runs a program and `git -c remote.origin.url=x` aims the next push somewhere else, and only the last two are worth interrupting about |
 | `ask_refspecs` | the effects an operand's *grammar* carries, for a push that spells force and delete twice |
+| `ask_destinations` | the forms of repository named inline that the first non-flag operand may carry — a URL or a path reaches one the remote table never heard of, where a bare remote name is one somebody approved putting there |
 
 A rule declaring `reviewed` on a write says the route it takes has gates that
 read what it wrote. It is declared rather than measured: which gates a
@@ -104,6 +105,7 @@ The rows, in order, each stating its own claim:
 | `sandbox-escalation` | `SandboxEscalation` | The agent asked for the launcher&#x27;s host, which is always reviewed. |
 | `trapped-placement` | `TrappedPlacement` | An operation that has to reach the host where nothing can carry it. |
 | `unleased-write` | `UnleasedWrite` | A write the measured boundary does not cover, wherever the session sits. |
+| `displaced-write` | `DisplacedWrite` | A write whose target does not land where its spelling says it does. |
 | `provider-native` | `ProviderNative` | A rule looked and handed the decision to the provider&#x27;s own mode. |
 | `recovered-loss` | `RecoveredLoss` | A question about a loss a proven capture already put somewhere safe. |
 | `unreachable-reviewer` | `UnreachableReviewer` | A question in a session no eligible reviewer can be reached from. |
@@ -186,7 +188,7 @@ than merely quieter. The lattice asked about everything unjudged for an
 *observability* reason, and a deferral is the one verdict that reaches nobody
 — the runtime's own gate decides and the reason goes to no human. So every
 deferral appends to `.lup/hooks/learned.jsonl`, one line per distinct command,
-and `uv run lup-devtools hooks learn` reads it back as two lists:
+and `uv run lup-devtools dev hooks learn` reads it back as two lists:
 
 - **gaps** — commands nobody has judged, which a boundary carried rather than
   a rule. Each is a candidate for a row in the shell vocabulary, and this list
@@ -219,6 +221,18 @@ Leaving it off is not the same answer: an undeclared target reaches no
 judgment, which denies unsandboxed and defers under the boundary, where the
 policy has stated nothing and the runtime's own permissions decide.
 
+That table also answers `uv run -m <root>.<module>`, on the root segment, and
+one criterion settles every `uv run` form: an invocation is refused when it
+leaves no reviewable artifact behind. `-c` leaves nothing to read and an
+interpreter handed nothing runs no program at all, so those keep the refusal.
+A path is judged as that path, spelled plainly, after `-s`, or after
+`--script`. A module is judged by whether the project declares the root it
+lives under, because a module is as openable, diffable and re-runnable as the
+file it lives in — so one declaration admits every entry point beneath a root,
+and an undeclared root is refused with the declaration to extend named. An
+`-m` a declared target owns stays that target's: `uv run pytest -m slow`
+selects a marker expression, not a module.
+
 A target may also carry subcommands, because a toolchain reached through
 `uv run` is one target and many commands — a devtools CLI that mostly reads
 a repository may have one verb beneath it that opens a paid agent session,
@@ -242,8 +256,11 @@ the subcommand that has one.
 opaque result rides only argument-safe commands; command position, deep
 nesting, and backticks stay conservative. File writes (redirection, `rm`)
 auto-allow only into a repo `tmp/` — the one at the top or any a package
-opened beside itself — and the scratchpad (`$TMPDIR`,
-`/tmp/claude-*`; reassigning `TMPDIR` asks); discards and fd dups strip.
+opened beside itself — and the machine's temporary root, the session
+scratchpad (`$TMPDIR`, `/tmp/claude-*`) with the rest of `/tmp` around it,
+which no review pass reads and no capture holds (reassigning `TMPDIR` asks,
+and a suffix climbing clear of `/tmp` leaves the grant behind); discards and
+fd dups strip.
 Loops, conditionals, case
 arms, subshells, and brace groups classify recursively over frozen bindings —
 literal assignments instantiate, opaque ones (`read`, globs) gate
@@ -291,6 +308,33 @@ under a git remote, a daemon socket — is not a scope question: the sandbox's
 only lever there is `excluded_commands`, which drops the command out of
 isolation rather than widening anything.
 
+## Reaching another session
+
+Two native calls address the population [coordination.md](coordination.md)
+describes, and the policy answers both from the roster rather than from a
+table. A send is denied when any string it carries names a live member of this
+repository's roster, with `coordination_send` named as the surface reaching the
+same peer and recording what it carried; every other target — a subagent this
+session started, a teammate, a session in another repository — passes through
+untouched. A listing is never refused: it answers for a wider, account-scoped
+population a repository-scoped roster cannot hold, so the verdict is a deferral
+and this repository's roster is attached beside the answer instead.
+
+This is the one decision whose inputs are not declarative. The roster is live,
+so the dispatcher's host half folds it — `peer_addresses` and `peer_listing` in
+`lup.policy.assets.host` — and hands the kernel the spellings it found, exactly
+the way an edit rule marked `resolution: required` is answered from a resolver
+the dispatcher ran. The kernel still reads no filesystem and still decides from
+its inputs alone. What is *declared* is only where to look: `HookSet.peer_policy`,
+built by `lup.coordination.policy.peer_policy` from the store's own layout,
+so renaming the coordination directory moves the compiled hook with it. A
+project declaring none has both calls left entirely to the runtime's own
+permissions, which is what a repository whose sessions never coordinate should
+pay for them.
+
+A deliberate send to a peer is not walled off. The `# lup: escalate:` marker in
+any of the call's own inputs turns the refusal into the approval question the
+sender asked for, carrying their stated reason — the valve every refusal has.
 ## Forge credentials
 
 A contained session reaches its forge on something the operator lent it,
@@ -348,8 +392,8 @@ failed` mid-commit.
 
 ## Edit decisions
 
-Edit decisions cover protected paths, marker changes, size, and the canonical
-anti-pattern audit. An edit over the size gate alone is deferred — the hook
+Edit decisions cover protected paths, marker changes, size, the canonical
+anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook
 emits no decision, so auto-accept applies while hard gates stay explicit.
 
 Size is counted in *real* changed lines per change block, and an edit of
@@ -362,6 +406,22 @@ gate, and a full-file write asks for everything but a package marker — an
 question the gate exists to raise has no content to answer it. One carrying
 anything else is the module it became, and asks. The anti-pattern audit runs
 before any auto-allow, so keeping an edit small cannot outrun it.
+
+`HookSet.import_boundaries` carries the same `seam-boundary` ownership that
+the repository audit reads. Concrete adapter imports belong in providers or
+declared composition roots; provider SDK imports belong in implementations
+and explicitly named fixtures, not application composition roots. The shared
+AST scanner understands direct, parent-package, wildcard, and relative
+imports, including multiline statements. Provider names in prose and canonical
+tool grants such as `Read` and `WebSearch` remain valid: vocabulary is not a
+dependency. Computed import names and arbitrary executed code are outside this
+static guard, not claims of runtime isolation.
+
+An unsuppressed dependency breach denies before size allowances or a batch's
+approval request can admit it. A typed suppression uses the existing reviewed
+suppression allowance; removing one exposes the import again. Retiring
+`seam-boundary` through `HookSet.rules` retires the hook and audit together.
+Both native dispatchers carry the same scanner and ownership rows.
 
 Every verdict above is what the kernel reaches when a project says nothing,
 and every one of them is nameable. `HookSet.edit_rules` is a `Selection` of
@@ -475,7 +535,7 @@ rather than a reading of this page:
 ```bash
 uv run lup-devtools dev policy '<the command as you would run it>'
 uv run lup-devtools dev vocabulary --provenance
-uv run lup-devtools hooks sweep
+uv run lup-devtools dev hooks sweep
 ```
 
 `dev policy` prints the decision and the sentence explaining it — the same
@@ -510,13 +570,39 @@ settled by adding it to a list that asserts allow.
 
 ## Hook execution evidence
 
+Claude reports post-edit diagnostics through its
+[structured post-edit feedback](https://code.claude.com/docs/en/hooks#posttooluse-decision-control):
+exit 0 with `decision: "block"` and a `reason`. This gives the agent the findings
+beside the completed edit. It does not undo the edit or report a crashed hook.
+Diagnostics name the file, line, severity, and message. Codex delivers its
+post-tool findings through stderr and exit 2; its edit events provide only
+the working directory, so per-file type checks run under Claude only.
+
+Both plugins register a short command invoking the generated
+`hooks/scripts/policy.sh`. That guard runs `policy.py`, preserves its output
+and deliberate refusals, and refuses if the dispatcher cannot start or crashes.
+Missing Python calls for installing Python or fixing PATH. Missing or broken
+generated files call for `uv run lup-devtools harness generate all` from a
+terminal outside the affected session. If a merge left conflict markers in
+generated files, settle or abort that merge before regenerating; do not repair
+the generated dispatcher by hand. Recovery instructions live in the guard,
+so the native runtime does not echo them with every diagnostic.
+
 Plugin hooks receive a writable data directory: `PLUGIN_DATA` under Codex and
 `CLAUDE_PLUGIN_DATA` under Claude Code. Each dispatcher appends
 `hook-events.jsonl` there as it runs: a `started` record after input parsing,
 then `completed` with the final policy outcome or `failed` with the exact
 dispatcher exception. Records carry the event, session, turn, tool, tool-use
 id, and UTC timestamp. They deliberately omit tool input and output, which may
-contain commands, patches, or credentials.
+contain commands, patches, or credentials — with one exception. A call whose
+input names a URL also records `fetch_origin`: the scheme, host, and port of
+that URL, and nothing else. That is the coarse half a scope is written
+against and the half the verdict turned on, so without it a refusal says a
+URL was outside the declared scopes without saying which origin asked, and
+the host has to be inferred from what the session did next. The path and
+query stay omitted because they are where a document id, a search phrase, or
+a token spelled into the URL ride; userinfo goes with them, since the host is
+read from the parse rather than from the authority that would carry it.
 
 This journal distinguishes failures whose UI is otherwise identical. A
 `failed` record is a dispatcher failure; `completed` with `deny` is an
@@ -532,7 +618,7 @@ diagnostic but does not change the decision the hook reached.
 The generated plugins enforce permissions without importing lup, yet decide
 identically to the library.
 
-1. **Canonical sources** — the `HookSet` in `devtools/harness/catalog.py`
+1. **Canonical sources** — the `HookSet` in `harness/catalog.py`
    (protected edit roots, allowed fetch scopes, policy ids, and the shell and
    edit selections), the anti-pattern rule set in `lup.harness.codescan.antipatterns`,
    and the offered shell vocabulary in `lup.policy.vocabulary`. Each selection
@@ -548,7 +634,8 @@ identically to the library.
    `lup.policy.models` events and render decisions back.
 3. **Assembly** — `lup.policy.bundle` reads the kernel source verbatim and
    renders the erased rows as data files; the adapter hook renderers emit
-   `hooks/hooks.json`, the dispatcher `hooks/scripts/policy.py`, and
+   `hooks/hooks.json`, the guard `hooks/scripts/policy.sh`, the dispatcher
+   `hooks/scripts/policy.py`, and
    `hooks/runtime/{kernel.py,policy_data.py}` into each plugin tree.
 4. **Equivalence** — the shared fixture suite runs the same cases through the
    library policies and the assembled runtime and requires identical verdicts.

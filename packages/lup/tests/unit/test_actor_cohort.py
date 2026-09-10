@@ -4,7 +4,7 @@ These are written against the failures that make a cohort useless without
 being visibly broken: an agent that cannot be steered because whoever spawned
 it is blocked waiting for it, an address that resolves only in the process
 that minted it, a second round that turns one agent into two, and a message
-meant for the spawner that its siblings eat.
+meant for the person that its siblings eat.
 """
 
 import asyncio
@@ -13,9 +13,10 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.orchestration.actors.cohort import ActorCohort, ActorRecipe, CohortJournal
-from lup.orchestration.actors.mail import EVERYONE
-from lup.orchestration.actors.refs import ActorRef
+from lup.coordination.cohort import ActorCohort, ActorRecipe, CohortJournal
+from lup.coordination.mail import EVERYONE
+from lup.coordination.refs import ActorRef
+from lup.coordination.roster import ROSTER_FILE, Delivery, Roster
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.capabilities import Session, Turn
 from lup.sessions.client import Client
@@ -244,8 +245,8 @@ def test_a_process_that_spawned_nothing_reaches_what_another_one_did(
     assert [member.task for member in outside.live()] == ["attack the bound"]
 
 
-def test_the_spawner_is_an_address_its_agents_can_reach(tmp_path: Path) -> None:
-    """A member's report goes to whoever spawned it, and to no sibling.
+def test_the_user_is_an_address_its_agents_can_reach(tmp_path: Path) -> None:
+    """A member's report goes to the person, and to no sibling.
 
     Addressed to the humans by leaving the target blank, it used to match
     every actor's own address list — so it was delivered into the siblings'
@@ -255,7 +256,7 @@ def test_the_spawner_is_an_address_its_agents_can_reach(tmp_path: Path) -> None:
     sibling = cohort.actor("worker", "other-concern")
     cohort.spawn(sibling, "do the other thing")
 
-    cohort.tell_spawner("I could not remove my own scratch file")
+    cohort.tell_user("I could not remove my own scratch file")
 
     assert [message.text for message in cohort.heard().messages] == [
         "I could not remove my own scratch file"
@@ -591,3 +592,58 @@ async def test_a_suspension_out_of_a_turn_leaves_its_agent_standing(
     standing = {member.actor.id: member for member in cohort.live()}
     assert standing["faulted"].running is True, "the host said nothing about it"
     assert standing["faulted"].error == ""
+
+
+def test_a_peer_that_joins_is_a_member_nobody_spawned(tmp_path: Path) -> None:
+    """The record a spawn cannot stand in for.
+
+    A spawned member is live because the process that started it says so. A
+    peer that walked in has no such process, so what would otherwise be
+    inferred has to be carried: who answers for it still being there, and what
+    reaches it.
+    """
+    roster = Roster(tmp_path / ROSTER_FILE)
+    peer = ActorRef(kind="session", id="walked-in")
+
+    roster.joined(peer, task="reading the ledger", liveness="launcher")
+
+    [member] = roster.live()
+    assert member.running
+    assert member.task == "reading the ledger"
+    assert member.liveness == "launcher"
+    assert member.delivery is Delivery.MAILBOX, "no wake declared, so mail waits"
+
+
+def test_a_peer_rejoining_after_a_restart_is_the_same_member(tmp_path: Path) -> None:
+    """Announcing itself twice must not offer an operator two of one session."""
+    roster = Roster(tmp_path / ROSTER_FILE)
+    peer = ActorRef(kind="session", id="restarted")
+
+    roster.joined(peer, task="first")
+    roster.joined(peer, task="second")
+
+    assert [member.actor.id for member in roster.live()] == ["restarted"]
+
+
+def test_a_peer_leaves_by_the_same_record_a_spawn_does(tmp_path: Path) -> None:
+    """How a member went is one question however it arrived."""
+    roster = Roster(tmp_path / ROSTER_FILE)
+    peer = ActorRef(kind="session", id="departed")
+    roster.joined(peer, delivery=Delivery.INBOX)
+
+    roster.finished(peer, summary="done reading")
+
+    [member] = roster.live()
+    assert not member.running
+    assert member.summary == "done reading"
+    assert member.delivery is Delivery.INBOX, "how it was reached survives its leaving"
+
+
+def test_a_spawned_member_is_reachable_through_its_own_hook(tmp_path: Path) -> None:
+    """The spawned default, which is the one mode that needs nothing beside it."""
+    roster = Roster(tmp_path / ROSTER_FILE)
+    roster.spawned(ActorRef(kind="worker", id="opened"), task="work")
+
+    [member] = roster.live()
+    assert member.delivery is Delivery.INBOX
+    assert member.liveness == "", "the process that spawned it is the answer"

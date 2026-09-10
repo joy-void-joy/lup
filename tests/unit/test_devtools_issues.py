@@ -127,13 +127,21 @@ def test_cli_reports_tracker_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cli_forwards_correction_number(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[issues.FrictionReport, int | None]] = []
+    """The number to correct, and the tracker the routing chose, both arrive.
 
-    def record(self: issues.FrictionReport, issue: int | None = None) -> str:
-        calls.append((self, issue))
+    Both, because the command now decides where a report lands as well as
+    whether it is a correction: a stub that only recorded the number would
+    pass a version that routed everything to one repository.
+    """
+    calls: list[tuple[issues.FrictionReport, str, int | None]] = []
+
+    def record(
+        self: issues.FrictionReport, repository: str = "", issue: int | None = None
+    ) -> str:
+        calls.append((self, repository, issue))
         return "https://github.test/o/r/issues/179"
 
     monkeypatch.setattr(issues.FrictionReport, "file", record)
     result = CliRunner().invoke(app, [*friction_arguments(), "--issue", "179"])
     assert result.exit_code == 0
-    assert calls == [(friction_report(), 179)]
+    assert calls == [(friction_report(), "joy-void-joy/lup", 179)]

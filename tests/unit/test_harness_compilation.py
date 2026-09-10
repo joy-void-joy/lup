@@ -4,6 +4,7 @@ import ast
 import errno
 import json
 import os
+import shlex
 import sys
 import tomllib
 from collections.abc import Callable
@@ -14,12 +15,13 @@ import pytest
 import sh
 import typer
 from claude_agent_sdk.types import SandboxNetworkConfig, SandboxSettings
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from lup.tools.lsp.tools import CODEINTEL_TOOL_DECLARATIONS
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.types import JsonObject
 from lup.providers.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
+from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.harness import (
     CODEX_DISPATCHER,
     CodexSpellings,
@@ -36,13 +38,24 @@ from lup.providers.harness import (
     compile_claude,
     compile_codex,
     guidance_artifacts,
+    startup_deadline_settings,
 )
-from lup.devtools.dev.check import budget_reports, scaffold_budget_report
+from lup.devtools.dev.check import (
+    budget_reports,
+    guidance_budget_report,
+    scaffold_budget_report,
+)
 from lup.workspace.paths import is_template_scaffold
+from lup.ledger.writeup import WRITEUP_COMMAND
+from lup_template.writeups import WRITEUPS
 from lup.harness.codescan.registry import RULE_REFERENCE
 from lup.devtools.dev.commands import COMMAND_REFERENCE
 from lup.devtools.harness.generated_paths import GENERATED_PATHS
-from lup.devtools.harness.drift import generate_with_report, roster_gaps
+from lup.devtools.harness.drift import (
+    generate_targets,
+    generate_with_report,
+    roster_gaps,
+)
 from lup.devtools.harness.settings import served_tool_grants
 from lup.formats.banner import (
     ARTIFACT_COMMENT_ROUTER,
@@ -60,9 +73,9 @@ from lup.harness.materialization import (
 )
 from lup.harness.validation import validated_tree
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
+    GUIDANCE_BUDGET,
     INVOCATION_SIGILS,
-    TEMPLATE_GUIDANCE_HEADROOM,
+    GuidanceBudget,
     Agent,
     Argument,
     Artifact,
@@ -80,6 +93,7 @@ from lup.harness.models import (
     PromptPart,
     RelocateSession,
     WatchOutput,
+    CommandInvocation,
     RequestApproval,
     ResolverEntry,
     RuntimeDocs,
@@ -131,14 +145,13 @@ from lup_template.devtools.agent.serve import (
     harness_session_context,
 )
 from lup.devtools.dev.rules import rule_reference_artifact
-from lup_template.devtools.harness.catalog import (
+from lup_template.harness.catalog import (
     HARNESS_SESSION,
-    declared_hook_set,
     portable_harness,
 )
-from lup_template.devtools.harness.content.docs.catalog import documents
-from lup_template.devtools.harness.content.guidance import document as guidance_document
-from lup_template.devtools.harness.content.settings import project_settings
+from lup_template.harness.content.docs.catalog import documents
+from lup_template.harness.content.catalog import GUIDANCE as COMPOSED_GUIDANCE
+from lup_template.harness.content.settings import project_settings
 from lup.devtools.harness import launch
 from lup.devtools.harness.launch import (
     claude_sandbox_arguments,
@@ -146,13 +159,13 @@ from lup.devtools.harness.launch import (
     companion_plugin_directories,
 )
 from lup.policy.kernel.shell import sandbox_excluded
-from lup_template.devtools.harness.content.template_claude import (
+from lup_template.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
 )
-from lup_template.devtools.harness.content.template_codex import (
+from lup_template.harness.content.template_codex import (
     DOCUMENT as TEMPLATE_CODEX,
 )
-from lup_template.devtools.harness.composition import (
+from lup_template.harness.composition import (
     claude_target,
     codex_target,
 )
@@ -165,8 +178,8 @@ from lup.devtools.harness.generate import (
     inspect_generation,
 )
 
-GUIDANCE = guidance_document(declared_hook_set().rules)
-"""The guidance this repository actually ships, selection included."""
+GUIDANCE = COMPOSED_GUIDANCE
+"""The guidance this repository actually ships, module selection included."""
 
 
 class ClaudeHookDecision(BaseModel, frozen=True):
@@ -322,15 +335,41 @@ def test_every_published_document_is_generated_and_banners_itself() -> None:
     # The three pages a repository writer produces rather than the docs
     # roster: each renders from something walked at generation time — the rule
     # registry, the composed CLI, the compiled trees — so none of them has a
-    # declaring content module to be rostered against.
+    # declaring content module to be rostered against. And the writeups:
+    # documents `ledger writeup` generates from this machine's ledger, outside
+    # the drift-checked generation because the ledger is live state each
+    # machine holds its own copy of, and committed like any other document —
+    # so a declared one that was never generated is missing here.
+    writeups = [Path(writeup.path) for writeup in WRITEUPS]
     assert unmanaged == sorted(
-        [Path(COMMAND_REFERENCE), Path(RULE_REFERENCE), GENERATED_PATHS]
+        [Path(COMMAND_REFERENCE), Path(RULE_REFERENCE), GENERATED_PATHS, *writeups]
     )
+    for writeup in WRITEUPS:
+        banner = GeneratedBanner(source=writeup.source, command=WRITEUP_COMMAND)
+        content = Path(writeup.path).read_text(encoding="utf-8")
+        assert banner.opens(Path(writeup.path), content)
     for document in roster:
         banner = GeneratedBanner(
             source=document.document.declared_source(), command=REGENERATE_COMMAND
         )
         assert banner.opens(document.path, artifacts[document.path].content)
+
+
+def test_platform_parity_audits_live_runtime_capabilities() -> None:
+    page = next(
+        document.document
+        for document in documents(Path.cwd())
+        if document.path == Path("docs/platform-differentiation.md")
+    )
+    content = claude_prompt_renderer().render(page)
+    for family in (
+        "Launch readiness",
+        "Authentication",
+        "Host bridges",
+        "Delegated-agent paths",
+        "Diagnostics and tests",
+    ):
+        assert f"| {family} |" in content
 
 
 def test_guidance_reaches_sections_by_name_not_by_anchor() -> None:
@@ -362,9 +401,9 @@ def test_guidance_stays_within_its_always_loaded_budget() -> None:
     for runtime, document in rendered.items():
         used = document_byte_size(document)
         assert used >= declared
-        assert used <= GUIDANCE_BYTE_BUDGET, (
+        assert used <= GUIDANCE_BUDGET.ceiling, (
             f"{runtime} guidance is {used} bytes, over budget by "
-            f"{used - GUIDANCE_BYTE_BUDGET}"
+            f"{used - GUIDANCE_BUDGET.ceiling}"
         )
 
 
@@ -380,12 +419,12 @@ def test_the_scaffold_leaves_its_adopter_room_inside_the_runtime_ceiling() -> No
     for composition in (claude_target(Path.cwd()), codex_target(Path.cwd())):
         for artifact in guidance_artifacts(composition.recipe.desired):
             used = document_byte_size(artifact.content)
-            ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+            ceiling = GUIDANCE_BUDGET.scaffold_ceiling
             assert used <= ceiling, (
                 f"{artifact.path.as_posix()} is {used} bytes, over the "
                 f"{ceiling} scaffold ceiling by {used - ceiling}. It fits the "
-                f"runtime's {GUIDANCE_BYTE_BUDGET}, but leaves an adopting "
-                f"domain less than the {TEMPLATE_GUIDANCE_HEADROOM} bytes "
+                f"runtime's {GUIDANCE_BUDGET.ceiling}, but leaves an adopting "
+                f"domain less than the {GUIDANCE_BUDGET.template_headroom} bytes "
                 "reserved for its own guidance."
             )
 
@@ -397,7 +436,7 @@ def test_the_scaffold_ceiling_is_weighed_only_while_the_flag_stands() -> None:
     Once adopted there is no further adopter to reserve for, and a domain that
     inherited a lean document is entitled to spend what it saved.
     """
-    fits = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+    fits = GUIDANCE_BUDGET.scaffold_ceiling
 
     assert [report.name for report in budget_reports(fits, scaffold=True)] == [
         "guidance budget",
@@ -416,7 +455,7 @@ def test_a_document_between_the_two_ceilings_fails_only_the_scaffold() -> None:
     What it has spent is its adopter's room, which is the only row that can say
     so. If both rows ever agree on everything, one of them is redundant.
     """
-    between = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM + 1
+    between = GUIDANCE_BUDGET.scaffold_ceiling + 1
 
     verdicts = {report.name: report.passed for report in budget_reports(between, True)}
 
@@ -434,7 +473,7 @@ def test_this_repository_is_still_the_scaffold_that_reservation_assumes() -> Non
 
 def test_the_scaffold_row_reports_the_reservation_it_withholds() -> None:
     """Over budget, the row names the overage rather than only failing."""
-    ceiling = GUIDANCE_BYTE_BUDGET - TEMPLATE_GUIDANCE_HEADROOM
+    ceiling = GUIDANCE_BUDGET.scaffold_ceiling
 
     fits = scaffold_budget_report(ceiling)
     over = scaffold_budget_report(ceiling + 1)
@@ -442,7 +481,42 @@ def test_the_scaffold_row_reports_the_reservation_it_withholds() -> None:
     assert fits.passed
     assert not over.passed
     assert "over by 1" in over.lines[0]
-    assert str(TEMPLATE_GUIDANCE_HEADROOM) in fits.lines[0]
+    assert str(GUIDANCE_BUDGET.template_headroom) in fits.lines[0]
+
+
+def test_the_scaffold_row_reports_the_room_a_session_may_still_spend() -> None:
+    """A green row tells a writer how much it may add, not only that it fit.
+
+    The reservation is a constant, so a row printing only that says the same
+    thing at 23 bytes free as at 11 KiB, and a session learns the ceiling
+    exists from the gate refusing writing it has already done. Both rows
+    report the room left, in one shape, so either one answers before it does.
+    """
+    ceiling = GUIDANCE_BUDGET.scaffold_ceiling
+
+    fits = scaffold_budget_report(ceiling - 23)
+    runtime = guidance_budget_report(GUIDANCE_BUDGET.ceiling - 23)
+
+    assert fits.lines == [
+        f"scaffold budget: ok — {ceiling - 23}/{ceiling} bytes, 23 free, "
+        f"{GUIDANCE_BUDGET.template_headroom} reserved for the adopting domain"
+    ]
+    assert runtime.lines == [
+        f"guidance budget: ok — {GUIDANCE_BUDGET.ceiling - 23}/"
+        f"{GUIDANCE_BUDGET.ceiling} bytes, 23 free"
+    ]
+
+
+def test_the_scaffold_row_over_budget_names_the_overage_and_not_the_room() -> None:
+    """Room left is what a passing row adds; a failing one has none to state."""
+    ceiling = GUIDANCE_BUDGET.scaffold_ceiling
+
+    over = scaffold_budget_report(ceiling + 1_078)
+
+    assert over.lines == [
+        f"scaffold budget: FAIL (over by 1078) — {ceiling + 1_078}/{ceiling} "
+        f"bytes, {GUIDANCE_BUDGET.template_headroom} reserved for the adopting domain"
+    ]
 
 
 def test_a_project_may_reserve_a_different_share_than_this_one() -> None:
@@ -451,10 +525,34 @@ def test_a_project_may_reserve_a_different_share_than_this_one() -> None:
     A downstream project with a thinner scaffold, or none, states its own
     share rather than forking the module that declares the default.
     """
-    used = GUIDANCE_BYTE_BUDGET - 1_000
+    used = GUIDANCE_BUDGET.ceiling - 1_000
 
-    assert scaffold_budget_report(used, headroom=512).passed
-    assert not scaffold_budget_report(used, headroom=4_096).passed
+    assert scaffold_budget_report(used, GuidanceBudget(template_headroom=512)).passed
+    assert not scaffold_budget_report(
+        used, GuidanceBudget(template_headroom=4_096)
+    ).passed
+
+
+def test_what_a_scaffold_may_spend_is_derived_from_the_two_it_is_given() -> None:
+    """The number every caller wanted, which neither field carries alone.
+
+    Written out by hand it was the same subtraction at every site that needed
+    it, and a project moving either number moved it at seven of them.
+    """
+    budget = GuidanceBudget(ceiling=20_000, template_headroom=8_000)
+
+    assert budget.scaffold_ceiling == 12_000
+
+
+def test_a_reserve_larger_than_the_ceiling_is_refused() -> None:
+    """Both readings of a clamp are wrong, so the project is asked instead.
+
+    Keeping nothing back abandons the reserve; lowering the ceiling tells a
+    runtime to load less than it will. Only the project can say which of its
+    two numbers it meant.
+    """
+    with pytest.raises(ValidationError, match="does not fit inside"):
+        GuidanceBudget(ceiling=1_000, template_headroom=2_000)
 
 
 def test_codex_config_states_the_same_ceiling_the_check_enforces() -> None:
@@ -464,7 +562,7 @@ def test_codex_config_states_the_same_ceiling_the_check_enforces() -> None:
         for artifact in codex_target(Path.cwd()).recipe.desired.artifacts
         if artifact.path.as_posix() == ".codex/config.toml"
     )
-    assert f"project_doc_max_bytes = {GUIDANCE_BYTE_BUDGET}" in config.content
+    assert f"project_doc_max_bytes = {GUIDANCE_BUDGET.ceiling}" in config.content
 
 
 def test_codex_tree_renders_the_agents_flavored_template() -> None:
@@ -478,6 +576,9 @@ def test_codex_tree_renders_the_agents_flavored_template() -> None:
 def test_template_flavors_share_sections_and_differ_natively() -> None:
     claude_render = claude_prompt_renderer().render(TEMPLATE_CLAUDE)
     codex_render = codex_prompt_renderer().render(TEMPLATE_CODEX)
+    parity = "Every supported runtime must provide equivalent user-visible behavior"
+    assert parity in claude_render
+    assert parity in codex_render
 
     def sections(render: str) -> list[str]:
         return [
@@ -498,6 +599,11 @@ def test_template_flavors_share_sections_and_differ_natively() -> None:
     assert "ExitWorktree" not in codex_render
 
 
+def test_repository_guidance_requires_semantic_parity_on_both_runtimes() -> None:
+    assert "Every runtime, same semantics." in claude_prompt_renderer().render(GUIDANCE)
+    assert "Every runtime, same semantics." in codex_prompt_renderer().render(GUIDANCE)
+
+
 def test_template_flavors_render_the_declared_codeintel_tools() -> None:
     expected = ToolRoster(tools=list(CODEINTEL_TOOL_DECLARATIONS)).text_payload
 
@@ -505,16 +611,66 @@ def test_template_flavors_render_the_declared_codeintel_tools() -> None:
     assert expected in codex_prompt_renderer().render(TEMPLATE_CODEX)
 
 
+def registered_hook_commands(config: str) -> list[str]:
+    """Every shell command one runtime's hook registration would run."""
+    registered = json.loads(config)["hooks"]
+    return [
+        hook["command"]
+        for entries in registered.values()
+        for entry in entries
+        for hook in entry["hooks"]
+    ]
+
+
 def test_claude_recipe_overrides_legacy_hook_entry_with_hermetic_dispatcher() -> None:
+    """The hook starts outside the workspace, so nothing it runs may need uv.
+
+    The registered command stays short because the native UI can echo it.
+    Recovery instructions belong in the generated guard it invokes.
+    """
     recipe = claude_target(Path.cwd()).recipe
     artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
 
     hook_config = artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content
-    assert "uv run" not in hook_config
-    assert "hooks/scripts/policy.py" in hook_config
+    registered = registered_hook_commands(hook_config)
+    # More than one hook is registered — the policy dispatcher and the peer
+    # delivery guard — and the property under test belongs to all of them:
+    # each starts outside the workspace, so none of them may reach for `uv`.
+    for command in registered:
+        assert "uv" not in shlex.split(command)
+        assert "hooks/scripts/" in command
+        assert REGENERATE_COMMAND not in command
+    assert any("hooks/scripts/policy.sh" in command for command in registered)
+    assert artifacts[Path(".claude/plugins/lup/hooks/scripts/policy.sh")].executable
     assert Path(".claude/plugins/lup/hooks/runtime/kernel/shell.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/policy_data.py") in artifacts
     assert Path(".claude/plugins/lup/hooks/runtime/evidence.json") in artifacts
+
+
+def test_peer_delivery_is_registered_for_every_tool_and_refuses_nothing() -> None:
+    """The second hook group, and the two properties that keep it safe.
+
+    Its matcher is empty, which is every tool: mail is worth carrying before a
+    `Read` as much as before an `Edit`, and the policy matcher deliberately
+    names neither. And its command cannot refuse — no `exit 2` beside it — so
+    a mailbox nobody can read never becomes a tool call nobody can make.
+    """
+    recipe = claude_target(Path.cwd()).recipe
+    artifacts = {artifact.path: artifact for artifact in recipe.desired.artifacts}
+    hooks = json.loads(artifacts[Path(".claude/plugins/lup/hooks/hooks.json")].content)
+
+    delivering = [
+        group for group in hooks["hooks"]["PreToolUse"] if group["matcher"] == ""
+    ]
+
+    assert len(delivering) == 1
+    command = delivering[0]["hooks"][0]["command"]
+    assert "coordination_delivery.sh" in command
+    assert "exit 2" not in command
+    guard = Path(".claude/plugins/lup/hooks/scripts/coordination_delivery.sh")
+    assert artifacts[guard].executable
+    runtime = Path(".claude/plugins/lup/hooks/runtime/coordination_delivery.py")
+    assert runtime in artifacts
 
 
 def test_codex_recipe_registers_semantic_permission_approval() -> None:
@@ -523,21 +679,30 @@ def test_codex_recipe_registers_semantic_permission_approval() -> None:
 
     hook_config = artifacts[Path(".codex/plugins/lup/hooks/hooks.json")].content
     assert '"PermissionRequest"' in hook_config
-    assert "hooks/scripts/policy.py" in hook_config
+    for command in registered_hook_commands(hook_config):
+        assert "uv" not in shlex.split(command)
+        assert "hooks/scripts/policy.sh" in command
+        assert REGENERATE_COMMAND not in command
+    assert artifacts[Path(".codex/plugins/lup/hooks/scripts/policy.sh")].executable
 
 
-def test_the_watching_event_is_registered_for_editing_tools_alone() -> None:
-    """A narrow matcher, because this event is registered to record, not judge.
+def test_the_watching_event_is_registered_for_what_leaves_writes_behind() -> None:
+    """A narrow matcher, because this event records rather than judges.
 
-    The deciding events cover everything the dispatcher routes, so sharing
-    one registration would spawn the script after every shell command and
-    every fetch to find no edited file to record. The two are separate keys
-    for that reason, and the compiler still proves the dispatcher may name
-    the event at all.
+    Narrow means *what leaves a write behind*, not *what names a file*. The
+    editing tools and the shell tool both do, and both have a reading
+    afterwards — an edited file to check, a command's result to review and
+    attribute — while a fetch leaves nothing, so sharing the deciding events'
+    registration would spawn the script to find no write at all.
+
+    The shell tool is pinned here because leaving it out fails silently: the
+    review of what a command wrote was wired into both dispatchers and
+    reachable from neither, for exactly as long as this matcher named only the
+    tools that carry a file path.
     """
     for target, plugin_root, edits in (
-        (claude_target, ".claude", "Edit|Write"),
-        (codex_target, ".codex", "apply_patch"),
+        (claude_target, ".claude", "Edit|Write|Bash"),
+        (codex_target, ".codex", "apply_patch|Bash"),
     ):
         artifacts = {
             artifact.path: artifact
@@ -563,10 +728,10 @@ def test_generated_resolver_entries_only_launch_the_shared_python_core() -> None
     command = claude[Path(".claude/plugins/lup/commands/resolve.md")]
     skill = codex[Path(".codex/plugins/lup/skills/resolve/SKILL.md")]
 
-    assert "uv run lup-devtools harness resolve --adapter claude --detach" in command
+    assert "uv run lup-devtools resolve --adapter claude --detach" in command
     assert "Triage into concerns" not in command
     assert "Workflow(" not in command
-    assert "uv run lup-devtools harness resolve --adapter codex --detach" in skill
+    assert "uv run lup-devtools resolve --adapter codex --detach" in skill
     assert "scheduling" not in skill
     for entry in (command, skill):
         assert "exactly one watch" in entry
@@ -667,8 +832,15 @@ PART_CONTRACT: dict[str, PartExpectation] = {
         part=RelocateSession(path="the path step 1 prints"), diverges=True
     ),
     "WatchOutput": PartExpectation(
-        part=WatchOutput(command="lup-devtools harness resolve status --watch"),
+        part=WatchOutput(command="lup-devtools resolve status --watch"),
         diverges=True,
+    ),
+    # The same words for both, because both reach the same shell: what a
+    # runtime spells differently is how it *asks* for something, and this asks
+    # for nothing — it names a command the reader runs.
+    "CommandInvocation": PartExpectation(
+        part=CommandInvocation(path=["dev", "check"], arguments="--no-test"),
+        diverges=False,
     ),
     "ResolverEntry": PartExpectation(part=ResolverEntry(), diverges=True),
     "ArgumentsRef": PartExpectation(part=ArgumentsRef(), diverges=True),
@@ -712,7 +884,20 @@ class PartQuestion(BaseModel, frozen=True):
 PART_QUESTIONS: dict[str, PartQuestion] = {
     "text_payload": PartQuestion(
         ask=lambda part: part.text_payload is not None,
-        answered_by=["TextPart", "SpellingExample", "MarkdownTable", "ToolRoster"],
+        answered_by=[
+            "TextPart",
+            "SpellingExample",
+            "MarkdownTable",
+            "ToolRoster",
+            "CommandInvocation",
+        ],
+    ),
+    # What a skill's own `tools` grant is checked against, so a step telling
+    # its reader to run something is one the skill actually granted a shell
+    # for. Both kinds that name a command answer it.
+    "shell_command": PartQuestion(
+        ask=lambda part: part.shell_command is not None,
+        answered_by=["WatchOutput", "CommandInvocation"],
     ),
     "invocation": PartQuestion(
         ask=lambda part: part.invocation is not None, answered_by=["SkillInvocation"]
@@ -880,7 +1065,7 @@ def test_every_typed_content_module_is_reachable_from_a_catalog() -> None:
     one no artifact is rendered from — a retired skill left behind, or a
     document nobody listed.
     """
-    content = Path("src/lup_template/devtools/harness/content")
+    content = Path("src/lup_template/harness/content")
     loaded = {
         Path(source).resolve()
         for source in (
@@ -1661,6 +1846,70 @@ def test_generated_claude_hook_records_metadata_only_evidence(tmp_path: Path) ->
     ]
 
 
+def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
+    tmp_path: Path,
+) -> None:
+    """Both journals name the origin that asked, and stop there.
+
+    A refusal that carries no part of the input reads as "a URL was outside
+    the declared scopes" with no way to tell which URL, so the question the
+    journal exists to answer -- what did this session try to reach -- is
+    settled by inference. The origin is the half the scope table is written
+    against; the path and the query are where a token or a document id ride,
+    and they stay out, as does everything else in the call.
+    """
+    url = "https://docs.example.test:8443/private/page?token=do-not-record"
+    body: JsonObject = {"hook_event_name": "PreToolUse"}
+    body.update(session_id="session-four", tool_use_id="tool-four")
+    claude_data, codex_data = tmp_path / "claude", tmp_path / "codex"
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+    # lup: ignore[os-environ] — test shell
+    environment = {**os.environ, "CLAUDE_PLUGIN_DATA": str(claude_data)}
+    claude = sh.Command(str(script))(
+        _in=json.dumps({**body, "tool_name": "WebFetch", "tool_input": {"url": url}}),
+        _env=environment,
+        _return_cmd=True,
+    )
+    assert isinstance(claude, sh.RunningCommand)
+    rendered = ClaudeHookOutput.model_validate_json(claude.stdout)
+    assert rendered.hook_specific_output.permission_decision == "ask"
+    codex = codex_hook_result(
+        {**body, "tool_name": "web_fetch", "tool_input": {"url": url}},
+        sandboxed=True,
+        plugin_data=codex_data,
+    )
+    assert codex.exit_code == 2
+
+    for data_root in (claude_data, codex_data):
+        written = (data_root / "hook-events.jsonl").read_text(encoding="utf-8")
+        assert "do-not-record" not in written
+        assert "/private/page" not in written
+        records = [json.loads(line) for line in written.splitlines()]
+        assert [record["phase"] for record in records] == ["started", "completed"]
+        for record in records:
+            assert record["fetch_origin"] == "https://docs.example.test:8443"
+
+
+def test_a_journal_names_no_origin_for_a_tool_that_fetches_nothing(
+    tmp_path: Path,
+) -> None:
+    """The omission stands everywhere the fetch surface does not.
+
+    A shell command names no origin and gets no key for one: what widened is
+    the fetch decision alone, rather than the journal's appetite for input.
+    """
+    body: JsonObject = {"hook_event_name": "PreToolUse", "tool_name": "Bash"}
+    body["tool_input"] = {"command": "git status", "url": ["not-a-url"]}
+    result = codex_hook_result(body, sandboxed=True, plugin_data=tmp_path)
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "hook-events.jsonl").read_text().splitlines()
+    ]
+
+    assert result.exit_code == 0
+    assert all("fetch_origin" not in record for record in records)
+
+
 def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     result = sh.Command(str(script))(
@@ -1678,7 +1927,7 @@ def test_generated_codex_pretool_accepts_a_safe_requested_escape() -> None:
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
         "tool_input": {
-            "command": "uv run lup-devtools harness resolve intake",
+            "command": "uv run lup-devtools resolve intake",
             "sandbox_permissions": "require_escalated",
         },
     }
@@ -1711,7 +1960,7 @@ def test_generated_codex_pretool_accepts_a_safe_automatic_escape() -> None:
     body: JsonObject = {
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": "uv run lup-devtools harness resolve intake"},
+        "tool_input": {"command": "uv run lup-devtools resolve intake"},
     }
     assert codex_hook_result(body, sandboxed=True).exit_code == 0
 
@@ -1740,7 +1989,7 @@ def test_generated_codex_pretool_refuses_an_ambient_escape() -> None:
 @pytest.mark.parametrize(
     "command",
     [
-        "UV_CACHE_DIR=/tmp/lup-uv-cache uv run lup-devtools harness resolve --adapter codex",
+        "UV_CACHE_DIR=/tmp/lup-uv-cache uv run lup-devtools resolve --adapter codex",
         "ENV_VAR=constant git status",
     ],
 )
@@ -1872,7 +2121,7 @@ def test_generated_codex_hook_refuses_the_declared_calls() -> None:
 
     refused = run("Artifact", {"content": "a page"})
     assert refused.exit_code == 2
-    assert b"lup-devtools report" in refused.stderr
+    assert b"lup-devtools dev report" in refused.stderr
 
     narrowed = run("Skill", {"skill": "artifact-design"})
     assert narrowed.exit_code == 2
@@ -1948,7 +2197,7 @@ def test_generated_claude_hook_refuses_the_declared_calls() -> None:
 
     refused = decision("Artifact", {"content": "a page"})
     assert refused.permission_decision == "deny"
-    assert "lup-devtools report" in refused.permission_decision_reason
+    assert "lup-devtools dev report" in refused.permission_decision_reason
 
     narrowed = decision("Skill", {"skill": "artifact-design"})
     assert narrowed.permission_decision == "deny"
@@ -2712,6 +2961,10 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     assert isinstance(domains, list)
     assert "code.claude.com" in domains
     assert "github.com" in domains
+    # The redirecting documentation host, and the domain around it left out:
+    # egress reaches exactly the origins the fetch scopes name.
+    assert "docs.anthropic.com" in domains
+    assert "anthropic.com" not in domains
     assert "sandbox" not in project_settings(None)
     assert sandbox["excludedCommands"] == hooks.excluded_commands()
 
@@ -2780,9 +3033,9 @@ def test_declared_exclusions_cover_the_commands_the_boundary_cannot_carry() -> N
     # where `dev worktree create` could not take the lock its config write
     # needs while the identical `git config --local` succeeded one call away.
     for driving in (
-        "uv run lup-devtools dev worktree create feat-x",
-        "uv run lup-devtools dev pr push",
-        "uv run lup-devtools harness resolve intake",
+        "uv run lup-devtools git worktree create feat-x",
+        "uv run lup-devtools git pr push",
+        "uv run lup-devtools resolve intake",
     ):
         assert sandbox_excluded(driving, excluded), driving
     assert not sandbox_excluded("uv run pytest -q", excluded)
@@ -2810,6 +3063,32 @@ def test_claude_sandbox_widens_the_writable_set_to_sibling_worktrees(
         *plugin.hooks.sandbox.writable_paths,
         str(tmp_path),
     ]
+
+
+def test_a_launch_mount_widens_the_inner_sandbox_where_it_asked_to_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--mount` says this session may reach a folder, in whichever posture.
+
+    Contained, that promise lands in the container's mount table through the
+    fleet lease; on the host it has to land here, in the runtime's own
+    widening, or where the session runs would decide what it can do. The
+    read-only mount stays out of `allowWrite` because writing is exactly what
+    it withheld -- reads are not what this key governs.
+    """
+    monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
+    plugin = portable_harness().plugins[0]
+    writable = tmp_path / "notes"
+    read_only = tmp_path / "reference"
+
+    arguments = claude_sandbox_arguments(
+        plugin, accessible=launch.declared_mounts([writable], [read_only])
+    )
+
+    widened = json.loads(arguments[arguments.index("--settings") + 1])
+    allowed = widened["sandbox"]["filesystem"]["allowWrite"]
+    assert str(writable) in allowed
+    assert str(read_only) not in allowed
 
 
 def test_a_plugin_kept_beside_the_generated_one_is_named_at_launch(
@@ -2973,6 +3252,15 @@ def test_each_runtime_spells_the_project_root_a_tool_server_starts_from() -> Non
     server = portable_harness().plugins[0].mcp_servers[0]
     assert "${CLAUDE_PROJECT_DIR}" in server.command_line(ClaudeSpellings())
     assert "." in server.command_line(CodexSpellings())
+
+
+def test_every_native_tool_server_selects_its_own_engine() -> None:
+    for server in portable_harness().plugins[0].mcp_servers:
+        for spellings in (ClaudeSpellings(), CodexSpellings()):
+            arguments = server.command_line(spellings)
+            assert (
+                arguments[arguments.index("--runtime") + 1] == spellings.runtime_key()
+            )
 
 
 def test_claude_tree_offers_the_tool_servers_as_a_plugin_configuration() -> None:
@@ -3152,15 +3440,22 @@ def test_a_declared_startup_deadline_reaches_the_runtime_that_waits_on_one() -> 
     the symptom is a group simply absent from a session that otherwise
     works, which reads as flakiness rather than as a configured limit.
     """
+    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    for name in ("notes", "codeintel", "sandbox"):
+        assert parsed["mcp_servers"][name]["startup_timeout_sec"] == 60.0
+
+
+def undeadlined_harness() -> Harness:
+    """The declared harness with every server's deadline stripped."""
     source = portable_harness()
     plugin = source.plugins[0]
-    deadlined = source.model_copy(
+    return source.model_copy(
         update={
             "plugins": [
                 plugin.model_copy(
                     update={
                         "mcp_servers": [
-                            server.model_copy(update={"startup_timeout_seconds": 60.0})
+                            server.model_copy(update={"startup_timeout_seconds": None})
                             for server in plugin.mcp_servers
                         ]
                     }
@@ -3168,14 +3463,47 @@ def test_a_declared_startup_deadline_reaches_the_runtime_that_waits_on_one() -> 
             ]
         }
     )
-    parsed = tomllib.loads(codex_project_config(deadlined, CodexSpellings()))
-    assert parsed["mcp_servers"]["notes"]["startup_timeout_sec"] == 60.0
 
 
 def test_a_server_naming_no_deadline_keeps_the_runtimes_own() -> None:
     """Declaring nothing leaves the default, rather than this file's opinion."""
-    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    parsed = tomllib.loads(
+        codex_project_config(undeadlined_harness(), CodexSpellings())
+    )
     assert "startup_timeout_sec" not in parsed["mcp_servers"]["notes"]
+
+
+def test_the_widest_declared_deadline_lands_in_the_settings_env() -> None:
+    """The runtime without a per-server spelling reads one global variable.
+
+    ``MCP_TIMEOUT`` is milliseconds and covers every server the session
+    starts, so the adapter renders the widest declared deadline — under the
+    project's own env block, since a repository spelling the variable itself
+    has made the judgement directly.
+    """
+    plugin = portable_harness().plugins[0]
+    settings = startup_deadline_settings(project_settings(plugin), plugin)
+    env = settings["env"]
+    assert isinstance(env, dict)
+    assert env["MCP_TIMEOUT"] == "60000"
+    assert env["CLAUDE_CODE_THISTLE_GREBE"] == "default"
+
+
+def test_a_project_spelling_the_timeout_itself_outranks_the_derivation() -> None:
+    plugin = portable_harness().plugins[0]
+    spelled = startup_deadline_settings({"env": {"MCP_TIMEOUT": "5000"}}, plugin)
+    env = spelled["env"]
+    assert isinstance(env, dict)
+    assert env["MCP_TIMEOUT"] == "5000"
+
+
+def test_no_declared_deadline_leaves_the_settings_env_alone() -> None:
+    """Stripped declarations render no opinion into the runtime's env."""
+    plugin = undeadlined_harness().plugins[0]
+    settings = startup_deadline_settings(project_settings(plugin), plugin)
+    env = settings["env"]
+    assert isinstance(env, dict)
+    assert "MCP_TIMEOUT" not in env
 
 
 def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:
@@ -3213,6 +3541,8 @@ def test_a_target_that_renders_one_declaration_short_is_named_with_it(
     full = compile_claude(harness)
     dropped = harness.plugins[0].skills[0].id
     composition = NativeHarnessComposition(
+        login=CLAUDE_LOGIN,
+        default_config_home=tmp_path,
         recipe=GenerationRecipe(
             label="claude",
             root=tmp_path,
@@ -3251,6 +3581,8 @@ def test_a_tree_generated_on_the_way_to_something_else_says_nothing(
     generate(third_recipe(tmp_path, None))
     settled = manifest_of(third_recipe(tmp_path, None))
     composed = NativeHarnessComposition(
+        login=CLAUDE_LOGIN,
+        default_config_home=tmp_path,
         recipe=third_recipe(tmp_path, settled),
         readiness=lambda: [],
         invocation_renderer=ClaudeSpellings(),
@@ -3263,3 +3595,31 @@ def test_a_tree_generated_on_the_way_to_something_else_says_nothing(
     asked_for = capsys.readouterr().out
     assert "0 writes, 0 deletes, 0 conflicts" in asked_for
     assert "0 changed, 0 removed" in asked_for
+
+
+def test_a_current_repository_artifact_is_neither_rewritten_nor_announced(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """In passing, the check is the whole of what a current artifact costs."""
+    calls: list[str] = []
+
+    def current(root: Path | None = None, *, check: bool = False) -> Path:
+        calls.append(f"current:{'check' if check else 'write'}")
+        return tmp_path / "current.md"
+
+    def behind(root: Path | None = None, *, check: bool = False) -> Path:
+        calls.append(f"behind:{'check' if check else 'write'}")
+        if check:
+            raise RuntimeError("behind its source")
+        return tmp_path / "behind.md"
+
+    generate_targets([], [current, behind], in_passing=True)
+    assert calls == ["current:check", "behind:check", "behind:write"]
+    assert capsys.readouterr().out == (
+        f"repository artifact ready: {tmp_path / 'behind.md'}\n"
+    )
+
+    calls.clear()
+    generate_targets([], [current, behind])
+    assert calls == ["current:write", "behind:write"]
+    assert capsys.readouterr().out.count("repository artifact ready") == 2

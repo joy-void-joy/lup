@@ -28,6 +28,7 @@ from .words import (
     program_carrying_operands,
     protected_write_target,
     refuses_generated_plugin_target,
+    sed_invocation,
     uv_run_words,
     write_checkpoint,
     write_scope,
@@ -289,8 +290,9 @@ def read_heredoc_bodies(
             if "`" in body or "$(" in body:
                 return KernelDecision(
                     "deny",
-                    "an unquoted heredoc substitutes commands — quote the"
-                    " delimiter (<<'EOF') to make the body literal",
+                    f"the unquoted heredoc <<{delimiter} substitutes commands"
+                    f" — quote the delimiter (<<'{delimiter}') to make the"
+                    " body literal",
                 )
             continue
         # A trailing newline per line, because that is what the shell feeds:
@@ -417,8 +419,12 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             position = substitution["end"]
             continue
         if character == ">" and position + 1 < length and command[position + 1] == "(":
+            written = read_process_substitution(command, position + 2)["text"]
+            substitution = f">({written})" if written is not None else ">(...)"
             return KernelDecision(
-                "ask", "writing process substitution is never auto-allowed"
+                "ask",
+                f"writing into the process substitution {substitution} requires"
+                " approval — the receiving command runs unjudged",
             )
         if character == "<" and position + 1 < length and command[position + 1] == "(":
             if started:
@@ -1064,7 +1070,11 @@ def resolve_redirection(
     target = index + 1
     if target >= len(tokens) or tokens[target].kind != "word":
         return Redirection(
-            decision=KernelDecision("ask", "file redirection is never auto-allowed"),
+            decision=KernelDecision(
+                "ask",
+                f"file redirection {operator} requires approval — it names no"
+                " target word, so where the write lands cannot be judged",
+            ),
             resume=index + 1,
         )
     if "<" in operator:
@@ -1092,7 +1102,9 @@ def resolve_redirection(
         return Redirection(
             decision=KernelDecision(
                 "ask",
-                "file redirection is never auto-allowed",
+                f"file redirection to {spelled} requires approval — the"
+                " expansion spells no path, so where the write lands cannot"
+                " be judged",
                 checkpoint="targeted",
                 purpose="unrecovered_local_mutation",
             ),
@@ -1119,10 +1131,14 @@ def resolve_redirection(
     )
     if decided == "allow":
         return Redirection(decision=None, resume=target + 1)
+    written = "overwrites" if existing else "creates"
+    reason = f"the redirection {written} {spelled}, a {scope} path"
+    if decided == "ask":
+        reason += " — requires approval"
     return Redirection(
         decision=KernelDecision(
             decided,
-            "file redirection is never auto-allowed",
+            reason,
             checkpoint=write_checkpoint(scope),
             purpose="unrecovered_local_mutation",
         ),
@@ -1390,3 +1406,51 @@ def shell_path_verb_targets(command: str) -> list[str]:
         operands = path_verb_operands(words)["operands"]
         targets.extend(operands)
     return targets
+
+
+class SedRewrite(TypedDict):
+    """One in-place rewrite a command carries: what to run, and over what.
+
+    Named here for the reason :func:`shell_patch_operands` is: the words are
+    on this side of the boundary and the files are on the other. A caller that
+    can reach a filesystem runs these scripts over copies of these targets and
+    hands the documents back, so the kernel judges a rewrite by what it would
+    produce without ever having produced it.
+    """
+
+    scripts: list[str]
+    targets: list[str]
+
+
+def shell_sed_rewrites(command: str) -> list[SedRewrite]:
+    """Name every in-place sed this command runs, with the scripts it runs.
+
+    Only the screened ones. A script carrying a write or execute primitive is
+    refused by the classifier on its own terms, and running it to find out
+    what it would produce would be running exactly what the screen exists to
+    keep from running — so an unscreened call yields nothing here and meets
+    its refusal there.
+
+    A command that does not lex yields nothing, on the same terms as every
+    reader beside it: an unparseable line keeps whatever verdict it already
+    earned rather than gaining a relaxation from a reading that failed.
+    """
+    segments = parse_shell_words(command, 0)
+    if isinstance(segments, KernelDecision):
+        return []
+    rewrites: list[SedRewrite] = []
+    for segment in segments:
+        words = effective_command(segment)["words"]
+        if not words or posixpath.basename(words[0]) != "sed":
+            continue
+        invocation = sed_invocation(words)
+        if isinstance(invocation, KernelDecision):
+            continue
+        if not invocation["in_place"] or not invocation["screened"]:
+            continue
+        if not invocation["targets"]:
+            continue
+        rewrites.append(
+            SedRewrite(scripts=invocation["scripts"], targets=invocation["targets"])
+        )
+    return rewrites

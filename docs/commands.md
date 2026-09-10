@@ -22,56 +22,51 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `conversation chatgpt` | Retain ChatGPT conversations and their downloadable attachments. |
 | `conversation claude` | Retain Claude conversations and their API-provided attachments. |
 
+## `coordination`
+
+| Command | What it does |
+| --- | --- |
+| `coordination roster` | List every session working in this repository, the live ones first. |
+| `coordination join` | Put a session on the roster and print the id it answers to. |
+| `coordination describe` | Record what one session is doing, for whoever reads the roster next. |
+| `coordination rename` | Rename one session, leaving the old name resolving to it. |
+| `coordination leave` | Record that a session has stopped, so nothing addresses it again. |
+| `coordination send` | Send one message to a peer, and say what will carry it there. |
+| `coordination inbox` | Read what is queued for one session, consuming it only when asked. |
+| `coordination holdings` | List what each live session in this repository is holding. |
+| `coordination lock` | Take everything beneath a prefix, before having touched any of it. |
+| `coordination release` | Give a prefix back, which does nothing unless this session held it. |
+| `coordination watch` | Stream what changes: who arrives and leaves, what they are on, what reaches them. |
+
 ## `dev`
 
 | Command | What it does |
 | --- | --- |
-| `dev branches` | Analyze branch containment, PR status, and worktree info. |
-| `dev base-branch` | Detect the base branch for the current (or specified) branch. |
-| `dev freshness` | Report how far this checkout sits behind its own remote and its base. |
-| `dev pr-body` | Generate a PR body (summary, commits, test plan) from branch commits. |
-| `dev monitor` | Follow a background run: its landed units, their statuses, its heartbeat. |
 | `dev pending` | Report the real pending changes, excluding sandbox-masked device paths. |
-| `dev survey` | Full branch inventory: containment, PRs, unique commits, diff sizes. |
-| `dev merge-driver` | Register the ownership-manifest merge driver `.gitattributes` names. |
-| `dev delete` | Delete a branch and its worktree, and origin&#x27;s copy if it is spent. |
-| `dev retire` | Retire a branch through a pull request, so its commits outlive it. |
-| `dev archive-traces` | Copy a worktree&#x27;s session records into the archive beside the repository. |
-| `dev resolve-branch` | Create + switch to the resolve/&lt;id&gt; branch (a resolve editor&#x27;s first step). |
-| `dev resolve-review` | Render a resolve manifest and its branch diffs into one static HTML review. |
-| `dev resolve-summary` | Print per-concern verdicts from a resolve manifest. |
 | `dev check` | Run ruff format, ruff check, pyright, and pytest. Read-only by default. |
+| `dev test` | Run named tests in the suite that installs each, one run per suite. |
 | `dev comments` | List unresolved `# lup:` feedback comments, or act on specific ones. |
 | `dev todos` | List `# lup: template:` markers — a scaffold&#x27;s open decisions. |
 | `dev seams` | Show what this project settled about itself, or settle one of them. |
 | `dev refutations` | Resolve one file&#x27;s proposed content and report what it refutes. |
 | `dev directives` | Measure every `# lup: ignore` against the canonical inline placement. |
-| `dev report-friction` | File or correct workflow friction in this checkout&#x27;s repository. |
-| `dev upstream` | Print a measured upstream defect, or list the ones declared. |
+| `dev report-friction` | File or correct workflow friction, on the tracker that owns the fix. |
 | `dev undo` | List the recoverable snapshots of this tree, or take and expire them. |
+| `dev history` | Trace a symbol through every branch, past this tree&#x27;s own snapshots. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
+| `dev modules` | Report which modules this project takes, and what each one&#x27;s prose costs. |
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
 | `dev relocate` | Move a module and repoint every import of it. |
 | `dev policy` | Show what the declared permission policy decides about an input, and why. |
 | `dev vocabulary` | Show every shell form the declared vocabulary judges, and how. |
-| `dev worktree create` | Create or re-attach a git worktree. |
-| `dev worktree list` | List all git worktrees with branch and status info. |
-| `dev worktree remove` | Remove a git worktree. |
-| `dev pr status` | Fetch PR review status, checks, and comments for a branch. |
-| `dev pr merge` | Merge a PR and pull changes into the integration branch. |
-| `dev pr sync-base` | Sync the base branch and merge it into the current feature branch. |
-| `dev pr push` | Push the current branch and report any existing PR. |
-| `dev pr create` | Create a new PR. |
-| `dev pr update` | Update a PR body. |
-| `dev conflict list` | Show conflicted files with scope classification (in-scope vs out-of-scope). |
-| `dev conflict status` | Detect conflict state, list files, and show both sides&#x27; history. |
-| `dev conflict audit` | Post-resolution deletion audit: check for accidentally dropped code. |
-| `dev conflict complete` | Finalize the merge/rebase/cherry-pick after all conflicts are resolved. |
+| `dev env status` | Where this project&#x27;s environment is, and who is installed in it. |
+| `dev env sync` | Install this project&#x27;s dependencies into its own environment. |
 | `dev plugin name` | Name this repo&#x27;s plugin marketplace uniquely (the plugin entry is kept). |
-| `dev git-hooks install` | Install every git hook this repository declares. |
-| `dev git-hooks status` | Report what this clone refuses, at every moment a hook sits at. |
-| `dev git-hooks uninstall` | Remove them, leaving hooks written elsewhere alone. |
+| `dev tracker comment` | Say something on an issue, here or on a declared tracker. |
+| `dev tracker close` | Close an issue, here or on a declared tracker. |
+| `dev tracker reopen` | Reopen an issue, here or on a declared tracker. |
+| `dev tracker list` | Which repositories this project may reach, and what each is for. |
 | `dev preserve capture` | Record the surface this repository offers, as a checked-in fixture. |
 | `dev preserve check` | Resolve every captured capability against the tree as it stands. |
 | `dev preserve migration` | Print the relocation that repoints an importer of the captured tree. |
@@ -88,6 +83,18 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev questions answer` | Approve one question, optionally with a note for the agent. |
 | `dev questions reject` | Refuse one question, optionally saying what to do instead. |
 | `dev questions cancel` | Withdraw a question nobody needs answered any more. |
+| `dev hooks classify` | Say what the policy decides about one shell command, and why. |
+| `dev hooks classify-fetch` | Say whether a URL is inside this project&#x27;s declared fetch scopes. |
+| `dev hooks sweep` | Classify a list of commands at once, and exit non-zero if any is not allowed. |
+| `dev hooks roots` | List the path roles and protected roots the declaration carries. |
+| `dev hooks learn` | Review the commands the policy declined to interrupt about. |
+| `dev py info` | Inspect a Python object — adapts to modules, classes, functions, values. |
+| `dev py source` | View source code for a Python object, or a package file tree with --tree. |
+| `dev py imports` | Show what a module imports, or what imports it (--reverse). |
+| `dev py text` | Search literal source text within explicitly selected Python paths. |
+| `dev py search` | Search project source and installed package exports by name. |
+| `dev usage claude` | Show live Claude Code usage with pacing bars (Anthropic OAuth). |
+| `dev usage codex` | Show live Codex usage with pacing bars (ChatGPT plan). |
 | `dev init rename-package` | Rename the lup Python package to a project-specific name. |
 | `dev init drop-examples` | Remove the scaffold&#x27;s demonstrations of itself, which no adopter wants. |
 | `dev library status` | Report where the lup library is resolved from. |
@@ -115,6 +122,36 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `feedback analyze` | Produce a structured JSON analysis report (tools, errors, gaps). |
 | `feedback commit` | Commit all uncommitted session result files, one commit per session. |
 
+## `git`
+
+| Command | What it does |
+| --- | --- |
+| `git branches` | Analyze branch containment, PR status, and worktree info. |
+| `git base-branch` | Detect the base branch for the current (or specified) branch. |
+| `git freshness` | Report how far this checkout sits behind its own remote and its base. |
+| `git pr-body` | Generate a PR body (summary, commits, test plan) from branch commits. |
+| `git survey` | Full branch inventory: containment, PRs, unique commits, diff sizes. |
+| `git merge-driver` | Register the ownership-manifest merge driver `.gitattributes` names. |
+| `git delete` | Delete a branch and its worktree, and origin&#x27;s copy if it is spent. |
+| `git retire` | Retire a branch through a pull request, so its commits outlive it. |
+| `git worktree create` | Create or re-attach a git worktree. |
+| `git worktree list` | List all git worktrees with branch and status info. |
+| `git worktree remove` | Remove a git worktree. |
+| `git worktree adopt-records` | Move lup&#x27;s `branch.*.lup-*` config keys into the shared `lup/` directory. |
+| `git pr status` | Fetch PR review status, checks, and comments for a branch. |
+| `git pr merge` | Merge a PR and pull changes into the integration branch. |
+| `git pr sync-base` | Sync the base branch and merge it into the current feature branch. |
+| `git pr push` | Push the current branch and report any existing PR. |
+| `git pr create` | Create a new PR. |
+| `git pr update` | Update a PR body. |
+| `git conflict list` | Show conflicted files with scope classification (in-scope vs out-of-scope). |
+| `git conflict status` | Detect conflict state, list files, and show both sides&#x27; history. |
+| `git conflict audit` | Post-resolution deletion audit: check for accidentally dropped code. |
+| `git conflict complete` | Finalize the merge/rebase/cherry-pick after all conflicts are resolved. |
+| `git hooks install` | Install every git hook this repository declares. |
+| `git hooks status` | Report what this clone refuses, at every moment a hook sits at. |
+| `git hooks uninstall` | Remove them, leaving hooks written elsewhere alone. |
+
 ## `harness`
 
 | Command | What it does |
@@ -125,49 +162,64 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness apply-reconciliation` | Apply a stale-base-checked source patch, then regenerate every target. |
 | `harness propose-reconciliation` | Persist a source patch for separate review and stale-base-checked apply. |
 | `harness doctor` | Report installed native runtime evidence without updating either CLI. |
-| `harness requirements` | Exercise the external programs this project expects on this machine. |
+| `harness requirements` | Check dependencies on the host, or in the session container with --inside. |
 | `harness image` | Render the container image this project&#x27;s sessions run in. |
 | `harness egress` | Report or remove the network boundary this project&#x27;s sessions run behind. |
-| `harness serve-resolver-tools` | Serve one worker&#x27;s question tools over stdio, for out-of-process runtimes. |
 | `harness claude` | Generate/reconcile Claude artifacts and launch the verified plugin. |
 | `harness codex` | Generate/reconcile Codex artifacts and launch without updating the CLI. |
-| `harness resolve status` | Say whether a run is alive, where it stands, and what it last did. |
-| `harness resolve supervise` | Answer any run under ``.lup/resolve``, live or parked. |
-| `harness resolve questions` | List a run&#x27;s questions and what each one has been answered. |
-| `harness resolve answer` | Offer an answer to one or more of a run&#x27;s questions. |
-| `harness resolve actors` | List every actor this run has recorded, and what each has not read yet. |
-| `harness resolve say` | Tell an actor something. It reads this and keeps going. |
-| `harness resolve accept` | Accept one concern over one failing verification, on the human&#x27;s word. |
-| `harness resolve retire` | Retire one concern whose work was settled somewhere other than this run. |
-| `harness resolve redirect` | Stop an actor and put it on something else. |
-| `harness resolve park` | Ask every open wait in this run to give up now. |
-| `harness resolve drain` | Ask a busy run to finish what is in flight and stop, resumably. |
-| `harness resolve refresh` | Bring a run&#x27;s base, and the leases holding work, up to its branch. |
-| `harness resolve intake` | Print what a run started now would plan from, without starting one. |
 | `harness profile list` | Show every profile, and which one a launch selects by default. |
 | `harness profile add` | Register a runtime configuration home under a name. |
 | `harness profile use` | Select the profile a launch uses when none is named. |
 | `harness profile remove` | Forget a profile, leaving its configuration home on disk. |
 
-## `hooks`
+## `ledger`
 
 | Command | What it does |
 | --- | --- |
-| `hooks classify` | Say what the policy decides about one shell command, and why. |
-| `hooks classify-fetch` | Say whether a URL is inside this project&#x27;s declared fetch scopes. |
-| `hooks sweep` | Classify a list of commands at once, and exit non-zero if any is not allowed. |
-| `hooks roots` | List the path roles and protected roots the declaration carries. |
-| `hooks learn` | Review the commands the policy declined to interrupt about. |
+| `ledger types` | List the node and edge types this project declares, with their fields. |
+| `ledger record` | Record one node of any declared kind; the kind validates the fields. |
+| `ledger relate` | Draw one edge of any declared kind between two nodes. |
+| `ledger amend` | Record a node again with some fields changed; nothing is overwritten. |
+| `ledger cite` | Check every cite in one document against where its node stands now. |
+| `ledger writeup` | Generate the documents this project declares over its ledger. |
+| `ledger list` | Show every node in this repository, with its standing read now. |
+| `ledger show` | Print one node in full, with its edges and what it attaches. |
+| `ledger delegate` | Record one task, hand it to a peer if there is one, and say what happened. |
+| `ledger handoff` | Move a body of work to a peer, and say exactly what crossed. |
+| `ledger brief` | Write one handoff out for whoever is going to read it. |
+| `ledger mine` | Print one holder&#x27;s outstanding tasks, grouped by what they cost. |
+| `ledger done` | Mark one task finished, by recording it again as done. |
+| `ledger snapshot` | Commit the store to a branch of its own, for a record worth keeping. |
+| `ledger explore` | Open the log in a browser, or write it as one self-contained page. |
 
-## `py`
+## `resolve`
 
 | Command | What it does |
 | --- | --- |
-| `py info` | Inspect a Python object — adapts to modules, classes, functions, values. |
-| `py source` | View source code for a Python object, or a package file tree with --tree. |
-| `py imports` | Show what a module imports, or what imports it (--reverse). |
-| `py text` | Search literal source text within explicitly selected Python paths. |
-| `py search` | Search project source and installed package exports by name. |
+| `resolve status` | Say whether a run is alive, where it stands, and what it last did. |
+| `resolve supervise` | Answer any run under ``.lup/resolve``, live or parked. |
+| `resolve questions` | List a run&#x27;s questions and what each one has been answered. |
+| `resolve answer` | Offer an answer to one or more of a run&#x27;s questions. |
+| `resolve actors` | List every actor this run has recorded, and what each has not read yet. |
+| `resolve say` | Tell an actor something. It reads this and keeps going. |
+| `resolve accept` | Accept one concern over one failing verification, on the human&#x27;s word. |
+| `resolve retire` | Retire one concern whose work was settled somewhere other than this run. |
+| `resolve redirect` | Stop an actor and put it on something else. |
+| `resolve park` | Ask every open wait in this run to give up now. |
+| `resolve drain` | Ask a busy run to finish what is in flight and stop, resumably. |
+| `resolve refresh` | Bring a run&#x27;s base, and the leases holding work, up to its branch. |
+| `resolve intake` | Print what a run started now would plan from, without starting one. |
+| `resolve serve-tools` | Serve one worker&#x27;s question tools over stdio, for out-of-process runtimes. |
+| `resolve branch` | Create + switch to the resolve/&lt;id&gt; branch (a resolve editor&#x27;s first step). |
+| `resolve review` | Render a resolve manifest and its branch diffs into one static HTML review. |
+| `resolve summary` | Print per-concern verdicts from a resolve manifest. |
+
+## `run`
+
+| Command | What it does |
+| --- | --- |
+| `run monitor` | Follow a background run: its landed units, their statuses, its heartbeat. |
+| `run report` | Say how far into its own work a unit has got, from any language. |
 
 ## `setup`
 
@@ -191,11 +243,12 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 
 | Command | What it does |
 | --- | --- |
+| `sync upstream` | Print a measured upstream defect, or list the ones declared. |
 | `sync status` | Show tracked projects and their sync status (read-only). |
-| `sync fetch` | Clone missing repos and fetch/reset cached ones (network + writes). |
+| `sync fetch` | Clone missing repos and fetch cached ones (network + writes). |
 | `sync log` | List commits to review: everything upstream added since the last sync. |
 | `sync diff` | Show full diff for a specific commit. |
-| `sync mark-synced` | Advance the sync checkpoint to the upstream&#x27;s current HEAD. |
+| `sync mark-synced` | Advance the sync checkpoint to where the upstream now stands. |
 | `sync setup` | Set the local path for a project (writes to sync.json.local). |
 
 ## `trace`
@@ -207,13 +260,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `trace list` | List available traces. |
 | `trace errors` | Show sessions with errors found in trace files. |
 | `trace capabilities` | Extract capability requests from traces. |
-
-## `usage`
-
-| Command | What it does |
-| --- | --- |
-| `usage claude` | Show live Claude Code usage with pacing bars (Anthropic OAuth). |
-| `usage codex` | Show live Codex usage with pacing bars (ChatGPT plan). |
+| `trace archive` | Copy a worktree&#x27;s session records into the archive beside the repository. |
 
 ## `version`
 

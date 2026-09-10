@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.harness by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.harness by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # The harness
 
@@ -20,11 +20,51 @@ uv run lup-devtools harness generate all   # render both trees from source
 uv run lup-devtools harness check all      # read-only drift check; what CI runs
 ```
 
-`harness claude` and `harness codex` regenerate one target and launch it;
-`--generate-only` stops before launching. `dev git-hooks install` installs
+`harness claude` and `harness codex` regenerate the declared targets, check the host, settle the
+base, and launch the selected runtime; each wait is named as it starts, so a long silence is a
+stopped launch rather than a slow one. `--generate-only` stops before launching. `git hooks install` installs
 the drift check as a git pre-commit hook, so omitted generated output is
 refused before the commit exists rather than minutes later in CI.
 [quality-pipeline.md](quality-pipeline.md) maps all three layers.
+
+## Startup checks and container images
+
+Both launchers build a container image when no image matches the rendered
+Dockerfile. They reuse a matching image. Package declarations feed that
+Dockerfile, so changing the declared packages triggers a build on the next
+launch. Building an image installs packages inside it, not on the host.
+`uv run lup-devtools harness image` prints the Dockerfile; it does not build it.
+
+Requirements declare where they are needed:
+
+| Location | Checked where |
+| --- | --- |
+| `host` | On the machine running the launcher |
+| `image` | Inside the session container |
+| `both` | In both environments |
+| `session` | Inside the container for a normal launch; on the host with `--sandbox inner` or `--sandbox none` |
+
+The allowed shell commands are a `session` requirement. Missing `tree` or
+`yq` on the host does not warn during a container launch when the image
+provides them. The container is checked after its image is built or reused.
+If a command is missing there, check that the image's declared packages
+actually provide it; repeating an unchanged build is not a general repair.
+
+Run `uv run lup-devtools harness requirements` to check host dependencies,
+including tools for sessions running on the host. Add `--inside` to check
+the container, or `--inside --launch-only` to run just its startup checks.
+Full container checks include a test model turn.
+
+The target selector also chooses its login layout and configuration home:
+`claude` honors `CLAUDE_CONFIG_DIR`, falling back to the personal `.claude`
+directory; `codex` honors `CODEX_HOME`, falling back to the launcher's worktree
+home. `all` checks each with its own selection. These checks use existing
+configuration; they do not install plugins or perform an interactive login.
+
+Reports name the environment and show the failed operation, its impact and
+the next step separately. A check that could not run reports an unknown
+result. A missing command can produce misleading shell results: exit code
+127 takes the fallback in `command || fallback`, just like other failures.
 
 ## Generated output is never hand-edited
 
@@ -75,14 +115,14 @@ Each row is now the artifact's own attribution, the same one its banner prints
 for a reader who opens the file, so nothing there can name a source the
 artifact does not.
 
-Canonical sources live in `lup.devtools.harness.content`
-(the declarations lup ships), `src/lup_template/devtools/harness/content/`
-(the ones only this repository has), `src/lup_template/devtools/harness/catalog.py`
+Canonical sources live in `lup.harness.content`
+(the declarations lup ships), `src/lup_template/harness/content/`
+(the ones only this repository has), `src/lup_template/harness/catalog.py`
 (plugin, hook, and resolver composition), and the `lup` package itself
 (adapter renderers and the policy bundle).
 
 Three things that map states and the reason for each. The
-16 modules under `hooks/runtime/kernel/` are a verbatim
+18 modules under `hooks/runtime/kernel/` are a verbatim
 copy of `lup/policy/kernel/`, kept byte-identical so it can be diffed against
 the canonical package. The ownership manifests are written by
 `lup.harness.ownership` from the generation result rather than compiled from a
@@ -104,11 +144,12 @@ than anything either runtime reads from its own tree.
 `lup-devtools harness generate|check|claude|codex` walks one path from typed
 Python to a launched native plugin.
 
-1. **Typed declarations** — `devtools/harness/content/` holds the skill,
-   agent, guidance, pattern, template, and documentation declarations;
-   `devtools/harness/catalog.py` composes them with the application-owned
-   `HookSet` into one canonical `lup.harness.models.Harness`. Prompt prose is
-   stored as ordered typed parts, never as a native string.
+1. **Typed declarations** — `harness/content/` holds the skill, agent,
+   guidance, pattern, template, and documentation declarations, above the
+   tooling layer because they are what a harness is made of rather than
+   anything the CLI adds; `harness/catalog.py` composes them with the
+   application-owned `HookSet` into one canonical `lup.harness.models.Harness`.
+   Prompt prose is stored as ordered typed parts, never as a native string.
 2. **Renderers** — `lup.providers.claude.harness` and
    `lup.providers.codex.harness` implement the `ArtifactRenderer` seams from
    `lup.harness.contracts`; the compilation roots in `lup.providers.harness`
@@ -136,9 +177,10 @@ the CLI composition root maps a user-facing target name to a concrete recipe:
 adding a third target supplies another recipe rather than a branch in
 reconciliation or materialization.
 
-Each harness module owns one concern. Everything but the declaration root
-lives in `packages/lup/src/lup/devtools/harness/`; `catalog.py` is this
-repository's, because its whole job is to be this project's own harness:
+Each harness module owns one concern. The CLI half lives in
+`packages/lup/src/lup/devtools/harness/` and the declarations it compiles in
+`packages/lup/src/lup/harness/content/`; `catalog.py` is this repository's,
+because its whole job is to be this project's own harness:
 
 - `app.py` — Typer wiring only; every command body lives elsewhere
 - `catalog.py` — declaration-graph root assembling `content/` into a `Harness`
@@ -155,29 +197,37 @@ repository's, because its whole job is to be this project's own harness:
 
 ## What the plugin ships
 
-Both rosters are rendered from the typed declarations: the ones about agent
-work in `lup.devtools.harness.content.catalog`, the ones
-about being a template in
-`src/lup_template/devtools/harness/content/catalog.py`, which composes both
-into what the plugin ships. Change the catalog that owns the subject, then
-regenerate.
+Both rosters are rendered from the typed declarations, and neither is a list.
+Every skill and agent belongs to a **module** — one subject as one value,
+carrying its content, its page under `docs/`, its paragraph in the
+always-loaded document, its command tree and its tool group — declared under
+`lup.harness.content.modules` for the subjects lup ships and under
+`src/lup_template/harness/content/modules` for the ones only this
+repository has. `src/lup_template/harness/content/catalog.py` composes
+both and states which modules this project takes; everything below is derived
+from that rather than declared beside it, so declining a subject removes all
+five surfaces at once. `dev modules` prints the roster. Change the module that
+owns the subject, then regenerate.
 
 **Skills:**
 
 - /lup:add-command — Create a new slash command in the lup plugin
 - /lup:analyze — Retain a ChatGPT or Claude conversation and answer from its files
-- /lup:brainstorm — Pre-init design exploration — brainstorm architecture, MCP tools, and agent design
+- /lup:brainstorm — Design exploration — a new agent before init or a feature inside a project, every decision walked with the user
 - /lup:bump — Review changes since last bump and bump agent version
 - /lup:close — Check PR review status, merge if approved, and clean up branches
 - /lup:commit — Review all diffs and create atomic commits
 - /lup:create-investigator — Create a new diagnostic command that traces pasted output to a root cause, like the debug skill
 - /lup:debug — Trace an error through logs to find root cause
+- /lup:delegate — Hand one piece of work to another session, or park it for whoever picks it up
+- /lup:distill — Restart from an explored repo — distill its direction into a fresh design
 - /lup:fb-analyze — Aggregate tool health, capability gaps, and reasoning patterns across sessions
 - /lup:fb-implement — Implement prioritized changes from feedback loop analysis
 - /lup:fb-investigate — Deep trace reading and error classification for selected sessions
 - /lup:fb-reflect — Meta and meta-meta reflection on the feedback loop process itself
 - /lup:fb-status — Feedback loop entry point — status, targets, and previous session context
 - /lup:feedback-loop — Full feedback loop — orchestrates status, investigation, analysis, reflection, and implementation
+- /lup:handoff — Hand a body of work to another session, with what it takes to resume it
 - /lup:hooks — Inspect and modify the canonical semantic permission policy
 - /lup:implementer — Implement one resolver concern inside its leased worktree
 - /lup:import — Import a feature or pattern from a tracked project or local Git source
@@ -245,9 +295,14 @@ Report:
 )
 ```
 
-Import it explicitly in `harness/content/catalog.py` and append it to
-`SKILLS`. Explicit imports make a misspelled or missing module a type-checking
-error; there is no dynamic registry and no barrel file.
+Import it into the module whose subject it serves, under `content/modules/`,
+and name it in that module's `ContentRoster`. That is the whole registration:
+a skill reaches a project because its module does, and there is no second
+roster to add it to as well. Explicit imports make a misspelled or missing
+module a type-checking error; there is no dynamic registry and no barrel file.
+A declaration file no module claims fails `dev check`'s module-coverage sweep
+rather than shipping unnoticed — and where no existing module is about the
+skill's subject, that is a new module rather than a stretched one.
 
 Then run the authoring loop:
 
@@ -279,7 +334,7 @@ leaving a link that resolves to nothing.
 ### Change the fetch allowlist
 
 The application-owned `HookSet` is constructed by `portable_harness()` in
-`{layout.path("devtools", "harness", "catalog.py")}`. Add the narrowest origin and
+`{layout.path("harness", "catalog.py")}`. Add the narrowest origin and
 path prefix that supports the workflow:
 
 ```python
@@ -365,7 +420,7 @@ once on a command and reach every verb beneath it. Run
 each half of every rule, and `dev vocabulary --json --output <path>` before and
 after a reshaping to confirm no verdict moved that you did not move.
 
-Then sweep what an ordinary session runs. `uv run lup-devtools hooks sweep`
+Then sweep what an ordinary session runs. `uv run lup-devtools dev hooks sweep`
 classifies the everyday corpus this project declared in
 `HookSet.everyday_commands` and exits non-zero on anything that is not a plain
 allow — the one measurement that reads the direction a *tightening* shows up
@@ -374,6 +429,41 @@ de-escalation quietly stops firing. Each command is swept once per posture a
 session runs in, so a rule that only asks where nobody can answer is caught
 too. `dev check` runs the same sweep, so a rule that stopped `git status`
 fails there rather than in somebody's session.
+
+### Put a program in the image
+
+A package reaches the container through one of three doors, and picking the
+wrong one is how a tool ends up absent with nothing having said so.
+
+`Image.baseline` is the library's answer to what any shell session needs to be
+usable at all — `git`, `curl`, `jq`, the registry managers. It is not a place
+for a project's own tools, and overriding it means restating every name in it
+to add one.
+
+A `Requirement` in the manifest is what a declared *capability* asked for. It
+takes a purpose, an exercise that proves a machine has the thing, and a policy
+for going without — so it is the right door exactly when the absence deserves
+a diagnostic. It is the wrong one otherwise: a manifest that invents
+prerequisites refuses machines that were fine, which is why ripgrep was
+declared here once and taken back out.
+
+`Image.tooling` is the third, and the one for a program this project's work
+simply needs present. Declared where the image is composed:
+
+```python
+return Image(
+    egress=SessionEgress(mode="host"),
+    tooling=[
+        Package(name="poppler"),
+        Package(name="prettier", manager="bun", version="3.4.2"),
+    ],
+)
+```
+
+Whole packages rather than bare names, so a registry package is pinned and
+reached through the manager that obtains it. Nothing exercises these: a name
+the manager cannot resolve fails the build and names itself, which beats a
+probe. `dev seams` reports what this project declared and where.
 
 ## Resolving a conflict
 

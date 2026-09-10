@@ -23,13 +23,16 @@ from lup.harness.codescan.portable import prose_breaches
 from lup.harness.contracts import NativeSpellings
 from lup.harness.prompts import SpelledPromptRenderer
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
+    GUIDANCE_BUDGET,
+    GuidanceBudget,
     document_byte_size,
     Artifact,
     ArtifactTree,
     Harness,
+    Plugin,
 )
 from lup.harness.validation import validated_tree
+from lup.types import JsonObject
 
 
 class AdapterName(StrEnum):
@@ -82,7 +85,7 @@ def guidance_artifacts(tree: ArtifactTree) -> list[Artifact]:
 
 
 def reject_oversized_guidance(
-    tree: ArtifactTree, budget: int = GUIDANCE_BYTE_BUDGET
+    tree: ArtifactTree, budget: GuidanceBudget = GUIDANCE_BUDGET
 ) -> None:
     """Hold the always-loaded document to its budget as a session sees it.
 
@@ -93,11 +96,12 @@ def reject_oversized_guidance(
     """
     for artifact in guidance_artifacts(tree):
         used = document_byte_size(artifact.content)
-        if used <= budget:
+        if used <= budget.ceiling:
             continue
         raise ValueError(
             f"rendered guidance {artifact.path.as_posix()} is {used} bytes, "
-            f"over the {budget} budget by {used - budget}. Move a section to a "
+            f"over the {budget.ceiling} budget by {used - budget.ceiling}. "
+            "Move a section to a "
             "generated document under docs/ and leave a file-path pointer, the "
             "way Self-Improvement Loop and Permission Hooks were split."
         )
@@ -151,6 +155,32 @@ def compile_claude(source: Harness) -> ArtifactTree:
     reject_oversized_guidance(guidance)
     artifacts.extend(guidance.artifacts)
     return validated_tree(artifacts)
+
+
+def startup_deadline_settings(settings: JsonObject, plugin: Plugin) -> JsonObject:
+    """Spell the declared server deadlines where Claude Code reads one.
+
+    Codex takes a deadline per server, rendered into its own config by its
+    adapter; Claude Code reads only ``MCP_TIMEOUT`` from the settings env
+    block, in milliseconds, applied to every server it starts. One variable
+    cannot honor several declarations, so the widest declared deadline lands —
+    loosening the limit for a server that declared nothing and never
+    tightening one. A project spelling the variable itself has made the
+    judgement directly, so its own value stands over the derived one.
+    """
+    deadlines = [
+        server.startup_timeout_seconds
+        for server in plugin.mcp_servers
+        if server.startup_timeout_seconds is not None
+    ]
+    if not deadlines:
+        return settings
+    spelled = settings["env"] if "env" in settings else {}
+    environment: JsonObject = {
+        "MCP_TIMEOUT": str(round(max(deadlines) * 1000)),
+        **(spelled if isinstance(spelled, dict) else {}),
+    }
+    return {**settings, "env": environment}
 
 
 def compile_codex(source: Harness) -> ArtifactTree:

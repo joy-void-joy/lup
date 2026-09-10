@@ -45,18 +45,26 @@ def step_named(view: WizardView, slug: str):
     return next(step for step in view.steps if step.slug == slug)
 
 
-async def test_dashboard_serves_a_page_it_generates(isolated_dashboard: None) -> None:
-    """Generated rather than read from an asset the wheel has to remember.
+async def test_the_dashboard_serves_its_built_page(isolated_dashboard: None) -> None:
+    """The page is the `wizard` bundle under `lup.web`'s package data.
 
-    The version that read one shipped without it, so every request here raised
-    ``FileNotFoundError`` and adopters retired the sub-app.
+    Served by name from the built surface, with its script reachable under
+    the bundle's own assets — the version that read a loose asset shipped
+    without it, so every request here raised ``FileNotFoundError`` and
+    adopters retired the sub-app.
     """
     del isolated_dashboard
     async with client() as http:
         response = await http.get("/")
+        script = next(
+            name
+            for name in response.text.split('"')
+            if name.startswith("./assets/") and name.endswith(".js")
+        )
+        asset = await http.get(script.removeprefix("./"))
 
     assert response.status_code == 200
-    assert "/api/wizard" in response.text
+    assert asset.status_code == 200 and "api/wizard" in asset.text
 
 
 async def test_dashboard_projects_cli_registry_status(

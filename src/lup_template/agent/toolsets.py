@@ -26,7 +26,9 @@ if TYPE_CHECKING:
     from lup.orchestration.reflection import ReviewGate
     from lup.sandbox.container import Sandbox
 
-ServerGroup = Literal["notes", "sandbox", "codeintel", "session", "example"]
+ServerGroup = Literal[
+    "notes", "sandbox", "codeintel", "session", "coordination", "ledger", "example"
+]
 """A tool-group name this registry can build — the group vocabulary every
 consumer shares: server registration (``core.build_session_options``),
 subprocess serving and CLI selection (``lup-devtools agent serve-tools
@@ -43,6 +45,10 @@ SANDBOX_GROUP: ServerGroup = "sandbox"
 CODEINTEL_GROUP: ServerGroup = "codeintel"
 # lup: ignore[constant-declaration] — group identity
 SESSION_GROUP: ServerGroup = "session"
+# lup: ignore[constant-declaration] — group identity
+COORDINATION_GROUP: ServerGroup = "coordination"
+# lup: ignore[constant-declaration] — group identity
+LEDGER_GROUP: ServerGroup = "ledger"
 # lup: ignore[constant-declaration] — group identity
 EXAMPLE_GROUP: ServerGroup = "example"
 """Placeholder tools with fabricated data — never served to a live agent
@@ -63,9 +69,14 @@ def tool_group_names(*, realtime: bool) -> list[ServerGroup]:
     :func:`build_session_toolset`; ``test_toolsets`` asserts the two
     stay aligned.
     """
-    if realtime:
-        return [NOTES_GROUP, SANDBOX_GROUP, CODEINTEL_GROUP, SESSION_GROUP]
-    return [NOTES_GROUP, SANDBOX_GROUP, CODEINTEL_GROUP]
+    base: list[ServerGroup] = [
+        NOTES_GROUP,
+        SANDBOX_GROUP,
+        CODEINTEL_GROUP,
+        COORDINATION_GROUP,
+        LEDGER_GROUP,
+    ]
+    return [*base, SESSION_GROUP] if realtime else base
 
 
 def build_session_toolset(
@@ -76,6 +87,7 @@ def build_session_toolset(
     sandbox: "Sandbox | None" = None,
     realtime_dir: Path | None = None,
     subagent_tool: "LupMcpTool | None" = None,
+    session_id: str = "",
 ) -> SessionToolset:
     """Build every MCP tool group for one session.
 
@@ -86,6 +98,12 @@ def build_session_toolset(
             Claude in-process path); subprocess paths pass a file-backed
             gate so the parent and the tool subprocess agree.
         sandbox: Session sandbox whose tools form the ``sandbox`` group.
+        session_id: What this session's runtime calls it, which the
+            coordination group falls back to when no launcher minted a
+            durable member id. Empty serves no coordination tools at all —
+            a process with no identity would either join the repository
+            roster as a new member on every call or read somebody else's
+            inbox, and neither is better than having no verbs.
         realtime_dir: Relay mailbox directory; presence adds the
             ``session`` group (persistent-mode tools), wired with a
             file-backed reflection gate so this domain keeps its
@@ -95,6 +113,11 @@ def build_session_toolset(
     Returns:
         The groups plus the shared reflection gate.
     """
+    from lup.coordination.identity import member_ref, session_member_id
+    from lup.coordination.peer_tools import create_peer_tools
+    from lup.coordination.repository import RepositoryPeers
+    from lup.ledger.tools import create_ledger_tools
+    from lup_template.kinds import EDGE_KINDS, NODE_KINDS, PLACEMENT
     from lup.tools.lsp.tools import create_codeintel_tools
     from lup.workspace.paths import project_root
     from lup_template.agent.config import aux_model
@@ -131,6 +154,22 @@ def build_session_toolset(
         meta_flag = RealtimeMailbox(realtime_dir).meta_flag_path
         groups[SESSION_GROUP] = create_realtime_relay_tools(
             realtime_dir, gate=ReflectionGate(flag_path=meta_flag)
+        )
+
+    member = session_member_id(session_id)
+    if member:
+        # The worktree is passed rather than looked up inside the tools,
+        # because it is what puts this session on the roster: a peer reading
+        # the listing is choosing between checkouts as much as between names.
+        working = project_root()
+        groups[COORDINATION_GROUP] = create_peer_tools(
+            RepositoryPeers(working), member, working
+        )
+        # The same identity stamps what this session records, and for the
+        # same reason the group waits on one: a record with no author is
+        # provenance nobody can read, which is worse than no record.
+        groups[LEDGER_GROUP] = create_ledger_tools(
+            working, member_ref(member), NODE_KINDS, EDGE_KINDS, PLACEMENT
         )
 
     groups[EXAMPLE_GROUP] = list(EXAMPLE_TOOLS)

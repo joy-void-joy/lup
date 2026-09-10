@@ -40,10 +40,22 @@ parser = MarkdownIt()
 
 
 class ContentSafetyConfig(BaseModel):
-    """Where spilled content lands, and the sizes that trigger a spill."""
+    """Where spilled content lands, and the sizes that trigger a spill.
+
+    ``spill_threshold`` is set against what the runtime on the other side
+    of the tool boundary will accept. The CLI caps an MCP result at
+    ``MAX_MCP_OUTPUT_TOKENS`` (25,000 by default) and estimates a payload at
+    four characters per token, so it inlines anything under half the cap
+    without asking, counts anything above it against a real tokenizer, and
+    writes what genuinely exceeds the cap to a path of its own choosing —
+    one an adopter's own permission policy has no reason to have granted.
+
+    Spilling below that boundary is what keeps the choice of where the
+    content lands here rather than there.
+    """
 
     directory: Path
-    spill_threshold: int = 150_000
+    spill_threshold: int = 50_000
     max_readable_size: int = 180_000
     preview_chars: int = 500
     label_fields: list[str] = [
@@ -232,6 +244,13 @@ def spill_oversized_result[T: BaseModel](
 
     Returns the model unchanged when nothing is over the threshold, so a
     caller can apply this to every result without paying for a copy.
+
+    Only top-level strings can be spilled: a pointer is a string, so there
+    is nowhere to put one on a model whose weight is a list of records. A
+    result that is over the threshold with nothing spillable is reported
+    rather than passed on silently, because the tool that owns it is the
+    only thing that can bound it — and it will otherwise learn only from
+    the runtime writing the payload somewhere it cannot read.
     """
     config = resolve_state()
 
@@ -251,6 +270,16 @@ def spill_oversized_result[T: BaseModel](
     pointers = {field.name: field.pointer for field in spilled()}
 
     if not pointers:
+        served = len(result.model_dump_json())
+        if served > config.spill_threshold:
+            logger.warning(
+                "%s returned %d characters with no spillable field (label=%s). "
+                "Its weight is in nested collections, which a pointer cannot "
+                "replace — bound the payload in the tool.",
+                tool_name,
+                served,
+                label,
+            )
         return result
 
     logger.info(

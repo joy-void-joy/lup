@@ -26,7 +26,9 @@ from lup.policy.kernel.edit import (
     dict_get_sites,
     empty_collection_exempt_lines,
     lines_of,
+    masked_typescript_lines,
     slice_exempt_lines,
+    typescript_comment_columns,
 )
 from lup.policy.kernel.rows import AntiPatternRow
 from lup.policy.rules import antipattern_row
@@ -109,6 +111,7 @@ def test_the_hook_refuses_a_directive_the_audit_would_refuse(rule_id: str) -> No
         else f"{matching}  # lup: ignore[{rule_id}]\n",
         rows,
         python_source=suffix == ".py",
+        typescript_source=suffix == ".ts",
     )
 
     assert decision is not None
@@ -236,6 +239,69 @@ def test_a_marker_added_where_the_edit_removed_none_still_asks() -> None:
 
     assert decision is not None
     assert decision.effect == "ask"
+
+
+def test_taking_a_directive_away_is_denied_while_its_violation_stands() -> None:
+    """The added-line scan is blind to a violation the edit does not retype.
+
+    Removing a directive adds no line, so the line it was covering is
+    byte-identical across the edit and every scan keyed on added lines misses
+    it. The write landed clean and `dev check` then reported the rule missing
+    — the gate and the audit disagreeing about the same file, which is the one
+    outcome this pair exists to rule out.
+    """
+    decision = antipattern_decision(
+        "value: Any = 1  # lup: ignore[any-type]\n",
+        "value: Any = 1\n",
+        suppression_rows(),
+        python_source=True,
+    )
+
+    assert decision is not None
+    assert decision.effect == "deny"
+    assert "any-type" in decision.reason
+
+
+def test_a_directive_taken_off_a_line_that_stopped_tripping_is_fine() -> None:
+    """Clearing the violation is the other half of the fix, and costs nothing.
+
+    The denial names two remedies and this is the second: the directive goes
+    because what it was silencing went with it. Denying here would demand a
+    marker guarding nothing, which the spurious refusal then takes back out.
+    """
+    decision = antipattern_decision(
+        "value: Any = 1  # lup: ignore[any-type]\n",
+        "value: int = 1\n",
+        suppression_rows(),
+        python_source=True,
+    )
+
+    assert decision is None or decision.effect != "deny"
+
+
+def test_debt_the_edit_did_not_uncover_is_left_to_the_audit() -> None:
+    """A rescan sees lines the edit never proposed, so it is scoped to two.
+
+    Only rules a withdrawn directive named, and within those only the lines
+    that directive was covering. The second line here trips the same rule and
+    was never suppressed, so it is the file's standing debt rather than
+    anything this edit did — charging it to whoever next touches the file
+    would make the gate impossible to get past without unrelated repairs.
+    """
+    before = (
+        "first: Any = 1  # lup: ignore[any-type]\n"
+        "second: Any = 2\n"
+        "third: Any = 3  # lup: ignore[any-type]\n"
+    )
+    after = "first: Any = 1  # lup: ignore[any-type]\nsecond: Any = 2\nthird: Any = 3\n"
+
+    decision = antipattern_decision(
+        before, after, suppression_rows(), python_source=True
+    )
+
+    assert decision is not None
+    assert decision.effect == "deny"
+    assert "line 3" in decision.reason
 
 
 def test_rule_ids_are_unique_kebab_case() -> None:
@@ -881,13 +947,13 @@ def test_audit_flags_ts_additions() -> None:
         "let cb: Function;\n",
         "console.log('debug');\n",
     ):
-        findings = audit_text(line, TS_ANTI_PATTERNS)
+        findings = audit_text(line, TS_ANTI_PATTERNS, typescript=True)
         assert [f.kind for f in findings] == ["missing"], line
 
 
 def test_audit_accepts_strict_equality_and_typed_ts() -> None:
     clean = "const ok = a !== b;\nconst v: string = name;\n"
-    assert audit_text(clean, TS_ANTI_PATTERNS) == []
+    assert audit_text(clean, TS_ANTI_PATTERNS, typescript=True) == []
 
 
 def test_audit_flags_string_keyed_mapping_with_scalar_value() -> None:
@@ -1282,22 +1348,27 @@ EXAMPLE_CASES = [
 def hook_denies(rule: AntiPattern, code: str, python: bool) -> bool:
     """Whether the edit hook refuses this snippet over this one rule.
 
-    ``refuted={}`` says a checker ran and took nothing back, which is what
-    separates the two answers a resolution-required rule can give: without it
-    the gate asks rather than denying, and every `dict-get` example would
-    read the same whatever its receiver was.
+    An empty resolution says a checker ran and took nothing back, which is
+    what separates the two answers a resolution-required rule can give:
+    without it the gate asks rather than denying, and every `dict-get`
+    example would read the same whatever its receiver was.
     """
     decision = antipattern_decision(
-        None, f"{code}\n", [antipattern_row(rule)], python, refuted={}
+        None,
+        f"{code}\n",
+        [antipattern_row(rule)],
+        python,
+        resolution={"refuted": {}, "unresolved": {}},
+        typescript_source=not python,
     )
     return decision is not None and decision.effect == "deny"
 
 
-def audit_reports(rule: AntiPattern, code: str) -> list[str]:
+def audit_reports(rule: AntiPattern, code: str, python: bool) -> list[str]:
     """The rule ids the whole-file audit reports as unguarded in this snippet."""
     return [
         finding.rule_id
-        for finding in audit_text(f"{code}\n", [rule])
+        for finding in audit_text(f"{code}\n", [rule], typescript=not python)
         if finding.kind == "missing"
     ]
 
@@ -1318,7 +1389,7 @@ def test_each_rule_answers_its_own_examples(
     the hook side is asserted here and `test_grammar` carries the resolution.
     """
     denied = hook_denies(rule, example.code, python)
-    reported = audit_reports(rule, example.code)
+    reported = audit_reports(rule, example.code, python)
 
     match example.verdict:
         case "flagged" | "refuted":
@@ -1365,3 +1436,113 @@ def test_a_rule_stating_only_what_it_catches_does_not_import() -> None:
             examples=[RuleExample(code="nope = 1", verdict="flagged")],
             message="states only what it catches",
         )
+
+
+TYPESCRIPT_PROSE = [
+    "/** Whether a node answers a search: any of its readable fields carries the words. */",
+    "// TODO: any of these",
+    'let a: string = ": any";',
+    "const s = `: any ${x}`;",
+    "const re = /: any/; const ok = 1;",
+    "/* block\n : any\n */ const w = 1;",
+    "// the cast read `raw as any` before the guard existed",
+    'const note = "a <any> cast hides the shape";',
+]
+"""TypeScript whose only `any` sits in prose: a comment, a string, a regex."""
+
+TYPESCRIPT_TYPE_POSITIONS = {
+    "const x: any = 1;": "any-annotation",
+    "function load(payload: any) {}": "any-annotation",
+    "const y = foo as any;": "as-any",
+    "const z = <any>raw;": "any-assertion",
+    "const s = `it's ${x as any}`;": "as-any",
+}
+"""The same words in a type position, and the rule each trips."""
+
+
+def typescript_verdict(text: str) -> str | None:
+    """The hook's effect on one TypeScript file the edit would create."""
+    decision = antipattern_decision(
+        None,
+        f"{text}\n",
+        lib_rows(TS_ANTI_PATTERNS),
+        python_source=False,
+        typescript_source=True,
+    )
+    return None if decision is None else decision.effect
+
+
+@pytest.mark.parametrize("line", TYPESCRIPT_PROSE)
+def test_typescript_prose_is_never_a_type_position(line: str) -> None:
+    """`: any`, `as any` and `<any>` inside a comment, a string or a regex trip nothing.
+
+    Issue #458: a JSDoc line reading `: any of its readable fields` was
+    refused as an annotation. Both gates read the family through one mask,
+    so the hook and the audit are asserted together.
+    """
+    assert typescript_verdict(line) is None
+    assert audit_text(f"{line}\n", TS_ANTI_PATTERNS, typescript=True) == []
+
+
+@pytest.mark.parametrize(("line", "rule_id"), sorted(TYPESCRIPT_TYPE_POSITIONS.items()))
+def test_typescript_type_positions_are_still_refused(line: str, rule_id: str) -> None:
+    """Masking prose takes nothing from the rules, a template hole included."""
+    assert typescript_verdict(line) == "deny"
+    findings = audit_text(f"{line}\n", TS_ANTI_PATTERNS, typescript=True)
+    assert [(finding.kind, finding.rule_id) for finding in findings] == [
+        ("missing", rule_id)
+    ]
+
+
+def test_the_audit_reads_a_typescript_directive_where_its_comment_opens() -> None:
+    """A `// lup: ignore` guards the line it ends; one quoted in a string guards nothing.
+
+    The audit asks the family's own comment map where a directive may stand,
+    as it asks the Python tokenizer for `#` — a map answered from `#` columns
+    reported every TypeScript directive missing.
+    """
+    guarded = "const x: any = 1; // lup: ignore[any-annotation]\n"
+    quoted = 'const x: any = "// lup: ignore[any-annotation]";\n'
+
+    assert audit_text(guarded, TS_ANTI_PATTERNS, typescript=True) == []
+    findings = audit_text(quoted, TS_ANTI_PATTERNS, typescript=True)
+    assert [(finding.kind, finding.rule_id) for finding in findings] == [
+        ("missing", "any-annotation")
+    ]
+
+
+def test_typescript_masking_keeps_every_line_and_column() -> None:
+    """Blanking prose moves nothing: a hit's line and a directive's column stay true.
+
+    Each shape the scan tells apart is here once: a block comment across
+    lines, a template with a nested template in its hole, a division beside
+    a regex literal holding quotes and a slash, and a quote left open, which
+    costs its own line and no more.
+    """
+    source = (
+        "/* block\n"
+        "   : any spans\n"
+        "   lines */ const w = <any>raw; // lup: ignore[any-assertion]\n"
+        "const s = `it's ${x as any} and ${`nested ${y}`} : any`;\n"
+        "const d = total / count; const re = /[/\"']: any/g; const q: any = 1;\n"
+        "const url = 'unterminated\n"
+        "const t: any = 2;\n"
+    )
+
+    code = masked_typescript_lines(source, comments=True)
+    commented = masked_typescript_lines(source, comments=False)
+
+    assert [len(line) for line in code] == [len(line) for line in source.splitlines()]
+    assert code[:3] == [
+        "        ",
+        "              ",
+        "            const w = <any>raw;                              ",
+    ]
+    assert commented[:3] == source.splitlines()[:3]
+    assert code[3] == "const s = `     ${x as any}     ${`       ${y} }       ;"
+    assert (
+        code[4]
+        == "const d = total / count; const re = /            ; const q: any = 1;"
+    )
+    assert code[5:] == ["const url = '            ", "const t: any = 2;"]
+    assert typescript_comment_columns(source) == {1: 0, 3: 32}

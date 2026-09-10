@@ -20,6 +20,7 @@ import pytest
 
 from lup.devtools.harness import launch
 from lup.devtools.harness.launch import (
+    LaunchSandbox,
     apply_sandbox_environment,
     claude_sandbox_arguments,
     codex_sandbox_arguments,
@@ -83,7 +84,11 @@ def test_a_contained_launch_probes_nothing_and_claims_nothing() -> None:
     )
 
     apply_sandbox_environment(
-        confining_plugin(), environment, "claude", [refuses], contained=True
+        confining_plugin(),
+        environment,
+        "claude",
+        [refuses],
+        sandbox=LaunchSandbox.OUTER,
     )
 
     assert "LUP_SANDBOX_ACTIVE" not in environment
@@ -107,7 +112,11 @@ def test_an_uncontained_launch_vouches_for_a_boundary_that_answers() -> None:
     )
 
     apply_sandbox_environment(
-        confining_plugin(), environment, "claude", [answers], contained=False
+        confining_plugin(),
+        environment,
+        "claude",
+        [answers],
+        sandbox=LaunchSandbox.INNER,
     )
 
     assert environment["LUP_SANDBOX_ACTIVE"] == "1"
@@ -124,7 +133,11 @@ def test_an_uncontained_launch_still_refuses_to_vouch_for_a_broken_tool() -> Non
     )
 
     apply_sandbox_environment(
-        confining_plugin(), environment, "claude", [refuses], contained=False
+        confining_plugin(),
+        environment,
+        "claude",
+        [refuses],
+        sandbox=LaunchSandbox.INNER,
     )
 
     assert "LUP_SANDBOX_ACTIVE" not in environment
@@ -137,7 +150,9 @@ def test_a_contained_claude_session_turns_its_own_sandbox_off() -> None:
     right answer for the uncontained launch the same file serves. Which one
     this launch is, is the launch's to say.
     """
-    arguments = claude_sandbox_arguments(confining_plugin(), contained=True)
+    arguments = claude_sandbox_arguments(
+        confining_plugin(), sandbox=LaunchSandbox.OUTER
+    )
 
     assert arguments[0] == "--settings"
     assert '"enabled": false' in arguments[1]
@@ -155,10 +170,33 @@ def test_a_contained_codex_session_keeps_the_route_to_its_proxy() -> None:
     environment: EnvVars = {}
 
     arguments = codex_sandbox_arguments(
-        confining_plugin(), environment, [], contained=True
+        confining_plugin(), environment, [], sandbox=LaunchSandbox.OUTER
     )
 
     assert arguments == ["--sandbox", "danger-full-access"]
+    assert "LUP_SANDBOX_ACTIVE" not in environment
+
+
+def test_a_launch_choosing_no_sandbox_stands_both_walls_down_and_vouches_nothing() -> (
+    None
+):
+    """`--sandbox none` is the degraded posture stated rather than assumed.
+
+    Both runtimes spell their own sandbox off, exactly as a contained launch
+    does, and neither exports LUP_SANDBOX_ACTIVE -- so the deny lattice stays
+    standing and every unjudged command keeps its escalation recipe. What
+    used to be reachable only as a broken inner sandbox is a choice with a
+    name, and the name buys the strict judgment on purpose.
+    """
+    environment: EnvVars = {}
+
+    claude = claude_sandbox_arguments(confining_plugin(), sandbox=LaunchSandbox.NONE)
+    codex = codex_sandbox_arguments(
+        confining_plugin(), environment, [], sandbox=LaunchSandbox.NONE
+    )
+
+    assert claude == CLAUDE_CONFINEMENT.off
+    assert codex == CODEX_CONFINEMENT.off
     assert "LUP_SANDBOX_ACTIVE" not in environment
 
 
@@ -185,7 +223,7 @@ def test_neither_runtime_vouches_for_a_boundary_it_did_not_exercise(
     )
 
     arguments = codex_sandbox_arguments(
-        confining_plugin(), environment, [], contained=False
+        confining_plugin(), environment, [], sandbox=LaunchSandbox.INNER
     )
 
     assert "LUP_SANDBOX_ACTIVE" not in environment
@@ -210,7 +248,9 @@ def test_an_envelope_that_answers_is_vouched_for(
         ),
     )
 
-    codex_sandbox_arguments(confining_plugin(), environment, [], contained=False)
+    codex_sandbox_arguments(
+        confining_plugin(), environment, [], sandbox=LaunchSandbox.INNER
+    )
 
     assert environment["LUP_SANDBOX_ACTIVE"] == "1"
 
@@ -300,15 +340,25 @@ def test_an_image_no_longer_installs_a_sandbox_it_cannot_start() -> None:
 def test_the_image_carries_every_runtime_a_contained_launch_can_open() -> None:
     """A contained launch runs `<cli>` inside the container, so it has to be there.
 
-    While the install was one hardcoded line naming Claude, `harness codex`
-    without `--unsandboxed` built the image, started the egress proxy, wrote
+    While the install was one hardcoded line naming Claude, a contained
+    `harness codex` built the image, started the egress proxy, wrote
     the boundary record, and then failed on `codex: not found` -- every
     expensive step taken before the cheap one that could not work.
     """
     installed = " ".join(item.requested() for item in Image().agent_clis)
 
-    assert "@anthropic-ai/claude-code@" in installed
-    assert "@openai/codex@" in installed
+    assert "@anthropic-ai/claude-code" in installed
+    assert "@openai/codex" in installed
+
+
+def test_the_declared_runtimes_leave_their_version_to_the_launch() -> None:
+    """An empty version is a per-launch resolution, not a declaration.
+
+    The launch pins each one to the registry's current release before
+    rendering, so the pin lives in the rendered Dockerfile rather than
+    here -- a version declared here would freeze it instead.
+    """
+    assert all(not item.version for item in Image().agent_clis)
 
 
 def test_a_client_and_the_engine_behind_it_are_read_separately() -> None:
@@ -329,11 +379,13 @@ def test_each_runtime_stands_down_by_one_declaration_rather_than_two() -> None:
     environment: EnvVars = {}
 
     assert (
-        claude_sandbox_arguments(confining_plugin(), contained=True)
+        claude_sandbox_arguments(confining_plugin(), sandbox=LaunchSandbox.OUTER)
         == CLAUDE_CONFINEMENT.off
     )
     assert (
-        codex_sandbox_arguments(confining_plugin(), environment, [], contained=True)
+        codex_sandbox_arguments(
+            confining_plugin(), environment, [], sandbox=LaunchSandbox.OUTER
+        )
         == CODEX_CONFINEMENT.off
     )
 

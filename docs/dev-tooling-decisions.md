@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.decisions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup_template.harness.content.docs.decisions by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Development-tooling decisions
 
@@ -196,8 +196,8 @@ verbatim, so rewording a comment in one of them drifted both without
 changing anything either does — and a path pattern deciding when to check is
 one more belief that can be wrong about which commits matter.
 
-Decision: A git `pre-commit` hook, written by `dev git-hooks install` and
-armed by `dev worktree create`, whose body is `harness check all`. The
+Decision: A git `pre-commit` hook, written by `git hooks install` and
+armed by `git worktree create`, whose body is `harness check all`. The
 pipeline runs that same command as its own step, spelled from the same
 constant, and `dev check` reads the same `DriftVerdict` that command reads.
 The `pre-commit` framework config is dropped: it named a framework nothing
@@ -269,7 +269,7 @@ roster resolves last-declaration-wins.
 
 ## ADR-016: Hold a scaffold to a share of the guidance budget it passes on
 
-Context: the always-loaded guidance is checked against `GUIDANCE_BYTE_BUDGET`,
+Context: the always-loaded guidance is checked against `GuidanceBudget.ceiling`,
 which mirrors a runtime's own `project_doc_max_bytes` — exceed it and nothing
 reports an error, the document is silently truncated. That number is right for
 every project and wrong for one: a repository still shipping as the template
@@ -281,8 +281,8 @@ gate could see the problem, because at the only ceiling anyone had declared
 the document was passing.
 
 Decision: while `[tool.lup] template = true`, a second and stricter row —
-`scaffold budget` — holds guidance to `GUIDANCE_BYTE_BUDGET` less
-`TEMPLATE_GUIDANCE_HEADROOM`, 11.5 KiB withheld for the adopter. Its own row
+`scaffold budget` — holds guidance to `GuidanceBudget.scaffold_ceiling`, the
+ceiling less 11.5 KiB withheld for the adopter. Its own row
 rather than a stricter number in the existing one, because the two answer
 different questions of the same byte count: whether a runtime will truncate
 this tree, true of every project, and whether a scaffold is spending for a

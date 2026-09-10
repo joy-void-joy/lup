@@ -7,7 +7,10 @@ the harness invokes it.
 """
 
 import importlib.util
+import io
 import json
+import shlex
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -19,7 +22,7 @@ from lup.policy.grants import allowance_grants_environment, write_allowance_gran
 from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.types import EnvVars, JsonObject
-from lup_template.devtools.harness.catalog import declared_hook_set
+from lup_template.harness.catalog import declared_hook_set
 from tests.unit.repos import commit_file, initialized_repo
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
@@ -355,6 +358,75 @@ def test_a_sibling_worktree_of_this_repository_is_not_foreign() -> None:
     assert effect == "deny"
 
 
+NOTE_SITE = "packages/lup/src/lup/devtools/dev/antipatterns.py"
+"""A production file of this repository carrying one unique preimage."""
+
+NOTE_PREIMAGE = "from lup.policy.kernel.roles import path_role"
+
+ADDED_NOTE = "# lup: write down what this leaves open"
+"""The note these cases put to the gate.
+
+A string literal rather than a comment, which is what keeps it a subject
+under test instead of an open note this file owes work on.
+"""
+
+
+def note_verdict(path: str, cwd: Path) -> tuple[str, str]:
+    """One edit that leaves a review note on *path*, judged from a session cwd."""
+    payload = {
+        **edit_payload(path, NOTE_PREIMAGE, f"{NOTE_PREIMAGE}\n{ADDED_NOTE}", False),
+        "cwd": str(cwd),
+    }
+    specific = decide_from(payload, cwd)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    return str(specific["permissionDecision"]), str(
+        specific["permissionDecisionReason"]
+    )
+
+
+@pytest.fixture
+def unversioned_directory(tmp_path: Path) -> Path:
+    """A tree belonging to no repository at all, holding one ordinary file."""
+    work = tmp_path / "notes"
+    work.mkdir()
+    (work / "scratch.py").write_text(f"{NOTE_PREIMAGE}\n", encoding="utf-8")
+    return work
+
+
+def test_a_note_written_outside_every_repository_is_not_this_projects_feedback(
+    unversioned_directory: Path,
+) -> None:
+    """A `# lup:` marker is this project's review instrument, not a syntax.
+
+    Nothing of ours walks a tree outside the repository — `dev check` and
+    `dev comments` read this checkout — so a note left there has no reader to
+    protect and no pass that could ever check a claim against it. Judging it
+    means an agent cannot write down a probe *of* this policy anywhere the
+    policy is not, which is the one place such a probe belongs.
+    """
+    effect, reason = note_verdict(str(unversioned_directory / "scratch.py"), Path.cwd())
+
+    assert effect == "allow"
+    assert "feedback" not in reason
+
+
+def test_a_note_in_this_repositorys_own_file_is_judged_however_it_is_spelled() -> None:
+    """The half that must not move, in both spellings a session sends.
+
+    A session names files absolutely and a shell command names them relative
+    to where it runs, and the same file has to answer the same way through
+    either — otherwise the scoping above is an evasion: address a governed
+    file by the spelling that misses, and the gate goes quiet on this
+    repository's own code.
+    """
+    absolute = note_verdict(str(Path.cwd().resolve() / NOTE_SITE), Path.cwd())
+    relative = note_verdict(NOTE_SITE, Path.cwd())
+
+    assert absolute == relative
+    assert absolute[0] == "ask"
+    assert "inline review feedback" in absolute[1]
+
+
 def undo_refs(work: Path) -> list[str]:
     """Every snapshot this checkout holds, read the way a human would find them."""
     return [
@@ -406,21 +478,21 @@ def test_a_command_that_could_destroy_work_is_snapshotted_first(
     assert undo_refs(delete_repo) == ["lup undo: rm untracked.py"]
 
 
-def test_a_question_a_capture_cannot_settle_still_says_it_was_taken(
+def test_a_question_a_capture_cannot_settle_stays_silent_about_it(
     delete_repo: Path,
 ) -> None:
-    """The one moment the information changes an answer.
+    """The question asks its question; the snapshot is looked up, not narrated.
 
-    A person deciding whether to permit something destructive is weighing
-    exactly whether it can be undone, so a question that survives the
-    capture carries the ref. A permitted command stays silent, because a
-    line appended to every mutating command is one nobody reads by the
-    third time — and where the capture settled the question there is no
-    longer anybody being asked.
+    A ref appended to every approval prompt is a line nobody reads by the
+    third time, in the one place reading matters — and `dev undo` is where a
+    snapshot is looked for anyway. So the question carries only its reason,
+    while the capture it stays silent about is still on disk for the moment
+    somebody reaches for it.
     """
     _effect, reason = snapshotting_effect("git clean -fdx", delete_repo)
 
-    assert "snapshotted" in reason and "refs/lup/undo/" in reason
+    assert "snapshotted" not in reason and "refs/lup/undo/" not in reason
+    assert undo_refs(delete_repo) == ["lup undo: git clean -fdx"]
 
 
 def test_a_command_whose_writes_are_not_in_its_argv_is_snapshotted(
@@ -493,18 +565,22 @@ def test_removing_an_untracked_file_still_asks(delete_repo: Path) -> None:
     assert effect == "ask"
 
 
-def test_removing_a_directory_asks_and_names_the_way_through(
+def test_removing_a_directory_asks_where_no_capture_covers_it(
     delete_repo: Path,
 ) -> None:
     """Nothing in the command bounds what a directory holds, however clean.
 
-    The refusal has to say what is open instead, or the agent reads a delete
-    it expected to pass as an unexplained wall.
+    A question rather than a wall, and worded as one. The earlier text said
+    the operation "is never granted" and offered approval in the same
+    sentence, which reads as a refusal and was worked around as one — so the
+    assertion is that the reason states what is being asked rather than
+    announcing an outcome nobody can reach.
     """
     effect, reason = effect_from("rm -rf src", delete_repo)
 
     assert effect == "ask"
-    assert "name the files instead" in reason
+    assert "requires approval" in reason
+    assert "never granted" not in reason
 
 
 def test_a_build_product_is_disposable_wherever_it_sits(delete_repo: Path) -> None:
@@ -810,12 +886,132 @@ def dispatcher_rewrite(
         dispatcher.KernelDecision("allow", "placed", placement),
         {"tool_name": "Bash", "tool_input": call},
         None,
+        "",
     )
     specific = answer["hookSpecificOutput"]
     assert isinstance(specific, dict)
     rewritten = specific["updatedInput"] if "updatedInput" in specific else None
     assert rewritten is None or isinstance(rewritten, dict)
     return rewritten
+
+
+@pytest.mark.parametrize(
+    "findings",
+    [
+        [],
+        [
+            'evidence.py:188: error: "EVIDENCE_REFRESHED" is not defined',
+            'evidence.py:211: error: Argument missing for parameter "refreshed"',
+        ],
+    ],
+)
+def test_post_tool_findings_are_feedback_without_a_process_error(
+    findings: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    dispatcher = bundled_dispatcher()
+    payload = {"hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": {}}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr(dispatcher, "observe", lambda _payload: findings)
+    monkeypatch.setattr(dispatcher, "plugin_data_root", lambda: tmp_path)
+
+    dispatcher.main()
+
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert json.loads(output.out) == (
+        {"decision": "block", "reason": "\n".join(findings)} if findings else {}
+    )
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "hook-events.jsonl").read_text().splitlines()
+    ]
+    assert events[-1]["phase"] == "completed"
+
+
+def test_a_failed_post_tool_check_does_not_request_permission_for_the_edit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    def failed_check(_payload: object) -> list[str]:
+        raise ValueError("checker output has no range")
+
+    dispatcher = bundled_dispatcher()
+    payload = {"hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": {}}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr(dispatcher, "observe", failed_check)
+    monkeypatch.setattr(dispatcher, "plugin_data_root", lambda: tmp_path)
+
+    dispatcher.main()
+
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert json.loads(output.out) == {
+        "decision": "block",
+        "reason": "Lup post-tool check failed: checker output has no range",
+    }
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "hook-events.jsonl").read_text().splitlines()
+    ]
+    assert events[-1]["phase"] == "failed"
+
+
+def test_registered_post_tool_command_reports_the_edited_file(tmp_path: Path) -> None:
+    work = tmp_path / "repo"
+    initialized_repo(work, tmp_path / "no-hooks")
+    edited = work / "evidence.py"
+    edited.write_text("value = missing\n", encoding="utf-8")
+    diagnostics = {
+        "generalDiagnostics": [
+            {
+                "file": str(edited),
+                "severity": "error",
+                "range": {"start": {"line": 0}},
+                "message": '"missing" is not defined',
+            }
+        ]
+    }
+    binaries = work / ".venv" / "bin"
+    binaries.mkdir(parents=True)
+    declaration = declared_hook_set()
+    for command, report in (
+        (declaration.diagnostics_command, diagnostics),
+        (declaration.repair_command, {"repaired": []}),
+    ):
+        program = binaries / command[0]
+        program.write_text(
+            f"#!/bin/sh\nprintf '%s\\n' {shlex.quote(json.dumps(report))}\n",
+            encoding="utf-8",
+        )
+        program.chmod(0o755)
+    plugin = Path(".claude/plugins/lup").resolve()
+    config = json.loads((plugin / "hooks" / "hooks.json").read_text())
+    command = config["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+
+    done = sh.Command("sh")(
+        "-c",
+        command,
+        _in=json.dumps(
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(edited)},
+            }
+        ),
+        _env={"PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": str(plugin)},
+        _return_cmd=True,
+    )
+
+    assert done.exit_code == 0
+    assert done.stderr == b""
+    assert json.loads(done.stdout) == {
+        "decision": "block",
+        "reason": 'evidence.py:1: error: "missing" is not defined',
+    }
 
 
 def spent_call(spent: bool) -> JsonObject:
@@ -1012,3 +1208,44 @@ def test_a_container_whose_placement_went_unmeasured_still_asks(
     unmeasured = {**CONTAINED_LEDGER, "delivered": ["question_relay"]}
 
     assert unjudged_effect_under(unmeasured, tmp_path, monkeypatch) == "ask"
+
+
+def created(path: str, content: str) -> JsonObject:
+    return {"tool_name": "Write", "tool_input": {"file_path": path, "content": content}}
+
+
+def test_a_write_announces_what_its_own_prompt_will_not_show() -> None:
+    """This runtime's create-file dialog takes nothing from a hook.
+
+    Measured: a `Write` ask renders as that dialog's own path, preview and two
+    answers, and the reason handed alongside it is dropped — where the same
+    field is shown for a shell command. So a verdict that enumerated something
+    the approver cannot otherwise see says it through the one field this
+    runtime displays to a person from every hook.
+    """
+    carrying = "value: Any = 1  # lup: ignore[any-type]\n"
+    decision = decide(created("src/lup_template/zz_probe.py", carrying))
+    announcement = decision["systemMessage"]
+
+    assert isinstance(announcement, str)
+    assert "arrives carrying antipattern suppressions" in announcement
+    assert "line 1 silences any-type" in announcement
+
+
+def test_a_reason_naming_only_its_category_announces_nothing() -> None:
+    """The dialog already shows the file and its content.
+
+    Repeating that a whole file is being written adds a line telling the
+    reader what they are looking at, which is how a channel that exists to
+    carry evidence becomes one nobody reads.
+    """
+    decision = decide(created("src/lup_template/zz_plain.py", "value = 1\n"))
+
+    assert "systemMessage" not in decision
+
+
+def test_a_shell_prompt_is_not_told_twice() -> None:
+    """A command's prompt renders the reason itself, so announcing it repeats it."""
+    decision = decide({"tool_name": "Bash", "tool_input": {"command": "rm -rf src"}})
+
+    assert "systemMessage" not in decision

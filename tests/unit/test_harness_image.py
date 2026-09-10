@@ -8,7 +8,13 @@ the broken version too.
 
 from pathlib import Path
 
-from lup.harness.image import Docker, Image, Podman, detected_client
+from lup.harness.image import (
+    Docker,
+    Image,
+    Podman,
+    detected_client,
+    stream_arguments,
+)
 from lup.harness.requirements import Manifest, Package, Requirement, Run
 from lup.harness.requirements import LostCapability
 
@@ -64,6 +70,42 @@ def test_a_registry_package_carries_its_pinned_version_into_the_install() -> Non
     assert "bun add -g typescript@6.0.3" in rendered
 
 
+def test_declared_tooling_reaches_the_layer_its_manager_installs() -> None:
+    """The third door a package gets into an image through.
+
+    `baseline` is the library's answer to what a shell needs, and a
+    requirement is what a capability asked for and something exercises.
+    Neither has room for a program this project's own work shells out to, and
+    a declaration that did not reach the layer would be a field that reads
+    like a decision and installs nothing.
+    """
+    rendered = Image(
+        tooling=[
+            Package(name="poppler"),
+            Package(name="prettier", manager="bun", version="3.4.2"),
+        ]
+    ).dockerfile(Manifest())
+
+    assert "poppler" in rendered
+    assert "bun add -g prettier@3.4.2" in rendered
+
+
+def test_declared_tooling_is_the_images_alone_and_not_the_manifests() -> None:
+    """The two audiences a package list has, kept apart.
+
+    `Manifest.packages` feeds an image *and* answers for what a machine is
+    expected to have; merging the two produced `apt-get install -y uv` against
+    a runner that cannot satisfy it. Tooling is the image's alone, so nothing
+    reading the manifest learns a new prerequisite from it.
+    """
+    manifest = Manifest()
+
+    assert Package(name="poppler") in Image(tooling=[Package(name="poppler")]).packages(
+        manifest
+    )
+    assert Package(name="poppler") not in manifest.packages()
+
+
 def test_globally_installed_executables_are_reachable_by_directory() -> None:
     """Measured: linking the CLI by name left `tsc` installed and unreachable."""
     assert "ENV PATH=/opt/bun/bin:$PATH" in Image().dockerfile(Manifest())
@@ -79,7 +121,7 @@ def test_the_registry_root_is_reachable_by_the_user_the_session_runs_as() -> Non
     """
     rendered = Image().dockerfile(Manifest())
     assert "/root/.bun" not in rendered
-    assert "chown -R $UID:$GID /opt/lup/venv /opt/bun" in rendered
+    assert "chown -R $UID:$GID /opt/bun" in rendered
 
 
 def test_the_registry_root_is_declared_before_anything_installs_into_it() -> None:
@@ -215,6 +257,109 @@ def test_a_session_mounts_the_checkout_at_its_own_absolute_path() -> None:
     assert started[-1] == "lup-agent:x"
 
 
+def test_the_project_environment_is_keyed_per_project_rather_than_per_machine() -> None:
+    """An absolute value is one environment for every project mounted here.
+
+    Measured on uv 0.12.7: `uv sync` is exact by default, so syncing a second
+    project into a shared environment uninstalls the first and its
+    dependencies. Relative is what makes `uv` do the keying, and it has to
+    reach the container as-is -- resolved to an absolute path on the way out
+    would restore the collision while still reading as a fix.
+    """
+    image = Image()
+    assert not Path(image.project_environment).is_absolute()
+    assert image.environment()["UV_PROJECT_ENVIRONMENT"] == image.project_environment
+
+
+def test_the_build_cannot_pre_create_a_project_relative_environment() -> None:
+    """A path relative to each project root has no directory here to make.
+
+    The caches and the registry root are absolute and stay; the environment
+    leaving the `mkdir` is what forces the run to bind one instead, and a
+    `mkdir .venv-contained` in a Dockerfile would silently make one directory
+    in the build's working directory and satisfy nothing.
+    """
+    rendered = Image().dockerfile(Manifest())
+    handed = [line for line in rendered.splitlines() if "chown -R" in line]
+    assert handed, "the build hands its directories to the session's uid somewhere"
+    assert Image().project_environment not in "\n".join(handed)
+    assert "mkdir -p /opt/bun" in rendered
+
+
+def test_each_mounted_project_gets_its_own_environment_directory() -> None:
+    """One shared environment is the collision; one per root is the fix.
+
+    Two roots, two private directories, each bound at the environment's name
+    inside its own tree -- so a `uv sync` in either reaches only its own.
+    """
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={Path("/home/u/repo"): "/home/u/repo"},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        environments={
+            Path("/home/u/repo"): Path("/home/u/.cache/lup/environments/repo-aaaa"),
+            Path("/home/u/other"): Path("/home/u/.cache/lup/environments/other-bbbb"),
+        },
+    )
+    name = Image().project_environment
+    assert (
+        f"/home/u/.cache/lup/environments/repo-aaaa:/home/u/repo/{name}:rw" in started
+    )
+    assert (
+        f"/home/u/.cache/lup/environments/other-bbbb:/home/u/other/{name}:rw" in started
+    )
+
+
+def test_an_environment_mount_is_emitted_after_the_bind_it_sits_inside() -> None:
+    """The order a reader takes it in, though both engines sort by depth.
+
+    Measured on podman 6.1.0: a nested mount emitted first still wins. Pinned
+    anyway, because the day an engine applies the list in order is the day
+    the environment silently becomes the host's `.venv` again -- and nothing
+    else in a session would report it.
+    """
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={Path("/home/u/repo"): "/home/u/repo"},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        environments={Path("/home/u/repo"): Path("/held")},
+    )
+    name = Image().project_environment
+    assert started.index("/home/u/repo:/home/u/repo:rw") < started.index(
+        f"/held:/home/u/repo/{name}:rw"
+    )
+
+
+def test_a_session_without_declared_environments_binds_none() -> None:
+    """A probe and a one-off `run` pass none, and must still assemble.
+
+    The variable is still baked -- it is an image fact -- so what must be
+    absent is the mount, not the name.
+    """
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+    )
+    suffix = f"/{Image().project_environment}:rw"
+    assert not [argument for argument in started if argument.endswith(suffix)]
+
+
 def test_the_config_home_is_container_private_and_carries_across_launches() -> None:
     """A clean config home discards the workspace's declared permissions.
 
@@ -273,41 +418,13 @@ def test_the_credential_crosses_as_one_read_only_file_outside_the_config_home() 
     assert "LUP_CREDENTIAL_RENEWABLE=.a > 1" in started
 
 
-def test_the_entrypoint_seeds_a_login_only_where_none_can_still_be_renewed() -> None:
-    """Both directions have to be safe, and only this order makes them so.
-
-    Copying unconditionally would overwrite a login made inside with the
-    host's at every launch, which is the feature undone. Writing back to the
-    host's file would let a contained agent rotate the credential every host
-    session depends on. Seeding only where nothing usable sits is neither.
-
-    The seed is tested the same way as the target, which is the half a first
-    draft would leave out: copying a host login that has itself aged out
-    replaces one credential nothing will answer with another, and reports a
-    recovery that did not happen.
-    """
+def test_the_entrypoint_uses_the_fingerprinted_login_handoff() -> None:
+    """The executable handoff receives provider-owned fields and renewal test."""
     entrypoint = Image().dockerfile(Manifest())
-    assert 'cp "$seed" "$stored"' in entrypoint
-    assert 'usable "$seed" && ! usable "$stored"' in entrypoint
-    # Size rather than presence, and a removal first. Every config home that
-    # predates this holds an empty file here -- the mount point the old
-    # read-only bind needed, owned by the uid that created it -- which a
-    # presence test reads as a login and a copy cannot write through.
-    assert '[ -s "$1" ] || return 1' in entrypoint
-    assert 'rm -f "$stored"' in entrypoint
-
-
-def test_a_runtime_that_declares_no_renewal_test_keeps_the_older_rule() -> None:
-    """An unanswerable question must not read as the answer "expired".
-
-    Codex states no deadline in its stored login, so the filter is empty for
-    it -- and an empty filter reaching `jq` would evaluate to nothing and
-    condemn every login it was asked about, re-seeding a working one at every
-    launch. The guard is what keeps "cannot be asked" and "past renewing"
-    apart.
-    """
-    entrypoint = Image().dockerfile(Manifest())
-    assert '[ -n "$LUP_CREDENTIAL_RENEWABLE" ] || return 0' in entrypoint
+    assert "python3 /opt/lup/credential-seed.py" in entrypoint
+    assert '--keys "${LUP_CREDENTIAL_KEYS:-[]}"' in entrypoint
+    assert '--renewable "${LUP_CREDENTIAL_RENEWABLE:-}"' in entrypoint
+    assert "COPY <<'CREDENTIAL' /opt/lup/credential-seed.py" in entrypoint
 
 
 def test_the_entrypoint_reads_the_config_home_the_image_baked() -> None:
@@ -375,3 +492,22 @@ def test_every_baked_variable_is_a_line_the_dockerfile_parser_accepts() -> None:
         value = pair.split("=", 1)[1]
         quoted = value.startswith('"') and value.endswith('"')
         assert quoted or not any(character.isspace() for character in value), pair
+
+
+def test_a_terminal_session_takes_both_flags() -> None:
+    assert stream_arguments("terminal") == ["-it"]
+
+
+def test_a_piped_session_is_given_stdin_without_a_terminal() -> None:
+    """The state a bool had no room for, and the one a worker needs.
+
+    A worker speaks framed JSON over its stdin, so it has to be given one --
+    which `captured` does not do -- and must not be handed a terminal
+    discipline in front of that stream, which `terminal` would.
+    """
+    assert stream_arguments("piped") == ["-i"]
+
+
+def test_a_captured_session_takes_neither() -> None:
+    """`-it` against a pipe fails on the terminal it was promised."""
+    assert stream_arguments("captured") == []

@@ -17,8 +17,14 @@ from lup.harness.image import Podman
 from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
 from lup.harness.ownership import source_digest
 from lup.harness.toolchain import for_host
-from lup_template.devtools.harness.catalog import portable_harness
-from lup_template.devtools.harness.content.requirements import manifest
+from lup.policy.survey import allowed_programs
+from lup.policy.vocabulary import default_vocabulary
+from lup_template.harness.catalog import portable_harness
+from lup_template.harness.content.requirements import (
+    carried_vocabulary,
+    manifest,
+)
+from lup_template.harness.content.shell_vocabulary import SHELL_RULES
 from lup.harness.requirements import (
     Advisory,
     AnyOf,
@@ -41,12 +47,14 @@ WORKING = Run(command=["echo", "hello"])
 
 def requirement(name: str, exercise: Run | AnyOf, **rest: object) -> Requirement:
     """One requirement with the fields a test does not care about filled in."""
-    return Requirement(
-        capability=name,
-        purpose=f"whatever {name} is for",
-        exercise=exercise,
-        absence=LostCapability(capability=f"the {name} capability"),
-        **rest,  # pyright: ignore[reportArgumentType]
+    return Requirement.model_validate(
+        {
+            "capability": name,
+            "purpose": f"whatever {name} is for",
+            "exercise": exercise,
+            "absence": LostCapability(capability=f"the {name} capability"),
+            **rest,
+        }
     )
 
 
@@ -54,7 +62,7 @@ def test_a_clean_exit_proves_a_requirement() -> None:
     found = requirement("echo", WORKING).check({})
     assert found.working
     assert [(item.text, item.urgency) for item in found.notices()] == [
-        ("echo: working", "ready")
+        ("echo (host): working", "ready")
     ]
 
 
@@ -90,7 +98,8 @@ def test_a_program_that_runs_without_working_is_not_counted_as_working() -> None
     found = requirement("wrong", Run(command=["echo", "nothing"], expect="banana"))
     checked = found.check({})
     assert not checked.working
-    assert "installed without working" in checked.detail
+    assert "output did not contain 'banana'" in checked.detail
+    assert "Output: 'nothing'" in checked.detail
 
 
 def test_any_of_takes_the_first_spelling_that_works() -> None:
@@ -147,6 +156,14 @@ def test_an_environment_redirect_is_silent_when_the_target_is_there() -> None:
     outcome = ExerciseOutcome(proved=False, detail="cannot connect")
     assert redirect.cause({"DOCKER_HOST": "unix:///"}, outcome) == ""
     assert redirect.cause({}, outcome) == ""
+
+
+def test_a_remote_endpoint_is_not_diagnosed_as_a_missing_local_socket() -> None:
+    redirect = EnvironmentRedirect(variable="DOCKER_HOST")
+    outcome = ExerciseOutcome(proved=False, detail="connection failed")
+    assert (
+        redirect.cause({"DOCKER_HOST": "tcp://container.example:2376"}, outcome) == ""
+    )
 
 
 def test_a_group_diagnosis_stays_quiet_about_a_failure_it_cannot_explain() -> None:
@@ -252,7 +269,7 @@ def test_a_failing_finding_says_what_was_lost_and_what_needed_it() -> None:
     lines = requirement("clipboard", Run(command=["lup-no-such-program"])).check({})
     rendered = "\n".join(item.text for item in lines.notices())
     assert "the clipboard capability is unavailable" in rendered
-    assert "needed for whatever clipboard is for" in rendered
+    assert "clipboard (host): check failed" in rendered
 
 
 def test_a_container_that_never_started_is_not_read_as_an_absent_capability() -> None:
@@ -272,9 +289,9 @@ def test_a_container_that_never_started_is_not_read_as_an_absent_capability() ->
     assert not found.working
     assert not found.exercised
     rendered = "\n".join(item.text for item in found.notices())
-    assert "proxy: not established" in rendered
+    assert "proxy (host): check could not run" in rendered
     assert "the proxy capability is unavailable" not in rendered
-    assert "nothing here is a verdict on whatever proxy is for" in rendered
+    assert "Result unknown" in rendered
 
 
 def test_a_probe_that_ran_and_failed_is_still_the_capabilitys_own_answer() -> None:
@@ -310,7 +327,7 @@ def test_the_declared_manifest_names_only_programs_this_project_invokes() -> Non
     an ordinary edit, while the roster staying small stays deliberate: an
     earlier draft declared ripgrep, which this project never invokes.
     """
-    from lup_template.devtools.harness.content.requirements import manifest
+    from lup_template.harness.content.requirements import manifest
 
     MANIFEST = manifest()
 
@@ -354,7 +371,7 @@ def test_every_offered_requirement_lets_a_project_place_and_install_it() -> None
 
 def test_the_declared_manifest_asks_the_host_for_nothing_image_side() -> None:
     """bun and typescript live in the image, so a bare host is never faulted."""
-    from lup_template.devtools.harness.content.requirements import manifest
+    from lup_template.harness.content.requirements import manifest
 
     MANIFEST = manifest()
 
@@ -376,7 +393,7 @@ def test_every_declared_package_is_obtained_by_something_that_verifies_it() -> N
     reintroduces.
     """
     from lup.harness.toolchain import default_manifest
-    from lup_template.devtools.harness.content.requirements import manifest
+    from lup_template.harness.content.requirements import manifest
 
     for roster in (default_manifest(), manifest()):
         assert not [item for item in roster.packages() if not item.verified()]
@@ -533,11 +550,16 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
     nothing at all, and a model call and a toolchain version are what
     somebody setting a machine up hears once.
 
-    Two entries rather than one, and they are the two kinds of nothing a
-    session can do. Without the endpoint it cannot think; without the
-    placement it cannot be said to be anywhere, and every operation after is
-    placed by a boundary nothing observed. Both ride the argv a session opens
-    with, so neither costs a container start of its own.
+    The criterion is a failure invisible from outside. Without the endpoint a
+    session cannot think; without the placement it cannot be said to be
+    anywhere, and every operation after is placed by a boundary nothing
+    observed. The third is the same criterion reached from the other
+    direction: a session missing part of its shell vocabulary is not stopped
+    by the absence and is not told about it either, because a program that is
+    not there exits 127 and a shell reads 127 as an answer -- so it works on,
+    holding conclusions it has no way to doubt. That is the one kind of
+    absence a session cannot discover for itself, which is what a launch is
+    for.
     """
     declared = manifest()
     opening = ["podman", "run", "--rm", "lup-agent:abc"]
@@ -549,7 +571,11 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
         item.requirement.capability for item in declared.check_inside({}, opening)
     }
 
-    assert at_launch == {"session reaches the model endpoint", "inside placement"}
+    assert at_launch == {
+        "session reaches the model endpoint",
+        "inside placement",
+        "shell commands",
+    }
     assert "contained agent session" in at_setup - at_launch
 
 
@@ -668,3 +694,42 @@ def test_verification_is_a_property_rather_than_a_manager() -> None:
     )
     assert verified.verified()
     assert Package(name="ripgrep").verified()
+
+
+def test_every_promised_program_is_measured_or_deliberately_dropped() -> None:
+    """Nothing leaves the promise quietly, which is the whole of the defect.
+
+    What this repository met was not a package missing from an image. It was
+    that the vocabulary and the image were two lists nothing compared, so a
+    word could be declared safe for an agent to run unattended and carried
+    nowhere -- and the agent that ran it got 127, which a shell hands to `||`
+    as an ordinary answer. Measured inside the agent container:
+    `cmp -s A B && echo IDENTICAL || echo DIFFERS` printed DIFFERS for two
+    byte-identical files.
+
+    So the two lists are held against each other here, and a word may leave
+    the probe only by being named in the subtraction, where it has to give a
+    reason.
+    """
+    promised = allowed_programs(SHELL_RULES.over(default_vocabulary()))
+    carried = carried_vocabulary()
+
+    assert set(promised) - set(carried) == {"man"}
+    assert set(carried) <= set(promised)
+
+
+def test_the_comparison_tools_are_promised_and_installed() -> None:
+    """The measured pair, pinned on both sides of the seam that separated them."""
+    assert {"diff", "cmp"} <= set(carried_vocabulary())
+    assert "diffutils" in [item.name for item in manifest().packages()]
+
+
+def test_the_vocabulary_probe_reads_the_policy_rather_than_a_copy() -> None:
+    """A word joins the probe by joining the table, not by being copied here."""
+    entry = next(
+        item for item in manifest().requirements if item.capability == "shell commands"
+    )
+
+    assert entry.exercise.programs() == carried_vocabulary()
+    assert not entry.absence.refuses()
+    assert entry.absence.costly()

@@ -1,17 +1,17 @@
-<!-- Generated from lup.devtools.harness.content.docs.upstream_reports by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.upstream_reports by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Upstream reports
 
 Defects this project measured in components it does not own, each with the evidence that was actually run and the command that files it.
 
-Nothing here files anything. Publishing under an account belongs to whoever owns the account, so a report stays *not filed* until a human runs the command and records the URL in the declaration at `packages/lup/src/lup/devtools/harness/content/docs/upstream_reports.py`.
+Nothing here files anything. Publishing under an account belongs to whoever owns the account, so a report stays *not filed* until a human runs the command and records the URL in the declaration at `packages/lup/src/lup/harness/content/docs/upstream_reports.py`.
 
 ## Worktree isolation refuses fifteen shell words in any argv position, including in read-only commands containing no git
 
 Measured against **Claude Code 2.1.237**. Goes to `anthropics/claude-code`; currently **not filed**.
 
 ```bash
-uv run lup-devtools dev upstream worktree-token-wall | gh issue create --repo anthropics/claude-code --title 'Worktree isolation refuses fifteen shell words in any argv position, including in read-only commands containing no git' --body-file -
+uv run lup-devtools sync upstream worktree-token-wall | gh issue create --repo anthropics/claude-code --title 'Worktree isolation refuses fifteen shell words in any argv position, including in read-only commands containing no git' --body-file -
 ```
 
 **What happens.** In a session isolated by `EnterWorktree`, a command is

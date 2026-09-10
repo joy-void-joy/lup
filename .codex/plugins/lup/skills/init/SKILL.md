@@ -109,11 +109,11 @@ Open-ended exploration is ordinary conversation, but every answer that *forks
 the scaffolding* — the package name, what a run is, whether ground truth
 resolves later — decides which files exist at the end. Ask the user directly, offering concrete options, and wait for the answer: each identity answer that decides what gets generated, with the reading you would pick offered first rather than leaving it in prose the user has to notice and correct.
 
-## Phase 1.5: Prune Scaffolding
+## Phase 1.5: Choose the Modules
 
 First, the part that is not a decision. The template ships demonstrations of
 *itself* — `examples/` composing lup's own runtime against lup's own README,
-and the two test modules driving them. A domain that adopted the template is a
+and the test modules driving them. A domain that adopted the template is a
 consumer of that library rather than a demonstrator of it, so what it inherits
 there is a directory it will never run and a suite it has to keep green. Run:
 
@@ -127,16 +127,49 @@ docstring citations, and the `"examples/"` composition root in the catalog,
 which is dead once the directory is. Fix those; the README is human-owned, so
 propose that edit rather than making it.
 
-Now the decisions. Which optional patterns does this domain actually need? The template ships them all wired; most domains use a subset, and **deleting the rest is the goal, not a failure** (see the guidance file's § Scaffolding Is a Menu, Not a Mandate). From the interview answers, classify each as KEEP-and-customize or DELETE-the-files:
+Now the decisions, and there is one kind of them. Everything lup ships belongs
+to a **module** — a subject as one value, carrying its skills, its agents, its
+page under `docs/`, its paragraph in the always-loaded document, its command
+tree and its tool group. A module is taken or declined whole, so there is no
+keeping a subject's skills and deleting its page, and there are no files to
+hunt down: declining is a name in a list.
 
-- **Reflection** (`agent/tools/reflect.py` + the gate wiring in `core.py`) — keep only if the agent commits a consequential, judgment-bearing output where self-critique helps.
-- **Realtime / persistent mode** (`agent/tools/realtime.py`, `lup.orchestration.realtime*`, the Stop-hook/sleep-wake wiring) — keep only for agents that live over time (chat, monitoring, games); delete for one-shot agents.
-- **Feedback loop** (the `feedback` sub-app this project inherits from `lup.devtools`, and the feedback-loop skill) — keep only if ground truth or a feedback signal resolves over time. Dropping it is a line in `devtools/subapps.py`, not a directory to delete: the commands are the library's.
-- **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing the `notes/*` and `!notes/.gitkeep` pair so session data can be committed. The `notes/harness/` line under them is not part of that decision and stays either way — a launch transcript is one native CLI session in full, redacted for portability rather than for publication. When deleting the pattern, leave every ignore line in place.
+Start by reading the roster, which is the only complete statement of what is on
+offer:
 
-Ask the user directly, offering concrete options, and wait for the answer: which of these four patterns this domain keeps, one option per pattern — deleting is the expected answer for most of them, so say which you would
-delete and why. Then **delete the files and their wiring** for everything not
-kept before proceeding. The customization steps below apply only to what you kept.
+```bash
+uv run lup-devtools dev modules --verbose
+```
+
+Each row says what the module is, whether this project has it, what its prose
+costs in the always-loaded document, and what it contributes. Walk it against
+the interview answers. **Declining is the expected answer for several of them,
+and it is not a loss** — a module a domain has no subject for spends guidance
+budget and session context every time and earns nothing. Three ship off by
+default and are worth naming here, because each is a real capability rather
+than a leftover:
+
+- **`reflection`** — the gate an agent meets on its own output, an independent reviewer between finishing the work and submitting it. Take it if the agent commits a consequential, judgment-bearing output where self-critique helps.
+- **`realtime`** — persistent agents that control their own attention: the sleep/wake loop, and the relay that spells it for subprocess backends. Take it for an agent that lives over time (chat, monitoring, a game), never for a one-shot one.
+- **`feedback-loop`** — turning an observed agent failure into a durable capability change. Take it only if ground truth or a feedback signal resolves over time; a domain whose output nobody grades has nothing to feed it.
+
+Ask about every module the roster offers rather than only those three — this
+list goes stale and `dev modules` does not.
+
+Ask the user directly, offering concrete options, and wait for the answer: which modules this domain takes and which it declines, one option per module the roster offers — for each, say which way you would go and why, from what the interview
+established rather than from what sounds useful.
+
+Write the answer as module ids in `DECLINED`, in `harness/content/catalog.py`.
+Nothing else changes: a declined module's skills, page, prose, commands and
+tools stop arriving together, and a module left unnamed keeps its own default —
+including the ones lup grows after that line was last edited, which is why the
+list is refusals rather than what is kept. Then regenerate with
+`uv run lup-devtools harness generate all` and re-read `dev modules`.
+
+One decision in this phase is *not* a module, because it is this template's own
+wiring rather than a subject lup ships. **Commit loop** (auto-commit in `environment/cli/__main__.py`) — keep only if each run yields a data artifact worth versioning. Session data is gitignored by default (the `notes/*` lines in `.gitignore`), so traces and outputs stay local; keeping this pattern means removing the `notes/*` and `!notes/.gitkeep` pair so session data can be committed. The `notes/harness/` line under them is not part of that decision and stays either way — a launch transcript is one native CLI session in full, redacted for portability rather than for publication. When deleting the pattern, leave every ignore line in place.
+
+The customization steps below apply only to what you kept.
 
 ## Phase 1.6: Settle the Seams
 
@@ -216,7 +249,7 @@ before anything reads the project's types.
 
 #### 2. Merge the guidance template into the guidance declaration
 
-The merge lands in `src/<project>/devtools/harness/content/guidance.py`, never in a tree's guidance file (.claude/CLAUDE.md under Claude Code, AGENTS.md under Codex): those are generation's outputs, and an edit made directly to one is undone the next time the harness runs. Take the sections from that tree's template flavor (.claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex), covering every tree the project commits:
+The merge lands in `src/<project>/harness/content/guidance.py`, never in a tree's guidance file (.claude/CLAUDE.md under Claude Code, AGENTS.md under Codex): those are generation's outputs, and an edit made directly to one is undone the next time the harness runs. Take the sections from that tree's template flavor (.claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex), covering every tree the project commits:
 
 1. Read the template and replace `<project>` placeholders with the actual project name
 2. Read the existing declaration
@@ -320,10 +353,6 @@ proposes rather than writes. The template ships `README.md` that way, which is
 right for a file whose words are the author's and wrong for a project that
 wants its README kept current by the agent.
 
-```bash
-uv run lup-devtools dev init ownership
-```
-
 Ask the user directly, offering concrete options, and wait for the answer: which files the human author owns, starting from whether README.md stays locked — then apply the answer with `--lock` / `--unlock` on that same command,
 which rewrites the declaration and regenerates the native trees. Never
 hand-edit `human_owned_files` in the catalog.
@@ -360,7 +389,7 @@ silence. Where the user defers one, say which default now stands.
 uv run lup-devtools dev todos --json
 ```
 
-Walk the collected decision points one by one — each entry gives the file, line, decision text, and surrounding context. For every marker, either customize the code it points at and remove the marker, or delete it along with scaffolding pruned in Phase 1.5. The numbered steps below give domain guidance for the major ones, but the gathered list is the source of truth: a marker you never reach is a decision silently defaulted.
+Walk the collected decision points one by one — each entry gives the file, line, decision text, and surrounding context. For every marker, either customize the code it points at and remove the marker, or delete it along with whatever Phase 1.5 declined. The numbered steps below give domain guidance for the major ones, but the gathered list is the source of truth: a marker you never reach is a decision silently defaulted.
 
 Based on the answers from Phase 1, generate or modify:
 
@@ -391,9 +420,9 @@ Customize the CLI for the domain's task format:
 
 Set `agent_version` under `[tool.lup]` in `pyproject.toml` and explain bump rules for this domain.
 
-### 6. Reflection (only if kept in Phase 1.5)
+### 6. Reflection (only if the `reflection` module was taken in Phase 1.5)
 
-If this domain has no consequential, judgment-bearing output, you already deleted `reflect.py` and its gate — skip this step. Otherwise customize `src/<project>/agent/tools/reflect.py`:
+If this domain has no consequential, judgment-bearing output, `reflection` is in `DECLINED` and its tool group never reaches a session — skip this step. Otherwise customize `src/<project>/agent/tools/reflect.py`:
 
 - Extend `ReflectInput` with domain-specific fields (factor analysis, move evaluation, etc.)
 - Customize the reviewer prompt for the domain's common failure modes
@@ -407,7 +436,7 @@ The feedback collection module (exposed via `uv run lup-devtools feedback collec
 
 ### 8. Update the guidance
 
-Edit `src/<project>/devtools/harness/content/guidance.py`, then regenerate with `uv run lup-devtools harness generate all` -- .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex are its outputs, and editing them directly is undone by the next generation.
+Edit `src/<project>/harness/content/guidance.py`, then regenerate with `uv run lup-devtools harness generate all` -- .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex are its outputs, and editing them directly is undone by the next generation.
 
 The guidance should already carry the template sections from the Phase 2 merge. Now add domain-specific content based on the interview answers:
 
@@ -434,7 +463,7 @@ Customize the interactive setup wizard for the domain's integrations:
 - Update the `INTEGRATIONS` list — each entry is an `Integration(name, env_keys, setup_func, status_func)`
 - Add corresponding `@app.command()` subcommands for individual integration setup
 - Update env var names in `config.py` to match what the setup wizard writes to `.env.local`
-- Verify `lup-devtools dashboard` exposes the same registry: declarative fields become browser forms, while bespoke flows link back to their CLI command
+- Verify `lup-devtools setup dashboard` exposes the same registry: declarative fields become browser forms, while bespoke flows link back to their CLI command
 
 The framework (env helpers, status table, mask, clipboard, browser open, wizard flow) is reusable — only the integration functions and registry need customization.
 

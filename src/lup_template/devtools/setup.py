@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfoNotFoundError
 import typer
 from tzlocal import get_localzone_name
 
-from lup_template.devtools.harness.composition import profile_directory
+from lup_template.harness.composition import profile_directory
 from lup.devtools.setup import (
     Integration,
     IntegrationStatus,

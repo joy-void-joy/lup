@@ -34,7 +34,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from lup.tools.mcp import LupMcpTool, lup_tool
+from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 from lup.orchestration.reflection import ReviewGate, ReviewResult, ReviewVerdict
 
 logger = logging.getLogger(__name__)
@@ -176,19 +176,6 @@ class ReviewOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-REVIEWER_TOOLS: list[str] = ["Read", "Glob", "Grep", "WebFetch"]
-"""What the reviewer may call: file tools over past outputs (Read/Glob/Grep)
-plus WebFetch for known URLs. The reviewer reads and verifies; it does not act."""
-
-REVIEWER_THINKING_BUDGET = 8000
-"""Thinking-token budget for the reviewer's critique — enough to weigh the
-evidence without matching the main agent's full budget."""
-
-REVIEWER_MAX_TURNS = 5
-"""Turn cap for the reviewer: a bounded read-and-critique pass, not an
-open-ended investigation."""
-
-
 # The reviewer session is the subject: this composes a factory, runs one query,
 # and returns its verdict. ReflectInput is the `review` tool's input schema,
 # handed over whole, so the operation is the tool's rather than the schema's.
@@ -196,11 +183,9 @@ async def run_reviewer(
     validated: ReflectInput,
     outputs_dir: Path | None,
     *,
-    model: str = "claude-opus-5",
+    model: str | None = None,
     system_prompt: str = REVIEWER_SYSTEM_PROMPT,
-    tools: list[str] = REVIEWER_TOOLS,
-    thinking_budget: int = REVIEWER_THINKING_BUDGET,
-    max_turns: int = REVIEWER_MAX_TURNS,
+    timeout_seconds: float = 300,
 ) -> ReviewResult | None:
     """Run the nested reviewer agent and return its structured verdict.
 
@@ -212,7 +197,8 @@ async def run_reviewer(
     Args:
         validated: The reflection input from the main agent.
         outputs_dir: Path to past outputs for historical calibration.
-        model: Model to use for the reviewer (default: claude-opus-5).
+        model: Explicit model override; otherwise use the native strongest tier.
+        timeout_seconds: Wall-clock bound enforced for every engine.
     """
     prompt_sections = [
         "## Agent Assessment\n\n" + validated.assessment,
@@ -228,9 +214,8 @@ async def run_reviewer(
     factory = build_auxiliary_factory(
         model=model,
         system_prompt=system_prompt.format(outputs_dir=outputs_dir or "N/A"),
-        tools=tools,
-        thinking_budget=thinking_budget,
-        max_turns=max_turns,
+        capabilities=["workspace-read", "web-search"],
+        timeout_seconds=timeout_seconds,
     )
     result = await factory.query(reviewer_prompt, ReviewResult)
     return result.output
@@ -253,7 +238,7 @@ def create_reflect_tools(
     session_dir: Path,
     outputs_dir: Path | None = None,
     gate: ReviewGate | None = None,
-    reviewer_model: str = "claude-opus-5",
+    reviewer_model: str | None = None,
 ) -> ReflectToolKit:
     """Create the reflection tool(s) and their gate state.
 
@@ -292,18 +277,17 @@ def create_reflect_tools(
         )
         if not validated.skip_reviewer:
             try:
-                result = await run_reviewer(
+                verdict = await run_reviewer(
                     validated, outputs_dir, model=reviewer_model
-                ) or ReviewResult(
-                    verdict=ReviewVerdict.approve,
-                    assessment="(reviewer unavailable — see logs)",
                 )
-            except (RuntimeError, OSError, TimeoutError, ValueError):
+            except (RuntimeError, OSError, TimeoutError, ValueError) as error:
                 logger.exception("Nested reviewer agent failed")
-                result = ReviewResult(
-                    verdict=ReviewVerdict.approve,
-                    assessment="(reviewer error — see logs)",
-                )
+                raise ToolError(
+                    "Reviewer failed; resolve the reported error and retry review"
+                ) from error
+            if verdict is None:
+                raise ToolError("Reviewer returned no verdict; retry review")
+            result = verdict
 
         gate.record(result)
 

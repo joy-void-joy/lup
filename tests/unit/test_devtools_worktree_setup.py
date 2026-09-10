@@ -15,18 +15,29 @@ import pytest
 import sh
 import typer
 
-from lup.devtools.dev import worktree
+from lup.devtools.dev import records, worktree
 from lup.devtools.harness.launch import relocation_hint
 from tests.unit.repos import commit_file, initialized_repo
+
+
+def recorded_base(repo: Path, branch: str) -> str:
+    """The base lup records for a branch, read where that record lives."""
+    return records.recorded_base(branch, repo)
+
+
+def record_base(repo: Path, branch: str, base: str) -> None:
+    """Write a base as creation does, without running creation."""
+    records.remember(branch, records.BranchRecord(base=base), repo)
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     """A checkout with an origin, which is what worktrees are cut in.
 
-    The remote is part of the fixture rather than one test's setup because a
-    branch is given one at creation: without it every case here would run the
-    offline path, and the step that pushes would never be exercised at all.
+    The remote is part of the fixture rather than one test's setup because
+    what several cases here assert is that nothing was sent to it. A repo
+    with no origin cannot tell a run that declined to publish from one that
+    had nowhere to publish to.
     """
     work = tmp_path / "repo"
     git = initialized_repo(work, tmp_path / "no-hooks")
@@ -54,8 +65,16 @@ def the_worktree_holds_its_own_environment(monkeypatch: pytest.MonkeyPatch) -> N
     environment is shared across worktrees and how the session image puts it
     outside the checkout. That is a fact about the machine and stays set for
     the suite -- but it makes :meth:`SyncedEnvironment.satisfied` read a
-    directory that is there whatever the sync did, so these two cases, whose
-    whole subject is a sync that produced nothing, take it away.
+    path that is not the one these cases wrote, so every case whose subject
+    is what a sync did or did not leave behind takes it away.
+
+    Both directions need it, which is what makes it a fixture rather than a
+    line in the one test that noticed. Where the value is absolute it names a
+    directory the image already holds, so an environment reads as built when
+    nothing built one; where it is relative -- which is what a contained
+    session now sets, so `uv` keys the environment per project -- it names a
+    sibling of the `.venv` these cases create, so an environment that *was*
+    built reads as missing and the sync runs again.
     """
     monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
 
@@ -130,7 +149,8 @@ def test_a_half_made_worktree_is_finished_by_re_running(
     """The failure the success message used to hide: setup that never ran.
 
     The base is the observable half — `uv sync` is not run in tests — and it
-    is exactly the record whose config write fails under a held lock.
+    is the record an interruption between `worktree add` and the rest of
+    setup leaves unwritten.
     """
     path = interrupted_creation(repo, tree_dir, "topic")
     monkeypatch.chdir(repo)
@@ -138,8 +158,7 @@ def test_a_half_made_worktree_is_finished_by_re_running(
 
     create("topic")
 
-    recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
-    assert str(recorded).strip() == "main"
+    assert recorded_base(repo, "topic") == "main"
     assert "setup never finished" in capsys.readouterr().out
 
 
@@ -186,7 +205,10 @@ def test_the_steps_that_did_not_run_are_named(
 
 
 def test_an_environment_that_was_built_is_not_rebuilt(
-    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
 ) -> None:
     """Readiness is read off the worktree, so a finished step is not repeated."""
     (interrupted_creation(repo, tree_dir, "topic") / ".venv").mkdir()
@@ -200,8 +222,50 @@ def test_an_environment_that_was_built_is_not_rebuilt(
     create("topic", no_sync=False)
 
 
+def test_an_environment_that_only_links_to_a_sibling_is_rebuilt(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
+) -> None:
+    """A link to another worktree's environment is not an environment.
+
+    `is_dir()` follows it, so readiness read off the link alone reports a
+    worktree that is set up and skips the sync. What syncing through the link
+    would then do is the expensive half: `uv` resolves it, finds the sibling's
+    environment at the far end, and repoints *that* worktree's editable
+    install at this one's source — two checkouts importing one tree, the
+    branch under test being whichever synced last, and nothing said.
+
+    So the link is cleared and a real environment built where it stood. What
+    it pointed at belongs to another worktree and is left as it was.
+    """
+    worktree_path = interrupted_creation(repo, tree_dir, "topic")
+    sibling = tree_dir / "sibling-environment"
+    sibling.mkdir()
+    (worktree_path / ".venv").symlink_to(sibling)
+    monkeypatch.chdir(repo)
+
+    built: list[Path] = []  # lup: ignore[empty-collection] — sync call record
+
+    def build(path: Path) -> None:
+        (path / ".venv").mkdir()
+        built.append(path)
+
+    monkeypatch.setattr(worktree, "sync_dependencies", build)
+
+    create("topic", no_sync=False)
+
+    assert built == [worktree_path]
+    assert not (worktree_path / ".venv").is_symlink()
+    assert sibling.is_dir()
+
+
 def test_an_opted_out_step_is_not_owed(
-    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
 ) -> None:
     """`--no-sync` removes the step, so its absence cannot make a worktree unready."""
     interrupted_creation(repo, tree_dir, "topic")
@@ -212,18 +276,117 @@ def test_an_opted_out_step_is_not_owed(
     assert not (tree_dir / "topic" / ".venv").exists()
 
 
+def create_with_workspace(name: str, no_sync: bool = False) -> None:
+    """Create a worktree declaring one bun workspace at `web`, as the CLI would."""
+    worktree.create(
+        name,
+        no_sync=no_sync,
+        no_copy_data=True,
+        base_branch=None,
+        launcher=relocation_hint,
+        workspaces=[Path("web")],
+    )
+
+
+def built_environment(path: Path) -> None:
+    """Stand in for `uv sync`, leaving the environment it would have built."""
+    (path / ".venv").mkdir()
+
+
+def test_the_bun_workspace_is_restored_beside_the_environment(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
+) -> None:
+    """One flag, two toolchains: a worktree readied with its environment has
+    its bun workspace restored too, and the step is read off the worktree the
+    way the sync is, so a finished restore is not repeated."""
+    worktree_path = interrupted_creation(repo, tree_dir, "topic")
+    monkeypatch.chdir(repo)
+    restored: list[Path] = []  # lup: ignore[empty-collection] — restore record
+
+    def restore(workspace: Path) -> bool:
+        (workspace / "node_modules").mkdir(parents=True)
+        restored.append(workspace)
+        return True
+
+    monkeypatch.setattr(worktree, "sync_dependencies", built_environment)
+    monkeypatch.setattr(worktree, "restore_dependencies", restore)
+
+    create_with_workspace("topic")
+
+    assert restored == [worktree_path / "web"]
+    assert worktree.RestoredWorkspace(
+        worktree=worktree_path, workspace=Path("web")
+    ).satisfied()
+
+
+def test_no_sync_skips_the_workspace_restore_too(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    the_worktree_holds_its_own_environment: None,
+) -> None:
+    interrupted_creation(repo, tree_dir, "topic")
+    monkeypatch.chdir(repo)
+
+    def refuse(_workspace: Path) -> bool:
+        raise AssertionError("a bun workspace was restored under --no-sync")
+
+    monkeypatch.setattr(worktree, "restore_dependencies", refuse)
+
+    create_with_workspace("topic", no_sync=True)
+
+    assert not (tree_dir / "topic" / "web" / "node_modules").exists()
+
+
+def test_a_workspace_that_cannot_be_restored_leaves_the_worktree_usable(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    the_worktree_holds_its_own_environment: None,
+) -> None:
+    """The gate restores what it finds behind, so a restore the registry
+    refused is said out loud and the worktree is handed over anyway."""
+    interrupted_creation(repo, tree_dir, "topic")
+    monkeypatch.chdir(repo)
+
+    def refuse(workspace: Path) -> bool:
+        raise RuntimeError(
+            f"`bun install --frozen-lockfile` in {workspace} failed:\n"
+            "error: ConnectionRefused downloading tarball js-yaml@4.3.2"
+        )
+
+    monkeypatch.setattr(worktree, "sync_dependencies", built_environment)
+    monkeypatch.setattr(worktree, "restore_dependencies", refuse)
+
+    create_with_workspace("topic")
+
+    printed = capsys.readouterr().out
+    assert "Warning: `bun install --frozen-lockfile`" in printed
+    assert "ConnectionRefused" in printed
+    assert "Without the restored bun workspace (web)" in printed
+
+
+def test_the_template_declares_its_bun_workspace_for_restoring() -> None:
+    from lup_template.devtools.dev.app import declared
+
+    assert declared().restored_workspaces() == [Path("packages/lup/web")]
+
+
 def test_a_recorded_base_is_left_as_it_was(
     repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Finishing a worktree completes what is missing and rewrites nothing."""
     interrupted_creation(repo, tree_dir, "topic")
-    repo_git(repo)("config", "branch.topic.lup-base", "deliberate")
+    record_base(repo, "topic", "deliberate")
     monkeypatch.chdir(repo)
 
     create("topic")
 
-    recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
-    assert str(recorded).strip() == "deliberate"
+    assert recorded_base(repo, "topic") == "deliberate"
 
 
 def test_the_gitignored_extras_are_finished_too(
@@ -240,23 +403,32 @@ def test_the_gitignored_extras_are_finished_too(
 
 
 @pytest.mark.usefixtures("tree_dir")
-def test_a_new_branch_is_given_a_remote_to_track(
+def test_a_new_branch_is_published_nowhere_until_it_carries_work(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An upstream is what a later session's pull and push both name.
+    """A branch with no commits of its own has nothing origin does not hold.
 
-    Without one the freshness reading has nothing to keep this checkout level
-    with, and the branch has no copy anywhere but this disk until somebody
-    opens a pull request.
+    Publishing one leaves a ref at the base's tip: noise to anybody reading
+    the remote, and an obstacle to the branch it is named after. Rebuilding
+    the branch on a different base meets that ref as a non-fast-forward, and
+    the force-push that answers is a decision nobody wanted to make about a
+    branch that had never been pushed with work on it.
+
+    What the ref claimed to buy was something to be kept level with, and
+    level with a copy of the base is a reading with no content. The base
+    itself is what a checkout is kept level with, and `RecordedBase` writes
+    that down. The tracking relationship arrives with the first push that
+    carries something, which `dev pr push` makes and the pre-push guard
+    judges.
     """
     monkeypatch.chdir(repo)
 
     create("topic")
 
-    tracked = repo_git(repo)(
-        "rev-parse", "--abbrev-ref", "--symbolic-full-name", "topic@{upstream}"
-    )
-    assert str(tracked).strip() == "origin/topic"
+    published = repo_git(repo)("ls-remote", "--heads", "origin", "topic")
+    assert str(published).strip() == ""
+    tracked = repo_git(repo)("config", "--get", "branch.topic.merge", _ok_code=[0, 1])
+    assert str(tracked).strip() == ""
 
 
 def test_a_checkout_with_no_remote_is_still_handed_over(
@@ -265,18 +437,19 @@ def test_a_checkout_with_no_remote_is_still_handed_over(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A worktree that could not be pushed is a worktree to work in.
+    """A checkout made offline is a checkout to work in.
 
-    Every other step answers for whether the checkout is usable; this one
-    answers for whether a remote was told about it, and failing the command
-    over that would cost more than the step is worth.
+    Nothing in setup reaches origin, so a repository that has no remote at
+    all takes the same path as one that has: every step answers for whether
+    the checkout is usable, and none of them for whether a remote was told
+    about it.
     """
     repo_git(repo)("remote", "remove", "origin")
     monkeypatch.chdir(repo)
 
     create("topic")
 
-    assert "the remote branch tracking topic" in capsys.readouterr().out
+    assert "not ready" not in capsys.readouterr().out
     assert (tree_dir / "topic").is_dir()
 
 
@@ -284,14 +457,13 @@ def test_commits_no_remote_holds_are_left_for_the_gated_push(
     repo: Path,
     tree_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Creation pushes a tip the remote already has, and nothing else.
+    """Finishing a worktree does not publish the work found in it.
 
-    The pre-push guard is armed a step earlier and runs the whole gate on any
-    push, so creation only ever pushes where there is nothing to gate. A
-    branch that has advanced is `dev pr push`'s to send, with the guard doing
-    what it is there for.
+    The pre-push guard runs the whole gate on any push, and setting a
+    checkout up is not where somebody's commits are sent through it. A branch
+    that has advanced is `dev pr push`'s to send, with the guard doing what
+    it is there for — which is also what gives the branch its upstream.
     """
     interrupted_creation(repo, tree_dir, "topic")
     commit_file(
@@ -305,7 +477,8 @@ def test_commits_no_remote_holds_are_left_for_the_gated_push(
 
     create("topic")
 
-    assert "Not pushing topic" in capsys.readouterr().out
+    published = repo_git(repo)("ls-remote", "--heads", "origin", "topic")
+    assert str(published).strip() == ""
 
 
 def test_a_base_nobody_can_name_is_refused_before_the_worktree_exists(
@@ -350,10 +523,7 @@ def test_a_base_nobody_can_name_is_created_anyway_when_asked_deliberately(
     )
 
     assert (tree_dir / "topic").is_dir()
-    recorded = repo_git(repo)(
-        "config", "--get", "branch.topic.lup-base", _ok_code=[0, 1]
-    )
-    assert str(recorded).strip() == ""
+    assert recorded_base(repo, "topic") == ""
 
 
 def test_a_named_base_is_recorded_from_a_detached_head(
@@ -373,5 +543,119 @@ def test_a_named_base_is_recorded_from_a_detached_head(
         launcher=relocation_hint,
     )
 
-    recorded = repo_git(repo)("config", "--get", "branch.topic.lup-base")
-    assert str(recorded).strip() == "main"
+    assert recorded_base(repo, "topic") == "main"
+
+
+def on_a_feature_branch(repo: Path) -> str:
+    """Put the checkout on a branch of its own, and report the tip work lands on."""
+    git = repo_git(repo)
+    landing = str(git("rev-parse", "main")).strip()
+    git("checkout", "-q", "-b", "feature")
+    commit_file(git, repo, "feature.txt", "feature\n", "feat: feature")
+    return landing
+
+
+def test_a_fresh_branch_is_cut_from_where_work_lands(
+    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not from whichever checkout the command was run in.
+
+    A worktree is routinely created from another worktree, which is on a
+    branch holding nothing but its own work. Cut from there, the new branch
+    carries commits its own pull request never asked for: the request opens
+    conflicting against the integration branch, no CI runs on it, and the
+    repair is a rebase and a force-push after the fact.
+    """
+    landing = on_a_feature_branch(repo)
+    monkeypatch.chdir(repo)
+
+    create("topic")
+
+    tip = str(repo_git(repo)("rev-parse", "topic")).strip()
+    assert tip == landing
+    assert recorded_base(repo, "topic") == "main"
+
+
+def test_the_base_a_feature_checkout_did_not_get_is_said_out_loud(
+    repo: Path,
+    tree_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Stacking is a real intent, and a default that overrides it silently costs it.
+
+    Whoever meant to build on the checkout they were standing in has one
+    flag to say so, and this is where they find out they need it.
+    """
+    on_a_feature_branch(repo)
+    monkeypatch.chdir(repo)
+
+    create("topic")
+
+    reported = capsys.readouterr().out
+    assert "--base feature" in reported
+
+
+def test_a_named_base_is_taken_over_the_integration_branch(
+    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The flag is the whole answer to stacking, so it wins where it is passed."""
+    on_a_feature_branch(repo)
+    monkeypatch.chdir(repo)
+
+    worktree.create(
+        "topic",
+        no_sync=True,
+        no_copy_data=True,
+        base_branch="feature",
+        launcher=relocation_hint,
+    )
+
+    tip = str(repo_git(repo)("rev-parse", "topic")).strip()
+    assert tip == str(repo_git(repo)("rev-parse", "feature")).strip()
+
+
+def test_re_attaching_leaves_a_branch_where_it_stands(
+    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A default base applies to a branch being cut, and there is nothing to cut.
+
+    `worktree add <path> <branch>` takes a branch where it already is, so a
+    base could only reach it by moving it — and whatever sits on it would go.
+    """
+    on_a_feature_branch(repo)
+    tip = str(repo_git(repo)("rev-parse", "feature")).strip()
+    repo_git(repo)("checkout", "-q", "main")
+    monkeypatch.chdir(repo)
+
+    create("feature")
+
+    assert str(repo_git(repo)("rev-parse", "feature")).strip() == tip
+
+
+def test_a_branch_rebuilt_on_another_base_still_pushes_forward(
+    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The collision a published placeholder guaranteed, and its whole cost.
+
+    Discovering that the code being changed lives on another branch, and
+    resetting the new branch onto it, is an ordinary correction. Where
+    creation had already published the first base's tip, that correction made
+    every later push a non-fast-forward — on a branch nobody had ever pushed
+    work from, so the force-push answering it was a decision about nothing.
+    """
+    git = repo_git(repo)
+    git("checkout", "-q", "-b", "other")
+    commit_file(git, repo, "other.txt", "other\n", "feat: other")
+    git("checkout", "-q", "main")
+    commit_file(git, repo, "main.txt", "main\n", "feat: main")
+    git("push", "-q", "origin", "main", "other")
+    monkeypatch.chdir(repo)
+
+    create("topic")
+
+    rebuilt = repo_git(tree_dir / "topic")
+    rebuilt("reset", "-q", "--hard", "other")
+    commit_file(rebuilt, tree_dir / "topic", "mine.txt", "mine\n", "feat: mine")
+
+    rebuilt("push", "--no-verify", "-u", "origin", "topic")

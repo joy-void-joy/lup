@@ -19,6 +19,7 @@ from lup.providers.harness import (
     codex_prompt_renderer,
     compile_claude,
     compile_codex,
+    startup_deadline_settings,
 )
 from lup.formats.banner import (
     COMMENT_FREE,
@@ -40,6 +41,7 @@ from lup.harness.models import (
     PromptDocument,
 )
 from lup.types import JsonObject
+from lup.workspace.paths import declared_project_root
 from lup.harness.ownership import (
     OwnershipManifest,
     build_manifest,
@@ -59,6 +61,8 @@ from lup.harness.contracts import (
     SkillInvocationRenderer,
 )
 from lup.harness.validation import validated_tree
+from lup.harness.clipboard import ClipboardTransport
+from lup.providers.login import ProviderLogin
 
 
 class ProjectContent(BaseModel, frozen=True):
@@ -125,6 +129,9 @@ class NativeHarnessComposition(BaseModel, frozen=True, arbitrary_types_allowed=T
     recipe: GenerationRecipe
     readiness: RuntimeReadiness
     invocation_renderer: SkillInvocationRenderer
+    login: ProviderLogin
+    default_config_home: Path
+    clipboard_transport: ClipboardTransport = "commands"
 
 
 class HarnessGenerationConflict(RuntimeError):
@@ -265,8 +272,19 @@ def claude_generation_recipe(
     plugin = Path(".claude/plugins") / source.plugins[0].name
 
     def copied_from(asset: Path) -> str:
-        """Where the asset sits, as a reader of this checkout would name it."""
-        inside = asset.relative_to(root) if asset.is_relative_to(root) else asset
+        """Where the asset sits, named from the project that holds it.
+
+        The bytes are read from wherever the declaring package was imported,
+        which is not always the checkout being written: generating into a
+        sibling worktree leaves the two apart. Anchoring on ``root`` there
+        names the asset by an absolute path into somebody else's tree, and
+        that path is committed — so the map a reader opens points at a
+        checkout they may not have, and the same source compiles to different
+        bytes depending on where the command ran. The asset's own project
+        answers the same in every checkout, which is what the row means.
+        """
+        anchor = declared_project_root(asset.parent) or root
+        inside = asset.relative_to(anchor) if asset.is_relative_to(anchor) else asset
         return inside.as_posix()
 
     verbatim = [
@@ -287,7 +305,11 @@ def claude_generation_recipe(
         *verbatim,
         Artifact(
             path=Path(".claude/settings.json"),
-            content=json.dumps(content.settings, indent=2, sort_keys=True),
+            content=json.dumps(
+                startup_deadline_settings(content.settings, source.plugins[0]),
+                indent=2,
+                sort_keys=True,
+            ),
             semantic_id="harness.project-settings",
             banner=COMMENT_FREE.compiled_from(content.settings_source),
         ),

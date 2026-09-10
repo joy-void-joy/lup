@@ -2,10 +2,10 @@
 
 import asyncio
 
+from pydantic import BaseModel, Field
+
 from lup import Client, create_claude, create_codex
 from lup.providers.routing import ModelRoute, ModelRouter, PrefixModelMatcher
-
-from examples.common import Summary
 
 MODEL = "claude-opus-5"  # lup: ignore[constant-declaration] — a vendor's model id
 
@@ -14,6 +14,12 @@ MODEL = "claude-opus-5"  # lup: ignore[constant-declaration] — a vendor's mode
 # so a routing table never has to know which provider spells it which way.
 # lup: ignore[constant-declaration] — shared by the two recipes below
 SYSTEM_PROMPT = "Submit a concise structured summary."
+
+
+class Summary(BaseModel, frozen=True):
+    """A minimal structured result submitted by this example's agent."""
+
+    summary: str = Field(min_length=1)
 
 
 def claude_client() -> Client:

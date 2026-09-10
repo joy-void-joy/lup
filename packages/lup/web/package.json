@@ -1,0 +1,31 @@
+{
+  "name": "lup-web",
+  "private": true,
+  "type": "module",
+  "description": "The TypeScript surfaces lup serves locally, one Vite entry per surface, built into lup.web's package data.",
+  "scripts": {
+    "typegen": "json2ts --input schema/views.json --output src/generated/views.d.ts --unreachableDefinitions --bannerComment '/* Generated from lup.ledger.views by `bun run typegen`; edit the pydantic models, not this file. */'",
+    "build": "bun run typegen && tsc --noEmit && vite build",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@tanstack/react-form": "^1.33.5",
+    "@tanstack/react-query": "^5.102.8",
+    "@tanstack/react-router": "^1.170.33",
+    "@tanstack/react-table": "^9.2.4",
+    "@tanstack/react-virtual": "^3.14.11",
+    "cytoscape": "^3.34.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/cytoscape": "^3.31.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "bun-types": "^1.4.2",
+    "json-schema-to-typescript": "^16.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}

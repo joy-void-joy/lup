@@ -30,7 +30,7 @@ Report which case it is and what the comparison showed, and let the user settle 
 
 ## Targeted Mode (branch names provided)
 
-1. Run `uv run lup-devtools dev survey --json`.
+1. Run `uv run lup-devtools git survey --json`.
 2. Resolve every named branch against the survey. Report each name that matches nothing; stop only when none of them resolve.
 3. Show every resolved branch's `disposition` and `reason` in one table, then Request explicit user approval before carrying out the actions those dispositions imply. Reason: the branches may hold work the user has not looked at.
 4. Carry out each disposition's action from the table below, committing every `COMMIT` branch and taking it and every `LAND` branch through step 6, and every branch an open PR is driving through step 7.
@@ -40,16 +40,16 @@ Report which case it is and what the comparison showed, and let the user settle 
 ### 2. Collect data
 
 ```bash
-uv run lup-devtools dev survey --json
+uv run lup-devtools git survey --json
 ```
 
-Every branch arrives with a `disposition` and a `reason` already computed. **Do not re-derive them** — the classifier is shared with `dev survey`, so a judgement made here would drift from the one made there.
+Every branch arrives with a `disposition` and a `reason` already computed. **Do not re-derive them** — the classifier is shared with `git survey`, so a judgement made here would drift from the one made there.
 
 ### 3. Reconcile against the runs holding branches
 
 Read `runs` before you read `branches`. Each entry is a resolver run holding branches out of the sweep, and `alive` says whether anything is still answerable for them.
 
-A run with `alive: false` holds work that no verb here reaches: it is not landing on its own, and nothing will retire its leases. Report it before the table — the run id, how many branches, and `uv run lup-devtools harness resolve status --run-id <id>` for what it was doing when it stopped — and ask what should happen to the run before offering any per-branch action. Landing its branches by hand bypasses the join machinery the run never ran, which is the whole reason the lease holds them.
+A run with `alive: false` holds work that no verb here reaches: it is not landing on its own, and nothing will retire its leases. Report it before the table — the run id, how many branches, and `uv run lup-devtools resolve status --run-id <id>` for what it was doing when it stopped — and ask what should happen to the run before offering any per-branch action. Landing its branches by hand bypasses the join machinery the run never ran, which is the whole reason the lease holds them.
 
 Do not present a dead run's branches as a to-do list. One decision about the run is the honest question; twenty-six decisions about its branches is the same question asked in a form that hides what it is.
 
@@ -75,6 +75,8 @@ One table covering every branch, ordered `LAND` and `COMMIT` first (that is the 
 
 `remote_branches` is every branch a remote carries that no local branch corresponds to. Read it as part of the sweep, not as an appendix: a branch whose local copy went when its work landed leaves nothing in `branches` to classify, so without this list nothing mentions it again and the remote keeps it for good. That is the silent bucket this command exists to empty, one clone removed.
 
+**Read `remotes_fetched` before `remote_branches`.** Where it is false the remotes were not read for this survey — `fetch_complaint` says why — and an empty list then means nothing at all: it is what a repository with nothing stranded produces and what a fetch that never answered produces. Say so and treat the step as unperformed rather than as clean. Do not carry out any remote verb on those rows; get the fetch to work and survey again, and report that the remote bucket went unswept if it cannot be made to.
+
 Each row carries the same `disposition` the local classifier gave it, so it means what it means everywhere else. What differs is the verb — a push, not a local delete — and that a remote branch has no worktree, no lease, and no dirt to weigh:
 
 | Disposition | What it means here | Action |
@@ -94,7 +96,7 @@ Each row carries the same `disposition` the local classifier gave it, so it mean
 | --- | --- | --- |
 | `LAND` | Holds commits the integration branch lacks, with no PR driving it | Land it — step 6 |
 | `COMMIT` | A reserved workspace holding uncommitted work | The work sits in no commit, on no branch and on no remote, so nothing but this row records it. Read the diff against the integration branch before proposing anything — where it reports nothing, the work is a stale duplicate to discard rather than commit. Otherwise committing it in its own worktree — the move step 1 makes — turns it into a `LAND` branch; take it through step 6 from there. Never leave it on the grounds that the workspace was reserved: that is what it stopped being |
-| `DELETE` | Reached the integration branch, or its PR merged | `uv run lup-devtools dev delete <branch>`; where `Dirt` is set it refuses, so compare that worktree against the integration branch and report what forcing would discard before asking |
+| `DELETE` | Reached the integration branch, or its PR merged | `uv run lup-devtools git delete <branch>`; where `Dirt` is set it refuses, so compare that worktree against the integration branch and report what forcing would discard before asking. A worktree the session holds read-only refuses too, and the deletion aborts whole rather than half-done — the branch and origin's copy are left alone, and the message names the lease. Nothing is lost where the work already landed, but the directory stays until an unleased session clears it, so say so rather than reporting the branch gone |
 | `STALE` | Every commit already cherry-picked into the integration branch | Confirm, then delete |
 | `KEEP` | Protected, an open PR is already driving it, a resolver run holds its lease, or it is a clean reserved workspace | Read which of the four it is: protected leaves it alone; an open PR offers it — step 7; a resolver run is step 3, and one with `alive: false` holds it forever; a clean reserved workspace is somebody's next session, so leave it — the same workspace holding work is `COMMIT` and is not this row |
 | `UNRELATED` | Shares no history with the integration branch | Never rebase or merge it — both would replay an unrelated tree. Report it and ask; an adopted subtree or a wrongly-pushed branch are the usual causes, and neither is this sweep's to settle |
@@ -106,23 +108,28 @@ Land one branch at a time, oldest divergence first — rebase, merge, and push b
 
 Ask the user, per branch, which route to take:
 
-- **Open a PR** — get into that branch's worktree: work in <the survey's worktree field> by whichever of these you can reach: launch a session rooted there; or, already running, keep working where you are and address files under <the survey's worktree field> by absolute path. `EnterWorktree(path=<the survey's worktree field>)` reaches any worktree from anywhere and is refused for it: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you truly need it, and leave with `ExitWorktree(action="keep")`. Create one first via `uv run lup-devtools dev worktree create <branch>` when `worktree` is null. Then run `/lup:rebase`.
+- **Open a PR** — get into that branch's worktree: work in <the survey's worktree field> by whichever of these you can reach: launch a session rooted there; or, already running, address its files by absolute path, where that tree is writable. `EnterWorktree` is refused, and takes a `tree/` path only as a session's first switch: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you must, and leave with `ExitWorktree(action="keep")`. Create one first via `uv run lup-devtools git worktree create <branch>` when `worktree` is null. Then run `/lup:rebase`.
 - **Merge directly** — take the same route into the worktree and through `/lup:rebase`, then merge from the integration checkout with `/lup:merge <branch>`. `sync-base` has already pulled the integration branch in, so the merge is a fast-forward, and pushing it closes the PR the rebase opened. Suits small, uncontroversial work that needs no review.
-- **Retire it** — the work is not worth landing. After explicit confirmation, `uv run lup-devtools dev retire <branch> --reason "<why>"`, which pushes, opens a pull request, closes it without merging, and only then deletes.
+- **Merge it from here** — the route when that branch's worktree is leased read-only, which a contained session does to every worktree that already existed when it started. `/lup:rebase` cannot run there at all: its first write is refused before it reaches a file, and neither a sandbox escalation nor a command exclusion lifts a mount. Merge from the integration checkout instead — `git merge <branch>`, then `uv run lup-devtools harness generate all` until it reports `ownership=present`, committing what that writes, then `uv run lup-devtools dev check`. One branch at a time, so a failing check still names the branch that caused it. No history is rebuilt, so this suits commits that are already atomic; what it buys over the routes above is that the checks run on the integrated result rather than on each branch alone.
+- **Retire it** — the work is not worth landing. After explicit confirmation, `uv run lup-devtools git retire <branch> --reason "<why>"`, which pushes, opens a pull request, closes it without merging, and only then deletes.
 
 Never choose a route on the user's behalf: a `LAND` branch by definition carries no PR expressing intent, so the intent has to come from them.
 
-**Retiring is how a `LAND` branch ends, and `dev delete` is not.** A branch the integration branch never absorbed, deleted with no copy on the remote, leaves its commits reachable from nothing and a collector free to take them — and `dev delete` says so only at the moment it does it, which is too late to be a choice. Opening a request and closing it unmerged leaves a copy that outlives the branch: GitHub writes the head of every request to `refs/pull/<number>/head` and keeps it there after the request is closed and after both the branch and origin's copy are deleted. The work survives, and the reason it was dropped sits beside the commits rather than in a session nobody will read again.
+**Retiring is how a `LAND` branch ends, and `git delete` is not.** A branch the integration branch never absorbed, deleted with no copy on the remote, leaves its commits reachable from nothing and a collector free to take them — and `git delete` says so only at the moment it does it, which is too late to be a choice. Opening a request and closing it unmerged leaves a copy that outlives the branch: GitHub writes the head of every request to `refs/pull/<number>/head` and keeps it there after the request is closed and after both the branch and origin's copy are deleted. The work survives, and the reason it was dropped sits beside the commits rather than in a session nobody will read again.
 
-**It is only for work the integration branch does not hold.** `dev retire` refuses a branch holding nothing new, because there the commits are already in history, the branch is only a pointer, and `dev delete` is the verb — which is every `DELETE` and `STALE` row. Where a request already exists it reuses it only if it is still open: one that merged or closed cannot be closed again, so anything else gets a fresh request over the same head.
+**It is only for work the integration branch does not hold.** `git retire` refuses a branch holding nothing new, because there the commits are already in history, the branch is only a pointer, and `git delete` is the verb — which is every `DELETE` and `STALE` row. Where a request already exists it reuses it only if it is still open: one that merged or closed cannot be closed again, so anything else gets a fresh request over the same head.
 
 ### 7. Merging an open-PR branch
 
 A `KEEP` branch an open PR is driving is not finished work — it is work whose intent is already on record. The question step 6 puts to the user is therefore already answered here: never *whether* to land it, only *when*, and that answer belongs to the sweep as a whole rather than to the branch alone.
 
-**Offer these. Leaving one open is a decision the user makes, not one the sweep makes on their behalf.** Present them as their own group, each with its PR's review decision and check state — `uv run lup-devtools dev pr status --branch <branch> --json` — and ask which to merge. A draft PR, a failing check, or a review still owed are all reasons to leave one standing, and each of them is the user's to weigh.
+**Offer these. Leaving one open is a decision the user makes, not one the sweep makes on their behalf.** Present them as their own group, each with its PR's review decision and check state — `uv run lup-devtools git pr status --branch <branch> --json` — and ask which to merge. A draft PR, a failing check, or a review still owed are all reasons to leave one standing, and each of them is the user's to weigh.
+
+**`checks_state` has three answers, and only `passing` is one.** `running` says the checks have not finished — report it as its own state, never merged into the passing group and never presented as a difference between branches, because a probe that has not reported says nothing about the branch it is probing. Where the sweep turns on it, wait for the checks and read the status again rather than reading the unfinished answer.
 
 **They share step 6's queue.** Every merge moves the integration branch, so open-PR branches and `LAND` branches form one ordered sequence rather than two independent passes. Take them one at a time, and re-derive the next one's base after each.
+
+**A stacked PR is retargeted before anything lands, or it never reads as merged.** A PR whose base is its stack parent merges into that parent, and the forge marks a request merged only when a push to *its own base* carries its head — so landing the stack's work in the integration branch leaves every child PR open, and retargeting afterwards is refused with "no new commits" once the head is contained, closable forever but never merged. Read each open PR's base before its group's first merge, and where it names another feature branch, point it at the integration branch while the head still holds commits the integration branch lacks — `uv run lup-devtools git pr merge <number> --retarget` does both in one move, and `gh pr edit <number> --base <integration>` is the half by itself. Bottom-up over the stack, so each PR's diff collapses to its own commits as its parent lands.
 
 **Order by what the branches touch, not by when they started.** Branches cut from the same tip have no divergence to sort by, so compare their file sets — `git diff --name-only <integration>...<branch>` for each — and read the intersection:
 

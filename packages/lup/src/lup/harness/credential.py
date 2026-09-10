@@ -485,6 +485,34 @@ def remote_rewrites(
     return list(found.values())
 
 
+def fleet_rewrites(
+    roots: list[Path], host: str, transport: ForgeTransport
+) -> list[RemoteRewrite]:
+    """Every spelling the checkouts this session can open use and cannot reach.
+
+    One walk per root rather than one over the session's own checkout, because
+    what a session can open stopped being a single repository. A mounted
+    project is one a session commits and pushes in, and its remotes are
+    spelled however its own author spells them -- an ssh config alias, an
+    HTTPS URL, a `git@` address -- none of which the checkout that launched
+    the session has to use. A table built from that checkout alone leaves the
+    mounted one addressed exactly as it was outside, on a transport this
+    session may hold no credential for, and the push then fails in the
+    transport's vocabulary rather than in the boundary's.
+
+    Settled by spelling across all of them, because the settings this becomes
+    are global to the container: git holds one `insteadOf` per spelling, and
+    two roots reaching the same forge by the same name are one rewrite.
+    """
+    return list(
+        {
+            rewrite.spelling: rewrite
+            for root in roots
+            for rewrite in remote_rewrites(root, host, transport)
+        }.values()
+    )
+
+
 def contained_ssh(home_inside: str) -> str:
     """The ssh git runs inside, reading the configuration compiled for this launch.
 

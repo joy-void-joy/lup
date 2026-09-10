@@ -13,7 +13,7 @@ from lup.devtools.harness.generated_paths import (
     GENERATED_PATHS,
     generated_paths_document,
 )
-from lup_template.devtools.harness.composition import TARGETS
+from lup_template.harness.composition import TARGETS
 
 
 def rendered() -> str:
@@ -45,7 +45,7 @@ def test_the_families_a_hand_written_table_folded_are_each_present() -> None:
     page = rendered()
 
     assert "`.claude/plugins/lup/commands/commit.md`" in page
-    assert "lup.devtools.harness.content.skills.commit" in page
+    assert "lup.harness.content.skills.commit" in page
     assert "`.codex/plugins/lup/skills/commit/SKILL.md`" in page
     assert "`.claude/plugins/lup/hooks/runtime/kernel/edit.py`" in page
     assert "lup.policy.kernel.edit" in page

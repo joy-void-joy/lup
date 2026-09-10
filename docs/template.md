@@ -1,4 +1,4 @@
-<!-- Generated from lup_template.devtools.harness.content.docs.template by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup_template.harness.content.docs.template by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # The application template
 
@@ -34,6 +34,7 @@ src/lup_template/
 │   │   ├── realtime.py      # Real-time MCP tools for persistent agents.
 │   │   └── reflect.py       # Reflection tool — forced self-assessment before output finalization.
 │   └── toolsets.py          # Single source of truth for the agent's MCP tool groups.
+├── corpus.py                # This repository's corpus: claims, what backs them, and what retired them.
 ├── devtools/                # Development and analysis CLI tools for lup.
 │   ├── agent/               # Agent introspection and interactive debugging tools.
 │   │   ├── inspect_agent.py # Agent configuration inspection: tools, schemas, prompt, subagents.
@@ -43,39 +44,52 @@ src/lup_template/
 │   │   ├── app.py           # What only a template adds to the `dev` tree the library already builds.
 │   │   ├── init.py          # Package renaming for downstream project initialization.
 │   │   └── library.py       # How this project obtains the ``lup`` library.
-│   ├── harness/             # Canonical harness generation and native launch commands.
-│   │   ├── catalog.py       # Root of the project-owned harness declaration graph.
-│   │   ├── composition.py   # What this project publishes through each native target, and what writes it.
-│   │   └── content/         # Declaration leaves of the harness graph.
-│   │       ├── assets/      # Typed harness content declarations.
-│   │       ├── catalog.py   # This repository's harness content: what it inherits, and what only it has.
-│   │       ├── docs/        # Typed source for every document under ``docs/``.
-│   │       │   ├── catalog.py # Every document this repository publishes under ``docs/``.
-│   │       │   ├── decisions.py # Architectural decisions behind the development tooling.
-│   │       │   ├── index.py # The documentation index: what this repository is, and where each part is.
-│   │       │   └── template.py # Guide to ``src/lup_template``, the application built on the library.
-│   │       ├── guidance.py  # Canonical repository guidance.
-│   │       ├── image.py     # The container this repository's agent sessions run in.
-│   │       ├── provenance.py # What a project settles about where its lup came from.
-│   │       ├── requirements.py # The external programs this repository needs, and what going without costs.
-│   │       ├── settings.py  # What this repository grants, refuses, and enables for itself.
-│   │       ├── shell_vocabulary.py # Where this project's shell vocabulary differs from the one lup offers.
-│   │       ├── skills/      # Typed harness content declarations.
-│   │       │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
-│   │       │   ├── import_skill.py # Canonical declaration for the import skill.
-│   │       │   ├── init.py  # Canonical declaration for the init skill.
-│   │       │   ├── install.py # Canonical declaration for the install skill.
-│   │       │   ├── meta.py  # Canonical declaration for the meta skill.
-│   │       │   └── update.py # Canonical declaration for the update skill.
-│   │       ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
-│   │       ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
-│   │       └── template_sections.py # Portable downstream-template sections shared by every guidance flavor.
 │   ├── main.py              # Root CLI app composing all devtools sub-apps.
 │   ├── setup.py             # This project's setup integrations, over the reusable wizard framework.
 │   └── subapps.py           # This application's sub-app delta: what it declines, and what only it has.
-└── environment/             # Environment harness — how the outside world reaches the agent.
-    └── cli/                 # CLI package for the environment client.
-        └── __main__.py      # Environment CLI for running agent sessions.
+├── environment/             # Environment harness — how the outside world reaches the agent.
+│   └── cli/                 # CLI package for the environment client.
+│       └── __main__.py      # Environment CLI for running agent sessions.
+├── harness/                 # What this repository declares about the harness its own sessions run under.
+│   ├── catalog.py           # Root of the project-owned harness declaration graph.
+│   ├── composition.py       # What this project publishes through each native target, and what writes it.
+│   └── content/             # Declaration leaves of the harness graph.
+│       ├── assets/          # Typed harness content declarations.
+│       ├── catalog.py       # Which modules this repository takes, and what it changed about each.
+│       ├── docs/            # Typed source for every document under ``docs/``.
+│       │   ├── catalog.py   # Every document this repository publishes under ``docs/``.
+│       │   ├── corpus.py    # This repository's corpus: a body of claims, what backs each, and what retired it.
+│       │   ├── decisions.py # Architectural decisions behind the development tooling.
+│       │   ├── index.py     # The documentation index: what this repository is, and where each part is.
+│       │   └── template.py  # Guide to ``src/lup_template``, the application built on the library.
+│       ├── guidance.py      # Canonical repository guidance.
+│       ├── image.py         # The container this repository's agent sessions run in.
+│       ├── modules/
+│       │   ├── catalog.py   # The modules only this repository has, each spec beside its builder.
+│       │   ├── examples.py  # The scaffold demonstrating itself, which no adopter runs.
+│       │   ├── project.py   # What this repository is, and what it expects of a session working in it.
+│       │   ├── specs.py     # What the modules only this repository has are called, and what they are for.
+│       │   ├── template_init.py # Standing a lup project up, and keeping it configured once it is standing.
+│       │   └── upstream.py  # Keeping a project in step with what it was built from.
+│       ├── provenance.py    # What a project settles about where its lup came from.
+│       ├── requirements.py  # The external programs this repository needs, and what going without costs.
+│       ├── settings.py      # What this repository grants, refuses, and enables for itself.
+│       ├── shell_vocabulary.py # Where this project's shell vocabulary differs from the one lup offers.
+│       ├── skills/          # Typed harness content declarations.
+│       │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
+│       │   ├── deciding.py  # The decision walk the design-facing skills share.
+│       │   ├── discovery.py # The discovery posture the design-facing skills share.
+│       │   ├── distill.py   # Canonical declaration for the distill skill.
+│       │   ├── import_skill.py # Canonical declaration for the import skill.
+│       │   ├── init.py      # Canonical declaration for the init skill.
+│       │   ├── install.py   # Canonical declaration for the install skill.
+│       │   ├── meta.py      # Canonical declaration for the meta skill.
+│       │   └── update.py    # Canonical declaration for the update skill.
+│       ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
+│       ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
+│       └── template_sections.py # Portable downstream-template sections shared by every guidance flavor.
+├── kinds.py                 # What this repository records in its ledger, declared once.
+└── writeups.py              # This repository's writeups: documents generated from its own ledger.
 ```
 
 Nothing above is written down. The structure is walked from the checkout when
@@ -93,7 +107,7 @@ is the only nudge this page gives about writing one.
 | `prompts.py` | The system prompt composed from named sections. | Editing `PURPOSE` and `GUIDELINES`. Leave `output_format()` alone — it reads the schema. |
 | `toolsets.py` | The MCP tool groups a session gets, as one registry. | Adding a group to `build_session_toolset()` and to the `ServerGroup` literal beside it. |
 | `tools/` | The tool implementations. `example.py` is placeholder search/fetch/read/glob; `reflect.py`, `realtime.py`, and `nested.py` are working patterns. | Replacing `example.py` with your domain's tools. |
-| `subagents.py` | Portable `SubagentSpec` declarations and their tool lists. | Adding specs to `ALL_SPECS`. |
+| `subagents.py` | Portable `SubagentSpec` declarations: capabilities, exact tool grants, model tiers. | Adding specs to `ALL_SPECS`. |
 | `tool_policy.py` | Which tools are available given the configuration — a missing API key bans its tools rather than failing at call time. | Adding an exclusion for each new conditional dependency. |
 | `config.py` | Pydantic settings from `.env` and `.env.local`: model, budget, turn cap, sandbox, paths. | Adding settings, never reading the environment directly elsewhere. |
 | `core.py` | `provider_factory()` — the **one** place a concrete adapter is named. | Rarely. Everything downstream takes the portable `Client` it returns. |
@@ -138,9 +152,12 @@ the SDK; everything else is loaded through pydantic-settings in
 workflow sub-apps live in `lup.devtools` and are *inherited*: an upgrade
 brings their improvements without a merge, which is the point — they are
 development tooling, not this domain, and a fork of them goes stale the day
-it is taken. `devtools/subapps.py` names the ones this project takes and
-declares the ones only it has; `devtools/main.py` is where each name meets
-the app answering to it.
+it is taken. Which of them this project serves is not written down anywhere: a
+sub-app is one surface of a subject, so the roster follows the modules this
+project adopted and is derived beside them in `harness/content/catalog.py`.
+`devtools/subapps.py` declares the one thing that cannot be derived — what a
+sub-app of this project's own is called — and `devtools/main.py` is where each
+name meets the app answering to it.
 
 That is also where `usage` is decided, twice over: whether to serve it, and
 which backends' accounts it reads. The display, the pacing bars, and the
@@ -150,17 +167,17 @@ display around the readers it names.
 
 - `agent` — Agent introspection and debugging
 - `conversation` — Retain authenticated AI conversations
-- `dashboard` — Host the local setup dashboard
-- `dev` — Worktrees, branches, and pre-flight checks
+- `coordination` — Reach the other sessions working in this repository
+- `dev` — Read this repository, and hold it to what it settled
 - `feedback` — Feedback state, metrics, and commits
+- `git` — Branches, worktrees, pull requests, and conflicts
 - `harness` — Generate and launch the native harnesses
-- `hooks` — Query the permission policy
-- `py` — Python source and module inspection
-- `report` — Everything left to implement, in one place
-- `setup` — Interactive setup wizard
-- `sync` — Track sync.json repos and review their commits
-- `trace` — Trace display, search, and analysis
-- `usage` — Runtime usage display
+- `ledger` — Read and preserve the notes this repository has recorded
+- `resolve` — Drive a resolver run, and watch or answer it
+- `run` — Follow work that outlives its tool call
+- `setup` — Interactive setup wizard, and its page
+- `sync` — Stay in step with upstream: tracked repos, and what they owe
+- `trace` — What a session left behind: its trace and its records
 - `version` — Agent version, changelog, and bump
 
 Run `uv run lup-devtools --help` for the full command tree. The three you will
@@ -180,18 +197,23 @@ through the reviewable ladder in
 [contributing.md](contributing.md) rather than a script in `tmp/`, which is
 gitignored and so reaches no diff and no reviewer.
 
-### `devtools/harness/` — the declaration graph
+### `harness/` — the declaration graph
 
-The harness lives under devtools because generating it is a development
-activity. `catalog.py` is the root: it assembles the skills and agents from
-`content/` with the application-owned `HookSet` and the resolver spec into one
-`Harness`. `content/` holds the leaves — one module per skill, per agent, per
-document — and `generate.py` compiles them. [harness.md](harness.md) is the
-guide; this is only where the files are.
+Declaration content sits above the tooling that compiles it, so the harness is
+its own package rather than a corner of `devtools/`. `catalog.py` is the root:
+it assembles the skills and agents this project composes with the
+application-owned `HookSet` and the resolver spec into one `Harness`.
+`content/` holds the leaves — one module per skill, per agent, per document —
+and `content/modules/` groups them by subject: a module carries its content,
+its page, its paragraph in the always-loaded document, its command tree and
+its tool group, and `content/catalog.py` states which of them this project
+takes. What the plugin ships, what `docs/` publishes, what the CLI serves and
+what a session is offered are all derived from that one answer.
+[harness.md](harness.md) is the guide; this is only where the files are.
 
 ### The setup dashboard
 
-`uv run lup-devtools dashboard` serves a local browser interface at
+`uv run lup-devtools setup dashboard` serves a local browser interface at
 `http://127.0.0.1:8765`. It is the web face of the same declarative
 `INTEGRATIONS` registry that `uv run lup-devtools setup` walks in the
 terminal: a domain customizes the registry once and gets both.
@@ -200,9 +222,10 @@ A progress-oriented wizard covers first setup; an all-integrations view covers
 later maintenance. Browser forms are generated only for declarative
 environment fields, from an explicit per-integration allowlist, so the page
 cannot write an arbitrary variable; anything needing OAuth or bespoke
-validation routes to its existing CLI command. FastAPI serves one packaged
-HTML asset — zero build, no Node — and `--no-open` and `--port` cover the
-cases where the defaults do not fit.
+validation routes to its existing CLI command. FastAPI serves the `wizard`
+surface Vite built into `lup.web`'s package data — the wheel carries the
+bundle, and bun is needed only to change it — and `--no-open` and `--port`
+cover the cases where the defaults do not fit.
 
 `--host` takes only a loopback address, and every request's `Host` header is
 checked against one. The page writes credentials into `.env.local`, and a
@@ -245,9 +268,31 @@ pulls *from* it. The lup repository itself sets `"ignore": true` on its own
 entry and registers its downstream fleet in `sync.json.local`, so /lup:update can generalize emerged patterns back into the template. Same
 registry, opposite seats.
 
-Repositories created before the rename may still carry
-`downstream.json`/`downstream.json.local`; the tooling reads them as a
-fallback with a deprecation warning, and renaming the files is the migration.
+An entry may also carry a `"mount"` of `"rw"` or `"ro"`, which is a
+declaration about *access* rather than about review: a session opens that
+project at its own path, inside the container as well as outside it, and
+`refs/<name>` resolves there rather than dangling. Written or absent, never
+defaulted — tracking a project and handing a session the keys to it are
+different claims, and `sync.json` is committed scaffold that would otherwise
+make the second one on every adopter's behalf.
+
+A registration that names only a URL is materialized under
+`~/.cache/lup/sync/<name>.git` in the layout one naming a local path already
+points at: a full bare clone — every branch, whole history — with a worktree
+attached at `tree/<branch>`. What is mounted is that worktree, so a session
+opens either kind of registration on the same terms, and `git worktree
+create` inside one lands its next checkout beside the first. The cache sits
+outside the project deliberately. A clone under the checkout is inside the
+session's own writable mount, which makes a `"ro"` registration silently
+`"rw"`, and it is re-cloned once per worktree where the history is worth
+having once per machine.
+
+Nothing a review does moves a branch in one of those clones. The upstream's
+commits are read from its remote-tracking ref rather than from `HEAD`, so
+refreshing is a fetch: `sync fetch`, `sync log` and `sync diff` leave a
+branch cut in the clone, a commit made on it, and every uncommitted file
+beside it exactly where they stand. `sync log` reports what the *upstream*
+added, never what a session working in the clone did.
 
 ## How the two halves depend on each other
 

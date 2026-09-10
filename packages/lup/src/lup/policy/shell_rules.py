@@ -13,7 +13,7 @@ An application declares its own table and hands it to ``ShellPolicy`` and to
 ``HookSet.shell_rules``; :mod:`lup.policy.bundle` erases that same table into
 ``policy_data.py`` at generation time, so the canonical ``ShellPolicy`` and
 every generated dispatcher decide identically. This repository's table is
-``lup_template.devtools.harness.content.shell_vocabulary``.
+``lup_template.harness.content.shell_vocabulary``.
 
 Three nesting levels mirror how real tools are shaped:
 
@@ -73,6 +73,7 @@ from lup.policy.kernel.decision import (
     SandboxPlacement,
 )
 from lup.policy.kernel.rows import (
+    DestinationForm,
     RefspecEffect,
     RunnerTargetRow,
     RuleLevel,
@@ -359,17 +360,23 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     effect is kept only for the settings that redirect how commands execute.
     ``ask_refspecs`` states the ``ask_flags`` downgrade about an operand's
     grammar instead of a word's spelling, for a subcommand whose refspecs
-    carry the same effects its flags do.
+    carry the same effects its flags do. ``ask_destinations`` states the same
+    downgrade about the first operand that is not a flag, for a subcommand
+    that takes a repository there and accepts one spelled out inline as
+    readily as one the remote table holds.
     """
 
     name: str
     effects: list[EffectRow] = []
     refuses: str = ""
+    ask_destinations: list[DestinationForm] = []
     ask_refspecs: list[RefspecEffect] = []
     ask_flags: list[str] = []
     flag_effects: list[EffectRow] = []
     write_flags: list[str] = []
     read_verbs: list[str] = []
+    probe_flags: list[str] = []
+    frozen_flags: list[str] = []
     guarded_keys: list[str] = []
     operations: list[ShellOperationRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
@@ -466,6 +473,28 @@ class ShellCommandRule(SelectableRule, frozen=True):
     """
     allow_flags: list[str] = []
     read_verbs: list[str] = []
+    probe_flags: list[str] = []
+    """Flags after which this command performs nothing — its dry-run spelling.
+
+    A read verb pins a many-actioned command to its query action, and is
+    honored only among unguarded words, because a guarded flag beside it
+    would still act. A probe flag is stronger: `git push --dry-run --force`
+    replaces no ref however the rest of the line reads, so its literal
+    presence stands down the flag- and refspec-earned questions along with
+    the row's own effects. What it does not stand down is destination
+    grammar — a probe still contacts the repository it names, so where the
+    work would go stays guarded as a place rather than as a write.
+    """
+    frozen_flags: list[str] = []
+    """Flags that pin a dependency restore to what its lockfile already declares.
+
+    `bun install --frozen-lockfile` fetches nothing the lock does not pin by
+    integrity hash, which is the restore `uv run` performs before running
+    anything, unasked — so the flag de-escalates the row to allow, on the
+    terms a read verb is honored: legible, and among words free of guarded
+    flags. Without it the same verb is free to rewrite the lockfile first,
+    which resolves what the project depends on anew and keeps the question.
+    """
     write_markers: list[str] = []
     """Argument prefixes whose *absence* makes this command read-only.
 
@@ -633,12 +662,15 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 command=command_name,
                 subcommand=subcommand.name,
                 operation=operation.name,
+                ask_destinations=[],
                 ask_refspecs=[],
                 ask_flags=list(operation.ask_flags),
                 flag_effects=list(operation.flag_effects),
                 write_flags=list(operation.write_flags),
                 allow_flags=[],
                 read_verbs=[],
+                probe_flags=[],
+                frozen_flags=[],
                 write_markers=[],
                 guarded_keys=[],
                 setting_flags=[],
@@ -655,12 +687,15 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command_name,
             subcommand=subcommand.name,
             operation="",
+            ask_destinations=list(subcommand.ask_destinations),
             ask_refspecs=list(subcommand.ask_refspecs),
             ask_flags=list(subcommand.ask_flags),
             flag_effects=list(subcommand.flag_effects),
             write_flags=list(subcommand.write_flags),
             allow_flags=[],
             read_verbs=list(subcommand.read_verbs),
+            probe_flags=list(subcommand.probe_flags),
+            frozen_flags=list(subcommand.frozen_flags),
             write_markers=[],
             guarded_keys=list(subcommand.guarded_keys),
             setting_flags=[],
@@ -679,12 +714,15 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command.name,
             subcommand="",
             operation="",
+            ask_destinations=[],
             ask_refspecs=[],
             ask_flags=list(command.ask_flags),
             flag_effects=list(command.flag_effects),
             write_flags=list(command.write_flags),
             allow_flags=list(command.allow_flags),
             read_verbs=list(command.read_verbs),
+            probe_flags=list(command.probe_flags),
+            frozen_flags=list(command.frozen_flags),
             write_markers=list(command.write_markers),
             guarded_keys=list(command.guarded_keys),
             setting_flags=list(command.setting_flags),

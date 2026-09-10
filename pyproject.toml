@@ -57,6 +57,7 @@ dev = [
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.1.0",
     "pytest-xdist>=3.8.0",
+    "python-xlib>=0.33",
     "pyyaml>=6.0.3",
     "ruff>=0.14.14",
 ]
@@ -66,7 +67,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "lup_template.devtools.dashboard" = ["assets/*.html"]
-"lup_template.devtools.harness.content" = ["assets/*.js", "assets/*.sh"]
+"lup_template.harness.content" = ["assets/*.js", "assets/*.sh"]
 
 [tool.lup]
 agent_version = "0.2.0"

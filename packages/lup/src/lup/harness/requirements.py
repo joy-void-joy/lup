@@ -204,7 +204,7 @@ class Advisory(BaseModel, frozen=True):
         return False
 
     def consequence(self) -> str:
-        return f"{self.improves} would be smoother with it"
+        return f"Optional support for {self.improves} is unavailable."
 
 
 class LostCapability(BaseModel, frozen=True):
@@ -230,6 +230,52 @@ class LostCapability(BaseModel, frozen=True):
         return f"{self.capability} is unavailable"
 
 
+class MisleadingAbsence(BaseModel, frozen=True):
+    """Absence does not read as absence: something answers, and answers wrongly.
+
+    The grade between :class:`LostCapability` and :class:`RefusedLaunch`, and
+    the one whose omission was measured. A capability lost is a session that
+    knows what it cannot do, because reaching for it raises something a
+    caller can see. This is the case where reaching for it does not: a
+    missing program exits 127, and a shell spends its exit codes on *meaning*
+    rather than on availability, so ``cmp -s A B && echo same || echo
+    differs`` prints ``differs`` for two byte-identical files on a machine
+    carrying no ``cmp``. Nothing is unavailable to whoever reads that line.
+    The answer is simply false, in the voice of a true one.
+
+    So it is said in its own words rather than folded into a degradation,
+    and what it says is what the absence is *mistaken for* -- because a
+    reader who is told a capability is missing goes without it, and a reader
+    who is not told keeps acting on what it said.
+    """
+
+    kind: Literal["misleads"] = "misleads"
+    capability: str = Field(description="What this session cannot do without it")
+    mistaken_for: str = Field(
+        description=(
+            "The answer a caller gets instead of an error, in the caller's "
+            "own terms. Stated rather than derived because only the "
+            "declaration knows which wrong answer this particular absence "
+            "produces, and a generic sentence about failure is exactly the "
+            "reading that makes it invisible"
+        )
+    )
+
+    def refuses(self) -> bool:
+        """No. A session told what it is holding can still work around it."""
+        return False
+
+    def costly(self) -> bool:
+        """Yes, and more so than a plain loss: what is spent is trust."""
+        return True
+
+    def consequence(self) -> str:
+        return (
+            f"{self.capability} is unavailable. "
+            f"Failures can be mistaken for {self.mistaken_for}."
+        )
+
+
 class RefusedLaunch(BaseModel, frozen=True):
     """Absence makes a claimed boundary worth less than it says, so nothing opens.
 
@@ -249,11 +295,12 @@ class RefusedLaunch(BaseModel, frozen=True):
         return True
 
     def consequence(self) -> str:
-        return f"refusing to open: {self.because}"
+        return self.because
 
 
 type Absence = Annotated[
-    Advisory | LostCapability | RefusedLaunch, Discriminator("kind")
+    Advisory | LostCapability | MisleadingAbsence | RefusedLaunch,
+    Discriminator("kind"),
 ]
 
 
@@ -282,16 +329,15 @@ class EnvironmentRedirect(BaseModel, frozen=True):
         whatever words the client chose to fail in.
         """
         value = environment.get(self.variable, "")
-        if not value:
+        if not value or not value.startswith(self.scheme):
             return ""
         target = Path(value.removeprefix(self.scheme))
         if target.exists():
             return ""
         return (
             f"{self.variable} points at {target}, which does not exist. "
-            f"Unset {self.variable} to use the default, or start whatever "
-            "serves that path -- the service you were about to restart is "
-            "probably not the one at fault."
+            f"Unset {self.variable} to use the default socket, or start the "
+            "service that provides this socket."
         )
 
 
@@ -331,18 +377,17 @@ class SupplementaryGroup(BaseModel, frozen=True):
         try:
             entry = grp.getgrnam(self.group)
         except KeyError:
-            return f"there is no {self.group} group on this host"
+            return f"There is no {self.group} group on this host."
         if environment.get("USER", "") not in entry.gr_mem:  # lup: ignore[dict-get]
             return (
-                f"this account is not in the {self.group} group; adding it is "
-                "what grants access, and takes a new session to take effect"
+                f"This account is not in the {self.group} group. If that group "
+                "owns the socket, join it and log out and back in."
             )
         if entry.gr_gid in os.getgroups():
             return ""
         return (
-            f"this account is in {self.group} but this session is not: "
-            "supplementary groups are fixed when a process starts. Start a "
-            "new session -- nothing needs installing or reconfiguring."
+            f"This account belongs to {self.group}, but the current process "
+            "does not have that membership. Log out and back in."
         )
 
 
@@ -453,7 +498,9 @@ class Run(BaseModel, frozen=True):
             output = str(sh.Command(self.command[0])(*self.command[1:]))
         except sh.CommandNotFound:
             return ExerciseOutcome(
-                proved=False, detail=f"{self.command[0]} is not on PATH"
+                proved=False,
+                exercised=not self.contained,
+                detail=f"{self.command[0]} is not on PATH",
             )
         except sh.ErrorReturnCode as failure:
             spoken = failure.stderr.decode("utf-8", "replace").strip()
@@ -472,8 +519,8 @@ class Run(BaseModel, frozen=True):
             return ExerciseOutcome(
                 proved=False,
                 detail=(
-                    f"{' '.join(self.command)} ran but did not produce "
-                    f"{self.expect!r}, so it is installed without working"
+                    f"{' '.join(self.command)} exited successfully, but its "
+                    f"output did not contain {self.expect!r}. Output: {output.strip()!r}"
                 ),
             )
         return ExerciseOutcome(proved=True, detail=output.strip())
@@ -833,12 +880,108 @@ class SentinelProbe(BaseModel, frozen=True):
         )
 
 
+class VocabularyProbe(BaseModel, frozen=True):
+    """Ask an environment for every program a permission policy promised it.
+
+    The one requirement whose subject is a *list* rather than a capability,
+    and it is here because the two halves it joins were each correct alone
+    and wrong together. A shell vocabulary declares which commands an agent
+    may run unattended; an image declares which packages it installs. Nothing
+    compared them, so a word could be declared safe and never carried, and
+    what that produced was not a refusal an agent could read -- ``diff`` and
+    ``cmp`` were both declared and both absent, and the ordinary comparison
+    idiom answered ``DIFFERS`` for two byte-identical files, because the
+    ``||`` arm cannot tell "they differ" from "that program was never here".
+
+    Asked as one probe over the whole list rather than one requirement per
+    word, because the finding a reader wants is the *set*: eight absences
+    reported as eight lines is eight capabilities to weigh, and reported as
+    one line naming eight programs is a single fact about an image that was
+    built from a stale list.
+
+    ``command -v`` is presence, and this module argues against presence
+    everywhere else. The argument holds where a program is the visible half
+    of something larger -- a client with no daemon, a binary with no group --
+    and these words are not that: a coreutil on ``PATH`` is the whole
+    capability. What matters is *where* the question is asked, and it is
+    asked in the environment itself, through the argv a session opens with,
+    rather than by a launcher consulting its own ``PATH`` on behalf of a
+    container it is not inside.
+    """
+
+    kind: Literal["vocabulary_probe"] = "vocabulary_probe"
+    vocabulary: list[str] = Field(
+        min_length=1,
+        description=(
+            "Programs the permission policy declares safe to run unattended, "
+            "which is the promise this probe holds the environment to"
+        ),
+    )
+    marker: str = Field(
+        default="every declared program answered",
+        description="What the probe prints when nothing is missing",
+    )
+
+    def resolved(self) -> Run:
+        """This probe as the command an environment runs, in portable shell.
+
+        The absent names go to stderr and the marker to stdout, because that
+        is the split :meth:`Run.run` reads: a clean exit is proved by the
+        marker, and a failing one carries stderr into the finding's detail.
+        Printed to stdout, the one thing a reader needs -- which words were
+        missing -- would be discarded at the moment it became true.
+        """
+        words = " ".join(self.vocabulary)
+        script = (
+            'absent=""; '
+            f"for word in {words}; do "
+            'command -v "$word" >/dev/null 2>&1 || absent="$absent $word"; '
+            "done; "
+            'if [ -n "$absent" ]; then '
+            'printf "Missing commands:%s" '
+            '"$absent" >&2; exit 1; fi; '
+            f'printf "{self.marker}"'
+        )
+        return Run(command=["sh", "-c", script], expect=self.marker)
+
+    def programs(self) -> list[str]:
+        """Every word this asks for, which is what a reader has to be told."""
+        return list(self.vocabulary)
+
+    def pointed_at(self, program: str) -> "VocabularyProbe":
+        """Unchanged: the shell that asks is not a fact about any machine."""
+        return self
+
+    def behind(self, opening: list[str]) -> "VocabularyProbe":
+        """Unchanged: :meth:`given` renders the ``Run`` that *opening* prefixes."""
+        return self
+
+    def given(self, facts: HostFacts) -> Run:
+        """The rendered command, which needs no host fact to be complete."""
+        return self.resolved()
+
+    def run(self) -> ExerciseOutcome:
+        """Ask here, which is a real answer -- unlike its sibling probes.
+
+        A mount and a sentinel are shapes until a launch aims them, so both
+        refuse to answer unaimed. This one is whole as declared: the words
+        come from the policy and the shell is wherever this runs, so the host
+        roster gets a true reading for free and only the image roster needs
+        the opening argv.
+        """
+        return self.resolved().run()
+
+
 type Exercise = Annotated[
-    Run | AnyOf | MountProbe | SentinelProbe, Discriminator("kind")
+    Run | AnyOf | MountProbe | SentinelProbe | VocabularyProbe,
+    Discriminator("kind"),
 ]
 
 
-type Side = Literal["host", "image", "both"]
+type Location = Literal["host", "image"]
+
+
+type Side = Literal["host", "image", "both", "session"]
 """Which side of the boundary is expected to satisfy a requirement."""
 
 
@@ -856,7 +999,9 @@ class Requirement(BaseModel, frozen=True):
             "sibling with the whole host mounted. An image requirement is "
             "the reverse: the host is not expected to have it, so exercising "
             "it here would report a machine broken for lacking something it "
-            "was never meant to carry"
+            "was never meant to carry. A session requirement is checked where "
+            "the agent runs: in the container for a contained launch, on the "
+            "host otherwise"
         ),
     )
     checked: Literal["always", "setup"] = Field(
@@ -889,6 +1034,10 @@ class Requirement(BaseModel, frozen=True):
     )
     exercise: Exercise
     absence: Absence
+    recovery: str = Field(default="", description="The next step after a failed check")
+    recovery_by_location: dict[Location, str] = Field(
+        default={}, description="Recovery specific to the environment actually checked"
+    )
     diagnoses: list[Diagnosis] = Field(
         default=[],
         description=(
@@ -923,11 +1072,13 @@ class Requirement(BaseModel, frozen=True):
         ),
     )
 
-    def check(self, environment: EnvVars) -> "Finding":
+    def check(self, environment: EnvVars, location: Location = "host") -> "Finding":
         """Exercise this requirement and say what was found, in whose words."""
         outcome = self.exercise.run()
         if outcome.proved:
-            return Finding(requirement=self, working=True, detail=outcome.detail)
+            return Finding(
+                requirement=self, working=True, detail=outcome.detail, location=location
+            )
         # Only when something was actually exercised. A diagnosis explains why
         # this capability failed, and an operation that never ran did not fail
         # for any of the reasons they look for -- so asking them here would
@@ -949,6 +1100,7 @@ class Requirement(BaseModel, frozen=True):
             exercised=outcome.exercised,
             detail=outcome.detail,
             causes=causes,
+            location=location,
         )
 
 
@@ -960,69 +1112,68 @@ class Finding(BaseModel, frozen=True):
     exercised: bool = True
     detail: str = ""
     causes: list[str] = []
+    location: Location | None = Field(
+        default=None,
+        description="Where the check ran, independent of where it is required",
+    )
 
     def refuses(self) -> bool:
         """Whether this finding is one a launch must not continue past."""
         return not self.working and self.requirement.absence.refuses()
 
     def notices(self) -> list[Notice]:
-        """This finding as an operator reads it: verdict, cause, consequence.
+        """Report the environment, evidence, effect, and next step separately.
 
-        The consequence is printed even when a cause was found, because the
-        two answer different questions -- why it failed, and what is now
-        missing -- and a reader who gets only the first has to work out
-        whether it mattered.
-
-        The urgency is the finding's own, not the printer's. A capability
-        whose absence refuses the launch and one whose absence merely costs
-        something are different sentences to a reader and were the same
-        sentence on the screen, which is how a working machine's launch and
-        a broken one's looked alike.
-
-        An unexercised finding says so and stops, because every sentence the
-        other branch prints would be invented: the consequence describes an
-        absence nothing established, and the purpose line asserts what was
-        lost. What that cost, measured, was a container refused for a missing
-        bind source announced as an unreachable proxy and an untunnelled
-        egress, under advice to tear down a network that was working.
-
-        A working requirement is a line here because somebody asked. The
-        launch, which asked nobody, reads :meth:`alarms` instead.
+        A check that could not start establishes no loss of capability and
+        offers no capability-specific repair. Healthy checks appear only in
+        an explicit report; launches use :meth:`alarms`.
         """
+        label = self.requirement.capability
+        if self.location is not None:
+            label += " (container)" if self.location == "image" else " (host)"
         if self.working:
-            return [
-                Notice(text=f"{self.requirement.capability}: working", urgency="ready")
-            ]
+            return [Notice(text=f"{label}: working", urgency="ready")]
         urgency: Urgency = "refusal" if self.refuses() else "warning"
         if not self.exercised:
             return [
                 Notice(
-                    text=f"{self.requirement.capability}: not established",
+                    text=f"{label}: check could not run",
                     urgency=urgency,
                 ),
                 Notice(text=self.detail, urgency=urgency, indent=1),
                 Notice(
                     text=(
-                        "the exercise never ran, so nothing here is a verdict "
-                        f"on {self.requirement.purpose}"
+                        "Result unknown. Resolve the error above and rerun the check."
                     ),
                     urgency="detail",
                     indent=1,
                 ),
             ]
         consequence = self.requirement.absence.consequence()
+        recovery = self.requirement.recovery
+        if self.location is not None:
+            recovery = self.requirement.recovery_by_location.get(
+                self.location, recovery
+            )
         return [
             Notice(
-                text=f"{self.requirement.capability}: {consequence}", urgency=urgency
+                text=f"{label}: {'launch blocked' if self.refuses() else 'check failed'}",
+                urgency=urgency,
             ),
             *[
                 Notice(text=cause, urgency=urgency, indent=1)
-                for cause in self.causes or [self.detail]
+                for cause in [self.detail, *self.causes]
+                if cause
             ],
             Notice(
-                text=f"needed for {self.requirement.purpose}",
+                text=f"Impact: {consequence}",
                 urgency="detail",
                 indent=1,
+            ),
+            *(
+                [Notice(text=f"Fix: {recovery}", urgency=urgency, indent=1)]
+                if recovery
+                else []
             ),
         ]
 
@@ -1083,8 +1234,13 @@ class Manifest(BaseModel, frozen=True):
             ]
         )
 
-    def on_the_host(self, setting_up: bool = False) -> list[Requirement]:
+    def on_the_host(
+        self, setting_up: bool = False, contained: bool = False
+    ) -> list[Requirement]:
         """The requirements this machine is expected to satisfy itself.
+
+        A contained launch checks session tools in the container instead.
+        Otherwise this roster includes them for a session running on the host.
 
         Image-side entries are excluded outright rather than exercised and
         forgiven: a host without `bun` is not a host with a problem when
@@ -1100,7 +1256,10 @@ class Manifest(BaseModel, frozen=True):
         return [
             item
             for item in self.requirements
-            if item.where in ("host", "both")
+            if (
+                item.where in ("host", "both")
+                or (item.where == "session" and not contained)
+            )
             and (setting_up or item.checked == "always")
         ]
 
@@ -1126,12 +1285,18 @@ class Manifest(BaseModel, frozen=True):
         return [
             item
             for item in self.requirements
-            if item.where in ("image", "both") and (setting_up or item.at_launch)
+            if item.where in ("image", "both", "session")
+            and (setting_up or item.at_launch)
         ]
 
-    def check(self, environment: EnvVars, setting_up: bool = False) -> list["Finding"]:
+    def check(
+        self, environment: EnvVars, setting_up: bool = False, contained: bool = False
+    ) -> list["Finding"]:
         """Exercise every host-side requirement, in declaration order."""
-        return [item.check(environment) for item in self.on_the_host(setting_up)]
+        return [
+            item.check(environment, location="host")
+            for item in self.on_the_host(setting_up, contained=contained)
+        ]
 
     def check_inside(
         self,
@@ -1158,7 +1323,7 @@ class Manifest(BaseModel, frozen=True):
         return [
             item.model_copy(
                 update={"exercise": item.exercise.given(facts).behind(opening)}
-            ).check(environment)
+            ).check(environment, location="image")
             for item in self.inside_the_image(setting_up)
         ]
 
@@ -1185,7 +1350,7 @@ class Manifest(BaseModel, frozen=True):
             dict.fromkeys(
                 package
                 for item in self.requirements
-                if item.where in ("image", "both")
+                if item.where in ("image", "both", "session")
                 for package in item.install
             )
         )

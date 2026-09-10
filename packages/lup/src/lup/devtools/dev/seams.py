@@ -26,6 +26,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from lup.workspace.paths import project_root
+
 
 class DeclarationEdit(BaseModel, frozen=True):
     """One span of a source file, and what replaces it."""
@@ -258,10 +260,28 @@ class Seam(BaseModel, frozen=True):
     call: str
     keyword: str
     summary: str
+    module: Path | None = None
+    """Where this declaration is written, when it is not the catalog.
+
+    Most of what a project settles about itself sits in one file, and this
+    surface was built on that. It is not a rule: an image is declared where
+    the image is composed, and a seam that could only be read out of the
+    catalog would have to say a project holds nothing for it -- reporting an
+    answer that is written down as one nobody gave.
+
+    Relative to the project root, resolved by the caller that already knows
+    where that is."""
 
     def read(self, catalog: Path) -> SeamValue:
-        """What this project holds for this seam."""
-        return read_seam(catalog, self.call, self.keyword)
+        """What this project holds for this seam.
+
+        The catalog is the default rather than the only answer: a seam naming
+        its own module is read there, and the path it names is resolved
+        beside the catalog's own root.
+        """
+        if self.module is None:
+            return read_seam(catalog, self.call, self.keyword)
+        return read_seam(project_root() / self.module, self.call, self.keyword)
 
 
 DECLARED_SEAMS: list[Seam] = [

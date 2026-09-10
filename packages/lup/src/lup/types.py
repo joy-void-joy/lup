@@ -349,21 +349,36 @@ alone would rebuild every block as a base instance and drop its payload.
 # Subagent specification
 # ---------------------------------------------------------------------------
 
+type ModelTier = Literal["inherit", "strongest", "balanced", "fast"]
+"""Portable model preference for one role.
 
-class SubagentSpec(BaseModel):
+Runtimes name and version their own model lineups, so a declaration states the
+need and each adapter spells whichever tier it can honor — or omits the choice
+where it has no proven vocabulary to spell it in. One alias for every
+declaration that states a preference, because a role's tier and a delegated
+spec's tier are the same vocabulary: spelled twice, an adapter honouring one
+copy would silently ignore whichever tier the other copy grew."""
+
+type SubagentCapability = Literal["workspace-read", "web-search"]
+"""A provider-neutral facility a delegated role may use."""
+
+
+class SubagentSpec(BaseModel, extra="forbid"):
     """Provider-neutral subagent definition used by injected factory recipes."""
 
     name: str
     description: str
     prompt: str
-    tools: list[str] = []
-    model: str | None = Field(
-        default=None,
-        description="Model for this subagent; None inherits the session's "
-        "main model on every backend",
+    capabilities: list[SubagentCapability] = []
+    tools: list[ToolGrant] = []
+    model: ModelTier = Field(
+        default="inherit",
+        description="Portable model tier for this subagent; inherit reuses the "
+        "session's main model on every backend",
     )
     max_turns: int | None = Field(
         default=None,
+        gt=0,
         description="Turn cap for delegated one-shot runs (None = backend default)",
     )
 

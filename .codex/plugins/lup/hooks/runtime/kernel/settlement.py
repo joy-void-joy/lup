@@ -31,6 +31,8 @@ from .decision import (
     recovery_dischargeable,
 )
 from .escalation import EscalationRequest
+from .roles import is_temporary_root_target
+from .rows import DisplacedTargetRow
 from .semantics import CheckpointEvidence, UnjudgedAmbient
 
 # Every sentence below is one settlement row's own wording, declared beside the
@@ -82,6 +84,7 @@ class SettlementFacts:
     checkpoint: CheckpointEvidence
     unjudged_ambient: UnjudgedAmbient
     unleased: list[str]
+    displaced: list[DisplacedTargetRow]
     hint: str
 
     def __init__(
@@ -97,6 +100,7 @@ class SettlementFacts:
         checkpoint: CheckpointEvidence = "absent",
         unjudged_ambient: UnjudgedAmbient = "ask",
         unleased: list[str] | None = None,
+        displaced: list[DisplacedTargetRow] | None = None,
         hint: str = "",
     ) -> None:
         self.decision = decision
@@ -110,6 +114,7 @@ class SettlementFacts:
         self.checkpoint = checkpoint
         self.unjudged_ambient = unjudged_ambient
         self.unleased = unleased or []
+        self.displaced = displaced or []
         self.hint = hint
 
     def asks(self, kind: str) -> bool:
@@ -134,7 +139,23 @@ class SettlementFacts:
         confirmed is not evidence, so the launch's measurement of it is what
         makes containment count.
         """
-        return self.sandbox_confined or (self.contained and self.inside_placement)
+        return self.sandbox_confined or self.container_private()
+
+    def container_private(self) -> bool:
+        """Whether a path this launch touches outside every lease is still its own.
+
+        The half of :meth:`bounded` that a *filesystem* claim rests on, named
+        because two rows want different halves. Anything confines the effects
+        of an operation, which is the question above; this one asks whether
+        the machine's own directories are shared, and only a container
+        measured to place its work inside itself answers yes.
+
+        The native sandbox cannot. It confines one call at a time on the
+        operator's own filesystem, so a temporary directory it leaves
+        writable is the host's, holding other programs' files — the same
+        word, and the opposite fact.
+        """
+        return self.contained and self.inside_placement
 
     def rewritten(self, decision: KernelDecision) -> "SettlementFacts":
         """These same facts, with a row's rewrite standing as the verdict."""
@@ -150,6 +171,7 @@ class SettlementFacts:
             checkpoint=self.checkpoint,
             unjudged_ambient=self.unjudged_ambient,
             unleased=self.unleased,
+            displaced=self.displaced,
             hint=self.hint,
         )
 
@@ -319,6 +341,7 @@ class TrappedPlacement(SettlementRule):
             reason=SANDBOX_TRAPPED_REASON,
             cause="capability",
             capability="host_executor",
+            rule=self.id,
         )
 
 
@@ -356,13 +379,27 @@ class UnleasedWrite(SettlementRule):
     id = "unleased-write"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if not facts.unleased or facts.decision.effect not in ("allow", "defer"):
+        # The machine's temporary root is not the lease's business where the
+        # launch is a container. A lease enumerates what came from the host,
+        # so `/tmp` reads as uncovered — and it is uncovered in the direction
+        # that makes it safe, the same argument the session scratchpad won:
+        # this launch's own directory, gone with it, holding nothing any
+        # capture was meant to protect. The measurement is what carries it,
+        # so the exception is spelled against `container_private` rather than
+        # against the path: uncontained, that same word is the operator's own
+        # `/tmp`, shared with every other process on the machine.
+        reported = [
+            target
+            for target in facts.unleased
+            if not (facts.container_private() and is_temporary_root_target(target))
+        ]
+        if not reported or facts.decision.effect not in ("allow", "defer"):
             return None
         return facts.decision.revised(
             effect="ask",
             reason=(
                 f"{facts.decision.reason}. This writes to "
-                f"{', '.join(facts.unleased)}, which the boundary this launch "
+                f"{', '.join(reported)}, which the boundary this launch "
                 "measured does not cover — so nothing here confines the write "
                 "and no capture of this session holds what it replaces"
             ),
@@ -370,6 +407,52 @@ class UnleasedWrite(SettlementRule):
             # Named, because the verdict this replaces was reached by the
             # vocabulary finding nothing to say and carries no id of its own.
             # An ask that names no rule is one nobody can write a case for.
+            rule=self.id,
+            abstention=None,
+        )
+
+
+class DisplacedWrite(SettlementRule):
+    """A write whose target does not land where its spelling says it does.
+
+    Every grant above reads a path lexically, which is what makes a role
+    declarable at all: a root names a tree, and a spelling either sits under
+    it or does not. A symlink breaks exactly that step. `/tmp/link/cron.d/job`
+    reads as the temporary root — disposable, unreviewed, nothing a capture
+    was meant to hold — and lands wherever the link points, which is somebody
+    else's file with none of those properties.
+
+    The exposure is what a world-writable root costs. A repository-relative
+    root is planted in only by whoever can already write the checkout, and the
+    session scratchpad is minted per session by the harness; `/tmp` is neither,
+    so any process on an uncontained host can leave a link there and be
+    written through by a grant meant for a throwaway file.
+
+    Resolution belongs to the host and the reason belongs here, which is the
+    same division `unleased-write` makes: the kernel sees words, so a caller
+    that resolved nothing reports nothing and this row is silent — the
+    lexical grants then stand exactly as they did.
+
+    Read against ``allow`` and ``defer`` only. A verdict already asking has a
+    reviewer, and what they are shown carries the destination.
+    """
+
+    id = "displaced-write"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if not facts.displaced or facts.decision.effect not in ("allow", "defer"):
+            return None
+        spelled = ", ".join(
+            f"{row['path']} → {row['lands']}" for row in facts.displaced
+        )
+        return facts.decision.revised(
+            effect="ask",
+            reason=(
+                f"{facts.decision.reason}. This resolves through a symlink and"
+                f" lands elsewhere: {spelled} — so the role its spelling"
+                " claims is not the role of the file it would replace"
+            ),
+            purpose="unrecovered_local_mutation",
             rule=self.id,
             abstention=None,
         )
@@ -619,6 +702,7 @@ SETTLEMENT_ORDER: list[SettlementRule] = [
     SandboxEscalation(),
     TrappedPlacement(),
     UnleasedWrite(),
+    DisplacedWrite(),
     ProviderNative(),
     RecoveredLoss(),
     UnreachableReviewer(),
@@ -636,6 +720,12 @@ escalation so that a combined request over an overrideable refusal has
 already become a question by the time the placement moves — which is exactly
 the difference between ``escalate[decision,sandbox]`` reaching the host and
 ``escalate[sandbox]`` alone staying refused.
+
+``DisplacedWrite`` sits beside ``UnleasedWrite`` because the two are the same
+kind of correction: a measurement the classification above could not make,
+against a verdict it reached without one. Neither is the write row spelled
+twice — that row decides which tree a spelling names, and these decide what the
+filesystem does with the spelling afterwards.
 
 ``UnleasedWrite`` sits above ``RecoveredLoss`` for the reason that row exists:
 a proven capture settles a loss to a permission, and a capture of *this*

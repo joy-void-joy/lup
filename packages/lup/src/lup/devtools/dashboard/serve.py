@@ -17,7 +17,6 @@ from collections.abc import Callable
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from lup.devtools.dashboard.page import WIZARD_PAGE
 from lup.devtools.dashboard.wizard import (
     ScopeChoice,
     StepAnswers,
@@ -25,7 +24,7 @@ from lup.devtools.dashboard.wizard import (
     Wizard,
     WizardView,
 )
-from lup.web.serve import page_app
+from lup.web.serve import bundle_app
 
 
 class ScopeRequest(BaseModel):
@@ -70,8 +69,12 @@ def create_wizard_app[Scope](
     tab sends after somebody deleted the scope it was looking at. Falling back
     to the first real scope rather than refusing keeps that tab recoverable: it
     redraws something true instead of an empty frame.
+
+    The page is the ``wizard`` surface Vite built into ``lup.web``'s package
+    data, typed against the models below; it knows no step by name, so a
+    project adding one writes a declaration and the page draws it.
     """
-    application = page_app(title, url, WIZARD_PAGE)
+    application = bundle_app(title, url, "wizard")
 
     def chosen(name: str) -> str:
         if resolve(name) is not None:

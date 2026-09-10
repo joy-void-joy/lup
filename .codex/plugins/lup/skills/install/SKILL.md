@@ -137,19 +137,18 @@ session API. Name them in the requirement (`lup[claude,codex,docker]`).
 The `lup-devtools` CLI (`src/lup_template/devtools/`) gives the meta-agent structured commands for development tasks that would otherwise require ad-hoc bash one-liners. Without it, an agent resorts to `python -c "..."` snippets or manual shell pipelines for trace analysis, feedback collection, and session management — which are fragile and unrepeatable. The devtools encode these workflows as proper CLI commands with argument parsing, output formatting, and error handling.
 
 - `src/lup_template/devtools/main.py` — root typer app composing sub-apps (entry point: `lup-devtools`)
-  - `agent` — Agent introspection and debugging
   - `conversation` — Retain authenticated AI conversations
-  - `dashboard` — Host the local setup dashboard
-  - `dev` — Worktrees, branches, and pre-flight checks
+  - `coordination` — Reach the other sessions working in this repository
+  - `ledger` — Read and preserve the notes this repository has recorded
+  - `dev` — Read this repository, and hold it to what it settled
   - `feedback` — Feedback state, metrics, and commits
+  - `git` — Branches, worktrees, pull requests, and conflicts
   - `harness` — Generate and launch the native harnesses
-  - `hooks` — Query the permission policy
-  - `py` — Python source and module inspection
-  - `report` — Everything left to implement, in one place
-  - `setup` — Interactive setup wizard
-  - `sync` — Track sync.json repos and review their commits
-  - `trace` — Trace display, search, and analysis
-  - `usage` — Runtime usage display
+  - `resolve` — Drive a resolver run, and watch or answer it
+  - `run` — Follow work that outlives its tool call
+  - `setup` — Interactive setup wizard, and its page
+  - `sync` — Stay in step with upstream: tracked repos, and what they owe
+  - `trace` — What a session left behind: its trace and its records
   - `version` — Agent version, changelog, and bump
 
 ### Configuration Patterns
@@ -237,18 +236,18 @@ If the target repo builds (or will build) a tool-using SDK agent, the **self-imp
 - **Agent scaffolding**: core.py pattern (orchestration), subagents.py, models.py (structured output), prompts.py, tool_policy.py, config.py (pydantic-settings)
 - **Feedback loop**: feedback collection, trace analysis, metrics aggregation, scoring CSV
 - **Session management**: CLI with `run` + `loop` commands, auto-commit, session storage
-- **DevTools**: The full `lup-devtools` CLI (`agent`, `conversation`, `dashboard`, `dev`, `feedback`, `harness`, `hooks`, `py`, `report`, `setup`, `sync`, `trace`, `usage`, `version`)
+- **DevTools**: The full `lup-devtools` CLI (`conversation`, `coordination`, `ledger`, `dev`, `feedback`, `git`, `harness`, `resolve`, `run`, `setup`, `sync`, `trace`, `version`)
 - **Version tracking**: `[tool.lup] agent_version` in pyproject.toml + `lup-devtools version bump` for tracking agent behavior changes
 - **Commands**: `init`, `feedback-loop`, `bump`, `update` — the self-improvement workflow
 - **Template guidance**: Section-level merge into each guidance file the target carries, from its matching template flavor (add missing sections, leave existing ones)
 
 When the target has SDK agent code, adapt the scaffolding to wrap their existing agent — don't replace it. The lup patterns (trace logging, scoring, feedback collection) layer on top of whatever agent they already have.
 
-These patterns are **opt-in, not a bundle**: reflection, realtime/persistent mode, the feedback loop, and the commit loop each port only if the target actually needs them (see the guidance file's § Scaffolding Is a Menu, Not a Mandate). Don't install a pattern the target won't use — dead scaffolding is worse than a capability you can add later.
+These patterns are **opt-in, not a bundle**: `reflection`, `realtime` and `feedback-loop` are modules the target names in `DECLINED` or leaves to their defaults, and the commit loop is one file's wiring (see the guidance file's § Scaffolding Is a Menu, Not a Mandate). Don't install a pattern the target won't use — dead scaffolding is worse than a capability you can add later.
 
 ### Skip (never port)
 
-- **`examples/`, and the two test modules driving it.** These demonstrate lup's own runtime composition against lup's own README — a front door being opened, a wrapper stack, a policy denying the call it declared. The target is a consumer of that library rather than a demonstrator of it, so porting them installs a directory it will never run and a suite it has to keep green. When the target asks how a capability is composed, point at the source checkout's copy instead of copying it in.
+- **`examples/`, and the test modules driving it.** These demonstrate lup's own runtime composition against lup's own README — a front door being opened, a wrapper stack, a policy denying the call it declared. The target is a consumer of that library rather than a demonstrator of it, so porting them installs a directory it will never run and a suite it has to keep green. When the target asks how a capability is composed, point at the source checkout's copy instead of copying it in.
 - Domain-specific tool implementations (example.py contents)
 - Domain-specific prompt content
 - Domain-specific model fields (but port the pattern/structure)
@@ -359,7 +358,7 @@ Steps 1-4, 6 and 7 repeat per selected tree; step 5 is tree-independent.
 5. `src/<project>/devtools/` — devtools CLI skeleton (if Python target, adapt import paths but keep `lup-devtools` as the CLI entry point name), and the `lup` requirement itself in the target's `pyproject.toml`, declared through the mode § How the Target Obtains Lup settled on
 6. Project configuration — .claude/settings.json under Claude Code, .codex/config.toml under Codex — create or merge
 7. Guidance file — .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex — section-level merge from that tree's template flavor (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
-8. **Hand off to generation**: everything written in steps 1-4, 6 and 7 becomes a generated artifact once the target's harness runs. From here on, the target edits its declarations under `src/<project>/devtools/harness/content/` and regenerates with `uv run lup-devtools harness generate all`; the installed files are outputs, and a hand edit to one is reverted the next time generation runs. Say so explicitly in the Phase 7 report.
+8. **Hand off to generation**: everything written in steps 1-4, 6 and 7 becomes a generated artifact once the target's harness runs. From here on, the target edits its declarations under `src/<project>/harness/content/` and regenerates with `uv run lup-devtools harness generate all`; the installed files are outputs, and a hand edit to one is reverted the next time generation runs. Say so explicitly in the Phase 7 report.
 9. **Initialize upstream sync**, which comes last because it records what the previous eight steps installed:
 
 Baseline the upstream checkpoint at *the recorded commit*, not at whatever the

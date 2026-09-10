@@ -1,10 +1,9 @@
 """Handing the operator's clipboard into the container, and nothing else.
 
-A contained session has no display, no compositor and no clipboard client,
-because the image is built without one on purpose -- the terminal handoff
-picks ``emacs-nox`` over ``emacs`` for exactly that reason. So copying a
-command out of a session, and pasting a screenshot into one, both do nothing,
-and nothing says why.
+A contained session has no access to the operator's display or compositor.
+Command-based clients use broker-backed shims. Native X11 clients use an
+authenticated private virtual display and a selection bridge to that same
+broker, never a connection to the operator's desktop server.
 
 The obvious fix is to mount the host's display socket, and it is the wrong
 one twice over. On X11 there is no isolation between clients: anything that
@@ -47,11 +46,16 @@ from lup.devtools.clipboard import (
     clipboard_image,
     clipboard_text,
     copy_to_clipboard,
+    reachable_backend,
+    readable_backends,
 )
 from lup.harness.notice import Notice
+from lup.harness.requirements import Package
 from lup.types import EnvVars
 
 logger = logging.getLogger(__name__)
+
+type ClipboardTransport = Literal["commands", "x11"]
 
 
 class ClipboardReply(BaseModel, frozen=True):
@@ -67,6 +71,7 @@ class ClipboardReply(BaseModel, frozen=True):
     types: list[str] = []
     data: str = Field(default="", description="Base64, because JSON carries no bytes")
     error: str = ""
+    code: Literal["unsupported_type"] | None = None
 
     def rendered(self) -> bytes:
         """The reply as one line on the wire."""
@@ -148,7 +153,9 @@ class TypedAsk(ClipboardAsk, frozen=True):
             return self.encoded((clipboard_text() or "").encode("utf-8"), limit)
         if self.media_type not in media_types:
             return ClipboardReply(
-                ok=False, error=f"{self.media_type} is not carried by this bridge"
+                ok=False,
+                code="unsupported_type",
+                error=f"{self.media_type} is not carried by this bridge",
             )
         offered = clipboard_image((self.media_type,))
         return self.encoded(offered.data, limit) if offered else ClipboardReply()
@@ -229,11 +236,28 @@ class ClipboardHandler(socketserver.StreamRequestHandler):
         constructed by the server class it is registered with, and the
         declaration that carries the bridge is that class rather than the
         base one this signature sees.
+
+        A peer gone by the time the answer is written has already been
+        answered or has stopped caring, and either way the clipboard has
+        done its work: a client is entitled to close, and a write onto a
+        closed socket is this exchange ending rather than failing.
+
+        Both arms end here rather than escaping, because this server runs in
+        the launcher -- inside the operator's own terminal, beside a session
+        drawing a full-screen interface. The base class prints what escapes
+        to stderr, so an exception reaches the operator as a traceback
+        painted over the session, for a copy that worked.
         """
         listener = self.server
         if not isinstance(listener, ClipboardServer):
             return
-        self.wfile.write(listener.bridge.answered(self.rfile.readline()).rendered())
+        try:
+            answer = listener.bridge.answered(self.rfile.readline())
+            self.wfile.write(answer.rendered())
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception:
+            logger.warning("clipboard request failed", exc_info=True)
 
 
 class ClipboardServer(socketserver.ThreadingUnixStreamServer):
@@ -276,14 +300,52 @@ class ClipboardBridge(BaseModel, frozen=True):
         description="What tells the shims inside where to reach the broker",
     )
     shims: list[str] = Field(
-        default=["xclip", "xsel", "wl-copy", "wl-paste", "pbcopy", "pbpaste"],
+        default=[
+            "xclip",
+            "xsel",
+            "wl-copy",
+            "wl-paste",
+            "pbcopy",
+            "pbpaste",
+            "tmux",
+        ],
         description=(
             "The names a clipboard is asked for by, all pointed at one "
             "program. Every name a CLI might reach for is carried because the "
             "session's runtimes are not this repository's to change: a tool "
             "that shells out to `wl-paste` on a host that had X11 would "
             "otherwise find nothing, and the operator would be told their "
-            "clipboard is broken rather than that this bridge missed a name"
+            "clipboard is broken rather than that this bridge missed a name. "
+            "`tmux` is carried on the same reasoning and is not a clipboard "
+            "program: the terminal handoff crosses `TMUX` while the socket it "
+            "names stays on the host, so a session is told a multiplexer owns "
+            "its screen and then handed no `tmux` to ask -- and a runtime "
+            "spelling a copy the way a multiplexer takes one, `load-buffer` "
+            "on standard input, finds the contradiction rather than the "
+            "clipboard. The shim answers the buffer verbs and refuses the "
+            "rest by name, because the server is genuinely out of reach"
+        ),
+    )
+    display_variable: str = Field(
+        default="DISPLAY",
+        description=(
+            "The variable a runtime's own clipboard probe reads to decide "
+            "whether the machine it is on has a clipboard at all. Claude "
+            "Code's is the measured case: it looks for `wl-copy` only when "
+            "`WAYLAND_DISPLAY` is set and for `xclip` only when `DISPLAY` "
+            "is, so a container carrying every name under `shims` and no "
+            "display variable is judged to have no clipboard and falls back "
+            "to an escape sequence -- which the operator's multiplexer and "
+            "terminal each get to decline, where the shim beside it would "
+            "have answered"
+        ),
+    )
+    display: str = Field(
+        default="lup-bridge:0",
+        description=(
+            "Discovery marker for command-based clipboard clients. It is not "
+            "an X11 endpoint. The private-display wrapper replaces it with "
+            "an authenticated local endpoint for native X11 clients"
         ),
     )
     media_types: list[str] = Field(
@@ -305,13 +367,40 @@ class ClipboardBridge(BaseModel, frozen=True):
         ),
     )
 
+    native_packages: list[str] = ["xorg-server-xvfb", "xorg-xauth", "python-xlib"]
+
     def path(self) -> str:
         """The socket, spelled as the container sees it."""
         return f"{self.inside}/{self.channel}"
 
+    def packages(self) -> list[Package]:
+        """Native compatibility dependencies; command clients start no display."""
+        return [Package(name=name) for name in self.native_packages]
+
+    def wrap(self, command: list[str], transport: ClipboardTransport) -> list[str]:
+        """Open the native clipboard transport declared by this CLI's adapter."""
+        match transport:
+            case "commands":
+                return command
+            case "x11":
+                return ["lup-clipboard-x11", "--limit", str(self.limit), "--", *command]
+
+    def native_program(self) -> str:
+        """The independently checked program installed in the image."""
+        return (Path(__file__).parent / "assets" / "clipboard_x11.py").read_text(
+            encoding="utf-8"
+        )
+
     def environment(self) -> EnvVars:
-        """What tells the shims inside where to reach this broker."""
-        return {self.variable: self.path()}
+        """What tells the shims inside where to reach this broker, and what finds them.
+
+        The socket is the channel and the display marker is the *discovery*.
+        A runtime that never runs a shim, because it read the environment and
+        concluded the machine has no display, reaches the operator's
+        clipboard through neither -- so both are this bridge's to declare,
+        both being true only where it is running.
+        """
+        return {self.variable: self.path(), self.display_variable: self.display}
 
     def answered(self, line: bytes) -> ClipboardReply:
         """One request line, answered or refused.
@@ -356,10 +445,30 @@ class ClipboardBridge(BaseModel, frozen=True):
     def notice(self, serving: bool) -> list[Notice]:
         """What an operator is told about their clipboard crossing.
 
-        Said whichever way it went, because both answers change what they do
-        next: an operator who does not know the bridge is there is one who
-        will not paste a screenshot, and one who does not know it is absent
-        reads a dead Ctrl+V as the runtime being broken.
+        Said whichever way it went, because all three answers change what they
+        do next: an operator who does not know the bridge is there is one who
+        will not paste a screenshot, one who does not know it is absent reads a
+        dead Ctrl+V as the runtime being broken, and one told the bridge works
+        when the host end answers nothing debugs the container.
+
+        Three rather than two, and the third is the one this was missing. The
+        socket opening says a listener exists; it says nothing about whether
+        anything on this machine answers a clipboard read, and the promise made
+        on the strength of it -- "this session can read and replace what you
+        have copied" -- was asserted every launch and measured on none. The
+        capability requirement that would have caught it is ``checked="setup"``
+        by design, so the one moment it mattered was the one moment nothing
+        asked.
+
+        Named backends rather than a platform. Which tool answers is a fact
+        about the machine and the process asking, not about the desktop: a
+        Wayland session usually also answers through XWayland, an X11 session
+        over a forwarded display answers only while that display is reachable
+        from *this* process, and a headless host answers through none of them.
+        So the absent case lists what was tried, in order, and leaves the
+        reader to see whether their own is missing or simply not answering
+        here. Naming a package would be right on one distribution and wrong on
+        the rest.
         """
         if not serving:
             return [
@@ -371,12 +480,30 @@ class ClipboardBridge(BaseModel, frozen=True):
                     urgency="boundary",
                 )
             ]
+        answering = reachable_backend()
+        if not answering:
+            return [
+                Notice(
+                    text=(
+                        "Clipboard: the bridge is up and nothing on this "
+                        "machine answered a clipboard read, so copy and paste "
+                        "will come back empty. Tried "
+                        f"{', '.join(readable_backends())} in that order — one "
+                        "of them being installed is not enough, it also has to "
+                        "reach a display from the process that launched this "
+                        "session."
+                    ),
+                    urgency="warning",
+                )
+            ]
         return [
             Notice(
                 text=(
-                    "Clipboard: this session can read and replace what you have "
-                    f"copied, including {len(self.media_types)} image types; it "
-                    "reaches nothing else on your desktop."
+                    f"Clipboard broker: {answering} answered on the host; "
+                    f"{len(self.media_types)} image types are allowed. "
+                    "Command clients use its shims; native X11 clients require "
+                    "the private display checked at CLI startup. Neither "
+                    "transport reaches the rest of your desktop."
                 ),
                 urgency="boundary",
             )

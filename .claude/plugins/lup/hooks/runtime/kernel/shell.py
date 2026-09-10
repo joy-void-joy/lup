@@ -18,8 +18,14 @@ from .decision import (
 )
 from .settlement import SettlementFacts, settle
 from .rows import (
+    AcceptanceGuardRow,
+    AntiPatternRow,
+    EditRuleRow,
+    ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
+    DisplacedTargetRow,
+    RewrittenFileRow,
     RunnerTargetRow,
     ShellRuleRow,
     UrlScopeRow,
@@ -28,6 +34,7 @@ from .words import (
     INTERPRETERS,
     asks_before_removing_a_directory,
     command_words,
+    dangerous_assignment_reason,
     dangerous_env_name,
     effective_command,
     is_help_probe,
@@ -43,6 +50,7 @@ from .semantics import UnjudgedAmbient
 from .lex import parse_shell_words
 from .effects import declared_verdict
 from .commands import (
+    SedContext,
     WriteFacts,
     declares_command,
     unresolved_evidence,
@@ -84,10 +92,50 @@ class ShellContext(TypedDict):
     recoverable_targets: list[str]
     directory_targets: list[str]
     empty_directories: list[str]
+    repository_worktrees: list[str]
+    """Every checkout git calls part of this repository, resolved on the host.
+
+    Read by the `-C` guard, which asks whether a redirect leaves this
+    repository rather than whether it leaves this directory. Empty wherever
+    the host could not answer, which leaves every redirect asking."""
+
     recoverable_target_limit: int
     runner_targets: list[RunnerTargetRow]
     target_tables: list[ShellRuleRow]
     contained: bool
+    unjudged_ambient: UnjudgedAmbient
+    """The profile's answer for what nothing classified, carried for `curl`.
+
+    A segment classifier does not settle anything, so almost nothing here
+    needs this. `curl` does, because it is the one verb whose row hands the
+    question to the fetch scopes -- and an origin no scope names is the same
+    silence the shell reads this declaration for. Without it, one spelling of
+    reaching an undeclared origin answered from the profile and the other
+    from a constant."""
+
+    antipattern_rows: dict[str, list[AntiPatternRow]]
+    edit_rules: list[EditRuleRow]
+    import_boundaries: list[ImportBoundaryRow]
+    acceptance_guard: AcceptanceGuardRow | None
+    maximum_added_lines: int
+    autonomous: bool
+    allowances: list[str]
+    """The edit gates' own declarations, carried for the verbs that rewrite.
+
+    A shell command that overwrites a file in place performs an edit by
+    another spelling, and is judged by these rather than by a second set that
+    would drift from them. They travel in the bundle for the reason everything
+    else here does: a construct that forgot one would be a construct where a
+    rewrite nested in a loop met a weaker lattice than the same rewrite at the
+    top level."""
+
+    rewritten_documents: list[RewrittenFileRow]
+    """What each in-place rewrite would leave behind, as the host produced it.
+
+    Empty is not "nothing would change" but "nothing was read", and the
+    classifier acts on the difference: a target with no row is asked about.
+    That is what makes forgetting to resolve these safe rather than silently
+    permissive."""
 
 
 def write_facts(context: ShellContext) -> WriteFacts:
@@ -112,6 +160,7 @@ def write_facts(context: ShellContext) -> WriteFacts:
         path_roles=context["path_roles"],
         path_rules=context["path_rules"],
         contained=context["contained"],
+        worktrees=context["repository_worktrees"],
     )
 
 
@@ -127,10 +176,20 @@ def shell_context(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     empty_directories: list[str] | None = None,
+    repository_worktrees: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
+    unjudged_ambient: UnjudgedAmbient = "ask",
+    antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
+    edit_rules: list[EditRuleRow] | None = None,
+    import_boundaries: list[ImportBoundaryRow] | None = None,
+    acceptance_guard: AcceptanceGuardRow | None = None,
+    maximum_added_lines: int = 3,
+    autonomous: bool = False,
+    allowances: list[str] | None = None,
+    rewritten_documents: list[RewrittenFileRow] | None = None,
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists.
 
@@ -156,10 +215,43 @@ def shell_context(
         recoverable_targets=recoverable_targets or [],
         directory_targets=directory_targets or [],
         empty_directories=empty_directories or [],
+        repository_worktrees=repository_worktrees or [],
         recoverable_target_limit=recoverable_target_limit,
         runner_targets=runner_targets or [],
         target_tables=target_tables or [],
         contained=contained,
+        unjudged_ambient=unjudged_ambient,
+        antipattern_rows=antipattern_rows or {},
+        edit_rules=edit_rules or [],
+        import_boundaries=import_boundaries or [],
+        acceptance_guard=acceptance_guard,
+        maximum_added_lines=maximum_added_lines,
+        autonomous=autonomous,
+        allowances=allowances or [],
+        rewritten_documents=rewritten_documents or [],
+    )
+
+
+def sed_facts(context: ShellContext) -> SedContext:
+    """The declarations an in-place rewrite is judged against, off the bundle.
+
+    The projection :func:`write_facts` is, for the other half of what a shell
+    command can do to a file. Nothing is reshaped on the way through: the
+    rewrite meets the edit gates' own rows, so a file this policy would refuse
+    an ``Edit`` of is a file it refuses a rewrite of, without a second table
+    to keep in step.
+    """
+    return SedContext(
+        path_roles=context["path_roles"],
+        path_rules=context["path_rules"],
+        antipattern_rows=context["antipattern_rows"],
+        edit_rules=context["edit_rules"],
+        import_boundaries=context["import_boundaries"],
+        acceptance_guard=context["acceptance_guard"],
+        maximum_added_lines=context["maximum_added_lines"],
+        autonomous=context["autonomous"],
+        allowances=context["allowances"],
+        rewritten_documents=context["rewritten_documents"],
     )
 
 
@@ -221,11 +313,14 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
         ):
             return KernelDecision("allow", "native-managed skill script")
         return KernelDecision(
-            "deny", "bare interpreters and inline code are not allowed"
+            "deny", f"{executable}: bare interpreters and inline code are not allowed"
         )
     if executable == "git" and any("ext::" in word for word in words):
+        transport = next(word for word in words if "ext::" in word)
         return KernelDecision(
-            "ask", "the git ext transport can execute commands — requires approval"
+            "ask",
+            f"the git ext transport in {transport!r} can execute commands"
+            " — requires approval",
         )
     if executable == "git":
         recognized = (
@@ -273,25 +368,22 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
         return decide_shell_segment(payload, context)
     if executable == "curl":
         return decide_curl_words(
-            words, context["allowed_scopes"], context["denied_scopes"]
+            words,
+            context["allowed_scopes"],
+            context["denied_scopes"],
+            context["unjudged_ambient"],
         )
     if executable == "gh" and len(words) > 1 and words[1] == "api":
         return decide_gh_api_words(words)
     if executable == "find":
         return decide_find_words(words, context)
     if executable == "sed":
-        return decide_sed_words(
-            words,
-            context["path_roles"],
-            context["recoverable_targets"],
-            context["recoverable_target_limit"],
-            context["path_rules"],
-        )
+        return decide_sed_words(words, sed_facts(context))
     if executable in ("awk", "gawk", "mawk"):
         return decide_awk_words(words)
     if executable == "uvx":
         if len(words) > 1 and posixpath.basename(words[1]) in INTERPRETERS:
-            return KernelDecision("deny", "inline code is not allowed")
+            return KernelDecision("deny", f"uvx {words[1]}: inline code is not allowed")
         return unjudged("uvx command is not classified")
     if executable == "uv" and len(words) > 1:
         return decide_uv(
@@ -331,7 +423,7 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     dangerous = effective["dangerous"]
     if dangerous:
         return KernelDecision(
-            "ask", "a security-sensitive environment assignment requires approval"
+            "ask", dangerous_assignment_reason("assigning", dangerous)
         )
     if not words:
         return unjudged("shell segment has no command")
@@ -521,11 +613,10 @@ def read_bindings(
         if not word.isidentifier():
             return unjudged("read target is not a plain variable")
         names.append(word)
+    dangerous = [name for name in names or ["REPLY"] if dangerous_env_name(name)]
+    if dangerous:
+        return KernelDecision("ask", dangerous_assignment_reason("binding", dangerous))
     for name in names or ["REPLY"]:
-        if dangerous_env_name(name):
-            return KernelDecision(
-                "ask", "binding a security-sensitive variable requires approval"
-            )
         bindings = bind_name(bindings, name, None)
     return bindings
 
@@ -577,10 +668,7 @@ def decide_for_body(
     """
     if dangerous_env_name(name):
         return [
-            KernelDecision(
-                "ask",
-                "a security-sensitive environment assignment requires approval",
-            )
+            KernelDecision("ask", dangerous_assignment_reason("looping over", [name]))
         ]
     if len(loop_words) > 16:
         return [unjudged("loop word list is too long to instantiate")]
@@ -831,11 +919,13 @@ def decide_segment_list(
             continue
         assignments = pure_assignment_names(segment)
         if assignments is not None:
-            if any(dangerous_env_name(pair["name"]) for pair in assignments):
+            dangerous = [
+                pair["name"] for pair in assignments if dangerous_env_name(pair["name"])
+            ]
+            if dangerous:
                 decisions.append(
                     KernelDecision(
-                        "ask",
-                        "a security-sensitive environment assignment requires approval",
+                        "ask", dangerous_assignment_reason("assigning", dangerous)
                     )
                 )
                 index += 1
@@ -902,10 +992,20 @@ def classify_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     empty_directories: list[str] | None = None,
+    repository_worktrees: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
+    unjudged_ambient: UnjudgedAmbient = "ask",
+    antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
+    edit_rules: list[EditRuleRow] | None = None,
+    import_boundaries: list[ImportBoundaryRow] | None = None,
+    acceptance_guard: AcceptanceGuardRow | None = None,
+    maximum_added_lines: int = 3,
+    autonomous: bool = False,
+    allowances: list[str] | None = None,
+    rewritten_documents: list[RewrittenFileRow] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every segment in one shell command."""
     segments = parse_shell_words(
@@ -934,10 +1034,20 @@ def classify_shell(
         recoverable_targets=recoverable_targets,
         directory_targets=directory_targets,
         empty_directories=empty_directories,
+        repository_worktrees=repository_worktrees,
         recoverable_target_limit=recoverable_target_limit,
         runner_targets=runner_targets,
         target_tables=target_tables,
         contained=contained,
+        unjudged_ambient=unjudged_ambient,
+        antipattern_rows=antipattern_rows,
+        edit_rules=edit_rules,
+        import_boundaries=import_boundaries,
+        acceptance_guard=acceptance_guard,
+        maximum_added_lines=maximum_added_lines,
+        autonomous=autonomous,
+        allowances=allowances,
+        rewritten_documents=rewritten_documents,
     )
     decisions = decide_segment_list(segments, context)
     placement = joined_placement(decisions)
@@ -1023,6 +1133,7 @@ def decide_shell(
     recoverable_targets: list[str] | None = None,
     directory_targets: list[str] | None = None,
     empty_directories: list[str] | None = None,
+    repository_worktrees: list[str] | None = None,
     recoverable_target_limit: int = 5,
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
@@ -1033,6 +1144,15 @@ def decide_shell(
     relayed: bool = False,
     unjudged_ambient: UnjudgedAmbient = "ask",
     unleased_targets: list[str] | None = None,
+    displaced_targets: list[DisplacedTargetRow] | None = None,
+    antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
+    edit_rules: list[EditRuleRow] | None = None,
+    import_boundaries: list[ImportBoundaryRow] | None = None,
+    acceptance_guard: AcceptanceGuardRow | None = None,
+    maximum_added_lines: int = 3,
+    autonomous: bool = False,
+    allowances: list[str] | None = None,
+    rewritten_documents: list[RewrittenFileRow] | None = None,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -1109,6 +1229,7 @@ def decide_shell(
                 recoverable_targets=recoverable_targets,
                 directory_targets=directory_targets,
                 empty_directories=empty_directories,
+                repository_worktrees=repository_worktrees,
                 recoverable_target_limit=recoverable_target_limit,
                 runner_targets=runner_targets,
                 target_tables=target_tables,
@@ -1116,6 +1237,22 @@ def decide_shell(
                 # same way a read of one is, so the redirection reading needs
                 # the same fact the settlement below already has.
                 contained=contained,
+                # And `curl` needs the same declaration the settlement below
+                # reads for a command nothing classified, because reaching an
+                # undeclared origin is that silence spelled as a verb.
+                unjudged_ambient=unjudged_ambient,
+                # The edit gates, for the verbs that rewrite a file in place.
+                # Absent, every such rewrite asks, which is the arrangement
+                # that makes a composition forgetting them safe rather than
+                # silently permissive.
+                antipattern_rows=antipattern_rows,
+                edit_rules=edit_rules,
+                import_boundaries=import_boundaries,
+                acceptance_guard=acceptance_guard,
+                maximum_added_lines=maximum_added_lines,
+                autonomous=autonomous,
+                allowances=allowances,
+                rewritten_documents=rewritten_documents,
             ),
             escalation=reading.request,
             contained=contained,
@@ -1127,6 +1264,7 @@ def decide_shell(
             checkpoint="complete" if recovered else "absent",
             unjudged_ambient=unjudged_ambient,
             unleased=unleased_targets,
+            displaced=displaced_targets,
             hint=hint,
         )
     )

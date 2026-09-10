@@ -8,6 +8,8 @@ from pathlib import Path
 
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.subagents import CodexModelTiers
+from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.formats.banner import (
     COMMENT_FREE,
@@ -33,13 +35,13 @@ from lup.harness.prompts import (
     sentences,
 )
 from lup.harness.models import (
-    GUIDANCE_BYTE_BUDGET,
+    GUIDANCE_BUDGET,
     Agent,
+    GuidanceBudget,
     Artifact,
     ArtifactTree,
     Harness,
     HookSet,
-    ModelTier,
     Plugin,
     PluginLocation,
     QualifiedAgentName,
@@ -58,6 +60,7 @@ from lup.policy.dispatcher import (
     compile_dispatcher,
     dispatcher_banner,
     guarded_hook_command,
+    hook_guard_artifact,
 )
 from lup.policy.kernel.commands import no_write_facts, unresolved_evidence
 from lup.policy.kernel.decision import SandboxPlacement
@@ -131,12 +134,24 @@ class CodexSpellings(NativeSpellings):
         )
 
     def relocate_session(self, path: str) -> Instruction:
+        """Spell the two routes this runtime has, with the second's condition.
+
+        No third route to name: this runtime cannot move a running session, so
+        the tool the other adapter refuses does not exist here. The second
+        carries its condition for the same reason it does there -- a lease
+        mounts every pre-existing sibling read-only, so addressing one by
+        absolute path reaches a filesystem refusing every write, while a
+        worktree cut after the session started is outside the lease and
+        writable. Four words here and a paragraph in `docs/contributing.md`,
+        because what this renders into is budgeted: see the note on the
+        other adapter's method.
+        """
         return Instruction(
             f"start a session rooted at <{path}> and continue there — "
             "this runtime cannot move a running session, so work "
             "carried on here would land in the checkout it started from. "
-            "Already running, keep working where you are and address files "
-            "there by absolute path, which reaches the same branch."
+            "Already running, address files there by absolute path, where "
+            "that tree is writable, which reaches the same branch."
         )
 
     def escape_sandbox(self, reason: str) -> Spelling:
@@ -209,8 +224,8 @@ class CodexSpellings(NativeSpellings):
     def resolver_entry(self) -> Instruction:
         return Instruction(
             sentences(
-                "Run `uv run lup-devtools harness resolve --adapter codex --detach`. "
-                "`uv run lup-devtools harness resolve intake` first prints what a "
+                "Run `uv run lup-devtools resolve --adapter codex --detach`. "
+                "`uv run lup-devtools resolve intake` first prints what a "
                 "run started now would plan from — every actionable note at its "
                 "file and line, the deferred ones it would carry, and the ones it "
                 "would leave to their generator — creating no run and leasing no "
@@ -230,7 +245,11 @@ class CodexSpellings(NativeSpellings):
                 "`--answer <question-id>=<value>` flag to answer them. "
                 "`--admit <text>` carries work in the human's own words: it seeds "
                 "a run that does not exist yet, beside whatever notes the tree "
-                "holds, and joins one already moving. `--admit-note <file>:<line>` "
+                "holds, and widens a parked one before its review branch is "
+                "assembled. It takes the run's lock, so a run still moving "
+                "refuses it — under `--detach` in the child, after the banner "
+                "reports the run started, which loses the admission in "
+                "silence. Admit at a park. `--admit-note <file>:<line>` "
                 "names a note written in the tree and `--admit-issue <number>` an "
                 "open issue; all three are repeatable. "
                 "Never pass `--wait` or `--supervise`; both hold a run open "
@@ -250,6 +269,9 @@ class CodexSpellings(NativeSpellings):
             "https://learn.chatgpt.com/"
         )
 
+    def runtime_key(self) -> str:
+        return "codex"
+
     def project_root(self) -> str:
         # Codex substitutes nothing into a server command, but it reads this
         # config only for the project the config sits in, so the launch
@@ -259,7 +281,7 @@ class CodexSpellings(NativeSpellings):
         return "."
 
     def model_alias(self, tier: ModelTier) -> str | None:
-        return None
+        return CodexModelTiers().resolve(tier)
 
     def tree(self, location: TreeLocation) -> Atom:
         match location:
@@ -416,7 +438,9 @@ class CodexPluginManifestRenderer(ArtifactRenderer[Plugin]):
 
 
 def codex_project_config(
-    source: Harness, spellings: NativeSpellings, budget: int = GUIDANCE_BYTE_BUDGET
+    source: Harness,
+    spellings: NativeSpellings,
+    budget: GuidanceBudget = GUIDANCE_BUDGET,
 ) -> str:
     """Render the project config: enabled features, then every tool server.
 
@@ -455,7 +479,7 @@ def codex_project_config(
     features = tomlkit.table()
     features["hooks"] = True
     document["features"] = features
-    document["project_doc_max_bytes"] = budget
+    document["project_doc_max_bytes"] = budget.ceiling
     servers = tomlkit.table(is_super_table=True)
     for plugin in source.plugins:
         for server in plugin.mcp_servers:
@@ -480,7 +504,7 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
         self,
         prompts: PromptRenderer,
         spellings: NativeSpellings,
-        budget: int = GUIDANCE_BYTE_BUDGET,
+        budget: GuidanceBudget = GUIDANCE_BUDGET,
     ) -> None:
         self.prompts = prompts
         self.spellings = spellings
@@ -522,7 +546,7 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     routed_tools=["Bash", "web_fetch", "apply_patch"],
     hook_events=["PermissionRequest", "PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
-    observed_tools=["apply_patch"],
+    observed_tools=["apply_patch", "Bash"],
     failure="stderr_exit",
     runtime_modules=["codex_patch", "policy_data"],
 )
@@ -735,6 +759,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     executable=True,
                     banner=dispatcher_banner(CODEX_DISPATCHER),
                 ),
+                hook_guard_artifact(
+                    Path(f".codex/plugins/{self.plugin_name}"), source.id
+                ),
                 *[
                     Artifact(
                         path=Path(
@@ -797,7 +824,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),
+                        import_boundaries=source.resolved_import_boundaries(),
                         refused_tools=list(source.refused_tools),
+                        peer_policy=source.peer_policy,
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),
@@ -808,6 +837,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         ),
                         diagnostics_command=source.diagnostics_command,
                         resolution_command=source.resolution_command,
+                        repair_command=source.repair_command,
                         rules=antipattern_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,

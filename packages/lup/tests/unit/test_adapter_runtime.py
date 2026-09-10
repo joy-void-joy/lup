@@ -270,7 +270,7 @@ def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
                     description="Research independently",
                     prompt="Gather evidence",
                     tools=["WebSearch"],
-                    model="claude-sonnet-4-6",
+                    model="balanced",
                 )
             ],
         ),

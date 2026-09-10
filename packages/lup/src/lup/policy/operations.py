@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.policy.kernel.semantics import EffectClass
-from lup.types import JsonObject
+from lup.types import JsonObject, JsonValue
 
 type OperationKind = Literal[
     "read",
@@ -191,6 +191,33 @@ class Operation(BaseModel, frozen=True):
     escalation_normalized: str = ""
     provider: str = ""
 
+    def fingerprint_parts(self) -> dict[str, JsonValue]:
+        """The facts an approval binds to, each under the name a reviewer knows.
+
+        Split out from the digest so a mismatch can say *which* fact moved:
+        the coordinator holds the approved operation whole, and comparing
+        part by part is what turns "the operation changed" into "its targets
+        changed". Each key is the word the refusal sentence uses, so the two
+        cannot drift — and each is part of the hashed material, so renaming
+        one re-asks every question parked across the rename.
+        """
+        targets: list[JsonValue] = [
+            path.as_posix() for path in self.mutations.touches()
+        ]
+        reads: list[JsonValue] = [path.as_posix() for path in self.reads.targets]
+        nested: list[JsonValue] = [child.fingerprint() for child in self.nested]
+        destinations: list[JsonValue] = [*sorted(self.external.destinations)]
+        return {
+            "tool": self.tool,
+            "arguments": self.payload,
+            "directory": self.cwd.as_posix(),
+            "placement": self.placement,
+            "targets": targets,
+            "read paths": reads,
+            "destinations": destinations,
+            "nested operations": nested,
+        }
+
     def fingerprint(self) -> str:
         """What an approval binds to, and what a change of it invalidates.
 
@@ -205,18 +232,7 @@ class Operation(BaseModel, frozen=True):
         substitution an approval must not survive.
         """
         material = json.dumps(
-            {
-                "tool": self.tool,
-                "payload": self.payload,
-                "cwd": self.cwd.as_posix(),
-                "placement": self.placement,
-                "targets": [path.as_posix() for path in self.mutations.touches()],
-                "reads": [path.as_posix() for path in self.reads.targets],
-                "destinations": sorted(self.external.destinations),
-                "nested": [nested.fingerprint() for nested in self.nested],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+            self.fingerprint_parts(), sort_keys=True, separators=(",", ":")
         )
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
 

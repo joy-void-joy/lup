@@ -24,6 +24,8 @@ isolation product over a hostile one.
 """
 
 import json
+import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from secrets import token_hex
@@ -75,7 +77,10 @@ def ledger_path(root: Path, nonce: str, ledger: str = ".lup/preflight") -> Path:
 
 
 def record_preflight(
-    preflight: BoundaryPreflight, sentinels: LaunchSentinels, root: Path
+    preflight: BoundaryPreflight,
+    sentinels: LaunchSentinels,
+    root: Path,
+    launch: Sequence[str] | None = None,
 ) -> Path:
     """Write what this launch measured, in the shape a bare script can read.
 
@@ -89,6 +94,14 @@ def record_preflight(
     Written on every launch, contained or not. An uncontained launch used to
     write nothing at all, which left whatever a contained launch wrote last
     standing as this session's answer.
+
+    ``launch`` is the launcher's own invocation, recorded so a session can
+    spell its own reopening. A mount registered mid-session takes effect only
+    at the next launch, and the session proposing it is the one that knows why
+    -- but without this record it has no way to say *which* launch to repeat,
+    because nothing else remembers the profile, sandbox, and flags that opened
+    it. Defaulted from the process argv, which is the invocation, rather than
+    a reconstruction that would drift from it.
     """
     boundary = preflight.boundary
     written = ledger_path(root, sentinels.nonce)
@@ -105,11 +118,29 @@ def record_preflight(
                 "blocked": preflight.blocked(),
                 "writable_roots": [str(item) for item in boundary.writable_roots],
                 "managed_roots": [str(item) for item in boundary.managed_roots],
+                "launch": list(launch if launch is not None else sys.argv[1:]),
             },
             indent=2,
         )
     )
     return written
+
+
+def reopened(
+    launch: Sequence[str],
+    resume: str = "--continue",
+    resuming: tuple[str, ...] = ("--continue", "--resume", "--session"),
+) -> list[str]:
+    """The recorded launch, spelled to reach the same conversation again.
+
+    A launch that was already a resumption is repeated as it stands; any other
+    gains ``resume``, because repeating it verbatim would open a fresh session
+    and orphan the conversation that asked to be reopened.
+    """
+    argv = list(launch)
+    if any(flag in argv for flag in resuming):
+        return argv
+    return [*argv, resume]
 
 
 def retire_mount_table(root: Path, ledger: str = ".lup/boundary.json") -> None:

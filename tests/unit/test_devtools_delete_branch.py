@@ -432,3 +432,91 @@ def test_a_stranded_worktree_is_pruned_and_the_branch_deleted(
 
     assert "Pruned stranded worktree" in capsys.readouterr().out
     assert "feature" not in branch_names(repo)
+
+
+@pytest.fixture
+def remote_only(tmp_path: Path) -> Path:
+    """An origin carrying branches no local ref corresponds to.
+
+    What the end of a landed branch's life leaves behind: the local copy went
+    when the work merged, origin's did not, and the name a caller hands this
+    command resolves to nothing under `refs/heads`. `spent` is contained in
+    main; `solo` holds a commit main does not.
+    """
+    work = tmp_path / "repo"
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    commit_file(git, work, "file.txt", "base\n", "chore: base")
+    sh.Command("git")("init", "--bare", "-q", str(work.parent / "origin.git"))
+    git("remote", "add", "origin", str(work.parent / "origin.git"))
+    git("branch", "spent")
+    git("checkout", "-q", "-b", "solo")
+    commit_file(git, work, "extra.txt", "extra\n", "feat: extra")
+    git("checkout", "-q", "main")
+    git("push", "-q", "origin", "main", "spent", "solo")
+    git("branch", "-D", "spent")
+    git("branch", "-D", "solo")
+    return work
+
+
+def test_a_remote_only_branch_is_deleted_where_it_lives(
+    remote_only: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The survey classifies it DELETE, and this is the verb that acts on it."""
+    monkeypatch.chdir(remote_only)
+
+    branches.delete_branch("spent", dry_run=False, force=False)
+
+    assert "spent" not in remote_branch_names(remote_only)
+
+
+def test_a_remote_only_branch_is_reported_as_one(
+    remote_only: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The plan names what is there rather than a local branch that is not."""
+    monkeypatch.chdir(remote_only)
+
+    branches.delete_branch("spent", dry_run=True, force=False)
+
+    out = capsys.readouterr().out
+    assert "Delete remote branch: origin/spent" in out
+    assert "Delete local branch" not in out
+    assert "unmerged" not in out
+
+
+def test_an_unmerged_remote_only_branch_is_blocked_on_what_it_holds(
+    remote_only: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The check the old refusal claimed to have run, run against the ref that exists.
+
+    Origin's copy is the only copy, so the containment question is asked of
+    it. Answering from a local branch that was never there made the refusal
+    say `--force` would discard unmerged work in the one case where nothing
+    was at stake, and stay silent in the case where everything was.
+    """
+    monkeypatch.chdir(remote_only)
+
+    with pytest.raises(typer.Exit):
+        branches.delete_branch("solo", dry_run=False, force=False)
+
+    assert "solo" in remote_branch_names(remote_only)
+    assert "origin/solo holds commits main does not" in capsys.readouterr().err
+
+
+def test_a_name_that_is_no_branch_anywhere_is_refused_as_such(
+    remote_only: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nothing to delete is its own answer, not a verdict about mergedness."""
+    monkeypatch.chdir(remote_only)
+
+    with pytest.raises(typer.Exit):
+        branches.delete_branch("never-existed", dry_run=False, force=False)
+
+    err = capsys.readouterr().err
+    assert "no branch by that name" in err
+    assert "unmerged" not in err

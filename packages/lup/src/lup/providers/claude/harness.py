@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
+from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
 from lup.formats.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -28,7 +29,6 @@ from lup.harness.models import (
     ArtifactTree,
     Harness,
     HookSet,
-    ModelTier,
     Plugin,
     PluginLocation,
     QualifiedAgentName,
@@ -47,20 +47,12 @@ from lup.policy.dispatcher import (
     compile_dispatcher,
     dispatcher_banner,
     guarded_hook_command,
+    hook_guard_artifact,
 )
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import routed_for
-
-
-# lup: ignore[constant-declaration] — each value is Claude Code's own alias for
-# the tier beside it, over a tier vocabulary this library closes
-CLAUDE_MODEL_ALIASES: dict[ModelTier, str] = {
-    "inherit": "inherit",
-    "strongest": "opus",
-    "balanced": "sonnet",
-    "fast": "haiku",
-}
-"""Claude's own name for each portable tier, as agent frontmatter accepts it."""
+from lup.providers.claude.subagents import model_alias
+from lup.types import ModelTier
 
 
 class ClaudeSpellings(NativeSpellings):
@@ -126,20 +118,48 @@ class ClaudeSpellings(NativeSpellings):
         be instructing it to do what it cannot -- so the fallback that
         reaches the same branch from where it stands is named second.
 
-        The third is named as refused rather than merely discouraged, because
-        that is what it now is: the tool table denies it, carrying the cost as
-        its reason, and a deliberate use escalates. Prose that only called it
-        expensive was the whole of the gate before, and prose is what falls
-        out of context first.
+        That fallback carries its condition, because it is the one route a
+        lease can take away. A contained session mounts every worktree but
+        its own read-only (:mod:`lup.sandbox.rail`), so addressing a
+        *pre-existing* sibling by absolute path reaches a filesystem refusing
+        every write -- while one cut after that session started is outside
+        the lease and writable, which is why the same sentence is right where
+        a worktree was just made and wrong where one was merely found. Stated
+        flatly it read as an equal alternative to launching, and an agent
+        following it into a leased sibling spends its next hour discovering
+        the mount.
+
+        The condition is four words here and a paragraph in
+        `docs/contributing.md`, which this instruction's paragraph already
+        points at. Not a stylistic split: the scaffold ceiling this renders
+        into leaves an adopting domain its own room, and the guidance sat
+        within twenty-one bytes of that ceiling -- so the words that earn a
+        place here are the ones that stop a wrong move, and the ones that
+        explain it belong where there is room to explain.
+
+        The third is named as refused rather than merely discouraged: the
+        tool table denies it, carrying the cost as its reason, and a
+        deliberate use escalates. Prose that only calls a route expensive is
+        prose an agent reads once, so the gate is the table and the sentence
+        is what keeps the reflex from reaching for it.
+
+        What it reaches is stated beside the refusal, because escalating past
+        one wall meets another. `git worktree create` cuts under a sibling
+        `tree/`, and this runtime switches into a path outside its own
+        `.claude/worktrees/` only as a session's first entry from the
+        directory it launched in -- so a second switch is refused by the tool
+        itself, whatever this project decides. An agent told the refusal
+        alone would escalate it and meet an error the prose said could not
+        happen; `docs/contributing.md` carries the measurement.
         """
         return Instruction(
             f"work in <{path}> by whichever of these you can reach: launch a "
-            f"session rooted there; or, already running, keep working where "
-            f"you are and address files under <{path}> by absolute path. "
-            f"`EnterWorktree(path=<{path}>)` reaches any worktree from "
-            "anywhere and is refused for it: entering one arms worktree "
+            "session rooted there; or, already running, address its files by "
+            "absolute path, where that tree is writable. "
+            "`EnterWorktree` is refused, and takes a `tree/` path only as a "
+            "session's first switch: entering one arms worktree "
             "isolation, whose refusals cover ordinary read-only commands for "
-            "the rest of the session. Escalate it if you truly need it, and "
+            "the rest of the session. Escalate it if you must, and "
             'leave with `ExitWorktree(action="keep")`'
         )
 
@@ -178,8 +198,8 @@ class ClaudeSpellings(NativeSpellings):
     def resolver_entry(self) -> Instruction:
         return Instruction(
             sentences(
-                "Run `uv run lup-devtools harness resolve --adapter claude --detach`. "
-                "`uv run lup-devtools harness resolve intake` first prints what a "
+                "Run `uv run lup-devtools resolve --adapter claude --detach`. "
+                "`uv run lup-devtools resolve intake` first prints what a "
                 "run started now would plan from — every actionable note at its "
                 "file and line, the deferred ones it would carry, and the ones it "
                 "would leave to their generator — creating no run and leasing no "
@@ -199,7 +219,11 @@ class ClaudeSpellings(NativeSpellings):
                 "`--answer <question-id>=<value>` flag to answer them. "
                 "`--admit <text>` carries work in the human's own words: it seeds "
                 "a run that does not exist yet, beside whatever notes the tree "
-                "holds, and joins one already moving. `--admit-note <file>:<line>` "
+                "holds, and widens a parked one before its review branch is "
+                "assembled. It takes the run's lock, so a run still moving "
+                "refuses it — under `--detach` in the child, after the banner "
+                "reports the run started, which loses the admission in "
+                "silence. Admit at a park. `--admit-note <file>:<line>` "
                 "names a note written in the tree and `--admit-issue <number>` an "
                 "open issue; all three are repeatable. "
                 "Never pass `--wait` or `--supervise`; both hold a run open "
@@ -218,6 +242,9 @@ class ClaudeSpellings(NativeSpellings):
             "https://docs.claude.com/ and https://code.claude.com/"
         )
 
+    def runtime_key(self) -> str:
+        return "claude"
+
     def project_root(self) -> str:
         # Claude Code substitutes this into a plugin-provided MCP command
         # without needing a default, so a server reaches the repository it
@@ -226,7 +253,7 @@ class ClaudeSpellings(NativeSpellings):
         return "${CLAUDE_PROJECT_DIR}"
 
     def model_alias(self, tier: ModelTier) -> str | None:
-        return CLAUDE_MODEL_ALIASES[tier]
+        return model_alias(tier)
 
     def tree(self, location: TreeLocation) -> Atom:
         match location:
@@ -485,10 +512,10 @@ CLAUDE_DISPATCHER = DispatcherDeclaration(
     runtime_name="Claude Code",
     package="lup.providers.claude",
     managed_root_env=CLAUDE_LOGIN.config_home_env,
-    routed_tools=["Bash", "WebFetch", "Edit", "Write"],
+    routed_tools=["Bash", "WebFetch", "Edit", "Write", "SendMessage", "ListAgents"],
     hook_events=["PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
-    observed_tools=["Edit", "Write"],
+    observed_tools=["Edit", "Write", "Bash"],
     failure="conservative_ask",
     runtime_modules=["policy_data"],
 )
@@ -532,13 +559,32 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 "hooks": command,
             }
         ]
+        # An empty matcher is every tool, which is what delivery needs and the
+        # policy must not have: mail is worth carrying before a `Read` as much
+        # as before an `Edit`, while a permission branch for `Read` is a
+        # permission `Read` could be refused by. A second group rather than a
+        # widened one keeps those apart — every matching hook runs, and the
+        # most restrictive verdict wins, so a delivery that only ever allows
+        # cannot loosen what the policy decided beside it.
+        delivery = [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": delivery_command("CLAUDE_PLUGIN_ROOT"),
+                        "timeout": 10,
+                    }
+                ],
+            }
+        ]
         hooks = {
-            "description": "Lup semantic permission policy",
+            "description": "Lup semantic permission policy and peer delivery",
             "hooks": {
                 event: (
                     observed
                     if event == CLAUDE_DISPATCHER.observation_event
-                    else decided
+                    else [*decided, *delivery]
                 )
                 for event in CLAUDE_DISPATCHER.hook_events
             },
@@ -560,6 +606,12 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     semantic_id=source.id,
                     executable=True,
                     banner=dispatcher_banner(CLAUDE_DISPATCHER),
+                ),
+                hook_guard_artifact(
+                    Path(f".claude/plugins/{self.plugin_name}"), source.id
+                ),
+                *delivery_artifacts(
+                    Path(f".claude/plugins/{self.plugin_name}"), source.id
                 ),
                 *[
                     Artifact(
@@ -617,13 +669,16 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),
+                        import_boundaries=source.resolved_import_boundaries(),
                         refused_tools=list(source.refused_tools),
+                        peer_policy=source.peer_policy,
                         recoverable_target_limit=source.recoverable_target_limit,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),
                         auto_escape_prefixes=[],
                         diagnostics_command=source.diagnostics_command,
                         resolution_command=source.resolution_command,
+                        repair_command=source.repair_command,
                         rules=antipattern_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,

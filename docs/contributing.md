@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.contributing by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.contributing by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Contributing
 
@@ -13,8 +13,34 @@ change once you know where it goes.
 ```bash
 uv sync                                    # both workspace packages
 uv run lup-devtools setup                  # interactive: keys, integrations
+uv run lup-devtools dev check --changed     # ruff + pyright on what you changed
+uv run lup-devtools dev test <paths>       # while iterating: only these files
 uv run lup-devtools dev check              # the local pre-flight bar
 ```
+
+Three commands, because they answer different questions. `dev check` puts both
+test suites, pyright and ruff on the machine at once and costs whichever of
+them finishes last — a couple of minutes — and it is what has to be green
+before a commit. The gate reports what each of its checks cost, so a run that
+felt slow can be read rather than guessed at.
+
+The other two are the loop while a change is still moving. `dev check
+--changed` runs ruff and pyright over the Python files changed since the
+integration branch, in seconds — those are the two checks a scope narrows
+*exactly*, because each answers about the files it is handed and Pyright
+resolves their imports itself. It runs **no tests**, and says so every time.
+`dev test` runs the test files you name, in the suite that installs each.
+
+Which tests reach a change is deliberately left to you. It is a question about
+the import graph, and modules reached through `importlib` are invisible to any
+static reading of it — so a suite narrowed automatically could report green
+while skipping the one test the change breaks. A gate that is trusted and
+wrong costs more than one that is slow.
+
+Run one at a time. Two gates at once are slower than the same two in
+sequence, because each already spreads itself across every core the machine
+has — and a suite reading a repository whose branches another command is
+moving fails on that rather than on the code.
 
 `uv` is the package manager: use `uv add <package>`, never edit
 `pyproject.toml` by hand. Secrets go in `.env.local`, which is gitignored;
@@ -34,7 +60,7 @@ uv run lup-devtools harness codex
 | --- | --- | --- |
 | Anything another project built on lup would want | `packages/lup/` | [library.md](library.md) |
 | Anything only this application needs | `src/lup_template/` | [template.md](template.md) |
-| A skill, agent, guidance, permission policy, or a page under `docs/` | the `devtools/harness/content/` of whichever half owns its subject | [harness.md](harness.md) |
+| A skill, agent, guidance, permission policy, or a page under `docs/` | `packages/lup/src/lup/harness/content/` where the library owns the subject, `src/lup_template/harness/content/` where only this application does | [harness.md](harness.md) |
 | Repeated shell incantations | a new `lup-devtools` command | [template.md](template.md) |
 | A one-off computation | a new `lup-devtools` command | below |
 
@@ -76,6 +102,12 @@ checkout it was asked about.
 The argument is reviewability, not power: an agent may already edit
 `devtools/` and run it.
 
+A result too large to return does not come back at all: the runtime persists
+it to a file and returns a short preview naming that file. Hand the file to a
+reader that takes a file whole. `cat`-ing it is another result too large to
+return, persisted to another file, and `cat`-ing that one repeats it — a
+regress whose every step looks like the command having worked.
+
 Never create a tracking file. A `TODO.md`, backlog, or roadmap parks a
 decision where no workflow surfaces it again. Deferred work lives as a
 `# lup: defer: <text>` note at the site it concerns — where `dev comments`
@@ -98,6 +130,12 @@ it — so the check reads the integration branch as well as the working tree,
 for the notes naming the branch in hand. Write one where you are, aimed at the
 branch that has to act, and it reaches them without waiting for a merge.
 
+Landing wakes it even where the branch was deleted in the same sweep, because
+`git delete` judges containment off the ref it is about to remove and records
+that verdict beside the branch. A checkout that never deleted it holds no such
+record and stays quiet — which is what keeps a clone that merely never fetched
+the branch, every CI job among them, from waking every gate in the repository.
+
 A gate the checkout cannot see — "until the v2 API ships" — stays prose and
 stays advisory, which is the whole of what a stated gate ever did before.
 Prefer a resolvable spelling where one fits, because a deferral is dormant
@@ -117,14 +155,38 @@ Development happens in **worktrees**, not branches switched in place, so
 several changes can be in flight at once:
 
 ```bash
-uv run lup-devtools dev worktree create feat-name
+uv run lup-devtools git worktree create feat-name
 ```
 
 The worktree is created as a sibling under `tree/`. Never nest one inside
 another checkout. `git checkout -b` would make a branch and switch the
 current directory in place; `git worktree add` gives the branch a directory
 of its own, which is what keeps several live at once. `worktrees/` and
-`refs/` are gitignored, the latter holding symlinks to downstream projects.
+`refs/` are gitignored, the latter holding symlinks to the projects this
+repository tracks.
+
+Those symlinks resolve inside a contained session only for a project whose
+registration in `sync.json.local` carries a `"mount"` of `"rw"` or `"ro"` —
+`dev sync setup <name> <path> --mount rw` writes one, and `dev sync status`
+shows which projects have it. A mounted project is leased whole: its
+checkout at that mode, its shared git directory with it, and its own sibling
+worktrees read-only, which is what lets a session commit in it. Without the
+key the project is tracked for review and nothing more, and the symlink
+dangles inside the container the way an unmounted path does. The key is why
+`sync.json.local` is a protected edit root: writing one widens the boundary.
+For a folder one session needs without a standing registration, the launchers
+take `--mount <dir>` and `--mount-ro <dir>` (repeatable): the same lease, the
+same widening in every posture, lasting exactly one launch.
+
+A registration naming only a URL is mounted on the same terms, because it is
+materialized into the same shape: a full bare clone under
+`~/.cache/lup/sync/<name>.git` with a worktree attached at `tree/<branch>`,
+and the worktree is what the lease binds. Commit in it, cut branches in it,
+push from it — the remotes of every mounted checkout are rewritten onto the
+transport this session can reach, not just the one it was launched from. A
+review never moves a branch there: `sync` reads the upstream's commits from
+its remote-tracking ref, so refreshing is a fetch and nothing in the clone is
+reset over.
 
 The base the branch is cut from is recorded against it, because topology
 cannot recover a creation point once the parent has merged on. It is read
@@ -148,9 +210,19 @@ none of them is gated on the command being a git command. So an isolated
 session loses `grep -c hash` and `rg complete src/` — read-only commands with
 no git in them — for as long as it lasts, and no approval marker reaches the
 refusal.
+Relocation is bounded as well as expensive: `git worktree create` cuts under
+a sibling `tree/`, outside the `.claude/worktrees/` a relocating tool
+switches within, so such a path is taken only as a session's first entry from
+the directory it launched in. A session already sitting in one worktree is
+refused a second switch by the tool itself, whatever this project decides, so
+stacking a branch means a launch or absolute paths either way.
 A session launched already rooted in the worktree is never isolated and
 keeps all of them, which is why the workflow asks for a launch. Staying put
-and editing through absolute paths works too. Measured against Claude Code
+and editing through absolute paths works too, but only into a worktree that
+is writable: a contained session mounts every sibling that already existed
+when it started read-only, so that route reaches a filesystem refusing every
+write, while one cut afterwards is outside the lease and takes edits
+normally. Measured against Claude Code
 2.1.237; `docs/native-capabilities.md` carries the evidence.
 
 Commit early, commit often, and keep commits atomic — if the message needs an
@@ -183,14 +255,24 @@ resolution — and during a merge the bias is toward inclusion: audit the result
 against both parents and confirm every removed function, parameter, or command
 was removed deliberately rather than lost to a conflict side.
 
-Generated artifacts are regenerated, never hand-merged. A digest manifest
-(`.lup-ownership.json`) conflicts on every parallel branch because each field
-is derived, so `.gitattributes` gives it a driver that keeps one side, and
-`lup-devtools dev merge-driver` registers that driver in a clone that has not
-run `worktree create`. Reconciling such a file hunk by hunk produces a proof
-matching neither tree: take either side, run
+Generated artifacts are regenerated, never hand-merged. Every file in a
+generated tree conflicts on parallel branches because every line is derived,
+so `.gitattributes` declares those trees under a driver that keeps one side,
+and `lup-devtools git merge-driver` registers that driver in a clone that has
+not run `worktree create`. Reconciling such a file hunk by hunk produces an
+artifact matching neither tree: take either side, run
 `lup-devtools harness generate all`, and let `harness check all` confirm it
 settled.
+
+That declaration is a lockout guard as much as a convenience. One file in
+those trees is executed rather than read — the compiled hook dispatcher — so
+conflict markers in it leave a script that will not parse, and the permission
+boundary answers every shell command and every edit by refusing, `git merge
+--abort` included. Reaching that state, the refusal says which build product
+broke and what rebuilds it, and the rebuild has to be run from outside the
+session. The driver is per-clone git config, so it covers a merge performed in
+a clone that registered it and nothing else: a merge run on the forge's own
+server reads no config and lands the conflict anyway.
 
 ## What has to be green
 
@@ -201,8 +283,24 @@ uv run lup-devtools harness check all      # generated-tree drift
 uv run lup-devtools dev rules --check      # the generated rule reference
 ```
 
+The generated trees include the frontend bundles under `lup.web`'s package
+data, built from `packages/lup/web/` by Vite, so the gate needs `bun`. The
+workspace's dependencies it restores itself, the way `uv run` syncs the
+environment before running: where `packages/lup/web/node_modules` is missing
+or older than `bun.lock`, the bundle build and the `bun test` row run
+`bun install --frozen-lockfile` first, and `git worktree create` runs it
+beside `uv sync` (both skipped by `--no-sync`), so a fresh worktree is ready.
+A restore that fails is the row's verdict, carrying bun's own output. The
+policy allows that frozen restore, and `uv sync --frozen` and `uv sync
+--locked` on the same reasoning — a frozen lockfile pins every package by
+integrity hash, which is what `uv run` already fetches unasked — while
+`bun install` without the flag, `bun add`, `uv sync` without a freeze flag and
+`uv add` ask, since each can rewrite the lockfile. The workspace's own tests
+are a third suite beside the two pytest roots, run by `bun test` from the
+workspace, so a green gate ran the frontend's tests too.
+
 [quality-pipeline.md](quality-pipeline.md) explains which of the three
-automated layers catches what. The short version: `dev git-hooks install`
+automated layers catches what. The short version: `git hooks install`
 refuses a commit whose generated artifacts are behind their source and a
 push whose branch fails the gate, the per-push CI workflow runs those same
 commands and binds whether or not anyone armed the hooks, and the nightly

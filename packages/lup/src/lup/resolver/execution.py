@@ -22,7 +22,7 @@ it cost a run its budget re-deriving an acceptance it already had.
 
 from collections.abc import Callable
 
-from lup.orchestration.actors.refs import ActorRef
+from lup.coordination.refs import ActorRef
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
     ResolverDrained,

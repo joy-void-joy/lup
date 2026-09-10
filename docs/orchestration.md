@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.orchestration by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.orchestration by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Agent Orchestration Patterns
 
@@ -42,7 +42,7 @@ For agents that exist over time — maintaining conversations, monitoring system
 
 Agents produce better output when forced to self-assess before committing. Three components:
 
-1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Runs a nested reviewer agent that returns a structured `ReviewResult` verdict (skippable per call; a skip or reviewer failure records an approval so availability never deadlocks).
+1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Runs a nested reviewer agent that returns a structured `ReviewResult` verdict. An explicit skip records approval; a startup error, timeout, or missing verdict returns a recoverable tool error without opening the gate. The template reviewer has read and web-research capabilities and a configurable wall-clock bound enforced across engines.
 2. **Review gate** (`lup.orchestration.reflection`): `ReviewGate`, a verdict-aware `ReflectionGate` — in-memory, or file-backed (fail counter included) when tools run in a subprocess. Approve and warn open the gate; fail keeps it closed so the agent revises and re-reviews; after 3 consecutive fails it opens anyway (escape hatch). Enforced primarily *inside* the `submit_output` handler (`lup.sessions.output`), which rejects submission with a retriable error until the gate opens; `create_reflection_gate()` adds a PreToolUse hook as hardening where the backend supports it. The plain `ReflectionGate` base remains for act-of-reflecting gates (the realtime `sleep` meta-gate).
 3. **Wiring**: The gate rides inside submission — `reflection_submission_gate` (`agent/core.py`) adapts the `ReviewGate` to the `SubmissionGate` carried by the turn's `TurnToolBinding`, so a gated submission is rejected with a retriable message until the reviewer passes (persistent agents gate `sleep` instead). Final output always flows through the turn-bound submission tool — registered by the adapter on every SDK backend — whose `submit_output` handler validates against the turn's output model and persists through the bound `SubmittedOutputStore` (in-memory, or file-backed when tools run in a subprocess). Completion is enforced by the logical turn itself: `ResilientTurn` sends bounded corrective cycles (`CorrectionConfig`, `lup.sessions.middleware`) when a turn ends without a submission, and a turn that still produces none raises `StructuredOutputError` for the orchestration layer — the one-shot counterpart of the relay's missing-sleep message. Those cycles advance on the turn's own task rather than on whichever caller awaits it, so a resilient turn's event stream — one logical stream over every cycle, closing when the result settles — may be consumed before, during, or after `result()`, and a caller that watches a turn as it happens is not thereby waiting on itself. `create_completion_guard` (`lup.policy.hooks`) remains as optional Stop-hook hardening on backends that expose stop hooks.
 
@@ -62,6 +62,21 @@ SDK-native delegation: the main agent dispatches a focused task to a named role 
 Application-time delegation uses `create_run_subagent_tool()` only with an
 explicit `SubagentSpec -> Client` recipe; it never infers a provider or
 reconstructs a native client.
+
+`SubagentSpec.capabilities` declares runtime facilities (`workspace-read`,
+`web-search`); `tools` retains exact canonical grants such as `Read` or a
+specific MCP tool. These are separate contracts: a provider may implement
+workspace reads with sandboxed commands, but cannot turn an exact `Read`
+grant into general shell access. Unsupported exact grants or limits fail
+explicitly. Model choices use `inherit`, `strongest`, `balanced`, or `fast`;
+concrete model identifiers belong to provider configuration.
+
+The template's served roles follow the engine that owns their MCP server.
+Native server commands carry that selection explicitly, independent of the
+application's default engine. Read capabilities do not replace filesystem
+permission policy: the native runtime determines which files are visible,
+and the delegated role receives no write facility. Hosted web search is
+separate from network access for sandboxed commands.
 
 ---
 
@@ -150,11 +165,11 @@ several agents work at once and the facts move under them, that is the whole
 problem — an agent verifying a statement you have since disproved, or working
 a branch you closed, keeps going because nothing can tell it.
 
-An **actor cohort** (`lup.orchestration.actors.cohort.ActorCohort`) is a population of
+An **actor cohort** (`lup.coordination.cohort.ActorCohort`) is a population of
 agents that stay in contact while they work. Each holds one session across
 every turn it takes; anything addressed to one lands in front of its next tool
-call through a hook it never chooses to check; and the spawner is itself an
-address, so an agent can say something back.
+call through a hook it never chooses to check; and the person watching is
+itself an address, `user`, so an agent can say something back.
 
 | Aspect | Actor Cohort |
 | --- | --- |
@@ -210,15 +225,23 @@ difference between the two cases.
 **The population is a record, not a dict.** `live()`, `members()` and
 `reaching()` fold `roster.jsonl`, so a console in another process resolves the
 same address the cohort's own tools do, and a restart rebuilds the roster.
+`cohort.json` beside it says the directory is a cohort at all, which is what a
+peer that did not create one reads to find it.
 
-**Library support:** `lup.orchestration.actors.tools.create_cohort_tools` serves the verbs an
+**The person is on the roster.** They join as the member `user`, with an inbox
+and no session, so a report reaches them through the verb that steers an agent
+rather than through a channel of its own — and a console attaching to a
+directory some other process wrote resolves that address by the same fold. It
+is the one member `live()` leaves out, because nobody started them.
+
+**Library support:** `lup.coordination.tools.create_cohort_tools` serves the verbs an
 agent needs — list what I spawned, read what one of them has found so far, say
-something to one of them, say something back to whoever spawned me. Reading is
+something to one of them, say something to the person watching. Reading is
 what makes steering more than a guess: a spawn's turn events reach the journal
 as they happen, so `spawn_read` folds its own words, its calls and its
 refusals out of that record while it is still working, and a redirect can be
 aimed at what the agent is doing rather than at what it was asked.
-`lup.orchestration.actors.mailbox.QuestionMailbox`
+`lup.coordination.mailbox.QuestionMailbox`
 adds decisions that park a run, on the same storage; messages ride a stream
 and never park anything, which is why "a message stalled the run" is not
 expressible rather than merely avoided.

@@ -26,9 +26,9 @@ from tomlkit.items import Comment
 import typer
 from pydantic import BaseModel
 
-from lup.workspace.paths import find_project_root
+from lup.workspace.paths import project_root
 from lup.devtools.dev.plugin import set_marketplace_name
-from lup_template.devtools.harness.catalog import declared_plugin
+from lup_template.harness.catalog import declared_plugin
 from lup.execution.shell import git
 
 PACKAGE_IMPORT_RE = re.compile(
@@ -157,7 +157,7 @@ DEFAULT_SPELT_PATHS = [
         configures="dashboard package data",
     ),
     SpeltPath(
-        spelling="lup_template.devtools.harness.content",
+        spelling="lup_template.harness.content",
         configures="harness content package data",
     ),
 ]
@@ -317,12 +317,13 @@ SCAFFOLD_DEMONSTRATIONS = [
     Path("examples"),
     Path("tests/unit/test_policy_examples.py"),
     Path("tests/unit/test_examples_use_the_front_door.py"),
+    Path("tests/unit/test_examples_documented_commands.py"),
 ]
 """What the scaffold ships to demonstrate *itself*, for a caller that does not
 say. Each of these composes lup's own runtime against lup's own README — a
 front door being opened, a wrapper stack, a policy denying the call it declared
 — so a domain that adopted the template inherits a directory of demos for a
-library it is merely a consumer of, and two test modules driving them. Its own
+library it is merely a consumer of, and the test modules driving them. Its own
 examples, if it wants any, are about its own subject and share nothing with
 these but a directory name. A fork shipping different demonstrations passes
 its own list rather than editing this one."""
@@ -421,7 +422,7 @@ def rename_package(
         typer.echo("Error: new name is the same as the current name", err=True)
         raise typer.Exit(1)
 
-    root = find_project_root()
+    root = project_root()
     src_dir = root / "src"
     old_pkg = src_dir / "lup_template"
     new_pkg = src_dir / new_name

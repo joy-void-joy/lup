@@ -2,8 +2,8 @@
 
 Nothing here scans anything itself. Each topic is answered by the command
 that owns it — the marker scan behind `dev comments`, the drift inspection
-behind `harness check`, the containment walk behind `dev branches`, the run
-state behind `harness resolve supervise` — and this composes their answers
+behind `harness check`, the containment walk behind `git branches`, the run
+state behind `resolve supervise` — and this composes their answers
 into one shape. A second scanner beside those would be a second answer to
 compare against theirs, which is the reason the surface composes rather than
 replaces.

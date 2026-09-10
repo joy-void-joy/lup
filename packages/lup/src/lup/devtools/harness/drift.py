@@ -189,17 +189,17 @@ def generate_targets(
     """Generate owned artifacts for every composition the selector names.
 
     ``in_passing`` carries the launch's quiet through both halves: a
-    repository artifact is announced when it was behind its source, and a
-    rewrite of a file that was already current is the same non-event as a
-    native tree that had nothing to write.
+    repository artifact behind its source is written and announced, and one
+    already current is neither, the same non-event as a native tree that had
+    nothing to write. The check is the whole of what a current one costs,
+    which matters where the write is a toolchain run.
     """
     for composition in compositions:
         generate_with_report(composition, in_passing)
     for write in repository_writers:
-        behind = repository_staleness(write) if in_passing else ["asked for"]
-        written = write()
-        if behind:
-            typer.echo(f"repository artifact ready: {written}")
+        if in_passing and not repository_staleness(write):
+            continue
+        typer.echo(f"repository artifact ready: {write()}")
 
 
 def inspect_drift(

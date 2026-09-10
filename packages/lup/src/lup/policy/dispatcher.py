@@ -37,12 +37,13 @@ are the ones the declaration promised.
 
 import ast
 from importlib import resources
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import Literal
 
 from pydantic import BaseModel
 
 from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
+from lup.harness.models import Artifact
 from lup.policy.kernel.edit import file_level_line, suppression_reaches
 
 SHARED_PACKAGE = "lup.policy"
@@ -80,6 +81,7 @@ DISPATCHER_STDLIB = (
     "datetime",
     "hashlib",
     "csv",
+    "urllib.parse",
 )
 """The standard library a compiled dispatcher may reach.
 
@@ -115,6 +117,12 @@ conventions refuse to take a structured format apart with ``split`` -- so the
 choice is the reader for that format or a hand-rolled one, and a hand-rolled
 one inside a hook is the parser nobody maintains. Nothing already pinned here
 reads delimited text.
+
+``urllib.parse`` earns its place the same way. The evidence journal names a
+fetch by its origin and by nothing else, which means splitting a URL into
+the scheme, host and port a scope is written against and dropping the path,
+the query and any userinfo -- taking that apart by hand is how the userinfo
+ends up in the record. Nothing already pinned here parses a URL.
 """
 
 ROUTER = "dispatch"
@@ -140,6 +148,9 @@ INVOCATION = 'if __name__ == "__main__":\n    main()'
 DISPATCHER_SCRIPT = PurePath("policy.py")
 """The file this compiler emits, named to spell its banner as a comment."""
 
+GUARD_SCRIPT = PurePath("policy.sh")
+"""The shell entry point that survives an unavailable Python dispatcher."""
+
 REFUSAL_STATUS = 2
 """The one exit status either runtime reads as a refusal.
 
@@ -150,35 +161,46 @@ refusal, it is permission.
 
 
 def guarded_hook_command(plugin_root_env: str) -> str:
-    """Spell the invocation so a dispatcher that never ran still refuses.
-
-    Shared rather than spelled per runtime for the reason ``RELATIVIZER``
-    above is: a renderer free to write its own could omit the guard, and the
-    permission boundary would then be off on that runtime alone, reporting
-    nothing that distinguishes it from a boundary that allowed the call.
-
-    Not the dispatcher's own to answer. ``failure`` below covers input it
-    cannot decide from, which already presumes it is running -- nothing
-    inside a script can speak for an interpreter that was never there to
-    start it. A missing ``python3`` makes the shell exit 127, which is not
-    ``REFUSAL_STATUS``, so every call in that session proceeds unjudged and
-    the only trace is a non-blocking error beside each one. The guard belongs
-    to the command because the command is what survives that absence.
-
-    A deliberate refusal passes through untouched, having already written its
-    own reason; anything else names the status it exited with, so a missing
-    interpreter and a dispatcher that crashed are told apart by whoever reads
-    the line rather than by rerunning it.
-    """
-    script = f'"${plugin_root_env}/hooks/scripts/{DISPATCHER_SCRIPT}"'
-    complaint = (
-        "lup policy: dispatcher exited $status without judging this call; "
-        "refusing rather than passing it"
-    )
+    """Keep the displayed command short and refuse if its guard cannot run."""
     return (
-        f"python3 {script} || {{ status=$?; "
-        f'[ "$status" -eq {REFUSAL_STATUS} ] || echo "{complaint}" >&2; '
-        f"exit {REFUSAL_STATUS}; }}"
+        f'sh "${plugin_root_env}/hooks/scripts/{GUARD_SCRIPT}" || exit {REFUSAL_STATUS}'
+    )
+
+
+def hook_guard_artifact(plugin_root: Path, semantic_id: str) -> Artifact:
+    """Run the dispatcher with a refusal for every failure to start or judge.
+
+    Native runtimes can display the registered command with a hook error.
+    Keeping recovery text in this script makes it visible only when needed.
+    The inline command still refuses if this script or its shell is missing.
+    """
+    return Artifact.generated(
+        path=plugin_root / "hooks" / "scripts" / GUARD_SCRIPT,
+        body=f"""#!/bin/sh
+script="${{0%/*}}/{DISPATCHER_SCRIPT}"
+if [ ! -r "$script" ]; then
+    printf 'Lup hook unavailable: %s\\n' "$script" >&2
+    printf 'Run outside this session: {REGENERATE_COMMAND}\\n' >&2
+    exit {REFUSAL_STATUS}
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+    printf 'Lup hook cannot start: python3 is missing. Install Python 3 or fix PATH.\\n' >&2
+    exit {REFUSAL_STATUS}
+fi
+python3 "$script"
+lup_hook_status=$?
+case "$lup_hook_status" in
+    0|{REFUSAL_STATUS}) exit "$lup_hook_status" ;;
+    *) printf 'Lup hook failed (exit %s).\\n' "$lup_hook_status" >&2
+       printf 'Run outside this session: {REGENERATE_COMMAND}\\n' >&2
+       exit {REFUSAL_STATUS} ;;
+esac
+""",
+        semantic_id=semantic_id,
+        executable=True,
+        banner=GeneratedBanner(
+            source="lup.policy.dispatcher", command=REGENERATE_COMMAND
+        ),
     )
 
 

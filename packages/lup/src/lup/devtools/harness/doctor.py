@@ -1,7 +1,7 @@
 """Runtime evidence doctor for installed native CLIs and SDKs.
 
 Probes each selected composition's runtime readiness, prints the collected
-evidence, and compares supported components against the accepted ledger in
+evidence, and compares supported components against the accepted register in
 ``evidence`` — nonzero on missing capabilities, and on version drift under
 ``--strict-evidence``.
 """
@@ -13,7 +13,7 @@ from pathlib import Path
 import sh
 import typer
 
-from lup.devtools.harness.evidence import (
+from lup.harness.evidence import (
     SCHEMA_COMMAND,
     DigestDrift,
     EvidenceDrift,

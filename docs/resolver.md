@@ -1,4 +1,4 @@
-<!-- Generated from lup.devtools.harness.content.docs.resolver by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
+<!-- Generated from lup.harness.content.docs.resolver by `uv run lup-devtools harness generate all` — edit the source, not this file. See docs/harness.md. -->
 
 # Resolver lifecycle and recovery
 
@@ -10,8 +10,8 @@ resolver implementation.
 Run the native composition directly with one of:
 
 ```text
-uv run lup-devtools harness resolve --adapter claude
-uv run lup-devtools harness resolve --adapter codex
+uv run lup-devtools resolve --adapter claude
+uv run lup-devtools resolve --adapter codex
 ```
 
 `--run-id` selects a stable run for explicit recovery. Without it, the command
@@ -52,13 +52,13 @@ the environment. Wait and poll settings are constructor arguments rather than
 resume its own run.
 
 The doors are `--answer <question-id>=<value>`, the supervisor page,
-`lup-devtools harness resolve answer`, and a worker's own question tools.
+`lup-devtools resolve answer`, and a worker's own question tools.
 Assembling the review branch has no door of its own: it is the reserved
 `integration-assembly` question, answered `approve` or `defer` through
 whichever of those a human is already at. See [supervisor.md](supervisor.md).
 
 Accepting a concern *over a failing verification* is a different decision and
-has its own command, `lup-devtools harness resolve accept`, because it records
+has its own command, `lup-devtools resolve accept`, because it records
 a reason in place of a green check that was never green.
 
 **Telling an actor something is a stream, and delivery is a position.**
@@ -141,14 +141,24 @@ so a project on another forge supplies its own reader. When a concern
 derived from an issue lands, the run comments there naming the review branch,
 and never closes it — a reviewer passing is not a human having read the code.
 
-**Statements seed a run as well as join one.** `--admit <text>` carries work
-in the human's own words into a live run, and where no run exists yet it opens
-one from those statements beside whatever notes the tree already holds. Both
+**Statements seed a run as well as widen one.** `--admit <text>` carries work
+in the human's own words into a run standing still, and where no run exists yet
+it opens one from those statements beside whatever notes the tree holds. Both
 are positions in the same request, so a seeded run and a scanned one reach the
 same shape of inventory and one run may mix them. Otherwise somebody arriving
 with the concerns in their own words — which is how a human arrives — had to
 invent a note site for the planner to read back, a file edit standing in for a
 sentence.
+
+Admission reaches into the run and mutates it: the concern set widens, the
+graph is revalidated for unique ids, present dependencies and acyclicity, and
+the writable roots are checked. So it takes the run's exclusive lock as its
+first act, and a run some process is still driving refuses it with `resolver
+run '<id>' is already active`: a park is when to admit. An answer lands
+against a moving run because it deposits into a mailbox the run applies on its
+own schedule, and admission has no such route — so a detached admission
+against a moving run leaves the refusal in the child's log, behind a
+foreground banner reporting the run started.
 
 **A base is refreshed, not only inherited.** The base starts as the source
 snapshot and is brought up to the branch it came from whenever a lease is
@@ -156,7 +166,7 @@ created — fast-forwarded where the snapshot is contained in the branch,
 merged where it is not, so a run planned from uncommitted notes keeps them.
 That is the one moment it costs nothing: the worktree does not exist yet. A
 lease already holding work keeps its base until somebody asks, with
-`lup-devtools harness resolve refresh --run-id <id>`, which reports per lease
+`lup-devtools resolve refresh --run-id <id>`, which reports per lease
 what merging would conflict on and takes it only with `--apply`. A concern
 whose work is already verified is never moved: its commit is what the run
 records and joins.

@@ -20,18 +20,18 @@ from fastapi.responses import StreamingResponse
 from lup.providers.harness import AdapterName
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry
-from lup.orchestration.actors.mail import ActorMessage
-from lup.orchestration.actors.mailbox import (
+from lup.coordination.mail import ActorMessage
+from lup.coordination.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
     ParkRequest,
 )
-from lup.orchestration.actors.questions import QuestionAnswer
+from lup.coordination.questions import QuestionAnswer
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.types import StringMap
-from lup.web.serve import local_page_app, serve_local_page
+from lup.web.serve import bundle_app, serve_local_page
 from lup.workspace.paths import project_root
 from lup.devtools.supervisor.events import FRESH_CATCHUP_ENTRIES, stream
 from lup.devtools.supervisor.page import SUPERVISOR_PORT
@@ -170,10 +170,13 @@ def create_supervisor(
     adapter: AdapterName = AdapterName.CLAUDE,
     sse_headers: StringMap = DEFAULT_SSE_HEADERS,
 ) -> FastAPI:
-    """Build the supervisor app over every run under the state root."""
-    supervisor = local_page_app(
-        "Lup resolver supervisor", "lup.devtools.supervisor", url
-    )
+    """Build the supervisor app over every run under the state root.
+
+    The page is the ``supervisor`` surface Vite built into ``lup.web``'s
+    package data, typed against the projections below and the journal's own
+    entries, so a route renamed here fails its build rather than its reader.
+    """
+    supervisor = bundle_app("Lup resolver supervisor", url, "supervisor")
 
     def selected_run() -> str:
         if run_id is None:
@@ -198,7 +201,11 @@ def create_supervisor(
     @supervisor.get("/api/runs/{selected}/events")
     async def read_events(selected: str, request: Request) -> StreamingResponse:
         """Follow one run's record, resuming from whatever the reader last saw."""
-        resume = request.headers.get("last-event-id", "")  # lup: ignore[dict-get]
+        resume = (
+            request.headers["last-event-id"]
+            if "last-event-id" in request.headers
+            else ""
+        )
         return StreamingResponse(
             stream(run_journal(state_root, selected), last_seq(resume)),
             media_type="text/event-stream",

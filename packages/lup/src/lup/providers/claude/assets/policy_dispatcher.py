@@ -32,7 +32,14 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from decisions import (
     bash_decision,
     edit_decision,
+    claim_window_closed,
+    claim_window_opened,
+    edit_claim_decision,
     fetch_decision,
+    named_claim_recorded,
+    peer_listing_attachment,
+    peer_listing_decision,
+    peer_send_decision,
     placed_document,
     placed_edit_text,
     refused_tool_decision,
@@ -44,6 +51,7 @@ from host import (
     publish_edition,
     read_document,
     record_hook_evidence,
+    repaired_directives,
     sandbox_active,
 )
 from kernel.decision import KernelDecision, sandbox_escaped
@@ -51,7 +59,42 @@ from policy_data import (
     AGENT_IDENTITY_ENV,
     AUTONOMOUS_AGENT_IDENTITIES,
     DIAGNOSTICS_COMMAND,
+    REPAIR_COMMAND,
 )
+
+
+def announced(effect, tool_name, reason, dialogs=("Edit", "Write")):
+    """What a verdict has to say that its own prompt will not carry, or "".
+
+    *dialogs* names the calls whose approval prompt is this runtime's own
+    dialog. Claude Code renders a hook's ``permissionDecisionReason`` in the
+    prompt it raises for a shell command, and drops it in the one it raises
+    for a file write — that dialog shows the path, a preview and the two
+    answers, and takes nothing from a hook. Measured against 2.1.237, in both
+    directions.
+
+    Silent wherever the prompt already speaks. A shell command's prompt shows
+    the reason, so repeating it would say everything twice; a reason of one
+    line names a category and adds nothing to a dialog already showing the
+    file and its content. What is left is the case this exists for — a verdict
+    that enumerated something the approver cannot otherwise see, about a call
+    whose prompt drops it.
+
+    ``systemMessage`` is the one field this runtime displays to a person from
+    every hook, and it arrives with the tool call rather than with the prompt,
+    so this informs rather than gates. That is the whole of what is reachable:
+    the reason is dropped here, and ``PermissionRequest`` — the event that runs
+    before the prompt — belongs to the control protocol rather than to a local
+    plugin, and never fires for one.
+
+    The colour is spelled here rather than in the kernel because it is this
+    terminal's alphabet. The kernel states the sites; a runtime that shows them
+    some other way is showing the same verdict.
+    """
+    lines = reason.splitlines()
+    if effect != "ask" or tool_name not in dialogs or len(lines) < 2:
+        return ""
+    return "\n".join([lines[0], *(f"\033[33m{site}\033[0m" for site in lines[1:])])
 
 
 def plugin_data_root():
@@ -147,6 +190,17 @@ def placed_input(payload):
     return None if revised is None else {**tool_input, "new_string": revised}
 
 
+def session_root(payload):
+    """Where this session is rooted, which its relative operands resolve against.
+
+    A hook is promised nothing about where it runs, so the payload's own answer
+    is the only one there is. Read through here by both halves of an answer —
+    the verdict and whatever rides beside it — because a second spelling of it
+    is a second place it can be forgotten.
+    """
+    return Path(payload["cwd"]) if "cwd" in payload else None
+
+
 def dispatch(payload):
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
@@ -154,7 +208,7 @@ def dispatch(payload):
     # belongs to the repository being worked on or to somebody else's. Read
     # once, because the shell path and the edit path ask the same question of
     # it and a second read is a second place it can be forgotten.
-    session_directory = Path(payload["cwd"]) if "cwd" in payload else None
+    session_directory = session_root(payload)
     agent_type = payload["agent_type"] if "agent_type" in payload else ""
     autonomous = (
         agent_type in AUTONOMOUS_AGENT_IDENTITIES
@@ -162,6 +216,9 @@ def dispatch(payload):
     )
     if name == "Bash":
         unsandboxed = spent_escape(tool_input)
+        # A command names no file it will write, so what it changed can only
+        # be read afterwards against what stood here before it ran.
+        claim_window_opened(session_directory)
         return bash_decision(
             tool_input["command"],
             managed_root(),
@@ -180,7 +237,10 @@ def dispatch(payload):
             autonomous=autonomous,
         )
     if name == "WebFetch":
-        return fetch_decision(tool_input["url"])
+        # The same directory the shell branch reads its boundary from: the
+        # profile's answer for what nothing classified is one declaration,
+        # not one per surface.
+        return fetch_decision(tool_input["url"], session_directory)
     if name == "Edit":
         path = tool_input["file_path"]
         before, after = edit_documents(
@@ -189,27 +249,51 @@ def dispatch(payload):
             tool_input["new_string"],
             "replace_all" in tool_input and tool_input["replace_all"] is True,
         )
-        return edit_decision(
+        return edit_claim_decision(
+            edit_decision(
+                path,
+                before,
+                after,
+                Path(path).exists(),
+                autonomous,
+                "modify",
+                session_directory,
+            ),
             path,
-            before,
-            after,
-            Path(path).exists(),
-            autonomous,
-            "modify",
             session_directory,
         )
     if name == "Write":
         path = tool_input["file_path"]
         exists = Path(path).exists()
-        return edit_decision(
+        return edit_claim_decision(
+            edit_decision(
+                path,
+                read_document(path),
+                tool_input["content"],
+                exists,
+                autonomous,
+                "overwrite" if exists else "create",
+                session_directory,
+            ),
             path,
-            read_document(path),
-            tool_input["content"],
-            exists,
-            autonomous,
-            "overwrite" if exists else "create",
             session_directory,
         )
+    if name == "SendMessage":
+        # Every string the call carries rather than a named field, the reading
+        # the refusal table already takes: which key this runtime spells a
+        # recipient in is its own business, and the roster answers for all of
+        # them. A target nobody on it answers to passes through untouched,
+        # which is what leaves subagent continuation and every other session
+        # this repository does not hold working exactly as before.
+        return peer_send_decision(
+            [value for value in tool_input.values() if isinstance(value, str)],
+            session_directory,
+        )
+    if name == "ListAgents":
+        # Nothing to permit and nothing to refuse: it answers for a population
+        # wider than one repository, so the roster rides alongside as context
+        # rather than as a verdict that could take the answer away.
+        return peer_listing_decision()
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them
     # here would be this file holding a second, narrower copy of it. The
@@ -222,7 +306,20 @@ def dispatch(payload):
     return KernelDecision("ask", "tool is not classified")
 
 
-def rendered(decision, payload, placed):
+def attachment(name, cwd):
+    """What one call carries back beside its verdict, or nothing to carry.
+
+    Only the listing has any. It answers for a wider population than this
+    repository's roster, and the roster is exactly what a reader needs beside
+    it to tell the two apart — every other call has no second population to be
+    confused with, so nothing is folded for it and nothing is paid.
+    """
+    if name != "ListAgents":
+        return ""
+    return peer_listing_attachment(cwd)
+
+
+def rendered(decision, payload, placed, attached):
     """Answer one call on the permission channel, and place it on the other.
 
     Claude Code takes a call's sandbox as an argument of the call rather than
@@ -266,26 +363,56 @@ def rendered(decision, payload, placed):
     agent set for itself is not that request.
     """
     settled = decision.placed(escapable=True)
+
+    def carried(result):
+        """The same answer, with whatever context rides beside the verdict.
+
+        Beside rather than inside, and it survives a deferral: the whole point
+        of attaching a roster to a listing is that the listing goes ahead, so
+        the one answer that says "this runtime decides" is the one that most
+        needs to carry it. An empty attachment adds no key, so a call with
+        nothing to say returns exactly what it returned before.
+        """
+        if not attached:
+            return result
+        specific = (
+            result["hookSpecificOutput"]
+            if "hookSpecificOutput" in result
+            else {"hookEventName": "PreToolUse"}
+        )
+        return {
+            **result,
+            "hookSpecificOutput": {**specific, "additionalContext": attached},
+        }
+
     if settled.effect == "defer":
-        return {}
+        return carried({})
     answer = {
         "hookEventName": "PreToolUse",
         "permissionDecision": settled.effect,
         "permissionDecisionReason": settled.reason,
     }
+
+    def surfaced(result):
+        """The same verdict, with what this runtime will not show it said."""
+        message = announced(settled.effect, payload["tool_name"], settled.reason)
+        return carried({**result, "systemMessage": message} if message else result)
+
     if placed is not None and settled.effect != "deny":
-        return {"hookSpecificOutput": {**answer, "updatedInput": placed}}
+        return surfaced({"hookSpecificOutput": {**answer, "updatedInput": placed}})
     if settled.sandbox == "ambient" or payload["tool_name"] != "Bash":
-        return {"hookSpecificOutput": answer}
-    return {
-        "hookSpecificOutput": {
-            **answer,
-            "updatedInput": {
-                **payload["tool_input"],
-                "dangerouslyDisableSandbox": sandbox_escaped(settled.sandbox),
-            },
+        return surfaced({"hookSpecificOutput": answer})
+    return surfaced(
+        {
+            "hookSpecificOutput": {
+                **answer,
+                "updatedInput": {
+                    **payload["tool_input"],
+                    "dangerouslyDisableSandbox": sandbox_escaped(settled.sandbox),
+                },
+            }
         }
-    }
+    )
 
 
 def observe(payload):
@@ -307,14 +434,30 @@ def observe(payload):
     path = tool_input["file_path"] if "file_path" in tool_input else ""
     if path:
         publish_edition(path)
-        return file_diagnostics(path, DIAGNOSTICS_COMMAND)
+        # The tier that needs no comparison: the call said which file, so the
+        # claim it leaves is one another session can act on unqualified.
+        named_claim_recorded(path, session_root(payload))
+        # Repaired before checked, because the repair rewrites the file: run
+        # the other way round and the diagnostics describe lines that have
+        # already moved. Both reports reach the agent together, which is the
+        # one channel this event has.
+        return repaired_directives(path, REPAIR_COMMAND) + file_diagnostics(
+            path, DIAGNOSTICS_COMMAND
+        )
     command = tool_input["command"] if "command" in tool_input else ""
-    return written_review(command, Path.cwd()) if command else []
+    if not command:
+        return []
+    # What the command changed, read against the snapshot its own PreToolUse
+    # took, and contested where another session had a window open across it.
+    claim_window_closed(session_root(payload))
+    return written_review(command, session_root(payload) or Path.cwd())
 
 
 def main():
     payload = {}
+    event = ""
     placed = None
+    attached = ""
     failed = False
     try:
         payload = json.load(sys.stdin)
@@ -326,22 +469,21 @@ def main():
         # approval prompt for work already done.
         if event == "PostToolUse":
             found = observe(payload)
-            # Exit 2 is the one channel this event has to the agent: the tool
-            # already ran, so nothing is undone, and stdout on a clean exit
-            # reaches a debug log nobody reads. Silence when the file checks
-            # out, so the channel means something when it is used.
+            # Structured feedback reaches the agent beside the completed tool.
+            # A file diagnostic is a successful check, so it exits normally.
             if found:
                 detail = "\n".join(found)
                 record_hook_evidence(
                     plugin_data_root(), payload, "completed", "observed", detail
                 )
-                sys.stderr.write(detail)
-                raise SystemExit(2)
+                json.dump({"decision": "block", "reason": detail}, sys.stdout)
+                return
             json.dump({}, sys.stdout)
             record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
         decision = dispatch(payload)
         placed = placed_input(payload)
+        attached = attachment(payload["tool_name"], session_root(payload))
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -360,7 +502,13 @@ def main():
             "error",
             f"{type(error).__name__}: {error}",
         )
-    json.dump(rendered(decision, payload, placed), sys.stdout)
+        if event == "PostToolUse":
+            json.dump(
+                {"decision": "block", "reason": f"Lup post-tool check failed: {error}"},
+                sys.stdout,
+            )
+            return
+    json.dump(rendered(decision, payload, placed, attached), sys.stdout)
     if not failed:
         detail = decision.reason if decision.effect == "deny" else None
         record_hook_evidence(

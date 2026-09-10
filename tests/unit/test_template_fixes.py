@@ -80,7 +80,7 @@ def test_aux_model_claude_defaults_to_opus(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(settings, "agent_sdk", "claude")
     monkeypatch.setattr(settings, "openai_base_url", None)
     monkeypatch.setattr(settings, "openrouter_api_key", None)
-    assert aux_model() == "claude-opus-5"
+    assert aux_model() is None  # The provider resolves its strongest alias.
 
 
 def test_aux_model_compat_endpoint_reuses_session_model(

@@ -25,12 +25,12 @@ $ARGUMENTS
   (`antipatterns.py`), boundary/spelling seams (`boundaries.py`), capability
   architecture (`capabilities.py`) — indexed by `registry.py` and rendered
   into `docs/rules.md` by `uv run lup-devtools dev rules`.
-- `src/lup_template/devtools/harness/catalog.py` owns application URL scopes,
+- `src/lup_template/harness/catalog.py` owns application URL scopes,
   protected roots, policy IDs, and other composition inputs; the readable
   shell table it declares is `content/shell_vocabulary.py`.
 - `tests/unit/test_semantic_policy.py` is the shared canonical/bundled fixture
   suite.
-- `packages/lup/src/lup/devtools/harness/content/docs/permissions.py` renders
+- `packages/lup/src/lup/harness/content/docs/permissions.py` renders
   `docs/permissions.md`, which describes the lattice a change here moves. It
   is generated like every other page under `docs/`: edit the source module,
   never the rendered file.
@@ -60,7 +60,7 @@ generated artifacts. Never edit them as the source of a policy change.
 6. Run `uv run pytest -q tests/unit/test_semantic_policy.py`.
 7. Sweep the commands this project actually runs, because the fixtures cover
    what the change was aimed at and say nothing about what it caught by
-   accident. `uv run lup-devtools hooks sweep <file>` classifies a list one
+   accident. `uv run lup-devtools dev hooks sweep <file>` classifies a list one
    per line and exits non-zero on anything not allowed, so a rule that
    tightened something it did not mean to tighten fails here instead of in
    somebody's session. Keep that list in a file rather than retyping it, and

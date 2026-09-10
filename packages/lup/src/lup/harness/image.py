@@ -98,6 +98,18 @@ class Registry(BaseModel, frozen=True):
 
     manager: PackageManager = Field(description="Which manager this drives")
     command: str = Field(description="The install command, taking names as arguments")
+    release_url: str = Field(
+        default="",
+        description=(
+            "Where this manager's registry answers for a package's current "
+            "release, as a URL template taking ``{name}``, answering JSON "
+            "with a top-level ``version``. Empty means the registry is "
+            "never asked, and an unpinned package is left to the build -- "
+            "the right declaration for a registry whose answer has another "
+            "shape, like PyPI's nested ``info.version``, until something "
+            "needs it"
+        ),
+    )
 
 
 class ContainerEngine(BaseModel, frozen=True):
@@ -183,6 +195,34 @@ type EngineFlavor = Literal["docker", "podman", "unknown"]
 """Which of the two engines something is, or that it did not say."""
 
 
+type SessionStreams = Literal["terminal", "piped", "captured"]
+"""How one container's standard streams are wired to whatever opened it.
+
+Three states because a bool covered two and the third is a real caller. An
+operator's session owns a terminal and wants ``-it``. A probe's output is
+captured and wants neither, since ``-it`` against a pipe fails on the terminal
+it was promised. A worker sits between them: it speaks a protocol over its
+stdin, so it needs ``-i`` to be given one and must not have ``-t``, which would
+put a terminal discipline in front of a stream carrying framed JSON.
+
+Spelled as three names rather than two flags because the flags are the
+engine's vocabulary and these are the situations -- and the situation is what a
+caller knows. A caller reaching for ``-i`` directly is deciding a container
+argument from a place that should only know it is talking over pipes.
+"""
+
+
+def stream_arguments(streams: SessionStreams) -> list[str]:
+    """The engine flags that wire one container's standard streams."""
+    match streams:
+        case "terminal":
+            return ["-it"]
+        case "piped":
+            return ["-i"]
+        case "captured":
+            return []
+
+
 def flavor_of(reported: str) -> EngineFlavor:
     """Read an engine's own words for which of the two it is."""
     return "podman" if "podman" in reported.lower() else "docker"
@@ -234,13 +274,10 @@ class ContainerClient(BaseModel, frozen=True):
     def consequence(self) -> str:
         """What a session started through this client would lose, for a refusal."""
         return (
-            f"`{self.binary}` is a Docker client driving a podman engine, which "
-            "podman needs `--userns=keep-id` to do without remapping uids -- and "
-            "a Docker client rejects that flag before the daemon sees it, so the "
-            "session's own checkout would be read-only to it. Install podman's "
-            "own CLI, or unset DOCKER_HOST to reach a Docker daemon, or open the "
-            "session with --unsandboxed to run on the host under the semantic "
-            "policy alone."
+            f"`{self.binary}` is a Docker client connected to a Podman server. "
+            "It cannot pass `--userns=keep-id`, which Lup needs for writable "
+            "checkout mounts. Use the Podman CLI, or unset DOCKER_HOST to "
+            "connect the Docker client to a Docker server."
         )
 
 
@@ -382,32 +419,65 @@ class Image(BaseModel, frozen=True):
             "option costs before it does"
         ),
     )
-    project_environment: str = Field(
-        default="/opt/lup/venv",
+    tooling: list[Package] = Field(
+        default=[],
         description=(
-            "``UV_PROJECT_ENVIRONMENT``, deliberately outside the mounted "
-            "tree. A `.venv` inside the checkout is shared with the host "
-            "through the bind mount, so host tooling and container tooling "
-            "overwrite each other's interpreter paths. Container-private is "
-            "the fix, and it holds under a contained-Bash architecture too"
+            "What *this project's* work needs inside the image, which is the "
+            "other side of the line ``baseline`` draws: that field is a shell "
+            "being usable at all and is the library's answer, this one is the "
+            "application's and starts empty. A project that reads PDFs or "
+            "renders diagrams says so here, in the same call where it "
+            "declares its image, rather than restating fourteen baseline "
+            "names to add one -- and rather than inventing a capability. "
+            "A ``Requirement`` is the other door and a narrower one: it takes "
+            "a purpose, an exercise proving a machine has the thing, and a "
+            "policy for going without, so a tool whose *absence* deserves a "
+            "diagnostic belongs there and one that simply has to be present "
+            "belongs here. Nothing exercises these, deliberately: a name the "
+            "manager cannot resolve fails the build, naming it, which is a "
+            "better answer than a probe. Whole packages rather than bare "
+            "names, so a registry package can be pinned and reached through "
+            "the manager that obtains it"
+        ),
+    )
+    project_environment: str = Field(
+        default=".venv-contained",
+        description=(
+            "``UV_PROJECT_ENVIRONMENT``, relative so `uv` resolves it against "
+            "each project root rather than naming one directory for the whole "
+            "machine. An absolute value is a single environment shared by "
+            "every project mounted here, and `uv sync` is exact by default -- "
+            "measured on uv 0.12.7, syncing a second project uninstalls the "
+            "first and its dependencies, so a session's own toolchain does "
+            "not survive an agent running `uv sync` in a mounted clone. "
+            "Relative, `uv` does that keying itself for every spelling, a "
+            "bare `uv run` in a shell included -- which is why this is not "
+            "re-keyed from lup's own code, that reaching only the processes "
+            "lup starts. What keeps the environment off the host is then the "
+            "mount rather than the path: a private directory is bound at "
+            "this name inside each project root, so the checkout's own "
+            "`.venv` and this one never meet"
         ),
     )
     agent_clis: list[Package] = Field(
         default=[
-            Package(name="@anthropic-ai/claude-code", manager="bun", version="2.1.237"),
-            Package(name="@openai/codex", manager="bun", version="0.149.0"),
+            Package(name="@anthropic-ai/claude-code", manager="bun"),
+            Package(name="@openai/codex", manager="bun"),
         ],
         description=(
-            "The agent runtimes this image carries, each pinned rather than "
-            "latest so a rebuild is a decision. Every runtime the harness "
-            "launches belongs here: a contained launch runs `<cli>` inside "
-            "the container, so a runtime missing from this list builds an "
-            "image, starts a proxy, and then fails with `not found` on the "
-            "one program the session existed to run -- which is what "
-            "happened to Codex while the list was one hardcoded line. The "
-            "installs land in a layer the run mounts read-only, which is "
-            "what stops a self-update from silently making the image "
-            "disagree with this declaration"
+            "The agent runtimes this image carries. Every runtime the "
+            "harness launches belongs here: a contained launch runs `<cli>` "
+            "inside the container, so a runtime missing from this list "
+            "builds an image, starts a proxy, and then fails with `not "
+            "found` on the one program the session existed to run -- which "
+            "is what happened to Codex while the list was one hardcoded "
+            "line. An empty version is resolved to the registry's current "
+            "release at each contained launch and rendered as a concrete "
+            "pin, so the image tag still content-addresses a real version "
+            "and a new release is what triggers the rebuild; declaring a "
+            "version freezes it instead. The installs land in a layer the "
+            "run mounts read-only, which is what stops a self-update from "
+            "silently making the image disagree with what was rendered"
         ),
     )
     terminal: TerminalHandoff = Field(
@@ -447,8 +517,8 @@ class Image(BaseModel, frozen=True):
     clipboard: ClipboardBridge = Field(
         default=ClipboardBridge(),
         description=(
-            "How the operator's clipboard reaches a session that has no "
-            "display, no compositor and no clipboard client of its own. "
+            "How the operator's clipboard reaches a contained session without "
+            "connecting to the host's display or compositor. "
             "Declared beside the browser bridge because it is the same kind "
             "of thing -- one narrow channel through the boundary, named "
             "rather than buried. The alternative it replaces is mounting the "
@@ -460,15 +530,9 @@ class Image(BaseModel, frozen=True):
     credential_seed: str = Field(
         default="/opt/lup/credential-seed",
         description=(
-            "Where the host's stored login is offered to the entrypoint, "
-            "outside the config home rather than over it. The host file used "
-            "to be bind-mounted read-only at the exact path the CLI keeps a "
-            "login, which read as working -- a session started signed in -- "
-            "and was not: that file is written back to, both when a login "
-            "completes and when an expiring token is renewed, and a "
-            "read-only mount refused both. It also shadowed whatever the "
-            "config volume held, so a login made inside was invisible the "
-            "next launch. Offered here instead, and copied in once"
+            "Read-only host login offered outside the writable config home. "
+            "A login fingerprint applies each host change once, retaining "
+            "private container renewals and unrelated authorization records"
         ),
     )
     registry_root: str = Field(
@@ -494,7 +558,11 @@ class Image(BaseModel, frozen=True):
 
     registries: list[Registry] = Field(
         default=[
-            Registry(manager="bun", command="bun add -g"),
+            Registry(
+                manager="bun",
+                command="bun add -g",
+                release_url="https://registry.npmjs.org/{name}/latest",
+            ),
             Registry(manager="uv", command="uv tool install"),
         ],
         description=(
@@ -601,7 +669,7 @@ class Image(BaseModel, frozen=True):
     )
 
     def packages(self, manifest: Manifest) -> list[Package]:
-        """Everything the image installs: baseline, editors, then declared.
+        """Everything the image installs: baseline, editors, tooling, declared.
 
         Deduplicated with declaration order kept, so a rebuild does not
         invalidate a layer because two lists mentioned one package. The
@@ -615,6 +683,11 @@ class Image(BaseModel, frozen=True):
         apart in the direction that is hardest to see: the launch forwards a
         name it believes is carried, the layer never installed it, and the
         operator's editor fails to open with the runtime blamed for it.
+
+        The project's own tooling sits between the library's answer and the
+        manifest's, which is where it belongs in the reading as well as in
+        the layer: after what a shell needs to work at all, before what a
+        declared capability asked for.
         """
         return list(
             dict.fromkeys(
@@ -622,6 +695,8 @@ class Image(BaseModel, frozen=True):
                     *(Package(name=name) for name in self.baseline),
                     *(Package(name=name) for name in self.inner_sandbox),
                     *self.terminal.packages(),
+                    *self.clipboard.packages(),
+                    *self.tooling,
                     *manifest.packages(),
                 ]
             )
@@ -721,6 +796,9 @@ class Image(BaseModel, frozen=True):
         agent_clis = " ".join(item.requested() for item in self.agent_clis)
         opening = self.browser.script(self.egress.shares_host_loopback())
         clipping = shim_program()
+        seeding = (Path(__file__).parent / "assets" / "credential_seed.py").read_text(
+            encoding="utf-8"
+        )
         shim_names = " ".join(self.clipboard.shims)
         # Quoted, because `ENV name=value` takes whitespace as separating
         # *more* pairs: an unquoted `GIT_SSH_COMMAND=ssh -o BatchMode=yes`
@@ -763,10 +841,10 @@ RUN pacman -S --noconfirm --needed \\
 ENV BUN_INSTALL={self.registry_root}
 ENV PATH={self.registry_bin()}:$PATH
 {registry_layers}{script_layer}
-# Every agent runtime the harness launches, from the registry at a pinned
-# version rather than an install script, so what lands is what the
-# declaration names and the layer the run mounts read-only cannot be
-# rewritten by a self-update.
+# Every agent runtime the harness launches, from the registry at the version
+# the launch resolved (or the declaration pinned) rather than an install
+# script, so what lands is what was rendered and the layer the run mounts
+# read-only cannot be rewritten by a self-update.
 RUN bun add -g {agent_clis}
 
 # Trust, seeded where a fresh config home will find it. A workspace this
@@ -810,62 +888,11 @@ if [ ! -f "$config/.claude.json" ]; then
      '.projects[$here] = {{"hasTrustDialogAccepted": true}}' \\
      /opt/lup/trust-seed.json > "$config/.claude.json"
 fi
-# The stored login, copied in rather than mounted over the path it lives at.
-# Only when the config home holds none that could still reach an account,
-# which is what keeps the two directions from fighting: a login usable in here
-# is never overwritten by the host's, and the host's file is never written by
-# anything in here. After the copy this container owns its credential
-# outright, so `/login` completes and an expiring token renews -- neither of
-# which a read-only mount allowed.
-#
-# "Usable" rather than "present" because the config home outlives the
-# credential in it. The volume is keyed on the repository and kept, the copy
-# ages on its own schedule, and a home left alone past the refresh
-# credential's life holds a file that is a login by every test except the one
-# that matters. Read as present, it suppresses the seed and the session opens
-# demanding a sign-in -- and a sign-in is the one thing this boundary cannot
-# finish, because the callback comes back to a loopback address that only
-# exists inside. So the seed answers the question the failure actually turns
-# on, and nothing is lost by replacing a credential no request will be
-# answered for: it is not a login for its own account either.
-#
-# What decides that is the runtime's, and arrives per launch beside the
-# filename. A runtime declaring no test is taken at its word rather than
-# guessed at -- it keeps the older present-or-absent rule, and a launch that
-# cannot renew what it holds falls back to the printed URL.
-#
-# The copy replaces the file whole, which is the unit it always was, so
-# whatever else the runtime keeps beside the login in there goes with it --
-# Claude Code stores its MCP authorizations in this same file, and they come
-# back as the host's rather than surviving as this home's. That is the price
-# of the seed being a copy, and it is paid only for a home whose login had
-# already stopped working.
-#
-# The filename is the runtime's own word and arrives per launch, because one
-# image starts every runtime the harness declares and they do not agree on it.
-# `-s` rather than `-f`, and a removal before the copy, because every config
-# home that predates this holds an empty file at exactly this path: it was the
-# mount point the old read-only bind needed, so the engine created it, and it
-# belongs to the remapped uid that created it. A presence test would read that
-# as a login and seed nothing, and a copy over it would be refused for the
-# ownership -- the directory is ours and the file is not, so it is removed
-# rather than written through. An empty credential is not a login by anyone's
-# definition, so nothing is lost by replacing one.
-usable() {{
-  [ -s "$1" ] || return 1
-  [ -n "$LUP_CREDENTIAL_RENEWABLE" ] || return 0
-  jq -e "$LUP_CREDENTIAL_RENEWABLE" "$1" >/dev/null 2>&1
-}}
-seed={self.credential_seed}
-stored="$config/$LUP_CREDENTIAL_NAME"
-if [ -n "$LUP_CREDENTIAL_NAME" ] && usable "$seed" && ! usable "$stored"; then
-  if [ -s "$stored" ]; then
-    echo "lup: the login in this config home can no longer be renewed," >&2
-    echo "lup: so it was replaced by the host's, which still can." >&2
-  fi
-  rm -f "$stored"
-  cp "$seed" "$stored"
-  chmod 600 "$stored"
+# A selected host login is applied once per change. Native renewal remains
+# container-private, and unrelated records in a shared credential file survive.
+if [ -n "${{LUP_CREDENTIAL_NAME:-}}" ]; then
+  python3 /opt/lup/credential-seed.py {self.credential_seed} "$config/$LUP_CREDENTIAL_NAME" \\
+    --keys "${{LUP_CREDENTIAL_KEYS:-[]}}" --renewable "${{LUP_CREDENTIAL_RENEWABLE:-}}"
 fi
 
 # One credential, two consumers. The token crosses the boundary by name --
@@ -882,6 +909,10 @@ ENTRY
 RUN chmod +x /usr/local/bin/lup-entrypoint
 ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
 
+COPY <<'CREDENTIAL' /opt/lup/credential-seed.py
+{seeding}
+CREDENTIAL
+
 # What `BROWSER` names, so a sign-in inside can reach a browser outside. The
 # pipe it writes to is mounted per launch; with nothing mounted the script
 # prints the URL and returns, which is what the flow falls back to.
@@ -894,13 +925,19 @@ RUN chmod +x {self.browser.opener}
 # to the broker in the launcher. The socket is mounted per launch; with none
 # mounted each shim exits non-zero, which is what "this machine has no
 # clipboard" already looked like to every caller.
-COPY <<'CLIP' /usr/local/bin/lup-clipboard
+COPY <<'CLIP' /usr/local/bin/clipboard_shim.py
 {clipping}
 CLIP
-RUN chmod +x /usr/local/bin/lup-clipboard \\
+RUN chmod +x /usr/local/bin/clipboard_shim.py \\
+    && ln -sf /usr/local/bin/clipboard_shim.py /usr/local/bin/lup-clipboard \\
     && for name in {shim_names}; do \\
         ln -sf /usr/local/bin/lup-clipboard "/usr/local/bin/$name"; \\
     done
+
+COPY <<'X11' /usr/local/bin/lup-clipboard-x11
+{self.clipboard.native_program()}
+X11
+RUN chmod +x /usr/local/bin/lup-clipboard-x11
 
 # The identity the session runs as. Supplied at build time from the host's own
 # uid/gid, because a bind mount carries numbers rather than names: a container
@@ -910,13 +947,18 @@ RUN chmod +x /usr/local/bin/lup-clipboard \\
 # handed over here, the registry root included. Leaving that one out is how a
 # pinned toolchain ends up installed and unreachable, reported by whatever
 # tried to run it rather than by the layer that misplaced it.
+#
+# The project environment is not among them and cannot be: it is a name
+# relative to each project root, so it has no path here to create. The run
+# binds a host directory over it instead, which arrives owned by the host uid
+# this build is handing everything else to.
 ARG UID=1000
 ARG GID=1000
 RUN groupadd -g $GID agent 2>/dev/null || true \\
     && useradd -u $UID -g $GID -m -s /bin/bash agent 2>/dev/null || true \\
-    && mkdir -p {self.project_environment} {self.registry_root} \\
+    && mkdir -p {self.registry_root} \\
         {" ".join(c.path for c in self.caches)} \\
-    && chown -R $UID:$GID {self.project_environment} {self.registry_root} \\
+    && chown -R $UID:$GID {self.registry_root} \\
         {" ".join(c.path for c in self.caches)}
 
 {exported}
@@ -1037,6 +1079,48 @@ USER $UID:$GID
         """
         return ["-v", f"{config_home / 'ide'}:{self.config_home}/ide:rw"]
 
+    def environment_mounts(self, environments: Mapping[Path, Path]) -> list[str]:
+        """A container-private directory at each project root's environment name.
+
+        :attr:`project_environment` is relative, so every mounted project
+        resolves it inside its own bind mount -- which is the host's tree. A
+        session syncing there would write its environment into the checkout
+        the operator is also working in, and the interpreter paths a venv
+        bakes are absolute, so the two would overwrite each other's. Binding
+        a private directory at that name is what makes the relative value
+        safe, and it is per root rather than one shared directory because
+        sharing one is the collision this whole arrangement exists to end.
+
+        Host binds rather than named volumes, which is a departure from
+        :class:`CacheVolume` and deliberate. That class prefers named volumes
+        because a cache *shared with the host* mixes wheels built for two
+        platforms, and nothing here is shared: only the container ever reads
+        this path, so the objection does not reach it. What decides it
+        instead is ownership. A bind arrives owned by whoever owns it on the
+        host, and the launcher creates it as the operator; a fresh named
+        volume at a path the image does not hold is the engine's to own, and
+        the engines disagree about who that is. Measured on rootless podman
+        6.1.0 with ``--userns=keep-id``: a named volume nested here came out
+        ``1000:1000`` and writable, so on that engine the volume would have
+        worked. The bind is chosen for the engine that host could not answer
+        for -- a Docker daemon seeds a fresh volume from the image, and the
+        image cannot hold a project-relative path to seed it from, which
+        leaves the ownership its choice rather than ours. A bind takes that
+        question off the table on both. If a session ever does meet an
+        unwritable one, the entrypoint's config-home check is the shape of
+        the diagnostic it needs: a permission error on a path names neither
+        the mount nor the mapping.
+
+        Keyed by project root, and the caller decides which roots are in it:
+        a read-only root gets none, because a session cannot sync into one
+        and a directory bound inside it would be a mount nothing writes.
+        """
+        return [
+            argument
+            for root, held in environments.items()
+            for argument in ("-v", f"{held}:{root / self.project_environment}:rw")
+        ]
+
     def session_arguments(
         self,
         *,
@@ -1050,6 +1134,7 @@ USER $UID:$GID
         config_home_env: str,
         credential_file: str = ".credentials.json",
         credential_renewable: str = "",
+        credential_fields: list[str] | None = None,
         credential: Path | None = None,
         host_config_home: Path | None = None,
         engine: ContainerEngine = Docker(),
@@ -1060,10 +1145,11 @@ USER $UID:$GID
         browser_directory: Path | None = None,
         clipboard_directory: Path | None = None,
         terminal: EnvVars | None = None,
-        interactive: bool = True,
+        streams: SessionStreams = "terminal",
         proxy_address: str = "",
         boundary: EnvVars | None = None,
         inherited_environment: list[str] | None = None,
+        environments: Mapping[Path, Path] | None = None,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1080,23 +1166,19 @@ USER $UID:$GID
         policy would be off with nothing having failed.
 
         ``credential`` is offered read-only at :attr:`credential_seed` and
-        copied into the config home by the entrypoint when that home holds
-        none that could still be renewed -- ``credential_renewable`` is the
-        runtime's own test for that, and an empty one keeps the older rule of
-        seeding only an absent login. It used to be mounted read-only at the
-        path the CLI keeps a login, which looked right and was not: the CLI writes that file back
-        both when a login completes and when it renews an expiring token, so
-        a read-only mount meant `/login` could not finish inside the boundary
-        and a long session could not renew what it started with. The mount
-        also shadowed the config volume's own copy, so a login made in here
-        was gone by the next launch.
+        applied once per host-login change, including the first adoption of
+        fingerprinted handoff. An unchanged seed preserves private renewals;
+        a missing or unrenewable saved login may be recovered from the seed.
+        ``credential_renewable`` is the provider's own test, never an inferred
+        access-token expiry. ``credential_fields`` selects login records in
+        a shared file, preserving unrelated container authorizations.
 
         The agent can read the credential either way, which is not a leak
         this could close: an agent that can open a session can reach whatever
         opens one. The scope is the boundary, not the secrecy. What the copy
         does close is the other direction -- nothing in here writes the
-        host's file -- at the cost of the two diverging, which is what makes
-        signing in as somebody else inside possible at all.
+        host's file. A container login remains private until the selected host
+        login changes, at which point the explicit host selection takes effect.
 
         ``terminal`` is what :meth:`TerminalHandoff.for_host` answered on this
         machine, passed rather than resolved here for the reason every host
@@ -1104,11 +1186,21 @@ USER $UID:$GID
         ``TERM`` read inside it would report a generated tree stale for having
         been checked from a different terminal.
 
-        ``interactive`` is what a probe turns off. The same argv has to open a
-        session and carry an exercise, because an exercise that ran through a
-        differently-assembled argv would verify a container no session opens
-        -- but a probe's output is captured rather than shown, and ``-it``
-        against a pipe fails on the terminal it was promised.
+        ``streams`` is how this container's standard streams are wired, and
+        the same argv has to serve every way of reaching it: an exercise that
+        ran through a differently-assembled argv would verify a container no
+        session opens. Three states rather than two, because the third is the
+        one a bool had no room for -- see :type:`SessionStreams`.
+
+        ``environments`` is what :meth:`environment_mounts` binds, and it is
+        emitted after the leased mounts because that is the order it reads
+        in, not because the engine needs it: measured on podman 6.1.0, a
+        nested mount emitted *before* the bind it sits inside still wins, so
+        that engine sorts by depth rather than applying the list in order.
+        The same sorting is what ``lease_for`` relies on for its read-only
+        holes, and this leans on it in the same direction -- so an engine
+        that applied the list in order would already be breaking that, and
+        the order here costs nothing to keep right either way.
         """
         mounts = [
             argument
@@ -1127,6 +1219,8 @@ USER $UID:$GID
                 f"LUP_CREDENTIAL_NAME={credential_file}",
                 "-e",
                 f"LUP_CREDENTIAL_RENEWABLE={credential_renewable}",
+                "-e",
+                f"LUP_CREDENTIAL_KEYS={json.dumps(credential_fields or [])}",
             ]
             if credential is not None
             else []
@@ -1182,7 +1276,7 @@ USER $UID:$GID
             engine.binary,
             "run",
             "--rm",
-            *(["-it"] if interactive else []),
+            *stream_arguments(streams),
             "-v",
             f"{state_volume}:{self.config_home}",
             "-e",
@@ -1196,6 +1290,7 @@ USER $UID:$GID
             *inherited,
             *selected.mount_arguments(),
             *mounts,
+            *self.environment_mounts(environments or {}),
             *seeded,
             *bridged,
             *opening,

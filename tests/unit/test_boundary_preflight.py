@@ -109,9 +109,9 @@ def test_an_uncontained_profile_does_not_depend_on_containment() -> None:
     """Otherwise the posture a contained launch refuses *into* is unopenable.
 
     `inside_placement` can only be observed behind a container, so requiring
-    it of a profile that promises none would fail every `--unsandboxed`
-    launch — for lacking a boundary it never claimed. Not a capability that
-    profile is missing; one it never asked for.
+    it of a profile that promises none would fail every launch outside the
+    outer sandbox — for lacking a boundary it never claimed. Not a capability
+    that profile is missing; one it never asked for.
     """
     capabilities = [
         depends_on("inside_placement", "inside placement", contained_only=True),

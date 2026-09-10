@@ -16,10 +16,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.orchestration.actors.mail import EVERYONE, MESSAGE_FILE
-from lup.orchestration.actors.mailbox import QUESTION_DIR
-from lup.orchestration.actors.questions import QuestionAnswer
-from lup.orchestration.actors.refs import ActorRef
+from lup.coordination.mail import EVERYONE, MESSAGE_FILE
+from lup.coordination.mailbox import QUESTION_DIR
+from lup.coordination.questions import QuestionAnswer
+from lup.coordination.refs import ActorRef
 from lup.resolver.mailbox import QuestionMailbox
 from lup.resolver.models import (
     ConcernStatus,
@@ -101,7 +101,7 @@ class SupervisorState(BaseModel, frozen=True):
 
     ``phases`` and ``statuses`` are served from the library enums rather
     than restated in the page, so adding a phase upstream cannot leave the
-    zero-build frontend silently out of date.
+    frontend silently out of date.
     """
 
     run_id: str
@@ -194,12 +194,12 @@ def answer_recipe(adapter: str, run_id: str, questions: list[MaterialQuestion]) 
 
     One definition, because this is the CLI's own interface restated as
     text: the page prints it and the parked run prints it, and a change to
-    `harness resolve`'s flags that reached only one of them would have the
+    `resolve`'s flags that reached only one of them would have the
     other teaching a command that no longer exists.
     """
     return " ".join(
         [
-            "uv run lup-devtools harness resolve",
+            "uv run lup-devtools resolve",
             f"--adapter {adapter}",
             f"--run-id {run_id}",
             *(f"--answer {question.id}=<value>" for question in questions),

@@ -1,4 +1,4 @@
-"""Helpers for ``py search`` — find symbols across packages and project source."""
+"""Helpers for ``dev py search`` — find symbols across packages and project source."""
 
 import ast
 import importlib
@@ -99,6 +99,22 @@ def scan_project_symbols(root: Path, pattern: str) -> list[SearchMatch]:
         for source in project_python_files(root)
         for match in scan_source_symbols(source, pattern)
     ]
+
+
+def name_candidates(name: str, root: Path | None) -> list[SearchMatch]:
+    """Where one name is defined in a project's source, exact matches first.
+
+    What a dotted path that did not resolve is asked next. A guess at such a
+    path is usually wrong only about which module holds the symbol, so the
+    name is the half worth searching for -- and where anything carries it
+    exactly, the substring neighbours are dropped rather than listed beside
+    the answer, which is what burying it would look like.
+    """
+    if root is None:
+        return []
+    found = scan_project_symbols(root, name)
+    exact = [match for match in found if match["symbol"] == name]
+    return exact or found
 
 
 def scan_module_symbols(module_name: str, pattern: str) -> list[SearchMatch]:

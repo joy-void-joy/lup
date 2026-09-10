@@ -154,3 +154,5 @@ class LazyCommand:
 
 
 git = LazyCommand("git", "--no-pager", "-c", "color.ui=never", tty_out=False)
+
+findmnt = LazyCommand("findmnt", tty_out=False)

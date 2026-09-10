@@ -24,10 +24,9 @@ from lup.resolver.models import (
 )
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
 from lup.resolver.status import RunStatus, run_status
-from lup.orchestration.actors.cohort import ActorCohort
-from lup.orchestration.actors.mail import EVERYONE
-from lup.orchestration.actors.refs import ActorRef
-from lup.orchestration.actors.mailbox import (
+from lup.coordination.cohort import ActorCohort
+from lup.coordination.mail import EVERYONE
+from lup.coordination.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
@@ -68,7 +67,6 @@ def open_cohort(run_id: str) -> ActorCohort:
         journal=Journal(mailbox.root),
         mail=mailbox.mail,
         run_id=run_id,
-        spawner=ActorRef(kind="run", id=run_id),
     )
 
 
@@ -191,7 +189,7 @@ def answer_questions(
         if identifier not in known:
             raise typer.BadParameter(
                 f"{identifier!r} names no question this run asked; "
-                f"run `harness resolve questions --run-id {run_id}`"
+                f"run `resolve questions --run-id {run_id}`"
             )
         question = known[identifier].question
         if question.closed_choices and value not in question.choices:
@@ -234,13 +232,13 @@ def list_actors(
     if not members:
         typer.echo("No actor has recorded anything yet.")
         return
-    # What the run itself has been told, first, because it is addressed to
-    # whoever is reading this. A worker's report used to go out unaddressed,
-    # which every actor matched and consumed, so the one message meant for a
-    # person was the one no surface showed.
+    # What the person has been told, first, because it is addressed to whoever
+    # is reading this. A worker's report used to go out unaddressed, which
+    # every actor matched and consumed, so the one message meant for a person
+    # was the one no surface showed.
     told = cohort.heard().messages
     if told:
-        typer.echo(f"{cohort.spawner.label()} — said to you by this run's actors:")
+        typer.echo(f"{cohort.user.label()} — said to you by this run's actors:")
         for message in told:
             typer.echo(f"  {message.text}")
     for member in members:

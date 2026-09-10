@@ -14,7 +14,7 @@ phantom packages into the layout diagram.
 
 from pathlib import Path
 
-from lup.devtools.harness.content.tree import annotated_tree, top_level_entries
+from lup.harness.content.tree import annotated_tree, top_level_entries
 
 
 def package_at(root: Path, name: str) -> Path:

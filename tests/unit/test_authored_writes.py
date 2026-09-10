@@ -178,3 +178,28 @@ def test_a_stream_sink_beside_the_write_does_not_hide_it() -> None:
     assert authored_writes("cat > f.py <<'EOF' 2>/dev/null\nx = 1\nEOF") == [
         {"path": "f.py", "content": "x = 1\n", "append": False}
     ]
+
+
+def test_a_comment_reading_like_an_annotation_is_not_refused(tmp_path: Path) -> None:
+    """Issue #458, as it was written: a JSDoc line whose prose reads `: any of`.
+
+    The bytes reach the anti-pattern gate as an `Edit` would, and the gate
+    reads them as TypeScript — a comment is not a type position, while the
+    line that is one is still refused.
+    """
+    target = "packages/lup/web/src/explorer/narrow.ts"
+    prose = (
+        f"cat > {target} <<'EOF'\n"
+        "/** Whether a node answers a search: any of its readable fields carries the words. */\n"
+        "export function narrow(): void {}\n"
+        "EOF"
+    )
+    annotated = f"cat > {target} <<'EOF'\nexport const found: any = 1;\nEOF"
+
+    accepted = judged(prose, tmp_path)
+    refused = judged(annotated, tmp_path)
+
+    assert accepted.effect != "deny", accepted.reason
+    assert "any-annotation" not in accepted.reason
+    assert refused.effect == "deny"
+    assert "any-annotation" in refused.reason

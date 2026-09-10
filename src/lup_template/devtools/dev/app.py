@@ -18,17 +18,19 @@ import typer
 import lup.devtools.dev.check as check
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.library as library
-import lup_template.devtools.harness.catalog as catalog
-from lup.devtools.dev.app import DevDeclarations
-from lup.workspace.paths import find_project_root
+import lup_template.harness.catalog as catalog
+from lup.devtools.dev.declarations import DevDeclarations
+from lup.workspace.paths import project_root
 
 
 def declared() -> DevDeclarations:
     """What this repository tells the dev tree, read where a command runs.
 
-    Both test suites are installed separately — the workspace root and the
+    Both pytest suites are installed separately — the workspace root and the
     vendored library — so the gate runs pytest once per root rather than
-    reporting a green tree that never exercised half of it.
+    reporting a green tree that never exercised half of it. The frontend's
+    own tests are a third suite, run by bun from the workspace that holds
+    them.
     """
     return DevDeclarations(
         project=catalog.dev_project(),
@@ -37,6 +39,7 @@ def declared() -> DevDeclarations:
         test_roots=[
             check.TestRoot(name="pytest", directory=Path.cwd()),
             check.TestRoot(name="pytest (lup)", directory=Path("packages/lup")),
+            check.BunTestRoot(name="bun test", directory=Path("packages/lup/web")),
         ],
     )
 
@@ -84,15 +87,15 @@ def init_drop_examples_cmd(
 ) -> None:
     """Remove the scaffold's demonstrations of itself, which no adopter wants.
 
-    `examples/` composes lup's own runtime against lup's own README, and two
-    test modules drive it. A domain that adopted the template is a consumer of
+    `examples/` composes lup's own runtime against lup's own README, and the
+    test modules beside it drive it. A domain that adopted the template is a consumer of
     that library rather than a demonstrator of it, so what it inherits here is
     a directory it will never run and a suite it has to keep green.
 
     Lines still naming what went are reported rather than rewritten: a link in
     a README its human owner is already rewriting is theirs to remove.
     """
-    root = find_project_root()
+    root = project_root()
     removed = init.drop_scaffold_demonstrations(root, dry_run)
     if not removed:
         typer.echo("no scaffold demonstrations left to remove")

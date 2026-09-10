@@ -28,6 +28,7 @@ approval requests are not alike:
     capability into a silent grant.
 """
 
+import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -43,6 +44,8 @@ from lup.policy.hooks import LupHookInput, LupHooksConfig
 from lup.policy.enforcement import NativeSemantics
 from lup.policy.models import SemanticTool
 from lup.types import JsonObject
+
+logger = logging.getLogger(__name__)
 
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 """The app-server request carrying a command about to run."""
@@ -157,9 +160,15 @@ class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=Tru
 
         An ``ask`` reaching here has nobody to ask: the app-server is a
         program and this session was opened without a human attached, so it
-        declines carrying the reason rather than approving something whose
-        approval was never given. That is the same fail-closed reading the
-        generated Codex dispatcher takes, reached the same way.
+        declines rather than approving something whose approval was never
+        given. That is the same fail-closed reading the generated Codex
+        dispatcher takes, reached the same way.
+
+        The approval reply schema is a bare decision, so the reasons cannot
+        ride it; they are logged instead, which is the one channel this path
+        has to whoever reads the session afterwards. Every refusing reason is
+        logged rather than the first, since each names the specific thing
+        that tripped it.
         """
         outputs = [
             await matcher.hook(self.hook_input(method, params))
@@ -168,6 +177,8 @@ class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=Tru
         refused = [
             item for item in outputs if item.decision in ("deny", "block", "ask")
         ]
+        for item in refused:
+            logger.info("declining %s: %s", method, item.reason)
         return DECLINE if refused else ACCEPT
 
 

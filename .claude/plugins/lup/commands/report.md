@@ -32,7 +32,7 @@ because it is the one somebody is already reading.
 ## 2. Ask the surfaces
 
 ```bash
-uv run lup-devtools report --write tmp/<name>.md --force
+uv run lup-devtools dev report --write tmp/<name>.md --force
 ```
 
 `--force` because a report already standing at that name carries the *last*
