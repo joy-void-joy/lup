@@ -165,6 +165,14 @@ class Listing(WriteupPart, frozen=True):
     standing: str = ""
     """Only nodes whose standing has this label right now."""
 
+    excluding: str = ""
+    """Only nodes whose standing is not this label right now.
+
+    The other half of `standing`: what is still to do is every task but the
+    finished ones, which no one label names — open, held, blocked and waiting
+    are all of them.
+    """
+
     since: datetime | None = None
     """Only nodes with a record newer than this moment."""
 
@@ -180,6 +188,11 @@ class Listing(WriteupPart, frozen=True):
     min_priority: int = 0
     numbered: bool = False
     empty: str = "Nothing recorded."
+
+    def admits(self, label: str) -> bool:
+        """Whether a node standing under *label* is a row: the one asked for, not the one excluded."""
+        asked = not self.standing or label == self.standing
+        return asked and (not self.excluding or label != self.excluding)
 
     def chosen(
         self, store: LedgerStore, classes: list[type[LedgerNode]]
@@ -214,8 +227,8 @@ class Listing(WriteupPart, frozen=True):
             if node.priority >= self.min_priority
             and (moved is None or node.id in moved)
             and (
-                not self.standing
-                or store.standing(node, classes).label == self.standing
+                not (self.standing or self.excluding)
+                or self.admits(store.standing(node, classes).label)
             )
         ]
         return sorted(kept, key=lambda node: (-node.priority, node.at))
