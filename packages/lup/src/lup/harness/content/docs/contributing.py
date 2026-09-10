@@ -297,6 +297,13 @@ uv run lup-devtools harness check all      # generated-tree drift
 uv run lup-devtools dev rules --check      # the generated rule reference
 ```
 
+The gate type-checks against the environment `uv` runs it in: the
+configuration it hands Pyright names the environment `UV_PROJECT_ENVIRONMENT`
+redirects to, resolved against the project the way `uv` resolves it, so a
+session keeping its environment elsewhere is not checked against a stale
+`.venv` beside it; with the variable unset, the root configuration's `.venv`
+stands.
+
 The generated trees include the frontend bundles under `lup.web`'s package
 data, built from `packages/lup/web/` by Vite, so the gate needs `bun`. The
 workspace's dependencies it restores itself, the way `uv run` syncs the
