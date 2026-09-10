@@ -272,6 +272,14 @@ merge reconciles and the listing still shows. Each session's last look is kept
 beside its delivery position under the coordination directory, so two sessions
 in one checkout are each told what changed since *their* prompt.
 
+What is measured differs by runtime, and
+[platform-differentiation.md](platform-differentiation.md) carries the row:
+on Claude Code the rendered hook's stdout is measured by a test that runs it
+over a store the typed writers produced, and its arrival in a live session is
+not yet; on Codex the event and its context channel rest on the vendor's
+documentation at https://learn.chatgpt.com/docs/hooks alone, no Codex session
+being signed in on the machine this was written on.
+
 ## The other address book
 
 A runtime that can already address another session offers a second way to

@@ -138,9 +138,9 @@ property of the relation rather than of any project's epistemics.
 
 `lup.ledger` declares no grade, no edge type, and one node type. What counts
 as verified, what grades exist, and what a claim owes are a project's
-questions — the scaffold's corpus (`docs/corpus.md`) is one project's answer,
-declared in its `node_classes` beside its tasks, and a project that wants its
-own declares its own types the same way.
+questions — the scaffold's corpus (`docs/corpus.md`) is one answer, a set of
+types an adopter declares in its `node_classes` beside its tasks, and a
+project that wants its own declares its own types the same way.
 
 The one kind is `File`: a path pinned to the digest of its content as it was
 recorded, standing `fresh` while the tree still holds those bytes, `stale`
@@ -158,11 +158,14 @@ Two more kinds point the same way, declared by the package whose subject a
 run is: `lup.observability.sessions` declares `Session` and `Output`, a
 session's directory and trace journal under `notes/` and the result document
 a run wrote there, each a path, a digest and the checkout it was recorded in —
-never the bytes. Both refuse an attachment, in words saying pointers only,
+never the bytes — and `OutputOf`, the edge from a result to the session that
+wrote it. Both kinds refuse an attachment, in words saying pointers only,
 before anything reaches the blob store: a trace runs to hundreds of megabytes
-per checkout and the ledger is a log of records. A project lists them beside
-`File` and the writers record as sessions open and close; `docs/corpus.md`
-says what this repository does with them.
+per checkout and the ledger is a log of records. A project lists them the way
+it lists `Task` and the writers record as sessions open and close. This
+repository declares exactly its tasks and handoffs, committed, and its
+sessions and outputs, local; `docs/corpus.md` says where, what it does with
+the latter two, and what an adopter wanting a corpus declares beside them.
 
 ## The local half is untracked
 

@@ -521,7 +521,6 @@ def build_session_factory(
     from lup_template.agent.subagents import get_subagent_specs
     from lup_template.agent.toolsets import EXAMPLE_GROUP, build_session_toolset
     from lup.coordination.identity import member_ref, session_member_id
-    from lup_template.corpus import About
     from lup_template.kinds import NODE_KINDS, LAYOUT
 
     engine = engine_for_settings(model)
@@ -533,7 +532,6 @@ def build_session_factory(
         member_ref(session_member_id(session_id)),
         NODE_KINDS,
         LAYOUT,
-        about=About,
     )
     notes = setup_notes(session_id, task_id or "0", recorder=recorder, runtime=engine)
     no_subagents: list[SubagentSpec] = []
