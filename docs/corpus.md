@@ -128,7 +128,10 @@ optionally where the mistake was noticed. What *survives* and what *changes*
 live on the `supersedes` edge, because they are facts about the pair — and what
 changes may not be empty, since a correction that changes nothing is a note.
 The superseded node stays in the log, readable, with the correction pointing
-at it.
+at it. Evidence and sources are retired the same way: an artifact, a
+certificate or a source a correction points at reads `superseded` before its
+digests get a word, is not sound, and stops counting as support for the
+claims it backed.
 
 Nothing broadcasts. The one message a correction sends is to the author of
 what it corrects, and only while that author is on the roster. Everyone else

@@ -94,6 +94,27 @@ class Validation(BaseModel, frozen=True):
         ]
 
 
+def superseded_by(around: Surroundings) -> Standing | None:
+    """The reading a correction imposes on this node, or nothing where none points here.
+
+    One reading for every kind a correction can retire — a claim, a piece of
+    evidence, a source — so the corpus reads ``superseded`` the same way
+    wherever a ``supersedes`` edge lands, and a retired node is unsound
+    whatever else it could have said about itself: evidence a correction
+    retired must not go on counting as support.
+    """
+    superseding = [
+        edge.source for edge in around.incoming if edge.kind == "corpus:supersedes"
+    ]
+    if not superseding:
+        return None
+    return Standing(
+        label="superseded",
+        reason=f"corrected by {', '.join(superseding)}",
+        sound=False,
+    )
+
+
 class Evidence(LedgerNode, frozen=True):
     """Bytes that bear on a claim, with the validation that says what they are.
 
@@ -124,12 +145,16 @@ class Evidence(LedgerNode, frozen=True):
         )
 
     def standing(self, around: Surroundings) -> Standing:
-        """Fresh while every scoped file is as it was; stale the moment one is not.
+        """Superseded, then fresh while every scoped file is as it was, stale the moment one is not.
 
-        Unchecked where there is no tree to read, which is true on a snapshot
-        read elsewhere, and is reported as sound: a reader that cannot check
-        has no grounds to say the evidence went away.
+        Superseded first, in the order a claim reads, because a correction
+        outranks whatever the digests say. Unchecked where there is no tree to
+        read, which is true on a snapshot read elsewhere, and is reported as
+        sound: a reader that cannot check has no grounds to say the evidence
+        went away.
         """
+        if (retired := superseded_by(around)) is not None:
+            return retired
         if around.root is None:
             return Standing(label="unchecked", reason="no working tree to read")
         gone = self.validation.drifted(around.root)
@@ -164,6 +189,17 @@ class Source(LedgerNode, frozen=True):
 
     kind: Literal["corpus:source"] = "corpus:source"
     origin: str = Field(min_length=1)
+
+    def standing(self, around: Surroundings) -> Standing:
+        """Superseded where a correction points here; recorded otherwise.
+
+        A source is its own bytes under their digest and rots against
+        nothing, so the one thing that retires it is somebody saying it was
+        the wrong thing to have read from — read in the order a claim reads,
+        so a claim it supported stops counting it.
+        """
+        retired = superseded_by(around)
+        return retired if retired is not None else Standing(label="recorded")
 
 
 class Correction(LedgerNode, frozen=True):
@@ -263,18 +299,12 @@ class Claim(LedgerNode, frozen=True):
         evidence. Then a premise that fell, as deep as the reader can see —
         which is how one refutation reaches every claim built on it without
         anybody amending any of them. Then the evidence, each piece asked
-        whether it itself still stands, and the answer refuses to hide a
-        contradiction.
+        whether it itself still stands — so only evidence that is sound is
+        counted, and a piece a correction retired or a file change withered
+        is not — and the answer refuses to hide a contradiction.
         """
-        superseding = [
-            edge.source for edge in around.incoming if edge.kind == "corpus:supersedes"
-        ]
-        if superseding:
-            return Standing(
-                label="superseded",
-                reason=f"corrected by {', '.join(superseding)}",
-                sound=False,
-            )
+        if (retired := superseded_by(around)) is not None:
+            return retired
 
         premises = [
             edge.target for edge in around.outgoing if edge.kind == "corpus:rests_on"
