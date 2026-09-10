@@ -10,19 +10,19 @@ models the tool group returns, served here as JSON routes or embedded whole
 for an export.
 
 **Two ways to open it, one page.** `serve` answers the routes on the loopback
-and the page fetches them; `export` writes one self-contained file. The data
-rides in an attribute of the mount point, escaped by the standard library, so
-a node whose text happens to contain a closing tag cannot break the page it is
-shown on; the script and the stylesheet ride as ``data:`` URLs, base64 so
-nothing in a minified bundle needs escaping either.
+and the page fetches them; `export` renders the template the build emitted
+beside the page — the page itself, its script and stylesheet inline and made
+safe to inline when they were built — over the log, which rides in an
+attribute of the mount point, entity-escaped by the template engine, so a
+node whose text happens to contain a closing tag cannot break the page it is
+shown on.
 """
 
-import base64
 from datetime import datetime
-from html import escape
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from jinja2 import Template
 
 from lup.channels.models import utc_now
 from lup.coordination.identity import mint_member_id
@@ -39,7 +39,7 @@ from lup.ledger.views import (
     kinds_view,
     node_detail,
 )
-from lup.web.serve import BundleAssets, bundle_app, bundle_assets, serve_local_page
+from lup.web.serve import bundle_app, bundle_template, serve_local_page
 
 # lup: ignore[constant-declaration] — an identity this repository defines: the
 # bun workspace entry and the bundle it builds to are both named by this word
@@ -129,43 +129,16 @@ def export_view(
     )
 
 
-def data_url(media_type: str, text: str) -> str:
-    """One asset as a URL carrying its own bytes, base64 so none of them needs escaping."""
-    encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
-    return f"data:{media_type};base64,{encoded}"
+def export_page(view: ExportView, template: Template) -> str:
+    """One self-contained page: the surface's export template rendered over the log.
 
-
-def export_page(view: ExportView, assets: BundleAssets) -> str:
-    """One self-contained page: the bundle carried as data URLs, the log as an attribute.
-
-    Assembled from the bundle's pieces rather than by editing its own
-    `index.html`, whose asset paths only a server answers. The app reads the
-    attribute before it would fetch, so the same bundle serves both ways.
+    The template is the built `index.html` with the bundle inline, emitted by
+    the build beside it, so no markup is authored here; the one value handed
+    to it is the log as JSON, which autoescape entity-escapes into the mount
+    element's `data-lup-export` attribute. The app reads that attribute
+    before it would fetch, so the same bundle serves both ways.
     """
-    styles = "".join(
-        f'<link rel="stylesheet" href="{data_url("text/css", style)}" />\n'
-        for style in assets.styles
-    )
-    scripts = "".join(
-        f'<script type="module" src="{data_url("text/javascript", script)}"></script>\n'
-        for script in assets.scripts
-    )
-    data = escape(view.model_dump_json(), quote=True)
-    return (
-        "<!doctype html>\n"
-        '<html lang="en">\n'
-        "<head>\n"
-        '<meta charset="utf-8" />\n'
-        '<meta name="viewport" content="width=device-width, initial-scale=1" />\n'
-        "<title>Ledger explorer</title>\n"
-        f"{styles}"
-        "</head>\n"
-        "<body>\n"
-        f'<div id="root" data-lup-export="{data}"></div>\n'
-        f"{scripts}"
-        "</body>\n"
-        "</html>\n"
-    )
+    return template.render(log=view.model_dump_json())
 
 
 def export_explorer(
@@ -182,7 +155,7 @@ def export_explorer(
     what the log held when it was written — the page says when.
     """
     page = export_page(
-        export_view(root, classes, edges, layout), bundle_assets(SURFACE, bundles)
+        export_view(root, classes, edges, layout), bundle_template(SURFACE, bundles)
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(page, encoding="utf-8")
