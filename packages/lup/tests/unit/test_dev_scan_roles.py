@@ -71,6 +71,9 @@ def test_every_external_check_skips_data_and_scratch(
     monkeypatch.setattr(check, "project_root", lambda: tmp_path)
     excluded = check.non_code_roots(data_project)
 
+    # About data roots, not the environment: the whole configuration is
+    # asserted, so the session's own redirect is held out of it.
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
     check.ruff_format_check(False, excluded)
     check.ruff_lint_check(False, excluded)
     check.pyright_check(excluded)
