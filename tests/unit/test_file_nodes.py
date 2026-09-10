@@ -1,4 +1,9 @@
-"""A claim about a file: the edge is ordinary, and the file rots on its own."""
+"""A claim about a file: the edge is ordinary, and the file rots on its own.
+
+Declared here the way an adopter turning the corpus on would declare it —
+the library's `File` beside the scaffold's `Claim`, joined by `About` — since
+this repository's own declaration carries neither.
+"""
 
 from pathlib import Path
 
@@ -9,9 +14,12 @@ import lup.devtools.ledger.app as ledger_app
 from lup.coordination.refs import ActorRef
 from lup.ledger.files import File
 from lup.ledger.journal import LedgerStore
+from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.views import graph_view
-from lup_template.corpus import Claim
-from lup_template.kinds import EDGE_KINDS, NODE_KINDS
+from lup_template.corpus import About, Claim
+
+NODE_KINDS: list[type[LedgerNode]] = [File, Claim]
+EDGE_KINDS: list[type[LedgerEdge]] = [About]
 
 
 def test_a_claim_about_a_file_is_drawn_and_the_file_goes_stale_alone(
