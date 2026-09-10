@@ -21,13 +21,14 @@ from lup_template.corpus import (
     Correction,
     Refutes,
     Scoped,
+    Source,
     Supersedes,
     Supports,
     Validation,
     Verifies,
 )
 
-CLASSES: list[type[LedgerNode]] = [Claim, Correction, Artifact]
+CLASSES: list[type[LedgerNode]] = [Claim, Correction, Artifact, Source]
 
 
 def opened(root: Path, who: str = "alice") -> LedgerStore:
@@ -114,6 +115,53 @@ def test_a_correction_supersedes_and_outranks_every_piece_of_evidence(
     )
 
     reading = store.standing(claim, CLASSES)
+
+    assert reading.label == "superseded" and not reading.sound
+    assert correction.id in reading.reason
+
+
+def test_evidence_a_correction_retired_reads_superseded_and_stops_counting(
+    tmp_path: Path,
+) -> None:
+    """An artifact whose log recorded the wrong thing is retired the way a
+    claim is, before its digests get a word, and the claim it backed no
+    longer counts it: only what stands supports.
+    """
+    scope = tmp_path / "parser.py"
+    scope.write_text("v1", encoding="utf-8")
+    store = opened(tmp_path)
+    claim, artifact = backed(tmp_path, store, scope)
+    correction = store.record(
+        Correction, "the log was a collection error", where="run.log", wrong="no run"
+    )
+    store.relate(
+        Supersedes, correction, artifact, changes=["the attached log and its digest"]
+    )
+
+    retired = store.standing(artifact, CLASSES)
+    assert retired.label == "superseded" and not retired.sound
+    assert correction.id in retired.reason
+
+    withered = store.standing(claim, CLASSES)
+    assert withered.label == "stale" and not withered.sound
+    assert correction.id in withered.reason
+
+    _claim, second = backed(tmp_path, store, scope)
+    store.relate(Supports, second, claim)
+    reading = store.standing(claim, CLASSES)
+
+    assert reading.label == "supported" and reading.reason == "1 artifact(s) stand"
+
+
+def test_a_source_a_correction_retired_reads_superseded(tmp_path: Path) -> None:
+    store = opened(tmp_path)
+    source = store.record(Source, "the paper", origin="https://example.org/p")
+
+    assert store.standing(source, CLASSES).label == "recorded"
+
+    correction = store.record(Correction, "wrong paper", where="refs", wrong="p")
+    store.relate(Supersedes, correction, source, changes=["the origin"])
+    reading = store.standing(source, CLASSES)
 
     assert reading.label == "superseded" and not reading.sound
     assert correction.id in reading.reason
