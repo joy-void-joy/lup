@@ -13,11 +13,11 @@ for an export.
 and the page fetches them; `export` writes one self-contained file. The data
 rides in an attribute of the mount point, escaped by the standard library, so
 a node whose text happens to contain a closing tag cannot break the page it is
-shown on; the script and the stylesheet ride as ``data:`` URLs, base64 so
-nothing in a minified bundle needs escaping either.
+shown on; the script and the stylesheet ride inline, a ``<script>`` and a
+``<style>`` element holding the served bundle's own bytes, which the build
+made safe to inline when it built them.
 """
 
-import base64
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -129,26 +129,21 @@ def export_view(
     )
 
 
-def data_url(media_type: str, text: str) -> str:
-    """One asset as a URL carrying its own bytes, base64 so none of them needs escaping."""
-    encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
-    return f"data:{media_type};base64,{encoded}"
-
-
 def export_page(view: ExportView, assets: BundleAssets) -> str:
-    """One self-contained page: the bundle carried as data URLs, the log as an attribute.
+    """One self-contained page: the bundle inline, the log as an attribute.
 
     Assembled from the bundle's pieces rather than by editing its own
-    `index.html`, whose asset paths only a server answers. The app reads the
-    attribute before it would fetch, so the same bundle serves both ways.
+    `index.html`, whose asset paths only a server answers. The script and
+    the stylesheet are the served bundle's bytes verbatim, inside a
+    `<script type="module">` and a `<style>` element: the build escaped
+    every `</script`, `<!--` and `</style` when it built them and proved the
+    script still parses (`lup.web.build.escape_for_inlining`), so nothing
+    here has to. The app reads the attribute before it would fetch, so the
+    same bundle serves both ways.
     """
-    styles = "".join(
-        f'<link rel="stylesheet" href="{data_url("text/css", style)}" />\n'
-        for style in assets.styles
-    )
+    styles = "".join(f"<style>{style}</style>\n" for style in assets.styles)
     scripts = "".join(
-        f'<script type="module" src="{data_url("text/javascript", script)}"></script>\n'
-        for script in assets.scripts
+        f'<script type="module">{script}</script>\n' for script in assets.scripts
     )
     data = escape(view.model_dump_json(), quote=True)
     return (
