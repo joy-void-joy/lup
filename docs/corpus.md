@@ -54,6 +54,26 @@ what a claim is about is visible and rots on its own. The edge is
 descriptive: a claim that must fall with a file rests on evidence scoped to
 it instead.
 
+## Sessions and outputs are indexed as pointers
+
+`notes/` holds this repository's session data — per agent version, a
+directory per session, its trace journal, the result documents it wrote, and
+one `observable.jsonl` per `lup-devtools harness` launch — gitignored, per
+checkout, hundreds of megabytes. The ledger indexes it without holding any of
+it: `Session` and `Output`, from `lup.observability.sessions`, are among this
+repository's kinds. A session is recorded when its directory opens, whether
+`build_session_factory` opened it for the SDK or a harness launch opened its
+transcript, and amended when it closes with how it ended and the journal's
+digest pinned at that moment; each result document `save_session` writes is
+recorded as an output `about` its session. A record carries the checkout it
+was made in, because `notes/` is per worktree while the log is per clone, so
+it reads `open`, then `fresh`, `stale` or `missing` from any worktree against
+the tree that wrote it.
+
+No trace, output or log byte enters the ledger or its blob store: both kinds
+refuse an attachment, and a record is a path, a digest and metadata. What was
+under `notes/` before recording started is not swept in.
+
 ## A claim refuses to hide contradiction
 
 `Claim.standing()` reads, in order: `superseded` by a correction; `premise

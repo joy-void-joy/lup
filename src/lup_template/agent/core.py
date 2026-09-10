@@ -62,6 +62,11 @@ from lup.observability.metrics import (
     log_metrics_summary,
     reset_metrics,
 )
+from lup.observability.sessions import (
+    SessionRecorder,
+    recorded_session_factory,
+    session_recorder,
+)
 from lup.observability.trace import TraceLogger
 from lup.types import (
     PayloadText,
@@ -73,7 +78,7 @@ from lup.types import (
 )
 from lup.workspace.history import save_session
 from lup.workspace.notes import NotesConfig, session_gate_flag, setup_notes
-from lup.workspace.paths import agent_version
+from lup.workspace.paths import agent_version, project_root
 from lup_template.agent.config import (
     compat_api_key,
     compat_base_url,
@@ -102,6 +107,8 @@ class SessionBuild(BaseModel, frozen=True, arbitrary_types_allowed=True):
     factory: Client
     notes: NotesConfig
     trace_logger: TraceLogger
+    recorder: SessionRecorder | None = None
+    """Where this session's record and its outputs are indexed, or nothing."""
 
 
 def cleaning_session_factory(inner: Client, cleanup: Callable[[], None]) -> Client:
@@ -513,8 +520,22 @@ def build_session_factory(
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.subagents import get_subagent_specs
     from lup_template.agent.toolsets import EXAMPLE_GROUP, build_session_toolset
+    from lup.coordination.identity import member_ref, session_member_id
+    from lup_template.corpus import About
+    from lup_template.kinds import NODE_KINDS, PLACEMENT
 
-    notes = setup_notes(session_id, task_id or "0")
+    engine = engine_for_settings(model)
+    # Sessions and their results are indexed in the ledger as pointers,
+    # under the identity the session's own tool group records with, so the
+    # opening and what the session later claims share one author.
+    recorder = session_recorder(
+        project_root(),
+        member_ref(session_member_id(session_id)),
+        NODE_KINDS,
+        PLACEMENT,
+        about=About,
+    )
+    notes = setup_notes(session_id, task_id or "0", recorder=recorder, runtime=engine)
     no_subagents: list[SubagentSpec] = []
     subagents = no_subagents if toolless else get_subagent_specs()
     system_prompt = "" if bare_prompt else get_system_prompt()
@@ -526,7 +547,6 @@ def build_session_factory(
     hooks = create_permission_hooks(notes.rw, notes.ro)
     tools: list[str] | None = [] if toolless else None
     sandbox: Sandbox | None = None
-    engine = engine_for_settings(model)
     if not toolless and engine in ("claude", "claude-compat"):
         policy = ToolPolicy(settings)
         realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
@@ -643,15 +663,21 @@ def build_session_factory(
         trace_path=notes.trace_log,
         title=f"Session {session_id}",
     )
-    return SessionBuild(
-        factory=decorate_factory(
-            factory,
-            notes=notes,
-            trace_logger=trace_logger,
-            model=model,
-        ),
+    decorated = decorate_factory(
+        factory,
         notes=notes,
         trace_logger=trace_logger,
+        model=model,
+    )
+    # Outermost, so the session's record closes after every other wrapper has
+    # run and the trace it pins is the one the tracing sink finished writing.
+    if recorder is not None and notes.record is not None:
+        decorated = recorded_session_factory(decorated, recorder, notes.record)
+    return SessionBuild(
+        factory=decorated,
+        notes=notes,
+        trace_logger=trace_logger,
+        recorder=recorder,
     )
 
 
@@ -806,7 +832,12 @@ async def run_agent(
         session_id=identifier,
         task_id=task_id,
     )
-    save_session(projected, session_id=identifier)
+    save_session(
+        projected,
+        session_id=identifier,
+        recorder=build.recorder,
+        session=build.notes.record,
+    )
     return projected
 
 

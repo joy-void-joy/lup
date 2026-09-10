@@ -548,7 +548,7 @@
     {
       "path": "docs/corpus.md",
       "category": "generated",
-      "sha256": "e69585d579ac73b89611202c7532453568b897e52e6503f09ec0ca23cde71628",
+      "sha256": "bd38f54d55d2d22fab38548809e8b1373cc776f89d950c652d033d70192aa049",
       "semantic_id": "docs.corpus",
       "executable": false
     },
@@ -569,7 +569,7 @@
     {
       "path": "docs/ledger.md",
       "category": "generated",
-      "sha256": "fd5c26e930c7e4eb056d039cb31940e23354537f9bbd69acf436487566004d2b",
+      "sha256": "d35532ab154a9a60a21f8368ee5f89c75fb4dbf5e8662bf400f3fed3c6e4d967",
       "semantic_id": "docs.ledger",
       "executable": false
     },

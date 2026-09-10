@@ -14,6 +14,7 @@ from lup.coordination.tasks import Blocks, Task
 from lup.ledger.files import File
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.observability.sessions import Output, Session
 from lup_template.corpus import (
     About,
     Answers,
@@ -48,6 +49,8 @@ NODE_KINDS: list[type[LedgerNode]] = [
     Artifact,
     Certificate,
     Source,
+    Session,
+    Output,
 ]
 
 # lup: ignore[constant-declaration] — the relations this repository draws,
