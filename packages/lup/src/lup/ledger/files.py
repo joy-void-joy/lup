@@ -33,6 +33,28 @@ def digest_of(path: Path) -> str:
         return ""
 
 
+def pinned(held_at: Path, spelled: str, digest: str) -> Standing:
+    """Where a path pinned to a digest stands now: fresh, stale, or missing.
+
+    The one reading every pinned kind shares — a file, a session's journal,
+    an output — over the path the kind resolved and the spelling it shows a
+    reader, so the words for stale and missing are the same wherever a
+    digest rots.
+    """
+    held = digest_of(held_at)
+    if not held:
+        return Standing(
+            label="missing", reason=f"{spelled} is not in the tree", sound=False
+        )
+    if held != digest:
+        return Standing(
+            label="stale",
+            reason=f"{spelled} changed since it was recorded",
+            sound=False,
+        )
+    return Standing(label="fresh")
+
+
 class File(LedgerNode, frozen=True):
     """One file in the working tree, pinned to the bytes it held when recorded."""
 
@@ -70,15 +92,4 @@ class File(LedgerNode, frozen=True):
         """
         if around.root is None:
             return Standing(label="unchecked", reason="no working tree to read")
-        held = digest_of(around.root / self.path)
-        if not held:
-            return Standing(
-                label="missing", reason=f"{self.path} is not in the tree", sound=False
-            )
-        if held != self.digest:
-            return Standing(
-                label="stale",
-                reason=f"{self.path} changed since it was recorded",
-                sound=False,
-            )
-        return Standing(label="fresh")
+        return pinned(around.root / self.path, self.path, self.digest)

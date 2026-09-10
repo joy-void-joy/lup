@@ -15,7 +15,6 @@ from typing import Annotated
 
 import typer
 
-import lup.devtools.dev.check as check
 import lup_template.devtools.dev.init as init
 import lup_template.devtools.dev.library as library
 import lup_template.harness.catalog as catalog
@@ -26,21 +25,15 @@ from lup.workspace.paths import project_root
 def declared() -> DevDeclarations:
     """What this repository tells the dev tree, read where a command runs.
 
-    Both pytest suites are installed separately — the workspace root and the
-    vendored library — so the gate runs pytest once per root rather than
-    reporting a green tree that never exercised half of it. The frontend's
-    own tests are a third suite, run by bun from the workspace that holds
-    them.
+    Every declaration is the catalog's, the test roots included: the policy
+    derives the test role from the same list, so the suites the gate runs and
+    the files the policy judges as tests are one declaration read twice.
     """
     return DevDeclarations(
         project=catalog.dev_project(),
         hooks=catalog.declared_hook_set(),
         plugin=catalog.declared_plugin(),
-        test_roots=[
-            check.TestRoot(name="pytest", directory=Path.cwd()),
-            check.TestRoot(name="pytest (lup)", directory=Path("packages/lup")),
-            check.BunTestRoot(name="bun test", directory=Path("packages/lup/web")),
-        ],
+        test_roots=catalog.declared_test_roots(),
     )
 
 

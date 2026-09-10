@@ -10,6 +10,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import perf_counter
+from typing import Literal
 
 import sh
 import typer
@@ -23,6 +24,7 @@ from lup.harness.models import (
     GUIDANCE_BUDGET,
     GuidanceBudget,
     GuidanceSection,
+    HookPathRole,
     HookSet,
     document_byte_size,
 )
@@ -46,7 +48,7 @@ from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.dev.commands import CommandSurface
 from lup.devtools.dev.documented import unresolved
 from lup.ledger.models import LedgerNode
-from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.store import LedgerLayout
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
 from lup.devtools.dev.records import branches_awaiting_adoption, record_location
@@ -257,6 +259,38 @@ def pyright_base_configuration(root: Path) -> Path | None:
             return None
 
 
+def pyright_environment(root: Path) -> dict[Literal["venvPath", "venv"], str]:
+    """The environment keys the gate's configuration overrides the base with.
+
+    The base names ``.venv`` beside the manifest, which is where `uv` keeps
+    an environment until ``UV_PROJECT_ENVIRONMENT`` says otherwise. The gate
+    is `uv run`, so the packages it installs land wherever that variable
+    points — and Pyright, reading the base alone, checks against whatever
+    ``.venv`` was left beside it, missing every package the lockfile added
+    since, or falls back to the interpreter on ``PATH`` where none was. Asked
+    of the variable rather than of `uv`: no subcommand prints the environment
+    as data — `uv python find` answers the interpreter on ``PATH`` even with
+    the variable set, and `uv sync --dry-run` says it in prose on stderr, at
+    the cost of a resolve — while the variable is what `uv` itself reads. The
+    path comes from `project_environment`, the one reading of it, resolved
+    against the project the way `uv` resolves a relative value; its parent
+    and its name are what Pyright's two keys want, the parent spelled
+    absolute because Pyright resolves a relative one against the
+    configuration file rather than the project.
+
+    Nothing when the variable is unset, so the base's answer stands: a
+    project checking against no environment at all is not handed one that
+    is not there.
+    """
+    environ = os.environ  # lup: ignore[os-environ] — whether uv was told where
+    # its environment is decides whether the base's answer stands; the path
+    # itself is read once, in project_environment
+    if "UV_PROJECT_ENVIRONMENT" not in environ:
+        return {}
+    environment = project_environment(root)
+    return {"venvPath": str(environment.parent), "venv": environment.name}
+
+
 def pyright_check(
     excluded_roots: list[str], scope: list[str] | None = None
 ) -> CheckReport:
@@ -284,6 +318,7 @@ def pyright_check(
             {
                 **({"extends": str(base)} if base is not None else {"include": ["."]}),
                 "exclude": excluded_roots,
+                **pyright_environment(root),
             },
             stream,
         )
@@ -341,6 +376,17 @@ class TestRoot(BaseModel):
         builds. A pytest suite runs against that environment and restores
         nothing of its own, which is the answer for every suite but the
         bun workspace's.
+        """
+        return []
+
+    def collected(self) -> list[Path]:
+        """The files this suite collects as tests, as patterns from the repository top.
+
+        What the policy reads to give those files the test role, so the suite
+        the gate runs and the role table cannot name different files. A
+        pytest suite answers nothing here: it collects by the `testpaths` its
+        configuration declares, which a project spells as a role root
+        outright.
         """
         return []
 
@@ -412,6 +458,18 @@ class BunTestRoot(TestRoot):
     builds surfaces has the toolchain as a dependency of its gate.
     """
 
+    shapes: tuple[str, ...] = ("*.test", "*_test", "*.spec", "*_spec")
+    """The stems bun collects as tests, each over every one of `extensions`.
+
+    Bun's own vocabulary, read from the workspace down and skipping
+    `node_modules`; a workspace that collects otherwise says so here.
+    """
+    extensions: tuple[str, ...] = ("js", "jsx", "ts", "tsx")
+
+    def collected(self) -> list[Path]:
+        names = (f"{shape}.{ext}" for shape in self.shapes for ext in self.extensions)
+        return [self.directory / "**" / name for name in names]
+
     def restored_workspaces(self) -> list[Path]:
         return [self.directory]
 
@@ -427,6 +485,20 @@ class BunTestRoot(TestRoot):
         del workers, excluded_roots
         restore_dependencies(self.directory)
         BUN("test", *paths, _cwd=str(self.directory), _fg=foreground)
+
+
+def collected_test_roles(test_roots: list[TestRoot]) -> list[HookPathRole]:
+    """The test role, declared for every file the gate's suites collect.
+
+    Derived from the suites rather than spelled beside them: a test file the
+    gate runs is judged as a test by the policy — written whole without a
+    question, held still by an acceptance guard — because the one
+    declaration answers both. A second table naming the same files would
+    drift from the first, and a file the gate ran that the policy budgeted
+    as source is the disagreement this exists to rule out.
+    """
+    patterns = [pattern for root in test_roots for pattern in root.collected()]
+    return [HookPathRole(root=pattern, role="test") for pattern in patterns]
 
 
 class RootSelection(BaseModel):
@@ -800,7 +872,7 @@ def scan_reports(
     git_guards: list[GitGuard],
     hooks_declaration: HookSet,
     node_classes: list[type[LedgerNode]] | None = None,
-    ledger: LedgerPlacement = SharedStore(),
+    ledger: LedgerLayout = LedgerLayout(),
     command_surface: Callable[[], CommandSurface] | None = None,
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them."""
@@ -980,10 +1052,10 @@ def scan_reports(
             ],
         )
 
-        # The other declaration about a checkout only git can answer for: a
-        # log kept in the tree merges losslessly only where its journal is
-        # declared `merge=union`, an attribute of the checkout rather than of
-        # the code that reads it. The shared store has nothing to ask.
+        # The other declaration about a checkout only git can answer for: the
+        # committed half of the log merges losslessly only where its journal
+        # is declared `merge=union`, an attribute of the checkout rather than
+        # of the code that reads it. The local half has nothing to ask.
         troubles = ledger.problems(project_root())
         yield CheckReport(
             name="ledger placement",
@@ -1161,7 +1233,7 @@ def run_checks(
     scope: list[str] | None = None,
     test_workers: int = TEST_WORKERS,
     node_classes: list[type[LedgerNode]] | None = None,
-    ledger: LedgerPlacement = SharedStore(),
+    ledger: LedgerLayout = LedgerLayout(),
 ) -> None:
     """Run ruff format, ruff check, pyright, pytest, and this gate's own sweeps.
 

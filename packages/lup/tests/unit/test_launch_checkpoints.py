@@ -18,7 +18,8 @@ class Transcript:
         self.events = events
         self.journal = Mock()
 
-    def close(self, *, succeeded: bool) -> None:
+    def close(self, *, succeeded: bool, interrupted: bool = False) -> None:
+        del interrupted
         self.events.append(f"close:{succeeded}")
 
 

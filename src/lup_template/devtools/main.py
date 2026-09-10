@@ -45,7 +45,7 @@ from lup.devtools.dev.commands import CommandSurface, write_command_reference
 from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
 from lup.devtools.roster import DevtoolsDeclarations
-from lup_template.kinds import EDGE_KINDS, NODE_KINDS, PLACEMENT
+from lup_template.kinds import EDGE_KINDS, LAYOUT, NODE_KINDS
 from lup_template.writeups import WRITEUPS
 from lup.devtools.subapps import SubApp, compose
 from lup.workspace.paths import find_nearest_pyproject
@@ -128,7 +128,7 @@ DECLARATIONS = DevtoolsDeclarations(
     node_classes=NODE_KINDS,
     edge_classes=EDGE_KINDS,
     writeups=WRITEUPS,
-    ledger=PLACEMENT,
+    ledger=LAYOUT,
 )
 """What this repository tells the library's roster about itself.
 

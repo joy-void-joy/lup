@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "ef7ce6452e07d70099bdaf68b9efaee63ff1da58f511d017accd4cd827b75cbb",
+  "source_digest": "cee0aa60f0840591e9013d27dc08c27d452661c3b91e20b338886af1b59742b6",
   "target_requirements": [
     "bun"
   ],
   "files": [
     {
-      "path": "packages/lup/src/lup/web/bundles/explorer/assets/index-DoFFLCdP.js",
+      "path": "packages/lup/src/lup/web/bundles/explorer/assets/index-BZ8_wTH2.js",
       "category": "generated",
-      "sha256": "1610c4ab340605aeaa705d563661b0b5d98c16721e24f44bb6d75ec306fa4b3c",
-      "semantic_id": "web.explorer.assets/index-DoFFLCdP.js",
+      "sha256": "ba4a8e25b44e5382a179c0896a31d75f1687cc647046273eb75dfba9349a355b",
+      "semantic_id": "web.explorer.assets/index-BZ8_wTH2.js",
       "executable": false
     },
     {
@@ -21,9 +21,16 @@
       "executable": false
     },
     {
+      "path": "packages/lup/src/lup/web/bundles/explorer/export.html.j2",
+      "category": "generated",
+      "sha256": "6b9ee1043d40d6732a598122e2fd7bd62e61d798eddf83f29d35a04588a8fac1",
+      "semantic_id": "web.explorer.export.html.j2",
+      "executable": false
+    },
+    {
       "path": "packages/lup/src/lup/web/bundles/explorer/index.html",
       "category": "generated",
-      "sha256": "1879fca512fab752d595fca282721d7d3902519fd98b7c25dd8ae5dafbcc8e43",
+      "sha256": "5f22d9fe7c8c6fd6b4e207d0f5aabef953a0ac502caffc3b5b86e6545a3a4201",
       "semantic_id": "web.explorer.index.html",
       "executable": false
     },

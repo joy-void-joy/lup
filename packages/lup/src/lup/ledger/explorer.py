@@ -10,26 +10,26 @@ models the tool group returns, served here as JSON routes or embedded whole
 for an export.
 
 **Two ways to open it, one page.** `serve` answers the routes on the loopback
-and the page fetches them; `export` writes one self-contained file. The data
-rides in an attribute of the mount point, escaped by the standard library, so
-a node whose text happens to contain a closing tag cannot break the page it is
-shown on; the script and the stylesheet ride as ``data:`` URLs, base64 so
-nothing in a minified bundle needs escaping either.
+and the page fetches them; `export` renders the template the build emitted
+beside the page — the page itself, its script and stylesheet inline and made
+safe to inline when they were built — over the log, which rides in an
+attribute of the mount point, entity-escaped by the template engine, so a
+node whose text happens to contain a closing tag cannot break the page it is
+shown on.
 """
 
-import base64
 from datetime import datetime
-from html import escape
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from jinja2 import Template
 
 from lup.channels.models import utc_now
 from lup.coordination.identity import mint_member_id
 from lup.coordination.refs import ActorRef
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerEdge, LedgerNode
-from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.store import LedgerLayout
 from lup.ledger.views import (
     ExportView,
     GraphView,
@@ -39,7 +39,7 @@ from lup.ledger.views import (
     kinds_view,
     node_detail,
 )
-from lup.web.serve import BundleAssets, bundle_app, bundle_assets, serve_local_page
+from lup.web.serve import bundle_app, bundle_template, serve_local_page
 
 # lup: ignore[constant-declaration] — an identity this repository defines: the
 # bun workspace entry and the bundle it builds to are both named by this word
@@ -52,9 +52,9 @@ differently would serve nothing.
 """
 
 
-def opened(root: Path, placement: LedgerPlacement) -> LedgerStore:
+def opened(root: Path, layout: LedgerLayout) -> LedgerStore:
     """The store, opened to read; a reader mints a console identity like the CLI."""
-    return LedgerStore(root, ActorRef(kind="console", id=mint_member_id()), placement)
+    return LedgerStore(root, ActorRef(kind="console", id=mint_member_id()), layout)
 
 
 def since_moment(spelling: str) -> datetime | None:
@@ -75,7 +75,7 @@ def explorer_app(
     classes: list[type[LedgerNode]],
     edges: list[type[LedgerEdge]],
     bundles: Path | None = None,
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> FastAPI:
     """The explorer over one repository's log: its page, and the routes it reads.
 
@@ -87,7 +87,7 @@ def explorer_app(
     @application.get("/api/graph")
     async def graph(kind: str = "", standing: str = "", since: str = "") -> GraphView:
         return graph_view(
-            opened(root, placement),
+            opened(root, layout),
             classes,
             kind=kind,
             standing=standing,
@@ -96,7 +96,7 @@ def explorer_app(
 
     @application.get("/api/node/{spelling}")
     async def node(spelling: str) -> NodeDetail:
-        store = opened(root, placement)
+        store = opened(root, layout)
         found = store.resolve(spelling, classes)
         if found is None:
             raise HTTPException(
@@ -106,7 +106,7 @@ def explorer_app(
 
     @application.get("/api/kinds")
     async def kinds() -> KindsView:
-        return kinds_view(classes, edges)
+        return kinds_view(classes, edges, layout)
 
     return application
 
@@ -115,57 +115,30 @@ def export_view(
     root: Path,
     classes: list[type[LedgerNode]],
     edges: list[type[LedgerEdge]],
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> ExportView:
     """The whole log as one value, for a page that cannot ask for more later."""
-    store = opened(root, placement)
+    store = opened(root, layout)
     return ExportView(
         graph=graph_view(store, classes),
         details=[
             node_detail(store, classes, node) for node in store.all_nodes(classes)
         ],
-        kinds=kinds_view(classes, edges),
+        kinds=kinds_view(classes, edges, layout),
         exported_at=utc_now(),
     )
 
 
-def data_url(media_type: str, text: str) -> str:
-    """One asset as a URL carrying its own bytes, base64 so none of them needs escaping."""
-    encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
-    return f"data:{media_type};base64,{encoded}"
+def export_page(view: ExportView, template: Template) -> str:
+    """One self-contained page: the surface's export template rendered over the log.
 
-
-def export_page(view: ExportView, assets: BundleAssets) -> str:
-    """One self-contained page: the bundle carried as data URLs, the log as an attribute.
-
-    Assembled from the bundle's pieces rather than by editing its own
-    `index.html`, whose asset paths only a server answers. The app reads the
-    attribute before it would fetch, so the same bundle serves both ways.
+    The template is the built `index.html` with the bundle inline, emitted by
+    the build beside it, so no markup is authored here; the one value handed
+    to it is the log as JSON, which autoescape entity-escapes into the mount
+    element's `data-lup-export` attribute. The app reads that attribute
+    before it would fetch, so the same bundle serves both ways.
     """
-    styles = "".join(
-        f'<link rel="stylesheet" href="{data_url("text/css", style)}" />\n'
-        for style in assets.styles
-    )
-    scripts = "".join(
-        f'<script type="module" src="{data_url("text/javascript", script)}"></script>\n'
-        for script in assets.scripts
-    )
-    data = escape(view.model_dump_json(), quote=True)
-    return (
-        "<!doctype html>\n"
-        '<html lang="en">\n'
-        "<head>\n"
-        '<meta charset="utf-8" />\n'
-        '<meta name="viewport" content="width=device-width, initial-scale=1" />\n'
-        "<title>Ledger explorer</title>\n"
-        f"{styles}"
-        "</head>\n"
-        "<body>\n"
-        f'<div id="root" data-lup-export="{data}"></div>\n'
-        f"{scripts}"
-        "</body>\n"
-        "</html>\n"
-    )
+    return template.render(log=view.model_dump_json())
 
 
 def export_explorer(
@@ -174,7 +147,7 @@ def export_explorer(
     edges: list[type[LedgerEdge]],
     destination: Path,
     bundles: Path | None = None,
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> Path:
     """Write the explorer as one file holding the log as it is now.
 
@@ -182,7 +155,7 @@ def export_explorer(
     what the log held when it was written — the page says when.
     """
     page = export_page(
-        export_view(root, classes, edges, placement), bundle_assets(SURFACE, bundles)
+        export_view(root, classes, edges, layout), bundle_template(SURFACE, bundles)
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(page, encoding="utf-8")
@@ -196,11 +169,11 @@ def serve_explorer(
     host: str,
     port: int,
     open_page: bool = True,
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> None:
     """Bind the loopback and serve the explorer over this repository's log."""
     serve_local_page(
-        lambda url: explorer_app(url, root, classes, edges, placement=placement),
+        lambda url: explorer_app(url, root, classes, edges, layout=layout),
         "Ledger explorer",
         host,
         port,

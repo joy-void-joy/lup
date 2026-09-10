@@ -6,7 +6,6 @@ and over the package's own bundle for the export, which is what a reader
 opens.
 """
 
-from base64 import b64decode
 from datetime import UTC, datetime, timedelta
 from html import unescape
 from pathlib import Path
@@ -35,8 +34,20 @@ def handmade(root: Path) -> Path:
         '<script type="module" src="./assets/index-1.js"></script>\n',
         encoding="utf-8",
     )
-    (home / "assets" / "index-1.js").write_text("console.log('x');\n", encoding="utf-8")
+    # Escaped the way the build leaves a bundle, so an export carries it as is.
+    (home / "assets" / "index-1.js").write_text(
+        'console.log("x", "<\\/script>", "<\\!--");\n', encoding="utf-8"
+    )
     (home / "assets" / "index-1.css").write_text("body{margin:0}\n", encoding="utf-8")
+    # The template the build emits beside the page: the bundle in raw blocks,
+    # the log's one expression in the mount element's attribute.
+    (home / "export.html.j2").write_text(
+        '<!doctype html><div id="root" data-lup-export="{{ log }}"></div>\n'
+        "<style>{% raw %}body{margin:0}\n{% endraw %}</style>\n"
+        '<script type="module">{% raw %}console.log("x", "<\\/script>", "<\\!--");\n'
+        "{% endraw %}</script>\n",
+        encoding="utf-8",
+    )
     return root / "bundles"
 
 
@@ -106,12 +117,17 @@ def test_a_reading_of_when_a_node_moved_is_the_latest_touch(tmp_path: Path) -> N
     assert held.movements() == {node.id: edge.at, other.id: edge.at}
 
 
-def test_an_export_carries_the_log_escaped_and_the_bundle_as_data_urls(
+def test_an_export_carries_the_log_escaped_and_the_bundle_inline(
     tmp_path: Path,
 ) -> None:
+    """One module script and one style element, each the served asset's
+    bytes, and the log in an attribute the app reads before it would fetch."""
     held = store(tmp_path)
     held.record(Task, 'closing</div><script>alert("x")</script>', slug="tricky")
     bundles = handmade(tmp_path)
+    served = TestClient(
+        explorer_app(URL, tmp_path, [Task], [Blocks], bundles), base_url=URL
+    )
 
     written = export_explorer(
         tmp_path, [Task], [Blocks], tmp_path / "out" / "ledger.html", bundles
@@ -126,10 +142,13 @@ def test_an_export_carries_the_log_escaped_and_the_bundle_as_data_urls(
     assert view.graph.nodes[0].slug == "tricky"
     assert view.details[0].node.title.startswith("closing</div>")
     assert view.kinds.nodes[0].kind == "coordination:task"
-    script = page.split('src="data:text/javascript;base64,', 1)[1].split('"', 1)[0]
-    style = page.split('href="data:text/css;base64,', 1)[1].split('"', 1)[0]
-    assert b64decode(script).decode("utf-8") == "console.log('x');\n"
-    assert b64decode(style).decode("utf-8") == "body{margin:0}\n"
+    assert "data:" not in page
+    assert page.count('<script type="module">') == 1 and page.count("<style>") == 1
+    script = page.split('<script type="module">', 1)[1].split("</script>", 1)[0]
+    style = page.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert script == served.get("/assets/index-1.js").text
+    assert style == served.get("/assets/index-1.css").text
+    assert script == 'console.log("x", "<\\/script>", "<\\!--");\n'
 
 
 def test_the_explore_command_writes_an_export_from_the_package_bundle(
@@ -146,4 +165,5 @@ def test_the_explore_command_writes_an_export_from_the_package_bundle(
     assert result.exit_code == 0, result.output
     page = (tmp_path / "ledger.html").read_text(encoding="utf-8")
     assert "kept" in page and 'data-lup-export="' in page
-    assert "data:text/javascript;base64," in page
+    assert page.count('<script type="module">') == 1 and page.count("<style>") == 1
+    assert 'src="data:' not in page and 'href="data:' not in page

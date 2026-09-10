@@ -283,6 +283,13 @@ uv run lup-devtools harness check all      # generated-tree drift
 uv run lup-devtools dev rules --check      # the generated rule reference
 ```
 
+The gate type-checks against the environment `uv` runs it in: the
+configuration it hands Pyright names the environment `UV_PROJECT_ENVIRONMENT`
+redirects to, resolved against the project the way `uv` resolves it, so a
+session keeping its environment elsewhere is not checked against a stale
+`.venv` beside it; with the variable unset, the root configuration's `.venv`
+stands.
+
 The generated trees include the frontend bundles under `lup.web`'s package
 data, built from `packages/lup/web/` by Vite, so the gate needs `bun`. The
 workspace's dependencies it restores itself, the way `uv run` syncs the
@@ -297,7 +304,11 @@ integrity hash, which is what `uv run` already fetches unasked — while
 `bun install` without the flag, `bun add`, `uv sync` without a freeze flag and
 `uv add` ask, since each can rewrite the lockfile. The workspace's own tests
 are a third suite beside the two pytest roots, run by `bun test` from the
-workspace, so a green gate ran the frontend's tests too.
+workspace, so a green gate ran the frontend's tests too. They sit beside
+their source as `*.test.ts` and `*.test.tsx`, and carry the `test` role a
+file under `tests/` carries — a whole one is written without a question —
+because the policy derives that role from the suites the gate declares
+rather than from a second table naming the same files.
 
 [quality-pipeline.md](quality-pipeline.md) explains which of the three
 automated layers catches what. The short version: `git hooks install`

@@ -255,3 +255,24 @@ def test_only_the_bun_root_names_a_workspace_to_restore(tmp_path: Path) -> None:
 
     assert pytest_root.restored_workspaces() == []
     assert bun_root.restored_workspaces() == [tmp_path / "web"]
+
+
+def test_the_bun_root_collects_tests_beside_their_source(tmp_path: Path) -> None:
+    """The files bun runs are the files the policy gives the test role.
+
+    Bun collects four stems over four extensions from the workspace down,
+    so the role names each as a file pattern under the workspace; pytest
+    collects by its configured `testpaths`, which a project declares as a
+    role root itself, so a pytest root derives nothing.
+    """
+    pytest_root = check.TestRoot(name="pytest", directory=tmp_path)
+    bun_root = check.BunTestRoot(name="bun test", directory=Path("web"))
+
+    assert pytest_root.collected() == []
+    assert len(bun_root.collected()) == 16
+    assert Path("web/**/*.test.tsx") in bun_root.collected()
+    assert Path("web/**/*_spec.js") in bun_root.collected()
+
+    roles = check.collected_test_roles([pytest_root, bun_root])
+    assert [role.root for role in roles] == bun_root.collected()
+    assert {role.role for role in roles} == {"test"}

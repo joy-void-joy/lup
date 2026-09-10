@@ -27,7 +27,7 @@ from lup.ledger.cite import read_cites
 from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.kinds import by_kind
 from lup.ledger.models import LedgerEdge, LedgerNode
-from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.store import LedgerLayout
 from lup.ledger.views import (
     EdgeView,
     KindsView,
@@ -123,14 +123,14 @@ def create_ledger_tools(
     author: ActorRef,
     classes: list[type[LedgerNode]],
     edges: list[type[LedgerEdge]],
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> list[LupMcpTool]:
     """The ledger verbs, bound to one working tree, one author, and its kinds."""
     node_kinds = by_kind(classes)
     edge_kinds = by_kind(edges)
 
     def store() -> LedgerStore:
-        return LedgerStore(root, author, placement)
+        return LedgerStore(root, author, layout)
 
     def found(held: LedgerStore, spelling: str) -> LedgerNode:
         node = held.resolve(spelling, classes)
@@ -149,12 +149,14 @@ def create_ledger_tools(
         "fields `ledger_record` and `ledger_relate` accept for it. Call it once "
         "before recording anything: the kinds are the project's, not a fixed "
         "vocabulary, and the fields are read off the types so the listing "
-        "cannot disagree with what is validated. Returns {nodes: [{kind, name, "
-        "summary, fields}], edges: [...]}.",
+        "cannot disagree with what is validated. Each node kind says which half "
+        "of the log it is written to: `committed` travels with the code, "
+        "`local` stays under the git directory. Returns {nodes: [{kind, name, "
+        "summary, fields, placement}], edges: [...]}.",
         name="ledger_types",
     )
     async def ledger_types(_params: NoInput) -> KindsView:
-        return kinds_view(classes, edges)
+        return kinds_view(classes, edges, layout)
 
     @lup_tool(
         "Record one node of a declared kind — a claim you can be held to, a "

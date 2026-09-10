@@ -15,6 +15,7 @@ present and wrong.
 from hashlib import sha256
 from pathlib import Path
 
+from lup.ledger.models import Placement
 from lup.ledger.store import BLOBS_DIR
 
 
@@ -33,6 +34,14 @@ class Blobs:
         """Where the bytes with this digest sit, whether or not they are there."""
         return self.root / digest
 
+    def name(self, content: bytes) -> str:
+        """The name these bytes would be stored under, without storing them.
+
+        What a record names before its bytes land, so a type may refuse the
+        attachment while nothing is yet on disk.
+        """
+        return sha256(content).hexdigest()
+
     def store(self, content: bytes) -> str:
         """Put these bytes in the store and hand back the name they are under.
 
@@ -40,7 +49,7 @@ class Blobs:
         reader never opens a half-written blob: the path either does not exist
         or holds every byte the digest promises.
         """
-        digest = sha256(content).hexdigest()
+        digest = self.name(content)
         landing = self.path(digest)
         if landing.exists():
             return digest
@@ -66,3 +75,39 @@ class Blobs:
     def holds(self, digest: str) -> bool:
         """Whether these bytes are in the store."""
         return self.path(digest).is_file()
+
+
+class BlobStores:
+    """The blob directories of one log, one beside each journal, read as one.
+
+    Bytes go beside the journal of the node attaching them, so a committed
+    node's evidence is committed with it and a local node's never reaches a
+    commit. A read looks in every one, because a digest names the same bytes
+    wherever they sit, and two stores holding one blob hold the same blob.
+    """
+
+    def __init__(self, roots: dict[Placement, Path]) -> None:
+        self.halves = {placement: Blobs(root) for placement, root in roots.items()}
+
+    def name(self, content: bytes) -> str:
+        """The name these bytes would take in either half, without storing them."""
+        return sha256(content).hexdigest()
+
+    def store(self, content: bytes, placement: Placement) -> str:
+        """Put these bytes beside one half's journal and hand back their digest."""
+        return self.halves[placement].store(content)
+
+    def read(self, digest: str) -> bytes | None:
+        """The bytes under this digest from whichever half holds them, or nothing."""
+        return next(
+            (
+                found
+                for half in self.halves.values()
+                if (found := half.read(digest)) is not None
+            ),
+            None,
+        )
+
+    def holds(self, digest: str) -> bool:
+        """Whether either half has these bytes."""
+        return any(half.holds(digest) for half in self.halves.values())

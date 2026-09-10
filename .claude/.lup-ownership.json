@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "70f10d1696234e355796da5172713890ffe2cef1a9ac2147d2c181a0f160daab",
+  "source_digest": "8736b4170bb53294ed7dc18a738c68d1ad090963191c29b4bd94e76650d3d303",
   "target_requirements": [
     "claude-code"
   ],
@@ -471,7 +471,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "30cb3d255142eaf217e25cb5e01435d05af1cb817044142d247e034e4b6465af",
+      "sha256": "8d524700187d4b48b06def449cfa55b56ae161db52e1a13de3bb648a5d39c652",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -527,7 +527,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "69c6213a78befdaff060b886e8d1f99798c8ae15a05912a5fd534211f8d5e2d5",
+      "sha256": "6f3673a1ffdfec0c9f566ae8768521c714d881d6b66364ef73fb2596b39fb96b",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -548,7 +548,7 @@
     {
       "path": "docs/corpus.md",
       "category": "generated",
-      "sha256": "e69585d579ac73b89611202c7532453568b897e52e6503f09ec0ca23cde71628",
+      "sha256": "4cdd0be4a9829e44fdbf1e4b07a390808696d178dc20abff77cee86d7de5e4d6",
       "semantic_id": "docs.corpus",
       "executable": false
     },
@@ -569,7 +569,7 @@
     {
       "path": "docs/ledger.md",
       "category": "generated",
-      "sha256": "fd5c26e930c7e4eb056d039cb31940e23354537f9bbd69acf436487566004d2b",
+      "sha256": "c330c1b4ec632cb01a199bd20b67838aff5404bf8a37fa7d6be6e18a54f88bc2",
       "semantic_id": "docs.ledger",
       "executable": false
     },

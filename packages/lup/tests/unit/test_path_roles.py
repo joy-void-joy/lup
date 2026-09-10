@@ -170,6 +170,7 @@ PATTERN_ROLES = [
     PathRoleRow(root="**/__pycache__", role="scratch"),
     PathRoleRow(root="**/*.egg-info", role="scratch"),
     PathRoleRow(root="src/*/generated", role="scratch"),
+    PathRoleRow(root="web/**/*.test.tsx", role="test"),
 ]
 """Roles for trees scattered through the repository rather than gathered.
 
@@ -206,6 +207,22 @@ def test_a_pattern_matches_whole_segments_rather_than_substrings() -> None:
     assert path_role("notes/__pycache__.bak", PATTERN_ROLES) == "production"
     assert path_role("src/__pycache__extra/x.py", PATTERN_ROLES) == "production"
     assert path_role("my.egg-info.txt", PATTERN_ROLES) == "production"
+
+
+def test_a_pattern_may_name_files_and_reaches_no_lookalike() -> None:
+    """A suite that collects tests beside their source names them by file.
+
+    `web/**/*.test.tsx` is every such file at any depth under the workspace,
+    the workspace top included, and nothing else: a backup of one and a stem
+    the suite would not collect are source, however much of the name they
+    share, and so is the module the test sits beside.
+    """
+    assert path_role("web/src/explorer/mount.test.tsx", PATTERN_ROLES) == "test"
+    assert path_role("web/mount.test.tsx", PATTERN_ROLES) == "test"
+    assert path_role("web/src/mount.test.tsx.bak", PATTERN_ROLES) == "production"
+    assert path_role("web/src/mount.tests.tsx", PATTERN_ROLES) == "production"
+    assert path_role("web/src/explorer/Browse.tsx", PATTERN_ROLES) == "production"
+    assert path_role("src/mount.test.tsx", PATTERN_ROLES) == "production"
 
 
 def test_being_untracked_is_not_what_makes_a_path_disposable() -> None:

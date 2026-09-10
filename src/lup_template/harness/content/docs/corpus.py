@@ -13,8 +13,10 @@ the evidence that backs each one and the corrections that have since retired
 some. This repository's corpus types live in `src/lup_template/corpus.py`:
 `Claim`, `Question`, `Evidence` as artifact or certificate, `Source`,
 `Correction`, and the edges between them. They are declared in `node_classes`
-and `edge_classes` exactly as `Task` is, and the ledger's generic commands
-record, relate, list and check them.
+and `edge_classes` exactly as `Task` is, placed committed in the layout
+beside them (`src/lup_template/kinds.py`) so the corpus travels with the
+code and is reviewed in a diff, and the ledger's generic commands record,
+relate, list and check them.
 
 **They are the template's, not the library's, by decision.** Nothing in the
 library consumes them; the ledger's charter is to declare no epistemics, and
@@ -59,6 +61,26 @@ file reads `stale` the moment it changes and the explorer draws the line, so
 what a claim is about is visible and rots on its own. The edge is
 descriptive: a claim that must fall with a file rests on evidence scoped to
 it instead.
+
+## Sessions and outputs are indexed as pointers
+
+`notes/` holds this repository's session data — per agent version, a
+directory per session, its trace journal, the result documents it wrote, and
+one `observable.jsonl` per `lup-devtools harness` launch — gitignored, per
+checkout, hundreds of megabytes. The ledger indexes it without holding any of
+it: `Session` and `Output`, from `lup.observability.sessions`, are among this
+repository's kinds. A session is recorded when its directory opens, whether
+`build_session_factory` opened it for the SDK or a harness launch opened its
+transcript, and amended when it closes with how it ended and the journal's
+digest pinned at that moment; each result document `save_session` writes is
+recorded as an output `about` its session. A record carries the checkout it
+was made in, because `notes/` is per worktree while the log is per clone, so
+it reads `open`, then `fresh`, `stale` or `missing` from any worktree against
+the tree that wrote it.
+
+No trace, output or log byte enters the ledger or its blob store: both kinds
+refuse an attachment, and a record is a path, a digest and metadata. What was
+under `notes/` before recording started is not swept in.
 
 ## A claim refuses to hide contradiction
 
@@ -145,8 +167,10 @@ from the corpus instead, which is what writeups are.
 the way guidance is declared: as parts. `docs/corpus-status.md` is the worked
 example — the open questions, the claims and where each stands, what waits on
 a person, the corrections, and a stamp naming the newest record it was
-generated from. `uv run lup-devtools ledger writeup` writes it from this
-machine's ledger; `--check` verifies the file on disk. The prose is the
+generated from. Every kind it renders is committed with the code, so it is a
+generated file like the rest: `harness generate all` writes it and `dev
+check` refuses one that is behind; `uv run lup-devtools ledger writeup`
+writes it too, and `--check` verifies the file on disk. The prose is the
 author's and every figure is the ledger's, cited, so a number in it cannot
 outlive what supports it: a claim that stopped standing renders struck through
 with the reason, and the cite check reports it besides.

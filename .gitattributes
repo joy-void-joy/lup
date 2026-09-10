@@ -20,3 +20,9 @@
 .codex/** merge=lup-ownership
 .agents/** merge=lup-ownership
 packages/lup/src/lup/web/bundles/** merge=lup-ownership
+#
+# The committed half of the ledger is the other case, and the opposite one:
+# append-only lines with unique ids, so two branches that both appended are
+# both right, and git's own `union` driver — needing no per-clone registration
+# — keeps every line of each side, with a read folding any duplicate by id.
+ledger/journal.jsonl merge=union

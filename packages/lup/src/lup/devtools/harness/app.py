@@ -21,8 +21,12 @@ import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
+from lup.coordination.refs import ActorRef
 from lup.harness.codescan.registry import every_rule_retired
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
+from lup.ledger.models import LedgerNode
+from lup.ledger.store import LedgerLayout
+from lup.observability.sessions import SessionRecorder, session_recorder
 from lup.devtools.harness.contained import (
     image_tag,
     report_egress,
@@ -47,6 +51,8 @@ def create_harness_app(
     profiles: ProfileDirectory | None = None,
     launch_modes: list[launch.LaunchMode] | None = None,
     checkpoint: launch.LaunchCheckpoint | None = None,
+    node_classes: list[type[LedgerNode]] | None = None,
+    ledger: LedgerLayout = LedgerLayout(),
 ) -> typer.Typer:
     """Wire the harness command tree over the targets one project declares.
 
@@ -61,11 +67,30 @@ def create_harness_app(
     rather than only the command line this tree assembles.
 
     ``checkpoint`` saves application data before generation and after closing.
+
+    ``node_classes`` and ``ledger`` are what the project records and where:
+    a launch that finds the session kinds among them records itself in the
+    ledger as a pointer at its transcript directory, and one that does not
+    records nothing.
     """
     directory = profiles or claude_profile_directory()
     modes = launch_modes or []
     app = typer.Typer(no_args_is_help=True, help="Generate and launch a native harness")
     selector = f"{', '.join(targets.builders)}, or {targets.every}"
+
+    def recorder_for(provider: str) -> SessionRecorder | None:
+        """The ledger recorder a launch of one runtime records through, resolved now.
+
+        Built at launch rather than when the tree is wired, because the
+        project root is resolved against the working directory the command
+        runs in, and the recorder stamps the launcher as the author.
+        """
+        return session_recorder(
+            project_root(),
+            ActorRef(kind="harness", id=provider),
+            node_classes or [],
+            ledger,
+        )
 
     def repository_wide(target: str) -> list[RepositoryWriter]:
         """The writers a selector reaches: every one of them, or none.
@@ -456,6 +481,7 @@ def create_harness_app(
                 companions=companion_targets(selection.mode, "claude", allowance),
                 repository_writers=repository_writers,
                 mounts=launch.declared_mounts(mount, mount_ro),
+                recorder=recorder_for("claude"),
             )
 
     codex_target = targets.builder("codex")
@@ -591,6 +617,7 @@ def create_harness_app(
                 companions=companion_targets(selection.mode, "codex", allowance),
                 repository_writers=repository_writers,
                 mounts=launch.declared_mounts(mount, mount_ro),
+                recorder=recorder_for("codex"),
             )
 
     return app
