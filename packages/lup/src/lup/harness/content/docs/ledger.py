@@ -164,9 +164,8 @@ before anything reaches the blob store: a trace runs to hundreds of megabytes
 per checkout and the ledger is a log of records. A project lists them the way
 it lists `Task` and the writers record as sessions open and close. This
 repository declares exactly its tasks and handoffs, committed, and its
-sessions and outputs, local (`src/lup_template/kinds.py`); `docs/corpus.md`
-says what it does with the latter two, and what an adopter wanting a corpus
-declares beside them.
+sessions and outputs, local; `docs/corpus.md` says where, what it does with
+the latter two, and what an adopter wanting a corpus declares beside them.
 
 ## The local half is untracked
 
