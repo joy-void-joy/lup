@@ -28,7 +28,6 @@ from lup.harness.content.docs import (
 )
 from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import CORE
-from lup.harness.content.skills.analyze import SKILL as SKILL_ANALYZE
 from lup.harness.content.skills.debug import skill as build_debug
 from lup.harness.content.skills.hooks import skill as build_hooks
 from lup.harness.content.skills.report import SKILL as SKILL_REPORT
@@ -79,7 +78,6 @@ def module(layout: ApplicationLayout, rules: RuleSelection) -> Module:
         spec=CORE,
         content=ContentRoster(
             skills=[
-                SKILL_ANALYZE,
                 build_debug(layout),
                 build_hooks(layout),
                 SKILL_REPORT,

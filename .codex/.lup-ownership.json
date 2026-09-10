@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "9e328b1f8a734ad432869c3e1a632efeae0faf64ff6f99612d3358eaf27a90b6",
+  "source_digest": "d97ae68fe2a95cf2099c97f941313e2113e68c5ed3f0e243ddd766429415a42c",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -282,7 +282,7 @@
     {
       "path": ".codex/plugins/lup/skills/commit/SKILL.md",
       "category": "generated",
-      "sha256": "52eabc2901b657e80b99ee040b22efec9d6b4f50d1899f8debeb12c1b2aa94f6",
+      "sha256": "0c7744142890b5e202896113db48816e0a36673cd64530a1da400af2be67a866",
       "semantic_id": "skill.commit",
       "executable": false
     },

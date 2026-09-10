@@ -96,7 +96,7 @@ After creating commits:
 - **Don't skip hooks** unless explicitly requested
 - **Don't commit secrets** (.env.local, credentials, API keys)
 - **Don't commit large binaries** unless necessary
-- For **session data** commits (notes/traces/), use `uv run lup-devtools feedback commit` instead — it auto-commits one session per commit with proper `data(sessions):` messages
+- For **session data** commits (notes/traces/) in a project that took the feedback-loop module, its `feedback commit` command auto-commits one session per commit with proper `data(sessions):` messages
 
 ## If Pre-commit Hooks Fail
 
