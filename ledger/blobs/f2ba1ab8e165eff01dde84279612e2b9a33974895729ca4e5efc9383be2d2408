@@ -1,0 +1,7 @@
+## tests/unit/test_roster_prompt_hook.py
+.....                                                                    [100%]
+5 passed in 2.50s
+
+## packages/lup/tests/unit/test_coordination_changes.py
+.............                                                            [100%]
+13 passed in 0.29s
