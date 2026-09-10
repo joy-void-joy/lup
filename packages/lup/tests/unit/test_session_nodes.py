@@ -18,6 +18,7 @@ from typing import Literal
 
 import pytest
 from pydantic import BaseModel
+from rich.text import Text
 from typer.testing import CliRunner
 
 import lup.devtools.ledger.app as ledger_app
@@ -312,8 +313,11 @@ def unwrapped(panel: str) -> str:
 
     The console wraps a refusal mid-sentence inside a drawn box, so the
     sentence is read back as words rather than matched against the drawing.
+    Where the terminal colours the box, its edges arrive wrapped in escape
+    codes, so the panel is read through Rich's own parser first.
     """
-    return " ".join(word for word in panel.split() if word != "│")
+    plain = Text.from_ansi(panel).plain
+    return " ".join(word for word in plain.split() if word != "│")
 
 
 def test_the_console_refuses_bytes_on_either_kind_before_they_are_stored(
