@@ -14,7 +14,7 @@ from lup.coordination.handoffs import Handoff, Transfers
 from lup.coordination.tasks import Blocks, Task
 from lup.ledger.files import File
 from lup.ledger.models import LedgerEdge, LedgerNode
-from lup.ledger.store import LedgerLayout
+from lup.ledger.store import InTree, LedgerLayout, SharedStore
 from lup_template.corpus import (
     About,
     Answers,
@@ -35,9 +35,24 @@ from lup_template.corpus import (
 # which stay local — a committed kind's records sit in `ledger/`, travel with
 # commits, are reviewed in a diff and merged by union, so they are the same on
 # every machine; a local kind's sit under the git directory every worktree
-# shares and never reach a commit. Every kind is local until the layout names
-# a committed half and places kinds in it
-LAYOUT = LedgerLayout()
+# shares and never reach a commit. The scaffold commits its corpus, its tasks
+# and handoffs, and the files they rest on; a kind absent from the mapping is
+# local, and an edge is committed only where both of its ends are
+LAYOUT = LedgerLayout(
+    committed=InTree(),
+    local=SharedStore(),
+    placements={
+        Task: "committed",
+        Handoff: "committed",
+        Claim: "committed",
+        Question: "committed",
+        Artifact: "committed",
+        Certificate: "committed",
+        Source: "committed",
+        Correction: "committed",
+        File: "committed",
+    },
+)
 """One log in two journals, and which of this repository's kinds go to which."""
 
 # lup: ignore[constant-declaration] — what this repository records, which is a

@@ -336,9 +336,9 @@ def test_every_published_document_is_generated_and_banners_itself() -> None:
     # roster: each renders from something walked at generation time — the rule
     # registry, the composed CLI, the compiled trees — so none of them has a
     # declaring content module to be rostered against. And the writeups:
-    # documents `ledger writeup` generates from this machine's ledger, outside
-    # the drift-checked generation because the ledger is live state each
-    # machine holds its own copy of, and committed like any other document —
+    # documents generated from the ledger and committed like any other
+    # document — as repository writers where every kind they render is
+    # committed with the code, by `ledger writeup` alone where one is local —
     # so a declared one that was never generated is missing here.
     writeups = [Path(writeup.path) for writeup in WRITEUPS]
     assert unmanaged == sorted(
