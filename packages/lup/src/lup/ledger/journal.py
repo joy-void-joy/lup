@@ -516,11 +516,15 @@ class LedgerStore:
         writer cannot get wrong, and that has to hold for a writer handing
         over a whole object as much as for one naming keywords.
 
-        Attachments land beside the journal the node's kind declares, so a
-        committed node's evidence is committed with it.
+        Attachments are named before the node validates and stored after,
+        so a type that refuses bytes — a session, which points at its trace
+        and never carries it — refuses them while nothing is yet on disk,
+        and a node that lands still points at blobs already there. They land
+        beside the journal the node's kind declares, so a committed node's
+        evidence is committed with it.
         """
         placement = self.layout.placement(kind_of(node))
-        held = [self.blobs.store(item, placement) for item in attachments or []]
+        pending = list(attachments or [])
         built = node.model_validate(
             {
                 "title": title,
@@ -529,7 +533,7 @@ class LedgerStore:
                 "id": uuid4().hex[:12],
                 "author": self.author.model_dump(),
                 "at": at or utc_now(),
-                "attachments": held,
+                "attachments": [self.blobs.name(item) for item in pending],
             }
         )
         holder = self.slug_holder(built.slug)
@@ -538,6 +542,8 @@ class LedgerStore:
         # Derived fields are filled after validation and before the append,
         # so a type reads the tree exactly once and what lands is complete.
         prepared = built.prepared(self.project)
+        for item in pending:
+            self.blobs.store(item, placement)
         self.append(prepared)
         return prepared
 

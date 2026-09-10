@@ -34,6 +34,14 @@ class Blobs:
         """Where the bytes with this digest sit, whether or not they are there."""
         return self.root / digest
 
+    def name(self, content: bytes) -> str:
+        """The name these bytes would be stored under, without storing them.
+
+        What a record names before its bytes land, so a type may refuse the
+        attachment while nothing is yet on disk.
+        """
+        return sha256(content).hexdigest()
+
     def store(self, content: bytes) -> str:
         """Put these bytes in the store and hand back the name they are under.
 
@@ -41,7 +49,7 @@ class Blobs:
         reader never opens a half-written blob: the path either does not exist
         or holds every byte the digest promises.
         """
-        digest = sha256(content).hexdigest()
+        digest = self.name(content)
         landing = self.path(digest)
         if landing.exists():
             return digest
@@ -80,6 +88,10 @@ class BlobStores:
 
     def __init__(self, roots: dict[Placement, Path]) -> None:
         self.halves = {placement: Blobs(root) for placement, root in roots.items()}
+
+    def name(self, content: bytes) -> str:
+        """The name these bytes would take in either half, without storing them."""
+        return sha256(content).hexdigest()
 
     def store(self, content: bytes, placement: Placement) -> str:
         """Put these bytes beside one half's journal and hand back their digest."""

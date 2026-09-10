@@ -148,6 +148,16 @@ is why it is the library's and the rest is not. A project lists it in
 `node_classes` the way it lists `Task`; recorded with an empty title, a file
 takes its path for one.
 
+Two more kinds point the same way, declared by the package whose subject a
+run is: `lup.observability.sessions` declares `Session` and `Output`, a
+session's directory and trace journal under `notes/` and the result document
+a run wrote there, each a path, a digest and the checkout it was recorded in —
+never the bytes. Both refuse an attachment, in words saying pointers only,
+before anything reaches the blob store: a trace runs to hundreds of megabytes
+per checkout and the ledger is a log of records. A project lists them beside
+`File` and the writers record as sessions open and close; `docs/corpus.md`
+says what this repository does with them.
+
 ## The local half is untracked
 
 In the local half, nodes accumulate as work happens and nobody reviews a
