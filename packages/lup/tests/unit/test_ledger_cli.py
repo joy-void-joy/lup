@@ -155,6 +155,27 @@ def test_relate_draws_a_declared_edge_and_the_edge_may_refuse(
     assert selfcite.exit_code != 0 and "itself" in selfcite.output
 
 
+def test_show_asks_a_neighbour_its_own_answer_and_not_the_base_class(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blocker that finished stops blocking on the next look, which only
+    holds when the neighbourhood is resolved through the declared kinds: a
+    base node never finishes, so a listing over base nodes would keep the
+    task blocked forever.
+    """
+    cli = app(tmp_path, monkeypatch)
+    run(cli, "record", "coordination:task", "first", "--slug", "first")
+    run(cli, "record", "coordination:task", "second", "--slug", "second")
+    run(cli, "relate", "coordination:blocks", "first", "second")
+
+    assert "blocked" in run(cli, "show", "second").output
+
+    assert run(cli, "done", "first").exit_code == 0
+
+    assert "blocked" not in run(cli, "show", "second").output
+    assert "blocked" not in run(cli, "list", "--kind", "coordination:task").output
+
+
 def test_amend_records_the_node_again_validated_whole(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
