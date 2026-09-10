@@ -1958,6 +1958,70 @@ PATH_ROLES: list[PathRoleRow] = [
         "root": "packages/lup/src/lup/web/bundles",
         "role": "scratch",
     },
+    {
+        "root": "packages/lup/web/**/*.test.js",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*.test.jsx",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*.test.ts",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*.test.tsx",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*_test.js",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*_test.jsx",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*_test.ts",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*_test.tsx",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*.spec.js",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*.spec.jsx",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*.spec.ts",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*.spec.tsx",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*_spec.js",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*_spec.jsx",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*_spec.ts",
+        "role": "test",
+    },
+    {
+        "root": "packages/lup/web/**/*_spec.tsx",
+        "role": "test",
+    },
 ]
 
 ACCEPTANCE_GUARD: AcceptanceGuardRow | None = None

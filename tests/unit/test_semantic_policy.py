@@ -36,7 +36,11 @@ from lup.providers.codex.native import (
     CodexUnknownOperation,
     CodexDecisionRenderer,
 )
-from lup.harness.enforcement import declared_path_rules, semantic_policy_for
+from lup.harness.enforcement import (
+    declared_path_rules,
+    declared_role_rows,
+    semantic_policy_for,
+)
 from lup.harness.models import HookSet
 from lup.harness.codescan.boundaries import native_import_boundaries
 from lup.harness.codescan.common import RuleSelection
@@ -102,9 +106,11 @@ from lup.policy.rules import (
 )
 
 from lup.policy.vocabulary import bun_rule
+from lup.devtools.dev.check import collected_test_roles
 from lup_template.harness.catalog import (
     application_roots,
     declared_hook_set,
+    declared_test_roots,
     portable_harness,
 )
 
@@ -180,6 +186,17 @@ class EditDecisionCase(BaseModel, frozen=True):
     effect: Literal["allow", "ask", "deny", "defer"]
     autonomous: bool = False
     path_exists: bool = True
+
+
+def typescript_module(statements: int) -> str:
+    """A TypeScript module of this many statements, past any size budget."""
+    lines = [f"export const line{index} = {index};" for index in range(statements)]
+    return "\n".join(lines) + "\n"
+
+
+def heredoc_write(target: str, statements: int) -> str:
+    """A whole-file heredoc write of a module that size to this target."""
+    return f"cat > {target} <<'EOF'\n{typescript_module(statements)}EOF"
 
 
 NATIVE_IMPORT_CASES = [
@@ -434,6 +451,9 @@ FIXTURE_PATH_ROLES = [
     PathRoleRow(root=".venv", role="scratch"),
     PathRoleRow(root="build", role="scratch"),
     PathRoleRow(root="**/node_modules", role="scratch"),
+    # The files the gate's suites collect, derived here as the catalog derives
+    # them, so a fixture judging a bun test judges what the runtime does.
+    *declared_role_rows(collected_test_roles(declared_test_roots())),
 ]
 
 FIXTURE_PATH_RULES = declared_path_rules(declared_hook_set())
@@ -1615,6 +1635,38 @@ EDIT_POLICY_CASES = [
         before=None,
         after="def test_thing() -> None:\n    assert True\n",
         effect="allow",
+    ),
+    # The bun suite collects its tests beside their source, and the role
+    # follows the file the gate would run rather than the directory it sits
+    # in: a whole test file arrives without a question where the source
+    # beside it, a backup of the test, or a stem bun does not collect asks.
+    EditDecisionCase(
+        path="packages/lup/web/src/explorer/mount.test.tsx",
+        before=None,
+        after=typescript_module(35),
+        effect="allow",
+        path_exists=False,
+    ),
+    EditDecisionCase(
+        path="packages/lup/web/src/explorer/Browse.tsx",
+        before=None,
+        after=typescript_module(35),
+        effect="ask",
+        path_exists=False,
+    ),
+    EditDecisionCase(
+        path="packages/lup/web/src/explorer/mount.test.tsx.bak",
+        before=None,
+        after=typescript_module(35),
+        effect="ask",
+        path_exists=False,
+    ),
+    EditDecisionCase(
+        path="packages/lup/web/src/explorer/mount.tests.ts",
+        before=None,
+        after=typescript_module(35),
+        effect="ask",
+        path_exists=False,
     ),
     EditDecisionCase(
         path="src/module.py",
@@ -4640,6 +4692,42 @@ def test_an_in_place_rewrite_never_covers_a_protected_path(tmp_path: Path) -> No
     # One protected file among several takes the whole command, because the
     # strongest verdict is the command's.
     assert effect("sed -i 's/a/b/' notes.md README.md") == "ask"
+
+
+def test_a_test_the_bun_suite_collects_is_written_whole_without_a_question(
+    tmp_path: Path,
+) -> None:
+    """The role follows the file the gate runs, not the directory it sits in.
+
+    The bun suite collects `*.test.ts` and `*.test.tsx` beside their source,
+    where no tests directory could name them, and the policy derives the
+    test role from that suite. Judged through the composition a session runs
+    under, because a heredoc's body reaches the edit gates only there: a
+    whole test file arrives without a question by either route, while the
+    source beside it, a backup of the test, and a stem bun does not collect
+    ask as any production file does.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    def written(target: str) -> str:
+        command = ShellCommand(command=heredoc_write(target, 35), cwd=tmp_path)
+        return policy.decide(command).effect
+
+    def created(target: str) -> str:
+        change = EditChange(path=Path(target), after=typescript_module(35))
+        return policy.decide(EditBatch(changes=[change])).effect
+
+    explorer = "packages/lup/web/src/explorer"
+    for test in (f"{explorer}/mount.test.tsx", f"{explorer}/narrow.test.ts"):
+        assert written(test) == "allow", test
+        assert created(test) == "allow", test
+    for source in (
+        f"{explorer}/Browse.tsx",
+        f"{explorer}/mount.test.tsx.bak",
+        f"{explorer}/mount.tests.ts",
+    ):
+        assert written(source) == "ask", source
+        assert created(source) == "ask", source
 
 
 def test_an_in_place_rewrite_is_still_screened_for_what_the_script_does(
