@@ -1,0 +1,5 @@
+# `bun test` is one row of the gate. The surfaces mount into a browser, and
+# the sandbox has none, so the DOM every test file sees is registered before
+# the first one loads.
+[test]
+preload = ["./src/test-dom.ts"]
