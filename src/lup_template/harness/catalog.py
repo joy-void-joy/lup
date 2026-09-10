@@ -39,7 +39,7 @@ from lup.harness.codescan.boundaries import (
     generated_tree_paths,
     native_import_boundaries,
 )
-from lup.harness.codescan.common import RuleSelection
+from lup.harness.content.modules.specs import RESOLVER
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import FrontendSpec, WorkflowSpec
@@ -63,6 +63,7 @@ from lup_template.harness.content.catalog import (
     GUIDANCE,
     LAYOUT,
     MODULE_SELECTION,
+    RULES,
     SKILLS,
     SUBAPP_SELECTION,
     TOOL_GROUPS,
@@ -433,7 +434,15 @@ def dev_project() -> DevProject:
         # because that is the call it is a keyword of — so the seam names the
         # module, and the library's list stays free of this layout.
         seams=[
-            *DECLARED_SEAMS,
+            # The library's seams, less the rule selection, which this project
+            # declares beside the guidance that teaches it rather than here.
+            *[seam for seam in DECLARED_SEAMS if seam.keyword != "retired"],
+            Seam(
+                call="RuleSelection",
+                keyword="retired",
+                summary="library scan rules this project does not hold itself to",
+                module=Path("src/lup_template/harness/content/catalog.py"),
+            ),
             Seam(
                 call="Image",
                 keyword="tooling",
@@ -469,14 +478,10 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         hooks=HookSet(
             id="hooks.lup-policy",
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],
-            # lup: template: which of the library's scan rules this domain holds
-            # itself to. Spelled empty rather than left to the default, because
-            # a default nobody was shown is not a decision — and a repository
-            # that settled a convention differently is not defective there. Name
-            # the few it drops with `dev seams --retire <rule-id>`, or drop the
-            # family outright with `--retire-all`, which is one answer here
-            # instead of thirty retirements one denial at a time.
-            rules=RuleSelection(retired=[]),
+            # The one selection, declared where the guidance reads it too, so
+            # the hooks enforcing a rule and the section teaching it cannot
+            # disagree; `dev seams --retire` edits it there.
+            rules=RULES,
             import_boundaries=native_import_boundaries(
                 application_roots([plugin_name])
             ),
@@ -755,11 +760,17 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         image=agent_image(),
         plugins=[plugin],
         guidance=GUIDANCE,
-        resolver=ResolveSpec(
-            id="resolver.lup",
-            worker_identity="resolver-worker",
-            worker_skill=SkillInvocation(plugin="lup", skill="implementer"),
-            review_skill=SkillInvocation(plugin="lup", skill="resolve-reviewer"),
-            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+        # A project that declined the resolver module has no worker, review
+        # or merge skill for a spec to name, so it declares none.
+        resolver=(
+            ResolveSpec(
+                id="resolver.lup",
+                worker_identity="resolver-worker",
+                worker_skill=SkillInvocation(plugin="lup", skill="implementer"),
+                review_skill=SkillInvocation(plugin="lup", skill="resolve-reviewer"),
+                merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+            )
+            if MODULE_SELECTION.takes(RESOLVER)
+            else None
         ),
     )
