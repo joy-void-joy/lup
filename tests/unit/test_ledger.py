@@ -244,7 +244,7 @@ def test_a_malformed_line_does_not_poison_a_live_log(tmp_path: Path) -> None:
     """One bad record must not stop a reader of a log somebody is appending to."""
     store = opened(tmp_path)
     store.record(Chore, "before", holder="alpha")
-    with store.path.open("a", encoding="utf-8") as log:
+    with store.journal("local").open("a", encoding="utf-8") as log:
         log.write("{not json at all\n")
     store.record(Chore, "after", holder="alpha")
     assert [task.title for task in store.read(Chore)] == ["before", "after"]

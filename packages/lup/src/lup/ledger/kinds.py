@@ -20,6 +20,12 @@ class KindInfo(BaseModel, frozen=True):
     name: str
     summary: str
     fields: list[str]
+    placement: str = ""
+    """Which half of the log records of this kind go to — committed or local.
+
+    Empty for a relation, whose placement follows its two ends rather than
+    being declared.
+    """
 
 
 def kind_of(declared: type[LedgerNode] | type[LedgerEdge]) -> str:
@@ -65,11 +71,19 @@ def summary_of(declared: type[LedgerNode] | type[LedgerEdge]) -> str:
     return lines[0] if lines else ""
 
 
-def describe(declared: type[LedgerNode] | type[LedgerEdge]) -> KindInfo:
-    """One declared type as a caller reads it, every part read off the class."""
+def describe(
+    declared: type[LedgerNode] | type[LedgerEdge], placement: str = ""
+) -> KindInfo:
+    """One declared type as a caller reads it, every part read off the class.
+
+    The placement is the one part the class cannot say about itself — the
+    project's layout declares it — so a caller describing a node kind hands
+    it in, and one describing a relation leaves it empty.
+    """
     return KindInfo(
         kind=kind_of(declared),
         name=declared.__name__,
         summary=summary_of(declared),
         fields=declared_fields(declared),
+        placement=placement,
     )

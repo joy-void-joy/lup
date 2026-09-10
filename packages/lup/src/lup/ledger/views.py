@@ -12,8 +12,9 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from lup.ledger.journal import LedgerStore
-from lup.ledger.kinds import KindInfo, describe
+from lup.ledger.kinds import KindInfo, describe, kind_of
 from lup.ledger.models import LedgerEdge, LedgerNode
+from lup.ledger.store import LedgerLayout
 from lup.types import JsonObject
 
 
@@ -129,11 +130,16 @@ def edge_view(kind: str, source: str, target: str) -> EdgeView:
 
 
 def kinds_view(
-    classes: list[type[LedgerNode]], edges: list[type[LedgerEdge]]
+    classes: list[type[LedgerNode]],
+    edges: list[type[LedgerEdge]],
+    layout: LedgerLayout = LedgerLayout(),
 ) -> KindsView:
-    """Every declared kind as a reader is told about it."""
+    """Every declared kind as a reader is told about it, with where each is kept."""
     return KindsView(
-        nodes=[describe(declared) for declared in classes],
+        nodes=[
+            describe(declared, layout.placement(kind_of(declared)))
+            for declared in classes
+        ],
         edges=[describe(declared) for declared in edges],
     )
 

@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from lup.devtools.coordination.app import create_coordination_app
 from lup.devtools.ledger.app import create_ledger_app
 from lup.ledger.models import LedgerEdge, LedgerNode
-from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.store import LedgerLayout
 from lup.ledger.writeup import Writeup, write_writeup
 from lup.devtools.dev.app import create_dev_app
 from lup.devtools.dev.commands import CommandSurface
@@ -138,23 +138,24 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
     """The documents this project generates from its ledger.
 
     Declared in Python the way guidance is, and written by `ledger writeup`.
-    Under the shared store that is the only way they are written, because the
-    ledger is live state each machine holds its own copy of; with the log in
-    the tree they join the drift-checked generation as well, since every
-    machine then renders the same document."""
+    One whose every rendered kind is committed joins the drift-checked
+    generation as well, since every machine then renders the same document;
+    one rendering a local kind is `ledger writeup`'s alone, because the
+    local half is live state each machine holds its own copy of."""
 
-    ledger: LedgerPlacement = SharedStore()
-    """Where this project keeps its log.
+    ledger: LedgerLayout = LedgerLayout()
+    """Where this project keeps its log: one log in two journals, placed per kind.
 
-    Shared under the git directory every worktree resolves to, which is the
-    default and the answer to a ledger that forks; or `InTree`, committed with
-    the code and merged by union, where a project wants its record reviewed
-    in a diff and identical on every machine. The store, the console, the
-    tool group, the explorer and the gate all read this one declaration."""
+    Every kind is local by default — under the git directory every worktree
+    resolves to, which is the answer to a ledger that forks — and a project
+    declares which kinds are committed instead, in a journal in the tree,
+    merged by union, reviewed in a diff and identical on every machine. The
+    store, the console, the tool group, the explorer and the gate all read
+    this one declaration."""
 
     def writers(self) -> list[RepositoryWriter]:
         """Every generated file outside a native tree, the writeups among them
-        where the log they render from is in the tree."""
+        whose every rendered kind is committed."""
         return [
             *self.repository_writers,
             *writeup_writers(self.ledger, self.writeups, self.node_classes),
@@ -184,23 +185,24 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
 
 
 def writeup_writers(
-    placement: LedgerPlacement,
+    layout: LedgerLayout,
     writeups: list[Writeup],
     classes: list[type[LedgerNode]],
 ) -> list[RepositoryWriter]:
-    """The writeups as generated files, where the log they render from is in the tree.
+    """The writeups as generated files, where every kind each renders is committed.
 
-    A writeup rendered from a log every machine holds identically is a
+    A writeup rendered from kinds every machine holds identically is a
     generated file like any other, so it joins the drift-checked generation:
     `harness generate all` writes it and `dev check` refuses one that is
-    behind. Under a shared store it stays `ledger writeup`'s alone, since the
-    same declaration renders differently where nothing was recorded.
+    behind. One rendering a local kind — or one whose parts name nodes
+    rather than kinds, and so cannot say — stays `ledger writeup`'s alone,
+    since the same declaration renders differently where nothing was
+    recorded.
     """
-    if not placement.tracked():
-        return []
     return [
-        partial(write_writeup, writeup, classes, placement=placement)
+        partial(write_writeup, writeup, classes, layout=layout)
         for writeup in writeups
+        if (kinds := writeup.kinds()) is not None and layout.tracked(kinds)
     ]
 
 

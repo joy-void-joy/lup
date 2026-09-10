@@ -46,7 +46,7 @@ from lup.devtools.utils import decode_stderr, output_json, repository_slug
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.ledger.models import LedgerNode
-from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.store import LedgerLayout
 from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.policy.vocabulary import default_vocabulary
 from lup.workspace.paths import is_template_scaffold, project_root
@@ -59,7 +59,7 @@ def create_dev_app(
     relocate_roots: list[Path],
     usage_entries: list[UsageEntry] | None = None,
     node_classes: list[type[LedgerNode]] | None = None,
-    ledger: LedgerPlacement = SharedStore(),
+    ledger: LedgerLayout = LedgerLayout(),
     command_surface: Callable[[], CommandSurface] | None = None,
 ) -> typer.Typer:
     """Wire the dev command tree over what one repository declares about itself."""

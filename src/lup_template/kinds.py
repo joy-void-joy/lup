@@ -6,14 +6,15 @@ session records through. Listed here rather than derived from the adopted
 modules, because a union assembled at run time is not one a type checker can
 narrow. The library declares none of these — what a node kind is for is a
 project's question — so this file is where a project adopting the scaffold
-puts its own answer.
+puts its own answer, and where it says which of them are committed with the
+code and which stay local to each clone.
 """
 
 from lup.coordination.handoffs import Handoff, Transfers
 from lup.coordination.tasks import Blocks, Task
 from lup.ledger.files import File
 from lup.ledger.models import LedgerEdge, LedgerNode
-from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.store import LedgerLayout
 from lup_template.corpus import (
     About,
     Answers,
@@ -30,11 +31,14 @@ from lup_template.corpus import (
     Verifies,
 )
 
-# lup: template: decide where this project keeps its ledger — `SharedStore()`
-# under the git directory every worktree shares, or `InTree()` committed with
-# the code, reviewed in a diff, merged by union and the same on every machine
-PLACEMENT: LedgerPlacement = SharedStore()
-"""Where this repository's log lives, read by every surface that opens it."""
+# lup: template: decide which kinds this project commits with the code and
+# which stay local — a committed kind's records sit in `ledger/`, travel with
+# commits, are reviewed in a diff and merged by union, so they are the same on
+# every machine; a local kind's sit under the git directory every worktree
+# shares and never reach a commit. Every kind is local until the layout names
+# a committed half and places kinds in it
+LAYOUT = LedgerLayout()
+"""One log in two journals, and which of this repository's kinds go to which."""
 
 # lup: ignore[constant-declaration] — what this repository records, which is a
 # declaration about this project and not a default an adopter tunes
