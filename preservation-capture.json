@@ -1,5 +1,5 @@
 {
-  "revision": "71ad8319f2036d51e7f0f46b7cf6921b0fea3c67",
+  "revision": "1ab788514a4bacff0cc6d6d7aea8f2e1fc77fc80",
   "roots": [
     "lup",
     "lup_template"
@@ -14524,10 +14524,7 @@
       "module": "lup.web.serve",
       "declares": [
         "bundle_root",
-        "BundleAssets",
-        "BundleAssets.scripts",
-        "BundleAssets.styles",
-        "bundle_assets",
+        "bundle_template",
         "bundle_app",
         "bundle_app.asset",
         "page_app",
