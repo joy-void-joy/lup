@@ -23,8 +23,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from lup.observability.sessions import Session, SessionRecorder
 from lup.workspace.paths import (
     TIMESTAMP_FMT,
+    agent_version,
     outputs_dir,
     runtime_logs_path,
     sessions_dir,
@@ -41,6 +43,10 @@ class NotesConfig(BaseModel, arbitrary_types_allowed=True):
     trace_log: Path = Field(description="Trace log path (agent cannot access)")
     rw: list[Path] = Field(default=[], description="Read-write directories")
     ro: list[Path] = Field(default=[], description="Read-only directories")
+    record: Session | None = Field(
+        default=None,
+        description="The ledger node pointing at this session, where one was recorded",
+    )
 
     @property
     def all_dirs(self) -> list[Path]:
@@ -72,6 +78,9 @@ def setup_notes(
     session_id: str,
     task_id: str | None = None,
     type: str | None = None,
+    *,
+    recorder: SessionRecorder | None = None,
+    runtime: str = "",
 ) -> NotesConfig:
     """Create session-specific notes folder structure.
 
@@ -80,11 +89,22 @@ def setup_notes(
     - RO directories: Historical data, read-only for this session
     - Logs: Agent cannot access (for feedback loop analysis)
 
+    This is the writer that opens a session's directory, so it is where the
+    session is recorded as open: handed a ``recorder``, it records one
+    :class:`~lup.observability.sessions.Session` pointing at the directory
+    and the trace log, under ``runtime`` as the client that opened it, and
+    hands the node back on the config for the closer to amend. Handed none
+    it records nothing and works as before. The scaffold's
+    ``build_session_factory`` wires the recorder from the project's declared
+    kinds; a refusing ledger is logged there and the session goes on.
+
     Args:
         session_id: Unique session identifier.
         task_id: Optional task identifier (for organizing by task).
         type: Optional prefix inserted under sessions/, outputs/, and logs/
             to separate data by category (e.g. "background", "interactive").
+        recorder: Where to record the session as a pointer, or nothing.
+        runtime: The client opening the session, recorded on its node.
 
     Returns:
         NotesConfig with RW and RO directories separated.
@@ -111,6 +131,11 @@ def setup_notes(
         trace_log=trace_log,
         rw=[session_path, output_path],
         ro=collect_ro_dirs(),
+        record=(
+            recorder.opened(runtime, agent_version(), session_path, trace_log)
+            if recorder is not None
+            else None
+        ),
     )
 
 

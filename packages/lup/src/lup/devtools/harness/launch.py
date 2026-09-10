@@ -75,9 +75,10 @@ from lup.observability.audit import (
     TraceJournal,
 )
 from lup.observability.native import NativeTranscripts, NativeTranscriptWatcher
+from lup.observability.sessions import Session, SessionRecorder
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
 from lup.types import EnvVars, JsonObject, JsonValue
-from lup.workspace.paths import harness_runs_path, project_root
+from lup.workspace.paths import agent_version, harness_runs_path, project_root
 from lup.providers.codex.home import (
     CodexWorktreeHomeStore,
     select_codex_home,
@@ -292,15 +293,32 @@ class HarnessTranscript(BaseModel, arbitrary_types_allowed=True):
     journal: TraceJournal
     watcher: NativeTranscriptWatcher | None = None
     diagnostics: logging.Handler | None = None
+    record: Session | None = None
+    """The ledger node pointing at this launch's directory, where one was recorded."""
 
-    def close(self, *, succeeded: bool) -> None:
-        """Stop ingestion, record the outcome, and release the diagnostics log."""
+    recorder: SessionRecorder | None = None
+
+    def close(self, *, succeeded: bool, interrupted: bool = False) -> None:
+        """Stop ingestion, record the outcome, and release the diagnostics log.
+
+        The ledger's record of the launch is amended last, after the journal
+        holds its final record, so the digest pinned is the closed journal's.
+        """
         if self.watcher is not None:
             self.watcher.stop()
         self.journal.emit("run_end", {"succeeded": succeeded})
         if self.diagnostics is not None:
             watcher_logger().removeHandler(self.diagnostics)
             self.diagnostics.close()
+        if self.recorder is not None and self.record is not None:
+            self.recorder.closed(
+                self.record,
+                "interrupted"
+                if interrupted
+                else "completed"
+                if succeeded
+                else "failed",
+            )
 
 
 def watcher_logger() -> logging.Logger:
@@ -517,6 +535,7 @@ def start_harness_transcript(
     record_root: Path | None = None,
     mode: str | None = None,
     transcribe: bool = True,
+    recorder: SessionRecorder | None = None,
 ) -> HarnessTranscript:
     """Start one canonical transcript around a native interactive CLI.
 
@@ -529,6 +548,13 @@ def start_harness_transcript(
     reader can tell apart without opening one. ``mode`` puts the same fact
     inside the record, because a directory is renameable and a run that has
     been copied out of one should still say what it was.
+
+    This is the writer that opens a launch's directory, so it is where the
+    launch is recorded in the ledger: handed a ``recorder``, it records one
+    :class:`~lup.observability.sessions.Session` pointing at the directory
+    and its observable journal, which :meth:`HarnessTranscript.close` amends
+    with the outcome. The harness command tree wires the recorder from the
+    project's declared kinds; handed none, nothing is recorded.
     """
     run_id = (
         f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{provider}_{uuid4().hex[:8]}"
@@ -564,8 +590,13 @@ def start_harness_transcript(
         "arguments": safe_arguments,
     }
     journal.emit("run_start", payload)
+    record = (
+        recorder.opened(provider, agent_version(), trace_path.parent, trace_path)
+        if recorder is not None
+        else None
+    )
     if not transcribe:
-        return HarnessTranscript(journal=journal)
+        return HarnessTranscript(journal=journal, record=record, recorder=recorder)
     watcher = NativeTranscriptWatcher(
         transcripts,
         journal.child(
@@ -583,7 +614,13 @@ def start_harness_transcript(
     # Said by the banner rather than here, where it was printed a second time
     # under `Artifacts` a few lines later: one path, twice, in two different
     # spellings of the same sentence.
-    return HarnessTranscript(journal=journal, watcher=watcher, diagnostics=diagnostics)
+    return HarnessTranscript(
+        journal=journal,
+        watcher=watcher,
+        diagnostics=diagnostics,
+        record=record,
+        recorder=recorder,
+    )
 
 
 def runtime_preflight(
@@ -1544,6 +1581,7 @@ def launch_claude(
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
     mounts: list[AccessibleRoot] = [],
+    recorder: SessionRecorder | None = None,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
     contradiction = resume.contradicted()
@@ -1634,8 +1672,10 @@ def launch_claude(
         record_root=mode.transcript_root() if mode is not None else None,
         mode=mode.name if mode is not None else None,
         transcribe=transcribing,
+        recorder=recorder,
     )
     succeeded = False
+    interrupted = False
     try:
         opening = (
             nullcontext({})
@@ -1662,6 +1702,9 @@ def launch_claude(
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
     except sh.CommandNotFound as error:
         raise typer.BadParameter(
             f"Cannot launch Claude Code: executable {error} was not found. Check PATH."
@@ -1674,7 +1717,7 @@ def launch_claude(
         # once: with a second session open it removes a measurement that
         # session's dispatcher is still reading.
         release_ledger(project_root(), sentinels.nonce)
-        transcript.close(succeeded=succeeded)
+        transcript.close(succeeded=succeeded, interrupted=interrupted)
         if checkpoint is not None:
             checkpoint(provider="claude")
 
@@ -1699,6 +1742,7 @@ def launch_codex(
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
     mounts: list[AccessibleRoot] = [],
+    recorder: SessionRecorder | None = None,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
     contradiction = resume.contradicted()
@@ -1760,8 +1804,10 @@ def launch_codex(
         record_root=mode.transcript_root() if mode is not None else None,
         mode=mode.name if mode is not None else None,
         transcribe=transcribing,
+        recorder=recorder,
     )
     succeeded = False
+    interrupted = False
     opening = (
         nullcontext({})
         if mode is None
@@ -1805,6 +1851,9 @@ def launch_codex(
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
     except sh.CommandNotFound as error:
         raise typer.BadParameter(
             f"Cannot launch Codex: executable {error} was not found. Check PATH."
@@ -1813,7 +1862,7 @@ def launch_codex(
         raise typer.Exit(error.exit_code) from error
     finally:
         release_ledger(project_root(), sentinels.nonce)
-        transcript.close(succeeded=succeeded)
+        transcript.close(succeeded=succeeded, interrupted=interrupted)
         if home.isolated and store.publish(project_root()):
             typer.echo("Returned the refreshed Codex login to the account home")
         if checkpoint is not None:

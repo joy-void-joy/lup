@@ -57,6 +57,7 @@ from semver import Version as Semver
 
 from lup.types import JsonObject, JsonValue, Usage
 from lup.observability.metrics import MetricsSummary
+from lup.observability.sessions import Session, SessionRecorder
 from lup.workspace.paths import (
     TIMESTAMP_FMT,
     agent_version,
@@ -159,12 +160,23 @@ def save_session(
     result: BaseModel,  # lup: ignore[bare-basemodel] — any domain's result model
     *,
     session_id: str,
+    recorder: SessionRecorder | None = None,
+    session: Session | None = None,
 ) -> Path:
     """Save a session result to disk.
+
+    This is the writer that produces a run's result document, so it is
+    where the output is recorded: handed a ``recorder``, it records one
+    :class:`~lup.observability.sessions.Output` pointing at the file, about
+    the ``session`` node where the caller has one. Handed none it records
+    nothing and works as before. The scaffold's ``run_agent`` wires both
+    from the build that opened the session.
 
     Args:
         result: Any Pydantic model representing a session result.
         session_id: Unique session identifier.
+        recorder: Where to record the output as a pointer, or nothing.
+        session: The recorded session that produced it, where known.
 
     Returns:
         Path to the saved file.
@@ -177,6 +189,8 @@ def save_session(
 
     filepath.write_text(result.model_dump_json(indent=2), encoding="utf-8")
     logger.info("Saved session %s to %s", session_id, filepath)
+    if recorder is not None:
+        recorder.produced(filepath, session)
 
     return filepath
 

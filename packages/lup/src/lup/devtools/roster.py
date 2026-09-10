@@ -298,6 +298,8 @@ LIBRARY_ROSTER = [
             declared.profiles,
             declared.launch_modes,
             declared.launch_checkpoint,
+            node_classes=declared.node_classes,
+            ledger=declared.ledger,
         ),
     ),
     RosterEntry(
