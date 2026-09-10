@@ -39,6 +39,15 @@ def handmade(root: Path) -> Path:
         'console.log("x", "<\\/script>", "<\\!--");\n', encoding="utf-8"
     )
     (home / "assets" / "index-1.css").write_text("body{margin:0}\n", encoding="utf-8")
+    # The template the build emits beside the page: the bundle in raw blocks,
+    # the log's one expression in the mount element's attribute.
+    (home / "export.html.j2").write_text(
+        '<!doctype html><div id="root" data-lup-export="{{ log }}"></div>\n'
+        "<style>{% raw %}body{margin:0}\n{% endraw %}</style>\n"
+        '<script type="module">{% raw %}console.log("x", "<\\/script>", "<\\!--");\n'
+        "{% endraw %}</script>\n",
+        encoding="utf-8",
+    )
     return root / "bundles"
 
 

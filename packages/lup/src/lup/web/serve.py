@@ -19,13 +19,13 @@ import webbrowser
 from collections.abc import Callable
 from importlib import resources
 from importlib.resources.abc import Traversable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import typer
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
+from jinja2 import Environment, StrictUndefined, Template
 
 from lup.web.loopback import guard_loopback_host, refuse_non_loopback
 
@@ -50,37 +50,29 @@ def bundle_root(surface: str, bundles: Path | None = None) -> Traversable:
     return root
 
 
-class BundleAssets(BaseModel, frozen=True):
-    """The pieces of one built surface a page carries inline: its scripts and styles."""
+def bundle_template(surface: str, bundles: Path | None = None) -> Template:
+    """One built surface's export template, compiled to autoescape what it is handed.
 
-    scripts: list[str]
-    styles: list[str]
-
-
-def bundle_assets(surface: str, bundles: Path | None = None) -> BundleAssets:
-    """One built surface's scripts and stylesheets, read whole, in name order.
-
-    For a page that has to carry the surface itself — an export opened from a
-    file, with no server to answer for ``assets/``. The build emits one
-    script and one stylesheet per surface, so a name order is an order.
+    Where a surface exports, its build emits ``export.html.j2`` beside
+    ``index.html``: the page itself with the script and the stylesheet inline,
+    made safe to inline when they were built, and the mount element carrying
+    ``data-lup-export="{{ log }}"``. Compiled with autoescape on, so what a
+    render hands it is entity-escaped into that attribute, and with an
+    undefined name a refusal rather than an empty string; the bundle's own
+    text sits in raw blocks the engine never reads. A surface whose bundle
+    holds no template is refused naming the command that builds one.
     """
-    root = bundle_root(surface, bundles)
-    found = sorted(
-        (entry for entry in root.joinpath("assets").iterdir() if entry.is_file()),
-        key=lambda entry: entry.name,
+    found = bundle_root(surface, bundles).joinpath("export.html.j2")
+    if not found.is_file():
+        raise ValueError(
+            f"the {surface!r} bundle holds no export template: the surface does"
+            " not export, or its bundle predates one — run"
+            " `uv run lup-devtools harness generate all` with bun installed"
+        )
+    environment = Environment(
+        autoescape=True, undefined=StrictUndefined, keep_trailing_newline=True
     )
-    return BundleAssets(
-        scripts=[
-            entry.read_text(encoding="utf-8")
-            for entry in found
-            if PurePosixPath(entry.name).suffix == ".js"
-        ],
-        styles=[
-            entry.read_text(encoding="utf-8")
-            for entry in found
-            if PurePosixPath(entry.name).suffix == ".css"
-        ],
-    )
+    return environment.from_string(found.read_text(encoding="utf-8"))
 
 
 def bundle_app(
