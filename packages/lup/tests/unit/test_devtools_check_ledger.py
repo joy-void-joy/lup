@@ -1,14 +1,14 @@
 """What the pre-flight gate says about where a repository keeps its log.
 
-`run_checks` takes the placement a project declares and hands every sweep to
+`run_checks` takes the layout a project declares and hands every sweep to
 `scan_reports` through one partial. A parameter that partial leaves out is no
 error: `scan_reports` declares a default for it, so the gate runs, reports,
-and answers about the shared store for a repository whose journal is in the
-tree — the one placement with something to check. The first two tests drive
-the gate over a throwaway repository and read the row it prints; the third
-holds the partial to the signature, so a parameter added to `scan_reports`
-and left out of the gate fails here rather than in the project that declared
-it.
+and answers about a log with no committed half for a repository whose
+committed journal is in the tree — the one half with something to check. The
+first two tests drive the gate over a throwaway repository and read the row
+it prints; the third holds the partial to the signature, so a parameter added
+to `scan_reports` and left out of the gate fails here rather than in the
+project that declared it.
 """
 
 import inspect
@@ -22,7 +22,7 @@ import typer
 import lup.devtools.dev.check as check
 from lup.devtools.project import DevProject
 from lup.harness.models import HookSet
-from lup.ledger.store import InTree
+from lup.ledger.store import InTree, LedgerLayout
 from tests.unit.test_ledger_placement import committed, repository
 
 UNION = "ledger/journal.jsonl merge=union\n"
@@ -56,7 +56,7 @@ def gate(tmp_lup_project: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-def checked(ledger: InTree) -> None:
+def checked(ledger: LedgerLayout) -> None:
     check.run_checks(
         fix=False,
         no_test=True,
@@ -70,7 +70,7 @@ def checked(ledger: InTree) -> None:
     )
 
 
-def printed(ledger: InTree, capsys: pytest.CaptureFixture[str]) -> list[str]:
+def printed(ledger: LedgerLayout, capsys: pytest.CaptureFixture[str]) -> list[str]:
     """Every line the gate echoed, whether or not it went on to refuse: a
     throwaway repository has no merge driver registered, so the exit says
     nothing about the row under test."""
@@ -84,29 +84,41 @@ def placement_row(lines: list[str]) -> str:
     return row
 
 
-def test_a_journal_in_the_tree_fails_the_gate_until_it_merges_by_union(
+def test_a_committed_half_fails_the_gate_until_it_merges_by_union(
     gate: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    placement = InTree()
+    layout = LedgerLayout(committed=InTree())
 
-    lines = printed(placement, capsys)
+    lines = printed(layout, capsys)
 
-    assert placement_row(lines) == f"ledger placement: FAIL ({placement.describe()})"
+    assert placement_row(lines) == f"ledger placement: FAIL ({layout.describe()})"
     assert any('"ledger/journal.jsonl merge=union"' in line for line in lines)
     assert lines[-1].startswith("Failed:") and "ledger placement" in lines[-1]
 
 
-def test_a_journal_declared_to_merge_by_union_passes_as_in_tree(
+def test_a_committed_half_declared_to_merge_by_union_passes_naming_both_halves(
     gate: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (gate / ".gitattributes").write_text(UNION, encoding="utf-8")
-    placement = InTree()
+    layout = LedgerLayout(committed=InTree())
 
-    lines = printed(placement, capsys)
+    lines = printed(layout, capsys)
 
-    assert placement_row(lines) == f"ledger placement: ok ({placement.describe()})"
-    assert "in the tree" in placement_row(lines)
+    assert placement_row(lines) == (
+        "ledger placement: ok (committed kinds in the tree at ledger/, merged by"
+        " union; local kinds shared under the git directory)"
+    )
     assert "ledger placement" not in lines[-1]
+
+
+def test_a_log_with_no_committed_half_has_nothing_to_ask_git(
+    gate: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    lines = printed(LedgerLayout(), capsys)
+
+    assert placement_row(lines) == (
+        "ledger placement: ok (every kind shared under the git directory)"
+    )
 
 
 def test_the_gate_binds_every_parameter_scan_reports_declares(
@@ -122,10 +134,10 @@ def test_the_gate_binds_every_parameter_scan_reports_declares(
         return []
 
     monkeypatch.setattr(check, "scan_reports", recording)
-    placement = InTree()
+    layout = LedgerLayout(committed=InTree())
 
-    checked(placement)
+    checked(layout)
 
     [call] = calls
     assert set(call.arguments) == set(declared.parameters)
-    assert call.arguments["ledger"] is placement
+    assert call.arguments["ledger"] is layout

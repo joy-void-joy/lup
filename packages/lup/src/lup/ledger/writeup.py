@@ -14,17 +14,19 @@ in, a listing of nodes chosen by kind or standing or relation, what needs a
 person, a stamp saying what the document was generated from. A new kind of
 part is a new variant, not a branch somewhere else.
 
-**Generated on demand, and drift-checked only where the log is in the tree.**
-Under the shared store the ledger is live state under the repository's own
-git directory, so the same declaration renders differently on a machine that
-has recorded and one that has not. A writeup is then written by `ledger
-writeup` and committed like any other document, and `--check` verifies it
-against *this* machine's log; what keeps it honest everywhere is that every
-figure it renders is a `lup:` cite, which the cite check holds to the node
-wherever the log is. Where a project declared its log in the tree, every
-machine holds the same log, and the writeups are repository writers like any
-other generated file. The stamp names the newest record rather than the wall
-clock, so one log renders one document either way.
+**Generated on demand, and drift-checked where every rendered kind is
+committed.** Each part says which kinds it renders, or that it cannot say —
+one naming nodes rather than kinds — and a writeup whose every kind the
+project's layout commits renders the same on every machine, so it is a
+repository writer like any other generated file. One rendering a local kind
+reads live state under the repository's own git directory, so the same
+declaration renders differently on a machine that has recorded and one that
+has not; it is written by `ledger writeup` and committed like any other
+document, and `--check` verifies it against *this* machine's log. What keeps
+either honest everywhere is that every figure it renders is a `lup:` cite,
+which the cite check holds to the node wherever the log is. The stamp names
+the newest record rather than the wall clock, so one log renders one
+document either way.
 """
 
 from abc import ABC, abstractmethod
@@ -37,12 +39,14 @@ from pydantic import BaseModel, Field
 from lup.coordination.identity import mint_member_id
 from lup.coordination.refs import ActorRef
 from lup.coordination.rendering import GROUPS, task_line, user_tasks
+from lup.coordination.tasks import Task
 from lup.formats.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
 from lup.ledger.journal import LedgerStore
+from lup.ledger.kinds import kind_of
 from lup.ledger.models import LedgerNode
-from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.store import LedgerLayout
 from lup.workspace.paths import project_root
 
 # lup: ignore[constant-declaration] — the command that regenerates a writeup,
@@ -102,6 +106,17 @@ class WriteupPart(BaseModel, ABC, frozen=True):
     def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
         """This part as lines of markdown, read from the store now."""
 
+    @abstractmethod
+    def kinds(self) -> list[str] | None:
+        """The kinds this part renders, or nothing where the declaration cannot say.
+
+        What decides whether the document is the same on every machine: a
+        part reading only kinds the layout commits renders identically
+        everywhere, one reading a local kind does not, and one naming nodes
+        rather than kinds cannot tell until the log is read — which is too
+        late for a decision the roster takes at composition.
+        """
+
 
 class Prose(WriteupPart, frozen=True):
     """The author's own markdown, with figures filled in where it names them.
@@ -126,6 +141,10 @@ class Prose(WriteupPart, frozen=True):
             raise WriteupError(
                 f"prose names a placeholder no figure fills: {unnamed}"
             ) from unnamed
+
+    def kinds(self) -> list[str] | None:
+        """Nothing where the prose stands alone; unknown where a figure names a node."""
+        return None if self.figures else []
 
 
 class Listing(WriteupPart, frozen=True):
@@ -216,6 +235,12 @@ class Listing(WriteupPart, frozen=True):
             lines.append(f"| {number} | {what} | {where.label} | `{handle(node)}` |")
         return [*lines, ""]
 
+    def kinds(self) -> list[str] | None:
+        """The one kind chosen by `of`; unknown where rows are named, related, or every kind."""
+        if self.nodes or self.into or not self.of:
+            return None
+        return [self.of]
+
 
 class NeedsPerson(WriteupPart, frozen=True):
     """What is waiting on the person, grouped by what each row costs them.
@@ -244,6 +269,9 @@ class NeedsPerson(WriteupPart, frozen=True):
             lines.append("")
         return lines
 
+    def kinds(self) -> list[str] | None:
+        return [kind_of(Task)]
+
 
 class Stamp(WriteupPart, frozen=True):
     """What this document was generated from, so a reader knows how current it is.
@@ -256,9 +284,34 @@ class Stamp(WriteupPart, frozen=True):
     counting: list[str] = []
     """Kinds worth a count of their own beside the totals — corrections, say."""
 
+    of: list[str] = []
+    """The kinds this document is generated from; every kind where empty.
+
+    Named so the stamp counts what the document renders and nothing else: a
+    document over committed kinds stamped over the whole log would change
+    with every local record, on every machine differently. An edge counts
+    only where both of its ends are among these kinds, which is exactly the
+    edges the committed half holds.
+    """
+
+    def kinds(self) -> list[str] | None:
+        return self.of or None
+
     def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
-        nodes = store.all_nodes(classes)
-        edges = store.edges()
+        nodes = [
+            node
+            for node in store.all_nodes(classes)
+            if not self.of or node.kind in self.of
+        ]
+        edges = [
+            edge
+            for edge in store.edges()
+            if not self.of
+            or (
+                store.kind_at(edge.source) in self.of
+                and store.kind_at(edge.target) in self.of
+            )
+        ]
         newest = max((node.at for node in nodes), default=None)
         counted = "; ".join(
             f"{sum(1 for node in nodes if node.kind == kind)} {kind}"
@@ -286,6 +339,18 @@ class Writeup(BaseModel, frozen=True):
 
     parts: list[WriteupPart] = Field(min_length=1)
 
+    def kinds(self) -> list[str] | None:
+        """Every kind this document renders, or nothing where one part cannot say.
+
+        Each kind once, in the order the parts first name it. One part that
+        cannot say makes the document one that cannot, since a reader is
+        asking whether the whole file is the same everywhere.
+        """
+        answers = [part.kinds() for part in self.parts]
+        if any(answer is None for answer in answers):
+            return None
+        return list(dict.fromkeys(kind for answer in answers for kind in answer or []))
+
 
 def render_writeup(
     store: LedgerStore, classes: list[type[LedgerNode]], writeup: Writeup
@@ -306,7 +371,7 @@ def write_writeup(
     root: Path | None = None,
     *,
     check: bool = False,
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> Path:
     """Write one writeup from this machine's ledger, or verify the one on disk.
 
@@ -314,11 +379,11 @@ def write_writeup(
     the banner says where to edit and what to run, and `--check` says stale
     in the same words — against this machine's log, which is the only one it
     can see. The signature past the writeup and its classes is a repository
-    writer's, so a project whose log is in the tree lists these among its
-    generated files.
+    writer's, so a writeup whose every kind is committed is listed among a
+    project's generated files.
     """
     base = root or project_root()
-    store = LedgerStore(base, ActorRef(kind="console", id=mint_member_id()), placement)
+    store = LedgerStore(base, ActorRef(kind="console", id=mint_member_id()), layout)
     artifact = Artifact.generated(
         path=Path(writeup.path),
         body=render_writeup(store, classes, writeup),

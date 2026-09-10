@@ -10,10 +10,11 @@ also the one place a list of node classes is needed: a record names its type
 and not the class that reads it, so something has to try. Everything else in
 the codebase asks the store for the type it actually wants.
 
-Every command reads the shared git directory, so any checkout answers and none
-of them owns the answer. Nothing holds a lock: a listing folds an append-only
-file, which is why a session recording flat out does not delay a console
-reading it, and a console cannot wedge a session.
+Every command folds both halves of the log — the journal committed with the
+code and the one under the shared git directory — so any checkout answers
+and none of them owns the answer. Nothing holds a lock: a listing folds
+append-only files, which is why a session recording flat out does not delay
+a console reading it, and a console cannot wedge a session.
 """
 
 from datetime import datetime
@@ -37,14 +38,14 @@ from lup.coordination.tasks import NEEDS_NAMES, Needs, Task
 from lup.coordination.refs import ActorRef
 from lup.ledger.cite import read_cites
 from lup.ledger.journal import LedgerRefusal, LedgerStore
-from lup.ledger.kinds import by_kind, declared_fields, kind_of
+from lup.ledger.kinds import by_kind, declared_fields, kind_of, summary_of
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.snapshot import snapshot
 from lup.ledger.writeup import Writeup, WriteupError, write_writeup
 from lup.types import JsonObject
 from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
-from lup.ledger.store import LedgerPlacement, SharedStore, ledger_root
+from lup.ledger.store import LedgerLayout
 from lup.workspace.edition import shared_git_directory
 from lup.workspace.paths import project_root
 
@@ -145,7 +146,7 @@ def create_ledger_app(
     classes: list[type[LedgerNode]],
     edges: list[type[LedgerEdge]] | None = None,
     writeups: list[Writeup] | None = None,
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> typer.Typer:
     """Wire the command tree for this repository's notes, over these types.
 
@@ -157,8 +158,8 @@ def create_ledger_app(
     types for. Recording and relating are generic for the same reason: a kind
     is looked up in what the project declared, and the type validates the
     fields, so there is one `record` rather than one command per kind. The
-    placement is the project's too: where its log lives, shared under the
-    git directory or committed in the tree.
+    layout is the project's too: which kinds are committed with the code and
+    which stay local under the git directory.
     """
     app = typer.Typer(no_args_is_help=True)
     relations = list(edges or [])
@@ -169,7 +170,7 @@ def create_ledger_app(
         return LedgerStore(
             project_root(),
             ActorRef(kind="console", id=mint_member_id()),
-            placement,
+            layout,
         )
 
     def found(held: LedgerStore, node_id: str) -> LedgerNode:
@@ -185,15 +186,22 @@ def create_ledger_app(
 
         The fields are what `record --json` and `relate --json` accept, read
         off the types so the listing cannot disagree with what is validated.
+        Each node kind says which half of the log it is written to; a
+        relation's placement follows its two ends.
         """
         if not classes and not relations:
             typer.echo("This project declares no ledger types.")
             return
-        for declared in [*classes, *relations]:
-            summary = (declared.__doc__ or "").strip().splitlines()
+        for declared in classes:
             typer.echo(
-                f"{kind_of(declared)}  ({declared.__name__}) — "
-                f"{summary[0] if summary else ''}"
+                f"{kind_of(declared)}  ({declared.__name__},"
+                f" {layout.placement(kind_of(declared))}) — {summary_of(declared)}"
+            )
+            for line in declared_fields(declared):
+                typer.echo(f"    {line}")
+        for declared in relations:
+            typer.echo(
+                f"{kind_of(declared)}  ({declared.__name__}) — {summary_of(declared)}"
             )
             for line in declared_fields(declared):
                 typer.echo(f"    {line}")
@@ -327,14 +335,14 @@ def create_ledger_app(
     ) -> None:
         """Generate the documents this project declares over its ledger.
 
-        Written from this machine's log and committed like any document.
-        Under the shared store they are not drift-checked by `dev check`: the
-        log is live state under the git directory, so the same declaration
-        renders differently where nothing has been recorded, and `--check`
-        asks whether the file on disk is what this machine would render —
-        the question a person about to commit one has. With the log in the
-        tree every machine renders the same document, and the writeups are
-        generated and drift-checked with every other repository artifact.
+        Written from this machine's log and committed like any document. One
+        whose every rendered kind is committed renders the same on every
+        machine, so it is also generated and drift-checked with every other
+        repository artifact. One rendering a local kind is not drift-checked
+        by `dev check`: the local half is live state under the git directory,
+        so the same declaration renders differently where nothing has been
+        recorded, and `--check` asks whether the file on disk is what this
+        machine would render — the question a person about to commit one has.
         """
         declared = list(writeups or [])
         chosen = [each for each in declared if not name or each.name == name]
@@ -345,7 +353,7 @@ def create_ledger_app(
         for each in chosen:
             try:
                 written = write_writeup(
-                    each, classes, project_root(), check=check, placement=placement
+                    each, classes, project_root(), check=check, layout=layout
                 )
             except (RuntimeError, WriteupError) as problem:
                 typer.echo(str(problem))
@@ -633,32 +641,37 @@ def create_ledger_app(
             str, typer.Option("--branch", help="Where the copy is committed")
         ] = SNAPSHOT_BRANCH,
     ) -> None:
-        """Commit the store to a branch of its own, for a record worth keeping.
+        """Commit the local half to a branch of its own, for a record worth keeping.
 
-        The shared store is live untracked state the rest of the time, which
+        The local half is live untracked state the rest of the time, which
         is what keeps a node per turn out of the history of the code. This is
         the deliberate act that preserves it, and it is somebody asking rather
-        than something happening on every write. A log declared in the tree
-        is committed with the code, and there is nothing here to copy.
+        than something happening on every write. The committed half is
+        already in git, so it is not copied: the snapshot is the local
+        journal and the blobs beside it, and nothing else.
         """
         root = project_root()
-        if placement.tracked():
-            typer.echo(
-                f"The ledger is {placement.describe()}: it is committed with the"
-                " code, so there is nothing to snapshot."
-            )
-            raise typer.Exit(1)
-        held = ledger_root(root, placement)
+        kept = (
+            f"  committed kinds are {layout.committed.describe()}: already in git,"
+            " not copied"
+            if layout.committed is not None
+            else ""
+        )
+        held = layout.local.root(root)
         if not held.exists():
-            typer.echo("This repository has recorded nothing to snapshot.")
+            typer.echo("This repository has recorded nothing local to snapshot.")
+            if kept:
+                typer.echo(kept)
             raise typer.Exit(1)
         commit = snapshot(
             held,
             shared_git_directory(root),
             branch,
-            f"snapshot({branch}): the ledger as it stands",
+            f"snapshot({branch}): the local half of the ledger as it stands",
         )
         typer.echo(f"{branch} at {commit[:12]}: {held}")
+        if kept:
+            typer.echo(kept)
 
     @app.command("explore")
     def explore_cmd(
@@ -690,14 +703,12 @@ def create_ledger_app(
 
         root = project_root()
         if export is not None:
-            written = export_explorer(
-                root, classes, relations, export, placement=placement
-            )
+            written = export_explorer(root, classes, relations, export, layout=layout)
             typer.echo(f"written {written}")
             return
         try:
             serve_explorer(
-                root, classes, relations, host, port, open_page, placement=placement
+                root, classes, relations, host, port, open_page, layout=layout
             )
         except ValueError as error:
             raise typer.BadParameter(str(error)) from error

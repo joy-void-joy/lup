@@ -3,36 +3,44 @@
 # one DAG. Two processes that spelled them differently would keep two
 # ledgers, so they are an identity of this layout rather than a caller's
 # choice.
-"""Where one repository's notes live, and the one decision a project makes about it.
+"""Where one repository's notes live, and the decision a project makes about it per kind.
 
-Two placements, one store. **Shared** is the default: the log sits under the
-git directory every worktree of one clone resolves to, outside all of them,
-so a branch cannot change what a reader sees and removing a worktree does not
-take the notes with it. That is the whole answer to a ledger that forks — the
+One log, two journals. Every kind of record a project declares is either
+**committed** — its lines sit in a journal inside the worktree, travel with
+commits, are reviewed in a diff, and are the same on every machine — or
+**local**, under the git directory every worktree of one clone resolves to,
+outside all of them, so a branch cannot change what a reader sees and
+removing a worktree does not take the notes with it. The two journals are
+one log: one id space, edges crossing kinds freely, and every reader folds
+both. An edge is committed only where both of its ends are, so git never
+carries a reference to a record it does not hold.
+
+Local is the default and the whole answer to a ledger that forks — the
 repository this came from kept eight copies in eight worktrees and reconciled
-them with a script that dropped every modification. **In the tree** is the
-option: the log sits inside the worktree, travels with commits, is reviewed
-in a diff, and is the same on every machine. Every worktree then holds a
-copy, and what makes that viable is the shape already chosen — append-only
-lines with unique ids — so two branches appending is exactly what git's own
-``union`` merge resolves losslessly, and a read folds any duplicate by id.
+them with a script that dropped every modification. What makes the committed
+half viable is the shape already chosen — append-only lines with unique ids —
+so two branches appending is exactly what git's own ``union`` merge resolves
+losslessly, and a read folds any duplicate by id.
 
-The placement is a declaration in the project's code rather than a path a
+The layout is a declaration in the project's code rather than a path a
 worktree could be configured with, so two checkouts of one branch cannot be
-set differently: the code that says where the log is travels with the tree
-that reads it. :mod:`lup.coordination` keeps its roster under the git
+set differently: the code that says where each kind goes travels with the
+tree that reads it. :mod:`lup.coordination` keeps its roster under the git
 directory whichever is chosen, because a roster is about the live sessions
 on this machine and nothing else.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 import sh
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from lup.execution.shell import git
+from lup.ledger.kinds import kind_of
+from lup.ledger.models import LedgerNode, Placement
 from lup.workspace.edition import shared_git_directory
 
 STORE_DIR = "lup"
@@ -42,23 +50,13 @@ BLOBS_DIR = "blobs"
 
 
 class LedgerPlacement(BaseModel, ABC, frozen=True):
-    """Where a repository keeps its log; each placement answers for its consequences."""
+    """Where one half of a repository's log is kept; each placement answers for its consequences."""
 
     kind: str
 
     @abstractmethod
     def root(self, project: Path) -> Path:
-        """The directory this project's log and blobs live under, given its tree."""
-
-    @abstractmethod
-    def tracked(self) -> bool:
-        """Whether the log is committed with the code, and so the same everywhere.
-
-        What two things downstream turn on: a document rendered from the log
-        can be drift-checked only where every machine renders the same one,
-        and a snapshot branch is worth taking only where nothing else keeps
-        the log.
-        """
+        """The directory this half's journal and blobs live under, given the tree."""
 
     @abstractmethod
     def problems(self, project: Path) -> list[str]:
@@ -66,19 +64,16 @@ class LedgerPlacement(BaseModel, ABC, frozen=True):
 
     @abstractmethod
     def describe(self) -> str:
-        """Where the log is, as the gate's row reads it."""
+        """Where this half is, as the gate's row reads it."""
 
 
 class SharedStore(LedgerPlacement, frozen=True):
-    """Under the git directory every worktree shares: one log, and no seam to get wrong."""
+    """Under the git directory every worktree shares: one copy, and no seam to get wrong."""
 
     kind: Literal["shared"] = "shared"
 
     def root(self, project: Path) -> Path:
         return shared_git_directory(project) / STORE_DIR / LEDGER_DIR
-
-    def tracked(self) -> bool:
-        return False
 
     def problems(self, project: Path) -> list[str]:
         del project
@@ -106,9 +101,6 @@ class InTree(LedgerPlacement, frozen=True):
     def root(self, project: Path) -> Path:
         return project / self.path
 
-    def tracked(self) -> bool:
-        return True
-
     def journal(self) -> Path:
         """The journal's path relative to the tree, which the attribute names."""
         return self.path / JOURNAL_FILE
@@ -124,7 +116,91 @@ class InTree(LedgerPlacement, frozen=True):
         ]
 
     def describe(self) -> str:
-        return f"in the tree at {self.path.as_posix()}/, journal merged by union"
+        return f"in the tree at {self.path.as_posix()}/, merged by union"
+
+
+class LedgerLayout(BaseModel, frozen=True):
+    """One log in two journals, and which of a project's kinds go to which.
+
+    ``committed`` is the half git carries, or none; ``local`` the half under
+    the git directory. ``placements`` says for each declared kind which half
+    its records are written to, and a kind it does not name is local — so a
+    project that never declares a committed kind keeps one journal under the
+    git directory and nothing else changes for it. A kind placed committed
+    with no committed half to go to is refused here, at declaration, rather
+    than at the first record.
+    """
+
+    committed: InTree | None = None
+    local: SharedStore = SharedStore()
+    placements: dict[type[LedgerNode], Placement] = {}
+
+    @model_validator(mode="after")
+    def committed_kinds_have_somewhere_to_go(self) -> Self:
+        stranded = [
+            kind_of(declared)
+            for declared, where in self.placements.items()
+            if where == "committed"
+        ]
+        if stranded and self.committed is None:
+            raise ValueError(
+                f"{', '.join(stranded)} placed committed with no committed half;"
+                " declare `committed=InTree()` or place them local"
+            )
+        return self
+
+    def placement(self, kind: str) -> Placement:
+        """Which half records of one kind are written to: local unless declared committed."""
+        by_kind: dict[str, Placement] = {
+            kind_of(declared): where for declared, where in self.placements.items()
+        }
+        return by_kind.get(kind, "local")
+
+    def placement_of(self, kinds: list[str]) -> Placement:
+        """Where a record decided by these kinds is written.
+
+        Committed only where every one of them is, which for a node is its
+        own kind and for an edge is both of its ends' — so an edge touching
+        a local node stays local, and git never carries a reference to a
+        record it does not hold. No kind at all is a record the log cannot
+        place, and that goes local too.
+        """
+        return "committed" if kinds and self.tracked(kinds) else "local"
+
+    def tracked(self, kinds: Iterable[str]) -> bool:
+        """Whether records of every one of these kinds are the same on every machine.
+
+        What two things downstream turn on: a document rendered from these
+        kinds can be drift-checked only where every machine renders the same
+        one, and a snapshot branch is worth taking only over what nothing
+        else keeps. No kinds at all are trivially the same everywhere.
+        """
+        return all(self.placement(kind) == "committed" for kind in kinds)
+
+    def roots(self, project: Path) -> dict[Placement, Path]:
+        """The directory each half's journal and blobs live under, given the tree.
+
+        The committed half first where there is one, so a fold that breaks a
+        tie by position reads the local copy as the later.
+        """
+        halves: dict[Placement, Path] = {}
+        if self.committed is not None:
+            halves["committed"] = self.committed.root(project)
+        halves["local"] = self.local.root(project)
+        return halves
+
+    def problems(self, project: Path) -> list[str]:
+        """What this checkout lacks for the layout to hold; only the committed half can lack anything."""
+        return self.committed.problems(project) if self.committed is not None else []
+
+    def describe(self) -> str:
+        """Where each half is, as the gate's row reads it."""
+        if self.committed is None:
+            return f"every kind {self.local.describe()}"
+        return (
+            f"committed kinds {self.committed.describe()};"
+            f" local kinds {self.local.describe()}"
+        )
 
 
 def merges_by_union(project: Path, path: Path) -> bool:
@@ -144,13 +220,3 @@ def merges_by_union(project: Path, path: Path) -> bool:
     except sh.ErrorReturnCode:
         return False
     return framed == f"{path.as_posix()}\0merge\0union\0"
-
-
-def ledger_root(root: Path, placement: LedgerPlacement = SharedStore()) -> Path:
-    """The directory *root*'s repository records into, under the placement it declared.
-
-    A path in no repository answers for itself through
-    :func:`~lup.workspace.edition.shared_git_directory`, so a caller outside a
-    clone gets somewhere to write rather than an exception about git.
-    """
-    return placement.root(root)

@@ -6,7 +6,9 @@ every row is the ledger's, read at generation with its standing beside it, so
 the document cannot carry a number the log stopped supporting. This one is the
 scaffold's worked example: what this repository has recorded about itself, in
 the order a reader picking it up asks — what is open, what is claimed and how
-well it stands, what waits on a person, what was corrected.
+well it stands, what waits on a person, what was corrected. Every kind it
+renders is committed with the code, so it is also a generated file `harness
+generate all` writes and `dev check` holds current.
 
 An adopting project replaces the parts, keeps the shape, and adds documents by
 adding to `WRITEUPS`.
@@ -43,7 +45,15 @@ STATUS = Writeup(
             of="corpus:correction",
             empty="Nothing has been corrected.",
         ),
-        Stamp(counting=["corpus:claim", "corpus:correction"]),
+        Stamp(
+            of=[
+                "corpus:question",
+                "corpus:claim",
+                "coordination:task",
+                "corpus:correction",
+            ],
+            counting=["corpus:claim", "corpus:correction"],
+        ),
     ],
 )
 """What this repository has recorded, as one document a reader opens on."""

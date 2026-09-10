@@ -48,6 +48,7 @@ function Kinds({ nodes, edges }: { nodes: KindInfo[]; edges: KindInfo[] }) {
       {[...nodes, ...edges].map((kind) => (
         <p key={kind.kind} title={kind.fields.join("\n")}>
           <code>{kind.kind}</code> {kind.summary}
+          {kind.placement ? <em> · {kind.placement}</em> : null}
         </p>
       ))}
     </details>

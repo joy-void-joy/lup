@@ -29,7 +29,7 @@ from lup.coordination.identity import mint_member_id
 from lup.coordination.refs import ActorRef
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerEdge, LedgerNode
-from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.store import LedgerLayout
 from lup.ledger.views import (
     ExportView,
     GraphView,
@@ -52,9 +52,9 @@ differently would serve nothing.
 """
 
 
-def opened(root: Path, placement: LedgerPlacement) -> LedgerStore:
+def opened(root: Path, layout: LedgerLayout) -> LedgerStore:
     """The store, opened to read; a reader mints a console identity like the CLI."""
-    return LedgerStore(root, ActorRef(kind="console", id=mint_member_id()), placement)
+    return LedgerStore(root, ActorRef(kind="console", id=mint_member_id()), layout)
 
 
 def since_moment(spelling: str) -> datetime | None:
@@ -75,7 +75,7 @@ def explorer_app(
     classes: list[type[LedgerNode]],
     edges: list[type[LedgerEdge]],
     bundles: Path | None = None,
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> FastAPI:
     """The explorer over one repository's log: its page, and the routes it reads.
 
@@ -87,7 +87,7 @@ def explorer_app(
     @application.get("/api/graph")
     async def graph(kind: str = "", standing: str = "", since: str = "") -> GraphView:
         return graph_view(
-            opened(root, placement),
+            opened(root, layout),
             classes,
             kind=kind,
             standing=standing,
@@ -96,7 +96,7 @@ def explorer_app(
 
     @application.get("/api/node/{spelling}")
     async def node(spelling: str) -> NodeDetail:
-        store = opened(root, placement)
+        store = opened(root, layout)
         found = store.resolve(spelling, classes)
         if found is None:
             raise HTTPException(
@@ -106,7 +106,7 @@ def explorer_app(
 
     @application.get("/api/kinds")
     async def kinds() -> KindsView:
-        return kinds_view(classes, edges)
+        return kinds_view(classes, edges, layout)
 
     return application
 
@@ -115,16 +115,16 @@ def export_view(
     root: Path,
     classes: list[type[LedgerNode]],
     edges: list[type[LedgerEdge]],
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> ExportView:
     """The whole log as one value, for a page that cannot ask for more later."""
-    store = opened(root, placement)
+    store = opened(root, layout)
     return ExportView(
         graph=graph_view(store, classes),
         details=[
             node_detail(store, classes, node) for node in store.all_nodes(classes)
         ],
-        kinds=kinds_view(classes, edges),
+        kinds=kinds_view(classes, edges, layout),
         exported_at=utc_now(),
     )
 
@@ -174,7 +174,7 @@ def export_explorer(
     edges: list[type[LedgerEdge]],
     destination: Path,
     bundles: Path | None = None,
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> Path:
     """Write the explorer as one file holding the log as it is now.
 
@@ -182,7 +182,7 @@ def export_explorer(
     what the log held when it was written — the page says when.
     """
     page = export_page(
-        export_view(root, classes, edges, placement), bundle_assets(SURFACE, bundles)
+        export_view(root, classes, edges, layout), bundle_assets(SURFACE, bundles)
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(page, encoding="utf-8")
@@ -196,11 +196,11 @@ def serve_explorer(
     host: str,
     port: int,
     open_page: bool = True,
-    placement: LedgerPlacement = SharedStore(),
+    layout: LedgerLayout = LedgerLayout(),
 ) -> None:
     """Bind the loopback and serve the explorer over this repository's log."""
     serve_local_page(
-        lambda url: explorer_app(url, root, classes, edges, placement=placement),
+        lambda url: explorer_app(url, root, classes, edges, layout=layout),
         "Ledger explorer",
         host,
         port,

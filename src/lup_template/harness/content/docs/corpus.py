@@ -13,8 +13,10 @@ the evidence that backs each one and the corrections that have since retired
 some. This repository's corpus types live in `src/lup_template/corpus.py`:
 `Claim`, `Question`, `Evidence` as artifact or certificate, `Source`,
 `Correction`, and the edges between them. They are declared in `node_classes`
-and `edge_classes` exactly as `Task` is, and the ledger's generic commands
-record, relate, list and check them.
+and `edge_classes` exactly as `Task` is, placed committed in the layout
+beside them (`src/lup_template/kinds.py`) so the corpus travels with the
+code and is reviewed in a diff, and the ledger's generic commands record,
+relate, list and check them.
 
 **They are the template's, not the library's, by decision.** Nothing in the
 library consumes them; the ledger's charter is to declare no epistemics, and
@@ -145,8 +147,10 @@ from the corpus instead, which is what writeups are.
 the way guidance is declared: as parts. `docs/corpus-status.md` is the worked
 example — the open questions, the claims and where each stands, what waits on
 a person, the corrections, and a stamp naming the newest record it was
-generated from. `uv run lup-devtools ledger writeup` writes it from this
-machine's ledger; `--check` verifies the file on disk. The prose is the
+generated from. Every kind it renders is committed with the code, so it is a
+generated file like the rest: `harness generate all` writes it and `dev
+check` refuses one that is behind; `uv run lup-devtools ledger writeup`
+writes it too, and `--check` verifies the file on disk. The prose is the
 author's and every figure is the ledger's, cited, so a number in it cannot
 outlive what supports it: a claim that stopped standing renders struck through
 with the reason, and the cite check reports it besides.

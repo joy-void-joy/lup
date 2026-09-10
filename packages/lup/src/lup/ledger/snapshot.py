@@ -1,9 +1,10 @@
-"""Putting a copy of the live store somewhere git will keep it.
+"""Putting a copy of the local half of the store somewhere git will keep it.
 
-The store is untracked on purpose. Notes accumulate as work happens, nobody
-reviews a diff of them, and a note per turn in the history of the code would
-make the history of the code unreadable. So preservation is a deliberate act
-somebody asks for, not something that happens on every write.
+The local half is untracked on purpose. Notes accumulate as work happens,
+nobody reviews a diff of them, and a note per turn in the history of the code
+would make the history of the code unreadable. So preservation is a
+deliberate act somebody asks for, not something that happens on every write.
+The committed half is already in git and is not copied.
 
 It goes to a branch of its own, sharing no history with the code it is about,
 and it is written with plumbing rather than ``git add``: the store sits inside

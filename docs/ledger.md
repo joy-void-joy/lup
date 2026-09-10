@@ -4,13 +4,14 @@
 
 Work that outlives the session which did it has to live somewhere a later
 session finds. `lup.ledger` is that somewhere: one append-only log per
-repository, kept outside every worktree, holding typed nodes whose standing is
-computed when somebody reads rather than stored when somebody claims.
+repository, in two journals — one committed with the code, one kept outside
+every worktree — holding typed nodes whose standing is computed when somebody
+reads rather than stored when somebody claims.
 
 ## One log, separate types
 
-**The log is one file. The types in it are unrelated.** Those are two
-different facts and running them together is the mistake this shape avoids.
+**The log is one. The types in it are unrelated.** Those are two different
+facts and running them together is the mistake this shape avoids.
 
 A `Task` has a holder and what it is waiting for. A `Claim` has a grade. A
 `Correction` has what survives and what changes. They share `id`, `kind`,
@@ -40,37 +41,54 @@ id is an id.
 ## Where it lives
 
 ```
-<repo>.git/lup/ledger/
-  journal.jsonl       every node and edge, append-only, oldest first
-  blobs/<sha256>      bytes a node attached, under the digest of what they are
+<repo>/ledger/              the committed half, where the project declares one
+  journal.jsonl             every record of a committed kind, and every edge between two
+  blobs/<sha256>            bytes a committed node attached, under the digest of what they are
+<repo>.git/lup/ledger/      the local half
+  journal.jsonl             every record of a local kind, and every edge touching one
+  blobs/<sha256>            bytes a local node attached
 ```
 
-Outside every worktree, which is the whole answer to a record that forks. A
-store inside a checkout is a store per branch: worktrees diverge for days, and
-reconciling them afterwards is a script somebody writes once, races against
-live sessions, and never re-runs. There is no merge to get wrong when there is
-one log.
+One log, two journals, placed per kind. A project's `LedgerLayout`, declared
+beside its kinds, names the committed half — an `InTree()` placement, at
+`ledger/` unless told otherwise, or none — the local half, a
+`SharedStore()`, and for each kind which of the two its records go to; a
+kind the mapping does not name is local, and a kind placed committed with no
+committed half is refused at declaration. A record is appended to the
+journal its kind declares, and an edge to the committed one only where both
+of its ends are, so git never carries a reference to a record it does not
+hold. Every reader folds both journals into one log, oldest first by the
+records' own timestamps: one id space, an edge crossing the two freely, and a
+duplicate id folding the way one within a file does — latest wins, first
+position kept — which is what makes moving a kind between halves a matter of
+copying its lines later.
+
+The local half sits outside every worktree, which is the whole answer to a
+record that forks. A store inside a checkout is a store per branch:
+worktrees diverge for days, and reconciling them afterwards is a script
+somebody writes once, races against live sessions, and never re-runs. There
+is no merge to get wrong when there is one copy. Every kind is local unless
+declared otherwise, so a project that declares no committed half keeps one
+journal under the git directory and nothing else changes for it.
 
 Nothing is rewritten in place, so two sessions appending at once produce a
 longer file rather than a lost record, and a malformed line is skipped rather
 than fatal.
 
-That is the default placement, `SharedStore()`, and a project may declare
-the other: `InTree()` keeps the log inside the worktree, at `ledger/` unless
-told otherwise, so the journal travels with commits, is reviewed in a diff,
-and is the same on every machine. Every worktree then holds a copy — the
-failure the shared store answers — and what makes that viable is the shape
-already chosen: append-only lines with unique ids, so two branches appending
-is exactly what git's own `union` merge resolves losslessly, declared as
+The committed half travels with commits, is reviewed in a diff, and is the
+same on every machine. Every worktree then holds a copy — the failure the
+local half answers — and what makes that viable is the shape already chosen:
+append-only lines with unique ids, so two branches appending is exactly what
+git's own `union` merge resolves losslessly, declared as
 `ledger/journal.jsonl merge=union` in `.gitattributes` with no per-clone
 registration, and a read folds any duplicate by id. Blobs are
-content-addressed and never conflict. `dev check` reports the placement and
-refuses an in-tree journal the attribute does not cover. A forge merging on
-its server reads no attributes, so there two branches that both appended
-show a conflict, resolved by taking both sides. A symlink does not do this
-job — git stores a link as its target text — and the placement is a
+content-addressed and never conflict. `dev check` reports both halves in one
+row and refuses a committed half the attribute does not cover. A forge
+merging on its server reads no attributes, so there two branches that both
+appended show a conflict, resolved by taking both sides. A symlink does not
+do this job — git stores a link as its target text — and the layout is a
 declaration in the code rather than a per-worktree setting, so two checkouts
-of one branch cannot disagree about where the log is.
+of one branch cannot disagree about where a kind's records are.
 
 ## Standing is read, never stored
 
@@ -130,15 +148,16 @@ is why it is the library's and the rest is not. A project lists it in
 `node_classes` the way it lists `Task`; recorded with an empty title, a file
 takes its path for one.
 
-## The shared store is untracked
+## The local half is untracked
 
-Under the shared store, nodes accumulate as work happens and nobody reviews a
-diff of them. `dev ledger snapshot` commits the tree to a branch of its own,
-sharing no history with the code it is about, when somebody wants it
-preserved — a deliberate act rather than something that happens on every
-write. It is written with git plumbing over a scratch index, so it never
-stages uncommitted work. With the log in the tree it is committed with the
-code, and `snapshot` says so rather than copying what git already keeps.
+In the local half, nodes accumulate as work happens and nobody reviews a
+diff of them. `dev ledger snapshot` commits that journal and the blobs
+beside it to a branch of its own, sharing no history with the code it is
+about, when somebody wants it preserved — a deliberate act rather than
+something that happens on every write. It is written with git plumbing over
+a scratch index, so it never stages uncommitted work. The committed half is
+already in git, and `snapshot` says so rather than copying what git already
+keeps.
 
 ## Reading it
 
@@ -146,7 +165,8 @@ code, and `snapshot` says so rather than copying what git already keeps.
 narrows it. `dev ledger show <id>` prints one node with its edges and
 attachments. `dev ledger types` says what node and edge types this project
 declares, with the fields each accepts — which is what `ledger record <kind>
-"<title>" --json '{…}'` and `ledger relate <kind> <source> <target>` take.
+"<title>" --json '{…}'` and `ledger relate <kind> <source> <target>` take —
+and, for a node kind, which half of the log it is written to.
 Recording is generic: the kind is looked up in what the project declared and
 the type validates the fields, so there is one `record` rather than a command
 per kind, and a kind the project adds tomorrow is recordable today. `ledger
@@ -198,14 +218,17 @@ costs. `Stamp` says what the document was generated from, naming the newest
 record rather than the clock, so one log renders one document.
 
 `ledger writeup` writes every declared document, and `--check` verifies the
-file on disk against this machine's log. Under the shared store they are not
-drift-checked by `dev check`, deliberately: the log is live state under the
-git directory, so the same declaration renders differently where nothing has
-been recorded. What keeps a writeup honest everywhere is that every figure in
-it is a `lup:` cite, which the cite check holds to its node wherever the log
-is. With the log in the tree every machine renders the same document, so the
-writeups join the drift-checked generation: `harness generate all` writes
-them and `dev check` refuses one that is behind.
+file on disk against this machine's log. Each part says which kinds it
+renders — a `Listing` its `of`, `NeedsPerson` the tasks, a `Stamp` the kinds
+its `of` names, `Prose` none, and a part naming nodes rather than kinds
+cannot say — and a writeup whose every kind is committed renders the same on
+every machine, so it joins the drift-checked generation: `harness generate
+all` writes it and `dev check` refuses one that is behind. One rendering a
+local kind is not drift-checked, deliberately: the local half is live state
+under the git directory, so the same declaration renders differently where
+nothing has been recorded. What keeps either honest everywhere is that every
+figure in it is a `lup:` cite, which the cite check holds to its node
+wherever the log is.
 
 ## Standing reaches through the log
 

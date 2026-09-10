@@ -1,9 +1,9 @@
 """One append-only log per repository, read back as whichever type you ask for.
 
-The store is one file and the types in it are many and unrelated. Those two
-facts are separate, and running them together is the mistake this shape
-avoids: a `Task` and a `Claim` share a log, not a class, and nothing outside
-this module ever sees them unioned.
+The log is one and the types in it are many and unrelated. Those two facts
+are separate, and running them together is the mistake this shape avoids: a
+`Task` and a `Claim` share a log, not a class, and nothing outside this
+module ever sees them unioned.
 
 **Reads are per type.** ``store.read(Task)`` hands back ``list[Task]`` with
 every field typed, ``store.read(Claim)`` hands back ``list[Claim]``, and a
@@ -20,12 +20,20 @@ and has to be snapshotted consistently across all of them. Git keeps commits,
 trees and blobs in one object store for the same reason, and those are no more
 alike than these.
 
+**One log in two journals.** The project's layout places each kind committed
+or local, and every write goes to the journal its kind declares — an edge to
+the committed one only where both of its ends are. Every read folds both
+journals into one sequence, oldest first by the records' own timestamps, so
+an id is an id whichever file holds it and an edge crosses the two freely.
+That is a split by placement and not by subject: the question "what points
+at this node" is still answered over one fold.
+
 Nothing is ever rewritten in place, so two sessions appending at once produce
 a longer log rather than a lost record.
 """
 
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -33,9 +41,10 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from lup.channels.models import utc_now
 from lup.coordination.refs import ActorRef
-from lup.ledger.blobs import Blobs
-from lup.ledger.models import LedgerEdge, LedgerNode, Standing, Surroundings
-from lup.ledger.store import JOURNAL_FILE, LedgerPlacement, SharedStore, ledger_root
+from lup.ledger.blobs import BlobStores
+from lup.ledger.kinds import kind_of
+from lup.ledger.models import LedgerEdge, LedgerNode, Placement, Standing, Surroundings
+from lup.ledger.store import JOURNAL_FILE, LedgerLayout
 from lup.types import JsonObject, JsonValue
 
 
@@ -51,6 +60,41 @@ def latest[N: LedgerNode](nodes: Iterator[N]) -> list[N]:
     seen = list(nodes)
     current = {node.id: node for node in seen}
     return [current[node_id] for node_id in dict.fromkeys(node.id for node in seen)]
+
+
+def moment(line: JsonObject) -> datetime:
+    """When a stored record says it is from, as an aware moment.
+
+    A naive stamp is read as local time, which is what a writer that spelled
+    one meant by it. A record that carries no readable stamp is a record no
+    type will validate; it sorts first so it is out of every reader's way
+    rather than fatal to the fold.
+    """
+    if "at" not in line:
+        return datetime.min.replace(tzinfo=UTC)
+    try:
+        at = datetime.fromisoformat(str(line["at"]))
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    return at if at.tzinfo is not None else at.astimezone()
+
+
+class Stored(BaseModel, frozen=True):
+    """One raw record of the fold, with what decides its place in it."""
+
+    line: JsonObject
+    placement: Placement
+    """Which journal held it."""
+
+    own: bool
+    """Whether that journal is the one its kind is declared into.
+
+    A copy in the other journal is what a kind that moved leaves behind, and
+    it sorts before the copy in the journal the kind now declares, so the
+    fold takes the declared one.
+    """
+
+    at: datetime
 
 
 class Touch(BaseModel, frozen=True):
@@ -73,68 +117,107 @@ class LedgerRefusal(Exception):
 class LedgerStore:
     """The one log this repository records into, and the blobs beside it.
 
-    Holds nothing open and locks nothing: every read folds the file and every
-    write appends a line, so a hook, a console and a tool server may all reach
-    it at once and none of them has to be running for the others to work.
+    Holds nothing open and locks nothing: every read folds the journals and
+    every write appends a line, so a hook, a console and a tool server may all
+    reach it at once and none of them has to be running for the others to
+    work.
     """
 
     def __init__(
         self,
         root: Path,
         author: ActorRef,
-        placement: LedgerPlacement = SharedStore(),
+        layout: LedgerLayout = LedgerLayout(),
     ) -> None:
-        self.root = ledger_root(root, placement)
         self.project = root
         """The tree this store was opened from, which evidence stands against."""
-        self.placement = placement
-        """Where the log is kept, as the project declared it."""
+        self.layout = layout
+        """Which half each kind is written to, as the project declared it."""
+        self.roots = layout.roots(root)
+        """The directory each half's journal and blobs live under, by placement."""
         self.author = author
-        self.blobs = Blobs(self.root)
+        self.blobs = BlobStores(self.roots)
 
-    @property
-    def path(self) -> Path:
-        """The log itself, created on first use rather than at construction."""
-        self.root.mkdir(parents=True, exist_ok=True)
-        return self.root / JOURNAL_FILE
+    def journal(self, placement: Placement) -> Path:
+        """One half's log, its directory created on first use rather than at construction."""
+        root = self.roots[placement]
+        root.mkdir(parents=True, exist_ok=True)
+        return root / JOURNAL_FILE
 
-    def lines(self) -> list[JsonObject]:
-        """Every record as it was stored, oldest first.
+    def stored(self) -> list[Stored]:
+        """Every record in both journals, oldest first, with where each was read.
+
+        Sorted by the records' own timestamps rather than left in file order,
+        because two files have no shared order and one log has to: a reader's
+        "first recorded" and "latest" are answered over the fold. A tie — the
+        same record copied from one journal to the other when its kind moved
+        — puts the copy in the journal its kind now declares last, so that
+        copy is the one a read takes. Two stable passes, the moment's after
+        the tie-break's, so within one journal file order survives both.
 
         Raw rather than validated, because what a record should be read *as*
-        is the caller's question and this cannot answer it: one log holds every
-        vocabulary, and the same line is a ``Task`` to one reader and a record
-        of an unknown type to the next.
-
-        A malformed line is skipped rather than fatal. One bad record must not
-        poison a log a live session is still appending to.
+        is the caller's question and this cannot answer it: one log holds
+        every vocabulary, and the same line is a ``Task`` to one reader and a
+        record of an unknown type to the next. A malformed line is skipped
+        rather than fatal. One bad record must not poison a log a live
+        session is still appending to.
         """
         adapter = TypeAdapter[JsonObject](JsonObject)
 
-        def parsed() -> Iterator[JsonObject]:
+        def parsed(placement: Placement) -> Iterator[Stored]:
             try:
-                raw = self.path.read_text(encoding="utf-8")
+                raw = (self.roots[placement] / JOURNAL_FILE).read_text(encoding="utf-8")
             except OSError:
                 return
             for line in raw.splitlines():
                 if not line.strip():
                     continue
                 try:
-                    yield adapter.validate_json(line)
+                    record = adapter.validate_json(line)
                 except ValidationError:
                     continue
+                kind = str(record["kind"]) if "kind" in record else ""
+                yield Stored(
+                    line=record,
+                    placement=placement,
+                    own=self.layout.placement(kind) == placement,
+                    at=moment(record),
+                )
 
-        return list(parsed())
+        held = [each for placement in self.roots for each in parsed(placement)]
+        declared_last = sorted(held, key=lambda each: each.own)
+        return sorted(declared_last, key=lambda each: each.at)
+
+    def lines(self) -> list[JsonObject]:
+        """Every record as it was stored, oldest first, whichever journal holds it."""
+        return [each.line for each in self.stored()]
 
     def append(self, record: LedgerNode | LedgerEdge) -> None:
-        """Put one record at the end of the log, atomically enough to share.
+        """Put one record at the end of the journal its kinds place it in.
 
-        One ``write`` of one line opened for append, which the platform does
-        not interleave below the pipe buffer, so a concurrent writer produces
-        a longer file rather than a torn line.
+        A node goes where its kind is declared; an edge goes committed only
+        where both of its ends are, so git never carries a reference to a
+        record it does not hold. One ``write`` of one line opened for append,
+        which the platform does not interleave below the pipe buffer, so a
+        concurrent writer produces a longer file rather than a torn line.
         """
-        with self.path.open("a", encoding="utf-8") as log:
+        # lup: defer: moving a kind between placements after records exist
+        # wants a `ledger migrate` command copying its lines and blobs across;
+        # the fold reads a record wherever it sits, so nothing here does it
+        placement = self.layout.placement_of(record.deciding_kinds(self.kind_at))
+        with self.journal(placement).open("a", encoding="utf-8") as log:
             log.write(record.model_dump_json() + "\n")
+
+    def kind_at(self, node_id: str) -> str:
+        """The kind of the node with this id as last recorded, or nothing where there is none."""
+        return next(
+            (
+                str(line["kind"])
+                for line in reversed(self.lines())
+                if "id" in line and line["id"] == node_id and "kind" in line
+            ),
+            "",
+        )
 
     def read[N: LedgerNode](self, node: type[N]) -> list[N]:
         """Every node of this type as it now stands, in the order first recorded.
@@ -224,7 +307,7 @@ class LedgerStore:
             for line in self.lines():
                 if "at" not in line:
                     continue
-                at = datetime.fromisoformat(str(line["at"]))
+                at = moment(line)
                 if "id" in line:
                     yield Touch(id=str(line["id"]), at=at)
                 if "source" in line and "target" in line:
@@ -261,7 +344,7 @@ class LedgerStore:
     def into(self, node_id: str) -> list[LedgerEdge]:
         """Every edge pointing at one node, which is what standing is read from.
 
-        One pass over one file, which is the property that decides the whole
+        One pass over one fold, which is the property that decides the whole
         shape: split the log by subject and this spans several of them, each
         able to change between reads.
         """
@@ -432,8 +515,12 @@ class LedgerStore:
         an id is overruled: provenance a writer cannot spell is provenance a
         writer cannot get wrong, and that has to hold for a writer handing
         over a whole object as much as for one naming keywords.
+
+        Attachments land beside the journal the node's kind declares, so a
+        committed node's evidence is committed with it.
         """
-        held = [self.blobs.store(item) for item in attachments or []]
+        placement = self.layout.placement(kind_of(node))
+        held = [self.blobs.store(item, placement) for item in attachments or []]
         built = node.model_validate(
             {
                 "title": title,

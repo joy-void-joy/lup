@@ -19,7 +19,7 @@ from lup.execution.shell import git
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerNode
 from lup.ledger.cite import CiteReading, read_cites
-from lup.ledger.store import LedgerPlacement, SharedStore
+from lup.ledger.store import LedgerLayout
 from lup.workspace.paths import project_root
 
 
@@ -55,11 +55,11 @@ class CiteSweep(BaseModel, frozen=True):
 
 
 def sweep_cites(
-    classes: list[type[LedgerNode]], placement: LedgerPlacement = SharedStore()
+    classes: list[type[LedgerNode]], layout: LedgerLayout = LedgerLayout()
 ) -> CiteSweep:
     """Read every tracked markdown file's cites against the repository's log."""
     root = project_root()
-    store = LedgerStore(root, ActorRef(kind="console", id=mint_member_id()), placement)
+    store = LedgerStore(root, ActorRef(kind="console", id=mint_member_id()), layout)
 
     def located() -> Iterator[Located]:
         for rel in git.lines("ls-files", "--", "*.md"):

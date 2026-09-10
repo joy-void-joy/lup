@@ -22,11 +22,19 @@ outrun its support, because nothing records that it ever had any.
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, Field
 
 from lup.coordination.refs import ActorRef
+
+type Placement = Literal["committed", "local"]
+"""Which half of one log a record is written to.
+
+One log is two journals: the committed one travels with the code, the local
+one sits under the git directory. Every reader folds both, and a kind is
+declared into one of them; the store's layout says where each half is.
+"""
 
 
 class Standing(BaseModel, frozen=True):
@@ -87,6 +95,16 @@ class LedgerEdge(BaseModel, frozen=True):
         """
         del source, target
         return ""
+
+    def deciding_kinds(self, kind_at: Callable[[str], str]) -> list[str]:
+        """The kinds whose placement decides which journal this record goes to.
+
+        An edge's are its two ends', read through the log, because an edge
+        is committed only where both ends are: git must never carry a
+        reference to a record it does not hold. An end the log does not hold
+        reads as no kind, which places the edge local.
+        """
+        return [kind_at(self.source), kind_at(self.target)]
 
 
 class LedgerNode(BaseModel, frozen=True):
@@ -193,6 +211,15 @@ class LedgerNode(BaseModel, frozen=True):
         """
         del root
         return self
+
+    def deciding_kinds(self, kind_at: Callable[[str], str]) -> list[str]:
+        """The kinds whose placement decides which journal this record goes to.
+
+        A node's is its own: the one declaration a project makes about where
+        a kind lives is read off the record's `kind` and nothing else.
+        """
+        del kind_at
+        return [self.kind]
 
 
 class Surroundings(BaseModel, frozen=True):
