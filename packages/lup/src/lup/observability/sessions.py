@@ -256,6 +256,20 @@ class Output(LedgerNode, frozen=True):
         return pinned(self.held_at(), self.path, self.digest)
 
 
+class OutputOf(LedgerEdge, frozen=True):
+    """An output pointing at the session that produced it.
+
+    Drawn by the recorder wherever the session is known, so ``ledger show``
+    on a session counts what it wrote and the explorer draws the line from
+    each result to the run it came from. Declared here beside the two kinds
+    it joins, because which run wrote a document is a fact about the run and
+    not a project's epistemics; a project lists it among its edge kinds the
+    way it lists the two node kinds.
+    """
+
+    kind: Literal["observability:output_of"] = "observability:output_of"
+
+
 class SessionRecorder:
     """Records sessions and outputs into one store, and never lets a refusal reach the writer.
 
@@ -265,16 +279,12 @@ class SessionRecorder:
     kind the type refuses. Every call here answers with the node or with
     nothing, and says why in the log, so the session goes on.
 
-    ``about`` is the edge drawn from an output to its session where the
-    project declares one; the scaffold's ``corpus:about`` fits, being
-    descriptive. Without one the output still names its session by id.
+    An output is related to its session by :class:`OutputOf` wherever the
+    session is known, and names it by id besides.
     """
 
-    def __init__(
-        self, store: LedgerStore, about: type[LedgerEdge] | None = None
-    ) -> None:
+    def __init__(self, store: LedgerStore) -> None:
         self.store = store
-        self.about = about
 
     @property
     def checkout(self) -> Path:
@@ -327,8 +337,8 @@ class SessionRecorder:
                 session=session.id if session is not None else "",
                 produced=utc_now().isoformat(),
             )
-            if session is not None and self.about is not None:
-                self.store.relate(self.about, output, session)
+            if session is not None:
+                self.store.relate(OutputOf, output, session)
             return output
         except Exception:
             logger.exception(
@@ -343,7 +353,6 @@ def session_recorder(
     author: ActorRef,
     classes: list[type[LedgerNode]],
     layout: LedgerLayout = LedgerLayout(),
-    about: type[LedgerEdge] | None = None,
 ) -> SessionRecorder | None:
     """A recorder over this project's declared kinds, or nothing where they are not declared.
 
@@ -362,7 +371,7 @@ def session_recorder(
             ", ".join(undeclared),
         )
         return None
-    return SessionRecorder(LedgerStore(root, author, layout), about)
+    return SessionRecorder(LedgerStore(root, author, layout))
 
 
 def recorded_session_factory(

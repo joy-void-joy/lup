@@ -167,8 +167,8 @@ def save_session(
 
     This is the writer that produces a run's result document, so it is
     where the output is recorded: handed a ``recorder``, it records one
-    :class:`~lup.observability.sessions.Output` pointing at the file, about
-    the ``session`` node where the caller has one. Handed none it records
+    :class:`~lup.observability.sessions.Output` pointing at the file, an
+    ``OutputOf`` the ``session`` node where the caller has one. Handed none it records
     nothing and works as before. The scaffold's ``run_agent`` wires both
     from the build that opened the session.
 
