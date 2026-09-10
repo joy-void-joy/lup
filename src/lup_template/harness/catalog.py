@@ -40,6 +40,7 @@ from lup.harness.codescan.boundaries import (
     native_import_boundaries,
 )
 from lup.harness.codescan.common import RuleSelection
+from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import FrontendSpec, WorkflowSpec
 from lup.devtools.project import DevProject, Tracker
@@ -250,6 +251,24 @@ def declared_hook_set() -> HookSet:
     it enforces something the generated tree does not.
     """
     return portable_harness().declared_hooks
+
+
+def declared_test_roots() -> list[TestRoot]:
+    """The suites the gate runs: one pytest per installed root, and bun's own.
+
+    Both pytest suites are installed separately — the workspace root and the
+    vendored library — so the gate runs pytest once per root rather than
+    reporting a green tree that never exercised half of it. The frontend's
+    own tests are a third suite, run by bun from the workspace that holds
+    them. Declared beside the hook set because the policy reads the list
+    too: the files a suite collects carry the test role, derived from here.
+    Read where a command runs, since the first root is the working directory.
+    """
+    return [
+        TestRoot(name="pytest", directory=Path.cwd()),
+        TestRoot(name="pytest (lup)", directory=Path("packages/lup")),
+        BunTestRoot(name="bun test", directory=Path("packages/lup/web")),
+    ]
 
 
 WORKFLOW = WorkflowSpec(
@@ -600,6 +619,14 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 HookPathRole(
                     root=Path("packages/lup/src/lup/web/bundles"), role="scratch"
                 ),
+                # What each suite the gate runs collects is a test by
+                # derivation rather than by a second table: bun collects
+                # `*.test.ts` beside its source, where no directory root
+                # could name it, and a file the gate runs as a test that the
+                # policy budgets as source is the disagreement deriving one
+                # from the other rules out. After the scratch rows, so a test
+                # under `node_modules` stays scratch.
+                *collected_test_roles(declared_test_roots()),
                 # Deliberately absent, though Git ignores every one of them:
                 # `.env.local`, `notes/`, `.lup/`, and the `*.local` configs
                 # each hold the only copy of what is in them. Ignored means

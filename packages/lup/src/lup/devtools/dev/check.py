@@ -23,6 +23,7 @@ from lup.harness.models import (
     GUIDANCE_BUDGET,
     GuidanceBudget,
     GuidanceSection,
+    HookPathRole,
     HookSet,
     document_byte_size,
 )
@@ -344,6 +345,17 @@ class TestRoot(BaseModel):
         """
         return []
 
+    def collected(self) -> list[Path]:
+        """The files this suite collects as tests, as patterns from the repository top.
+
+        What the policy reads to give those files the test role, so the suite
+        the gate runs and the role table cannot name different files. A
+        pytest suite answers nothing here: it collects by the `testpaths` its
+        configuration declares, which a project spells as a role root
+        outright.
+        """
+        return []
+
     def absent(self) -> CheckReport:
         """The verdict a root naming a directory this checkout lacks earns.
 
@@ -412,6 +424,18 @@ class BunTestRoot(TestRoot):
     builds surfaces has the toolchain as a dependency of its gate.
     """
 
+    shapes: tuple[str, ...] = ("*.test", "*_test", "*.spec", "*_spec")
+    """The stems bun collects as tests, each over every one of `extensions`.
+
+    Bun's own vocabulary, read from the workspace down and skipping
+    `node_modules`; a workspace that collects otherwise says so here.
+    """
+    extensions: tuple[str, ...] = ("js", "jsx", "ts", "tsx")
+
+    def collected(self) -> list[Path]:
+        names = (f"{shape}.{ext}" for shape in self.shapes for ext in self.extensions)
+        return [self.directory / "**" / name for name in names]
+
     def restored_workspaces(self) -> list[Path]:
         return [self.directory]
 
@@ -427,6 +451,20 @@ class BunTestRoot(TestRoot):
         del workers, excluded_roots
         restore_dependencies(self.directory)
         BUN("test", *paths, _cwd=str(self.directory), _fg=foreground)
+
+
+def collected_test_roles(test_roots: list[TestRoot]) -> list[HookPathRole]:
+    """The test role, declared for every file the gate's suites collect.
+
+    Derived from the suites rather than spelled beside them: a test file the
+    gate runs is judged as a test by the policy — written whole without a
+    question, held still by an acceptance guard — because the one
+    declaration answers both. A second table naming the same files would
+    drift from the first, and a file the gate ran that the policy budgeted
+    as source is the disagreement this exists to rule out.
+    """
+    patterns = [pattern for root in test_roots for pattern in root.collected()]
+    return [HookPathRole(root=pattern, role="test") for pattern in patterns]
 
 
 class RootSelection(BaseModel):
