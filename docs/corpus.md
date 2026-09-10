@@ -4,13 +4,19 @@
 
 A corpus is a body of claims somebody is prepared to be held to, together with
 the evidence that backs each one and the corrections that have since retired
-some. This repository's corpus types live in `src/lup_template/corpus.py`:
+some. The scaffold's corpus types live in `src/lup_template/corpus.py`:
 `Claim`, `Question`, `Evidence` as artifact or certificate, `Source`,
-`Correction`, and the edges between them. They are declared in `node_classes`
-and `edge_classes` exactly as `Task` is, placed committed in the layout
-beside them (`src/lup_template/kinds.py`) so the corpus travels with the
-code and is reviewed in a diff, and the ledger's generic commands record,
-relate, list and check them.
+`Correction`, and the edges between them, and the ledger's generic commands
+record, relate, list and check whatever a project declares.
+
+**This repository declares none of them.** What it records in its ledger is
+coordination — tasks, handoffs, and the sessions and outputs indexed as
+pointers — and what it knows about itself it writes in `docs/`, where a
+reader finds it without a log to query; `src/lup_template/kinds.py` is the
+declaration and says so. An adopter that wants a corpus turns it on there:
+list the corpus's kinds in `NODE_KINDS` and its edges in `EDGE_KINDS` beside
+`Task`, and place them committed in `LAYOUT` so the corpus travels with the
+code and is reviewed in a diff, or leave them local to each clone.
 
 **They are the template's, not the library's, by decision.** Nothing in the
 library consumes them; the ledger's charter is to declare no epistemics, and
@@ -67,7 +73,9 @@ repository's kinds. A session is recorded when its directory opens, whether
 `build_session_factory` opened it for the SDK or a harness launch opened its
 transcript, and amended when it closes with how it ended and the journal's
 digest pinned at that moment; each result document `save_session` writes is
-recorded as an output `about` its session. A record carries the checkout it
+recorded as an output, related to its session by `output_of`, the edge
+`lup.observability.sessions` declares beside the two kinds and this
+repository lists among its edges. A record carries the checkout it
 was made in, because `notes/` is per worktree while the log is per clone, so
 it reads `open`, then `fresh`, `stale` or `missing` from any worktree against
 the tree that wrote it.
@@ -128,7 +136,10 @@ optionally where the mistake was noticed. What *survives* and what *changes*
 live on the `supersedes` edge, because they are facts about the pair — and what
 changes may not be empty, since a correction that changes nothing is a note.
 The superseded node stays in the log, readable, with the correction pointing
-at it.
+at it. Evidence and sources are retired the same way: an artifact, a
+certificate or a source a correction points at reads `superseded` before its
+digests get a word, is not sound, and stops counting as support for the
+claims it backed.
 
 Nothing broadcasts. The one message a correction sends is to the author of
 what it corrects, and only while that author is on the roster. Everyone else
@@ -158,13 +169,17 @@ from the corpus instead, which is what writeups are.
 ## Writeups
 
 `src/lup_template/writeups.py` declares this repository's generated documents
-the way guidance is declared: as parts. `docs/corpus-status.md` is the worked
-example — the open questions, the claims and where each stands, what waits on
-a person, the corrections, and a stamp naming the newest record it was
-generated from. Every kind it renders is committed with the code, so it is a
-generated file like the rest: `harness generate all` writes it and `dev
-check` refuses one that is behind; `uv run lup-devtools ledger writeup`
-writes it too, and `--check` verifies the file on disk. The prose is the
+the way guidance is declared: as parts. `docs/work-status.md` is the one it
+declares — the tasks not yet finished, what among them waits on a person and
+what each costs, the handoffs still open, and a stamp naming the newest
+record it was generated from — over the coordination ledger, since that is
+all this repository records. A project with a corpus declares a document
+over it the same way: a numbered listing of the open questions, the claims
+and where each stands, the corrections. Every kind such a document renders
+is committed with the code, so it is a generated file like the rest:
+`harness generate all` writes it and `dev check` refuses one that is behind;
+`uv run lup-devtools ledger writeup` writes it too, and `--check` verifies
+the file on disk. The prose is the
 author's and every figure is the ledger's, cited, so a number in it cannot
 outlive what supports it: a claim that stopped standing renders struck through
 with the reason, and the cite check reports it besides.

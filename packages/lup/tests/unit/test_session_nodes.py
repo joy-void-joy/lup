@@ -14,7 +14,6 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
 
 import pytest
 from pydantic import BaseModel
@@ -28,7 +27,7 @@ from lup.coordination.refs import ActorRef
 from lup.devtools.harness import launch
 from lup.ledger.files import digest_of
 from lup.ledger.journal import LedgerStore
-from lup.ledger.models import LedgerEdge, Surroundings
+from lup.ledger.models import Surroundings
 from lup.ledger.tools import NoInput, RecordInput, create_ledger_tools
 from lup.observability.sessions import (
     Output,
@@ -45,12 +44,6 @@ from lup.workspace.history import save_session
 from lup.workspace.notes import setup_notes
 
 AUTHOR = ActorRef(kind="test", id="t")
-
-
-class About(LedgerEdge, frozen=True):
-    """The descriptive edge a project draws from an output to its session."""
-
-    kind: Literal["test:about"] = "test:about"
 
 
 class Result(BaseModel):
@@ -78,7 +71,7 @@ def idle_factory() -> Client:
 
 
 def recorder_at(root: Path) -> SessionRecorder:
-    return SessionRecorder(LedgerStore(root, AUTHOR), about=About)
+    return SessionRecorder(LedgerStore(root, AUTHOR))
 
 
 async def test_opening_and_closing_a_session_records_then_amends_one_node(
@@ -173,7 +166,7 @@ def test_an_output_records_a_node_pointing_at_its_session(
     assert store.standing(output).label == "fresh"
     [edge] = store.edges()
     assert (edge.kind, edge.source, edge.target) == (
-        "test:about",
+        "observability:output_of",
         output.id,
         notes.record.id,
     )
@@ -231,8 +224,8 @@ def test_a_recorder_exists_only_where_both_kinds_are_declared(
     with caplog.at_level(logging.INFO):
         assert session_recorder(tmp_lup_project, AUTHOR, [Session]) is None
     assert "observability:output" in caplog.text
-    found = session_recorder(tmp_lup_project, AUTHOR, [Session, Output], about=About)
-    assert found is not None and found.about is About
+    found = session_recorder(tmp_lup_project, AUTHOR, [Session, Output])
+    assert found is not None and found.checkout == tmp_lup_project
 
 
 @pytest.fixture

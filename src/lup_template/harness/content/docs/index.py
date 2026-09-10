@@ -68,12 +68,12 @@ GENERATED_PATHS = IndexEntry(
 )
 """The third page no module declares: it renders from the compiled trees."""
 
-CORPUS_STATUS = IndexEntry(
-    link="corpus-status.md",
+WORK_STATUS = IndexEntry(
+    link="work-status.md",
     answers=(
-        "What this repository has recorded about itself — open questions, "
-        "claims and where each stands, what waits on a person, corrections — "
-        "generated from its ledger by `ledger writeup`."
+        "What this repository's coordination ledger still holds to do — the "
+        "open tasks, what waits on a person, the open handoffs — generated "
+        "from the ledger by `ledger writeup`."
     ),
 )
 """Declared by `lup_template.writeups` and written from this machine's log."""
@@ -170,7 +170,7 @@ def document(pages: list[models.Document]) -> models.PromptDocument:
                     ),
                     COMMAND_REFERENCE,
                     GENERATED_PATHS,
-                    CORPUS_STATUS,
+                    WORK_STATUS,
                     *page.rows(
                         "docs.quality-pipeline",
                         "The three check layers, and what each one uniquely catches.",
@@ -182,8 +182,9 @@ def document(pages: list[models.Document]) -> models.PromptDocument:
                     ),
                     *page.rows(
                         "docs.corpus",
-                        "This repository's corpus: claims, evidence, questions "
-                        "and corrections over the ledger, and how each stands.",
+                        "The corpus scaffold an adopter may declare — claims, "
+                        "evidence, questions and corrections over the ledger, and "
+                        "how each stands; this repository declares none of it.",
                     ),
                 ],
             ),

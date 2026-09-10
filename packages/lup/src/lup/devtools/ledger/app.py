@@ -113,9 +113,16 @@ def validated_results(spellings: list[str]) -> list[Established]:
     return [parsed(spelling) for spelling in spellings]
 
 
-def node_line(store: LedgerStore, node: LedgerNode) -> str:
-    """One node as a person reads it: what it is, where it stands, who said so."""
-    where = store.standing(node)
+def node_line(
+    store: LedgerStore, node: LedgerNode, classes: list[type[LedgerNode]]
+) -> str:
+    """One node as a person reads it: what it is, where it stands, who said so.
+
+    The classes resolve the neighbourhood, so a claim shown here asks its
+    evidence the evidence's own answer — stale, superseded — and not the
+    base's, which counts every piece as standing.
+    """
+    where = store.standing(node, classes)
     label = f"{where.label}: {where.reason}" if where.reason else where.label
     return " — ".join(
         part
@@ -406,7 +413,7 @@ def create_ledger_app(
             )
             return
         for node in rows:
-            typer.echo(node_line(held, node))
+            typer.echo(node_line(held, node, classes))
 
     @app.command("show")
     def show_cmd(
@@ -418,7 +425,7 @@ def create_ledger_app(
         if found is None:
             typer.echo(f"No node in this repository has the id {node_id!r}.")
             raise typer.Exit(1)
-        typer.echo(node_line(held, found))
+        typer.echo(node_line(held, found, classes))
         if found.text:
             typer.echo(found.text)
         if found.slug:

@@ -246,6 +246,34 @@ because a watcher with nobody to watch is finished. Started against an empty
 roster it lands at once, which is the truth rather than a process idling for a
 population that may never arrive.
 
+## What reaches a session at prompt time
+
+A session has no reason to ask who else is here at the moment a prompt
+arrives, which is the moment it most needs to know. So the roster's *changes*
+are pushed there: a hook the runtime fires when a prompt is submitted folds
+the roster and says only what differs from this session's last prompt — a
+path somebody now holds under this checkout, contested ones first, then who
+arrived, who left, and who now says they are on something else. The first
+prompt of a session is a baseline rather than a replay, and gets one line
+saying how many others are here and where the listing is. A quiet roster costs
+no context at all, and a broken one costs the prompt nothing, because the hook
+fails open.
+
+What does not reach a session this way: the roster itself, which
+`coordination_peers` lists whenever asked; mail, which the delivery hook puts
+in front of the next tool call; and holdings in other worktrees, which the
+merge reconciles and the listing still shows. Each session's last look is kept
+beside its delivery position under the coordination directory, so two sessions
+in one checkout are each told what changed since *their* prompt.
+
+What is measured differs by runtime, and
+[platform-differentiation.md](platform-differentiation.md) carries the row:
+on Claude Code the rendered hook's stdout is measured by a test that runs it
+over a store the typed writers produced, and its arrival in a live session is
+not yet; on Codex the event and its context channel rest on the vendor's
+documentation at https://learn.chatgpt.com/docs/hooks alone, no Codex session
+being signed in on the machine this was written on.
+
 ## The other address book
 
 A runtime that can already address another session offers a second way to

@@ -119,6 +119,28 @@ def test_a_listing_selects_by_kind_standing_relation_and_name_in_priority_order(
     assert "Not a one." in nothing
 
 
+def test_a_listing_excluding_one_standing_keeps_every_other_label(
+    tmp_path: Path,
+) -> None:
+    held = store(tmp_path)
+    low = held.record(Task, "low", slug="low", priority=1)
+    high = held.record(Task, "high", slug="high", priority=5)
+    done = held.record(Task, "done", slug="done")
+    held.amend(done.completed())
+    held.relate(Blocks, low, high)
+    unfinished = Listing(heading="Open", of="coordination:task", excluding="done")
+
+    rendered = "\n".join(unfinished.render(held, CLASSES))
+    contradictory = Listing(
+        heading="None", of="coordination:task", standing="open", excluding="open"
+    ).render(held, CLASSES)
+
+    assert "`done`" not in rendered
+    assert "| blocked | `high` |" in rendered and "| open | `low` |" in rendered
+    assert rows_of(contradictory) == []
+    assert unfinished.kinds() == ["coordination:task"]
+
+
 def test_needs_person_and_stamp_render_from_the_log_deterministically(
     tmp_path: Path,
 ) -> None:
