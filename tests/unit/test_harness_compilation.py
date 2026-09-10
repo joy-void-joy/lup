@@ -611,12 +611,18 @@ def test_template_flavors_render_the_declared_codeintel_tools() -> None:
     assert expected in codex_prompt_renderer().render(TEMPLATE_CODEX)
 
 
-def registered_hook_commands(config: str) -> list[str]:
-    """Every shell command one runtime's hook registration would run."""
+def registered_hook_commands(config: str, events: list[str] | None = None) -> list[str]:
+    """Every shell command one runtime's hook registration would run.
+
+    Narrowed to *events* where given, so a property of the policy's own
+    registrations can be asserted without the prompt event's fold answering
+    for it.
+    """
     registered = json.loads(config)["hooks"]
     return [
         hook["command"]
-        for entries in registered.values()
+        for event, entries in registered.items()
+        if events is None or event in events
         for entry in entries
         for hook in entry["hooks"]
     ]
@@ -679,7 +685,9 @@ def test_codex_recipe_registers_semantic_permission_approval() -> None:
 
     hook_config = artifacts[Path(".codex/plugins/lup/hooks/hooks.json")].content
     assert '"PermissionRequest"' in hook_config
-    for command in registered_hook_commands(hook_config):
+    # The dispatcher's own events, because the prompt event registers the
+    # roster's fold beside the policy and never the policy guard itself.
+    for command in registered_hook_commands(hook_config, CODEX_DISPATCHER.hook_events):
         assert "uv" not in shlex.split(command)
         assert "hooks/scripts/policy.sh" in command
         assert REGENERATE_COMMAND not in command

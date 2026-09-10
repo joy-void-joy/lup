@@ -38,6 +38,17 @@
         ],
         "matcher": "Bash|web_fetch|apply_patch|Artifact|Skill|EnterWorktree"
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$PLUGIN_ROOT/hooks/scripts/coordination_changes.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
     ]
   }
 }
