@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 94 artifacts
+## `claude` — 96 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -58,6 +58,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/commands/update.md` | lup_template.harness.content.skills.update |
 | `.claude/plugins/lup/commands/verify-solved.md` | lup.harness.content.skills.verify_solved |
 | `.claude/plugins/lup/hooks/hooks.json` | hooks.lup-policy |
+| `.claude/plugins/lup/hooks/runtime/coordination_changes.py` | lup.coordination.changes |
 | `.claude/plugins/lup/hooks/runtime/coordination_delivery.py` | lup.providers.claude.peer_delivery_runtime |
 | `.claude/plugins/lup/hooks/runtime/evidence.json` | hooks.lup-policy |
 | `.claude/plugins/lup/hooks/runtime/kernel/__init__.py` | lup.policy.kernel.__init__ |
@@ -79,6 +80,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.claude/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.claude/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
+| `.claude/plugins/lup/hooks/scripts/coordination_changes.sh` | lup.providers.roster_prompt |
 | `.claude/plugins/lup/hooks/scripts/coordination_delivery.sh` | lup.providers.claude.peer_delivery |
 | `.claude/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.providers.claude.assets.policy_dispatcher |
 | `.claude/plugins/lup/hooks/scripts/policy.sh` | lup.policy.dispatcher |
@@ -107,7 +109,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 70 artifacts
+## `codex` — 72 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -121,6 +123,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/TEMPLATE_AGENTS.md` | lup_template.harness.content.template_codex |
 | `.codex/plugins/lup/hooks/hooks.json` | hooks.lup-policy |
 | `.codex/plugins/lup/hooks/runtime/codex_patch.py` | lup.providers.codex.patch |
+| `.codex/plugins/lup/hooks/runtime/coordination_changes.py` | lup.coordination.changes |
 | `.codex/plugins/lup/hooks/runtime/evidence.json` | hooks.lup-policy |
 | `.codex/plugins/lup/hooks/runtime/kernel/__init__.py` | lup.policy.kernel.__init__ |
 | `.codex/plugins/lup/hooks/runtime/kernel/archives.py` | lup.policy.kernel.archives |
@@ -141,6 +144,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.codex/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.codex/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
+| `.codex/plugins/lup/hooks/scripts/coordination_changes.sh` | lup.providers.roster_prompt |
 | `.codex/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.providers.codex.assets.policy_dispatcher |
 | `.codex/plugins/lup/hooks/scripts/policy.sh` | lup.policy.dispatcher |
 | `.codex/plugins/lup/skills/add-command/SKILL.md` | lup.harness.content.skills.add_command |

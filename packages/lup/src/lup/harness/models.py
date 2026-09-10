@@ -1327,7 +1327,10 @@ class HookSet(BaseModel, frozen=True):
             "such call entirely to the runtime's own permissions. "
             "`lup.coordination.policy.peer_policy` builds one from the "
             "store's own layout, so the directory is spelled in the module "
-            "that owns it rather than again in a compiled hook"
+            "that owns it rather than again in a compiled hook. Declaring one "
+            "also registers the hook that pushes the roster's changes to a "
+            "session at each prompt, since a roster nobody declared has "
+            "nothing to push"
         ),
     )
     runner_targets: list[RunnerTargetRule] = Field(

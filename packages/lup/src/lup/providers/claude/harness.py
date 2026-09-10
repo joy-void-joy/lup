@@ -7,6 +7,7 @@ from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
+from lup.providers.roster_prompt import prompt_hook
 from lup.formats.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -526,6 +527,19 @@ what the compiler proves the dispatcher routes, so a tool cannot be handed
 to the hook without a branch that decides it.
 """
 
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
+CLAUDE_PROMPT_EVENT = "UserPromptSubmit"
+"""The event Claude Code fires when a prompt is submitted, before the model sees it.
+
+Documented at https://code.claude.com/docs/en/hooks under "UserPromptSubmit":
+the hook reads `session_id`, `cwd`, `prompt` and `hook_event_name` on stdin,
+and on exit 0 its stdout's `hookSpecificOutput.additionalContext` is added as
+context the model can see; exit 2 would block the prompt and erase it, which
+nothing registered under it here does. The runtime's own spelling of the
+moment, so not a value a project could choose.
+"""
+
 
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
     """Render Claude hooks, canonical kernel, and application policy rows."""
@@ -578,15 +592,30 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 ],
             }
         ]
+        # Under its own event rather than beside the policy's: a prompt is not
+        # a tool call, and what the roster has to say at that moment is
+        # context rather than a verdict, so nothing here can refuse.
+        roster = prompt_hook(
+            Path(f".claude/plugins/{self.plugin_name}"),
+            "CLAUDE_PLUGIN_ROOT",
+            source,
+            CLAUDE_PROMPT_EVENT,
+        )
         hooks = {
-            "description": "Lup semantic permission policy and peer delivery",
+            "description": (
+                "Lup semantic permission policy, peer delivery, and the roster's "
+                "changes at each prompt"
+            ),
             "hooks": {
-                event: (
-                    observed
-                    if event == CLAUDE_DISPATCHER.observation_event
-                    else [*decided, *delivery]
-                )
-                for event in CLAUDE_DISPATCHER.hook_events
+                **{
+                    event: (
+                        observed
+                        if event == CLAUDE_DISPATCHER.observation_event
+                        else [*decided, *delivery]
+                    )
+                    for event in CLAUDE_DISPATCHER.hook_events
+                },
+                **roster.registered,
             },
         }
         evidence = {"schemaVersion": 1, "policyIds": source.policy_ids}
@@ -613,6 +642,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 *delivery_artifacts(
                     Path(f".claude/plugins/{self.plugin_name}"), source.id
                 ),
+                *roster.artifacts,
                 *[
                     Artifact(
                         path=Path(

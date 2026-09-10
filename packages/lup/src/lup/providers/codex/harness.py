@@ -9,6 +9,7 @@ from pathlib import Path
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.subagents import CodexModelTiers
+from lup.providers.roster_prompt import prompt_hook
 from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.formats.banner import (
@@ -558,6 +559,22 @@ that never raise one. The tools named here are both what the plugin
 registers the hook for and what the compiler proves the dispatcher routes.
 """
 
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
+CODEX_PROMPT_EVENT = "UserPromptSubmit"
+"""The event Codex fires when a prompt is submitted, before the model sees it.
+
+Documented at https://learn.chatgpt.com/docs/hooks, where
+https://developers.openai.com/codex/hooks redirects, in the same words as
+Claude Code's: the hook reads `session_id`, `cwd`, `prompt` and
+`hook_event_name` on stdin, `matcher` is not read for this event, and on exit
+0 its stdout's `hookSpecificOutput.additionalContext` is added as context,
+under a default limit of about 2,500 tokens per hook past which it spills to
+disk. Documented and not yet measured: no Codex session is signed in on the
+machine this was written on. The runtime's own spelling of the moment, so
+not a value a project could choose.
+"""
+
 CODEX_PATCH_RUNTIME = (
     resources.files("lup.providers.codex").joinpath("patch.py").read_text("utf-8")
 )
@@ -720,12 +737,23 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 "hooks": [policy_hook],
             }
         ]
+        roster = prompt_hook(
+            Path(f".codex/plugins/{self.plugin_name}"),
+            "PLUGIN_ROOT",
+            source,
+            CODEX_PROMPT_EVENT,
+        )
         hooks = {
             "hooks": {
-                event: (
-                    observed if event == CODEX_DISPATCHER.observation_event else decided
-                )
-                for event in CODEX_DISPATCHER.hook_events
+                **{
+                    event: (
+                        observed
+                        if event == CODEX_DISPATCHER.observation_event
+                        else decided
+                    )
+                    for event in CODEX_DISPATCHER.hook_events
+                },
+                **roster.registered,
             }
         }
         evidence = {
@@ -762,6 +790,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 hook_guard_artifact(
                     Path(f".codex/plugins/{self.plugin_name}"), source.id
                 ),
+                *roster.artifacts,
                 *[
                     Artifact(
                         path=Path(
