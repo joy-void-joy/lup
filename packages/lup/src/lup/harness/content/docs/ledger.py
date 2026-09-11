@@ -213,9 +213,11 @@ listed with its standing read now and who recorded it, narrowed by kind,
 standing, the moment it last moved or the edge kind it lacks, searched by
 title, text, slug or id,
 sorted by any column; one node in full, the edges pointing at it counted by
-kind, each end a link; and the DAG drawn as a graph, a tap opening the node.
-Every view is a URL, so a reader hands another one exactly what they were
-looking at.
+kind, each end a link; and the DAG drawn as a graph, a tap opening the node,
+each node nested inside the one an edge of a chosen kind points at — messages
+inside their thread — so a container is a box rather than another dot. Every
+view is a URL, so a reader hands another one exactly what they were looking
+at.
 
 `ledger explore --export <path>` writes the same page as one self-contained
 file with the whole log embedded — a memo attachment opened without a server,

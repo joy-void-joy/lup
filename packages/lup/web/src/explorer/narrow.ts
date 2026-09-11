@@ -39,6 +39,41 @@ export function narrowed(graph: GraphView, query: GraphQuery): GraphView {
   };
 }
 
+/**
+ * Which node each node sits inside, following edges of one kind from source
+ * to target: a message inside its thread, a thread inside its incident. One
+ * parent per node — the first edge of the kind wins — and only a parent the
+ * graph still shows, because a container the narrowing dropped is not one
+ * the canvas can draw.
+ */
+export function grouped(graph: GraphView, kind: string): Map<string, string> {
+  const parents = new Map<string, string>();
+  if (kind === "") return parents;
+  const shown = new Set(graph.nodes.map((node) => node.id));
+  for (const edge of graph.edges) {
+    if (edge.kind !== kind || parents.has(edge.source) || !shown.has(edge.target)) continue;
+    if (edge.source === edge.target) continue;
+    parents.set(edge.source, edge.target);
+  }
+  // A container inside one of its own members would loop the layout, so
+  // the first containment met whose ancestry comes back round is dropped
+  // and the rest of the loop stands as a chain: every node is then inside
+  // at most one, and none is inside itself.
+  for (const child of [...parents.keys()]) {
+    const seen = new Set<string>([child]);
+    let cursor = parents.get(child);
+    while (cursor !== undefined) {
+      if (seen.has(cursor)) {
+        parents.delete(child);
+        break;
+      }
+      seen.add(cursor);
+      cursor = parents.get(cursor);
+    }
+  }
+  return parents;
+}
+
 /** Whether a node answers a search — one of its readable fields carries the words. */
 export function matches(node: NodeView, needle: string): boolean {
   const wanted = needle.trim().toLowerCase();

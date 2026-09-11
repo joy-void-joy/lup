@@ -20,6 +20,7 @@ export type BrowseSearch = {
   standing: string;
   since: string;
   lacking: string;
+  group: string;
   q: string;
   view: View;
 };
@@ -44,6 +45,7 @@ export const browseRoute = createRoute({
     standing: word(search["standing"]),
     since: word(search["since"]),
     lacking: word(search["lacking"]),
+    group: word(search["group"]),
     q: word(search["q"]),
     view: search["view"] === "graph" ? "graph" : "list",
   }),

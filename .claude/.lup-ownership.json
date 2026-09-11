@@ -583,7 +583,7 @@
     {
       "path": "docs/ledger.md",
       "category": "generated",
-      "sha256": "19ab6af7b4a559e2d07505607de05e8c5db570146e280ef7bb3c07c39dfaafea",
+      "sha256": "68ec81adeb07b5eb145ec2da656ba4fccf7b48dfcf732c1162090886921c6efd",
       "semantic_id": "docs.ledger",
       "executable": false
     },

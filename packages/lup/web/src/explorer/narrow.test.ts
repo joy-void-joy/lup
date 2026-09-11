@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { GraphView, NodeView } from "../generated/views";
-import { matches, narrowed } from "./narrow";
+import { grouped, matches, narrowed } from "./narrow";
 
 function node(id: string, kind: string, standing: string, moved: string): NodeView {
   return {
@@ -84,5 +84,30 @@ describe("narrowed by lacking", () => {
       lacking: "corpus:rests_on",
     });
     expect(claims.nodes.map((each) => each.id)).toEqual(["b"]);
+  });
+});
+
+describe("grouped", () => {
+  test("nests each source inside the target of the chosen edge kind, once, and only where shown", () => {
+    const parents = grouped(graph, "corpus:rests_on");
+    expect([...parents.entries()]).toEqual([["a", "b"]]);
+    expect(grouped(graph, "").size).toBe(0);
+    const without = { ...graph, nodes: graph.nodes.filter((node) => node.id !== "b") };
+    expect(grouped(without, "corpus:rests_on").size).toBe(0);
+  });
+
+  test("a containment that loops back is cut once, and the rest of the loop stands as a chain", () => {
+    const loop: GraphView = {
+      ...graph,
+      edges: [
+        { kind: "in", source: "a", target: "b" },
+        { kind: "in", source: "b", target: "a" },
+        { kind: "in", source: "c", target: "a" },
+      ],
+    };
+    const parents = grouped(loop, "in");
+    expect(parents.has("a")).toBe(false);
+    expect(parents.get("b")).toBe("a");
+    expect(parents.get("c")).toBe("a");
   });
 });
