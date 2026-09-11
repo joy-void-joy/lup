@@ -58,12 +58,7 @@ Read it carefully. Note:
 
 ### 3. Gather Performance Data
 
-```bash
-# Check scores filtered by version
-uv run lup-devtools feedback status
-```
-
-Load session JSON files from `notes/traces/<version>/sessions/` to get scores and outcomes for this version's data. Each JSON contains fields like `output.confidence`, `outcome`, `cost_usd`, `duration_seconds`, and `tool_metrics`.
+Load session JSON files from `notes/traces/<version>/sessions/` to get scores and outcomes for this version's data. Each JSON contains fields like `output.confidence`, `outcome`, `cost_usd`, `duration_seconds`, and `tool_metrics`. `uv run lup-devtools trace list` names the sessions recorded under the version.
 
 ### 4. Read Traces for Best and Worst Sessions
 

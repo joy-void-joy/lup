@@ -6,10 +6,16 @@ what tells a session how this repository judges an edit would leave a harness
 that generates but cannot be worked in.
 
 Its skills are the ones whose subject is the work itself rather than any
-workflow over it: reading a codebase, saying what is left, finding out why
-something broke, and asking the policy what it decides. Its pages are the
-reference behind that — why the seams are where they are, how a permission
-decision is reached, which library answers which need.
+workflow over it: saying what is left, finding out why something broke, and
+asking the policy what it decides. Its pages are the reference behind that —
+why the seams are where they are, how a permission decision is reached, which
+library answers which need.
+
+Two of those reach into other modules by name, and the spec says so. The
+debug skill reads a session's trace, which is the observability module's
+command tree; the hooks skill and the permissions page end at regenerating
+the trees, which is meta's. Both are named in ``requires`` rather than left as
+instructions that fail for a project which took core and declined the rest.
 """
 
 import lup.harness.content.conventions as conventions
@@ -24,11 +30,9 @@ from lup.harness.content.docs import (
     orchestration,
     patterns,
     permissions,
-    quality_pipeline,
 )
 from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import CORE
-from lup.harness.content.skills.analyze import SKILL as SKILL_ANALYZE
 from lup.harness.content.skills.debug import skill as build_debug
 from lup.harness.content.skills.hooks import skill as build_hooks
 from lup.harness.content.skills.report import SKILL as SKILL_REPORT
@@ -43,6 +47,9 @@ def documents() -> list[DocumentEntry]:
     Each is about the library rather than about a workflow over it, which is
     what puts them here: a project declining the resolver stops publishing the
     resolver's page, and no project stops publishing how an edit is judged.
+    The quality pipeline is not among them: its subject is what has to be
+    green before a branch lands, which is the git loop's, and it names that
+    module's hook installer.
     """
     return [
         page("library", "library.md", lambda context: library.document(context.layout)),
@@ -54,11 +61,6 @@ def documents() -> list[DocumentEntry]:
             lambda context: native_capabilities.document(context.library_checkout),
         ),
         page("conventions", "conventions.md", lambda _: conventions_page.DOCUMENT),
-        page(
-            "quality_pipeline",
-            "quality-pipeline.md",
-            lambda _: quality_pipeline.DOCUMENT,
-        ),
         page("patterns", "patterns.md", lambda _: patterns.DOCUMENT),
         page(
             "orchestration",
@@ -79,7 +81,6 @@ def module(layout: ApplicationLayout, rules: RuleSelection) -> Module:
         spec=CORE,
         content=ContentRoster(
             skills=[
-                SKILL_ANALYZE,
                 build_debug(layout),
                 build_hooks(layout),
                 SKILL_REPORT,

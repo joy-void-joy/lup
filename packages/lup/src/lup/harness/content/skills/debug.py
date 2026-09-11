@@ -59,7 +59,6 @@ read it and every sibling artifact to establish how far the run got.
 First, check if there are sessions with errors:
 
 ```bash
-uv run lup-devtools feedback errors
 uv run lup-devtools trace errors
 ```
 
