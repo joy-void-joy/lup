@@ -257,6 +257,13 @@ def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
 
     lines = ["{"]
     for suffix, patterns in sorted(rows.items()):
+        # An empty list is written closed on one line: opened and closed on
+        # two, it is the one shape ruff rewrites, and a generated file that
+        # reformats is a drift failure on a file nobody edits. A project that
+        # retired the whole anti-pattern family renders every suffix this way.
+        if not patterns:
+            lines.append(f"    {python_literal(suffix)}: [],")
+            continue
         lines.append(f"    {python_literal(suffix)}: [")
         for row in patterns:
             fields = "\n".join(row_fields(row))
