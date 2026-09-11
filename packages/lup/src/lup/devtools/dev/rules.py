@@ -175,7 +175,11 @@ def rule_reference_artifact(selection: RuleSelection | None = None) -> Artifact:
     document = rule_reference_document(selection)
     return Artifact.generated(
         path=RULE_REFERENCE_PATH,
-        body=claude_prompt_renderer().render(document),
+        # A generated artifact ends in exactly one newline. The document's
+        # last part opens the refinement paragraph and then lists the
+        # refinements, so with every rule retired the opener's own separator
+        # is all that would end the file.
+        body=claude_prompt_renderer().render(document).rstrip("\n") + "\n",
         semantic_id="docs.rules",
         banner=GeneratedBanner(
             source=document.declared_source(), command=RULE_REFERENCE_COMMAND

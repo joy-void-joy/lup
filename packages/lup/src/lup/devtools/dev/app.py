@@ -608,7 +608,7 @@ def create_dev_app(
         # retiring all of them has to name the ones already retired too, or
         # the answer would silently exclude what a previous answer dropped.
         shipped = [rule.id for rule in all_rules()]
-        for line in answers.settled(catalog, shipped):
+        for line in answers.settled(catalog, shipped, project.seams):
             typer.echo(line)
 
     @app.command("refutations")

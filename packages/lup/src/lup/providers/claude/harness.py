@@ -686,10 +686,14 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         human_owned_files=[
                             path.as_posix() for path in source.human_owned_files
                         ],
-                        autonomous_agent_identities=[
-                            self.worker_identity,
-                            f"{self.plugin_name}:{self.worker_identity}",
-                        ],
+                        autonomous_agent_identities=(
+                            [
+                                self.worker_identity,
+                                f"{self.plugin_name}:{self.worker_identity}",
+                            ]
+                            if self.worker_identity
+                            else []
+                        ),
                         path_roles=[
                             PathRoleRow(root=role.root.as_posix(), role=role.role)
                             for role in source.path_roles

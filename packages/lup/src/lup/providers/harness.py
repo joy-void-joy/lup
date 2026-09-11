@@ -125,6 +125,16 @@ def reject_native_prose(source: Harness) -> None:
         )
 
 
+def worker_identity_of(source: Harness) -> str:
+    """The identity a resolver worker declares, or nothing where none is declared.
+
+    A project that declined the resolver module has no worker session, so the
+    policy it compiles grants autonomy to nobody: the renderers read the empty
+    spelling as an empty list rather than as a session called "".
+    """
+    return source.resolver.worker_identity if source.resolver is not None else ""
+
+
 def compile_claude(source: Harness) -> ArtifactTree:
     """Compile canonical declarations directly to Claude-owned artifacts."""
     reject_native_prose(source)
@@ -145,9 +155,7 @@ def compile_claude(source: Harness) -> ArtifactTree:
         artifacts.extend(mcp_renderer.render(plugin).artifacts)
         if plugin.hooks is not None:
             artifacts.extend(
-                ClaudeHookRenderer(
-                    plugin.name, source.resolver.worker_identity, spellings
-                )
+                ClaudeHookRenderer(plugin.name, worker_identity_of(source), spellings)
                 .render(plugin.hooks)
                 .artifacts
             )
@@ -201,9 +209,7 @@ def compile_codex(source: Harness) -> ArtifactTree:
         artifacts.extend(manifest_renderer.render(plugin).artifacts)
         if plugin.hooks is not None:
             artifacts.extend(
-                CodexHookRenderer(
-                    plugin.name, source.resolver.worker_identity, spellings
-                )
+                CodexHookRenderer(plugin.name, worker_identity_of(source), spellings)
                 .render(plugin.hooks)
                 .artifacts
             )

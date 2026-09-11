@@ -1438,6 +1438,12 @@ def run_resolve(
     # the composition that was actually resolved.
     adapter = composition.recipe.label
     harness = composition.recipe.source
+    if harness.resolver is None:
+        raise typer.BadParameter(
+            "this project declined the resolver module, so it declares no "
+            "resolver to run: take the module back in `DECLINED` and regenerate"
+        )
+    resolver_spec = harness.resolver
     plugin = harness.plugins[0]
     root = project_root()
     launcher = LocalProcessLauncher()
@@ -1559,7 +1565,7 @@ def run_resolve(
         # that stayed silent would inherit an operator's exported identity.
         worker_environment = {
             **session_environment,
-            **agent_identity_environment(harness.resolver.worker_identity),
+            **agent_identity_environment(resolver_spec.worker_identity),
         }
         reviewer_environment = {
             **session_environment,
@@ -1647,7 +1653,7 @@ def run_resolve(
         # fact about the machine rather than about any concern, and discovering
         # it per worker would turn one environmental refusal into an exception
         # group of concern failures after the run had already taken its leases.
-        contained_actors = harness.resolver.contain_actors
+        contained_actors = resolver_spec.contain_actors
         if contained_actors:
             absence = engine_absence()
             if absence is not None:
@@ -2036,7 +2042,7 @@ def run_resolve(
                     "all",
                 ],
             ),
-            harness.resolver,
+            resolver_spec,
             worker_factory,
             reviewer_factory,
             composition.invocation_renderer,

@@ -1553,7 +1553,13 @@ class Harness(BaseModel, frozen=True):
     source_evidence: dict[str, str] = {}  # lup: ignore[dict-str-payload]
     plugins: list[Plugin]
     guidance: PromptDocument
-    resolver: ResolveSpec
+    resolver: ResolveSpec | None = None
+    """How a resolver run is spelled, or nothing for a project without one.
+
+    Its three invocations are checked against the declared skills only when
+    a spec is here: a project that declined the resolver module ships no
+    worker, review or merge skill, and must not have to declare a spec
+    naming skills it does not have."""
     requirements: Manifest = Manifest()
     """The external programs this project needs, exercised before a launch.
 
@@ -1703,13 +1709,14 @@ class Harness(BaseModel, frozen=True):
             for part in prompt.parts
             if (issued := part.invocation) is not None
         ]
-        invocations.extend(
-            [
-                self.resolver.worker_skill,
-                self.resolver.review_skill,
-                self.resolver.merge_skill,
-            ]
-        )
+        if self.resolver is not None:
+            invocations.extend(
+                [
+                    self.resolver.worker_skill,
+                    self.resolver.review_skill,
+                    self.resolver.merge_skill,
+                ]
+            )
         for invocation in invocations:
             skill = skills.get((invocation.plugin, invocation.skill))
             if skill is None:
