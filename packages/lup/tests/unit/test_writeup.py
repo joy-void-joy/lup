@@ -309,11 +309,15 @@ def test_a_listing_selects_what_lacks_an_edge_and_what_is_sound(
     lacking = Listing(
         heading="Ours", of="coordination:task", lacking="coordination:blocks"
     )
+    having = Listing(
+        heading="Theirs", of="coordination:task", having="coordination:blocks"
+    )
     sound = Listing(heading="Sound", sound=True)
     unsound = Listing(heading="Unsound", sound=False)
 
     assert [node.id for node in lacking.chosen(held, CLASSES)] == [ours.id, source.id]
-    assert lacking.kinds() is None
+    assert [node.id for node in having.chosen(held, CLASSES)] == [theirs.id]
+    assert lacking.kinds() is None and having.kinds() is None
     assert {node.slug for node in sound.chosen(held, CLASSES)} == {
         "ours",
         "theirs",
