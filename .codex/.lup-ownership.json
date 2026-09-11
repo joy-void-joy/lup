@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "8736b4170bb53294ed7dc18a738c68d1ad090963191c29b4bd94e76650d3d303",
+  "source_digest": "f154379c8d3cc7f6775fd30af351978dda5a613885c49859f35a80ae92b23ae4",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -37,7 +37,7 @@
     {
       "path": ".codex/agents/version-reviewer.toml",
       "category": "generated",
-      "sha256": "5f5edf87773afd384938ddc1a30b97769f842675ea21c0ff3777796e83aea616",
+      "sha256": "ef6af3ffe6f63f7ac4e2b12d3a7c77a0088bb73e5515fe5df11e856e53873fe1",
       "semantic_id": "agent.version-reviewer",
       "executable": false
     },
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "46b33df0154f5a4dddfe00eaa0ce29628f3104ba3e11214fe4f1d1df5d1fde7f",
+      "sha256": "325dfa24038a7ef7ac1a3006e5b1160cf9dd80b928b1c2294c59374ddd292f5f",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -282,7 +282,7 @@
     {
       "path": ".codex/plugins/lup/skills/commit/SKILL.md",
       "category": "generated",
-      "sha256": "52eabc2901b657e80b99ee040b22efec9d6b4f50d1899f8debeb12c1b2aa94f6",
+      "sha256": "031bec6b35df7084fba468e7342a1d750da5cad5abad42730118491a93028aca",
       "semantic_id": "skill.commit",
       "executable": false
     },
@@ -296,7 +296,7 @@
     {
       "path": ".codex/plugins/lup/skills/debug/SKILL.md",
       "category": "generated",
-      "sha256": "5fd9c4fb922aec028c46a168b014d1c6ff311bdb043afd2c98f4efe83277391d",
+      "sha256": "bba722af227e9dec7300bbb91f4a82b8d79022580f6d0b1f43f111690d8f7932",
       "semantic_id": "skill.debug",
       "executable": false
     },
@@ -401,7 +401,7 @@
     {
       "path": ".codex/plugins/lup/skills/land/SKILL.md",
       "category": "generated",
-      "sha256": "d11abd0352b0e576f08c90ddc1d62e8b525c0458f1041b362e6922a26599caea",
+      "sha256": "8ff4a4b73012aa950b8fad4e6b697d7b28d27cc896242ca49dd13c83ea617865",
       "semantic_id": "skill.land",
       "executable": false
     },
@@ -415,7 +415,7 @@
     {
       "path": ".codex/plugins/lup/skills/meta/SKILL.md",
       "category": "generated",
-      "sha256": "390ab705efe136c8b55f0adb2c62287966005cb08f40b9bb042170f7549259c9",
+      "sha256": "25d109912406e8ab1ebb67c6048dbff6f8ab8b39995ad0d5982d4a59ce1e0e0e",
       "semantic_id": "skill.meta",
       "executable": false
     },
@@ -478,7 +478,7 @@
     {
       "path": ".codex/plugins/lup/skills/review/SKILL.md",
       "category": "generated",
-      "sha256": "6e25a9d9cd69bff23337cf233ad0eefc20141a72edaa0ef46aa1d7b385163f9c",
+      "sha256": "cc4f5a8f959c24443855a94075015b5c71d540bcc6f64f9dea4ab5ee8fb12d03",
       "semantic_id": "skill.review",
       "executable": false
     },

@@ -24,7 +24,7 @@ Based on the user's input above, explore the relevant sources and brainstorm sol
 | .claude/settings.json under Claude Code, .codex/config.toml under Codex | `harness/content/settings.py` and the adapter rendering each tree — the two are not parity, so read both before assuming a setting exists on either side |
 | .claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex | `harness/content/template_sections.py` plus each flavor module |
 
-Content paths above are relative to `src/lup_template/devtools/`. Every tree carries its own .codex/.lup-ownership.json recording which artifacts generation owns — consult the one for the tree you are changing whenever a path's source is not obvious.
+Content paths above are relative to `src/lup_template/`. Every tree carries its own .codex/.lup-ownership.json recording which artifacts generation owns — consult the one for the tree you are changing whenever a path's source is not obvious.
 
 Read the relevant sources based on what the user is asking about, then propose specific changes or additions and Request explicit user approval before editing any source the table names. Reason: one edit re-renders into every tree at once. Regenerate with `uv run lup-devtools harness generate all` after any accepted change.
 
