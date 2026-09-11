@@ -10,9 +10,10 @@ beside it, and never a number somebody typed.
 
 **Parts are a union that answers for itself.** The base names one operation,
 `render`, and each variant answers it over the store: prose with figures filled
-in, a listing of nodes chosen by kind or standing or relation, what needs a
-person, a stamp saying what the document was generated from. A new kind of
-part is a new variant, not a branch somewhere else.
+in, a listing of nodes chosen by kind or standing or relation, a timeline of
+dated nodes in the order of a named clock, what needs a person, a stamp
+saying what the document was generated from. A new kind of part is a new
+variant, not a branch somewhere else.
 
 **Generated on demand, and drift-checked where every rendered kind is
 committed.** Each part says which kinds it renders, or that it cannot say —
@@ -30,7 +31,7 @@ document either way.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -253,6 +254,201 @@ class Listing(WriteupPart, frozen=True):
         if self.nodes or self.into or not self.of:
             return None
         return [self.of]
+
+
+def moment_of(node: LedgerNode, field: str) -> datetime | None:
+    """The moment one named field holds on a node, or nothing.
+
+    Read by name because the library declares no clock: which field says when
+    a thing happened is the project's, and a node read back as the base class
+    — a kind this build does not declare — has no such field and is undated.
+    """
+    if not field:
+        return None
+    value = getattr(node, field, None)
+    return value if isinstance(value, datetime) else None
+
+
+def spelled_moment(moment: datetime) -> str:
+    """One moment as a timeline reads it: UTC, to the second, and marked so.
+
+    A naive moment is read as local time, which is what a writer that spelled
+    one meant by it, and every row is shown on one clock so two rows compare.
+    """
+    aware = moment if moment.tzinfo is not None else moment.astimezone()
+    return f"{aware.astimezone(UTC):%Y-%m-%d %H:%M:%S}Z"
+
+
+class Band(BaseModel, frozen=True):
+    """Nodes of one kind whose two moments frame a stretch of the timeline.
+
+    An incident with its window, a campaign with its first and last day. A
+    band's nodes render as rows of their own — one where it opens, one where
+    it closes — so a reader sees which stretch each dated row falls in
+    without the rows being split across tables.
+    """
+
+    of: str = Field(min_length=1)
+    start: str = Field(min_length=1)
+    end: str = Field(min_length=1)
+
+
+class Entry(BaseModel, frozen=True):
+    """One dated row before it is written: when, in what order at that moment, and the cells."""
+
+    when: datetime
+    rank: int
+    """Where a row sorts among rows at the same moment: a band opens before
+    them and closes after them."""
+
+    cells: list[str]
+
+    def key(self) -> tuple[datetime, int, str]:
+        aware = self.when if self.when.tzinfo is not None else self.when.astimezone()
+        return (aware.astimezone(UTC), self.rank, self.cells[-1])
+
+
+class Timeline(WriteupPart, frozen=True):
+    """Every dated node in the order it happened, with the clock that dated it beside.
+
+    The worked example this came from kept one `created_at` for three clocks
+    and filed observation time as event time three times over. Here a row is
+    ordered by the moment the author named (`moment`), and a node without
+    one takes its upper bound (`bound`) and says so, or the clock named as
+    `fallback`, or goes under the undated heading at the end; a second clock
+    (`beside`) is shown on every row and never folded into the order. Bands
+    — a kind with a start and an end — open and close as rows of their own,
+    so incidents frame the rows without splitting the table.
+
+    Field names rather than fields, because the library declares no clock:
+    which field says when a thing happened is the project's vocabulary, and
+    the same part declares an event timeline over one clock and a discovery
+    timeline over another.
+    """
+
+    kind: Literal["timeline"] = "timeline"
+    heading: str = Field(min_length=1)
+    of: list[str] = Field(min_length=1)
+    """The kinds whose nodes are rows."""
+
+    moment: str = Field(min_length=1)
+    """The field a row is ordered by."""
+
+    bound: str = ""
+    """The field holding an upper bound where the moment is unknown; the row says `before`."""
+
+    fallback: str = ""
+    """The field a row takes where it has neither moment nor bound — a record time, say."""
+
+    beside: str = ""
+    """A second clock shown beside every row, never ordered by."""
+
+    bands: Band | None = None
+    empty: str = "Nothing is dated."
+    undated: str = "Undated"
+    """The heading over the rows no clock could place."""
+
+    def placed(self, node: LedgerNode) -> tuple[datetime, str] | None:
+        """When a row sits, and how it reads: the moment, `before` a bound, or the fallback."""
+        if (when := moment_of(node, self.moment)) is not None:
+            return when, spelled_moment(when)
+        if (before := moment_of(node, self.bound)) is not None:
+            return before, f"before {spelled_moment(before)}"
+        if (taken := moment_of(node, self.fallback)) is not None:
+            return taken, f"{spelled_moment(taken)} ({self.fallback})"
+        return None
+
+    def cells_of(
+        self, store: LedgerStore, classes: list[type[LedgerNode]], node: LedgerNode
+    ) -> list[str]:
+        """The cells every row shares: what, the second clock, standing, node."""
+        seen = moment_of(node, self.beside)
+        return [
+            figure(store, classes, node.id),
+            spelled_moment(seen) if seen is not None else "",
+            store.standing(node, classes).label,
+            f"`{handle(node)}`",
+        ]
+
+    def entries(
+        self, store: LedgerStore, classes: list[type[LedgerNode]]
+    ) -> tuple[list[Entry], list[LedgerNode]]:
+        """The dated rows in order, and the nodes no clock could place."""
+        dated: list[Entry] = []  # lup: ignore[empty-collection] — filled below
+        undated: list[LedgerNode] = []  # lup: ignore[empty-collection] — filled below
+        for node in store.all_nodes(classes):
+            if node.kind in self.of:
+                placed = self.placed(node)
+                if placed is None:
+                    undated.append(node)
+                    continue
+                when, spelled = placed
+                dated.append(
+                    Entry(
+                        when=when,
+                        rank=1,
+                        cells=[spelled, *self.cells_of(store, classes, node)],
+                    )
+                )
+            if self.bands is not None and node.kind == self.bands.of:
+                what, seen, standing, spelled_handle = self.cells_of(
+                    store, classes, node
+                )
+                for field, rank, verb in (
+                    (self.bands.start, 0, "opens"),
+                    (self.bands.end, 2, "closes"),
+                ):
+                    if (edge := moment_of(node, field)) is not None:
+                        dated.append(
+                            Entry(
+                                when=edge,
+                                rank=rank,
+                                cells=[
+                                    spelled_moment(edge),
+                                    f"{what} {verb}",
+                                    seen,
+                                    standing,
+                                    spelled_handle,
+                                ],
+                            )
+                        )
+        return sorted(dated, key=Entry.key), sorted(undated, key=lambda node: node.at)
+
+    def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
+        dated, undated = self.entries(store, classes)
+        beside = self.beside or "also"
+        lines = [f"## {self.heading}", ""]
+        if not dated:
+            lines.extend([self.empty, ""])
+        else:
+            lines.extend(
+                [
+                    f"| {self.moment} | What | {beside} | Standing | Node |",
+                    "| --- | --- | --- | --- | --- |",
+                    *(f"| {' | '.join(entry.cells)} |" for entry in dated),
+                    "",
+                ]
+            )
+        if undated:
+            lines.extend(
+                [
+                    f"### {self.undated}",
+                    "",
+                    f"| What | {beside} | Standing | Node |",
+                    "| --- | --- | --- | --- |",
+                    *(
+                        f"| {' | '.join(self.cells_of(store, classes, node))} |"
+                        for node in undated
+                    ),
+                    "",
+                ]
+            )
+        return lines
+
+    def kinds(self) -> list[str] | None:
+        """The row kinds and the band kind, each once."""
+        band = [self.bands.of] if self.bands is not None else []
+        return list(dict.fromkeys([*self.of, *band]))
 
 
 class NeedsPerson(WriteupPart, frozen=True):

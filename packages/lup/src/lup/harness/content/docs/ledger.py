@@ -233,14 +233,20 @@ prose, and parts that render from the ledger when the document is generated.
 `Prose` fills `{placeholders}` with a node's figure, cited and bold, or struck
 through with the reason where the node no longer stands. `Listing` is a table
 of nodes chosen by kind, standing, relation, moment, or by name, ordered by
-priority. `NeedsPerson` is the person's task list grouped by what each row
-costs. `Stamp` says what the document was generated from, naming the newest
-record rather than the clock, so one log renders one document.
+priority. `Timeline` is every node of the named kinds in the order of the
+clock the author named, a node with only an upper bound placed there and
+saying `before`, a second clock shown beside each row and never ordered by,
+and bands — a kind with a start and an end — opening and closing as rows of
+their own; the undated go last under their own heading. `NeedsPerson` is the
+person's task list grouped by what each row costs. `Stamp` says what the
+document was generated from, naming the newest record rather than the clock,
+so one log renders one document.
 
 `ledger writeup` writes every declared document, and `--check` verifies the
 file on disk against this machine's log. Each part says which kinds it
-renders — a `Listing` its `of`, `NeedsPerson` the tasks, a `Stamp` the kinds
-its `of` names, `Prose` none, and a part naming nodes rather than kinds
+renders — a `Listing` its `of`, a `Timeline` its rows' kinds and its band's,
+`NeedsPerson` the tasks, a `Stamp` the kinds its `of` names, `Prose` none,
+and a part naming nodes rather than kinds
 cannot say — and a writeup whose every kind is committed renders the same on
 every machine, so it joins the drift-checked generation: `harness generate
 all` writes it and `dev check` refuses one that is behind. One rendering a
