@@ -250,6 +250,9 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
 
     from lup_template.harness.catalog import portable_harness
 
+    spec = portable_harness().resolver
+    assert spec is not None, "the template takes the resolver module"
+
     core = ResolverCore(
         ResolverConfig(
             state_root=repo / ".lup" / "resolve",
@@ -261,7 +264,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
                 VerificationCommand(name="status", arguments=["git", "status"])
             ],
         ),
-        portable_harness().resolver,
+        spec,
         worker_factory,
         reviewer_factory,
         ClaudeSpellings(),
@@ -322,6 +325,9 @@ def test_codex_plugin_blocks_a_forbidden_apply_patch(tmp_path: Path) -> None:
         codex_home.mkdir(parents=True)
         shutil.copy(auth, codex_home / "auth.json")
     from lup_template.harness.catalog import portable_harness
+
+    spec = portable_harness().resolver
+    assert spec is not None, "the template takes the resolver module"
 
     plugin = portable_harness().plugins[0]
     CodexPluginInstaller(
