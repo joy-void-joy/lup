@@ -199,6 +199,21 @@ export function Browse() {
             ))}
           </select>
         </label>
+        <label>
+          Group by edge
+          <select
+            value={search.group}
+            onChange={(event) => amend({ group: event.target.value })}
+            title="in the graph view, nest each node inside the node an edge of this kind points at — messages inside their thread"
+          >
+            <option value="">none</option>
+            {(kinds.data?.edges ?? []).map((edge) => (
+              <option key={edge.kind} value={edge.kind}>
+                {edge.kind}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="views">
           <Link to="/" search={{ ...search, view: "list" }} aria-current={search.view === "list" ? "page" : undefined}>
             list
@@ -225,6 +240,7 @@ export function Browse() {
                 data.some((node) => node.id === edge.target),
             ),
           }}
+          group={search.group}
         />
       )}
       {graph.data !== undefined && search.view === "list" && <Rows data={data} />}
