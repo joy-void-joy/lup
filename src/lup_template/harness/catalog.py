@@ -344,15 +344,16 @@ def application_roots(plugin_names: list[str] | None = None) -> ApplicationRoots
 def declared_coverage() -> ModuleCoverage:
     """Everything this checkout declares, for the sweep that asks who claims it.
 
-    Every module is built and every one is *resolved*, but none is filtered.
-    The three are separate answers and the sweep needs exactly this pairing: a
-    module nobody took still owns its declarations, so filtering would hide the
-    failure by removing the module that was meant to answer for it — while a
-    skill this project added to a module it did not write reaches the plugin
-    through the selection, so leaving the roster unresolved would report that
-    skill as owned by nobody when it is owned by the module it was added to.
-    Building them all costs this gate the imports the roster reaches, and costs
-    nothing anywhere else.
+    Every module is built and none is filtered, and the selection travels
+    beside them rather than being applied first. The three are separate
+    answers and the sweep needs exactly this pairing: a module nobody took
+    still owns its declarations, so filtering would hide the failure by
+    removing the module that was meant to answer for it — while what this
+    project changed about a module is read in both directions, since a skill
+    added under a new id is visible only once the selection is applied and a
+    skill rewritten under the library's id hides the library's own file once
+    it is. Building them all costs this gate the imports the roster reaches,
+    and costs nothing anywhere else.
 
     Only the index is the composition's own. Its subject is what every other
     module contributed, so no module can see enough to declare it; everything
@@ -362,7 +363,8 @@ def declared_coverage() -> ModuleCoverage:
     census: each renders from a registry, the wired CLI, or the compiled trees.
     """
     return ModuleCoverage(
-        modules=[MODULE_SELECTION.resolved(entry.build()) for entry in entries()],
+        modules=[entry.build() for entry in entries()],
+        selection=MODULE_SELECTION,
         roots=[
             ContentRoot(
                 directory=Path("packages/lup/src/lup/harness/content"),
