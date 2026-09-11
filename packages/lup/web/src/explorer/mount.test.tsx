@@ -43,6 +43,7 @@ function node(
     sound,
     text: `${title}, in full`,
     priority: 1,
+    author: "session:t#1",
     moved: "2026-09-09T10:00:00+00:00",
   };
 }

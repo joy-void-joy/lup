@@ -32,6 +32,7 @@ const columns = helper.columns([
   helper.accessor("standing", { header: "Standing" }),
   helper.accessor("priority", { header: "Priority" }),
   helper.accessor("moved", { header: "Moved" }),
+  helper.accessor("author", { header: "Recorded by" }),
 ]);
 const NO_NODES: NodeView[] = [];
 const ROW_HEIGHT = 32;
@@ -104,6 +105,9 @@ function Rows({ data }: { data: NodeView[] }) {
               <Standing label={node.standing} reason={node.reason} sound={node.sound} brief />
               <span>{node.priority}</span>
               <span className="muted">{moved(node.moved)}</span>
+              <span className="muted author" title="who recorded it, stamped by the store">
+                {node.author}
+              </span>
             </Link>
           );
         })}

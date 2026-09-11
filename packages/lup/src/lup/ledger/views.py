@@ -30,6 +30,14 @@ class NodeView(BaseModel, frozen=True):
     standing: str
     reason: str = ""
     sound: bool = True
+    author: str
+    """Who recorded it, as the store stamped it: the actor's label.
+
+    Shown on every surface a node is met on, because who found a thing is
+    the question a reader weighing it asks next, and a writer cannot spell
+    the answer: the store stamps it from the session's identity.
+    """
+
     moved: datetime
     """When the log last grew around this node: its own record, or an edge touching it.
 
@@ -121,6 +129,7 @@ def node_view(
         standing=where.label,
         reason=where.reason,
         sound=where.sound,
+        author=node.author.label(),
         moved=moved.get(node.id, node.at),
     )
 

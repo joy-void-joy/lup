@@ -13,6 +13,7 @@ function node(id: string, kind: string, standing: string, moved: string): NodeVi
     standing,
     reason: "",
     sound: true,
+    author: "session:t#1",
     moved,
   };
 }

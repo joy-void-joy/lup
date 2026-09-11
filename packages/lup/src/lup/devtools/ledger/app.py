@@ -129,7 +129,7 @@ def node_line(
         for part in (
             f"{node.id}  [{node.kind}] {node.title}",
             label,
-            node.author.id,
+            node.author.label(),
         )
         if part
     )

@@ -78,6 +78,8 @@ def test_the_routes_serve_the_graph_one_node_and_the_kinds(tmp_path: Path) -> No
     ]
     assert graph["kinds"] == ["coordination:task"]
     assert node["node"]["id"] == first.id
+    assert node["node"]["author"] == "test:t#1"
+    assert {each["author"] for each in graph["nodes"]} == {"test:t#1"}
     assert node["edges_out"][0]["target"] == second.id
     assert [each["kind"] for each in kinds["nodes"]] == ["coordination:task"]
     assert [each["kind"] for each in kinds["edges"]] == ["coordination:blocks"]
