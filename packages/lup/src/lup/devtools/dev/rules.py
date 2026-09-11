@@ -179,6 +179,7 @@ def rule_reference_artifact(selection: RuleSelection | None = None) -> Artifact:
         # last part opens the refinement paragraph and then lists the
         # refinements, so with every rule retired the opener's own separator
         # is all that would end the file.
+        # lup: ignore[string-strip] — a rendered page's ending, not structured data
         body=claude_prompt_renderer().render(document).rstrip("\n") + "\n",
         semantic_id="docs.rules",
         banner=GeneratedBanner(

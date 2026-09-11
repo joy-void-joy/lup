@@ -1,16 +1,53 @@
----
-description: "Review a session trace for workflow quality, tool usage, and improvement opportunities"
-allowed-tools: Read, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*), Agent
-argument-hint: "[session ID, file path, or pasted trace]"
----
+"""The review skill as this repository reviews a session: against its agent.
 
-# Review: Trace Workflow Analysis
+The library's review reads a trace against the harness, which is what every
+project has. This repository's sessions run an agent of their own, so the
+same walk reads more — the system prompt, the toolset registry, the tool
+policy, the factory wiring — and the step that names them has to name this
+repository's layout. Declared under the library's id so it replaces the
+harness-only version in place, through the feedback-loop adoption.
+"""
+
+import lup.harness.models as models
+from lup.harness.content.application import ApplicationLayout
+
+
+def skill(layout: ApplicationLayout) -> models.Skill:
+    """Review a trace against the agent sources this project actually has."""
+    return models.Skill(
+        id="skill.review",
+        name="review",
+        description="Review a session trace for workflow quality, tool usage, and improvement opportunities",
+        arguments=[
+            models.Argument(
+                name="arguments",
+                description="Optional arguments supplied with the skill invocation",
+                required=False,
+            ),
+        ],
+        tools=[
+            "Read",
+            "Grep",
+            "Glob",
+            "Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*)",
+            "Agent",
+        ],
+        argument_hint="[session ID, file path, or pasted trace]",
+        prompt=models.PromptDocument(
+            source=__name__,
+            parts=[
+                models.TextPart(
+                    text=r"""# Review: Trace Workflow Analysis
 
 **Don't speculate — analyze.** Read the actual trace, the actual prompt, and the actual tool descriptions. Ground every observation in evidence from the trace or source code.
 
 ## Input
 
-**Trace input**: $ARGUMENTS
+**Trace input**: """
+                ),
+                models.ArgumentsRef(),
+                models.TextPart(
+                    text=rf"""
 
 ## Process
 
@@ -45,13 +82,13 @@ uv run lup-devtools agent inspect --json
 
 This shows tools, subagents, model, and prompt info. For deeper inspection, read:
 
-- **System prompt**: `src/lup_template/agent/prompts.py`
-- **Tool groups**: `src/lup_template/agent/toolsets.py` — the registry, and so the list of what the agent actually had
-- **Tool policy**: `src/lup_template/agent/tool_policy.py`
-- **Tools**: `src/lup_template/agent/tools/`
-- **Core wiring**: `src/lup_template/agent/core.py` — the factory, the wrapper layers around it, and the `effort` and `autonomy` the turn asked for
+- **System prompt**: `{layout.path("agent", "prompts.py")}`
+- **Tool groups**: `{layout.path("agent", "toolsets.py")}` — the registry, and so the list of what the agent actually had
+- **Tool policy**: `{layout.path("agent", "tool_policy.py")}`
+- **Tools**: `{layout.directory("agent", "tools")}`
+- **Core wiring**: `{layout.path("agent", "core.py")}` — the factory, the wrapper layers around it, and the `effort` and `autonomy` the turn asked for
 
-Beneath the agent sits the harness every session runs under — the always-loaded guidance in `src/lup_template/harness/content/guidance.py`, the roster in `docs/harness.md`, the policy in `src/lup_template/harness/catalog.py` — which is the baseline for a session that ran no agent at all.
+Beneath the agent sits the harness every session runs under — the always-loaded guidance in `{layout.path("harness", "content", "guidance.py")}`, the roster in `docs/harness.md`, the policy in `{layout.path("harness", "catalog.py")}` — which is the baseline for a session that ran no agent at all.
 
 This is the baseline for evaluating whether the agent used its capabilities well.
 
@@ -121,7 +158,7 @@ A table or list of tool calls with assessment:
 **Actionable Improvements**
 Concrete, specific changes — not vague suggestions. Each improvement should reference:
 - What evidence from the trace motivates it
-- Which file to modify (`src/lup_template/agent/...`)
+- Which file to modify (`{layout.directory("agent")}...`)
 - What the change would be (new tool, description fix, prompt adjustment, workflow change)
 
 Categorize improvements as:
@@ -133,9 +170,14 @@ Categorize improvements as:
 ## Rules
 
 - **Never guess.** Every observation must cite a specific trace entry, tool call, or source code location.
-- **Read the source.** Don't evaluate tool usage without reading the actual tool descriptions and schemas in `src/lup_template/agent/tools/`.
-- **Compare to intent.** The system prompt (`src/lup_template/agent/prompts.py`) defines the intended behavior — compare actual behavior against it.
+- **Read the source.** Don't evaluate tool usage without reading the actual tool descriptions and schemas in `{layout.directory("agent", "tools")}`.
+- **Compare to intent.** The system prompt (`{layout.path("agent", "prompts.py")}`) defines the intended behavior — compare actual behavior against it.
 - **Focus on the general.** Per the Bitter Lesson: prefer improvements that add capabilities over improvements that add rules. A missing tool is almost always a better diagnosis than a missing prompt paragraph.
 - **Diagnose before prescribing.** For each proposed improvement, answer: what data was the agent missing, and where in the pipeline did the wrong decision enter? Don't propose "add rule X to the prompt" — propose the structural change that makes the failure impossible. Don't copy examples from this trace into the prompt — derive the general principle and write fresh examples.
 - **Be honest about quality.** If the session went well, say so. Not every review needs to find problems.
 - **Quote the trace.** When citing evidence, quote the actual trace text (tool names, thinking excerpts, result fragments) — don't paraphrase.
+"""
+                ),
+            ],
+        ),
+    )

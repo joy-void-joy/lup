@@ -1,11 +1,20 @@
-"""Canonical declaration for the review skill."""
+"""Canonical declaration for the review skill.
+
+A trace is reviewed against what the session had available, and what the
+library can promise every project has is the harness: the always-loaded
+guidance, the plugin's roster, the tool groups it declares, and the policy
+that judged the session's calls. A project whose sessions run an agent of its
+own has more — a system prompt, a toolset registry, a tool policy — and adds
+those sources by declaring this skill under its id with that step written for
+its own layout, which is what the scaffold does.
+"""
 
 import lup.harness.models as models
 from lup.harness.content.application import ApplicationLayout
 
 
 def skill(layout: ApplicationLayout) -> models.Skill:
-    """Review a trace against the agent sources this project actually has."""
+    """Review a trace against the harness the session actually ran under."""
     return models.Skill(
         id="skill.review",
         name="review",
@@ -31,7 +40,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
                 models.TextPart(
                     text=r"""# Review: Trace Workflow Analysis
 
-**Don't speculate — analyze.** Read the actual trace, the actual prompt, and the actual tool descriptions. Ground every observation in evidence from the trace or source code.
+**Don't speculate — analyze.** Read the actual trace, the actual guidance, and the actual tool descriptions. Ground every observation in evidence from the trace or source code.
 
 ## Input
 
@@ -64,30 +73,24 @@ Also read the `SessionResult` JSON from `notes/traces/<version>/sessions/<sessio
 
 If you can't find the trace, use `uv run lup-devtools trace list` to show available sessions and ask the user which one to review.
 
-### 2. Read the agent configuration
+### 2. Read the session's configuration
 
-Before analyzing the trace, understand what the agent had available:
+Before analyzing the trace, understand what the session had available. Its baseline is the harness it ran under:
 
-```bash
-uv run lup-devtools agent inspect --json
-```
+- **Always-loaded guidance**: `{layout.path("harness", "content", "guidance.py")}`, composed with the library modules this project takes and rendered into every tree — what the session was told before it read anything
+- **Skills and agents**: `docs/harness.md` carries the composed roster and the tool servers the plugin declares; the declarations only this repository adds sit under `{layout.directory("harness", "content", "skills")}`
+- **Policy**: `{layout.path("harness", "catalog.py")}` declares what a shell command, fetch, or edit is allowed to do, and `docs/permissions.md` explains how a verdict is reached
 
-This shows tools, subagents, model, and prompt info. For deeper inspection, read:
+A project whose sessions run an agent of its own declares this skill under its id with that agent's sources added here — its system prompt, its toolset registry, its tool policy — so read whatever this step names in the tree you are in.
 
-- **System prompt**: `{layout.path("agent", "prompts.py")}`
-- **Tool groups**: `{layout.path("agent", "toolsets.py")}` — the registry, and so the list of what the agent actually had
-- **Tool policy**: `{layout.path("agent", "tool_policy.py")}`
-- **Tools**: `{layout.directory("agent", "tools")}`
-- **Core wiring**: `{layout.path("agent", "core.py")}` — the factory, the wrapper layers around it, and the `effort` and `autonomy` the turn asked for
-
-This is the baseline for evaluating whether the agent used its capabilities well.
+This is the baseline for evaluating whether the session used its capabilities well.
 
 ### 3. Analyze the conversation flow
 
-Walk through the trace chronologically and map the agent's decision path:
+Walk through the trace chronologically and map the session's decision path:
 
 **Task understanding:**
-- Did the agent correctly interpret the task?
+- Did the session correctly interpret the task?
 - Did it plan before acting, or dive straight into tool calls?
 - Were there thinking blocks that showed good or poor reasoning?
 
@@ -95,11 +98,11 @@ Walk through the trace chronologically and map the agent's decision path:
 - Did the conversation move toward the goal, or meander?
 - Were there unnecessary loops (repeated tool calls with similar inputs)?
 - Were there dead-end explorations that didn't contribute to the outcome?
-- Did the agent recover well when something failed or returned unexpected results?
+- Did the session recover well when something failed or returned unexpected results?
 
 **Decision quality:**
 - At each major decision point, was the choice reasonable given available information?
-- Did the agent gather enough context before acting?
+- Did the session gather enough context before acting?
 - Were there moments where it should have asked for clarification but didn't?
 
 ### 4. Audit tool usage
@@ -110,17 +113,18 @@ For each tool call in the trace:
 
 **Inputs**: Were the arguments well-formed? Were searches specific enough? Were descriptions/specs complete?
 
-**Results**: Did the agent use the result effectively, or ignore useful information?
+**Results**: Did the session use the result effectively, or ignore useful information?
 
 **Patterns to flag:**
 - **Underused tools**: Tools that were available and would have helped but weren't called
 - **Overused tools**: Repetitive calls that could have been batched or avoided
-- **Poor tool descriptions**: If the agent misused a tool, check whether the tool's description was unclear (read the actual `@lup_tool` decorator and the `Field(description=...)` on each input field in the source — that text is the agent's only documentation for the field)
-- **Missing tools**: Situations where the agent worked around a gap that a new tool could fill
+- **Poor tool descriptions**: If the session misused a tool, check whether the tool's description was unclear (read the actual `@lup_tool` decorator and the `Field(description=...)` on each input field in the source — that text is the session's only documentation for the field)
+- **Missing tools**: Situations where the session worked around a gap that a new tool or command could fill
+- **Policy friction**: Denials and approval questions the session met, and whether each named a recovery the session could take
 
 ### 5. Assess the reflection (if present)
 
-If the agent called `review` (the reflection tool):
+If the session called `review` (the reflection tool):
 
 - Was the self-assessment honest and accurate given the trace?
 - Did the confidence score match the actual quality of work?
@@ -148,22 +152,22 @@ A table or list of tool calls with assessment:
 **Actionable Improvements**
 Concrete, specific changes — not vague suggestions. Each improvement should reference:
 - What evidence from the trace motivates it
-- Which file to modify (`{layout.directory("agent")}...`)
-- What the change would be (new tool, description fix, prompt adjustment, workflow change)
+- Which declaration to change — a guidance section, a skill, a tool group, the policy in `{layout.path("harness", "catalog.py")}` — or which library seam the change belongs upstream at
+- What the change would be (new tool or command, description fix, guidance adjustment, workflow change)
 
 Categorize improvements as:
-- **Tool changes** — new tools, better descriptions, schema fixes
-- **Prompt changes** — guidance that's missing, misleading, or unnecessary
+- **Tool changes** — new tools or commands, better descriptions, schema fixes
+- **Guidance changes** — prose that's missing, misleading, or unnecessary
 - **Workflow changes** — process or architectural adjustments
 - **Observability** — logging, metrics, or trace improvements needed
 
 ## Rules
 
 - **Never guess.** Every observation must cite a specific trace entry, tool call, or source code location.
-- **Read the source.** Don't evaluate tool usage without reading the actual tool descriptions and schemas in `{layout.directory("agent", "tools")}`.
-- **Compare to intent.** The system prompt (`{layout.path("agent", "prompts.py")}`) defines the intended behavior — compare actual behavior against it.
-- **Focus on the general.** Per the Bitter Lesson: prefer improvements that add capabilities over improvements that add rules. A missing tool is almost always a better diagnosis than a missing prompt paragraph.
-- **Diagnose before prescribing.** For each proposed improvement, answer: what data was the agent missing, and where in the pipeline did the wrong decision enter? Don't propose "add rule X to the prompt" — propose the structural change that makes the failure impossible. Don't copy examples from this trace into the prompt — derive the general principle and write fresh examples.
+- **Read the source.** Don't evaluate tool usage without reading the actual tool descriptions and schemas.
+- **Compare to intent.** The composed guidance defines the intended behavior — compare actual behavior against it.
+- **Focus on the general.** Per the Bitter Lesson: prefer improvements that add capabilities over improvements that add rules. A missing tool is almost always a better diagnosis than a missing guidance paragraph.
+- **Diagnose before prescribing.** For each proposed improvement, answer: what data was the session missing, and where in the workflow did the wrong decision enter? Don't propose "add rule X to the guidance" — propose the structural change that makes the failure impossible. Don't copy examples from this trace into the guidance — derive the general principle and write fresh examples.
 - **Be honest about quality.** If the session went well, say so. Not every review needs to find problems.
 - **Quote the trace.** When citing evidence, quote the actual trace text (tool names, thinking excerpts, result fragments) — don't paraphrase.
 """

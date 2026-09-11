@@ -250,6 +250,35 @@ def test_refreshing_a_clone_leaves_work_in_it_exactly_where_it_stands(
     assert sync.commit_count(str(again.checkout), "", again.tip) == 4
 
 
+def test_a_bare_path_registration_is_read_at_the_branch_it_registered(
+    registry_root: Path, cache: Path, remote: Path, tmp_path: Path
+) -> None:
+    """A bare repository's HEAD is nobody's checkout, so it is not the tip.
+
+    Measured on a registration naming a bare clone with a worktree attached:
+    the branch it named was 335 commits on and `status` said 0 behind, because
+    HEAD still pointed at the branch the clone was made with and nothing that
+    happens in an attached worktree moves it.
+    """
+    registered(registry_root, {"name": "up", "url": str(remote)})
+    materialize()
+    bare = cache / "up.git"
+    sidecar = bare / "tree" / "sidecar"
+    sync.git_in(str(bare), "worktree", "add", str(sidecar), "sidecar")
+    commit_file(
+        git_in(sidecar, tmp_path / "hooks"), sidecar, "side.txt", "on\n", "sidecar work"
+    )
+    main = sync.git_in(str(bare), "rev-parse", "main")
+    registered(registry_root, {"name": "own", "path": str(bare), "branch": "sidecar"})
+
+    found = sync.existing_upstream(sync.find_project("own"))
+
+    assert found is not None
+    assert found.tip == "refs/heads/sidecar"
+    assert sync.commit_count(str(found.checkout), main, found.tip) == 1
+    assert sync.commit_count(str(found.checkout), main, "HEAD") == 0
+
+
 def test_work_done_in_a_clone_is_not_read_back_as_the_upstream_s_own(
     registry_root: Path, cache: Path, remote: Path, tmp_path: Path
 ) -> None:

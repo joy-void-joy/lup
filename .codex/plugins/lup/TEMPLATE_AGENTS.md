@@ -568,8 +568,8 @@ Run `uv run lup-devtools --help` for the full command tree.
 installs an immutable content-addressed copy of the plugin after a digest check, and
 launches the Codex CLI in a persistent per-worktree home seeded from personal
 Codex authentication and settings.
-`lup-devtools dev usagecodex` reports this backend's usage and
-`lup-devtools dev usageclaude` the other's; profiles are managed with
+`lup-devtools dev usage codex` reports this backend's usage and
+`lup-devtools dev usage claude` the other's; profiles are managed with
 `lup-devtools setup profile`.
 `--codex-home` or an inherited `CODEX_HOME` selects an explicit home instead.
 

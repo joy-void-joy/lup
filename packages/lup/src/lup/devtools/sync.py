@@ -377,6 +377,23 @@ def clone_upstream(proj: ProjectEntry, repository: Path) -> Upstream:
     )
 
 
+def path_upstream(proj: ProjectEntry, path: Path) -> Upstream:
+    """A registration naming a path on disk, read at the ref its commits are on.
+
+    A working checkout's HEAD is what its owner has, and stays the tip. A bare
+    repository's HEAD is a symbolic ref nothing checks out: it names whichever
+    branch the clone was made with, and a worktree attached under ``tree/``
+    moves that branch and not HEAD — measured, a registration at a bare clone
+    read ``0 behind`` while the branch it named was 335 commits on. So a bare
+    registration is read at the branch it registered, which is the one its
+    attached worktree holds, and at HEAD only where it registered none.
+    """
+    branch = proj.get("branch", "")
+    if branch and bare_repository(path):
+        return Upstream(checkout=path, tip=f"refs/heads/{branch}")
+    return Upstream(checkout=path)
+
+
 def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """Where this registration already is, WITHOUT cloning or fetching.
 
@@ -385,7 +402,7 @@ def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """
     path = proj.get("path", "")
     if path and Path(path).exists():
-        return Upstream(checkout=Path(path))
+        return path_upstream(proj, Path(path))
     repository = cached_clone(proj["name"])
     return None if repository is None else clone_upstream(proj, repository)
 
@@ -612,7 +629,7 @@ def ensure_local(
     name = proj["name"]
     if path and Path(path).exists():
         ensure_ref_symlink(name, path)
-        return Upstream(checkout=Path(path))
+        return path_upstream(proj, Path(path))
 
     url = proj.get("url", "")
     repository = cached_clone(name)

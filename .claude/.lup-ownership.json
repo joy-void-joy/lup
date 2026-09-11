@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "d97ae68fe2a95cf2099c97f941313e2113e68c5ed3f0e243ddd766429415a42c",
+  "source_digest": "14accad9875412ee38e4c2940ce175f12e7444a25a1bf7b022110afda266bb49",
   "target_requirements": [
     "claude-code"
   ],
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "d4b30d559757b6062c32c692762f0a2e5324c68779758d51f576068e8dc8d66a",
+      "sha256": "2d447a0469081aec9e154e6f293561394371b28d2c278463030e75eec04036ab",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -65,7 +65,7 @@
     {
       "path": ".claude/plugins/lup/agents/version-reviewer.md",
       "category": "generated",
-      "sha256": "632aa43e4bdbfe878aefb6c41429415992c2542fa713a544cab109c7d208a71e",
+      "sha256": "c4dd8e80b5fea8afe19cc3e32149fa930bccd52eb7af4291533ecb3fd4bfa652",
       "semantic_id": "agent.version-reviewer",
       "executable": false
     },
@@ -107,7 +107,7 @@
     {
       "path": ".claude/plugins/lup/commands/commit.md",
       "category": "generated",
-      "sha256": "e763ef07f1cfc22a165e40c8a0b159da5101da8ac397910a032af37ac0f1d0cd",
+      "sha256": "d8622d194533987c4a802e9ca0df41ec187c97df30a5ddad9bf4c455217b4892",
       "semantic_id": "skill.commit",
       "executable": false
     },
@@ -240,7 +240,7 @@
     {
       "path": ".claude/plugins/lup/commands/meta.md",
       "category": "generated",
-      "sha256": "2aafe7613d79f6aac72ffa0222ffbc3b32f33825b1e99f976f20561ed26bac43",
+      "sha256": "1ee3181120ca6debe10b85824f8a9091b00e4b9b912e26b18965df4b0178f239",
       "semantic_id": "skill.meta",
       "executable": false
     },
@@ -303,7 +303,7 @@
     {
       "path": ".claude/plugins/lup/commands/review.md",
       "category": "generated",
-      "sha256": "77f7deca99f834b860898d9fd7749742996c69a585ecd1a6945064900ccb2662",
+      "sha256": "59fa3324ce5b6e376c477041ab42dce37ab99324125fa89f3b6eb5aec999dbdd",
       "semantic_id": "skill.review",
       "executable": false
     },
@@ -653,7 +653,7 @@
     {
       "path": "docs/self-improvement.md",
       "category": "generated",
-      "sha256": "347ec42e6bf038f3a48a973c35bbe9b2b4729ee944409230a176c16ec09187b6",
+      "sha256": "79327df803059f4d7897c6ecba64639bbc5acaa0926e8019791a18bafc88ef62",
       "semantic_id": "docs.self-improvement",
       "executable": false
     },
@@ -667,7 +667,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "038d839b67222d000bd7556cc30c26aa9706cbe8e6ef566c261ecfa6cbbf2604",
+      "sha256": "36aae247b8e0377a8c71ec3efa2edc2eac3de109cf78a905ae151e617e7a6cb2",
       "semantic_id": "docs.template",
       "executable": false
     },

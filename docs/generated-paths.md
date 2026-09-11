@@ -54,7 +54,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/commands/report.md` | lup.harness.content.skills.report |
 | `.claude/plugins/lup/commands/resolve-reviewer.md` | lup.harness.content.skills.resolve_reviewer |
 | `.claude/plugins/lup/commands/resolve.md` | lup.harness.content.skills.resolve |
-| `.claude/plugins/lup/commands/review.md` | lup.harness.content.skills.review |
+| `.claude/plugins/lup/commands/review.md` | lup_template.harness.content.skills.review |
 | `.claude/plugins/lup/commands/update.md` | lup_template.harness.content.skills.update |
 | `.claude/plugins/lup/commands/verify-solved.md` | lup.harness.content.skills.verify_solved |
 | `.claude/plugins/lup/hooks/hooks.json` | hooks.lup-policy |
@@ -180,7 +180,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/skills/report/SKILL.md` | lup.harness.content.skills.report |
 | `.codex/plugins/lup/skills/resolve-reviewer/SKILL.md` | lup.harness.content.skills.resolve_reviewer |
 | `.codex/plugins/lup/skills/resolve/SKILL.md` | lup.harness.content.skills.resolve |
-| `.codex/plugins/lup/skills/review/SKILL.md` | lup.harness.content.skills.review |
+| `.codex/plugins/lup/skills/review/SKILL.md` | lup_template.harness.content.skills.review |
 | `.codex/plugins/lup/skills/update/SKILL.md` | lup_template.harness.content.skills.update |
 | `.codex/plugins/lup/skills/verify-solved/SKILL.md` | lup.harness.content.skills.verify_solved |
 | `.codex/rules/lup.rules` | lup.policy.shell_rules |
