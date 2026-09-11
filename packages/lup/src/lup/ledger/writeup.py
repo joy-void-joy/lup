@@ -195,6 +195,13 @@ class Listing(WriteupPart, frozen=True):
     this came from, for changes of identity rather than of evidence.
     """
 
+    having: str = ""
+    """Only nodes from which an edge of this kind runs — the other half of `lacking`.
+
+    What others found first is every claim pointing at the source that stated
+    it, listed beside what is ours so credit and novelty are one query.
+    """
+
     sound: bool | None = None
     """Only nodes whose standing is sound (True) or is not (False) right now.
 
@@ -238,11 +245,9 @@ class Listing(WriteupPart, frozen=True):
                 if not self.of or node.kind == self.of
             ]
         moved = store.moved_since(self.since) if self.since is not None else None
-        pointing = (
-            {edge.source for edge in store.edges() if edge.kind == self.lacking}
-            if self.lacking
-            else set()
-        )
+        edges = store.edges() if self.lacking or self.having else []
+        pointing = {edge.source for edge in edges if edge.kind == self.lacking}
+        carrying = {edge.source for edge in edges if edge.kind == self.having}
 
         def admitted(node: LedgerNode) -> bool:
             if not (self.standing or self.excluding) and self.sound is None:
@@ -258,6 +263,7 @@ class Listing(WriteupPart, frozen=True):
             if node.priority >= self.min_priority
             and (moved is None or node.id in moved)
             and node.id not in pointing
+            and (not self.having or node.id in carrying)
             and admitted(node)
         ]
         return sorted(kept, key=lambda node: (-node.priority, node.at))
@@ -278,12 +284,13 @@ class Listing(WriteupPart, frozen=True):
         return [*lines, ""]
 
     def kinds(self) -> list[str] | None:
-        """The one kind chosen by `of`; unknown where rows are named, related, lacking, or every kind.
+        """The one kind chosen by `of`; unknown where rows are named, related, lacking, having, or every kind.
 
-        Unknown for `lacking` because the edge it reads follows its far end's
-        placement, and the declaration cannot name the far end's kind.
+        Unknown for `lacking` and `having` because the edge each reads follows
+        its far end's placement, and the declaration cannot name the far end's
+        kind.
         """
-        if self.nodes or self.into or self.lacking or not self.of:
+        if self.nodes or self.into or self.lacking or self.having or not self.of:
             return None
         return [self.of]
 
