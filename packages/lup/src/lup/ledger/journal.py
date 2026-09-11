@@ -30,9 +30,19 @@ at this node" is still answered over one fold.
 
 Nothing is ever rewritten in place, so two sessions appending at once produce
 a longer log rather than a lost record.
+
+**A batch reads the log once.** Every read folds the journals from disk, which
+is right for a hook, a console and a tool server reaching one log at once and
+wrong for a writer recording twenty thousand nodes from a trove: each record
+asks whether its slug is taken and each edge what kind its ends are, and a
+fold per question is a fold per record. Inside ``batch()`` the store holds
+one fold, indexed by id and slug, and grows it with each append, so the
+questions are lookups; what it cannot see is a record another process
+appends meanwhile, which a bulk writer accepts for the span of its batch.
 """
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -104,6 +114,43 @@ class Touch(BaseModel, frozen=True):
     at: datetime
 
 
+class Fold:
+    """The log read once and indexed, grown in step with what a batch appends.
+
+    Every version of a node under its id, in log order, so the last is the
+    current one; and the id each slug names, the first record to spell a slug
+    holding it — which is the answer a scan of the log gives, since a slug
+    is refused the moment a second node would take it.
+    """
+
+    def __init__(self, stored: list[Stored]) -> None:
+        self.records = list(stored)
+        self.versions: dict[str, list[JsonObject]] = {}
+        self.slugs: dict[str, str] = {}
+        for each in self.records:
+            self.index(each.line)
+
+    def index(self, line: JsonObject) -> None:
+        if "id" not in line:
+            return
+        node_id = str(line["id"])
+        self.versions.setdefault(node_id, []).append(line)
+        if "slug" in line and line["slug"]:
+            self.slugs.setdefault(str(line["slug"]), node_id)
+
+    def grown(self, line: JsonObject, placement: Placement) -> None:
+        """One record appended after the fold was read, in its journal's order."""
+        self.records.append(
+            Stored(line=line, placement=placement, own=True, at=moment(line))
+        )
+        self.index(line)
+
+    def current(self, node_id: str) -> JsonObject | None:
+        """The last version recorded under an id, or nothing."""
+        held = self.versions.get(node_id)
+        return held[-1] if held else None
+
+
 class LedgerRefusal(Exception):
     """Something declined to be recorded, in the words the writer is shown.
 
@@ -137,6 +184,24 @@ class LedgerStore:
         """The directory each half's journal and blobs live under, by placement."""
         self.author = author
         self.blobs = BlobStores(self.roots)
+        self.fold: Fold | None = None
+        """The one fold a batch holds, or nothing between batches."""
+
+    @contextmanager
+    def batch(self) -> Iterator["LedgerStore"]:
+        """Hold one indexed fold of the log for a run of writes.
+
+        For a writer recording a trove: what the log holds is read once on
+        entry and grown with each append, so a slug check and a kind lookup
+        are indexed reads rather than folds. A record another process appends
+        during the batch is not seen until it ends, which is the trade a bulk
+        writer makes knowingly; a hook or a console keeps folding from disk.
+        """
+        self.fold = Fold(self.stored())
+        try:
+            yield self
+        finally:
+            self.fold = None
 
     def journal(self, placement: Placement) -> Path:
         """One half's log, its directory created on first use rather than at construction."""
@@ -162,6 +227,8 @@ class LedgerStore:
         rather than fatal. One bad record must not poison a log a live
         session is still appending to.
         """
+        if self.fold is not None:
+            return list(self.fold.records)
         adapter = TypeAdapter[JsonObject](JsonObject)
 
         def parsed(placement: Placement) -> Iterator[Stored]:
@@ -207,9 +274,14 @@ class LedgerStore:
         placement = self.layout.placement_of(record.deciding_kinds(self.kind_at))
         with self.journal(placement).open("a", encoding="utf-8") as log:
             log.write(record.model_dump_json() + "\n")
+        if self.fold is not None:
+            self.fold.grown(record.model_dump(mode="json"), placement)
 
     def kind_at(self, node_id: str) -> str:
         """The kind of the node with this id as last recorded, or nothing where there is none."""
+        if self.fold is not None:
+            current = self.fold.current(node_id)
+            return str(current["kind"]) if current and "kind" in current else ""
         return next(
             (
                 str(line["kind"])
@@ -382,6 +454,8 @@ class LedgerStore:
         """
         if not slug:
             return ""
+        if self.fold is not None:
+            return self.fold.slugs.get(slug, "")
         return next(
             (
                 str(line["id"])
@@ -409,26 +483,30 @@ class LedgerStore:
                 return False
             return line["id"] == node_id or ("slug" in line and line["slug"] == node_id)
 
-        def versions() -> Iterator[LedgerNode]:
-            for line in self.lines():
-                if not names(line):
+        def as_declared(line: JsonObject) -> LedgerNode | None:
+            for declared in classes:
+                try:
+                    return declared.model_validate(line)
+                except ValidationError:
                     continue
-                for declared in classes:
-                    try:
-                        yield declared.model_validate(line)
-                        break
-                    except ValidationError:
-                        continue
-                else:
-                    try:
-                        yield LedgerNode.model_validate(line)
-                    except ValidationError:
-                        continue
+            try:
+                return LedgerNode.model_validate(line)
+            except ValidationError:
+                return None
+
+        if self.fold is not None:
+            held = self.fold.versions.get(self.fold.slugs.get(node_id, node_id), [])
+            for line in reversed(held):
+                if (node := as_declared(line)) is not None:
+                    return node
+            return None
 
         # The last record for this id, for the reason `read` takes it: a node
         # is amended by being appended again, so an earlier match is a version
         # somebody has already moved on from.
-        found = list(versions())
+        found = [
+            node for line in self.lines() if names(line) and (node := as_declared(line))
+        ]
         return found[-1] if found else None
 
     def all_nodes(self, classes: list[type[LedgerNode]]) -> list[LedgerNode]:
