@@ -138,6 +138,23 @@ anything here to ask about — and `coordination holdings` carries the paths,
 because a person who wants those wants all of them at once rather than one row
 at a time.
 
+## A rate is owed by the repository, not by each session
+
+A session spacing its own requests is polite on its own and three of them
+are not: the repository this grew out of got a host to block it with three
+sessions each keeping to the rate the operator asked for. So the budget a
+host or an account is owed is counted where every session of one repository
+meets — `SharedBudget` in `lup.execution.resilience.budget` keeps one file
+per key under a directory the caller names, the coordination directory
+being the obvious one, holding the moments of the requests still inside the
+window. A reservation reads, prunes and appends under an exclusive lock and
+returns either a slot or how long until the oldest request leaves the
+window; `slot` sleeps that long outside the lock and asks again, because a
+slot promised to a waiting process is not a slot held. A budget of zero is
+never granted, which is the honest answer to a surface that must not be
+requested at all. The per-loop `Throttle` stays what it is: spacing inside
+one process, which the shared budget does not replace but sums over.
+
 ## Work that outlives the session that found it
 
 A touch says what a live session is holding and expires with it. A **task**
