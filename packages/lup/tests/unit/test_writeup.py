@@ -292,3 +292,31 @@ def test_a_timeline_takes_the_fallback_clock_and_says_which_it_took(
 
     assert "(at) | **[recorded only](lup:only)** |" in row
     assert "Nothing is dated." in nothing
+
+
+def test_a_listing_selects_what_lacks_an_edge_and_what_is_sound(
+    tmp_path: Path,
+) -> None:
+    """What is ours is what points at no source, and what may be cited is
+    what is sound: both read off the log, never stored."""
+    held = store(tmp_path)
+    ours = held.record(Task, "found here", slug="ours")
+    theirs = held.record(Task, "read from a source", slug="theirs")
+    source = held.record(Task, "the source", slug="source")
+    held.record(Doubt, "a doubt", slug="doubt")
+    held.relate(Blocks, theirs, source)
+
+    lacking = Listing(
+        heading="Ours", of="coordination:task", lacking="coordination:blocks"
+    )
+    sound = Listing(heading="Sound", sound=True)
+    unsound = Listing(heading="Unsound", sound=False)
+
+    assert [node.id for node in lacking.chosen(held, CLASSES)] == [ours.id, source.id]
+    assert lacking.kinds() is None
+    assert {node.slug for node in sound.chosen(held, CLASSES)} == {
+        "ours",
+        "theirs",
+        "source",
+    }
+    assert [node.slug for node in unsound.chosen(held, CLASSES)] == ["doubt"]

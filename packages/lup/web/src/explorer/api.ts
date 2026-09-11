@@ -32,6 +32,7 @@ export async function loadGraph(query: GraphQuery): Promise<GraphView> {
   if (query.kind !== "") params.set("kind", query.kind);
   if (query.standing !== "") params.set("standing", query.standing);
   if (query.since !== "") params.set("since", query.since);
+  if (query.lacking !== "") params.set("lacking", query.lacking);
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return read<GraphView>(`api/graph${suffix}`);
 }

@@ -186,6 +186,22 @@ class Listing(WriteupPart, frozen=True):
     via: str = ""
     """…through edges of this kind, or through any edge where empty."""
 
+    lacking: str = ""
+    """Only nodes from which no edge of this kind runs.
+
+    The selector for what is *ours*: a claim with no edge to the source that
+    stated it first was found here, and that is a query over the edges rather
+    than a stored count — the count moved five times in the worked example
+    this came from, for changes of identity rather than of evidence.
+    """
+
+    sound: bool | None = None
+    """Only nodes whose standing is sound (True) or is not (False) right now.
+
+    The one bit every standing vocabulary shares, so a listing of what may
+    still be cited needs no list of the labels that mean so.
+    """
+
     min_priority: int = 0
     numbered: bool = False
     empty: str = "Nothing recorded."
@@ -222,15 +238,27 @@ class Listing(WriteupPart, frozen=True):
                 if not self.of or node.kind == self.of
             ]
         moved = store.moved_since(self.since) if self.since is not None else None
+        pointing = (
+            {edge.source for edge in store.edges() if edge.kind == self.lacking}
+            if self.lacking
+            else set()
+        )
+
+        def admitted(node: LedgerNode) -> bool:
+            if not (self.standing or self.excluding) and self.sound is None:
+                return True
+            where = store.standing(node, classes)
+            return self.admits(where.label) and (
+                self.sound is None or where.sound == self.sound
+            )
+
         kept = [
             node
             for node in candidates
             if node.priority >= self.min_priority
             and (moved is None or node.id in moved)
-            and (
-                not (self.standing or self.excluding)
-                or self.admits(store.standing(node, classes).label)
-            )
+            and node.id not in pointing
+            and admitted(node)
         ]
         return sorted(kept, key=lambda node: (-node.priority, node.at))
 
@@ -250,8 +278,12 @@ class Listing(WriteupPart, frozen=True):
         return [*lines, ""]
 
     def kinds(self) -> list[str] | None:
-        """The one kind chosen by `of`; unknown where rows are named, related, or every kind."""
-        if self.nodes or self.into or not self.of:
+        """The one kind chosen by `of`; unknown where rows are named, related, lacking, or every kind.
+
+        Unknown for `lacking` because the edge it reads follows its far end's
+        placement, and the declaration cannot name the far end's kind.
+        """
+        if self.nodes or self.into or self.lacking or not self.of:
             return None
         return [self.of]
 

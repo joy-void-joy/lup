@@ -183,6 +183,7 @@ def graph_view(
     kind: str = "",
     standing: str = "",
     since: datetime | None = None,
+    lacking: str = "",
 ) -> GraphView:
     """The log as nodes and edges, narrowed the way a reader asked.
 
@@ -190,25 +191,31 @@ def graph_view(
     filtered graph never draws a line to a node it is not showing. The kind
     and standing vocabularies are read off the whole log, not the narrowed
     one, so the filters a reader is offered do not shrink as they are used.
+    ``lacking`` keeps the nodes from which no edge of that kind runs — what
+    was found here rather than read from somewhere — read off the whole
+    log's edges before any narrowing, so a hidden far end still counts.
     """
     movements = store.movements()
     every = [
         node_view(store, classes, node, movements) for node in store.all_nodes(classes)
     ]
     moved = store.moved_since(since) if since is not None else None
+    edges = store.edges()
+    pointing = {edge.source for edge in edges if lacking and edge.kind == lacking}
     shown = [
         node
         for node in every
         if (not kind or node.kind == kind)
         and (not standing or node.standing == standing)
         and (moved is None or node.id in moved)
+        and node.id not in pointing
     ]
     ids = {node.id: node for node in shown}
     return GraphView(
         nodes=shown,
         edges=[
             edge_view(edge.kind, edge.source, edge.target)
-            for edge in store.edges()
+            for edge in edges
             if edge.source in ids and edge.target in ids
         ],
         kinds=list(dict.fromkeys(node.kind for node in every)),

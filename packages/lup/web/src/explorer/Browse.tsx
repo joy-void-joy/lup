@@ -120,8 +120,14 @@ export function Browse() {
   const search = browseRoute.useSearch();
   const navigate = useNavigate();
   const graph = useQuery({
-    queryKey: ["graph", search.kind, search.standing, search.since],
-    queryFn: () => loadGraph({ kind: search.kind, standing: search.standing, since: search.since }),
+    queryKey: ["graph", search.kind, search.standing, search.since, search.lacking],
+    queryFn: () =>
+      loadGraph({
+        kind: search.kind,
+        standing: search.standing,
+        since: search.since,
+        lacking: search.lacking,
+      }),
   });
   const kinds = useQuery({ queryKey: ["kinds"], queryFn: loadKinds });
   const data = useMemo(
@@ -177,6 +183,21 @@ export function Browse() {
             value={search.since}
             onChange={(event) => amend({ since: event.target.value })}
           />
+        </label>
+        <label>
+          Lacking an edge
+          <select
+            value={search.lacking}
+            onChange={(event) => amend({ lacking: event.target.value })}
+            title="only nodes from which no edge of this kind runs — what was found here rather than read from somewhere"
+          >
+            <option value="">none</option>
+            {(kinds.data?.edges ?? []).map((edge) => (
+              <option key={edge.kind} value={edge.kind}>
+                {edge.kind}
+              </option>
+            ))}
+          </select>
         </label>
         <div className="views">
           <Link to="/" search={{ ...search, view: "list" }} aria-current={search.view === "list" ? "page" : undefined}>

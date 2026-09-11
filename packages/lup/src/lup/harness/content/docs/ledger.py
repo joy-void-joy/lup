@@ -210,7 +210,8 @@ one call at the moment something is learned, not a chore at the end.
 
 `ledger explore` opens the log in a browser, on the loopback: every node
 listed with its standing read now and who recorded it, narrowed by kind,
-standing or the moment it last moved, searched by title, text, slug or id,
+standing, the moment it last moved or the edge kind it lacks, searched by
+title, text, slug or id,
 sorted by any column; one node in full, the edges pointing at it counted by
 kind, each end a link; and the DAG drawn as a graph, a tap opening the node.
 Every view is a URL, so a reader hands another one exactly what they were
@@ -232,8 +233,9 @@ than written by hand: a Python module declares it as parts — the author's
 prose, and parts that render from the ledger when the document is generated.
 `Prose` fills `{placeholders}` with a node's figure, cited and bold, or struck
 through with the reason where the node no longer stands. `Listing` is a table
-of nodes chosen by kind, standing, relation, moment, or by name, ordered by
-priority. `Timeline` is every node of the named kinds in the order of the
+of nodes chosen by kind, standing, soundness, relation, moment, by name, or
+by lacking an edge of a kind — what points at no source is what was found
+here — ordered by priority. `Timeline` is every node of the named kinds in the order of the
 clock the author named, a node with only an upper bound placed there and
 saying `before`, a second clock shown beside each row and never ordered by,
 and bands — a kind with a start and an end — opening and closing as rows of

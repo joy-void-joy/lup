@@ -85,13 +85,16 @@ def explorer_app(
     application = bundle_app("Ledger explorer", url, SURFACE, bundles)
 
     @application.get("/api/graph")
-    async def graph(kind: str = "", standing: str = "", since: str = "") -> GraphView:
+    async def graph(
+        kind: str = "", standing: str = "", since: str = "", lacking: str = ""
+    ) -> GraphView:
         return graph_view(
             opened(root, layout),
             classes,
             kind=kind,
             standing=standing,
             since=since_moment(since),
+            lacking=lacking,
         )
 
     @application.get("/api/node/{spelling}")

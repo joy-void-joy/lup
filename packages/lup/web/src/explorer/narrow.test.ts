@@ -34,25 +34,25 @@ const graph: GraphView = {
 
 describe("narrowed", () => {
   test("keeps everything for an empty query", () => {
-    expect(narrowed(graph, { kind: "", standing: "", since: "" })).toEqual(graph);
+    expect(narrowed(graph, { kind: "", standing: "", since: "", lacking: "" })).toEqual(graph);
   });
 
   test("drops an edge whose far end was narrowed away", () => {
-    const claims = narrowed(graph, { kind: "corpus:claim", standing: "", since: "" });
+    const claims = narrowed(graph, { kind: "corpus:claim", standing: "", since: "", lacking: "" });
     expect(claims.nodes.map((each) => each.id)).toEqual(["a", "b"]);
     expect(claims.edges.map((each) => each.kind)).toEqual(["corpus:rests_on"]);
     expect(claims.kinds).toEqual(graph.kinds);
   });
 
   test("reads since off when each node last moved", () => {
-    const recent = narrowed(graph, { kind: "", standing: "", since: "2026-09-04T00:00:00Z" });
+    const recent = narrowed(graph, { kind: "", standing: "", since: "2026-09-04T00:00:00Z", lacking: "" });
     expect(recent.nodes.map((each) => each.id)).toEqual(["b", "c"]);
-    const unreadable = narrowed(graph, { kind: "", standing: "", since: "yesterday-ish" });
+    const unreadable = narrowed(graph, { kind: "", standing: "", since: "yesterday-ish", lacking: "" });
     expect(unreadable.nodes).toHaveLength(3);
   });
 
   test("narrows by standing", () => {
-    const refuted = narrowed(graph, { kind: "", standing: "refuted", since: "" });
+    const refuted = narrowed(graph, { kind: "", standing: "refuted", since: "", lacking: "" });
     expect(refuted.nodes.map((each) => each.id)).toEqual(["b"]);
     expect(refuted.edges).toEqual([]);
   });
@@ -67,5 +67,22 @@ describe("matches", () => {
     expect(matches(first, "supported")).toBe(true);
     expect(matches(first, "task")).toBe(false);
     expect(matches(first, "")).toBe(true);
+  });
+});
+
+describe("narrowed by lacking", () => {
+  test("keeps only the nodes from which no edge of the kind runs, reading every edge first", () => {
+    // `a` rests on `b`, so lacking `rests_on` drops `a` and keeps `b` and `c`;
+    // narrowing to claims as well hides `c` without changing what `a` lacks.
+    const ours = narrowed(graph, { kind: "", standing: "", since: "", lacking: "corpus:rests_on" });
+    expect(ours.nodes.map((each) => each.id)).toEqual(["b", "c"]);
+    expect(ours.edges.map((each) => each.kind)).toEqual(["coordination:blocks"]);
+    const claims = narrowed(graph, {
+      kind: "corpus:claim",
+      standing: "",
+      since: "",
+      lacking: "corpus:rests_on",
+    });
+    expect(claims.nodes.map((each) => each.id)).toEqual(["b"]);
   });
 });

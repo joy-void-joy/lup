@@ -5,7 +5,7 @@
 // reads. Pure functions, so `bun test` holds them to the server's semantics.
 import type { GraphView, NodeView } from "../generated/views";
 
-export type GraphQuery = { kind: string; standing: string; since: string };
+export type GraphQuery = { kind: string; standing: string; since: string; lacking: string };
 
 /** A moment as milliseconds, or null where the spelling is empty or unreadable. */
 function moment(spelling: string): number | null {
@@ -14,14 +14,20 @@ function moment(spelling: string): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-/** The graph narrowed as `api/graph` narrows it: kind, standing, moved since. */
+/** The graph narrowed as `api/graph` narrows it: kind, standing, moved since, lacking an edge kind. */
 export function narrowed(graph: GraphView, query: GraphQuery): GraphView {
   const since = moment(query.since);
+  // Read off every edge before any node is dropped, so a far end the
+  // narrowing hides still counts as the edge it is.
+  const pointing = new Set(
+    graph.edges.filter((edge) => query.lacking !== "" && edge.kind === query.lacking).map((edge) => edge.source),
+  );
   const nodes = graph.nodes.filter(
     (node) =>
       (query.kind === "" || node.kind === query.kind) &&
       (query.standing === "" || node.standing === query.standing) &&
-      (since === null || Date.parse(node.moved) > since),
+      (since === null || Date.parse(node.moved) > since) &&
+      !pointing.has(node.id),
   );
   const shown = new Set(nodes.map((node) => node.id));
   return {
