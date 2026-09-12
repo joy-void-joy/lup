@@ -400,20 +400,22 @@ def create_ledger_app(
                 f"--since must be ISO 8601: {invalid}"
             ) from invalid
         moved = held.moved_since(moment) if moment is not None else None
-        rows = [
-            node
-            for node in held.all_nodes(classes)
-            if (not kind or node.kind == kind) and (moved is None or node.id in moved)
-        ]
-        if not rows:
-            typer.echo(
-                f"No node of kind {kind!r} is recorded."
-                if kind
-                else "This repository has recorded no nodes."
-            )
-            return
-        for node in rows:
-            typer.echo(node_line(held, node, classes))
+        with held.batch():
+            rows = [
+                node
+                for node in held.all_nodes(classes)
+                if (not kind or node.kind == kind)
+                and (moved is None or node.id in moved)
+            ]
+            if not rows:
+                typer.echo(
+                    f"No node of kind {kind!r} is recorded."
+                    if kind
+                    else "This repository has recorded no nodes."
+                )
+                return
+            for node in rows:
+                typer.echo(node_line(held, node, classes))
 
     @app.command("show")
     def show_cmd(

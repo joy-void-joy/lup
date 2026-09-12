@@ -48,6 +48,31 @@ def test_a_batch_resolves_by_slug_and_id_refuses_a_taken_slug_and_lands_every_re
     assert isinstance(resolved, Task) and resolved.done
 
 
+def test_inside_a_batch_edges_are_looked_up_by_their_ends_and_a_nested_batch_keeps_the_fold(
+    tmp_path: Path,
+) -> None:
+    store = LedgerStore(tmp_path, AUTHOR)
+    first = store.record(Task, "first")
+    second = store.record(Task, "second")
+    store.relate(Blocks, first, second)
+    with store.batch() as held:
+        fold = held.fold
+        assert fold is not None
+        assert [edge.source for edge in held.into(second.id)] == [first.id]
+        assert [edge.target for edge in held.out_of(first.id)] == [second.id]
+        assert held.into(first.id) == [] and held.out_of(second.id) == []
+        # Standing reads the same edges through the fold: second is blocked.
+        assert held.standing(second, [Task]).label == "blocked"
+        third = held.record(Task, "third")
+        held.relate(Blocks, third, first)
+        assert [edge.source for edge in held.into(first.id)] == [third.id]
+        with held.batch() as inner:
+            assert inner.fold is fold
+        assert held.fold is fold
+    assert store.fold is None
+    assert [edge.source for edge in store.into(first.id)] == [third.id]
+
+
 def test_a_batch_does_not_see_what_another_store_appends_meanwhile(
     tmp_path: Path,
 ) -> None:

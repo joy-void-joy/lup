@@ -195,12 +195,14 @@ def graph_view(
     was found here rather than read from somewhere — read off the whole
     log's edges before any narrowing, so a hidden far end still counts.
     """
-    movements = store.movements()
-    every = [
-        node_view(store, classes, node, movements) for node in store.all_nodes(classes)
-    ]
+    with store.batch():
+        movements = store.movements()
+        every = [
+            node_view(store, classes, node, movements)
+            for node in store.all_nodes(classes)
+        ]
+        edges = store.edges()
     moved = store.moved_since(since) if since is not None else None
-    edges = store.edges()
     pointing = {edge.source for edge in edges if lacking and edge.kind == lacking}
     shown = [
         node

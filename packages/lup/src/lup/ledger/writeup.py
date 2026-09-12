@@ -632,9 +632,13 @@ def write_writeup(
     """
     base = root or project_root()
     store = LedgerStore(base, ActorRef(kind="console", id=mint_member_id()), layout)
+    # One fold for the whole document: every part reads the log as it was
+    # when generation started, and what points at each node is a lookup.
+    with store.batch():
+        body = render_writeup(store, classes, writeup)
     artifact = Artifact.generated(
         path=Path(writeup.path),
-        body=render_writeup(store, classes, writeup),
+        body=body,
         semantic_id=f"writeup.{writeup.name}",
         banner=GeneratedBanner(source=writeup.source, command=WRITEUP_COMMAND),
     )

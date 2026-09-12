@@ -127,10 +127,23 @@ class Fold:
         self.records = list(stored)
         self.versions: dict[str, list[JsonObject]] = {}
         self.slugs: dict[str, str] = {}
+        self.edges_into: dict[str, list[JsonObject]] = {}
+        self.edges_out_of: dict[str, list[JsonObject]] = {}
+        """Every edge line by the id it points at, and by the id it runs from.
+
+        The two questions standing is read from — what points at this node,
+        what it points at — answered by lookup rather than by validating every
+        edge in the log once per node asked.
+        """
+
         for each in self.records:
             self.index(each.line)
 
     def index(self, line: JsonObject) -> None:
+        if "source" in line and "target" in line:
+            self.edges_into.setdefault(str(line["target"]), []).append(line)
+            self.edges_out_of.setdefault(str(line["source"]), []).append(line)
+            return
         if "id" not in line:
             return
         node_id = str(line["id"])
@@ -189,14 +202,23 @@ class LedgerStore:
 
     @contextmanager
     def batch(self) -> Iterator["LedgerStore"]:
-        """Hold one indexed fold of the log for a run of writes.
+        """Hold one indexed fold of the log for a run of writes, or of reads.
 
         For a writer recording a trove: what the log holds is read once on
         entry and grown with each append, so a slug check and a kind lookup
-        are indexed reads rather than folds. A record another process appends
-        during the batch is not seen until it ends, which is the trade a bulk
-        writer makes knowingly; a hook or a console keeps folding from disk.
+        are indexed reads rather than folds. For a reader whose subject is
+        the whole log — a writeup, a listing, the explorer — the same fold
+        answers what points at each node by lookup, so a document over
+        twenty thousand nodes reads the log once rather than once per node.
+        A record another process appends during the batch is not seen until
+        it ends, which is the trade both make knowingly; a hook keeps
+        folding from disk. Entering a batch inside a batch keeps the outer
+        fold, so a reader that holds one is not reset by a callee that
+        wants one.
         """
+        if self.fold is not None:
+            yield self
+            return
         self.fold = Fold(self.stored())
         try:
             yield self
@@ -413,17 +435,33 @@ class LedgerStore:
             return list(moved)
         return [node_id for node_id in ids if node_id in moved]
 
+    def edges_at(self, lines: list[JsonObject]) -> list[LedgerEdge]:
+        """The edges among some lines, each as the base, in the order given."""
+        adapter = TypeAdapter[LedgerEdge](LedgerEdge)
+        found: list[LedgerEdge] = []  # lup: ignore[empty-collection] — filled below
+        for line in lines:
+            try:
+                found.append(adapter.validate_python(line))
+            except ValidationError:
+                continue
+        return found
+
     def into(self, node_id: str) -> list[LedgerEdge]:
         """Every edge pointing at one node, which is what standing is read from.
 
         One pass over one fold, which is the property that decides the whole
         shape: split the log by subject and this spans several of them, each
-        able to change between reads.
+        able to change between reads. Inside a batch the fold is indexed by
+        the edges' ends, so the pass is a lookup.
         """
+        if self.fold is not None:
+            return self.edges_at(self.fold.edges_into.get(node_id, []))
         return [edge for edge in self.edges() if edge.target == node_id]
 
     def out_of(self, node_id: str) -> list[LedgerEdge]:
         """Every edge this node is the source of."""
+        if self.fold is not None:
+            return self.edges_at(self.fold.edges_out_of.get(node_id, []))
         return [edge for edge in self.edges() if edge.source == node_id]
 
     def amend[N: LedgerNode](self, node: N) -> N:

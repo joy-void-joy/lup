@@ -122,14 +122,15 @@ def export_view(
 ) -> ExportView:
     """The whole log as one value, for a page that cannot ask for more later."""
     store = opened(root, layout)
-    return ExportView(
-        graph=graph_view(store, classes),
-        details=[
-            node_detail(store, classes, node) for node in store.all_nodes(classes)
-        ],
-        kinds=kinds_view(classes, edges, layout),
-        exported_at=utc_now(),
-    )
+    with store.batch():
+        return ExportView(
+            graph=graph_view(store, classes),
+            details=[
+                node_detail(store, classes, node) for node in store.all_nodes(classes)
+            ],
+            kinds=kinds_view(classes, edges, layout),
+            exported_at=utc_now(),
+        )
 
 
 def export_page(view: ExportView, template: Template) -> str:
