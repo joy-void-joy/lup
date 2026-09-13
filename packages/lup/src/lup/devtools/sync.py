@@ -377,6 +377,29 @@ def clone_upstream(proj: ProjectEntry, repository: Path) -> Upstream:
     )
 
 
+def registered_upstream(proj: ProjectEntry, path: Path) -> Upstream:
+    """A registration naming a path: somebody's own checkout, read where they work.
+
+    A plain checkout is read at its HEAD, which is what they have. A bare
+    repository has no HEAD worth reading — it names whatever branch the
+    clone was made on, which for a clone kept beside its worktrees is the
+    default branch and not the one anybody links against — so it is read at
+    the branch the registration names, as that clone's *own* ref rather
+    than a remote-tracking one: the user's clone is the upstream here, and
+    what they committed on that branch is what a linked project builds on.
+    The commits are read from the worktree attached for the branch where
+    one is, and from the bare half otherwise.
+    """
+    if not bare_repository(path):
+        return Upstream(checkout=path)
+    branch = clone_branch(proj, path)
+    attached = path / "tree" / branch
+    return Upstream(
+        checkout=attached if branch and attached.is_dir() else path,
+        tip=f"refs/heads/{branch}" if branch else "HEAD",
+    )
+
+
 def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """Where this registration already is, WITHOUT cloning or fetching.
 
@@ -385,7 +408,7 @@ def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """
     path = proj.get("path", "")
     if path and Path(path).exists():
-        return Upstream(checkout=Path(path))
+        return registered_upstream(proj, Path(path))
     repository = cached_clone(proj["name"])
     return None if repository is None else clone_upstream(proj, repository)
 
@@ -612,7 +635,7 @@ def ensure_local(
     name = proj["name"]
     if path and Path(path).exists():
         ensure_ref_symlink(name, path)
-        return Upstream(checkout=Path(path))
+        return registered_upstream(proj, Path(path))
 
     url = proj.get("url", "")
     repository = cached_clone(name)
