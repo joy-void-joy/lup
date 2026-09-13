@@ -64,13 +64,25 @@ def handle(node: LedgerNode) -> str:
     return node.slug or node.id
 
 
+def cell(text: str) -> str:
+    """Text as one table cell carries it: one line, every pipe escaped.
+
+    A node's text is whatever its writer recorded — a paste body with its
+    newlines, a title with a pipe — and a listing row is a markdown table
+    row, which a newline ends and a pipe splits. Nothing is cut: the
+    whitespace collapses to single spaces and the pipes stay, escaped.
+    """
+    return " ".join(text.split()).replace("|", "\\|")
+
+
 def figure(store: LedgerStore, classes: list[type[LedgerNode]], spelling: str) -> str:
     """One node as a figure in prose: what it says, cited, with its standing.
 
     A sound node renders bold and cited, so the cite check holds the document
     to it. One that is not sound renders struck through with the reason, so
     the figure a reader would have copied is visibly not one to copy — and is
-    still cited, so the check reports it too.
+    still cited, so the check reports it too. The label is one line and safe
+    in a table row, because a figure sits in a listing as often as in prose.
     """
     node = store.resolve(spelling, classes)
     if node is None:
@@ -78,10 +90,10 @@ def figure(store: LedgerStore, classes: list[type[LedgerNode]], spelling: str) -
             f"no node in this repository has the id or slug {spelling!r}"
         )
     where = store.standing(node, classes)
-    link = f"[{node.text or node.title}](lup:{handle(node)})"
+    link = f"[{cell(node.text or node.title)}](lup:{handle(node)})"
     if where.sound:
         return f"**{link}**"
-    return f"~~{link}~~ ({where.label}: {where.reason})"
+    return f"~~{link}~~ ({where.label}: {cell(where.reason)})"
 
 
 class Placeholder(BaseModel, frozen=True):
@@ -277,7 +289,7 @@ class Listing(WriteupPart, frozen=True):
         for position, node in enumerate(rows, start=1):
             where = store.standing(node, classes)
             what = figure(store, classes, node.id) + (
-                f" — {node.title}" if node.text else ""
+                f" — {cell(node.title)}" if node.text else ""
             )
             number = str(position) if self.numbered else ""
             lines.append(f"| {number} | {what} | {where.label} | `{handle(node)}` |")
@@ -405,7 +417,7 @@ class Timeline(WriteupPart, frozen=True):
         return [
             figure(store, classes, node.id),
             spelled_moment(seen) if seen is not None else "",
-            store.standing(node, classes).label,
+            cell(store.standing(node, classes).label),
             f"`{handle(node)}`",
         ]
 

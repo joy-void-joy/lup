@@ -324,3 +324,18 @@ def test_a_listing_selects_what_lacks_an_edge_and_what_is_sound(
         "source",
     }
     assert [node.slug for node in unsound.chosen(held, CLASSES)] == ["doubt"]
+
+
+def test_a_figure_in_a_row_is_one_line_with_its_pipes_escaped(tmp_path: Path) -> None:
+    """A paste body with newlines and a title with a pipe stay whole and keep the table a table."""
+    held = store(tmp_path)
+    held.record(Task, "a | b", text="line one\nline two | three", slug="piped")
+
+    [row] = rows_of(
+        Listing(heading="Rows", of="coordination:task").render(held, CLASSES)
+    )
+
+    assert "\n" not in row
+    assert "line one line two \\| three" in row and " — a \\| b" in row
+    # Four columns are five bare pipes; the two inside the cells are escaped.
+    assert row.count("|") - row.count("\\|") == 5
