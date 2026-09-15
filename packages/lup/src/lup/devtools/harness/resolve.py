@@ -105,7 +105,7 @@ from lup.devtools.harness.contained import (
     worker_wrapper_path,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
-from lup.devtools.sync import accessible_roots
+from lup.devtools.sync import accessible_roots, granted_devices
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.devtools.supervisor.page import SUPERVISOR_PORT
@@ -1703,6 +1703,7 @@ def run_resolve(
                 program=actor_program,
                 read_only=read_only,
                 accessible=accessible_roots(),
+                devices=granted_devices(),
             )
 
         def toolchain_writable_paths() -> list[Path]:

@@ -179,6 +179,8 @@ CONFIGURATION = models.GuidanceSection(
 
 Configuration loads through pydantic-settings in `src/lup_template/agent/config.py`, the only module that reads the environment. `docs/template.md` lists the variables and how gitignored `.env.local` overrides `.env`.
 
+**A committed declaration is consumer-independent.** It holds what every machine and every downstream user of this repository shares, so no fact about *this* machine sits in one: a path, a device, a client, a login. Those go where the machine keeps them, `.env.local` for the application's settings, `sync.json.local` for what the launcher grants sessions here, a flag for one launch. A `# lup: template:` marker asks a downstream repository's authors a question about their domain, whose answer every user of that repository then shares; a question two machines running one commit would answer differently is not one.
+
 """
         ),
     ],

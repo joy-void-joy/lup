@@ -250,6 +250,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `sync diff` | Show full diff for a specific commit. |
 | `sync mark-synced` | Advance the sync checkpoint to where the upstream now stands. |
 | `sync setup` | Set the local path for a project (writes to sync.json.local). |
+| `sync grant` | Grant sessions on this machine a host device (writes to sync.json.local). |
+| `sync revoke` | Take a device back from sessions on this machine (writes to sync.json.local). |
 
 ## `trace`
 

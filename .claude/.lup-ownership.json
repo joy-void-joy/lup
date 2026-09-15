@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "d97ae68fe2a95cf2099c97f941313e2113e68c5ed3f0e243ddd766429415a42c",
+  "source_digest": "96acc748ec4c395662bf5e7aaef5121f4400e8341e64a576331b69f3c9abddee",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "8a9bf35c2aa4ff6fbc4054a220113c7eac7583fc48581e8b1425056348209b78",
+      "sha256": "3f6fb53b913c9e5990c0287ed5ea195ea0bd314bfd974b4a00ea5a4cfbdb9c0c",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -541,7 +541,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "6f3673a1ffdfec0c9f566ae8768521c714d881d6b66364ef73fb2596b39fb96b",
+      "sha256": "24069d51896b4e53de90c8bab99ab13dd6a2a7c726e9d4017b36cb6779e45831",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -576,7 +576,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "f580342308b9dd033f2535cf1890c55d9523f3d35cc3a28907a8ae0098d738ef",
+      "sha256": "6c46cbd29d64bdad00f78971921f03b3c6730c195514dc07f74a642917633840",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -625,7 +625,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "a9fe13ad2cb8c1e7863dcb6b431666dcc63a8d79e56766c54affc93cd2f6048b",
+      "sha256": "0a45d83fdf8ee1dee831bdf3304bd85daeaee3a91c93f88926d03636210bf50d",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
@@ -667,7 +667,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "038d839b67222d000bd7556cc30c26aa9706cbe8e6ef566c261ecfa6cbbf2604",
+      "sha256": "56750e1ce7615f3503b5c81d18cac1dfbe5d46ef3fce6363ca39ed842964cde8",
       "semantic_id": "docs.template",
       "executable": false
     },
