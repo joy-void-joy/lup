@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-
 from lup.coordination.identity import mint_member_id
 from lup.coordination.refs import ActorRef
 from lup.coordination.tasks import Blocks, Task
@@ -20,6 +19,7 @@ from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerNode, Standing, Surroundings
 from lup.ledger.writeup import (
     Band,
+    Count,
     Listing,
     NeedsPerson,
     Placeholder,
@@ -358,8 +358,12 @@ def test_a_tally_counts_nodes_by_a_field_largest_first_and_narrows_by_standing(
         heading="Open by holder", of="coordination:task", by="holder", standing="open"
     )
 
-    assert every.counted(held, CLASSES) == [("ann", 2), ("bob", 2), ("(none)", 1)]
-    assert open_only.counted(held, CLASSES) == [("(none)", 1)]
+    assert every.counted(held, CLASSES) == [
+        Count(value="ann", count=2),
+        Count(value="bob", count=2),
+        Count(value="(none)", count=1),
+    ]
+    assert open_only.counted(held, CLASSES) == [Count(value="(none)", count=1)]
     rendered = "\n".join(every.render(held, CLASSES))
     assert "| holder | count |" in rendered and "| ann | 2 |" in rendered
     assert every.kinds() == ["coordination:task"]
