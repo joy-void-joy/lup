@@ -233,47 +233,6 @@ SCRATCH_VERB_FLAGS = {
 }
 
 
-class OperandGrammar(TypedDict):
-    """How a command that carries a program tells its paths from its program.
-
-    The verbs above take paths and nothing else, so their operands are
-    whatever is not a flag. A command handed a program does not work that way:
-    `sed -n '/^def x/,/^def y/p' file.py` names one path and one script, and
-    reading both as paths is reading a script as a path.
-
-    That mattered because the reading feeds three questions and only two of
-    them stat anything. Whether a target is a directory and whether it is an
-    empty one both skip a path that is not on disk, so a script fell out
-    harmlessly; whether a target sits under a writable root resolves the
-    string and asks -- and a sed address script *begins with a slash*, so it
-    resolved to an absolute path no root contains and was reported as a write
-    outside the lease. `sed -n '/^def x/,/^def y/p' file.py` asked for
-    approval, naming the script as the file it was about to write.
-    """
-
-    script_flags: str
-    """Short options that supply the program, so no operand carries it."""
-    script_options: list[str]
-    """Long spellings of the same, matched before any ``=`` value."""
-    value_flags: str
-    """Short options that consume the following word, program or otherwise."""
-
-
-# lup: ignore[constant-declaration] — each command's own documented grammar, fixed by what the utility parses rather than by anybody's judgement
-PROGRAM_CARRYING_COMMANDS = {
-    "sed": OperandGrammar(
-        script_flags="ef", script_options=["expression", "file"], value_flags="efl"
-    )
-}
-"""Commands whose first operand is a program unless an option supplied one.
-
-One entry, and a table rather than a branch because the fact is about `sed`
-rather than about this function: what is declared is where the paths start,
-and a second command with the same shape is a row instead of a second `if`
-that has to be found and read to know it is the same shape.
-"""
-
-
 def leaves_the_checkout(path_text: str) -> bool:
     """Whether this spelling reaches somewhere the checkout does not cover.
 
@@ -412,38 +371,6 @@ def flag_write_targets(words: list[str], write_flags: list[str]) -> list[str]:
             continue
         following = word in write_flags
     return targets
-
-
-def program_carrying_operands(words: list[str], grammar: OperandGrammar) -> list[str]:
-    """The words this command names paths with, by its declared grammar.
-
-    Over-naming is safe for the questions that stat what they are handed and
-    unsafe for the one that does not, so this under-names instead: an option
-    whose value is unknown takes the following word with it, and the leading
-    operand is a path only once something else has supplied the program.
-    """
-    operands: list[str] = []
-    supplied = not grammar["script_flags"]
-    skipping = False
-    for word in words[1:]:
-        if skipping:
-            skipping = False
-            continue
-        if word.startswith("--") and len(word) > 2:
-            if word[2:].split("=", 1)[0] in grammar["script_options"]:
-                supplied = True
-            continue
-        if word.startswith("-") and len(word) > 1:
-            letters = word[1:]
-            if any(letter in grammar["script_flags"] for letter in letters):
-                supplied = True
-            skipping = letters[-1] in grammar["value_flags"]
-            continue
-        if not supplied:
-            supplied = True
-            continue
-        operands.append(word)
-    return operands
 
 
 def is_trusted_script(word: str, roots: list[str]) -> bool:
@@ -1415,3 +1342,40 @@ def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
         in_place=in_place,
         screened=sandbox or all(safe_sed_script(script) for script in scripts),
     )
+
+
+def sed_rewrite_operands(words: list[str]) -> list[str] | None:
+    """The files an in-place sed replaces, or ``None`` where the line is no sed.
+
+    One of the readers a path-writing verb's operands are named by, and like
+    :func:`git_restore_operands` it recognises its own command: what a
+    utility does with its operands is a fact about that utility, so the
+    reader that knows the utility is the one that says whether a line is it.
+
+    A sed without ``-i`` is ``cat`` with an address: what sits at its operand
+    is the same afterwards, so the operand is a path the command reads and
+    not one it acts on. Naming it anyway was defended as the safe direction,
+    because two of the three questions asked of an acted-on path stat it and
+    a file that is there answers them harmlessly -- but the third resolves it
+    against what the launch mounted writable, and a file under a read-only
+    mount is exactly the path no writable root contains. So
+    ``sed -n 1,80p /mounted/verify.py`` was reported as a write outside the
+    lease and asked, while ``head -80`` over the same file was allowed.
+
+    Read through :func:`sed_invocation` rather than by a grammar of its own,
+    on the terms that function states: a second reader of which files a
+    rewrite touches parts company with the first the moment one of them
+    learns a flag the other has not, and this one had never learned ``-i``.
+
+    A call the reader refuses names nothing. The classifier returns that same
+    refusal before any fact about the file is consulted, and a refusal is not
+    reopened by anything the facts could say -- which is also what every
+    other unclassified command names, so a sed nobody judged is treated as
+    one.
+    """
+    if posixpath.basename(words[0]) != "sed":
+        return None
+    invocation = sed_invocation(words)
+    if isinstance(invocation, KernelDecision):
+        return []
+    return invocation["targets"] if invocation["in_place"] else []

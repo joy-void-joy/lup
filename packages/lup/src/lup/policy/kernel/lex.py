@@ -17,7 +17,6 @@ from .effects import EffectEvidence, declare, verdict_for
 from .roles import spells_its_path
 from .rows import PathRoleRow, PathRuleRow, ShellRuleRow
 from .words import (
-    PROGRAM_CARRYING_COMMANDS,
     SCRATCH_VERB_FLAGS,
     effective_command,
     flag_write_targets,
@@ -25,10 +24,10 @@ from .words import (
     git_restore_operands,
     opaque_argument,
     path_verb_operands,
-    program_carrying_operands,
     protected_write_target,
     refuses_generated_plugin_target,
     sed_invocation,
+    sed_rewrite_operands,
     uv_run_words,
     write_checkpoint,
     write_scope,
@@ -1374,10 +1373,11 @@ def shell_path_verb_targets(command: str) -> list[str]:
     string and asks whether it sits under a writable root. A word that is not
     a path at all still answers that one, and answers it wrongly.
 
-    So a command carrying a program names its paths by
-    :data:`~lup.policy.kernel.words.PROGRAM_CARRYING_COMMANDS` rather than by
-    taking every non-flag word. A command that does not lex yields nothing and
-    keeps its unjudged verdict.
+    So ``sed`` names the files it rewrites in place, read by the one reader
+    the classifier judges it with, and nothing where it only prints: neither
+    its script, which is a program rather than a path, nor the file it reads,
+    which is at the path unchanged afterwards. A command that does not lex
+    yields nothing and keeps its unjudged verdict.
     """
     segments = parse_shell_words(command, 0)
     if isinstance(segments, KernelDecision):
@@ -1397,9 +1397,9 @@ def shell_path_verb_targets(command: str) -> list[str]:
             if archived["directory"] is not None:
                 targets.append(archived["directory"])
             continue
-        grammar = PROGRAM_CARRYING_COMMANDS.get(posixpath.basename(words[0]))
-        if grammar is not None:
-            targets.extend(program_carrying_operands(words, grammar))
+        rewritten = sed_rewrite_operands(words)
+        if rewritten is not None:
+            targets.extend(rewritten)
             continue
         if posixpath.basename(words[0]) not in SCRATCH_VERB_FLAGS:
             continue
