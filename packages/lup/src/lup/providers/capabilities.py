@@ -47,7 +47,7 @@ def canonical_capability_matrix() -> list[AdapterCapabilities]:
     """Return the checked-in evidence for the supported native contracts."""
     return [
         AdapterCapabilities(
-            name="claude-sdk-0.2.89",
+            name="claude-sdk-0.2.152",
             cells=cells(
                 live_events=True,
                 interrupt=True,
