@@ -44,6 +44,7 @@ from lup.coordination.refs import ActorRef
 from lup.coordination.rendering import GROUPS, task_line, user_tasks
 from lup.coordination.tasks import Task
 from lup.formats.banner import GeneratedBanner
+from lup.formats.markdown import PlainCell
 from lup.harness.materialization import write_generated_file
 from lup.harness.models import Artifact
 from lup.ledger.journal import LedgerStore
@@ -72,10 +73,10 @@ def cell(text: str) -> str:
     A node's text is whatever its writer recorded — a paste body with its
     newlines, a title with a pipe — and a listing row is a markdown table
     row, which a newline ends and a pipe splits. Nothing is cut: the
-    whitespace collapses to single spaces and the pipes stay, escaped.
+    cell kind every generated table renders through is what escapes it, so a
+    value survives a writeup's row as it survives any other generated table's.
     """
-    # lup: ignore[string-replace] — a table cell's pipe has no parser-side escape
-    return " ".join(text.split()).replace("|", "\\|")
+    return PlainCell(text=text).render()
 
 
 def figure(store: LedgerStore, classes: list[type[LedgerNode]], spelling: str) -> str:
