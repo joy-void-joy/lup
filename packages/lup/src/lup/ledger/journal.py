@@ -41,7 +41,7 @@ questions are lookups; what it cannot see is a record another process
 appends meanwhile, which a bulk writer accepts for the span of its batch.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -126,6 +126,7 @@ class Fold:
     def __init__(self, stored: list[Stored]) -> None:
         self.records = list(stored)
         self.versions: dict[str, list[JsonObject]] = {}
+        # lup: ignore[dict-str-payload] — a slug is spelled by whoever recorded it
         self.slugs: dict[str, str] = {}
         self.edges_into: dict[str, list[JsonObject]] = {}
         self.edges_out_of: dict[str, list[JsonObject]] = {}
@@ -438,7 +439,7 @@ class LedgerStore:
     def edges_at(self, lines: list[JsonObject]) -> list[LedgerEdge]:
         """The edges among some lines, each as the base, in the order given."""
         adapter = TypeAdapter[LedgerEdge](LedgerEdge)
-        found: list[LedgerEdge] = []  # lup: ignore[empty-collection] — filled below
+        found: list[LedgerEdge] = []
         for line in lines:
             try:
                 found.append(adapter.validate_python(line))
@@ -506,11 +507,11 @@ class LedgerStore:
     def resolve(
         self, node_id: str, classes: list[type[LedgerNode]]
     ) -> LedgerNode | None:
-        """One node as the first of these classes that accepts it, or the base.
+        """One node as the class its kind names, or the base.
 
         The deserialization boundary, and the one place a list of types is
         needed: an edge names an id and not what is at the other end, so
-        something has to try. A record no class accepts comes back as the base
+        something has to look. A record no class accepts comes back as the base
         — which happens for a type this build does not declare, and is why it
         is a fallback rather than a failure. A slug resolves the same way an id
         does, so every surface that takes one takes the other.
@@ -521,16 +522,7 @@ class LedgerStore:
                 return False
             return line["id"] == node_id or ("slug" in line and line["slug"] == node_id)
 
-        def as_declared(line: JsonObject) -> LedgerNode | None:
-            for declared in classes:
-                try:
-                    return declared.model_validate(line)
-                except ValidationError:
-                    continue
-            try:
-                return LedgerNode.model_validate(line)
-            except ValidationError:
-                return None
+        as_declared = self.reader(classes)
 
         if self.fold is not None:
             held = self.fold.versions.get(self.fold.slugs.get(node_id, node_id), [])
@@ -547,29 +539,58 @@ class LedgerStore:
         ]
         return found[-1] if found else None
 
+    def reader(
+        self, classes: list[type[LedgerNode]]
+    ) -> Callable[[JsonObject], LedgerNode | None]:
+        """One stored line as the class its kind names, or the base, or nothing.
+
+        A line spells its kind, and a declared class spells the kind it
+        answers to, so the class to read a line as is a lookup rather than a
+        trial of every class in turn — which over two hundred thousand lines
+        and sixteen kinds was fifteen validations for one. A kind no class
+        declares falls back to the trial, so a class that answers to a kind
+        under another spelling is still found, and then to the base.
+        """
+        # Read last to first, so the first class declared for a kind is kept.
+        by_kind = {kind_of(declared): declared for declared in reversed(classes)}
+
+        def as_declared(line: JsonObject) -> LedgerNode | None:
+            kind = str(line["kind"]) if "kind" in line else ""
+            named = by_kind.get(kind)
+            if named is not None:
+                try:
+                    return named.model_validate(line)
+                except ValidationError:
+                    pass
+            for declared in classes:
+                if declared is named:
+                    continue
+                try:
+                    return declared.model_validate(line)
+                except ValidationError:
+                    continue
+            try:
+                return LedgerNode.model_validate(line)
+            except ValidationError:
+                return None
+
+        return as_declared
+
     def all_nodes(self, classes: list[type[LedgerNode]]) -> list[LedgerNode]:
-        """Every node in the log, each as the most specific class that fits.
+        """Every node in the log, each as the class its kind names.
 
         For a reader whose subject is the log rather than any one type — the
         console, above all. Everything else asks :meth:`read` for what it
         actually wants.
         """
+        as_declared = self.reader(classes)
 
         def resolved() -> Iterator[LedgerNode]:
             for line in self.lines():
                 if "source" in line:
                     continue
-                for declared in classes:
-                    try:
-                        yield declared.model_validate(line)
-                        break
-                    except ValidationError:
-                        continue
-                else:
-                    try:
-                        yield LedgerNode.model_validate(line)
-                    except ValidationError:
-                        continue
+                if (node := as_declared(line)) is not None:
+                    yield node
 
         return latest(resolved())
 
