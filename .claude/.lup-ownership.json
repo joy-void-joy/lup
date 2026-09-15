@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "d97ae68fe2a95cf2099c97f941313e2113e68c5ed3f0e243ddd766429415a42c",
+  "source_digest": "35159fbf5f6d441b619d277553451ded2f22ca7ed71bee67c9ed5fa5e5451488",
   "target_requirements": [
     "claude-code"
   ],
@@ -541,7 +541,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "6f3673a1ffdfec0c9f566ae8768521c714d881d6b66364ef73fb2596b39fb96b",
+      "sha256": "0c97a2c2abb803c6a69f317a21a8c5d1fd1fe151a8ed3e2b3be5d630e17b694a",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -576,7 +576,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "f580342308b9dd033f2535cf1890c55d9523f3d35cc3a28907a8ae0098d738ef",
+      "sha256": "1089ca847e21e5381886f9dbf379b9d73f635f09bc05f83ff88a02597c4494fd",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -625,7 +625,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "a9fe13ad2cb8c1e7863dcb6b431666dcc63a8d79e56766c54affc93cd2f6048b",
+      "sha256": "ef62e03f971430ca5e1b6d090b4782c5246c3c4616bb9b5a62121ba439391831",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

@@ -55,6 +55,14 @@ including tools for sessions running on the host. Add `--inside` to check
 the container, or `--inside --launch-only` to run just its startup checks.
 Full container checks include a test model turn.
 
+A project that computes on a host device — a GPU — declares it on the image
+(`Image.devices`, by CDI name) and, in the manifest, `device_requirement`
+with the command that proves it answers, `nvidia-smi -L` for NVIDIA. The
+requirement is a setup check, because proving a device works means starting
+a container with it; a launch reads the host's CDI registry itself and
+withholds, with a notice, any declared device no spec there names.
+[contributing.md](contributing.md) carries how a device is leased.
+
 The target selector also chooses its login layout and configuration home:
 `claude` honors `CLAUDE_CONFIG_DIR`, falling back to the personal `.claude`
 directory; `codex` honors `CODEX_HOME`, falling back to the launcher's worktree

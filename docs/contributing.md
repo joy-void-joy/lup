@@ -178,6 +178,20 @@ For a folder one session needs without a standing registration, the launchers
 take `--mount <dir>` and `--mount-ro <dir>` (repeatable): the same lease, the
 same widening in every posture, lasting exactly one launch.
 
+A host device is granted on the same terms. The image declares the standing
+ones — `Image(devices=[Device(name="nvidia.com/gpu=all")])` is the GPU for
+every session and worker opened from it — and the launchers take `--device
+<name>` (repeatable) for one launch. The name is the Container Device
+Interface's, `vendor/class=device`; the nodes under `/dev` and the driver
+libraries beside them are the registered spec's to inject, so nothing in the
+tree enumerates either. The launcher reads `/etc/cdi` and `/var/run/cdi` on
+the host, grants what a spec there names, and withholds the rest with a
+notice carrying the command that registers it (`sudo nvidia-ctk cdi generate
+--output=/etc/cdi/nvidia.yaml` for NVIDIA). What was granted is written to
+`.lup/boundary.json` beside the mount table, so a run's provenance says which
+devices its container held. `device_requirement` in `lup.harness.toolchain`
+is the setup-time proof that a granted device answers inside a container.
+
 A registration naming only a URL is mounted on the same terms, because it is
 materialized into the same shape: a full bare clone under
 `~/.cache/lup/sync/<name>.git` with a worktree attached at `tree/<branch>`,
