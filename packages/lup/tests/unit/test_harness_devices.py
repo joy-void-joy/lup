@@ -13,6 +13,7 @@ import pytest
 import typer
 from pydantic import ValidationError
 
+import lup.devtools.sync as sync
 from lup.devtools.harness.contained import record_boundary
 from lup.devtools.harness.launch import declared_devices
 from lup.harness.devices import (
@@ -24,8 +25,8 @@ from lup.harness.devices import (
 )
 from lup.harness.egress import SessionEgress
 from lup.harness.image import Podman
-from lup.harness.requirements import Manifest
-from lup.harness.toolchain import device_requirement, for_host
+from lup.harness.requirements import Finding, Manifest, Run
+from lup.harness.toolchain import for_host, granted_device_requirement
 from lup.policy.assets.host import boundary_description
 from lup.sandbox.rail import Lease
 
@@ -193,17 +194,16 @@ def test_a_grant_is_said_at_boundary_weight() -> None:
     assert "nvidia.com/gpu=all" in said[0].text
 
 
-def test_a_withheld_device_names_the_command_that_registers_it() -> None:
-    """The fix is the operator's and made once on the machine, so the notice spells it."""
+def test_a_withheld_device_is_one_line_pointing_at_where_the_fix_is_read() -> None:
+    """The fix is reference, pulled from the roster command rather than pushed each launch."""
     said = lease_devices(
         [Device(name="nvidia.com/gpu=all")],
         DeviceRegistry(names=[], searched=[Path("/etc/cdi")]),
     ).notices()
 
-    assert [item.urgency for item in said] == ["warning", "warning"]
-    assert "withheld" in said[0].text
-    assert "nvidia-ctk cdi generate" in said[1].text
-    assert said[1].indent == 1
+    assert [item.urgency for item in said] == ["warning"]
+    assert "withheld" in said[0].text and "/etc/cdi" in said[0].text
+    assert "harness requirements" in said[0].text
 
 
 def test_the_boundary_ledger_records_the_granted_devices(tmp_path: Path) -> None:
@@ -228,19 +228,11 @@ def test_the_boundary_ledger_records_no_device_where_none_was_granted(
     assert boundary_description(tmp_path)["devices"] == []
 
 
-def test_a_device_requirement_proves_the_device_inside_a_container_the_client_starts() -> (
-    None
-):
-    """The probe is carried by whichever engine this host answered with."""
+def test_a_grant_is_proved_by_a_container_the_detected_client_starts_with_it() -> None:
+    """Vendor-neutral, and carried by whichever engine this host answered with."""
     aimed = for_host(
         Manifest(
-            requirements=[
-                device_requirement(
-                    Device(name="nvidia.com/gpu=all"),
-                    witness=["nvidia-smi", "-L"],
-                    purpose="the search core's population proposers",
-                )
-            ]
+            requirements=[granted_device_requirement(Device(name="a.com/gpu=all"))]
         ),
         Podman(),
     )
@@ -248,12 +240,124 @@ def test_a_device_requirement_proves_the_device_inside_a_container_the_client_st
 
     assert aimed.requirements[0].checked == "setup"
     assert exercise.programs() == ["podman"]
-    assert isinstance(exercise.model_dump()["command"], list)
-    assert exercise.model_dump()["command"][:5] == [
+    assert exercise.model_dump()["command"] == [
         "podman",
         "run",
         "--rm",
         "--device",
-        "nvidia.com/gpu=all",
+        "a.com/gpu=all",
+        "docker.io/library/busybox:latest",
+        "true",
     ]
-    assert exercise.model_dump()["command"][-2:] == ["nvidia-smi", "-L"]
+
+
+def local_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A project root whose local registry the sync module reads and writes."""
+    monkeypatch.setattr(sync, "project_root", lambda: tmp_path)
+    return tmp_path / "sync.json.local"
+
+
+def test_grants_are_read_from_the_local_file_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The committed registry is scaffold every adopter runs from, so it grants nothing."""
+    local = local_registry(tmp_path, monkeypatch)
+    (tmp_path / "sync.json").write_text(
+        json.dumps({"projects": [], "devices": ["committed.com/gpu=all"]})
+    )
+    local.write_text(json.dumps({"projects": [], "devices": ["nvidia.com/gpu=all"]}))
+
+    assert [device.name for device in sync.granted_devices()] == ["nvidia.com/gpu=all"]
+
+
+def test_a_machine_that_granted_nothing_grants_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local_registry(tmp_path, monkeypatch)
+
+    assert sync.granted_devices() == []
+
+
+def test_a_hand_edited_grant_the_grammar_refuses_is_reported_and_left_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A launch is not where a typo in a hand-editable file gets fixed."""
+    local = local_registry(tmp_path, monkeypatch)
+    local.write_text(json.dumps({"projects": [], "devices": ["all", "a.com/gpu=0"]}))
+    said: list[str] = []  # lup: ignore[empty-collection] — collected by callback
+
+    granted = sync.granted_devices(said.append)
+
+    assert [device.name for device in granted] == ["a.com/gpu=0"]
+    assert said == [
+        "sync.json.local grants 'all', which is not a CDI device name "
+        "(vendor/class=device), so it stays ungranted"
+    ]
+
+
+def proved(device: Device) -> Finding:
+    """A grant's finding as a machine that can hand the device over answers it."""
+    return (
+        granted_device_requirement(device)
+        .model_copy(update={"exercise": Run(command=["true"])})
+        .check({}, location="host")
+    )
+
+
+def refused(device: Device) -> Finding:
+    """A grant's finding as a machine whose engine cannot resolve the name answers it."""
+    return (
+        granted_device_requirement(device)
+        .model_copy(update={"exercise": Run(command=["false"])})
+        .check({}, location="host")
+    )
+
+
+def test_a_grant_is_written_once_it_is_proved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = local_registry(tmp_path, monkeypatch)
+    monkeypatch.setattr(sync, "verified_grant", proved)
+
+    sync.grant_device("nvidia.com/gpu=all")
+    sync.grant_device("nvidia.com/gpu=all")
+
+    assert json.loads(local.read_text())["devices"] == ["nvidia.com/gpu=all"]
+
+
+def test_a_grant_the_engine_cannot_honour_is_refused_where_it_is_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Handed to a launch instead, the name would refuse the whole container later."""
+    local = local_registry(tmp_path, monkeypatch)
+    monkeypatch.setattr(sync, "verified_grant", refused)
+
+    with pytest.raises(typer.Exit):
+        sync.grant_device("nvidia.com/gpu=all")
+
+    assert not local.exists()
+
+
+def test_a_grant_naming_no_device_is_refused_before_anything_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local_registry(tmp_path, monkeypatch)
+    monkeypatch.setattr(sync, "verified_grant", proved)
+
+    with pytest.raises(typer.BadParameter, match="'all'"):
+        sync.grant_device("all")
+
+
+def test_a_revoked_grant_leaves_the_others_standing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = local_registry(tmp_path, monkeypatch)
+    local.write_text(
+        json.dumps({"projects": [], "devices": ["a.com/gpu=0", "a.com/gpu=1"]})
+    )
+
+    sync.revoke_device("a.com/gpu=0")
+
+    assert json.loads(local.read_text())["devices"] == ["a.com/gpu=1"]
+    with pytest.raises(typer.Exit):
+        sync.revoke_device("a.com/gpu=0")

@@ -650,22 +650,6 @@ class Image(BaseModel, frozen=True):
             "number is a runaway backstop rather than a budget"
         ),
     )
-    devices: list[Device] = Field(
-        default=[],
-        description=(
-            "Host devices every session and worker opened from this image is "
-            "granted, by CDI name -- ``nvidia.com/gpu=all`` is the GPU. "
-            "Declared here rather than passed at launch for the reason the "
-            "egress is: a session that computes on the GPU needs it every "
-            "time and in every worker, and a flag remembered on some launches "
-            "is how a run comes to be recorded as contained while its GPU "
-            "half ran on the host. The nodes and driver libraries are the "
-            "registered spec's to inject, so nothing is enumerated here; a "
-            "host with no spec for the name withholds it with a notice rather "
-            "than refusing the session, and ``--device`` on a launch adds one "
-            "for that launch alone"
-        ),
-    )
     trusted_projects: list[Path] = Field(
         default=[],
         description=(
@@ -1220,12 +1204,15 @@ USER $UID:$GID
         that applied the list in order would already be breaking that, and
         the order here costs nothing to keep right either way.
 
-        ``devices`` is what the device lease granted, passed rather than read
-        off :attr:`devices` because the two are not the same list: the
-        declaration is what was asked for, and what reaches the engine is
-        what the host's registry answered for. Emitted with the mounts
-        because it is the same kind of thing -- the boundary, widened by
-        declaration -- and read in the same place by whoever reads the argv.
+        ``devices`` is what the device lease granted: the machine's standing
+        grants and this launch's flags, resolved against its CDI registry, so
+        what reaches the engine is what the host answered for. Passed rather
+        than declared here for the reason no machine fact is: this
+        declaration is hashed and shared by every machine that builds the
+        image, and which GPU one of them holds is that machine's alone.
+        Emitted with the mounts because it is the same kind of thing -- the
+        boundary, widened by a grant -- and read in the same place by
+        whoever reads the argv.
         """
         granted_devices = [
             argument for device in devices for argument in device.arguments()

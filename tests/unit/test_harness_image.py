@@ -539,8 +539,8 @@ def test_a_granted_device_is_handed_to_the_engine_beside_the_mounts() -> None:
 
 
 def test_a_session_granted_no_device_asks_the_engine_for_none() -> None:
-    """The image's standing declaration is not the grant: an unresolved one is withheld."""
-    started = Image(devices=[Device(name="nvidia.com/gpu=all")]).session_arguments(
+    """Nothing is handed over that the lease did not grant, however it was asked for."""
+    started = Image().session_arguments(
         tag="lup-agent:x",
         checkout=Path("/home/u/repo"),
         uid=1000,

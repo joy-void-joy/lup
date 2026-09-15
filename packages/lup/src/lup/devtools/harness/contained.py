@@ -1602,10 +1602,10 @@ def contained_argv(
     second builder for that one difference would be a second declaration of
     everything it has in common, free to drift from this one.
 
-    ``devices`` are the ones this launch asked for on top of the image's
-    standing declaration, and a worker passes none: what its container
-    computes on is what the image declared, so a run's workers hold the
-    same devices its session did.
+    ``devices`` are what this machine grants its sessions and what this
+    launch asked for besides, settled by the caller the way ``accessible``
+    is: the standing grants come from the same gitignored registry the
+    mounts do, so a run's workers hold the devices its session did.
     """
     said = banner if banner is not None else Banner()
     if engine is not None:
@@ -1655,9 +1655,8 @@ def contained_argv(
     # Resolved on the host against the registry both engines read, before any
     # argv names a device: a name no spec answers refuses the whole container,
     # so a device nobody registered is withheld and said here rather than
-    # handed to the engine to fail on. The image's standing declaration leads
-    # and this launch's flags follow, the order the mounts take.
-    granted_devices = lease_devices([*image.devices, *devices], registered_devices())
+    # handed to the engine to fail on.
+    granted_devices = lease_devices(devices, registered_devices())
     said.add(granted_devices.notices())
     record_boundary(lease, image.egress, root, granted_devices)
     # Read on the host and passed in, never resolved inside: the file that
@@ -1812,6 +1811,7 @@ def worker_cli(
     read_only: bool = False,
     sentinels: LaunchSentinels = LaunchSentinels(),
     accessible: list[AccessibleRoot] = [],
+    devices: list[Device] = [],
 ) -> Path:
     """The program to start one resolver actor as, so it runs in its own container.
 
@@ -1871,6 +1871,7 @@ def worker_cli(
             sentinels=sentinels,
             accessible=accessible,
             lease=demoted(lease) if read_only else lease,
+            devices=devices,
         ),
         program,
     )

@@ -281,46 +281,44 @@ def same_path_mount_requirement(
     )
 
 
-def device_requirement(
+def granted_device_requirement(
     device: Device,
-    witness: list[str],
-    purpose: str,
-    where: Side = "host",
-    image: str = "docker.io/library/debian:stable-slim",
-    lost: str = "",
+    image: str = "docker.io/library/busybox:latest",
 ) -> Requirement:
-    """A device the host can hand a container, exercised by using it inside one.
+    """A device this machine grants its sessions, exercised by handing it to a container.
 
-    ``witness`` is the command that proves the device answers -- ``nvidia-smi
-    -L`` for a GPU -- run inside a throwaway container started with the
-    device, because the two halves it joins each pass alone and fail
-    together: a spec can be registered on a host whose engine does not honour
-    the registry, and an engine can honour it on a host whose spec names a
-    driver that is not there. The image is a small glibc one rather than
-    busybox, since what a vendor's spec injects is a dynamically linked
-    toolkit and busybox carries no libc for it to link against.
+    Built from the machine's own grant rather than declared in a manifest,
+    and that placement is the whole of it: a manifest is committed and shared
+    by every machine and every downstream user of the repository, and which
+    GPU one of them holds is that machine's alone. `sync grant` builds this
+    as it writes the grant, and `harness requirements` builds one per grant
+    it finds, so a committed roster never names a vendor's device.
 
-    Checked at setup rather than every launch because it starts a container,
-    which is a statement about the probe's cost: a launch reads the registry
-    itself and withholds a device it cannot grant, so what this adds is the
-    proof the device *works* once granted, which is worth one container start
-    when a machine is set up and not before every session.
+    The exercise starts a throwaway container with the device and nothing
+    else. That is vendor-neutral proof of the two halves that pass alone and
+    fail together: a spec can be registered on a host whose engine does not
+    honour the registry, and an engine can honour it on a host with no spec
+    for the name. Whether the driver inside answers a vendor's tool is the
+    project's to ask in its own words, once the device is there.
 
-    Carried by the client for the reason the container requirement is:
-    which engine starts the probe is a fact about the machine, and the
-    declaration this sits in is hashed into the ownership digest.
+    Checked at setup rather than every launch because it starts a container:
+    a launch reads the registry itself and withholds a device it cannot
+    grant, so what this adds is worth one container start when a grant is
+    made and not before every session. Carried by the client for the reason
+    the container requirement is: which engine starts the probe is a fact
+    about the machine.
     """
     return Requirement(
         capability=f"device {device.name}",
         by_client=True,
-        purpose=purpose,
-        where=where,
+        purpose="what sessions on this machine were granted, held to the registry they read",
+        where="host",
         checked="setup",
         exercise=Run(
-            command=["docker", "run", "--rm", *device.arguments(), image, *witness]
+            command=["docker", "run", "--rm", *device.arguments(), image, "true"]
         ),
         absence=LostCapability(
-            capability=lost or f"{device.name} inside contained sessions and workers"
+            capability=f"{device.name} inside contained sessions and workers"
         ),
         recovery=(
             "Register the device with its vendor's toolkit -- for NVIDIA, "

@@ -48,7 +48,7 @@ from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
 from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.sandbox.rail import AccessibleRoot, fleet_lease
-from lup.devtools.sync import accessible_roots
+from lup.devtools.sync import accessible_roots, granted_devices
 from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import (
     Finding,
@@ -63,6 +63,7 @@ from lup.harness.toolchain import (
     codex_envelope_requirement,
     container_client,
     for_host,
+    granted_device_requirement,
     socat_requirement,
 )
 from lup.observability.audit import (
@@ -729,8 +730,18 @@ def report_requirements(
     # the declaration is hashed into the ownership digest and a container
     # client is a fact about the machine. This is the only place the
     # exercises actually run, so it is the only place that has to know.
+    #
+    # The machine's device grants join the roster here for the same reason
+    # and from the same side: a grant is read off this machine's own file at
+    # the moment the roster runs, so a committed manifest never names a
+    # vendor's device, and a setup check still re-proves every grant.
     findings = for_host(
-        manifest,
+        Manifest(
+            requirements=[
+                *manifest.requirements,
+                *(granted_device_requirement(device) for device in granted_devices()),
+            ]
+        ),
         container_client(),
         project_root(),
         inside_sentinel=sentinels.inside,
@@ -847,11 +858,12 @@ def report_inside_requirements(
         login,
         streams="captured",
         sentinels=sentinels,
-        # The same mounts a session gets, for the reason this probe assembles
-        # nothing of its own: a container built without the declared roots is
-        # a container no session opens, and a placement verified in one says
-        # nothing about the other.
+        # The same mounts and devices a session gets, for the reason this
+        # probe assembles nothing of its own: a container built without the
+        # declared roots is a container no session opens, and a placement
+        # verified in one says nothing about the other.
         accessible=accessible_roots(),
+        devices=granted_devices(),
     )
     # The same values on both sides of one call, which is the whole of what a
     # placement probe asks. Injected into the argv above and handed to the
@@ -1525,7 +1537,9 @@ def session_argv(
         banner=banner,
         sentinels=sentinels,
         accessible=accessible,
-        devices=devices,
+        # This launch's flags lead and the machine's standing grants follow,
+        # settled here beside the roots for the same reason they are.
+        devices=[*devices, *granted_devices(told)],
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two

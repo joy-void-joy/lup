@@ -3,10 +3,13 @@
 A container starts with none of the host's devices, and a GPU is the one a
 session has had to leave the boundary for: every accelerated run so far was
 launched on the host behind an escalation, outside containment and outside the
-provenance a contained launch records. What closes that is a declaration the
-launcher resolves rather than a flag somebody remembers -- a device named on
-the image is granted to every session and worker opened from it, and a device
-named on one command line is granted for that launch.
+provenance a contained launch records. What closes that is a grant the
+launcher resolves rather than a flag somebody remembers -- a device granted on
+the machine, in its gitignored registry, reaches every session and worker
+opened there, and a device named on one command line is granted for that
+launch. Never a committed declaration: which GPU a machine holds is that
+machine's fact, and a repository's code is shared by every machine and every
+downstream user that runs it.
 
 A device is named the way the Container Device Interface names it,
 ``vendor/class=device``, because that is the one spelling both engines take on
@@ -173,22 +176,18 @@ class DeviceLease(BaseModel, frozen=True):
     withheld: list[Withheld] = []
     unreadable: list[UnreadableSpecification] = []
 
-    def notices(
-        self,
-        registering: str = (
-            "A vendor's toolkit registers one: for NVIDIA, `sudo nvidia-ctk cdi "
-            "generate --output=/etc/cdi/nvidia.yaml`. Docker reads the registry "
-            'from 28.3; an older daemon needs `"features": {"cdi": true}`.'
-        ),
-    ) -> list[Notice]:
+    def notices(self) -> list[Notice]:
         """What a launch says about the devices the session is about to get.
 
-        Nothing when nothing was declared: a line saying no device was asked
+        Nothing when nothing was granted: a line saying no device was asked
         for is the block that grows with the roster, which this package
         argues against everywhere else. A grant is one line at boundary
         weight, because it widens what the session reaches. A device
-        withheld is a warning carrying the command that registers it, since
-        the fix is the operator's and made once on the machine.
+        withheld is one warning line naming it and where a spec was looked
+        for; what registers one is reference, pulled from `harness
+        requirements` and the contributing page rather than pushed at every
+        launch, because a line read at the first launch is skipped by the
+        third.
         """
         return [
             *(
@@ -207,16 +206,14 @@ class DeviceLease(BaseModel, frozen=True):
             ),
             *[
                 Notice(
-                    text=f"Device {item.device.name} withheld: {item.reason}.",
+                    text=(
+                        f"Device {item.device.name} withheld: {item.reason}; "
+                        "`harness requirements` says how to register one."
+                    ),
                     urgency="warning",
                 )
                 for item in self.withheld
             ],
-            *(
-                [Notice(text=registering, urgency="warning", indent=1)]
-                if self.withheld
-                else []
-            ),
             *[
                 Notice(
                     text=f"CDI spec {item.path} could not be read: {item.reason}",
