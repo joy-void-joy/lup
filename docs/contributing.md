@@ -178,19 +178,25 @@ For a folder one session needs without a standing registration, the launchers
 take `--mount <dir>` and `--mount-ro <dir>` (repeatable): the same lease, the
 same widening in every posture, lasting exactly one launch.
 
-A host device is granted on the same terms. The image declares the standing
-ones — `Image(devices=[Device(name="nvidia.com/gpu=all")])` is the GPU for
-every session and worker opened from it — and the launchers take `--device
-<name>` (repeatable) for one launch. The name is the Container Device
-Interface's, `vendor/class=device`; the nodes under `/dev` and the driver
-libraries beside them are the registered spec's to inject, so nothing in the
-tree enumerates either. The launcher reads `/etc/cdi` and `/var/run/cdi` on
-the host, grants what a spec there names, and withholds the rest with a
-notice carrying the command that registers it (`sudo nvidia-ctk cdi generate
---output=/etc/cdi/nvidia.yaml` for NVIDIA). What was granted is written to
-`.lup/boundary.json` beside the mount table, so a run's provenance says which
-devices its container held. `device_requirement` in `lup.harness.toolchain`
-is the setup-time proof that a granted device answers inside a container.
+A host device — a GPU — is granted on the same terms and from the same file.
+`sync grant nvidia.com/gpu=all` writes the name into `sync.json.local` after
+starting a throwaway container with it, so a grant nobody's engine can honour
+is refused where it is made; `sync revoke` takes it back, `sync status` shows
+each grant beside whether a spec still names it, and the launchers take
+`--device <name>` (repeatable) for one launch. The name is the Container
+Device Interface's, `vendor/class=device`; the nodes under `/dev` and the
+driver libraries beside them are the registered spec's to inject, so nothing
+here enumerates either, and nothing committed names one: which GPU a machine
+holds is that machine's fact. Every launch reads `/etc/cdi` and
+`/var/run/cdi` on the host, hands the engine what a spec there names, and
+withholds the rest with one line, because `/var/run/cdi` empties at boot and
+a driver update regenerates a spec. A spec is written by the vendor's
+toolkit — `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` for
+NVIDIA — and Docker reads the registry from 28.3 (an older daemon needs
+`"features": {"cdi": true}`; podman always has). What was granted is written
+to `.lup/boundary.json` beside the mount table, so a run's provenance says
+which devices its container held, and `harness requirements` re-exercises
+every grant it finds.
 
 A registration naming only a URL is mounted on the same terms, because it is
 materialized into the same shape: a full bare clone under

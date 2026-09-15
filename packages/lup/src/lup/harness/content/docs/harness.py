@@ -92,13 +92,14 @@ including tools for sessions running on the host. Add `--inside` to check
 the container, or `--inside --launch-only` to run just its startup checks.
 Full container checks include a test model turn.
 
-A project that computes on a host device — a GPU — declares it on the image
-(`Image.devices`, by CDI name) and, in the manifest, `device_requirement`
-with the command that proves it answers, `nvidia-smi -L` for NVIDIA. The
-requirement is a setup check, because proving a device works means starting
-a container with it; a launch reads the host's CDI registry itself and
-withholds, with a notice, any declared device no spec there names.
-[contributing.md](contributing.md) carries how a device is leased.
+A host device — a GPU — is never in the manifest, because a manifest is
+committed and which GPU a machine holds is that machine's fact. `sync grant
+<name>` records it in the machine's `sync.json.local`, and the host checks
+build one requirement per grant they find there: a throwaway container
+started with the device, at setup rather than every launch since it costs a
+container start. A launch reads the host's CDI registry itself and withholds,
+with one line, any grant no spec there names.
+[contributing.md](contributing.md) carries how a device is granted.
 
 The target selector also chooses its login layout and configuration home:
 `claude` honors `CLAUDE_CONFIG_DIR`, falling back to the personal `.claude`

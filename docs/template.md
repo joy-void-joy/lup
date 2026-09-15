@@ -276,6 +276,15 @@ defaulted — tracking a project and handing a session the keys to it are
 different claims, and `sync.json` is committed scaffold that would otherwise
 make the second one on every adopter's behalf.
 
+The same file grants host devices, for the same reason: `sync grant
+nvidia.com/gpu=all` writes the CDI name into a top-level `"devices"` list
+after starting a throwaway container with it, and every session and resolver
+worker opened on this machine is handed it from then on. Which GPU a machine
+holds is that machine's fact, so the list lives only in the local half, never
+in a committed declaration; `sync revoke` takes one back, `sync status` shows
+each grant beside whether a spec on this machine still names it, and the
+launchers take `--device <name>` for one launch.
+
 A registration that names only a URL is materialized under
 `~/.cache/lup/sync/<name>.git` in the layout one naming a local path already
 points at: a full bare clone — every branch, whole history — with a worktree
