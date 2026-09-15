@@ -250,6 +250,8 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
 
     from lup_template.harness.catalog import portable_harness
 
+    resolver = portable_harness().resolver
+    assert resolver is not None, "the portable harness declares a resolver"
     core = ResolverCore(
         ResolverConfig(
             state_root=repo / ".lup" / "resolve",
@@ -261,7 +263,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
                 VerificationCommand(name="status", arguments=["git", "status"])
             ],
         ),
-        portable_harness().resolver,
+        resolver,
         worker_factory,
         reviewer_factory,
         ClaudeSpellings(),
