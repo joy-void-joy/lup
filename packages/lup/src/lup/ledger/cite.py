@@ -131,5 +131,9 @@ def read_cites(
             standing=store.standing(node, classes) if node is not None else None,
         )
 
+    cites = cites_in(text)
+    if not cites:
+        # A document with nothing to hold to the log opens no fold of it.
+        return []
     with store.batch():
-        return [reading(cite) for cite in cites_in(text)]
+        return [reading(cite) for cite in cites]
