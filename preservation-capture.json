@@ -1,5 +1,5 @@
 {
-  "revision": "9ee9a0c8ed66918e41b1188d4a8a4cf109b9765f",
+  "revision": "2ee4d2c45eadeaede4e959391033f55629e47177",
   "roots": [
     "lup",
     "lup_template"
@@ -14595,8 +14595,6 @@
         "ToolResponse.is_error",
         "response_text",
         "mcp_response",
-        "CallToolResultWithAlias",
-        "CallToolResultWithAlias.is_error",
         "LupToolHandler",
         "ToolHandler",
         "LupMcpServerConfig",

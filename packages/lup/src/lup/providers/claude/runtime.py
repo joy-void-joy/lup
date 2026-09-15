@@ -13,8 +13,15 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
-from mcp.server import Server
-from mcp.types import CallToolResult, TextContent, Tool
+from mcp.server import Server, ServerRequestContext
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
 from pydantic import BaseModel, Field
 
 from lup.tools.mcp import (
@@ -65,7 +72,6 @@ from lup.sessions.transcript import fold_blocks, fold_transcript
 from lup.sessions.output import TurnSubmission, bound_submission
 from lup.types import (
     EnvVars,
-    JsonObject,
     JsonValue,
     SubagentSpec,
     Usage,
@@ -922,25 +928,29 @@ def build_submission_server(
     one that happened to be installed when the connection opened, which would
     write every later turn's output into the first turn's store.
     """
-    server = Server("lup-output", version="1")
 
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
+    async def list_tools(
+        _context: ServerRequestContext[object],
+        _params: PaginatedRequestParams | None,
+    ) -> ListToolsResult:
         submission = current()
         if submission is None:
-            return []
-        return [
-            Tool(
-                name="submit_output",
-                description="Submit the final validated result for this turn.",
-                inputSchema=submission.schema,
-            )
-        ]
+            return ListToolsResult(tools=[])
+        return ListToolsResult(
+            tools=[
+                Tool(
+                    name="submit_output",
+                    description="Submit the final validated result for this turn.",
+                    input_schema=submission.schema,
+                )
+            ]
+        )
 
-    @server.call_tool()
-    async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
-        if name != "submit_output":
-            raise ValueError(f"unknown output tool {name!r}")
+    async def call_tool(
+        _context: ServerRequestContext[object], params: CallToolRequestParams
+    ) -> CallToolResult:
+        if params.name != "submit_output":
+            raise ValueError(f"unknown output tool {params.name!r}")
         submission = current()
         if submission is None:
             return CallToolResult(
@@ -950,14 +960,17 @@ def build_submission_server(
                         text="No matching turn output binding is active.",
                     )
                 ],
-                isError=True,
+                is_error=True,
             )
-        response = await submission.submit(arguments)
+        response = await submission.submit(dict(params.arguments or {}))
         return CallToolResult(
             content=[TextContent(type="text", text=response.message)],
-            isError=not response.accepted,
+            is_error=not response.accepted,
         )
 
+    server = Server(
+        "lup-output", version="1", on_list_tools=list_tools, on_call_tool=call_tool
+    )
     return LupMcpServerConfig(
         name="lup-output",
         server=server,

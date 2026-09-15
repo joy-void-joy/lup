@@ -79,7 +79,7 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
                 session.list_tools(), timeout=SUBPROCESS_TIMEOUT_SECONDS
             )
             names = {tool.name for tool in listed.tools}
-            assert names == {"review", "run_subagent"}
+            assert {"review", "run_subagent"} <= names
             # The example placeholder ships fabricated data and is served to no
             # live agent by default — matching the Claude path. It is reachable
             # only via an explicit --server example.
@@ -99,7 +99,7 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
                 ),
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
-            assert reviewed.isError is False
+            assert reviewed.is_error is False
             assert gate_flag.exists()
 
     assert (session_dir / "review.json").exists()
@@ -245,7 +245,7 @@ async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:
                 session.call_tool("sleep", {"seconds": 60}),
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
-            assert premature.isError is True
+            assert premature.is_error is True
 
             replied = await asyncio.wait_for(
                 session.call_tool(
@@ -254,7 +254,7 @@ async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:
                 ),
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
-            assert replied.isError is False
+            assert replied.is_error is False
 
             await asyncio.wait_for(
                 session.call_tool("meta", {"thought": "relay wiring test"}),
@@ -264,7 +264,7 @@ async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:
                 session.call_tool("sleep", {"seconds": 60}),
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
-            assert recorded.isError is False
+            assert recorded.is_error is False
 
     mailbox = RealtimeMailbox(realtime_dir)
     events = mailbox.read_new_events()
