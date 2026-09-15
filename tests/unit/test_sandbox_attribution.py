@@ -130,3 +130,13 @@ def test_a_denied_plain_request_names_the_host_from_its_url() -> None:
 def test_requested_host_reports_nothing_for_a_line_naming_no_host() -> None:
     """Attributing nothing is the right answer, and has to be reachable."""
     assert requested_host("1787 3 172.17.0.3 TCP_DENIED/403 4 - - HIER_NONE/-") == ""
+
+
+def test_a_busy_mount_point_is_the_boundary_refusing_a_replacement() -> None:
+    """A bind-mounted file cannot be unlinked, so renaming over it says busy, not read-only."""
+    found = attribute_filesystem(
+        "error: unable to unlink old '/repo/siblings/README.md': Device or resource busy",
+        TOPOLOGY,
+    )
+    assert isinstance(found, FilesystemRefusal)
+    assert found.path == "/repo/siblings/README.md"
