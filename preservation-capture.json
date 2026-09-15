@@ -1,5 +1,5 @@
 {
-  "revision": "5230785a1f627ef600f58eb26b76656ccf11930e",
+  "revision": "2d1b2c5440fd2ec38659df0db94f8037c10bd442",
   "roots": [
     "lup",
     "lup_template"
@@ -190,6 +190,8 @@
     "sync diff",
     "sync mark-synced",
     "sync setup",
+    "sync grant",
+    "sync revoke",
     "trace show",
     "trace search",
     "trace list",
@@ -4577,6 +4579,7 @@
         "ProjectEntry.mount",
         "SyncConfig",
         "SyncConfig.projects",
+        "SyncConfig.devices",
         "SYNC_CONFIG_ADAPTER",
         "PROJECT_ENTRY_ADAPTER",
         "MOUNT_MODES",
@@ -4603,6 +4606,9 @@
         "openable",
         "accessible_roots",
         "accessible_roots.located",
+        "granted_devices",
+        "granted_devices.declared",
+        "verified_grant",
         "clone_bare",
         "refresh",
         "attach_worktree",
@@ -4619,7 +4625,9 @@
         "show_log",
         "show_diff",
         "mark_synced",
-        "setup_project"
+        "setup_project",
+        "grant_device",
+        "revoke_device"
       ]
     },
     {
@@ -6626,7 +6634,6 @@
         "Image.caches",
         "Image.published_ports",
         "Image.pids_limit",
-        "Image.devices",
         "Image.trusted_projects",
         "Image.packages",
         "Image.obtained_by",
@@ -7437,7 +7444,7 @@
         "container_client",
         "container_requirement",
         "same_path_mount_requirement",
-        "device_requirement",
+        "granted_device_requirement",
         "git_requirement",
         "github_requirement",
         "bubblewrap_requirement",
