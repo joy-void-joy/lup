@@ -32,6 +32,7 @@ document either way.
 """
 
 from abc import ABC, abstractmethod
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -73,6 +74,7 @@ def cell(text: str) -> str:
     row, which a newline ends and a pipe splits. Nothing is cut: the
     whitespace collapses to single spaces and the pipes stay, escaped.
     """
+    # lup: ignore[string-replace] — a table cell's pipe has no parser-side escape
     return " ".join(text.split()).replace("|", "\\|")
 
 
@@ -355,9 +357,24 @@ class Entry(BaseModel, frozen=True):
 
     cells: list[str]
 
-    def key(self) -> tuple[datetime, int, str]:
+    def moment(self) -> datetime:
+        """When the row sits, aware and in UTC, so rows from either kind of clock order together."""
         aware = self.when if self.when.tzinfo is not None else self.when.astimezone()
-        return (aware.astimezone(UTC), self.rank, self.cells[-1])
+        return aware.astimezone(UTC)
+
+
+class Placed(BaseModel, frozen=True):
+    """Where a dated row sits and how that reads: the moment, `before` a bound, or a fallback clock named."""
+
+    when: datetime
+    reads: str
+
+
+class Entries(BaseModel, frozen=True):
+    """A timeline's rows: the dated ones in order, and the nodes no clock could place."""
+
+    dated: list[Entry]
+    undated: list[LedgerNode]
 
 
 class Timeline(WriteupPart, frozen=True):
@@ -400,14 +417,16 @@ class Timeline(WriteupPart, frozen=True):
     undated: str = "Undated"
     """The heading over the rows no clock could place."""
 
-    def placed(self, node: LedgerNode) -> tuple[datetime, str] | None:
+    def placed(self, node: LedgerNode) -> Placed | None:
         """When a row sits, and how it reads: the moment, `before` a bound, or the fallback."""
         if (when := moment_of(node, self.moment)) is not None:
-            return when, spelled_moment(when)
+            return Placed(when=when, reads=spelled_moment(when))
         if (before := moment_of(node, self.bound)) is not None:
-            return before, f"before {spelled_moment(before)}"
+            return Placed(when=before, reads=f"before {spelled_moment(before)}")
         if (taken := moment_of(node, self.fallback)) is not None:
-            return taken, f"{spelled_moment(taken)} ({self.fallback})"
+            return Placed(
+                when=taken, reads=f"{spelled_moment(taken)} ({self.fallback})"
+            )
         return None
 
     def cells_of(
@@ -422,9 +441,7 @@ class Timeline(WriteupPart, frozen=True):
             f"`{handle(node)}`",
         ]
 
-    def entries(
-        self, store: LedgerStore, classes: list[type[LedgerNode]]
-    ) -> tuple[list[Entry], list[LedgerNode]]:
+    def entries(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> Entries:
         """The dated rows in order, and the nodes no clock could place."""
         dated: list[Entry] = []  # lup: ignore[empty-collection] — filled below
         undated: list[LedgerNode] = []  # lup: ignore[empty-collection] — filled below
@@ -434,12 +451,11 @@ class Timeline(WriteupPart, frozen=True):
                 if placed is None:
                     undated.append(node)
                     continue
-                when, spelled = placed
                 dated.append(
                     Entry(
-                        when=when,
+                        when=placed.when,
                         rank=1,
-                        cells=[spelled, *self.cells_of(store, classes, node)],
+                        cells=[placed.reads, *self.cells_of(store, classes, node)],
                     )
                 )
             if self.bands is not None and node.kind == self.bands.of:
@@ -464,10 +480,16 @@ class Timeline(WriteupPart, frozen=True):
                                 ],
                             )
                         )
-        return sorted(dated, key=Entry.key), sorted(undated, key=lambda node: node.at)
+        return Entries(
+            dated=sorted(
+                dated, key=lambda entry: (entry.moment(), entry.rank, entry.cells[-1])
+            ),
+            undated=sorted(undated, key=lambda node: node.at),
+        )
 
     def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
-        dated, undated = self.entries(store, classes)
+        entries = self.entries(store, classes)
+        dated, undated = entries.dated, entries.undated
         beside = self.beside or "also"
         lines = [f"## {self.heading}", ""]
         if not dated:
@@ -503,6 +525,13 @@ class Timeline(WriteupPart, frozen=True):
         return list(dict.fromkeys([*self.of, *band]))
 
 
+class Count(BaseModel, frozen=True):
+    """One value of a tallied field and how many nodes carry it."""
+
+    value: str
+    count: int
+
+
 class Tally(WriteupPart, frozen=True):
     """How many nodes of one kind share each value of one field, largest first.
 
@@ -529,20 +558,31 @@ class Tally(WriteupPart, frozen=True):
     none: str = "(none)"
     """How a node with no value, or no such field, is spelled."""
 
+    def tallied(
+        self, store: LedgerStore, classes: list[type[LedgerNode]], node: LedgerNode
+    ) -> bool:
+        """Whether a node is of the kind counted and, when one is named, at the standing."""
+        if node.kind != self.of:
+            return False
+        return not self.standing or store.standing(node, classes).label == self.standing
+
+    def value_of(self, node: LedgerNode) -> str:
+        value = getattr(node, self.by, "")
+        return str(value) if value not in (None, "") else self.none
+
     def counted(
         self, store: LedgerStore, classes: list[type[LedgerNode]]
-    ) -> list[tuple[str, int]]:
+    ) -> list[Count]:
         """Each value with its count, largest first and then by value."""
-        counts: dict[str, int] = {}
-        for node in store.all_nodes(classes):
-            if node.kind != self.of:
-                continue
-            if self.standing and store.standing(node, classes).label != self.standing:
-                continue
-            value = getattr(node, self.by, "")
-            spelled = str(value) if value not in (None, "") else self.none
-            counts[spelled] = counts.get(spelled, 0) + 1
-        return sorted(counts.items(), key=lambda row: (-row[1], row[0]))
+        counts = Counter(
+            self.value_of(node)
+            for node in store.all_nodes(classes)
+            if self.tallied(store, classes, node)
+        )
+        return sorted(
+            (Count(value=value, count=count) for value, count in counts.items()),
+            key=lambda row: (-row.count, row.value),
+        )
 
     def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
         rows = self.counted(store, classes)
@@ -550,7 +590,7 @@ class Tally(WriteupPart, frozen=True):
         if not rows:
             return [*lines, self.empty, ""]
         lines.extend([f"| {self.by} | count |", "| --- | --- |"])
-        lines.extend(f"| {cell(value)} | {count} |" for value, count in rows)
+        lines.extend(f"| {cell(row.value)} | {row.count} |" for row in rows)
         return [*lines, ""]
 
     def kinds(self) -> list[str] | None:

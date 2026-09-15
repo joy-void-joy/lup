@@ -597,7 +597,7 @@
     {
       "path": "docs/native-capabilities.md",
       "category": "generated",
-      "sha256": "0bb693de8ab89d417be2a36e393120e31c0828dfb7b9aa0d6589c18ca0117e50",
+      "sha256": "e397d5da44e451e348c4a4a4f82715b0b0058dbe8def8b6678eb233b160cee60",
       "semantic_id": "docs.native-capabilities",
       "executable": false
     },

@@ -70,7 +70,11 @@ def sweep_cites(
             for reading in read_cites(text, store, classes):
                 yield Located(file=rel, reading=reading)
 
-    found = list(located())
+    # One fold of the log for the whole sweep: every document reads the log
+    # as it was when the sweep started, and a hundred documents cost one
+    # parse of the journal rather than a hundred.
+    with store.batch():
+        found = list(located())
     return CiteSweep(
         checked=len(found),
         failing=[item for item in found if not item.reading.holds()],

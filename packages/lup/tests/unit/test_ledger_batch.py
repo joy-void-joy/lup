@@ -7,12 +7,14 @@ what the batch wrote as if it had been written one call at a time.
 """
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
 from lup.coordination.refs import ActorRef
 from lup.coordination.tasks import Blocks, Task
 from lup.ledger.journal import LedgerRefusal, LedgerStore
+from lup.ledger.models import LedgerNode
 
 AUTHOR = ActorRef(kind="session", id="bulk")
 
@@ -82,3 +84,24 @@ def test_a_batch_does_not_see_what_another_store_appends_meanwhile(
         other.record(Task, "from outside", slug="outside")
         assert store.slug_holder("outside") == ""
     assert LedgerStore(tmp_path, AUTHOR).slug_holder("outside") != ""
+
+
+def test_a_line_is_read_as_the_class_its_kind_names_and_an_undeclared_kind_as_the_base(
+    tmp_path: Path,
+) -> None:
+    class Note(LedgerNode, frozen=True):
+        kind: Literal["test:note"] = "test:note"
+        body: str = ""
+
+    store = LedgerStore(tmp_path, AUTHOR)
+    task = store.record(Task, "a task")
+    note = store.record(Note, "a note", body="b")
+
+    read = store.reader([Note, Task])
+    assert isinstance(read({**task.model_dump(mode="json")}), Task)
+    assert isinstance(read({**note.model_dump(mode="json")}), Note)
+    both = store.all_nodes([Note, Task])
+    assert [type(node).__name__ for node in both] == ["Task", "Note"]
+    stranger = read({**note.model_dump(mode="json"), "kind": "test:stranger"})
+    assert stranger is not None and type(stranger) is LedgerNode
+    assert type(store.all_nodes([Task])[1]) is LedgerNode

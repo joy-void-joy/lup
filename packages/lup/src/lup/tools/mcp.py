@@ -38,9 +38,18 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Literal, NotRequired, TypedDict, cast, get_type_hints
 
-from mcp.server import Server
+from mcp.server import Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
-from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ContentBlock,
+    ImageContent,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
 from pydantic import BaseModel, ValidationError
 
 from lup.types import Decorator, EnvVars, JsonObject
@@ -92,20 +101,6 @@ def mcp_response(text: str, *, is_error: bool = False) -> ToolResponse:
     if is_error:
         response["is_error"] = True
     return response
-
-
-class CallToolResultWithAlias(CallToolResult):
-    """CallToolResult with snake_case alias for SDK compatibility.
-
-    Some SDK query runners check ``is_error`` (snake_case) but MCP's
-    CallToolResult uses ``isError`` (camelCase). This subclass adds a
-    property alias so both work.
-    """
-
-    @property
-    def is_error(self) -> bool:
-        """Snake_case alias for isError."""
-        return self.isError
 
 
 # MCP hands an arbitrary JSON args object validated by the per-tool BaseModel.
@@ -214,31 +209,59 @@ def create_mcp_server(
     A server built without tools still registers its handlers and
     advertises an empty tool list — selecting an unpopulated group is a
     valid (if useless) session, not a protocol error.
+
+    The handlers are handed to the server at construction, which is the
+    low-level API's one registration path: each receives the request
+    context and the request's own typed params, and answers with the whole
+    result model rather than a bare list. The context is unused because a
+    tool's session is the process it serves from, not the request.
     """
-    server = Server(name, version=version, instructions=instructions)
     registered = list(tools or [])
     tool_map = {tool_def.name: tool_def for tool_def in registered}
 
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
+    async def list_tools(
+        _context: ServerRequestContext[object],
+        _params: PaginatedRequestParams | None,
+    ) -> ListToolsResult:
         """Return the list of available tools."""
-        return [
-            Tool(
-                name=tool_def.name,
-                description=tool_def.description,
-                inputSchema=tool_def.input_schema,
+        return ListToolsResult(
+            tools=[
+                Tool(
+                    name=tool_def.name,
+                    description=tool_def.description,
+                    input_schema=tool_def.input_schema,
+                )
+                for tool_def in registered
+            ]
+        )
+
+    async def call_tool(
+        _context: ServerRequestContext[object], params: CallToolRequestParams
+    ) -> CallToolResult:
+        """Execute a tool by name with given arguments.
+
+        Every failure crosses as an ``is_error`` result carrying its own
+        words, the unknown name and the handler that raised alike. The
+        runner would otherwise answer a raised exception with a bare
+        ``Internal server error`` so that handler internals never reach the
+        wire -- and the agent on the other end of that line is the one
+        reader who has to know what went wrong to do anything about it.
+        """
+        if params.name not in tool_map:
+            return CallToolResult(
+                content=[
+                    TextContent(type="text", text=f"Tool '{params.name}' not found")
+                ],
+                is_error=True,
             )
-            for tool_def in registered
-        ]
-
-    @server.call_tool()
-    async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
-        """Execute a tool by name with given arguments."""
-        if name not in tool_map:
-            raise ValueError(f"Tool '{name}' not found")
-
-        tool_def = tool_map[name]
-        result = await tool_def.handler(arguments)
+        try:
+            result = await tool_map[params.name].handler(dict(params.arguments or {}))
+        except Exception as failure:
+            logger.exception("tool %s raised", params.name)
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"{params.name}: {failure}")],
+                is_error=True,
+            )
 
         is_error = "is_error" in result and bool(result["is_error"])
 
@@ -252,11 +275,18 @@ def create_mcp_server(
                         content.append(TextContent(type="text", text=text))
                     case {"type": "image", "data": str(data), "mimeType": str(mime)}:
                         content.append(
-                            ImageContent(type="image", data=data, mimeType=mime)
+                            ImageContent(type="image", data=data, mime_type=mime)
                         )
 
-        return CallToolResultWithAlias(content=content, isError=is_error)
+        return CallToolResult(content=content, is_error=is_error)
 
+    server = Server(
+        name,
+        version=version,
+        instructions=instructions,
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+    )
     return LupMcpServerConfig(
         name=name,
         server=server,
