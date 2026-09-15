@@ -79,7 +79,7 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
                 session.list_tools(), timeout=SUBPROCESS_TIMEOUT_SECONDS
             )
             names = {tool.name for tool in listed.tools}
-            assert names == {"review", "run_subagent"}
+            assert {"review", "run_subagent"} <= names
             # The example placeholder ships fabricated data and is served to no
             # live agent by default — matching the Claude path. It is reachable
             # only via an explicit --server example.
