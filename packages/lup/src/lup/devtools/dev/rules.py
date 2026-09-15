@@ -173,13 +173,16 @@ def rule_reference_artifact(selection: RuleSelection | None = None) -> Artifact:
     tables end to end, so either vocabulary produces the same bytes.
     """
     document = rule_reference_document(selection)
+    rendered = claude_prompt_renderer().render(document)
     return Artifact.generated(
         path=RULE_REFERENCE_PATH,
         # A generated artifact ends in exactly one newline. The document's
         # last part opens the refinement paragraph and then lists the
         # refinements, so with every rule retired the opener's own separator
         # is all that would end the file.
-        body=claude_prompt_renderer().render(document).rstrip("\n") + "\n",
+        # lup: ignore[string-strip] — trailing newlines are whitespace the
+        # renderer left, not structure a parser would read
+        body=rendered.rstrip("\n") + "\n",
         semantic_id="docs.rules",
         banner=GeneratedBanner(
             source=document.declared_source(), command=RULE_REFERENCE_COMMAND
