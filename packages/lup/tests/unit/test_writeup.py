@@ -25,6 +25,7 @@ from lup.ledger.writeup import (
     Placeholder,
     Prose,
     Stamp,
+    Tally,
     Timeline,
     Writeup,
     WriteupError,
@@ -339,3 +340,29 @@ def test_a_figure_in_a_row_is_one_line_with_its_pipes_escaped(tmp_path: Path) ->
     assert "line one line two \\| three" in row and " — a \\| b" in row
     # Four columns are five bare pipes; the two inside the cells are escaped.
     assert row.count("|") - row.count("\\|") == 5
+
+
+def test_a_tally_counts_nodes_by_a_field_largest_first_and_narrows_by_standing(
+    tmp_path: Path,
+) -> None:
+    held = store(tmp_path)
+    held.record(Task, "a", holder="ann")
+    held.record(Task, "b", holder="ann")
+    held.record(Task, "c", holder="bob")
+    held.record(Task, "d")
+    done = held.record(Task, "e", holder="bob")
+    held.amend(done.completed())
+
+    every = Tally(heading="By holder", of="coordination:task", by="holder")
+    open_only = Tally(
+        heading="Open by holder", of="coordination:task", by="holder", standing="open"
+    )
+
+    assert every.counted(held, CLASSES) == [("ann", 2), ("bob", 2), ("(none)", 1)]
+    assert open_only.counted(held, CLASSES) == [("(none)", 1)]
+    rendered = "\n".join(every.render(held, CLASSES))
+    assert "| holder | count |" in rendered and "| ann | 2 |" in rendered
+    assert every.kinds() == ["coordination:task"]
+    assert "Nothing recorded." in "\n".join(
+        Tally(heading="None", of="test:doubt", by="title").render(held, CLASSES)
+    )

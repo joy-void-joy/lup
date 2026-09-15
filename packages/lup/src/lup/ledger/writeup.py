@@ -10,10 +10,11 @@ beside it, and never a number somebody typed.
 
 **Parts are a union that answers for itself.** The base names one operation,
 `render`, and each variant answers it over the store: prose with figures filled
-in, a listing of nodes chosen by kind or standing or relation, a timeline of
-dated nodes in the order of a named clock, what needs a person, a stamp
-saying what the document was generated from. A new kind of part is a new
-variant, not a branch somewhere else.
+in, a listing of nodes chosen by kind or standing or relation, a tally of
+how many share each value of a field, a timeline of dated nodes in the order
+of a named clock, what needs a person, a stamp saying what the document was
+generated from. A new kind of part is a new variant, not a branch somewhere
+else.
 
 **Generated on demand, and drift-checked where every rendered kind is
 committed.** Each part says which kinds it renders, or that it cannot say —
@@ -500,6 +501,60 @@ class Timeline(WriteupPart, frozen=True):
         """The row kinds and the band kind, each once."""
         band = [self.bands.of] if self.bands is not None else []
         return list(dict.fromkeys([*self.of, *band]))
+
+
+class Tally(WriteupPart, frozen=True):
+    """How many nodes of one kind share each value of one field, largest first.
+
+    The shape of "what is open, by host" over twenty thousand leads: a
+    reader deciding where to start wants the groups and their sizes, not a
+    row per node. Each row is one value of the field and the count of nodes
+    carrying it, narrowed to one standing where the author asked. A node
+    read back as the base class carries no such field and tallies under
+    the empty value, spelled so.
+    """
+
+    kind: Literal["tally"] = "tally"
+    heading: str = Field(min_length=1)
+    of: str = Field(min_length=1)
+    """Only nodes of this kind."""
+
+    by: str = Field(min_length=1)
+    """The field whose values are the rows."""
+
+    standing: str = ""
+    """Only nodes whose standing has this label right now."""
+
+    empty: str = "Nothing recorded."
+    none: str = "(none)"
+    """How a node with no value, or no such field, is spelled."""
+
+    def counted(
+        self, store: LedgerStore, classes: list[type[LedgerNode]]
+    ) -> list[tuple[str, int]]:
+        """Each value with its count, largest first and then by value."""
+        counts: dict[str, int] = {}
+        for node in store.all_nodes(classes):
+            if node.kind != self.of:
+                continue
+            if self.standing and store.standing(node, classes).label != self.standing:
+                continue
+            value = getattr(node, self.by, "")
+            spelled = str(value) if value not in (None, "") else self.none
+            counts[spelled] = counts.get(spelled, 0) + 1
+        return sorted(counts.items(), key=lambda row: (-row[1], row[0]))
+
+    def render(self, store: LedgerStore, classes: list[type[LedgerNode]]) -> list[str]:
+        rows = self.counted(store, classes)
+        lines = [f"## {self.heading}", ""]
+        if not rows:
+            return [*lines, self.empty, ""]
+        lines.extend([f"| {self.by} | count |", "| --- | --- |"])
+        lines.extend(f"| {cell(value)} | {count} |" for value, count in rows)
+        return [*lines, ""]
+
+    def kinds(self) -> list[str] | None:
+        return [self.of]
 
 
 class NeedsPerson(WriteupPart, frozen=True):

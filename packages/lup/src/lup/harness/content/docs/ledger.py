@@ -241,7 +241,9 @@ here — ordered by priority. `Timeline` is every node of the named kinds in the
 clock the author named, a node with only an upper bound placed there and
 saying `before`, a second clock shown beside each row and never ordered by,
 and bands — a kind with a start and an end — opening and closing as rows of
-their own; the undated go last under their own heading. `NeedsPerson` is the
+their own; the undated go last under their own heading. `Tally` is one row
+per value of a field with the count of nodes carrying it, for a frontier a
+reader opens on by host rather than by lead. `NeedsPerson` is the
 person's task list grouped by what each row costs. `Stamp` says what the
 document was generated from, naming the newest record rather than the clock,
 so one log renders one document.
@@ -249,7 +251,7 @@ so one log renders one document.
 `ledger writeup` writes every declared document, and `--check` verifies the
 file on disk against this machine's log. Each part says which kinds it
 renders — a `Listing` its `of`, a `Timeline` its rows' kinds and its band's,
-`NeedsPerson` the tasks, a `Stamp` the kinds its `of` names, `Prose` none,
+a `Tally` its `of`, `NeedsPerson` the tasks, a `Stamp` the kinds its `of` names, `Prose` none,
 and a part naming nodes rather than kinds
 cannot say — and a writeup whose every kind is committed renders the same on
 every machine, so it joins the drift-checked generation: `harness generate
