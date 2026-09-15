@@ -22,7 +22,7 @@ same-path mounting that :func:`run_arguments` refuses to spell any other way.
 """
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from lup.harness.browser import BrowserBridge
 from lup.harness.clipboard import ClipboardBridge, shim_program
+from lup.harness.devices import Device
 from lup.harness.credential import (
     ForgeCredential,
     GitAccess,
@@ -649,6 +650,22 @@ class Image(BaseModel, frozen=True):
             "number is a runaway backstop rather than a budget"
         ),
     )
+    devices: list[Device] = Field(
+        default=[],
+        description=(
+            "Host devices every session and worker opened from this image is "
+            "granted, by CDI name -- ``nvidia.com/gpu=all`` is the GPU. "
+            "Declared here rather than passed at launch for the reason the "
+            "egress is: a session that computes on the GPU needs it every "
+            "time and in every worker, and a flag remembered on some launches "
+            "is how a run comes to be recorded as contained while its GPU "
+            "half ran on the host. The nodes and driver libraries are the "
+            "registered spec's to inject, so nothing is enumerated here; a "
+            "host with no spec for the name withholds it with a notice rather "
+            "than refusing the session, and ``--device`` on a launch adds one "
+            "for that launch alone"
+        ),
+    )
     trusted_projects: list[Path] = Field(
         default=[],
         description=(
@@ -1150,6 +1167,7 @@ USER $UID:$GID
         boundary: EnvVars | None = None,
         inherited_environment: list[str] | None = None,
         environments: Mapping[Path, Path] | None = None,
+        devices: Sequence[Device] = (),
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1201,7 +1219,17 @@ USER $UID:$GID
         holes, and this leans on it in the same direction -- so an engine
         that applied the list in order would already be breaking that, and
         the order here costs nothing to keep right either way.
+
+        ``devices`` is what the device lease granted, passed rather than read
+        off :attr:`devices` because the two are not the same list: the
+        declaration is what was asked for, and what reaches the engine is
+        what the host's registry answered for. Emitted with the mounts
+        because it is the same kind of thing -- the boundary, widened by
+        declaration -- and read in the same place by whoever reads the argv.
         """
+        granted_devices = [
+            argument for device in devices for argument in device.arguments()
+        ]
         mounts = [
             argument
             for host, inside in writable.items()
@@ -1291,6 +1319,7 @@ USER $UID:$GID
             *selected.mount_arguments(),
             *mounts,
             *self.environment_mounts(environments or {}),
+            *granted_devices,
             *seeded,
             *bridged,
             *opening,

@@ -438,6 +438,15 @@ def create_harness_app(
                     "write (repeatable)",
                 ),
             ] = [],
+            device: Annotated[
+                list[str],
+                typer.Option(
+                    "--device",
+                    help="Host device this session is granted, by CDI name "
+                    "such as nvidia.com/gpu=all (repeatable); for this "
+                    "launch only",
+                ),
+            ] = [],
             max_recursive_agent: Annotated[
                 int | None,
                 typer.Option(
@@ -481,6 +490,7 @@ def create_harness_app(
                 companions=companion_targets(selection.mode, "claude", allowance),
                 repository_writers=repository_writers,
                 mounts=launch.declared_mounts(mount, mount_ro),
+                devices=launch.declared_devices(device),
                 recorder=recorder_for("claude"),
             )
 
@@ -573,6 +583,15 @@ def create_harness_app(
                     "write (repeatable)",
                 ),
             ] = [],
+            device: Annotated[
+                list[str],
+                typer.Option(
+                    "--device",
+                    help="Host device this session is granted, by CDI name "
+                    "such as nvidia.com/gpu=all (repeatable); for this "
+                    "launch only",
+                ),
+            ] = [],
             max_recursive_agent: Annotated[
                 int | None,
                 typer.Option(
@@ -617,6 +636,7 @@ def create_harness_app(
                 companions=companion_targets(selection.mode, "codex", allowance),
                 repository_writers=repository_writers,
                 mounts=launch.declared_mounts(mount, mount_ro),
+                devices=launch.declared_devices(device),
                 recorder=recorder_for("codex"),
             )
 

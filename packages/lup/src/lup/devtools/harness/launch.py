@@ -19,8 +19,9 @@ from uuid import uuid4
 
 import sh
 import typer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from lup.harness.devices import Device
 from lup.providers.login import ProviderLogin
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.contained import contained_argv
@@ -153,6 +154,27 @@ def declared_mounts(
         *[AccessibleRoot(path=path) for path in writable],
         *[AccessibleRoot(path=path, writable=False) for path in read_only],
     ]
+
+
+def declared_devices(names: list[str]) -> list[Device]:
+    """The devices one command line asked this session to be granted.
+
+    The same shape an image declares its standing ones in, so a flag costs no
+    second path downstream. A name the specification's grammar refuses is
+    refused here in the launcher's own words, naming the flag's value, rather
+    than by the engine refusing the whole container over it.
+    """
+
+    def declared(name: str) -> Device:
+        try:
+            return Device(name=name)
+        except ValidationError as error:
+            raise typer.BadParameter(
+                f"--device {name!r}: a device is named the way CDI names it, "
+                "vendor/class=device, such as nvidia.com/gpu=all"
+            ) from error
+
+    return [declared(name) for name in names]
 
 
 @runtime_checkable
@@ -1382,6 +1404,7 @@ def session_argv(
     sentinels: LaunchSentinels = LaunchSentinels(),
     cleared: LaunchOpening = LaunchOpening(),
     mounts: list[AccessibleRoot] = [],
+    devices: list[Device] = [],
     authenticate: Callable[[list[str], Path], None] | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
@@ -1435,6 +1458,26 @@ def session_argv(
 
     accessible = [*mounts, *accessible_roots(told)]
     if not sandbox.contained():
+        # A host posture holds the host's devices already, so a flag asking
+        # for one describes a container this launch does not open. Said
+        # rather than ignored: the operator typed it expecting a grant, and
+        # silence would leave them reading a GPU that answers on the host as
+        # one the flag delivered.
+        if devices:
+            banner.add(
+                [
+                    Notice(
+                        text=(
+                            "Devices: "
+                            + ", ".join(device.name for device in devices)
+                            + " asked for; the session runs on the host, which "
+                            "holds its own devices, and --device grants one "
+                            "inside the container."
+                        ),
+                        urgency="detail",
+                    )
+                ]
+            )
         if authenticate is not None:
             authenticate([cli], config_home)
         settle_boundary(
@@ -1482,6 +1525,7 @@ def session_argv(
         banner=banner,
         sentinels=sentinels,
         accessible=accessible,
+        devices=devices,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -1581,6 +1625,7 @@ def launch_claude(
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
     mounts: list[AccessibleRoot] = [],
+    devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
@@ -1699,6 +1744,7 @@ def launch_claude(
                 sentinels,
                 cleared,
                 mounts,
+                devices,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -1742,6 +1788,7 @@ def launch_codex(
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
     mounts: list[AccessibleRoot] = [],
+    devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
@@ -1847,6 +1894,7 @@ def launch_codex(
                 sentinels,
                 cleared,
                 mounts,
+                devices,
                 authenticate=authenticate,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)

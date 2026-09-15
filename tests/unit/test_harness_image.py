@@ -8,6 +8,7 @@ the broken version too.
 
 from pathlib import Path
 
+from lup.harness.devices import Device
 from lup.harness.image import (
     Docker,
     Image,
@@ -511,3 +512,43 @@ def test_a_piped_session_is_given_stdin_without_a_terminal() -> None:
 def test_a_captured_session_takes_neither() -> None:
     """`-it` against a pipe fails on the terminal it was promised."""
     assert stream_arguments("captured") == []
+
+
+def test_a_granted_device_is_handed_to_the_engine_beside_the_mounts() -> None:
+    """A device is the boundary widened by declaration, and reads where the mounts do.
+
+    The declaration and the grant are different lists: what reaches the engine
+    is what the host's registry answered for, so the argv takes the grant.
+    """
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={Path("/home/u/repo"): "/home/u/repo"},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        devices=[Device(name="nvidia.com/gpu=all")],
+    )
+    granted = started.index("--device")
+
+    assert started[granted + 1] == "nvidia.com/gpu=all"
+    assert granted > started.index("/home/u/repo:/home/u/repo:rw")
+    assert granted < started.index("lup-agent:x")
+
+
+def test_a_session_granted_no_device_asks_the_engine_for_none() -> None:
+    """The image's standing declaration is not the grant: an unresolved one is withheld."""
+    started = Image(devices=[Device(name="nvidia.com/gpu=all")]).session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={Path("/home/u/repo"): "/home/u/repo"},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+    )
+
+    assert "--device" not in started

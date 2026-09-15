@@ -21,6 +21,7 @@ it is for shell rules.
 from pathlib import Path
 
 from lup.devtools.clipboard import clipboard_probes
+from lup.harness.devices import Device
 from lup.harness.image import ContainerEngine, Docker, detected_client
 from lup.harness.requirements import (
     Advisory,
@@ -277,6 +278,56 @@ def same_path_mount_requirement(
         absence=LostCapability(capability="mounting worktrees in worker containers"),
         recovery="Check the mount error above and the container service's access to the checkout.",
         install=install,
+    )
+
+
+def device_requirement(
+    device: Device,
+    witness: list[str],
+    purpose: str,
+    where: Side = "host",
+    image: str = "docker.io/library/debian:stable-slim",
+    lost: str = "",
+) -> Requirement:
+    """A device the host can hand a container, exercised by using it inside one.
+
+    ``witness`` is the command that proves the device answers -- ``nvidia-smi
+    -L`` for a GPU -- run inside a throwaway container started with the
+    device, because the two halves it joins each pass alone and fail
+    together: a spec can be registered on a host whose engine does not honour
+    the registry, and an engine can honour it on a host whose spec names a
+    driver that is not there. The image is a small glibc one rather than
+    busybox, since what a vendor's spec injects is a dynamically linked
+    toolkit and busybox carries no libc for it to link against.
+
+    Checked at setup rather than every launch because it starts a container,
+    which is a statement about the probe's cost: a launch reads the registry
+    itself and withholds a device it cannot grant, so what this adds is the
+    proof the device *works* once granted, which is worth one container start
+    when a machine is set up and not before every session.
+
+    Carried by the client for the reason the container requirement is:
+    which engine starts the probe is a fact about the machine, and the
+    declaration this sits in is hashed into the ownership digest.
+    """
+    return Requirement(
+        capability=f"device {device.name}",
+        by_client=True,
+        purpose=purpose,
+        where=where,
+        checked="setup",
+        exercise=Run(
+            command=["docker", "run", "--rm", *device.arguments(), image, *witness]
+        ),
+        absence=LostCapability(
+            capability=lost or f"{device.name} inside contained sessions and workers"
+        ),
+        recovery=(
+            "Register the device with its vendor's toolkit -- for NVIDIA, "
+            "`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` -- "
+            "and check the engine reads the registry: Docker does from 28.3, "
+            'an older daemon needs `"features": {"cdi": true}`, podman always has.'
+        ),
     )
 
 
