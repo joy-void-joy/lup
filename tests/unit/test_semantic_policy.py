@@ -4627,6 +4627,30 @@ def test_an_in_place_rewrite_is_judged_as_the_edit_it_performs(
     assert decided("sed -i 's/a/b/'") == "deny"
 
 
+def test_a_rewrite_named_through_a_variable_is_judged_as_the_file_it_names(
+    tmp_path: Path,
+) -> None:
+    """`S=f; sed -i … $S` produces the same document `sed -i … f` does.
+
+    The classifier expanded `$S` and the host that runs the script over a
+    copy did not, so the document came back keyed by `$S`, matched no target,
+    and the rewrite asked as though the file could not be read.
+    """
+    committed_tree(tmp_path, "notes.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def decided(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert decided("S=notes.md; sed -i 's/body/text/' $S") == "allow"
+    assert decided("D=.; sed -i 's/body/text/' $D/notes.md") == "allow"
+    # Rebound inside a loop, the name holds whatever the last pass left, so it
+    # is judged as `S=$(…)` is rather than by the value before the loop.
+    assert decided("S=notes.md; for n in 1 2; do S=x; done; sed -i 's/a/b/' $S") == (
+        decided("S=$(date); sed -i 's/a/b/' $S")
+    )
+
+
 def test_an_in_place_rewrite_meets_the_content_gates_an_edit_meets(
     tmp_path: Path,
 ) -> None:

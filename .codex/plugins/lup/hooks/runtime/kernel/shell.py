@@ -1,4 +1,4 @@
-# lup: ignore[empty-collection, import-re, re-call, string-split]
+# lup: ignore[empty-collection, import-re, re-call]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Shell segment, structure, and whole-command classification."""
 
@@ -44,6 +44,14 @@ from .words import (
     confined_to_recoverable_roots,
     refuses_generated_plugin_write,
     xargs_payload,
+)
+from .bindings import (
+    ShellBinding,
+    bind_name,
+    literal_loop_word,
+    pure_assignment_names,
+    references_variable,
+    substitute_variable,
 )
 from .escalation import read_escalation
 from .semantics import UnjudgedAmbient
@@ -468,52 +476,6 @@ def find_loop_end(segments: list[list[str]], start: int) -> int | None:
     return None
 
 
-def variable_reference_end(word: str, position: int, name: str) -> int | None:
-    """The index just past a ``$name``/``${name}`` reference at ``position``."""
-    rest = word[position + 1 :]
-    if rest.startswith("{" + name + "}"):
-        return position + len(name) + 3
-    if rest.startswith(name):
-        follow = position + 1 + len(name)
-        if follow >= len(word) or not (word[follow].isalnum() or word[follow] == "_"):
-            return follow
-    return None
-
-
-def references_variable(word: str, name: str) -> bool:
-    """Detect a live ``$name`` or ``${name}`` reference inside one shell word."""
-    return any(
-        character == "$" and variable_reference_end(word, position, name) is not None
-        for position, character in enumerate(word)
-    )
-
-
-def substitute_variable(word: str, name: str, value: str) -> str:
-    """Replace every ``$name``/``${name}`` reference in one word with ``value``."""
-    pieces: list[str] = []
-    position = 0
-    while True:
-        found = word.find("$", position)
-        if found == -1:
-            pieces.append(word[position:])
-            return "".join(pieces)
-        end = variable_reference_end(word, found, name)
-        if end is None:
-            pieces.append(word[position : found + 1])
-            position = found + 1
-            continue
-        pieces.append(word[position:found])
-        pieces.append(value)
-        position = end
-
-
-def literal_loop_word(word: str) -> bool:
-    """A word whose runtime expansion is exactly its lexed text."""
-    return not word.startswith(("~", "/dev/fd/")) and not any(
-        character in "$*?[" for character in word
-    )
-
-
 def uv_post_target_words_safe(
     words: list[str], runner_targets: list[RunnerTargetRow]
 ) -> bool:
@@ -568,38 +530,6 @@ def argument_safe_words(words: list[str], context: ShellContext) -> bool:
     )
 
 
-class ShellBinding(TypedDict):
-    """One frozen variable binding: a name, and its literal value or None.
-
-    ``value`` is ``None`` where the word could not be read as a literal, which
-    is what makes the binding opaque to every later substitution.
-    """
-
-    name: str
-    value: str | None
-
-
-def bind_name(
-    bindings: tuple[ShellBinding, ...], name: str, value: str | None
-) -> tuple[ShellBinding, ...]:
-    """Rebind one name immutably, shadowing any earlier binding of it."""
-    kept = tuple(pair for pair in bindings if pair["name"] != name)
-    return (*kept, ShellBinding(name=name, value=value))
-
-
-def pure_assignment_names(segment: list[str]) -> list[ShellBinding] | None:
-    """The bindings of an assignment-only segment."""
-    pairs: list[ShellBinding] = []
-    for word in segment:
-        name, separator, value = word.partition("=")
-        if not separator or not name.isidentifier():
-            return None
-        pairs.append(
-            ShellBinding(name=name, value=value if literal_loop_word(value) else None)
-        )
-    return pairs
-
-
 def read_bindings(
     words: list[str], bindings: tuple[ShellBinding, ...]
 ) -> tuple[ShellBinding, ...] | KernelDecision:
@@ -627,21 +557,20 @@ def resolve_segment_bindings(
     context: ShellContext,
     gate_opaque: bool,
 ) -> list[str] | KernelDecision:
-    """Substitute literal bindings and gate opaque ones by argument safety.
+    """Gate a reference to a name this walk bound by argument safety.
 
-    A literal binding instantiates its references exactly, so guarded flags
-    are judged as the words they become. An opaque binding (``read``, a
-    non-literal assignment) can expand to any word, so a referencing segment
-    must name an argument-safe command.
+    Literal bindings were already expanded, once, by the binding pass over
+    the command's tokens (:func:`~lup.policy.kernel.lex.bind_tokens`), which
+    every other reader of the command shares. A reference still standing is
+    one that pass would not resolve -- a ``read``, a non-literal assignment,
+    or a name rebound inside a construct that may or may not run -- so it
+    can expand to any word, and a referencing segment must name an
+    argument-safe command. Expanding it here instead would judge a word the
+    host's readers never see, which is the disagreement the pass removed.
     """
     resolved = segment
     for binding in bindings:
-        name = binding["name"]
-        value = binding["value"]
-        if not any(references_variable(word, name) for word in resolved):
-            continue
-        if value is not None:
-            resolved = [substitute_variable(word, name, value) for word in resolved]
+        if not any(references_variable(word, binding["name"]) for word in resolved):
             continue
         if not gate_opaque:
             continue

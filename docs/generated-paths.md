@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 96 artifacts
+## `claude` — 97 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -63,6 +63,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/evidence.json` | hooks.lup-policy |
 | `.claude/plugins/lup/hooks/runtime/kernel/__init__.py` | lup.policy.kernel.__init__ |
 | `.claude/plugins/lup/hooks/runtime/kernel/archives.py` | lup.policy.kernel.archives |
+| `.claude/plugins/lup/hooks/runtime/kernel/bindings.py` | lup.policy.kernel.bindings |
 | `.claude/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.claude/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.claude/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |
@@ -109,7 +110,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 72 artifacts
+## `codex` — 73 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -127,6 +128,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/evidence.json` | hooks.lup-policy |
 | `.codex/plugins/lup/hooks/runtime/kernel/__init__.py` | lup.policy.kernel.__init__ |
 | `.codex/plugins/lup/hooks/runtime/kernel/archives.py` | lup.policy.kernel.archives |
+| `.codex/plugins/lup/hooks/runtime/kernel/bindings.py` | lup.policy.kernel.bindings |
 | `.codex/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.codex/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.codex/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |

@@ -13,6 +13,13 @@ from .decision import (
     unjudged,
 )
 from .archives import archive_write
+from .bindings import (
+    ShellBinding,
+    bind_name,
+    bound_word,
+    pure_assignment_names,
+    unsettled_assignments,
+)
 from .effects import EffectEvidence, declare, verdict_for
 from .roles import spells_its_path
 from .rows import PathRoleRow, PathRuleRow, ShellRuleRow
@@ -825,9 +832,10 @@ def authored_writes(command: str) -> list[AuthoredWrite]:
     standard output forward across a `|`, which is what lets `echo 'x = 1' |
     tee packages/lup/src/lup/seams.py` be read as the module replacement it is.
     """
-    tokens = tokenize_shell(command)
-    if isinstance(tokens, KernelDecision):
+    lexed = tokenize_shell(command)
+    if isinstance(lexed, KernelDecision):
         return []
+    tokens = bind_tokens(lexed)["tokens"]
     authored: list[AuthoredWrite] = []
     words: list[str] = []
     bodies: list[str] = []
@@ -900,9 +908,7 @@ def authored_writes(command: str) -> list[AuthoredWrite]:
             legible = False
             index += 1
             continue
-        spelled = resolved_target(
-            tokens[following].text, assigned_literals(tokens, index)
-        )
+        spelled = tokens[following].text
         # A stream sink is not a target here for the reason it is not one in
         # `shell_write_targets`: nothing is destroyed and no gate has anything
         # to read. Dropped as it is met rather than at the end, or a
@@ -916,7 +922,9 @@ def authored_writes(command: str) -> list[AuthoredWrite]:
     return authored
 
 
-def shell_write_targets(command: str, depth: int = 0) -> list[str]:
+def shell_write_targets(
+    command: str, depth: int = 0, inherited: tuple[ShellBinding, ...] = ()
+) -> list[str]:
     """Name every path this command's redirections would open for writing.
 
     A caller that can reach the filesystem stats these and hands back the
@@ -932,16 +940,20 @@ def shell_write_targets(command: str, depth: int = 0) -> list[str]:
     writable root contains it, so naming it here puts an approval question in
     front of every ``2>/dev/null``.
     """
-    tokens = tokenize_shell(command)
-    if isinstance(tokens, KernelDecision):
+    lexed = tokenize_shell(command)
+    if isinstance(lexed, KernelDecision):
         return []
+    bound = bind_tokens(lexed, inherited)
+    tokens = bound["tokens"]
     targets: list[str] = []
     index = 0
     while index < len(tokens):
         token = tokens[index]
         if token.kind in ("cmdsub", "procsub"):
             if depth < 2:
-                targets.extend(shell_write_targets(token.text, depth + 1))
+                targets.extend(
+                    shell_write_targets(token.text, depth + 1, bound["bindings"][index])
+                )
             index += 1
             continue
         if token.kind != "op" or not redirection_writes(token.text):
@@ -949,81 +961,11 @@ def shell_write_targets(command: str, depth: int = 0) -> list[str]:
             continue
         following = index + 1
         if following < len(tokens) and tokens[following].kind == "word":
-            targets.append(
-                resolved_target(
-                    tokens[following].text, assigned_literals(tokens, index)
-                )
-            )
+            targets.append(tokens[following].text)
             index = following + 1
             continue
         index += 1
     return [target for target in targets if not writes_to_a_stream(target)]
-
-
-# lup: ignore[dict-str-payload] -- shell variable names, owned by the command
-# being judged rather than by this repository, so no closed set enumerates
-# them; the kernel is hermetic, which puts StringMap out of reach here
-def assigned_literals(tokens: list[ShellToken], before: int) -> dict[str, str]:
-    """Every name a standalone assignment gave a literal value, before an index.
-
-    Only a *standalone* assignment is read, and the segment the index falls in
-    is never read at all. `VAR=x cmd > $VAR` sets `VAR` for that one command's
-    environment, and the shell expands the redirection from the value it
-    already held -- so reading `x` as the target would judge a path the command
-    never writes, and judge it in the permissive direction.
-
-    Anything a segment holds that is not an assignment poisons that segment
-    rather than being skipped: a command word means the assignments beside it
-    were its environment, and a substitution means a value nothing here can
-    read. Later assignments to one name win, because the shell's do.
-    """
-    # lup: ignore[dict-str-payload] -- as above, shell variable names
-    literals: dict[str, str] = {}
-    # lup: ignore[dict-str-payload] -- as above, shell variable names
-    pending: dict[str, str] = {}
-    poisoned = False
-    for token in tokens[:before]:
-        if token.kind == "op" and is_control_operator(token.text):
-            if not poisoned:
-                literals.update(pending)
-            pending, poisoned = {}, False
-            continue
-        if poisoned:
-            continue
-        if token.kind != "word":
-            poisoned = True
-            continue
-        # lup: ignore[string-split] -- the shell's own assignment grammar, on a
-        # word the lexer has already separated; no parser here models it
-        name, separator, value = token.text.partition("=")
-        if not separator or not name.isidentifier() or not spells_its_path(value):
-            poisoned = True
-            continue
-        pending[name] = value
-    return literals
-
-
-# lup: ignore[dict-str-payload] -- as above, shell variable names
-def resolved_target(word: str, literals: dict[str, str]) -> str:
-    """The path a target spells once a known literal stands in for it.
-
-    Only a whole-word parameter is substituted -- `$NAME` or `${NAME}` and
-    nothing else. A word mixing an expansion with other text names a path this
-    cannot reconstruct, and half a substitution is worse than none: it would
-    hand the rows below a path that reads as resolved and is not.
-
-    Both readers of the redirection target need this and must not derive it
-    apart. :func:`shell_write_targets` decides which paths the caller tests for
-    existence and recoverability, and :func:`resolve_redirection` judges them;
-    resolving in one alone would let a resolved path that already exists reach
-    the create-versus-overwrite relaxation as though it were new.
-    """
-    name = word.removeprefix("$")
-    if name == word:
-        return word
-    if name.startswith("{") and name.endswith("}"):
-        name = name.removeprefix("{").removesuffix("}")
-    return literals[name] if name.isidentifier() and name in literals else word
 
 
 def resolve_redirection(
@@ -1078,7 +1020,7 @@ def resolve_redirection(
         )
     if "<" in operator:
         return Redirection(decision=None, resume=target + 1)
-    spelled = resolved_target(tokens[target].text, assigned_literals(tokens, index))
+    spelled = tokens[target].text
     if writes_to_a_stream(spelled):
         return Redirection(decision=None, resume=target + 1)
     refused = refuses_generated_plugin_target(spelled)
@@ -1145,6 +1087,145 @@ def resolve_redirection(
     )
 
 
+# lup: ignore[library-default] — POSIX shell reserved words that open a command
+RESERVED_PREFIXES = ("then", "do", "else", "elif", "{", "}", "!")
+# lup: ignore[library-default] — POSIX shell compound-command openers
+STRUCTURE_OPENERS = ("if", "for", "while", "until", "case", "select")
+# lup: ignore[library-default] — POSIX shell compound-command closers
+STRUCTURE_CLOSERS = ("fi", "done", "esac")
+
+
+class TokenSegment(TypedDict):
+    """One simple command's token span, and whether its assignments stand.
+
+    ``words`` has the structure keywords in front of it stripped. ``standing``
+    is false inside a construct or subshell, beside a pipe or `&`, or with a
+    redirection among the tokens: any of those can leave an assignment made
+    here unseen by a later word.
+    """
+
+    start: int
+    end: int
+    words: list[str]
+    standing: bool
+
+
+def token_segments(tokens: list[ShellToken]) -> list[TokenSegment]:
+    """Group tokens into simple commands, tracking the structure around each.
+
+    A case pattern is told from a subshell by position: a `)` met while a
+    pattern is open ends it, and only outside one does a parenthesis open or
+    close a process. A `|` inside a pattern alternates it, which costs only
+    a pattern word read as piped -- the conservative reading.
+    """
+    segments: list[TokenSegment] = []
+    depth = 0
+    pattern = False
+    start = 0
+    for index, token in enumerate([*tokens, ShellToken("op", ";")]):
+        if token.kind != "op" or not (
+            is_control_operator(token.text) or token.text in SENTINEL_OPS
+        ):
+            continue
+        span = tokens[start:index]
+        words = [item.text for item in span if item.kind == "word"]
+        while words and words[0] in RESERVED_PREFIXES:
+            words = words[1:]
+        if words:
+            previous = tokens[start - 1].text if start else ""
+            segments.append(
+                TokenSegment(
+                    start=start,
+                    end=index,
+                    words=words,
+                    standing=depth == 0
+                    and all(item.kind == "word" for item in span)
+                    and token.text not in ("|", "|&", "&")
+                    and previous not in ("|", "|&"),
+                )
+            )
+            if words[0] in STRUCTURE_OPENERS:
+                depth += 1
+                pattern = words[0] == "case"
+            elif words[0] in STRUCTURE_CLOSERS:
+                depth = max(depth - 1, 0)
+        match token.text:
+            case "(" if not pattern:
+                depth += 1
+            case ")" if pattern:
+                pattern = False
+            case ")":
+                depth = max(depth - 1, 0)
+            case ";;" | ";&" | ";;&":
+                pattern = True
+        start = index + 1
+    return segments
+
+
+class BoundTokens(TypedDict):
+    """A command's tokens with literal bindings expanded, and what was in scope.
+
+    ``bindings`` holds, per token, what a command substitution standing there
+    inherits, so the command inside it is expanded from the same values.
+    """
+
+    tokens: list[ShellToken]
+    bindings: list[tuple[ShellBinding, ...]]
+
+
+def bind_tokens(
+    tokens: list[ShellToken], inherited: tuple[ShellBinding, ...] = ()
+) -> BoundTokens:
+    """Expand every literal variable binding into the words that reference it.
+
+    The one place a command's variables are resolved, and resolved before
+    anything reads a word: the classifier's segment walk, the redirection
+    rows, and the host readers that stat targets and produce rewritten
+    documents all take their words from here, so none of them can disagree
+    about what `$S` names.
+
+    Only a standing assignment binds (:class:`TokenSegment`). `VAR=x cmd`
+    sets `VAR` for that one command's environment, and the shell expands the
+    command's words from the value it already held. A name assigned anywhere
+    it may not stand is left unexpanded for the whole command, so a loop's
+    second pass or an untaken branch is never judged by another reading's
+    value, and a command that can ``eval`` expands nothing.
+    """
+    segments = token_segments(tokens)
+    unsettled: list[str] = []
+    for segment in segments:
+        names = unsettled_assignments(
+            segment["words"],
+            effective_command(segment["words"])["words"],
+            segment["standing"],
+        )
+        if names is None:
+            return BoundTokens(tokens=tokens, bindings=[() for _ in tokens])
+        unsettled.extend(names)
+    bindings = inherited
+    for name in unsettled:
+        bindings = bind_name(bindings, name, None)
+    bound = list(tokens)
+    scopes = [bindings for _ in tokens]
+    for segment in segments:
+        for index in range(segment["start"], segment["end"]):
+            scopes[index] = bindings
+            token = tokens[index]
+            if token.kind == "word":
+                bound[index] = ShellToken(
+                    "word", bound_word(token.text, bindings), token.quoted, token.body
+                )
+        assigned = pure_assignment_names(
+            [bound[index].text for index in range(segment["start"], segment["end"])]
+        )
+        if assigned is None or not segment["standing"]:
+            continue
+        for pair in assigned:
+            if pair["name"] not in unsettled:
+                bindings = bind_name(bindings, pair["name"], pair["value"])
+    return BoundTokens(tokens=bound, bindings=scopes)
+
+
 def parse_shell_words(
     command: str,
     depth: int = 0,
@@ -1153,6 +1234,7 @@ def parse_shell_words(
     path_rules: list[PathRuleRow] | None = None,
     recoverable_targets: list[str] | None = None,
     contained: bool = False,
+    inherited: tuple[ShellBinding, ...] = (),
 ) -> list[list[str]] | KernelDecision:
     """Group lexed tokens into command segments, resolving safe redirections.
 
@@ -1161,24 +1243,31 @@ def parse_shell_words(
     caller classifies it exactly like a piped command. Grouping parentheses
     and case terminators become single-word sentinel segments the segment
     walker interprets, and ``[[ ... ]]`` folds into one read-only test word.
+
+    Every word arrives with its literal variable bindings expanded
+    (:func:`bind_tokens`), and a substitution inherits the bindings in scope
+    where it stands, so each segment reader sees the path the shell would.
     """
-    tokens = tokenize_shell(command)
-    if isinstance(tokens, KernelDecision):
-        return tokens
+    lexed = tokenize_shell(command)
+    if isinstance(lexed, KernelDecision):
+        return lexed
+    bound = bind_tokens(lexed, inherited)
+    tokens = bound["tokens"]
 
     recoverable = recoverable_targets or []
 
-    def substituted_segments(text: str) -> list[list[str]] | KernelDecision:
+    def substituted_segments(at: int) -> list[list[str]] | KernelDecision:
         if depth >= 2:
             return unjudged("command substitution nests too deeply")
         return parse_shell_words(
-            text,
+            tokens[at].text,
             depth + 1,
             existing_targets,
             path_roles,
             path_rules,
             recoverable,
             contained,
+            bound["bindings"][at],
         )
 
     segments: list[list[str]] = []
@@ -1214,7 +1303,7 @@ def parse_shell_words(
                         "process substitution inside [[ ]] is not classified"
                     )
                 if tokens[fold].kind == "cmdsub":
-                    folded = substituted_segments(tokens[fold].text)
+                    folded = substituted_segments(fold)
                     if isinstance(folded, KernelDecision):
                         return folded
                     segments.extend(folded)
@@ -1251,6 +1340,7 @@ def parse_shell_words(
                 path_rules,
                 recoverable,
                 contained,
+                bound["bindings"][index],
             )
             if isinstance(inner, KernelDecision):
                 return inner
@@ -1259,7 +1349,7 @@ def parse_shell_words(
             index += 1
             continue
         if token.kind == "cmdsub":
-            spliced = substituted_segments(token.text)
+            spliced = substituted_segments(index)
             if isinstance(spliced, KernelDecision):
                 return spliced
             pending.extend(spliced)
