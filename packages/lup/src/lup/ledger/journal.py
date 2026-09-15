@@ -126,6 +126,8 @@ class Fold:
     def __init__(self, stored: list[Stored]) -> None:
         self.records = list(stored)
         self.versions: dict[str, list[JsonObject]] = {}
+        # lup: ignore[dict-str-payload] — a slug is whatever a writer spelled,
+        # and the id it names is minted by the log; neither set is closed
         self.slugs: dict[str, str] = {}
         self.edges_into: dict[str, list[JsonObject]] = {}
         self.edges_out_of: dict[str, list[JsonObject]] = {}
@@ -438,7 +440,7 @@ class LedgerStore:
     def edges_at(self, lines: list[JsonObject]) -> list[LedgerEdge]:
         """The edges among some lines, each as the base, in the order given."""
         adapter = TypeAdapter[LedgerEdge](LedgerEdge)
-        found: list[LedgerEdge] = []  # lup: ignore[empty-collection] — filled below
+        found: list[LedgerEdge] = []
         for line in lines:
             try:
                 found.append(adapter.validate_python(line))
