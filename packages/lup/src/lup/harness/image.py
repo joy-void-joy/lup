@@ -22,7 +22,7 @@ same-path mounting that :func:`run_arguments` refuses to spell any other way.
 """
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from lup.harness.browser import BrowserBridge
 from lup.harness.clipboard import ClipboardBridge, shim_program
+from lup.harness.devices import Device
 from lup.harness.credential import (
     ForgeCredential,
     GitAccess,
@@ -1150,6 +1151,7 @@ USER $UID:$GID
         boundary: EnvVars | None = None,
         inherited_environment: list[str] | None = None,
         environments: Mapping[Path, Path] | None = None,
+        devices: Sequence[Device] = (),
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1201,7 +1203,20 @@ USER $UID:$GID
         holes, and this leans on it in the same direction -- so an engine
         that applied the list in order would already be breaking that, and
         the order here costs nothing to keep right either way.
+
+        ``devices`` is what the device lease granted: the machine's standing
+        grants and this launch's flags, resolved against its CDI registry, so
+        what reaches the engine is what the host answered for. Passed rather
+        than declared here for the reason no machine fact is: this
+        declaration is hashed and shared by every machine that builds the
+        image, and which GPU one of them holds is that machine's alone.
+        Emitted with the mounts because it is the same kind of thing -- the
+        boundary, widened by a grant -- and read in the same place by
+        whoever reads the argv.
         """
+        granted_devices = [
+            argument for device in devices for argument in device.arguments()
+        ]
         mounts = [
             argument
             for host, inside in writable.items()
@@ -1291,6 +1306,7 @@ USER $UID:$GID
             *selected.mount_arguments(),
             *mounts,
             *self.environment_mounts(environments or {}),
+            *granted_devices,
             *seeded,
             *bridged,
             *opening,

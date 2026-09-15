@@ -1,5 +1,5 @@
 {
-  "revision": "54ad3cc21817c3ddffee48bd5a04e63dfdc65e4c",
+  "revision": "1ec76c85b946ebcb0bc809f11ec379f9c339bb7e",
   "roots": [
     "lup",
     "lup_template"
@@ -190,6 +190,8 @@
     "sync diff",
     "sync mark-synced",
     "sync setup",
+    "sync grant",
+    "sync revoke",
     "trace show",
     "trace search",
     "trace list",
@@ -3749,6 +3751,8 @@
         "LaunchSandbox.NONE",
         "LaunchSandbox.contained",
         "declared_mounts",
+        "declared_devices",
+        "declared_devices.declared",
         "LaunchCheckpoint",
         "LaunchCheckpoint.__call__",
         "relocation_hint",
@@ -4575,6 +4579,7 @@
         "ProjectEntry.mount",
         "SyncConfig",
         "SyncConfig.projects",
+        "SyncConfig.devices",
         "SYNC_CONFIG_ADAPTER",
         "PROJECT_ENTRY_ADAPTER",
         "MOUNT_MODES",
@@ -4601,6 +4606,9 @@
         "openable",
         "accessible_roots",
         "accessible_roots.located",
+        "granted_devices",
+        "granted_devices.declared",
+        "verified_grant",
         "clone_bare",
         "refresh",
         "attach_worktree",
@@ -4617,7 +4625,9 @@
         "show_log",
         "show_diff",
         "mark_synced",
-        "setup_project"
+        "setup_project",
+        "grant_device",
+        "revoke_device"
       ]
     },
     {
@@ -6420,6 +6430,41 @@
       ]
     },
     {
+      "module": "lup.harness.devices",
+      "declares": [
+        "Device",
+        "Device.name",
+        "Device.arguments",
+        "RegisteredDevice",
+        "RegisteredDevice.name",
+        "UnreadableSpecification",
+        "UnreadableSpecification.path",
+        "UnreadableSpecification.reason",
+        "UnreadableSpecification.names",
+        "UnreadableSpecification.failures",
+        "Specification",
+        "Specification.kind",
+        "Specification.devices",
+        "Specification.names",
+        "Specification.failures",
+        "DeviceRegistry",
+        "DeviceRegistry.names",
+        "DeviceRegistry.unreadable",
+        "DeviceRegistry.searched",
+        "read_specification",
+        "registered_devices",
+        "Withheld",
+        "Withheld.device",
+        "Withheld.reason",
+        "DeviceLease",
+        "DeviceLease.granted",
+        "DeviceLease.withheld",
+        "DeviceLease.unreadable",
+        "DeviceLease.notices",
+        "lease_devices"
+      ]
+    },
+    {
       "module": "lup.harness.egress",
       "declares": [
         "PROXY_LABEL",
@@ -7399,6 +7444,7 @@
         "container_client",
         "container_requirement",
         "same_path_mount_requirement",
+        "granted_device_requirement",
         "git_requirement",
         "github_requirement",
         "bubblewrap_requirement",
@@ -14549,8 +14595,6 @@
         "ToolResponse.is_error",
         "response_text",
         "mcp_response",
-        "CallToolResultWithAlias",
-        "CallToolResultWithAlias.is_error",
         "LupToolHandler",
         "ToolHandler",
         "LupMcpServerConfig",

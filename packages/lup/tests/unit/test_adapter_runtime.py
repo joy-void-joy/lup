@@ -891,7 +891,7 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
 @pytest.mark.asyncio
 async def test_claude_submission_server_serves_the_binding_installed_now() -> None:
     """A connection outlives the turn that opened it, so its tool must too."""
-    from mcp import types as mcp_types
+    from mcp import Client
 
     state = ClaudeConversationState(
         ClaudeSessionOpener(ClaudeSessionConfig(model="claude")), None
@@ -910,16 +910,12 @@ async def test_claude_submission_server_serves_the_binding_installed_now() -> No
         TurnToolBinding(output_type=FirstOutput, store=later_store, gate=None)
     )
 
-    handler = server.request_handlers[mcp_types.CallToolRequest]
-    await handler(
-        mcp_types.CallToolRequest(
-            method="tools/call",
-            params=mcp_types.CallToolRequestParams(
-                name="submit_output", arguments={"answer": "later"}
-            ),
-        )
-    )
+    # Called the way a runtime calls it, over the protocol against the live
+    # instance, rather than by reaching into the server for its handler.
+    async with Client(server) as client:
+        submitted = await client.call_tool("submit_output", {"answer": "later"})
 
+    assert submitted.is_error is False
     assert later_store.read(FirstOutput) == FirstOutput(answer="later")
     assert opening_store.read(FirstOutput) is None
 
