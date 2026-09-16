@@ -473,8 +473,8 @@ def reaching_builtin_rules(
     'x'`` and ``eval echo x``, which are one objection, were enforced two
     ways depending on which of them somebody had written down.
 
-    ``exec`` is absent though it was held out of that list too: the lexer
-    already resolves it to the command it wraps, so ``exec rm -rf src`` is
+    ``exec`` is absent though it was held out of that list too: reading a
+    command's words already resolves it to the command it wraps, so ``exec rm -rf src`` is
     judged as ``rm -rf src`` and a row here would never be reached. Which is
     also the right answer — what ``exec`` runs is the whole of what it does
     to anything outside the shell it replaces.

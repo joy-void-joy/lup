@@ -39,7 +39,9 @@ from lup.policy.assets.host import (
 from lup.policy.kernel.effects import STRENGTH
 from lup.policy.kernel.lex import (
     authored_writes,
-    parse_shell_words,
+    command_segments,
+    parse_shell,
+    redirection_verdict,
     shell_flag_write_targets,
     shell_path_verb_targets,
     shell_sed_rewrites,
@@ -159,11 +161,18 @@ def command_words(words: list[str]) -> list[str]:
 
 
 def parse_shell_segments(command: str) -> list[ShellSegment] | None:
-    """Expose validated segment models for compatibility consumers."""
-    segments = parse_shell_words(command)
-    if isinstance(segments, KernelDecision):
+    """Expose validated segment models for compatibility consumers.
+
+    ``None`` for a line the kernel would not read as plain segments: one that
+    does not parse, runs nothing, or carries a redirection it would stop when
+    judged with no facts about the filesystem. A consumer reading only argv
+    would otherwise wave through `echo x > .git/HEAD` as an `echo`.
+    """
+    tree = parse_shell(command)
+    if isinstance(tree, KernelDecision) or redirection_verdict(tree) is not None:
         return None
-    return [ShellSegment(words=words) for words in segments]
+    segments = command_segments(tree)
+    return [ShellSegment(words=words) for words in segments] if segments else None
 
 
 class ShellPolicy(DecisionPolicy[ShellCommand]):
