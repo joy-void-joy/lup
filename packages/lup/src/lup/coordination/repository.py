@@ -262,6 +262,15 @@ class RepositoryPeers:
         """Record that this session is here now."""
         beat(self.root, member_id)
 
+    def lapsed(self, now: datetime | None = None) -> list[SpawnedActor]:
+        """Every session the record says is running and the pulse says is gone."""
+        moment = now or utc_now()
+        return [
+            gone
+            for member in self.cohort.live()
+            if member.running and not (gone := self.pulsed(member, moment)).running
+        ]
+
     def sweep(self, now: datetime | None = None) -> list[SpawnedActor]:
         """Write the finish for every session whose pulse has stopped, and say which.
 
@@ -272,12 +281,7 @@ class RepositoryPeers:
         call, which the roster's own idempotence allows once the row is
         finished.
         """
-        moment = now or utc_now()
-        retired = [
-            gone
-            for member in self.cohort.live()
-            if member.running and not (gone := self.pulsed(member, moment)).running
-        ]
+        retired = self.lapsed(now)
         for member in retired:
             self.cohort.roster.finished(member.actor, error=member.error)
         return retired

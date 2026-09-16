@@ -155,6 +155,32 @@ def create_coordination_app() -> typer.Typer:
         """Record that a session has stopped, so nothing addresses it again."""
         peers().leave(member_id, summary=summary)
 
+    @app.command("sweep")
+    def sweep_cmd(
+        dry_run: Annotated[
+            bool,
+            typer.Option(
+                "--dry-run",
+                "-n",
+                help="Name the sessions that would be retired, retiring none",
+            ),
+        ] = False,
+    ) -> None:
+        """Retire every session whose pulse has stopped, so nothing addresses it again.
+
+        What every coordination server does on each of its ticks, for a
+        roster no server is up on: a machine whose sessions all ended without
+        writing a departure, or a store written before sessions beat at all.
+        """
+        found = peers()
+        rows = found.lapsed() if dry_run else found.sweep()
+        # The address beside the name, because names derive from worktrees and
+        # every session of one checkout answers to the same one.
+        for member in rows:
+            name = found.names.current(member.actor.id) or member.actor.id
+            typer.echo(f"{name} — {member.actor.label()} — {member.error}")
+        typer.echo(f"{'would retire' if dry_run else 'retired'} {len(rows)} session(s)")
+
     @app.command("send")
     def send_cmd(
         text: Annotated[str, typer.Argument(help="What the peer should read")],
