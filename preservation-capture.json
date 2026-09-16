@@ -1,5 +1,5 @@
 {
-  "revision": "013d7bc0ee0024ec08412155eec3161cef80018f",
+  "revision": "aaab7f5ecda64c9a1f3c6f50712e4a296c8ea437",
   "roots": [
     "lup",
     "lup_template"
@@ -16,6 +16,7 @@
     "coordination describe",
     "coordination rename",
     "coordination leave",
+    "coordination sweep",
     "coordination send",
     "coordination inbox",
     "coordination holdings",
@@ -336,6 +337,8 @@
         "TOUCHES_FILE",
         "MEMBER_KIND",
         "LOOKS_DIR",
+        "HEARTBEATS_DIR",
+        "STALE_AFTER_SECONDS",
         "Actor",
         "Actor.kind",
         "Actor.id",
@@ -346,6 +349,7 @@
         "RosterRecord.description",
         "RosterRecord.summary",
         "RosterRecord.worktree",
+        "RosterRecord.at",
         "NameRecord",
         "NameRecord.id",
         "NameRecord.cli_name",
@@ -368,6 +372,7 @@
         "Member.summary",
         "Member.worktree",
         "Member.running",
+        "Member.heard",
         "Folded",
         "Folded.look",
         "Folded.members",
@@ -389,6 +394,10 @@
         "loaded",
         "loaded.parsed",
         "standing",
+        "spoken_at",
+        "heard_at",
+        "gone",
+        "beat",
         "called",
         "held",
         "within",
@@ -465,6 +474,32 @@
       "module": "lup.coordination.delegate",
       "declares": [
         "delegate"
+      ]
+    },
+    {
+      "module": "lup.coordination.departure",
+      "declares": [
+        "ROSTER_FILE",
+        "MEMBER_KIND",
+        "Actor",
+        "Actor.kind",
+        "Actor.id",
+        "RosterRecord",
+        "RosterRecord.type",
+        "RosterRecord.actor",
+        "Finished",
+        "Finished.type",
+        "Finished.actor",
+        "Finished.at",
+        "Finished.summary",
+        "Finished.error",
+        "Ending",
+        "Ending.session_id",
+        "member_of",
+        "standing",
+        "standing.parsed",
+        "depart",
+        "main"
       ]
     },
     {
@@ -649,6 +684,11 @@
     {
       "module": "lup.coordination.peer_tools",
       "declares": [
+        "RosterPulse",
+        "RosterPulse.root",
+        "RosterPulse.member_id",
+        "RosterPulse.pulse",
+        "RosterPulse.run",
         "NoInput",
         "PeerListOutput",
         "PeerListOutput.peers",
@@ -735,6 +775,19 @@
       ]
     },
     {
+      "module": "lup.coordination.pulse",
+      "declares": [
+        "HEARTBEATS_DIR",
+        "Pulse",
+        "Pulse.interval_seconds",
+        "Pulse.stale_after_seconds",
+        "Pulse.stale",
+        "beat_path",
+        "beat",
+        "heard_at"
+      ]
+    },
+    {
       "module": "lup.coordination.questions",
       "declares": [
         "Question",
@@ -797,6 +850,12 @@
         "RepositoryPeers.address",
         "RepositoryPeers.listing",
         "RepositoryPeers.listing.row",
+        "RepositoryPeers.heard",
+        "RepositoryPeers.pulsed",
+        "RepositoryPeers.present",
+        "RepositoryPeers.beat",
+        "RepositoryPeers.lapsed",
+        "RepositoryPeers.sweep",
         "RepositoryPeers.send",
         "RepositoryPeers.waiting",
         "RepositoryPeers.take",
@@ -848,6 +907,7 @@
         "SpawnedActor.running",
         "SpawnedActor.summary",
         "SpawnedActor.error",
+        "SpawnedActor.heard",
         "SpawnedActor.worktree",
         "SpawnedActor.description",
         "SpawnedActor.liveness",
@@ -1497,6 +1557,7 @@
         "create_coordination_app.describe_cmd",
         "create_coordination_app.rename_cmd",
         "create_coordination_app.leave_cmd",
+        "create_coordination_app.sweep_cmd",
         "create_coordination_app.send_cmd",
         "create_coordination_app.inbox_cmd",
         "create_coordination_app.holdings_cmd",
@@ -8896,6 +8957,11 @@
         "stream_records",
         "stream_records.legible",
         "peer_members",
+        "peer_heard",
+        "peer_heard.recorded",
+        "peer_heard.beaten",
+        "peer_present",
+        "peer_present.present",
         "peer_name_claims",
         "peer_addresses",
         "peer_listing",
@@ -10204,7 +10270,10 @@
         "PeerPolicyRow.windows_dir",
         "PeerPolicyRow.claim_reason",
         "PeerPolicyRow.claim_recovery",
-        "PeerPolicyRow.member_env"
+        "PeerPolicyRow.member_env",
+        "PeerPolicyRow.member_kind",
+        "PeerPolicyRow.heartbeats_dir",
+        "PeerPolicyRow.stale_after_seconds"
       ]
     },
     {
@@ -10740,6 +10809,9 @@
         "PeerPolicy.claim_reason",
         "PeerPolicy.claim_recovery",
         "PeerPolicy.member_env",
+        "PeerPolicy.member_kind",
+        "PeerPolicy.heartbeats_dir",
+        "PeerPolicy.stale_after_seconds",
         "erase_peer_policy"
       ]
     },
@@ -11199,6 +11271,7 @@
         "ClaudeGuidanceRenderer.render",
         "CLAUDE_DISPATCHER",
         "CLAUDE_PROMPT_EVENT",
+        "CLAUDE_EXIT_EVENT",
         "ClaudeHookRenderer",
         "ClaudeHookRenderer.__init__",
         "ClaudeHookRenderer.render"
@@ -11764,6 +11837,7 @@
         "CodexGuidanceRenderer.render",
         "CODEX_DISPATCHER",
         "CODEX_PROMPT_EVENT",
+        "CODEX_EXIT_EVENT",
         "CODEX_PATCH_RUNTIME",
         "CODEX_DYNAMIC_COMMANDS",
         "codex_allow_prefixes",
@@ -12361,15 +12435,21 @@
         "RUNTIME_MODULE",
         "GUARD_SCRIPT",
         "RUNTIME_ORIGIN",
-        "changes_runtime_source",
+        "RUNTIME_SOURCE",
+        "DEPARTURE_MODULE",
+        "DEPARTURE_SCRIPT",
+        "DEPARTURE_ORIGIN",
+        "DEPARTURE_SOURCE",
+        "runtime_source",
         "guard_body",
-        "prompt_command",
-        "prompt_entry",
+        "guard_command",
+        "hook_entry",
         "PromptHook",
         "PromptHook.registered",
         "PromptHook.artifacts",
         "prompt_hook",
-        "prompt_artifacts"
+        "departure_hook",
+        "roster_artifacts"
       ]
     },
     {
@@ -14758,10 +14838,13 @@
         "mcp_response",
         "LupToolHandler",
         "ToolHandler",
+        "ServerCompanion",
+        "ServerCompanion.run",
         "LupMcpServerConfig",
         "LupMcpServerConfig.name",
         "LupMcpServerConfig.server",
         "LupMcpServerConfig.tool_names",
+        "LupMcpServerConfig.companions",
         "RawStdioServerConfig",
         "RawStdioServerConfig.type",
         "RawStdioServerConfig.command",
@@ -15535,6 +15618,7 @@
         "EXAMPLE_GROUP",
         "SessionToolset",
         "SessionToolset.groups",
+        "SessionToolset.companions",
         "SessionToolset.gate",
         "tool_group_names",
         "build_session_toolset"
@@ -15681,6 +15765,7 @@
       "module": "lup_template.devtools.agent.serve",
       "declares": [
         "collect_tools_by_server",
+        "collect_session_toolset",
         "collect_registry_tools",
         "harness_session_context",
         "serve_tools"
