@@ -13510,9 +13510,9 @@ SHELL_RULES: list[ShellRuleRow] = [
         "recovery": "",
     },
     {
-        "rule": "shell:lup-devtools.dev.conflict",
+        "rule": "shell:lup-devtools.git.conflict",
         "command": "lup-devtools",
-        "subcommand": "dev",
+        "subcommand": "git",
         "operation": "conflict",
         "sandbox": "ambient",
         "sandbox_source": "root",
@@ -13549,9 +13549,9 @@ SHELL_RULES: list[ShellRuleRow] = [
         "recovery": "",
     },
     {
-        "rule": "shell:lup-devtools.dev",
+        "rule": "shell:lup-devtools.git",
         "command": "lup-devtools",
-        "subcommand": "dev",
+        "subcommand": "git",
         "operation": "",
         "sandbox": "ambient",
         "sandbox_source": "root",
