@@ -20,13 +20,18 @@ from lup.coordination.changes import envelope, pointer
 from lup.coordination.identity import MEMBER_ENV, mint_member_id
 from lup.coordination.repository import RepositoryPeers
 from lup.devtools.harness.generate import NativeHarnessComposition
-from lup.providers.claude.harness import CLAUDE_PROMPT_EVENT
-from lup.providers.codex.harness import CODEX_PROMPT_EVENT
+from lup.providers.claude.harness import CLAUDE_EXIT_EVENT, CLAUDE_PROMPT_EVENT
+from lup.providers.codex.harness import CODEX_EXIT_EVENT, CODEX_PROMPT_EVENT
 from lup.providers.roster_prompt import (
+    DEPARTURE_MODULE,
+    DEPARTURE_SCRIPT,
+    DEPARTURE_SOURCE,
     GUARD_SCRIPT,
     RUNTIME_MODULE,
-    changes_runtime_source,
+    RUNTIME_SOURCE,
+    departure_hook,
     prompt_hook,
+    runtime_source,
 )
 from lup_template.harness.catalog import portable_harness
 from lup_template.harness.composition import claude_target, codex_target
@@ -36,6 +41,14 @@ RUNTIMES = pytest.mark.parametrize(
     [
         pytest.param(claude_target, ".claude", CLAUDE_PROMPT_EVENT, id="claude"),
         pytest.param(codex_target, ".codex", CODEX_PROMPT_EVENT, id="codex"),
+    ],
+)
+
+ENDINGS = pytest.mark.parametrize(
+    ("target", "tree", "event"),
+    [
+        pytest.param(claude_target, ".claude", CLAUDE_EXIT_EVENT, id="claude"),
+        pytest.param(codex_target, ".codex", CODEX_EXIT_EVENT, id="codex"),
     ],
 )
 
@@ -65,7 +78,30 @@ def test_the_prompt_event_registers_the_fold_and_refuses_nothing(
     assert "exit 2" not in entry["command"]
     assert artifacts[plugin / "hooks" / "scripts" / GUARD_SCRIPT].executable
     runtime = artifacts[plugin / "hooks" / "runtime" / RUNTIME_MODULE]
-    assert runtime.content == changes_runtime_source()
+    assert runtime.content == runtime_source(RUNTIME_SOURCE)
+
+
+@ENDINGS
+def test_the_ending_event_registers_the_departure_and_refuses_nothing(
+    target: Callable[[Path], NativeHarnessComposition], tree: str, event: str
+) -> None:
+    """Under its own event, for every reason, and with no `exit 2` beside it."""
+    artifacts = {
+        artifact.path: artifact
+        for artifact in target(Path.cwd()).recipe.desired.artifacts
+    }
+    plugin = rendered(tree)
+    hooks = json.loads(artifacts[plugin / "hooks" / "hooks.json"].content)["hooks"]
+
+    [group] = hooks[event]
+    [entry] = group["hooks"]
+
+    assert "matcher" not in group
+    assert DEPARTURE_SCRIPT in entry["command"]
+    assert "exit 2" not in entry["command"]
+    assert artifacts[plugin / "hooks" / "scripts" / DEPARTURE_SCRIPT].executable
+    runtime = artifacts[plugin / "hooks" / "runtime" / DEPARTURE_MODULE]
+    assert runtime.content == runtime_source(DEPARTURE_SOURCE)
 
 
 def test_a_project_without_a_roster_registers_nothing_and_carries_nothing() -> None:
@@ -75,9 +111,58 @@ def test_a_project_without_a_roster_registers_nothing_and_carries_nothing() -> N
     )
 
     quiet = prompt_hook(Path("plugin"), "PLUGIN_ROOT", undeclared, "UserPromptSubmit")
+    silent = departure_hook(Path("plugin"), "PLUGIN_ROOT", undeclared, "SessionEnd")
 
     assert quiet.registered == {}
     assert quiet.artifacts == []
+    assert silent.registered == {}
+    assert silent.artifacts == []
+
+
+@ENDINGS
+def test_the_rendered_departure_ends_the_row_of_the_session_that_sent_it(
+    target: Callable[[Path], NativeHarnessComposition],
+    tree: str,
+    event: str,
+    tmp_path: Path,
+) -> None:
+    """The guard run as the runtime runs it at an ending, over a real store.
+
+    No launcher-proven id in the environment, so the writer falls back to the
+    id the runtime hands the hook — the same fallback the prompt fold takes,
+    which is what makes the row that arrived the row that leaves.
+    """
+    artifacts = {
+        artifact.path: artifact
+        for artifact in target(Path.cwd()).recipe.desired.artifacts
+    }
+    plugin = rendered(tree)
+    for kind, name in (("scripts", DEPARTURE_SCRIPT), ("runtime", DEPARTURE_MODULE)):
+        shipped = tmp_path / "plugin" / "hooks" / kind / name
+        shipped.parent.mkdir(parents=True, exist_ok=True)
+        shipped.write_text(artifacts[plugin / "hooks" / kind / name].content)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    sh.git("init", "-q", str(repository))
+    peers = RepositoryPeers(repository)
+    peers.join("abc123", repository, cli_name="mine")
+    other = mint_member_id()
+    peers.join(other, repository, cli_name="other")
+    ending = {"session_id": "abc123", "cwd": str(repository), "hook_event_name": event}
+
+    ended = str(
+        sh.sh(
+            str(tmp_path / "plugin" / "hooks" / "scripts" / DEPARTURE_SCRIPT),
+            _in=json.dumps(ending),
+            _cwd=str(repository),
+            _env={**os.environ, MEMBER_ENV: ""},
+        )
+    )
+
+    assert ended == ""
+    standing = {member.actor.id: member.running for member in peers.cohort.live()}
+    assert standing["abc123"] is False
+    assert standing[other] is True
 
 
 @RUNTIMES

@@ -158,6 +158,27 @@ async def test_the_server_companion_sweeps_and_beats_while_it_serves(
     assert recorded.error.startswith("unheard since ")
 
 
+async def test_the_companion_puts_back_a_row_the_session_outlived(
+    tmp_path: Path,
+) -> None:
+    """A finish written while the process lives on is undone by the next tick."""
+    peers, me = joined(tmp_path, "mine", FOREVER)
+    peers.leave(me)
+    assert not [one for one in peers.cohort.live() if one.actor.id == me][0].running
+    companion = RosterPulse(
+        root=tmp_path, member_id=me, pulse=Pulse(interval_seconds=0.01)
+    )
+
+    serving = asyncio.create_task(companion.run())
+    await asyncio.sleep(0.05)
+    serving.cancel()
+    with suppress(asyncio.CancelledError):
+        await serving
+
+    assert row(peers, me).running
+    assert len([one for one in peers.cohort.live() if one.actor.id == me]) == 1
+
+
 async def test_the_companion_writes_nothing_where_no_session_ever_joined(
     tmp_path: Path,
 ) -> None:

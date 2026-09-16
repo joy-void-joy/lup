@@ -7,7 +7,7 @@ from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
-from lup.providers.roster_prompt import prompt_hook
+from lup.providers.roster_prompt import departure_hook, prompt_hook
 from lup.formats.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -540,6 +540,19 @@ nothing registered under it here does. The runtime's own spelling of the
 moment, so not a value a project could choose.
 """
 
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
+CLAUDE_EXIT_EVENT = "SessionEnd"
+"""The event Claude Code fires as a session ends, before its process exits.
+
+Documented at https://code.claude.com/docs/en/hooks under "SessionEnd": fired
+on a clean exit, `/clear`, a logout and a termination signal, with
+`session_id`, `cwd`, `hook_event_name` and a `reason` on stdin, under a
+budget the entry's own timeout raises. Nothing fires on a kill the process
+cannot catch, which is what the pulse is for. The runtime's own spelling of
+the moment, so not a value a project could choose.
+"""
+
 
 class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
     """Render Claude hooks, canonical kernel, and application policy rows."""
@@ -601,10 +614,19 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
             source,
             CLAUDE_PROMPT_EVENT,
         )
+        # The row that arrived under the prompt event ends under the ending
+        # one, written by the session itself, so a clean exit is exact and
+        # the pulse only has to answer for the exits nothing announces.
+        departure = departure_hook(
+            Path(f".claude/plugins/{self.plugin_name}"),
+            "CLAUDE_PLUGIN_ROOT",
+            source,
+            CLAUDE_EXIT_EVENT,
+        )
         hooks = {
             "description": (
-                "Lup semantic permission policy, peer delivery, and the roster's "
-                "changes at each prompt"
+                "Lup semantic permission policy, peer delivery, the roster's "
+                "changes at each prompt, and this session's departure as it ends"
             ),
             "hooks": {
                 **{
@@ -616,6 +638,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     for event in CLAUDE_DISPATCHER.hook_events
                 },
                 **roster.registered,
+                **departure.registered,
             },
         }
         evidence = {"schemaVersion": 1, "policyIds": source.policy_ids}
@@ -643,6 +666,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     Path(f".claude/plugins/{self.plugin_name}"), source.id
                 ),
                 *roster.artifacts,
+                *departure.artifacts,
                 *[
                     Artifact(
                         path=Path(

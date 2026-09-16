@@ -41,6 +41,7 @@ from pydantic import BaseModel
 RUNTIME_MODULE = "coordination_changes.py"
 GUARD_SCRIPT = "coordination_changes.sh"
 RUNTIME_ORIGIN = "lup.coordination.changes"
+RUNTIME_SOURCE = "changes.py"
 """The two files a plugin carries for the roster at prompt time, and the fold's home.
 
 Beside the delivery pair rather than inside it, because they answer at
@@ -49,13 +50,24 @@ per prompt, and a guard that had to tell the two apart would be paying for
 the distinction on every call.
 """
 
+DEPARTURE_MODULE = "coordination_departure.py"
+DEPARTURE_SCRIPT = "coordination_departure.sh"
+DEPARTURE_ORIGIN = "lup.coordination.departure"
+DEPARTURE_SOURCE = "departure.py"
+"""The two files a plugin carries for the roster as a session ends, and the writer's home.
 
-def changes_runtime_source() -> str:
-    """The fold, read from the module that owns it rather than restated here."""
-    return resources.files("lup.coordination").joinpath("changes.py").read_text("utf-8")
+The same guard shape under the runtime's ending event, handing over to the
+one writer the plugin ships: the record that finishes this session's row,
+which nothing else writes on a clean exit.
+"""
 
 
-def guard_body(event: str) -> str:
+def runtime_source(module: str) -> str:
+    """A shipped runtime, read from the module that owns it rather than restated here."""
+    return resources.files("lup.coordination").joinpath(module).read_text("utf-8")
+
+
+def guard_body(event: str, runtime_module: str) -> str:
     """A roster-existence check that answers "nobody coordinates here" without Python.
 
     The store's roster file is the whole test: a repository whose sessions
@@ -64,9 +76,10 @@ def guard_body(event: str) -> str:
     of every project that never coordinates.
 
     Every failure exits zero. A prompt is not something a broken roster may
-    stop, so a guard that cannot tell must let it through: the cost of being
-    wrong that way is one prompt without the roster, and the cost of the
-    other way is a session that cannot be prompted.
+    stop, and neither is an exit, so a guard that cannot tell must let it
+    through: the cost of being wrong that way is one prompt without the
+    roster or one departure unwritten, and the cost of the other way is a
+    session that cannot be prompted or cannot end.
 
     The member's launcher-proven id is handed over as an argument even where
     it is blank, so the reader can fall back to the id the runtime itself
@@ -82,11 +95,11 @@ case "$shared" in
 esac
 root="$shared/{STORE_DIR}/{COORDINATION_DIR}"
 [ -f "$root/{ROSTER_FILE}" ] || exit 0
-exec python3 "${{0%/*}}/../runtime/{RUNTIME_MODULE}" "$root" "${MEMBER_ENV}" "{event}"
+exec python3 "${{0%/*}}/../runtime/{runtime_module}" "$root" "${MEMBER_ENV}" "{event}"
 """
 
 
-def prompt_command(plugin_root_env: str) -> str:
+def guard_command(plugin_root_env: str, guard_script: str) -> str:
     """The hooks entry, which never refuses however badly it goes.
 
     No `|| exit 2` beside it, unlike the policy guard's: a fold that fails is
@@ -94,19 +107,20 @@ def prompt_command(plugin_root_env: str) -> str:
     prompt would make an unreadable roster stop the work it was trying to
     inform.
     """
-    return f'sh "${plugin_root_env}/hooks/scripts/{GUARD_SCRIPT}" || exit 0'
+    return f'sh "${plugin_root_env}/hooks/scripts/{guard_script}" || exit 0'
 
 
-def prompt_entry(plugin_root_env: str) -> JsonObject:
-    """The one command hook a runtime registers under its prompt event.
+def hook_entry(plugin_root_env: str, guard_script: str) -> JsonObject:
+    """The one command hook a runtime registers under one of its events.
 
     A short timeout, because the fold is three small files and a prompt is
     waiting on it: a store that takes longer than this to read is one the
-    session is better off without for this prompt.
+    session is better off without for this prompt. An ending runs under a
+    budget of its own that the same figure raises to fit.
     """
     return {
         "type": "command",
-        "command": prompt_command(plugin_root_env),
+        "command": guard_command(plugin_root_env, guard_script),
         "timeout": 10,
     }
 
@@ -135,25 +149,68 @@ def prompt_hook(
     if source.peer_policy is None:
         return PromptHook(registered={}, artifacts=[])
     return PromptHook(
-        registered={event: [{"hooks": [prompt_entry(plugin_root_env)]}]},
-        artifacts=prompt_artifacts(plugin_root, source.id, event),
+        registered={event: [{"hooks": [hook_entry(plugin_root_env, GUARD_SCRIPT)]}]},
+        artifacts=roster_artifacts(
+            plugin_root,
+            source.id,
+            event,
+            guard_script=GUARD_SCRIPT,
+            runtime_module=RUNTIME_MODULE,
+            source_file=RUNTIME_SOURCE,
+            origin=RUNTIME_ORIGIN,
+        ),
     )
 
 
-def prompt_artifacts(plugin_root: Path, semantic_id: str, event: str) -> list[Artifact]:
-    """The guard and the fold, as one plugin carries them."""
+def departure_hook(
+    plugin_root: Path, plugin_root_env: str, source: HookSet, event: str
+) -> PromptHook:
+    """The hooks entry under the runtime's ending event, and the files behind it.
+
+    Declared by the same ``peer_policy`` as the prompt-time hook: a session
+    on a roster is one whose row has to end when it does, and a project that
+    declined the roster has no row to end.
+    """
+    if source.peer_policy is None:
+        return PromptHook(registered={}, artifacts=[])
+    return PromptHook(
+        registered={
+            event: [{"hooks": [hook_entry(plugin_root_env, DEPARTURE_SCRIPT)]}]
+        },
+        artifacts=roster_artifacts(
+            plugin_root,
+            source.id,
+            event,
+            guard_script=DEPARTURE_SCRIPT,
+            runtime_module=DEPARTURE_MODULE,
+            source_file=DEPARTURE_SOURCE,
+            origin=DEPARTURE_ORIGIN,
+        ),
+    )
+
+
+def roster_artifacts(
+    plugin_root: Path,
+    semantic_id: str,
+    event: str,
+    guard_script: str,
+    runtime_module: str,
+    source_file: str,
+    origin: str,
+) -> list[Artifact]:
+    """A guard and the runtime it hands over to, as one plugin carries them."""
     return [
         Artifact.generated(
-            path=plugin_root / "hooks" / "scripts" / GUARD_SCRIPT,
-            body=guard_body(event),
+            path=plugin_root / "hooks" / "scripts" / guard_script,
+            body=guard_body(event, runtime_module),
             semantic_id=semantic_id,
             banner=GeneratedBanner(source=__name__, command=REGENERATE_COMMAND),
             executable=True,
         ),
         Artifact(
-            path=plugin_root / "hooks" / "runtime" / RUNTIME_MODULE,
-            content=changes_runtime_source(),
+            path=plugin_root / "hooks" / "runtime" / runtime_module,
+            content=runtime_source(source_file),
             semantic_id=semantic_id,
-            banner=VERBATIM_COPY.compiled_from(RUNTIME_ORIGIN),
+            banner=VERBATIM_COPY.compiled_from(origin),
         ),
     ]

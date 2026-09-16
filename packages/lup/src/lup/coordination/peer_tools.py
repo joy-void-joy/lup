@@ -33,10 +33,14 @@ class RosterPulse(ServerCompanion, frozen=True):
 
     The server is started when the session opens and stopped when it ends,
     however that ending comes, so its lifetime is the session's, and a beat
-    every interval is what lets every other process read that. Each beat
-    sweeps first: every row whose pulse stopped is retired on the record, so
-    a repository's roster is put right by whichever session is up rather
-    than by the one that died.
+    every interval is what lets every other process read that. Each tick
+    sweeps first, so every row whose pulse stopped is retired on the record
+    by whichever session is up rather than by the one that died; then it
+    joins, which the roster's own idempotence makes free while the row is
+    standing and is what puts it back after a finish the session outlived —
+    a cleared conversation, a rewound one, a sweep that ran while this
+    server was stalled. A session that really ended writes its finish and
+    stops ticking, so that finish stands.
 
     Nothing is written where no session has ever joined: a beat or a sweep
     there would create the store, and a session that never coordinates must
@@ -54,6 +58,7 @@ class RosterPulse(ServerCompanion, frozen=True):
         while True:
             if roster.exists():
                 peers.sweep()
+                peers.join(self.member_id, self.root, delivery=Delivery.INBOX)
                 peers.beat(self.member_id)
             await asyncio.sleep(self.pulse.interval_seconds)
 

@@ -9,7 +9,7 @@ from pathlib import Path
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.subagents import CodexModelTiers
-from lup.providers.roster_prompt import prompt_hook
+from lup.providers.roster_prompt import departure_hook, prompt_hook
 from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.formats.banner import (
@@ -575,6 +575,18 @@ machine this was written on. The runtime's own spelling of the moment, so
 not a value a project could choose.
 """
 
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
+CODEX_EXIT_EVENT = "SessionEnd"
+"""The event Codex fires as a session ends.
+
+Documented at https://learn.chatgpt.com/docs/hooks beside `SessionStart` and
+the tool events, with `session_id` and `cwd` on stdin as for the prompt
+event. Documented and not yet measured: no Codex session is signed in on the
+machine this was written on. The runtime's own spelling of the moment, so not
+a value a project could choose.
+"""
+
 CODEX_PATCH_RUNTIME = (
     resources.files("lup.providers.codex").joinpath("patch.py").read_text("utf-8")
 )
@@ -743,6 +755,12 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
             source,
             CODEX_PROMPT_EVENT,
         )
+        departure = departure_hook(
+            Path(f".codex/plugins/{self.plugin_name}"),
+            "PLUGIN_ROOT",
+            source,
+            CODEX_EXIT_EVENT,
+        )
         hooks = {
             "hooks": {
                 **{
@@ -754,6 +772,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     for event in CODEX_DISPATCHER.hook_events
                 },
                 **roster.registered,
+                **departure.registered,
             }
         }
         evidence = {
@@ -791,6 +810,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     Path(f".codex/plugins/{self.plugin_name}"), source.id
                 ),
                 *roster.artifacts,
+                *departure.artifacts,
                 *[
                     Artifact(
                         path=Path(

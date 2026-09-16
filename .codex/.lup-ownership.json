@@ -65,7 +65,7 @@
     {
       "path": ".codex/plugins/lup/hooks/hooks.json",
       "category": "generated",
-      "sha256": "87675193ba187fa6b1ddde222f1522b86062e0c2dfd12291e5a91f609cf07b09",
+      "sha256": "2b87d52c40420c9eacf2f7a5cea1cde3424d1786b24b80c978274cba74a5eee1",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -80,6 +80,13 @@
       "path": ".codex/plugins/lup/hooks/runtime/coordination_changes.py",
       "category": "generated",
       "sha256": "e23f8f8b7759e4a22fe0e7f05c4b2ac85927b4e6ce88cb7d58c750eb5107f78b",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/hooks/runtime/coordination_departure.py",
+      "category": "generated",
+      "sha256": "6625011954a0a2d0eca52e179b3a25e4299d58c7bf50a4c091501cdec3b875d5",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -241,6 +248,13 @@
       "path": ".codex/plugins/lup/hooks/scripts/coordination_changes.sh",
       "category": "generated",
       "sha256": "95d9704f3bb69f3c5d02a6d4a94d8c209b38b13b0385510624c76b0f70faa2c3",
+      "semantic_id": "hooks.lup-policy",
+      "executable": true
+    },
+    {
+      "path": ".codex/plugins/lup/hooks/scripts/coordination_departure.sh",
+      "category": "generated",
+      "sha256": "ad02f5a69eef0222dcbc0d38e1df1925dc9d27d2b20c3247a9542a8c2b755022",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
