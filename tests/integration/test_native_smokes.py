@@ -325,6 +325,9 @@ def test_codex_plugin_blocks_a_forbidden_apply_patch(tmp_path: Path) -> None:
         shutil.copy(auth, codex_home / "auth.json")
     from lup_template.harness.catalog import portable_harness
 
+    spec = portable_harness().resolver
+    assert spec is not None, "the template takes the resolver module"
+
     plugin = portable_harness().plugins[0]
     CodexPluginInstaller(
         PluginCacheConfig(codex_home=codex_home, marketplace=plugin.marketplace)
