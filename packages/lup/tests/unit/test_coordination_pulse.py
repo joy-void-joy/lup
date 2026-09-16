@@ -7,15 +7,19 @@ asserted is the read a peer makes — the listing, and the claims that expire
 with a session — and the sweep that makes the read durable.
 """
 
+import asyncio
+from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from lup.channels.models import utc_now
 from lup.coordination.identity import member_ref, mint_member_id
+from lup.coordination.peer_tools import RosterPulse
 from lup.coordination.pulse import HEARTBEATS_DIR, Pulse, beat, heard_at
 from lup.coordination.refs import ActorRef
 from lup.coordination.repository import RepositoryPeers
 from lup.coordination.roster import ActorJoined, SpawnedActor
+from lup.coordination.store import coordination_root
 
 FOREVER = Pulse(stale_after_seconds=3600.0)
 """A window nothing in a test outlives, for the rows that must read as present."""
@@ -128,6 +132,47 @@ def test_a_sweep_writes_the_finish_and_the_next_join_revives_the_row(
 
     assert row(peers, member).running
     assert row(peers, member).error == ""
+
+
+async def test_the_server_companion_sweeps_and_beats_while_it_serves(
+    tmp_path: Path,
+) -> None:
+    """A tool server's lifetime is the session's, and the beat is how others read it."""
+    peers, stale = joined(tmp_path, "stale", INSTANTLY)
+    me = mint_member_id()
+    companion = RosterPulse(
+        root=tmp_path,
+        member_id=me,
+        pulse=Pulse(interval_seconds=0.01, stale_after_seconds=0.0),
+    )
+
+    serving = asyncio.create_task(companion.run())
+    await asyncio.sleep(0.05)
+    serving.cancel()
+    with suppress(asyncio.CancelledError):
+        await serving
+
+    assert heard_at(peers.root, me) is not None
+    [recorded] = [one for one in peers.cohort.live() if one.actor.id == stale]
+    assert not recorded.running
+    assert recorded.error.startswith("unheard since ")
+
+
+async def test_the_companion_writes_nothing_where_no_session_ever_joined(
+    tmp_path: Path,
+) -> None:
+    """A session that never coordinates leaves no sign of having been able to."""
+    companion = RosterPulse(
+        root=tmp_path, member_id="abc", pulse=Pulse(interval_seconds=0.01)
+    )
+
+    serving = asyncio.create_task(companion.run())
+    await asyncio.sleep(0.05)
+    serving.cancel()
+    with suppress(asyncio.CancelledError):
+        await serving
+
+    assert not coordination_root(tmp_path).exists()
 
 
 def test_the_listing_puts_the_present_first_whatever_the_record_says(

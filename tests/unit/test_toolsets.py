@@ -11,6 +11,10 @@ run_subagent asymmetry.
 
 from pathlib import Path
 
+import pytest
+
+from lup.coordination.identity import MEMBER_ENV
+from lup.coordination.peer_tools import RosterPulse
 from lup.sandbox.container import Sandbox
 
 from lup_template.agent.toolsets import (
@@ -60,6 +64,34 @@ def test_session_group_requires_realtime_dir(tmp_path: Path) -> None:
 
     assert "session" not in without["groups"]
     assert with_relay["groups"]["session"]
+
+
+def test_the_coordination_server_beats_for_the_session_it_serves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The group's server keeps the session's pulse, under the identity the group joined as."""
+    # A launched test session carries its own member id, which would win over
+    # the fallback this asserts; the unlaunched case is the one under test.
+    monkeypatch.delenv(MEMBER_ENV, raising=False)
+    toolset = build(tmp_path)
+
+    [companion] = toolset["companions"]["coordination"]
+
+    assert isinstance(companion, RosterPulse)
+    assert companion.member_id == "toolset-test"
+    assert set(toolset["companions"]) == {"coordination"}
+
+
+def test_a_session_with_no_identity_has_no_companion_either(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(MEMBER_ENV, raising=False)
+    toolset = build_session_toolset(
+        session_dir=tmp_path / "session", outputs_dir=None, session_id=""
+    )
+
+    assert "coordination" not in toolset["groups"]
+    assert toolset["companions"] == {}
 
 
 def test_submit_output_is_owned_by_the_turn_runtime(tmp_path: Path) -> None:

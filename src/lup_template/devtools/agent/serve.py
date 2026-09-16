@@ -8,6 +8,7 @@ from lup_template.agent.toolsets import (
     EXAMPLE_GROUP,
     NOTES_GROUP,
     ServerGroup,
+    SessionToolset,
     build_session_toolset,
 )
 from lup_template.agent.tools.example import EXAMPLE_TOOLS
@@ -32,8 +33,22 @@ def collect_tools_by_server(
     enumerate the full registry without a session (inspection), use
     :func:`collect_registry_tools`.
     """
-    if context is None:
+    toolset = collect_session_toolset(context)
+    if toolset is None:
         return {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)}
+    return toolset["groups"]
+
+
+def collect_session_toolset(context: SessionContext | None) -> SessionToolset | None:
+    """The session's whole toolset — groups and their servers' companions — or nothing.
+
+    Nothing where no session is open, because every session-bound group
+    closes over a session's directories and a sandbox registered for
+    teardown; the static example group needs neither and is what a caller
+    without a session serves.
+    """
+    if context is None:
+        return None
 
     from lup.orchestration.reflection import ReviewGate
     from lup.orchestration.subagents import create_run_subagent_tool
@@ -51,7 +66,7 @@ def collect_tools_by_server(
         )
         atexit.register(sandbox.stop)
 
-    toolset = build_session_toolset(
+    return build_session_toolset(
         session_dir=context.session_dir,
         outputs_dir=context.outputs_dir,
         gate=ReviewGate(flag_path=context.gate_flag),
@@ -62,7 +77,6 @@ def collect_tools_by_server(
         ),
         session_id=context.session_id or "",
     )
-    return toolset["groups"]
 
 
 def collect_registry_tools() -> dict[ServerGroup, list[LupMcpTool]]:
@@ -133,7 +147,10 @@ def serve_tools(
     if context is not None:
         configure_metrics(metrics_path(context.session_dir))
 
-    by_server = collect_tools_by_server(context)
+    toolset = collect_session_toolset(context)
+    by_server = (
+        {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)} if toolset is None else toolset["groups"]
+    )
     if server_group is None:
         # Default tool set excludes the example placeholder, which ships
         # fabricated data and is served to no live agent — matching the
@@ -149,4 +166,16 @@ def serve_tools(
             typer.echo(t.name)
         return
 
-    serve_stdio(create_mcp_server(server_group or NOTES_GROUP, tools=lup_tools))
+    # A companion serves with the group it belongs to, so a server started
+    # for one group carries that group's, and the default set carries all.
+    beside = [
+        companion
+        for key, found in (toolset["companions"].items() if toolset else [])
+        if server_group is None or key == server_group
+        for companion in found
+    ]
+    serve_stdio(
+        create_mcp_server(
+            server_group or NOTES_GROUP, tools=lup_tools, companions=beside
+        )
+    )

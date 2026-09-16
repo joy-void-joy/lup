@@ -21,7 +21,6 @@ runs, and the prompt hook beats at each prompt, so a session without the
 server still pulses at the pace it is used.
 """
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -66,14 +65,3 @@ def heard_at(root: Path, member_id: str) -> datetime | None:
     except OSError:
         return None
     return datetime.fromtimestamp(stamp, UTC)
-
-
-async def keep_beating(root: Path, member_id: str, pulse: Pulse = Pulse()) -> None:
-    """Beat every interval until cancelled: the caller's lifetime is the loop's.
-
-    The first beat lands before the first wait, so a session reads as present
-    from the moment its server is up rather than one interval later.
-    """
-    while True:
-        beat(root, member_id)
-        await asyncio.sleep(pulse.interval_seconds)

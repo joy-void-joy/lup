@@ -110,6 +110,22 @@ type LupToolHandler = Callable[[JsonObject], Awaitable[ToolResponse]]
 type ToolHandler[I: BaseModel, O: BaseModel] = Callable[[I], Awaitable[O]]
 
 
+class ServerCompanion(BaseModel, frozen=True):
+    """Work a tool server keeps up beside itself for as long as it serves.
+
+    A server's lifetime is the one signal a session gives off for free: the
+    runtime starts the server when the session opens and stops it when the
+    session ends, however that ending comes — a clean exit, a kill, a
+    container stopping. A companion turns that lifetime into something other
+    processes can read. The base names the operation and each companion
+    answers it; the server neither knows nor asks what any of them does.
+    """
+
+    async def run(self) -> None:
+        """Run until cancelled, which is the server stopping."""
+        raise NotImplementedError
+
+
 class LupMcpServerConfig(BaseModel, arbitrary_types_allowed=True):
     """SDK-agnostic MCP server configuration.
 
@@ -120,6 +136,7 @@ class LupMcpServerConfig(BaseModel, arbitrary_types_allowed=True):
     name: str
     server: Server
     tool_names: list[str] = []
+    companions: list[ServerCompanion] = []
 
 
 class RawStdioServerConfig(TypedDict):
@@ -194,6 +211,7 @@ def create_mcp_server(
     version: str = "1.0.0",
     tools: Sequence["LupMcpTool"] | None = None,
     instructions: str | None = None,
+    companions: Sequence[ServerCompanion] | None = None,
 ) -> LupMcpServerConfig:
     """Create an in-process MCP server with proper is_error handling.
 
@@ -202,6 +220,8 @@ def create_mcp_server(
         version: Server version string.
         tools: List of LupMcpTool instances created with the @lup_tool decorator.
         instructions: Server-wide guidance returned during MCP initialization.
+        companions: What the server keeps running beside itself while it
+            serves over stdio; each is cancelled when the server stops.
 
     Returns:
         LupMcpServerConfig for adapter conversion.
@@ -291,6 +311,7 @@ def create_mcp_server(
         name=name,
         server=server,
         tool_names=[t.name for t in registered],
+        companions=list(companions or []),
     )
 
 
@@ -331,8 +352,23 @@ def serve_stdio(config: LupMcpServerConfig) -> None:
 
     async def run() -> None:
         init_options = config.server.create_initialization_options()
-        async with stdio_server() as (read_stream, write_stream):
-            await config.server.run(read_stream, write_stream, init_options)
+        beside = [
+            asyncio.create_task(companion.run(), name=type(companion).__name__)
+            for companion in config.companions
+        ]
+        try:
+            async with stdio_server() as (read_stream, write_stream):
+                await config.server.run(read_stream, write_stream, init_options)
+        finally:
+            # The companions' lifetime is the server's: cancelled when it stops,
+            # and a companion that stopped on its own is reported rather than
+            # lost, since its silence is what a peer would have read.
+            for task in beside:
+                task.cancel()
+            outcomes = await asyncio.gather(*beside, return_exceptions=True)
+            for task, outcome in zip(beside, outcomes, strict=True):
+                if isinstance(outcome, Exception):
+                    logger.error("companion %s stopped: %s", task.get_name(), outcome)
 
     asyncio.run(run())
 

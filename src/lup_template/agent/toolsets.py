@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict
 
 if TYPE_CHECKING:
-    from lup.tools.mcp import LupMcpTool
+    from lup.tools.mcp import LupMcpTool, ServerCompanion
     from lup.orchestration.reflection import ReviewGate
     from lup.sandbox.container import Sandbox
 
@@ -59,6 +59,8 @@ class SessionToolset(TypedDict):
     """Return type of :func:`build_session_toolset`."""
 
     groups: dict[ServerGroup, list["LupMcpTool"]]
+    companions: dict[ServerGroup, list["ServerCompanion"]]
+    """What each group's server keeps running beside itself while it serves."""
     gate: "ReviewGate"
 
 
@@ -114,7 +116,7 @@ def build_session_toolset(
         The groups plus the shared reflection gate.
     """
     from lup.coordination.identity import member_ref, session_member_id
-    from lup.coordination.peer_tools import create_peer_tools
+    from lup.coordination.peer_tools import RosterPulse, create_peer_tools
     from lup.coordination.repository import RepositoryPeers
     from lup.ledger.tools import create_ledger_tools
     from lup_template.kinds import EDGE_KINDS, LAYOUT, NODE_KINDS
@@ -156,6 +158,12 @@ def build_session_toolset(
             realtime_dir, gate=ReflectionGate(flag_path=meta_flag)
         )
 
+    # lup: defer: a session nobody launched falls back to the name its runtime
+    # hands the tool server, which for a native harness is the one constant
+    # `harness` — so every unlaunched session in a worktree joins as one
+    # member, while the prompt hook falls back to the runtime's own session
+    # id. One fallback both halves share is the fix, and it needs the
+    # runtime's session id to reach the tool server, which no adapter passes.
     member = session_member_id(session_id)
     if member:
         # The worktree is passed rather than looked up inside the tools,
@@ -174,7 +182,17 @@ def build_session_toolset(
 
     groups[EXAMPLE_GROUP] = list(EXAMPLE_TOOLS)
 
+    # The coordination server's lifetime is the session's, so it is the one
+    # that beats for it; the same identity, for the same reason the group
+    # waits on one.
+    companions: dict[ServerGroup, list[ServerCompanion]] = (
+        {COORDINATION_GROUP: [RosterPulse(root=project_root(), member_id=member)]}
+        if member
+        else {}
+    )
+
     return SessionToolset(
         groups=groups,
+        companions=companions,
         gate=reflect_kit["gate"],
     )

@@ -16,14 +16,46 @@ be never. A sender told "sent" cannot tell those apart, so nothing here says
 "sent".
 """
 
+import asyncio
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from lup.channels.models import Door
+from lup.coordination.pulse import Pulse
 from lup.coordination.repository import PeerView, RepositoryPeers
-from lup.coordination.roster import Delivery
-from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
+from lup.coordination.roster import ROSTER_FILE, Delivery
+from lup.tools.mcp import LupMcpTool, ServerCompanion, ToolError, lup_tool
+
+
+class RosterPulse(ServerCompanion, frozen=True):
+    """This session's pulse, beaten for as long as its tool server serves.
+
+    The server is started when the session opens and stopped when it ends,
+    however that ending comes, so its lifetime is the session's, and a beat
+    every interval is what lets every other process read that. Each beat
+    sweeps first: every row whose pulse stopped is retired on the record, so
+    a repository's roster is put right by whichever session is up rather
+    than by the one that died.
+
+    Nothing is written where no session has ever joined: a beat or a sweep
+    there would create the store, and a session that never coordinates must
+    leave no sign of having been able to. The roster file is the whole test,
+    as it is for the prompt-time guard.
+    """
+
+    root: Path
+    member_id: str
+    pulse: Pulse = Pulse()
+
+    async def run(self) -> None:
+        peers = RepositoryPeers(self.root, pulse=self.pulse)
+        roster = peers.root / ROSTER_FILE
+        while True:
+            if roster.exists():
+                peers.sweep()
+                peers.beat(self.member_id)
+            await asyncio.sleep(self.pulse.interval_seconds)
 
 
 class NoInput(BaseModel):
