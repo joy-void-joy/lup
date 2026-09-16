@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "d6d6f6a159a56a0bd159b6c6c75506562cf415a3362e8c27e1090445b76a6931",
+  "source_digest": "b79b8fe8cb38408606187f39fa9cc0480a0e84dcf231af3d5549d192be7b59ca",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "3f6fb53b913c9e5990c0287ed5ea195ea0bd314bfd974b4a00ea5a4cfbdb9c0c",
+      "sha256": "ebba80d191c06c9b17066660e690134681621fffa8dc7543bf6179580ed51eff",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -226,7 +226,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "17faa352ecbb61909cfe11fd2edc1d266c929e73cc1f82ca6a3e32b79f9a31d7",
+      "sha256": "d39de4719987709bda465b9c4484607e29eb35b0f249875a05860dbc47e86c01",
       "semantic_id": "skill.land",
       "executable": false
     },
@@ -499,7 +499,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "5bad4d341e0df514a627d3b33dc3bfb923ee1056aac5b2f419ad229cd7df5d17",
+      "sha256": "29e9c9ed7bcfb2468921bced70c154d8f7724682e0d5fe1ac6f06bd1fe2c97a6",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
