@@ -18739,6 +18739,9 @@ PEER_POLICY: PeerPolicyRow | None = {
     "claim_reason": "another live session has changed or locked this path",
     "claim_recovery": "Writing under a held path is how two sessions overwrite each other between merges. Ask the holder with `coordination_send` first, or go ahead if you already know what they are doing; a claim expires with the session holding it, so one still standing means that session has not stopped.",
     "member_env": "LUP_COORDINATION_MEMBER",
+    "member_kind": "session",
+    "heartbeats_dir": "heartbeats",
+    "stale_after_seconds": 120.0,
 }
 
 AUTONOMOUS_AGENT_IDENTITIES: list[str] = [

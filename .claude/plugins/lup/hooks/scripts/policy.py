@@ -1775,6 +1775,63 @@ def peer_members(directory: Path, roster_file: str) -> list[dict]:
     return [member for member in standing.values() if member["running"]]
 
 
+def peer_heard(directory: Path, heartbeats_dir: str, member: dict) -> datetime | None:
+    """When a member was last heard from: its newest record, or a later beat."""
+
+    def recorded() -> datetime | None:
+        spelled = (
+            member["at"] if "at" in member and isinstance(member["at"], str) else ""
+        )
+        try:
+            moment = datetime.fromisoformat(spelled)
+        except ValueError:
+            return None
+        return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+    def beaten() -> datetime | None:
+        try:
+            stamp = (directory / heartbeats_dir / member["actor"]["id"]).stat().st_mtime
+        except OSError:
+            return None
+        return datetime.fromtimestamp(stamp, UTC)
+
+    return max(
+        (moment for moment in (recorded(), beaten()) if moment is not None),
+        default=None,
+    )
+
+
+def peer_present(
+    directory: Path,
+    roster_file: str,
+    member_kind: str,
+    heartbeats_dir: str,
+    stale_after_seconds: float,
+) -> list[dict]:
+    """Every member the roster holds whose pulse says it is still there.
+
+    The record fold says who never wrote a departure; a session that was
+    killed wrote none either, so a session's row is present only while its
+    newest record or its latest beat is within the window. Only a session
+    answers for itself this way: a spawned agent's presence is its spawner's
+    word and the person is never finished, so both pass through as the record
+    says.
+    """
+    now = datetime.now(UTC)
+
+    def present(member: dict) -> bool:
+        if member["actor"]["kind"] != member_kind:
+            return True
+        heard = peer_heard(directory, heartbeats_dir, member)
+        return heard is not None and now - heard <= timedelta(
+            seconds=stale_after_seconds
+        )
+
+    return [
+        member for member in peer_members(directory, roster_file) if present(member)
+    ]
+
+
 def peer_name_claims(directory: Path, names_file: str) -> dict:
     """Which member each name reaches now, the newest claim on a name winning.
 
@@ -1795,7 +1852,13 @@ def peer_name_claims(directory: Path, names_file: str) -> dict:
 
 
 def peer_addresses(
-    root: Path | None, store: list[str], roster_file: str, names_file: str
+    root: Path | None,
+    store: list[str],
+    roster_file: str,
+    names_file: str,
+    member_kind: str,
+    heartbeats_dir: str,
+    stale_after_seconds: float,
 ) -> list[str]:
     """Every spelling that currently reaches a live member of this roster.
 
@@ -1811,7 +1874,9 @@ def peer_addresses(
     directory = peer_store(root, store)
     if directory is None:
         return []
-    members = peer_members(directory, roster_file)
+    members = peer_present(
+        directory, roster_file, member_kind, heartbeats_dir, stale_after_seconds
+    )
     live = [member["actor"]["id"] for member in members]
     return sorted(
         {
@@ -1830,7 +1895,13 @@ def peer_addresses(
 
 
 def peer_listing(
-    root: Path | None, store: list[str], roster_file: str, names_file: str
+    root: Path | None,
+    store: list[str],
+    roster_file: str,
+    names_file: str,
+    member_kind: str,
+    heartbeats_dir: str,
+    stale_after_seconds: float,
 ) -> list[str]:
     """One line per live member, as somebody choosing who to reach reads it.
 
@@ -1859,7 +1930,9 @@ def peer_listing(
 
     return [
         " — ".join(part for part in described(member) if part)
-        for member in peer_members(directory, roster_file)
+        for member in peer_present(
+            directory, roster_file, member_kind, heartbeats_dir, stale_after_seconds
+        )
     ]
 
 
@@ -1920,6 +1993,9 @@ def claim_holders(
     touches_file: str,
     path_text: str,
     mine: str,
+    member_kind: str,
+    heartbeats_dir: str,
+    stale_after_seconds: float,
 ) -> list[str]:
     """Who else, still working here, is holding the path a write would land on.
 
@@ -1934,7 +2010,12 @@ def claim_holders(
     directory = peer_store(root, store)
     if directory is None:
         return []
-    live = [member["actor"]["id"] for member in peer_members(directory, roster_file)]
+    live = [
+        member["actor"]["id"]
+        for member in peer_present(
+            directory, roster_file, member_kind, heartbeats_dir, stale_after_seconds
+        )
+    ]
     names = peer_name_claims(directory, names_file)
     target = str(Path(path_text).resolve())
     holding = [
@@ -2452,6 +2533,9 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
             PEER_POLICY["store"],
             PEER_POLICY["roster_file"],
             PEER_POLICY["names_file"],
+            PEER_POLICY["member_kind"],
+            PEER_POLICY["heartbeats_dir"],
+            PEER_POLICY["stale_after_seconds"],
         ),
         PEER_POLICY,
     )
@@ -2478,6 +2562,9 @@ def peer_listing_attachment(cwd: Path | None) -> str:
             PEER_POLICY["store"],
             PEER_POLICY["roster_file"],
             PEER_POLICY["names_file"],
+            PEER_POLICY["member_kind"],
+            PEER_POLICY["heartbeats_dir"],
+            PEER_POLICY["stale_after_seconds"],
         ),
         PEER_POLICY,
     )
@@ -2809,6 +2896,9 @@ def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision |
             PEER_POLICY["touches_file"],
             path_text,
             declared_identity(PEER_POLICY["member_env"]),
+            PEER_POLICY["member_kind"],
+            PEER_POLICY["heartbeats_dir"],
+            PEER_POLICY["stale_after_seconds"],
         ),
         PEER_POLICY,
     )

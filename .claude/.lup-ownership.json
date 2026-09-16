@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "cd409e61a5491847d99f2f236f76717c49265ad54e304f391dd4de6036f475e9",
+  "source_digest": "d6d6f6a159a56a0bd159b6c6c75506562cf415a3362e8c27e1090445b76a6931",
   "target_requirements": [
     "claude-code"
   ],
@@ -443,7 +443,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "47580c5c9a812bd7dc9dd82cef979a0896085a9ec17576c3e695d68f2caba394",
+      "sha256": "03a26b28494085558105254de73a8b39ade0d87367e8a49c24f6606608e7210e",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -492,7 +492,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "ba1749ff07d66a33dab00287983e81eb633d0b3626e5f2e18713e9c9be94f0ca",
+      "sha256": "5bad4d341e0df514a627d3b33dc3bfb923ee1056aac5b2f419ad229cd7df5d17",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -513,7 +513,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "19414abc40ade19c2b8b1599ceec2929df7bf767605c515c2ce724d183b82cd5",
+      "sha256": "eebd4449f335ae8beba4ff38ac33b181d2c632bc1282b2f20dc63d152ffbf39b",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

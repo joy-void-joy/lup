@@ -26,6 +26,12 @@ class PeerPolicy(BaseModel, frozen=True):
     directory, as path parts. Parts rather than a joined string because the
     dispatcher rebuilds the path with the host's own separator, and a compiled
     literal carrying one platform's answers on one platform.
+
+    ``member_kind``, ``heartbeats_dir`` and ``stale_after_seconds`` are what
+    the dispatcher's fold needs to read a session's pulse: which rows are
+    sessions that answer for themselves, where each one's beat is kept, and
+    how long a silence reads as absence — so a killed session stops holding
+    its paths and stops being somewhere a send is redirected to.
     """
 
     store: list[str] = Field(min_length=1)
@@ -39,6 +45,9 @@ class PeerPolicy(BaseModel, frozen=True):
     claim_reason: str = Field(min_length=1)
     claim_recovery: str = Field(min_length=1)
     member_env: str = Field(min_length=1)
+    member_kind: str = Field(min_length=1)
+    heartbeats_dir: str = Field(min_length=1)
+    stale_after_seconds: float = Field(gt=0)
 
 
 def erase_peer_policy(declared: PeerPolicy | None) -> PeerPolicyRow | None:
@@ -57,4 +66,7 @@ def erase_peer_policy(declared: PeerPolicy | None) -> PeerPolicyRow | None:
         claim_reason=declared.claim_reason,
         claim_recovery=declared.claim_recovery,
         member_env=declared.member_env,
+        member_kind=declared.member_kind,
+        heartbeats_dir=declared.heartbeats_dir,
+        stale_after_seconds=declared.stale_after_seconds,
     )

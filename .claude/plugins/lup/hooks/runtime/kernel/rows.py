@@ -669,3 +669,6 @@ class PeerPolicyRow(TypedDict):
     claim_reason: str
     claim_recovery: str
     member_env: str
+    member_kind: str
+    heartbeats_dir: str
+    stale_after_seconds: float

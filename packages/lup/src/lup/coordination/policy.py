@@ -12,7 +12,8 @@ reach for is a judgement about the surfaces a project offers, and a project
 that renamed its own is entitled to say so without editing the library.
 """
 
-from lup.coordination.identity import MEMBER_ENV, NAMES_FILE
+from lup.coordination.identity import MEMBER_ENV, MEMBER_KIND, NAMES_FILE
+from lup.coordination.pulse import HEARTBEATS_DIR, Pulse
 from lup.coordination.roster import ROSTER_FILE
 from lup.coordination.store import COORDINATION_DIR, STORE_DIR
 from lup.coordination.touches import TOUCHES_FILE, WINDOWS_DIR
@@ -77,6 +78,7 @@ def peer_policy(
     claim_reason: str = CLAIM_HELD,
     send_recovery: str = SEND_RECOVERY,
     claim_recovery: str = CLAIM_RECOVERY,
+    pulse: Pulse = Pulse(),
 ) -> PeerPolicy:
     """This repository's sessions, as the compiled permission hook reads them."""
     return PeerPolicy(
@@ -91,4 +93,7 @@ def peer_policy(
         claim_reason=claim_reason,
         claim_recovery=claim_recovery,
         member_env=MEMBER_ENV,
+        member_kind=MEMBER_KIND,
+        heartbeats_dir=HEARTBEATS_DIR,
+        stale_after_seconds=pulse.stale_after_seconds,
     )

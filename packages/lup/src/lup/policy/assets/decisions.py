@@ -389,6 +389,9 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
             PEER_POLICY["store"],
             PEER_POLICY["roster_file"],
             PEER_POLICY["names_file"],
+            PEER_POLICY["member_kind"],
+            PEER_POLICY["heartbeats_dir"],
+            PEER_POLICY["stale_after_seconds"],
         ),
         PEER_POLICY,
     )
@@ -415,6 +418,9 @@ def peer_listing_attachment(cwd: Path | None) -> str:
             PEER_POLICY["store"],
             PEER_POLICY["roster_file"],
             PEER_POLICY["names_file"],
+            PEER_POLICY["member_kind"],
+            PEER_POLICY["heartbeats_dir"],
+            PEER_POLICY["stale_after_seconds"],
         ),
         PEER_POLICY,
     )
@@ -746,6 +752,9 @@ def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision |
             PEER_POLICY["touches_file"],
             path_text,
             declared_identity(PEER_POLICY["member_env"]),
+            PEER_POLICY["member_kind"],
+            PEER_POLICY["heartbeats_dir"],
+            PEER_POLICY["stale_after_seconds"],
         ),
         PEER_POLICY,
     )

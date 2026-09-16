@@ -330,6 +330,9 @@ def peer_policy_literal(redirect: PeerPolicyRow | None) -> str:
         f'"claim_reason": {json.dumps(redirect["claim_reason"])}',
         f'"claim_recovery": {json.dumps(redirect["claim_recovery"])}',
         f'"member_env": {json.dumps(redirect["member_env"])}',
+        f'"member_kind": {json.dumps(redirect["member_kind"])}',
+        f'"heartbeats_dir": {json.dumps(redirect["heartbeats_dir"])}',
+        f'"stale_after_seconds": {json.dumps(redirect["stale_after_seconds"])}',
     ]
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
 
