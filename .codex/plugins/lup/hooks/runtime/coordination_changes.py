@@ -50,6 +50,7 @@ must not make its record unreadable here.
 
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TypedDict
 
@@ -68,6 +69,17 @@ LOOKS_DIR = "looks"
 """Where each session's last look is kept, one file per member, beside the mail
 positions the delivery reader keeps the same way."""
 
+HEARTBEATS_DIR = "heartbeats"
+STALE_AFTER_SECONDS = 120.0
+"""Where each session's pulse is kept, and how long a silence reads as absence.
+
+Restated from the pulse module and pinned by the same test as the file
+names. A session beats from here at each prompt and from its tool server on a
+timer, and a running row nothing has heard from within the window reads as
+gone — so a peer that was killed stops being reported as present, and stops
+holding what it touched, without anybody writing its departure.
+"""
+
 
 class Actor(TypedDict, total=False):
     """Whom a record attributes itself to, as the roster and touch records spell it."""
@@ -85,6 +97,7 @@ class RosterRecord(TypedDict, total=False):
     description: str
     summary: str
     worktree: str
+    at: str
 
 
 class NameRecord(TypedDict, total=False):
@@ -132,6 +145,8 @@ class Member(TypedDict):
     summary: str
     worktree: str
     running: bool
+    heard: str
+    """When the record last spoke of this member, as its newest record spells it."""
 
 
 class Folded(TypedDict):
@@ -250,15 +265,60 @@ def standing(path: Path) -> dict[str, Member]:
                     summary="",
                     worktree=text(record.get("worktree")),
                     running=True,
+                    heard=text(record.get("at")),
                 )
             case "described" if held in members:
                 members[held]["description"] = text(record.get("description"))
+                members[held]["heard"] = text(record.get("at"))
             case "finished" if held in members:
                 members[held]["running"] = False
                 members[held]["summary"] = text(record.get("summary"))
+                members[held]["heard"] = text(record.get("at"))
             case _:
                 continue
     return members
+
+
+def spoken_at(recorded: str) -> datetime | None:
+    """A record's own time as a moment, or nothing where it does not read as one."""
+    try:
+        moment = datetime.fromisoformat(recorded)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+def heard_at(root: Path, member_id: str) -> datetime | None:
+    """When this member last beat, or nothing where it never has."""
+    try:
+        stamp = (root / HEARTBEATS_DIR / member_id).stat().st_mtime
+    except OSError:
+        return None
+    return datetime.fromtimestamp(stamp, UTC)
+
+
+def gone(root: Path, member_id: str, member: Member, now: datetime) -> bool:
+    """Whether a running session's silence has outlasted the window.
+
+    The later of its newest record and its latest beat is when it was last
+    heard from; a session heard neither way is one the fold cannot vouch for.
+    """
+    heard = max(
+        (
+            moment
+            for moment in (spoken_at(member["heard"]), heard_at(root, member_id))
+            if moment is not None
+        ),
+        default=None,
+    )
+    return heard is None or now - heard > timedelta(seconds=STALE_AFTER_SECONDS)
+
+
+def beat(root: Path, member_id: str) -> None:
+    """Record that this session is here now, at the pace it is prompted."""
+    path = root / HEARTBEATS_DIR / member_id
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
 
 
 # lup: ignore[dict-str-payload] — keyed by member id, an identity the roster's
@@ -352,8 +412,20 @@ def concerns(claim: Held, checkout: str) -> bool:
 
 
 def looked(root: Path, mine: str, checkout: str) -> Folded:
-    """One look at the roster as this session reads it, and the fold behind it."""
+    """One look at the roster as this session reads it, and the fold behind it.
+
+    A session the pulse has retired is read as finished here, so it leaves
+    the look the way a departure does and its claims stop being reported.
+    """
     members = standing(root / ROSTER_FILE)
+    now = datetime.now(UTC)
+    for member_id, member in members.items():
+        if (
+            member_id != mine
+            and member["running"]
+            and gone(root, member_id, member, now)
+        ):
+            member["running"] = False
     names = called(root / NAMES_FILE)
     live = [held_id for held_id, member in members.items() if member["running"]]
     claims = [
@@ -490,6 +562,7 @@ def changes(root: Path, mine: str, checkout: Path) -> list[str]:
     folded = looked(root, mine, str(checkout))
     if not folded["members"]:
         return []
+    beat(root, mine)
     cursor = root / LOOKS_DIR / f"{MEMBER_KIND}-{mine}.json"
     before = last_look(cursor)
     now = folded["look"]

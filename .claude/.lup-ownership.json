@@ -331,7 +331,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/coordination_changes.py",
       "category": "generated",
-      "sha256": "51aed43b5e1855236187c2f16eb54750ce1be46691ba2fcf604ca72719af57c9",
+      "sha256": "e23f8f8b7759e4a22fe0e7f05c4b2ac85927b4e6ce88cb7d58c750eb5107f78b",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

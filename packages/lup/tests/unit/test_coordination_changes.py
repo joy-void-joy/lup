@@ -8,8 +8,10 @@ contested path before everything else — over a store the typed writers
 produced, so the copy is read against the record as it is really written.
 """
 
+from datetime import timedelta
 from pathlib import Path
 
+from lup.channels.models import utc_now
 from lup.coordination import changes as fold
 from lup.coordination.identity import (
     MEMBER_KIND,
@@ -17,8 +19,9 @@ from lup.coordination.identity import (
     member_ref,
     mint_member_id,
 )
+from lup.coordination.pulse import HEARTBEATS_DIR, Pulse, beat, heard_at
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import ROSTER_FILE
+from lup.coordination.roster import ROSTER_FILE, ActorJoined
 from lup.coordination.touches import TOUCHES_FILE
 
 
@@ -40,6 +43,48 @@ def test_the_copy_and_its_source_spell_the_store_alike() -> None:
     assert fold.NAMES_FILE == NAMES_FILE
     assert fold.TOUCHES_FILE == TOUCHES_FILE
     assert fold.MEMBER_KIND == MEMBER_KIND
+    assert fold.HEARTBEATS_DIR == HEARTBEATS_DIR
+    assert fold.STALE_AFTER_SECONDS == Pulse().stale_after_seconds
+
+
+def test_a_prompt_beats_for_the_session_it_was_submitted_from(tmp_path: Path) -> None:
+    """The hook is the pulse a session without a tool server has."""
+    peers = RepositoryPeers(tmp_path)
+    me = joined(peers, tmp_path / "mine", "mine")
+
+    told(peers, me, tmp_path / "mine")
+
+    assert heard_at(peers.root, me) is not None
+
+
+def test_a_peer_the_pulse_retired_reads_as_departed(tmp_path: Path) -> None:
+    """A killed session leaves the look the way one that said goodbye does."""
+    peers = RepositoryPeers(tmp_path)
+    me = joined(peers, tmp_path / "mine", "mine")
+    other = mint_member_id()
+    long_ago = utc_now() - timedelta(seconds=fold.STALE_AFTER_SECONDS + 1)
+    peers.cohort.roster.stream.append(
+        ActorJoined(
+            actor=member_ref(other),
+            task=f"working in {tmp_path / 'theirs'}",
+            worktree=str(tmp_path / "theirs"),
+            at=long_ago,
+        )
+    )
+    peers.names.rename(other, "reviewer")
+    peers.touches.touched(member_ref(other), tmp_path / "mine" / "src" / "a.py")
+
+    assert told(peers, me, tmp_path / "mine") == [
+        "No other session is working in this repository; "
+        "`coordination_peers` lists whoever arrives."
+    ]
+
+    beat(peers.root, other)
+
+    assert told(peers, me, tmp_path / "mine") == [
+        f"reviewer holding at {tmp_path / 'mine' / 'src' / 'a.py'}",
+        f"reviewer arrived — theirs — working in {tmp_path / 'theirs'}",
+    ]
 
 
 def test_the_copy_names_its_look_the_way_the_roster_names_the_member() -> None:
