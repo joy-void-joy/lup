@@ -19,6 +19,7 @@ the run; peers name themselves, and a name somebody wrote down has to go on
 working after the session behind it has moved on.
 """
 
+from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 
@@ -27,12 +28,14 @@ from pydantic import BaseModel, computed_field
 from lup.channels.models import Door, utc_now
 from lup.coordination.cohort import ActorCohort
 from lup.coordination.identity import (
+    MEMBER_KIND,
     NAMES_FILE,
     MemberNames,
     derived_cli_name,
     member_ref,
 )
 from lup.coordination.mail import ActorDelivery
+from lup.coordination.pulse import Pulse, beat, heard_at
 from lup.coordination.refs import ActorRef
 from lup.coordination.roster import Delivery, SpawnedActor
 from lup.coordination.store import coordination_root
@@ -104,9 +107,10 @@ class RepositoryPeers:
     others to work.
     """
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, pulse: Pulse = Pulse()) -> None:
         self.root = coordination_root(root)
         self.names = MemberNames(self.root / NAMES_FILE)
+        self.pulse = pulse
 
     @cached_property
     def cohort(self) -> ActorCohort:
@@ -216,7 +220,67 @@ class RepositoryPeers:
                 contested=[claim.subject() for claim in held if len(claim.holders) > 1],
             )
 
-        return [row(member) for member in self.cohort.live()]
+        return [row(member) for member in self.present()]
+
+    def heard(self, member: SpawnedActor) -> datetime | None:
+        """When this member was last heard from: its newest record, or a later pulse."""
+        pulsed = heard_at(self.root, member.actor.id)
+        return max(
+            (moment for moment in (member.heard, pulsed) if moment is not None),
+            default=None,
+        )
+
+    def pulsed(self, member: SpawnedActor, now: datetime) -> SpawnedActor:
+        """This member as its pulse leaves it: gone where the pulse has stopped.
+
+        Only a session answers for itself this way. A spawned agent's presence
+        is the word of the process that spawned it, which writes the finish;
+        the person is never finished at all. A session whose record says
+        running and whose pulse says nothing within the window reads as gone,
+        with the silence named where the finish would have been — derived at
+        the read, so that beating again is enough to read as back.
+        """
+        if member.actor.kind != MEMBER_KIND or not member.running:
+            return member
+        heard = self.heard(member)
+        if heard is not None and not self.pulse.stale(heard, now):
+            return member
+        since = heard.isoformat() if heard is not None else "it joined"
+        return member.model_copy(
+            update={"running": False, "error": f"unheard since {since}"}
+        )
+
+    def present(self, now: datetime | None = None) -> list[SpawnedActor]:
+        """Every member as the record and the pulses together say, the live ones first."""
+        moment = now or utc_now()
+        return sorted(
+            (self.pulsed(member, moment) for member in self.cohort.live()),
+            key=lambda member: not member.running,
+        )
+
+    def beat(self, member_id: str) -> None:
+        """Record that this session is here now."""
+        beat(self.root, member_id)
+
+    def sweep(self, now: datetime | None = None) -> list[SpawnedActor]:
+        """Write the finish for every session whose pulse has stopped, and say which.
+
+        What the read derives, made durable: a row the pulse retired is
+        retired on the record too, so a reader folding the record alone — a
+        replay, a console on another machine — agrees with one that read the
+        pulse. A session that beats again after this re-joins on its next
+        call, which the roster's own idempotence allows once the row is
+        finished.
+        """
+        moment = now or utc_now()
+        retired = [
+            gone
+            for member in self.cohort.live()
+            if member.running and not (gone := self.pulsed(member, moment)).running
+        ]
+        for member in retired:
+            self.cohort.roster.finished(member.actor, error=member.error)
+        return retired
 
     def send(
         self,
@@ -276,7 +340,7 @@ class RepositoryPeers:
         expiry rule: no timeout to tune, no release to forget, and the failure
         mode is a session that stopped taking its own claims with it.
         """
-        return [member.actor.id for member in self.cohort.live() if member.running]
+        return [member.actor.id for member in self.present() if member.running]
 
     def held(self) -> list[Claim]:
         """Every claim a live session is holding, newest first."""

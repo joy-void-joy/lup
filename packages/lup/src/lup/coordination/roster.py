@@ -82,7 +82,9 @@ class ActorSpawned(RosterRecord, frozen=True):
         """
         if standing is not None and self.actor.round < standing.actor.round:
             return standing
-        return SpawnedActor(actor=self.actor, task=self.task, running=True)
+        return SpawnedActor(
+            actor=self.actor, task=self.task, running=True, heard=self.at
+        )
 
 
 class Delivery(StrEnum):
@@ -173,6 +175,7 @@ class ActorJoined(RosterRecord, frozen=True):
             actor=self.actor,
             task=self.task,
             running=True,
+            heard=self.at,
             liveness=self.liveness,
             delivery=self.delivery,
             worktree=self.worktree,
@@ -202,7 +205,9 @@ class ActorDescribed(RosterRecord, frozen=True):
         """The member, redescribed. A description of nobody invents no member."""
         if standing is None:
             return None
-        return standing.model_copy(update={"description": self.description})
+        return standing.model_copy(
+            update={"description": self.description, "heard": self.at}
+        )
 
 
 class ActorFinished(RosterRecord, frozen=True):
@@ -223,7 +228,12 @@ class ActorFinished(RosterRecord, frozen=True):
         if standing is None:
             return None
         return standing.model_copy(
-            update={"running": False, "summary": self.summary, "error": self.error}
+            update={
+                "running": False,
+                "summary": self.summary,
+                "error": self.error,
+                "heard": self.at,
+            }
         )
 
 
@@ -259,6 +269,16 @@ class SpawnedActor(BaseModel, frozen=True):
     running: bool
     summary: str = ""
     error: str = ""
+
+    heard: datetime | None = None
+    """When the record last spoke of this member, or nothing where it never did.
+
+    The newest record's own time, whichever kind it was — an arrival, a
+    description, a finish. A reader deciding whether a silent member is still
+    there starts from here and takes a later pulse where one was written; the
+    record alone says when a member last *said* something, which is not the
+    same question.
+    """
 
     worktree: str = ""
     """Where this member is working, absolute, empty where it is nowhere.
