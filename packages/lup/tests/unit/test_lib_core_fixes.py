@@ -24,6 +24,7 @@ computable without a container.
 """
 
 import asyncio
+import gc
 import json
 import os
 import time
@@ -44,7 +45,7 @@ from lup.orchestration.realtime.relay import RealtimeMailbox, ReplyEvent, Remind
 from lup.orchestration.reflection import ReflectionGate
 from lup.sandbox.container import Sandbox
 from lup.sandbox.process import process_is_alive, process_start_token
-from lup.execution.resilience.throttle import Throttle
+from lup.execution.resilience.throttle import LoopState, Throttle
 
 HAVE_PROC = Path("/proc/self/stat").exists()
 
@@ -100,25 +101,40 @@ class TestThrottleCancellation:
 
 
 class TestThrottlePerLoopState:
-    def test_state_keyed_by_loop_object_not_id(self) -> None:
-        """Distinct loops get distinct semaphores; dead loops drop out.
+    def test_each_live_loop_holds_its_own_state(self) -> None:
+        """Two live loops hold two distinct states; a state goes with its loop.
 
-        Keying by id(loop) let a recycled id alias a dead loop's
-        semaphore. A WeakKeyDictionary keyed by the loop object can't
-        collide and evicts collected loops.
+        The throttle keys its state by the loop object, so a loop never
+        inherits another loop's semaphore, and a closed loop's entry is
+        evicted rather than left for whichever loop comes next. Both loops
+        stay alive across the assertions: comparing ids of states from
+        loops that had already been freed let the allocator hand the second
+        the first's address.
         """
         throttle = Throttle(max_concurrent=2)
+        first_loop = asyncio.new_event_loop()
+        second_loop = asyncio.new_event_loop()
 
-        async def grab_state() -> int:
-            return id(throttle.get_state())
+        async def grab_state() -> LoopState:
+            return throttle.get_state()
 
-        first = asyncio.run(grab_state())
-        # The first loop is gone; its weak entry must not survive.
-        assert len(throttle.loop_states) == 0
-        second = asyncio.run(grab_state())
-        assert len(throttle.loop_states) == 0
-        # Two independent loops produced two independent LoopState objects.
-        assert first != second
+        first = first_loop.run_until_complete(grab_state())
+        second = second_loop.run_until_complete(grab_state())
+        # Distinct state per live loop, stable across calls on the same loop.
+        assert first is not second
+        assert first_loop.run_until_complete(grab_state()) is first
+        assert second_loop.run_until_complete(grab_state()) is second
+        assert throttle.loop_states[first_loop] is first
+        assert throttle.loop_states[second_loop] is second
+        assert len(throttle.loop_states) == 2
+
+        first_loop.close()
+        del first_loop
+        gc.collect()
+        # The closed loop's entry went with it; the live loop kept its own.
+        assert list(throttle.loop_states) == [second_loop]
+        assert throttle.loop_states[second_loop] is second
+        second_loop.close()
 
 
 class TestMetricsAtomicFlush:
