@@ -16,6 +16,7 @@ from .decision import (
 )
 from .edit import path_rule_matches, protected_path_reason
 from .roles import (
+    GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
     is_generated_plugin_target,
     path_role,
@@ -592,7 +593,9 @@ def refuses_generated_plugin_target(word: str) -> KernelDecision | None:
     """
     if not is_generated_plugin_target(word):
         return None
-    return KernelDecision("deny", GENERATED_PLUGIN_REFUSAL)
+    return KernelDecision(
+        "deny", GENERATED_PLUGIN_REFUSAL, recovery=GENERATED_PLUGIN_RECOVERY
+    )
 
 
 def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
@@ -687,8 +690,7 @@ def asks_before_removing_a_directory(
     # the paths settled `rm -rf /etc/ssl` as "captured and restorable".
     return KernelDecision(
         "ask",
-        f"{taken} {directory} requires approval: nothing in the command"
-        f" bounds what {what}",
+        f"{taken} {directory}, and nothing in the command bounds what {what}",
         checkpoint=(
             "unrecoverable"
             if any(
@@ -725,7 +727,11 @@ def protected_write_target(
             None,
         )
         if matched is not None:
-            return KernelDecision("ask", protected_path_reason(word, matched))
+            return KernelDecision(
+                "ask",
+                protected_path_reason(word, matched),
+                recovery=matched["recovery"],
+            )
     return None
 
 
@@ -891,10 +897,8 @@ def dangerous_assignment_reason(verb: str, names: list[str]) -> str:
     """
     spelled = ", ".join(names)
     variables = f"variables {spelled}" if len(names) > 1 else f"variable {spelled}"
-    subject = "they" if len(names) > 1 else "it"
     return (
-        f"{verb} the security-sensitive {variables} requires approval"
-        f" — {subject} can redirect how commands execute"
+        f"{verb} the security-sensitive {variables}, which can change how commands run"
     )
 
 
@@ -1298,7 +1302,9 @@ def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
                 continue
             if name == "--file":
                 return KernelDecision(
-                    "deny", "sed script files are not screened — inline the script"
+                    "deny",
+                    "a sed script file is run without anything reading it",
+                    recovery="Inline the script.",
                 )
             if name == "--sandbox" and not separator:
                 sandbox = True
@@ -1322,7 +1328,9 @@ def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
                 flags = flags[: flags.index("i")]
             if "f" in flags:
                 return KernelDecision(
-                    "deny", "sed script files are not screened — inline the script"
+                    "deny",
+                    "a sed script file is run without anything reading it",
+                    recovery="Inline the script.",
                 )
             if flags.endswith("e"):
                 script_expected = True

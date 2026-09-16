@@ -130,13 +130,15 @@ Each is a requirement the boundary cannot express any other way, and the
 count is the point: an exclusion is not a widened rule but a removed one, so
 the list stays as short as the toolchain's actual incompatibilities."""
 
-ARTIFACT_REFUSAL = (
-    "publishing a page leaves the repository, and this project already owns"
-    " surfaces that do not — run `uv run lup-devtools dev report` for everything"
-    " left to implement, or the report skill to write it whole to a file named"
-    " for the work, under tmp/"
+ARTIFACT_REFUSAL = "publishing a page puts this work outside the repository"
+"""Why an artifact is the wrong reflex here, as the approver of one reads it."""
+
+ARTIFACT_RECOVERY = (
+    "Run `uv run lup-devtools dev report` for everything left to implement, or"
+    " the report skill to write it whole to a file named for the work, under"
+    " tmp/."
 )
-"""Why an artifact is the wrong reflex here, and what answers the same need.
+"""What answers the same need inside the repository.
 
 The redirect is the point rather than the refusal, exactly as the
 generated-tree refusal names the source to edit instead of only saying no. A
@@ -146,14 +148,17 @@ every later session, scan, and gate can reach.
 """
 
 WORKTREE_ENTRY_REFUSAL = (
-    "entering a worktree with this tool arms Claude Code's worktree isolation"
-    " for the rest of the session, which then refuses eval, source, fc, coproc,"
-    " trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and"
-    " let in any argv position — including in read-only commands with no git in"
-    " them, so `grep -c hash file.py` stops working. Measured: the tool call is"
-    " what arms it, not where the session is. `git worktree create` already made"
-    " the tree — launch a session rooted in it, or address its files by absolute"
-    " path from here"
+    "entering a worktree this way makes Claude Code refuse ordinary shell words"
+    " such as hash, alias and let for the rest of the session"
+)
+
+WORKTREE_ENTRY_RECOVERY = (
+    "The tool call arms worktree isolation wherever the session is, and it then"
+    " refuses eval, source, fc, coproc, trap, enable, mapfile, readarray, hash,"
+    " bind, complete, compgen, alias and let in any argv position, even in"
+    " read-only commands, so `grep -c hash file.py` stops working."
+    " `git worktree create` already made the tree: launch a session rooted in"
+    " it, or address its files by absolute path from here."
 )
 """Why the tool that moves a session into a worktree is the wrong way in.
 
@@ -170,9 +175,18 @@ may still have a reason to.
 """
 
 REFUSED_TOOLS = [
-    RefusedTool(tool="Artifact", reason=ARTIFACT_REFUSAL),
-    RefusedTool(tool="Skill", specifier="artifact-design", reason=ARTIFACT_REFUSAL),
-    RefusedTool(tool="EnterWorktree", reason=WORKTREE_ENTRY_REFUSAL),
+    RefusedTool(tool="Artifact", reason=ARTIFACT_REFUSAL, recovery=ARTIFACT_RECOVERY),
+    RefusedTool(
+        tool="Skill",
+        specifier="artifact-design",
+        reason=ARTIFACT_REFUSAL,
+        recovery=ARTIFACT_RECOVERY,
+    ),
+    RefusedTool(
+        tool="EnterWorktree",
+        reason=WORKTREE_ENTRY_REFUSAL,
+        recovery=WORKTREE_ENTRY_RECOVERY,
+    ),
 ]
 """The calls this project has decided against, each naming what to reach for.
 

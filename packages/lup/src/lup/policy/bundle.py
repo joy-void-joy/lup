@@ -128,6 +128,7 @@ def runtime_path_rule(root: str) -> PathRuleRow:
                 kind="contains_part",
                 value=root,
                 reason="scratch path requires approval",
+                recovery="",
                 allow_autonomous=False,
             )
         case _:
@@ -135,6 +136,7 @@ def runtime_path_rule(root: str) -> PathRuleRow:
                 kind="subtree",
                 value=root,
                 reason="protected path requires approval",
+                recovery="",
                 allow_autonomous=True,
             )
 
@@ -150,12 +152,14 @@ def runtime_path_rules(
             kind="name_prefix",
             value=".env",
             reason="protected path requires approval",
+            recovery="",
             allow_autonomous=False,
         ),
         PathRuleRow(
             kind="new_devtools",
             value="src",
             reason="new devtools module requires approval",
+            recovery="",
             allow_autonomous=False,
         ),
     ]
@@ -198,6 +202,7 @@ def path_rule_rows_literal(rows: list[PathRuleRow]) -> str:
                 f'"kind": {json.dumps(row["kind"])}',
                 f'"value": {json.dumps(row["value"])}',
                 f'"reason": {json.dumps(row["reason"])}',
+                f'"recovery": {json.dumps(row["recovery"])}',
                 f'"allow_autonomous": {row["allow_autonomous"]}',
             ]
             for row in rows
@@ -318,10 +323,12 @@ def peer_policy_literal(redirect: PeerPolicyRow | None) -> str:
         f'"roster_file": {json.dumps(redirect["roster_file"])}',
         f'"names_file": {json.dumps(redirect["names_file"])}',
         f'"send_reason": {json.dumps(redirect["send_reason"])}',
+        f'"send_recovery": {json.dumps(redirect["send_recovery"])}',
         f'"listing_note": {json.dumps(redirect["listing_note"])}',
         f'"touches_file": {json.dumps(redirect["touches_file"])}',
         f'"windows_dir": {json.dumps(redirect["windows_dir"])}',
         f'"claim_reason": {json.dumps(redirect["claim_reason"])}',
+        f'"claim_recovery": {json.dumps(redirect["claim_recovery"])}',
         f'"member_env": {json.dumps(redirect["member_env"])}',
     ]
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
@@ -335,6 +342,7 @@ def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
                 f'"tool": {json.dumps(row["tool"])}',
                 f'"specifier": {json.dumps(row["specifier"])}',
                 f'"reason": {json.dumps(row["reason"])}',
+                f'"recovery": {json.dumps(row["recovery"])}',
             ]
             for row in rows
         ]

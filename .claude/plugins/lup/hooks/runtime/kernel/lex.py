@@ -7,8 +7,10 @@ from typing import Literal, TypedDict
 
 from .decision import (
     BACKTICK_REASON,
+    BACKTICK_RECOVERY,
     KernelDecision,
     SUBSTITUTION_REASON,
+    SUBSTITUTION_RECOVERY,
     SUBSTITUTION_SENTINEL,
     unjudged,
 )
@@ -235,7 +237,9 @@ def arithmetic_token(command: str, position: int) -> Lexeme | KernelDecision:
     if expansion is not None:
         return Lexeme(text=expansion, end=end)
     if command[end : end + 2] == "$(" or command[end : end + 1] == "`":
-        return KernelDecision("deny", SUBSTITUTION_REASON)
+        return KernelDecision(
+            "deny", SUBSTITUTION_REASON, recovery=SUBSTITUTION_RECOVERY
+        )
     return unjudged("arithmetic expansion does not parse")
 
 
@@ -289,9 +293,10 @@ def read_heredoc_bodies(
             if "`" in body or "$(" in body:
                 return KernelDecision(
                     "deny",
-                    f"the unquoted heredoc <<{delimiter} substitutes commands"
-                    f" — quote the delimiter (<<'{delimiter}') to make the"
-                    " body literal",
+                    f"the unquoted heredoc <<{delimiter} runs the commands its"
+                    " body substitutes",
+                    recovery=f"Quote the delimiter (<<'{delimiter}') to make the"
+                    " body literal.",
                 )
             continue
         # A trailing newline per line, because that is what the shell feeds:
@@ -365,7 +370,9 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
                     word.append(outcome["text"])
                     continue
                 if inner == "`":
-                    return KernelDecision("deny", BACKTICK_REASON)
+                    return KernelDecision(
+                        "deny", BACKTICK_REASON, recovery=BACKTICK_RECOVERY
+                    )
                 if (
                     inner == "$"
                     and position + 1 < length
@@ -406,7 +413,7 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             started = True
             continue
         if character == "`":
-            return KernelDecision("deny", BACKTICK_REASON)
+            return KernelDecision("deny", BACKTICK_REASON, recovery=BACKTICK_RECOVERY)
         if character == "$" and position + 1 < length and command[position + 1] == "(":
             substitution = read_command_substitution(command, position)
             body = substitution["text"]
@@ -422,8 +429,8 @@ def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
             substitution = f">({written})" if written is not None else ">(...)"
             return KernelDecision(
                 "ask",
-                f"writing into the process substitution {substitution} requires"
-                " approval — the receiving command runs unjudged",
+                f"writing into the process substitution {substitution} feeds a"
+                " command nothing checked",
             )
         if character == "<" and position + 1 < length and command[position + 1] == "(":
             if started:
@@ -1071,8 +1078,8 @@ def resolve_redirection(
         return Redirection(
             decision=KernelDecision(
                 "ask",
-                f"file redirection {operator} requires approval — it names no"
-                " target word, so where the write lands cannot be judged",
+                f"file redirection {operator} names no target, so where it"
+                " writes is unknown",
             ),
             resume=index + 1,
         )
@@ -1101,9 +1108,8 @@ def resolve_redirection(
         return Redirection(
             decision=KernelDecision(
                 "ask",
-                f"file redirection to {spelled} requires approval — the"
-                " expansion spells no path, so where the write lands cannot"
-                " be judged",
+                f"file redirection to {spelled} writes to a path that is only"
+                " known when the command runs",
                 checkpoint="targeted",
                 purpose="unrecovered_local_mutation",
             ),
@@ -1131,13 +1137,10 @@ def resolve_redirection(
     if decided == "allow":
         return Redirection(decision=None, resume=target + 1)
     written = "overwrites" if existing else "creates"
-    reason = f"the redirection {written} {spelled}, a {scope} path"
-    if decided == "ask":
-        reason += " — requires approval"
     return Redirection(
         decision=KernelDecision(
             decided,
-            reason,
+            f"the redirection {written} {spelled}, a {scope} path",
             checkpoint=write_checkpoint(scope),
             purpose="unrecovered_local_mutation",
         ),

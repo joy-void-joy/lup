@@ -3231,7 +3231,10 @@ def main():
     # between a native approval and the call it approved not landing. They
     # read identically without this, which is how #180 reads as the first
     # when it is the second.
-    detail = decision.reason + uncorrelated(payload)
+    # Exit 2 turns the call back to the agent whatever its effect, so a
+    # question stopped here reaches the agent as a refusal does: reason and
+    # recovery both, since no approver reads this channel.
+    detail = decision.addressed() + uncorrelated(payload)
     # The journal is metadata-only: the reason names the refused input, which
     # for a fetch is the full URL, so only the correlation diagnosis is kept.
     record_hook_evidence(

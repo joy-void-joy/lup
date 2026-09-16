@@ -99,7 +99,7 @@ async def test_shell_example_refuses_the_command_its_policy_denies() -> None:
         {"command": semantic_policy_shell.DENIED_COMMAND},
     )
 
-    assert decision == permission("deny", f"URL is denied{ESCALATE_HINT}")
+    assert decision == permission("deny", f"URL is denied\n{ESCALATE_HINT}")
 
 
 async def test_shell_example_allows_a_read_only_command() -> None:

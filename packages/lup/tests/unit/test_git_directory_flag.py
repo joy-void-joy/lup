@@ -86,5 +86,5 @@ def test_a_read_of_a_tree_outside_the_checkout_costs_nothing_either() -> None:
 
 
 def test_the_redirect_is_still_named_in_the_way_through() -> None:
-    """`cd there && git commit` is two allowed segments, and the reason says so."""
-    assert "cd into that tree" in verdict("git -C ../other commit -m x").reason
+    """`cd there && git commit` is two allowed segments, and the agent is told."""
+    assert "cd into that tree" in verdict("git -C ../other commit -m x").recovery

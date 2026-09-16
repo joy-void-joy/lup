@@ -77,13 +77,19 @@ def policy_hook_output(
     placement its own runtime will honour — and a runtime with no such
     channel is handed the plain effect instead of an intent it would
     silently drop.
+
+    The two audiences get their own text. A question's reason is what the
+    approver reads, so the recovery rides beside it as context for the agent;
+    a refusal reaches the agent alone, so it carries both.
     """
     decision = decision.placed(escapable)
     match decision.effect:
         case "allow":
             return allow_hook(decision.sandbox, decision.reason)
         case "ask":
-            return ask_hook(decision.reason, decision.sandbox)
+            return ask_hook(decision.reason, decision.sandbox).model_copy(
+                update={"additional_context": decision.recovery}
+            )
         case "deny" if decision.escalated and relay is not None:
             # The refusal stands — nothing here can approve what no human
             # saw. What changes is that the request reaches somebody. A
@@ -92,9 +98,9 @@ def policy_hook_output(
             # blocked on a stray temp file had to park a human question over
             # housekeeping, or give up.
             relay(decision.escalated, decision.reason)
-            return deny_hook(decision.reason + RELAYED_NOTICE)
+            return deny_hook(decision.as_kernel().addressed() + RELAYED_NOTICE)
         case "deny":
-            return deny_hook(decision.reason)
+            return deny_hook(decision.as_kernel().addressed())
         case "defer":
             return LupHookOutput(reason=decision.reason)
 

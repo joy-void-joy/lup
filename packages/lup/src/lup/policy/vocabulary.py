@@ -60,6 +60,8 @@ class JudgedCommand(BaseModel, frozen=True):
 
     name: str
     reason: str
+    recovery: str = ""
+    """What the agent can do instead, where the command has a better route."""
     effects: list[EffectRow] = []
     """What this command does, where the group cannot say it for every member.
 
@@ -235,7 +237,8 @@ def judged_ask_rules(
         ),
         JudgedCommand(
             name="tee",
-            reason="writing files requires approval — prefer the Write tool",
+            reason="writing files requires approval",
+            recovery="Prefer a file write, which the edit gates read.",
             checkpoint="boundary_wide",
         ),
         JudgedCommand(
@@ -271,38 +274,39 @@ def judged_ask_rules(
             # Reached only in the query shape: every other spelling runs the
             # program after it, which `effective_command` unwraps to instead.
             read_verbs=["-v", "-V"],
-            reason="'command' runs a program through a modified lookup — name it directly",
+            reason="'command' runs a program through a modified lookup",
+            recovery="Name the program directly.",
         ),
         JudgedCommand(
             name="tar",
             # Named whole rather than scanned for a `t`, which a bundled
             # `-xzf` also contains: these are tar's own list-mode spellings.
             read_verbs=["-t", "--list", "-tf", "-tvf", "-tzf", "-tzvf", "-tjf", "-tJf"],
-            reason="archive operations write files — requires approval",
+            reason="archive operations write files",
             checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="unzip",
             read_verbs=["-l", "-t", "-v", "-z"],
-            reason="archive extraction writes files — requires approval",
+            reason="archive extraction writes files",
             checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="zip",
             read_verbs=["-sf", "--show-files"],
-            reason="archive creation writes files — requires approval",
+            reason="archive creation writes files",
             checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="gzip",
             read_verbs=["-l", "--list", "-t", "--test"],
-            reason="compression rewrites files — requires approval",
+            reason="compression rewrites files",
             checkpoint="boundary_wide",
         ),
         JudgedCommand(
             name="gunzip",
             read_verbs=["-l", "--list", "-t", "--test"],
-            reason="decompression rewrites files — requires approval",
+            reason="decompression rewrites files",
             checkpoint="boundary_wide",
         ),
         JudgedCommand(name="sudo", reason="privilege escalation requires approval"),
@@ -312,25 +316,26 @@ def judged_ask_rules(
         JudgedCommand(name="rsync", reason="remote sync requires approval"),
         JudgedCommand(
             name="wget",
-            reason="downloading files requires approval — prefer curl or WebFetch",
+            reason="downloading files requires approval",
+            recovery="Prefer curl or a web fetch, which the fetch scopes judge.",
         ),
         JudgedCommand(
             name="make",
             read_verbs=["-n", "--dry-run", "--just-print", "-q", "--question"],
-            reason="make executes arbitrary recipes — requires approval",
+            reason="make runs whatever its recipes say",
         ),
         JudgedCommand(
             name="npm",
             read_verbs=["ls", "list", "view", "outdated", "why", "explain"],
-            reason="package tools fetch and execute code — requires approval",
+            reason="package tools fetch and run code",
         ),
         JudgedCommand(
             name="pnpm",
-            reason="package tools fetch and execute code — requires approval",
+            reason="package tools fetch and run code",
         ),
         JudgedCommand(
             name="yarn",
-            reason="package tools fetch and execute code — requires approval",
+            reason="package tools fetch and run code",
         ),
         JudgedCommand(name="apt", reason="system package changes require approval"),
         JudgedCommand(name="apt-get", reason="system package changes require approval"),
@@ -359,6 +364,7 @@ def judged_ask_rules(
             bare_reads=command.bare_reads,
             checkpoint=command.checkpoint,
             reason=command.reason,
+            recovery=command.recovery,
         )
         for command in commands
     ]
@@ -368,12 +374,14 @@ def redirected_rules(
     commands: Sequence[JudgedCommand] = (
         JudgedCommand(
             name="pip",
-            reason="use uv add / uv remove instead of pip",
+            reason="pip changes packages outside this project's lockfile",
+            recovery="Use uv add / uv remove instead of pip.",
             effects=[declare("installs_dependency", scope="python package")],
         ),
         JudgedCommand(
             name="pip3",
-            reason="use uv add / uv remove instead of pip",
+            reason="pip changes packages outside this project's lockfile",
+            recovery="Use uv add / uv remove instead of pip.",
             effects=[declare("installs_dependency", scope="python package")],
         ),
     ),
@@ -397,6 +405,7 @@ def redirected_rules(
             effects=command.effects,
             refuses=command.reason,
             reason=command.reason,
+            recovery=command.recovery,
         )
         for command in commands
     ]
@@ -406,38 +415,38 @@ def reaching_builtin_rules(
     commands: Sequence[JudgedCommand] = (
         JudgedCommand(
             name="eval",
-            reason="eval runs text as code, which no gate reading the command"
-            " can see into — write the command out",
+            reason="eval runs text as code that nothing checked",
+            recovery="Write the command out.",
             effects=[declare("runs_undeclared_program", scope="unread code")],
         ),
         JudgedCommand(
             name="source",
-            reason="sourcing a script runs its code in this shell, where no"
-            " gate read it — run the commands it holds",
+            reason="sourcing a script runs code in this shell that nothing checked",
+            recovery="Run the commands it holds.",
             effects=[declare("runs_undeclared_program", scope="unread code")],
         ),
         JudgedCommand(
             name=".",
-            reason="sourcing a script runs its code in this shell, where no"
-            " gate read it — run the commands it holds",
+            reason="sourcing a script runs code in this shell that nothing checked",
+            recovery="Run the commands it holds.",
             effects=[declare("runs_undeclared_program", scope="unread code")],
         ),
         JudgedCommand(
             name="export",
-            reason="an exported variable decides what later commands see —"
-            " set it on the command that needs it",
+            reason="an exported variable changes what later commands see",
+            recovery="Set it on the command that needs it.",
             effects=[declare("mutates_environment", scope="shell variable")],
         ),
         JudgedCommand(
             name="declare",
-            reason="a declared variable decides what later commands see —"
-            " set it on the command that needs it",
+            reason="a declared variable changes what later commands see",
+            recovery="Set it on the command that needs it.",
             effects=[declare("mutates_environment", scope="shell variable")],
         ),
         JudgedCommand(
             name="unset",
-            reason="unsetting a variable decides what later commands see —"
-            " set it on the command that needs it",
+            reason="unsetting a variable changes what later commands see",
+            recovery="Set it on the command that needs it.",
             effects=[declare("mutates_environment", scope="shell variable")],
         ),
     ),
@@ -481,6 +490,7 @@ def reaching_builtin_rules(
             effects=command.effects,
             refuses=command.reason,
             reason=command.reason,
+            recovery=command.recovery,
         )
         for command in commands
     ]
@@ -537,16 +547,17 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # session either way -- which is machine state that is neither
             # this checkout nor another host.
             effects=[declare("mutates_environment", scope="credential agent")],
-            refuses="credential-agent changes stay with the user — ask them to run it",
+            refuses="credential-agent changes stay with the user",
             allow_flags=["-l", "-L"],
-            reason="credential-agent changes stay with the user — ask them to run it",
+            reason="credential-agent changes stay with the user",
+            recovery="Ask the user to run it.",
         ),
         ShellCommandRule(
             name="ssh-agent",
             effects=[declare("mutates_environment", scope="credential agent")],
-            refuses="credential-agent lifecycle stays with the user"
-            " — ask them to run it",
-            reason="credential-agent lifecycle stays with the user — ask them to run it",
+            refuses="credential-agent lifecycle stays with the user",
+            reason="credential-agent lifecycle stays with the user",
+            recovery="Ask the user to run it.",
         ),
         ShellCommandRule(
             name="sort",
@@ -1075,7 +1086,7 @@ def git_rule(
                 declare("installs_dependency", scope="repository"),
                 declare("writes_path", scope="production", write="create"),
             ],
-            reason="cloning fetches external code — requires approval",
+            reason="cloning fetches external code",
         ),
         ShellSubcommandRule(
             name="apply",
@@ -1129,7 +1140,7 @@ def git_rule(
             # Only the literal spellings: `-fdxn` is a cluster this cannot
             # read, and it keeps asking rather than trusting the `n`.
             probe_flags=["-n", "--dry-run"],
-            reason="deleting untracked files is destructive — requires approval",
+            reason="deleting untracked files is destructive",
         ),
         ShellSubcommandRule(
             name="config",
@@ -1157,9 +1168,8 @@ def git_rule(
             ],
             guarded_keys=guarded_config,
             reason=(
-                "git config can set what program git runs or which repository"
-                " it talks to — this names such a key, redirects the write to"
-                " a named file, or cannot be read"
+                "this git config write can change what program git runs or which"
+                " repository it talks to"
             ),
         ),
         ShellSubcommandRule(
@@ -1171,15 +1181,20 @@ def git_rule(
             # and `restore` do the same things to the same checkout.
             effects=[declare("destroys_uncaptured", scope="targeted")],
             refuses=(
-                "use git switch for branches or git restore for files"
+                "this project checks out through git switch and git restore"
                 if redirect_checkout
                 else ""
             ),
             checkpoint="targeted",
             reason=(
-                "use git switch for branches or git restore for files"
+                "this project checks out through git switch and git restore"
                 if redirect_checkout
                 else "checkout can discard working-tree changes"
+            ),
+            recovery=(
+                "Use git switch for branches or git restore for files."
+                if redirect_checkout
+                else ""
             ),
         ),
         ShellSubcommandRule(
@@ -1192,12 +1207,12 @@ def git_rule(
                 ShellOperationRule(
                     name="expire",
                     effects=[declare("destroys_uncaptured", scope="unrecoverable")],
-                    reason="expiring reflog entries is destructive — requires approval",
+                    reason="expiring reflog entries is destructive",
                 ),
                 ShellOperationRule(
                     name="delete",
                     effects=[declare("destroys_uncaptured", scope="unrecoverable")],
-                    reason="deleting reflog entries is destructive — requires approval",
+                    reason="deleting reflog entries is destructive",
                 ),
             ],
         ),
@@ -1330,12 +1345,12 @@ def git_rule(
                 ShellOperationRule(
                     name="remove",
                     effects=[declare("destroys_uncaptured", scope="unrecoverable")],
-                    reason="removing a worktree deletes it — requires approval",
+                    reason="removing a worktree deletes it",
                 ),
                 ShellOperationRule(
                     name="prune",
                     effects=[declare("destroys_uncaptured", scope="unrecoverable")],
-                    reason="pruning worktrees is destructive — requires approval",
+                    reason="pruning worktrees is destructive",
                 ),
             ],
             reason="this worktree operation is not classified",
@@ -1385,12 +1400,12 @@ def git_rule(
                 ShellOperationRule(
                     name="drop",
                     effects=[declare("destroys_uncaptured", scope="unrecoverable")],
-                    reason="dropping a stash is destructive — requires approval",
+                    reason="dropping a stash is destructive",
                 ),
                 ShellOperationRule(
                     name="clear",
                     effects=[declare("destroys_uncaptured", scope="unrecoverable")],
-                    reason="clearing stashes is destructive — requires approval",
+                    reason="clearing stashes is destructive",
                 ),
             ],
         ),
@@ -1442,7 +1457,7 @@ def git_rule(
                 ShellOperationRule(
                     name="prune",
                     effects=[declare("destroys_uncaptured", scope="targeted")],
-                    reason="pruning a remote is destructive — requires approval",
+                    reason="pruning a remote is destructive",
                 ),
             ],
         ),
@@ -1670,7 +1685,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                             declare("mutates_repository", scope="reversible"),
                         ],
                         reason="checking out a pull request puts its author's"
-                        " code in this tree — requires approval",
+                        " code in this tree",
                     ),
                     *compensable(
                         [
@@ -1696,14 +1711,12 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         name="review",
                         effect_class="compensable",
                         ask_flags=[*elsewhere, *attesting],
-                        reason="approving or requesting changes attests in your"
-                        " name — requires approval",
+                        reason="approving or requesting changes attests in your name",
                     ),
                     *judged(
                         ["merge"],
                         "execution",
-                        "merging runs the change into the base branch"
-                        " — requires approval",
+                        "merging runs the change into the base branch",
                     ),
                     *(
                         []
@@ -1711,8 +1724,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         else judged(
                             authoring,
                             "publication",
-                            "opening or describing a pull request publishes"
-                            " — requires approval",
+                            "opening or describing a pull request publishes",
                         )
                     ),
                 ],
@@ -1728,7 +1740,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         ["delete", "transfer"],
                         "execution",
                         "removing an issue from this repository is not"
-                        " restored by a follow-up — requires approval",
+                        " restored by a follow-up",
                     ),
                 ],
             ),
@@ -1749,7 +1761,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *lands(
                         ["download"],
                         "workflow artifact",
-                        "a workflow artifact is code from a build — requires approval",
+                        "a workflow artifact is code from a build",
                     ),
                 ],
             ),
@@ -1763,8 +1775,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *lands(
                         ["clone"],
                         "repository",
-                        "cloning brings a repository's code into this tree"
-                        " — requires approval",
+                        "cloning brings a repository's code into this tree",
                     ),
                     *judged(
                         ["create", "fork", "rename", "archive", "delete", "edit"],
@@ -1781,13 +1792,12 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *lands(
                         ["download"],
                         "release asset",
-                        "a release asset is a published binary — requires approval",
+                        "a release asset is a published binary",
                     ),
                     *judged(
                         ["create", "upload", "edit", "delete"],
                         "publication",
-                        "a release is published where people consume it"
-                        " — requires approval",
+                        "a release is published where people consume it",
                     ),
                 ],
             ),
@@ -1798,8 +1808,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *judged(
                         ["set", "delete"],
                         "repository_security",
-                        "repository secrets decide what automation can reach"
-                        " — requires approval",
+                        "repository secrets decide what automation can reach",
                     ),
                 ],
             ),
@@ -1810,7 +1819,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *judged(
                         ["set", "delete"],
                         "repository_security",
-                        "repository variables configure automation — requires approval",
+                        "repository variables configure automation",
                     ),
                 ],
             ),
@@ -1821,8 +1830,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *judged(
                         ["create", "edit", "delete"],
                         "repository_security",
-                        "rulesets are this repository's own protection"
-                        " — requires approval",
+                        "rulesets are this repository's own protection",
                     ),
                 ],
             ),
@@ -1833,8 +1841,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *judged(
                         ["run", "enable", "disable"],
                         "execution",
-                        "dispatching or gating a workflow runs something"
-                        " — requires approval",
+                        "dispatching or gating a workflow runs something",
                     ),
                 ],
             ),
@@ -1846,8 +1853,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *judged(
                         ["delete"],
                         "execution",
-                        "a deleted cache is not restored by a follow-up"
-                        " — requires approval",
+                        "a deleted cache is not restored by a follow-up",
                     ),
                 ],
             ),
@@ -1861,8 +1867,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *judged(
                         ["delete"],
                         "execution",
-                        "deleting a label removes it from everything carrying it"
-                        " — requires approval",
+                        "deleting a label removes it from everything carrying it",
                     ),
                 ],
             ),
@@ -1873,14 +1878,12 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     *lands(
                         ["clone"],
                         "gist",
-                        "a gist is somebody's code, cloned into this tree"
-                        " — requires approval",
+                        "a gist is somebody's code, cloned into this tree",
                     ),
                     *judged(
                         ["create", "edit", "delete"],
                         "publication",
-                        "a gist is published outside this repository"
-                        " — requires approval",
+                        "a gist is published outside this repository",
                     ),
                 ],
             ),
@@ -1893,7 +1896,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         ["create", "delete", "item-delete"],
                         "execution",
                         "creating or removing project state is not restored by"
-                        " a follow-up — requires approval",
+                        " a follow-up",
                     ),
                 ],
             ),
@@ -1935,7 +1938,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     "--raw-field",
                     "--input",
                 ],
-                reason="gh api can mutate anything — requires approval",
+                reason="gh api can mutate anything",
             ),
         ],
         reason="this gh command is not classified",
@@ -2048,8 +2051,9 @@ def bun_rule() -> ShellCommandRule:
                 refuses="",
                 frozen_flags=["--frozen-lockfile"],
                 reason="an install free to rewrite the lockfile resolves what"
-                " this project depends on anew — requires approval; a frozen"
-                " one (`--frozen-lockfile`) restores what it already pins",
+                " this project depends on anew",
+                recovery="`--frozen-lockfile` restores what the lockfile already"
+                " pins, and runs without asking.",
             ),
             *[
                 ShellSubcommandRule(

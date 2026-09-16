@@ -500,7 +500,11 @@ def test_a_refusal_is_what_widens_the_routed_set() -> None:
     anticipates the name, every adopter refusing nothing pays the
     unclassified ``ask`` for a tool they have no opinion about.
     """
-    refusal = RefusedTool(tool="Artifact", reason="publishing leaves the repository")
+    refusal = RefusedTool(
+        tool="Artifact",
+        reason="publishing leaves the repository",
+        recovery="Write the report under tmp/ instead.",
+    )
 
     assert "Artifact" not in CLAUDE_SEMANTICS.routed_tools
     assert "Artifact" in CLAUDE_SEMANTICS.also_refusing([refusal]).routed_tools
@@ -512,8 +516,18 @@ def test_a_refusal_is_what_widens_the_routed_set() -> None:
 def test_a_refused_tool_is_routed_exactly_once() -> None:
     """A refusal narrowed by specifier still names one tool to register."""
     refusals = [
-        RefusedTool(tool="Skill", specifier="artifact-design", reason="leaves it"),
-        RefusedTool(tool="Skill", specifier="page-design", reason="leaves it too"),
+        RefusedTool(
+            tool="Skill",
+            specifier="artifact-design",
+            reason="leaves it",
+            recovery="Stay in the repository.",
+        ),
+        RefusedTool(
+            tool="Skill",
+            specifier="page-design",
+            reason="leaves it too",
+            recovery="Stay in the repository.",
+        ),
     ]
 
     routed = CLAUDE_SEMANTICS.also_refusing(refusals).routed_tools
@@ -529,7 +543,13 @@ def test_refusing_a_tool_the_runtime_decodes_is_refused_outright() -> None:
     """
     with pytest.raises(ValueError, match="answer first"):
         CLAUDE_SEMANTICS.also_refusing(
-            [RefusedTool(tool="Bash", reason="shells leave the repository")]
+            [
+                RefusedTool(
+                    tool="Bash",
+                    reason="shells leave the repository",
+                    recovery="Stay in the repository.",
+                )
+            ]
         )
 
 

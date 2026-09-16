@@ -26,20 +26,28 @@ from .rows import PathRoleKind, PathRoleName, PathRoleRow, DisplacedTargetRow
 GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 GENERATED_PLUGIN_REFUSAL = (
-    "a native plugin tree is compiled from typed source, and the running"
-    " runtime already loaded it — edit the policy source, run"
-    " `lup-devtools harness generate all`, then ask the user to restart"
-    " claude or codex so the change takes effect"
+    "this edits a generated plugin tree, which is compiled from source and"
+    " already loaded"
+)
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+GENERATED_PLUGIN_RECOVERY = (
+    "Edit the policy source, run `lup-devtools harness generate all`, then ask"
+    " the user to restart claude or codex so the change takes effect."
 )
 
 
 # lup: ignore[constant-declaration] — the words this gate says, in a kernel
 # compiled hermetically into a bare dispatcher that takes no arguments
 FOREIGN_REPOSITORY_REFERRAL = (
-    "this file belongs to a different repository, whose conventions, size"
-    " budget and gates are its own — this project's rule checker has nothing"
-    " to say about it and is not applying any of them. Edit it as that"
-    " repository would want it, not as this one would"
+    "this file belongs to a different repository, which this project's rules"
+    " do not cover"
+)
+# lup: ignore[constant-declaration] — the words this gate says, in a kernel
+# compiled hermetically into a bare dispatcher that takes no arguments
+FOREIGN_REPOSITORY_RECOVERY = (
+    "That repository's conventions, size budget and gates are its own, and"
+    " this project's rule checker is not applying any of them. Edit it as that"
+    " repository would want it, not as this one would."
 )
 """What a foreign-repository edit is told, in place of a convention refusal.
 

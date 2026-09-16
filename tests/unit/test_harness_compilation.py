@@ -1844,7 +1844,7 @@ def test_generated_claude_hook_records_metadata_only_evidence(tmp_path: Path) ->
     timestamps = [record.pop("timestamp") for record in records]
     assert all(timestamp.endswith("+00:00") for timestamp in timestamps)
     detail = records[1].pop("detail")
-    assert "interpreters" in detail
+    assert "bare interpreter" in detail
     common = {"schema_version": 1, "event_name": "PreToolUse"}
     common.update(session_id="session-one", turn_id="turn-one")
     common.update(tool_use_id="tool-one", tool_name="Bash")
@@ -1927,7 +1927,7 @@ def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     )
     assert isinstance(result, sh.RunningCommand)
     assert result.exit_code == 2
-    assert b"interpreters" in result.stderr
+    assert b"bare interpreter" in result.stderr
 
 
 def test_generated_codex_pretool_accepts_a_safe_requested_escape() -> None:
@@ -2106,7 +2106,7 @@ def test_generated_codex_permission_request_denies_unapproved_code() -> None:
     )
     assert isinstance(result, sh.RunningCommand)
     assert result.exit_code == 2
-    assert b"interpreters" in result.stderr
+    assert b"bare interpreter" in result.stderr
 
 
 def test_generated_codex_hook_refuses_the_declared_calls() -> None:
@@ -2237,7 +2237,7 @@ def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
     assert isinstance(result, sh.RunningCommand)
     output = ClaudeHookOutput.model_validate_json(result.stdout)
     assert output.hook_specific_output.permission_decision == "deny"
-    assert "interpreters" in output.hook_specific_output.permission_decision_reason
+    assert "bare interpreter" in output.hook_specific_output.permission_decision_reason
 
 
 @pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
@@ -2272,7 +2272,7 @@ def test_generated_dispatcher_resolves_its_runtime_from_anywhere(
         case _:
             assert result.exit_code == 2
             reason = result.stderr.decode()
-    assert "interpreters" in reason
+    assert "bare interpreter" in reason
 
 
 def test_static_checking_reaches_every_shipped_dispatcher() -> None:

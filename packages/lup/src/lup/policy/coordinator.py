@@ -302,10 +302,8 @@ class OperationCoordinator:
                 decision=Decision.of(
                     KernelDecision(
                         "deny",
-                        "the operation changed after it was approved —"
-                        f" {changed_clause(operation, entry.operation)}, so"
-                        " this is a fresh question rather than a stale"
-                        " approval",
+                        "the operation changed after it was approved:"
+                        f" {changed_clause(operation, entry.operation)}",
                         cause="deliberate",
                         rule=entry.rule,
                     )

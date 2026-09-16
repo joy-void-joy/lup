@@ -116,7 +116,7 @@ def test_the_hook_refuses_a_directive_the_audit_would_refuse(rule_id: str) -> No
 
     assert decision is not None
     assert decision.effect == "deny"
-    assert "write the replacement" in decision.reason
+    assert "write the replacement" in decision.recovery
 
 
 def test_a_soft_rule_is_still_honoured_by_the_hook() -> None:

@@ -65,6 +65,7 @@ def test_a_redirection_into_a_protected_path_keeps_its_question() -> None:
             kind="exact",
             value="docs/owned.md",
             reason="human-owned",
+            recovery="",
             allow_autonomous=False,
         )
     ]

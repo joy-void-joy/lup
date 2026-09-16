@@ -82,8 +82,8 @@ agent would spend a turn discovering the call still ran inside.
 
 # lup: ignore[constant-declaration] — migration wording, declared with the alias it annotates
 LEGACY_NOTICE = (
-    " — '# lup: escalate:' is read as escalate[decision]; write the kind"
-    " explicitly, and use escalate[sandbox] to ask for the host"
+    "'# lup: escalate:' is read as escalate[decision]; write the kind"
+    " explicitly, and use escalate[sandbox] to ask for the host."
 )
 """What the bare spelling adds to the verdict it produces.
 
@@ -127,7 +127,7 @@ class EscalationRequest:
         return kind in self.kinds
 
     def notice(self) -> str:
-        """What this request adds to a verdict's reason, beyond its own words."""
+        """What this request tells the agent about its own spelling, or ``""``."""
         return LEGACY_NOTICE if self.legacy else ""
 
 

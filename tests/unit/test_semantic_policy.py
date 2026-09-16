@@ -472,9 +472,16 @@ where the declaration removed the cover it reaches whoever can answer for
 it — a reviewer, or a refusal where there is none."""
 
 FIXTURE_REFUSED_TOOLS = [
-    RefusedTool(tool="Quuxify", reason="quuxifying leaves the repository"),
     RefusedTool(
-        tool="Skill", specifier="quux-design", reason="designing quux leaves it too"
+        tool="Quuxify",
+        reason="quuxifying leaves the repository",
+        recovery="Quuxify it under tmp/ instead.",
+    ),
+    RefusedTool(
+        tool="Skill",
+        specifier="quux-design",
+        reason="designing quux leaves it too",
+        recovery="Design it under tmp/ instead.",
     ),
 ]
 """One whole-tool refusal and one narrowed to a single subject.
@@ -2103,7 +2110,7 @@ def test_a_tool_refusal_names_what_to_reach_for_instead() -> None:
     decision = policy.decide(refused_tool_call("Quuxify", {"content": "a page"}))
 
     assert "quuxifying leaves the repository" in decision.reason
-    assert "lup: escalate:" in decision.reason
+    assert "lup: escalate:" in decision.recovery
 
 
 def test_malformed_native_fetch_urls_become_conservative_unknown_tools() -> None:
@@ -2940,7 +2947,7 @@ def test_sandbox_escape_reenters_the_lattice_the_boundary_was_answering() -> Non
         ShellCommand(command="cat x ;& rm -rf ~", unsandboxed=True)
     )
     assert unreadable.effect == "deny"
-    assert "escalate" in unreadable.reason
+    assert "escalate" in unreadable.recovery
 
 
 def test_an_operation_the_profile_cannot_place_is_refused_by_capability() -> None:
@@ -3030,7 +3037,7 @@ def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     )
     assert blocked.effect == "deny"
     assert "escalate" not in blocked.reason
-    assert "allowed vocabulary" in blocked.reason
+    assert "allowed vocabulary" in blocked.recovery
 
 
 def test_a_reviewed_worker_is_told_the_route_it_actually_has() -> None:
@@ -3050,12 +3057,12 @@ def test_a_reviewed_worker_is_told_the_route_it_actually_has() -> None:
 
     assert relayed.effect == "ask"
     assert alone.effect == "deny"
-    assert "reshape the command" in alone.reason
+    assert "Reshape the command" in alone.recovery
     assert (
         "request_allowance"
         in ShellPolicy(SHELL_RULES, interactive=False, relayed=True)
         .decide(ShellCommand(command="cat x ;& rm -rf ~"))
-        .reason
+        .recovery
     )
 
 
@@ -3092,7 +3099,7 @@ def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
 
     denied = policy.decide(batch)
     assert denied.effect == "deny"
-    assert "(rule any-type — see docs/rules.md)" in denied.reason
+    assert "(rule any-type)" in denied.reason and "docs/rules.md" in denied.recovery
     protected = EditBatch(
         changes=[EditChange(path=Path("pyproject.toml"), after="version = '2'")]
     )
@@ -3325,7 +3332,7 @@ def test_only_the_dead_half_of_a_directive_is_refused() -> None:
 
     assert decision.effect == "deny"
     assert "names dict-get" in decision.reason
-    assert "Drop dict-get from it" in decision.reason
+    assert "Drop dict-get from it" in decision.recovery
 
 
 def test_a_rule_another_scanner_owns_is_not_refused_over() -> None:
@@ -3423,7 +3430,7 @@ def test_a_creation_names_the_suppressions_it_arrives_carrying() -> None:
         in decision.reason
     )
     assert policy.decide(plain).reason == (
-        "full-file writes require approval — src/new.py arrives whole, 1 line at once"
+        "src/new.py is written whole, 1 line at once"
     )
 
 
@@ -4419,7 +4426,7 @@ def test_editing_a_compiled_plugin_tree_is_refused_by_the_file_gate_too() -> Non
             python_source=True,
         )
         assert decision.effect == "deny", tree
-        assert "compiled from typed source" in decision.reason, tree
+        assert "compiled from source" in decision.reason, tree
 
 
 def test_a_note_whose_words_stay_in_the_file_was_moved_rather_than_deleted() -> None:
@@ -4463,7 +4470,7 @@ def test_a_note_whose_words_leave_the_file_is_still_a_deletion() -> None:
 
     assert decision.effect == "deny"
     assert "removes inline review feedback" in decision.reason
-    assert "dev comments --withdraw" in decision.reason
+    assert "dev comments --withdraw" in decision.recovery
 
 
 def test_moving_one_note_does_not_cover_deleting_another() -> None:
@@ -4532,7 +4539,7 @@ def test_a_frozen_restore_is_allowed_for_every_package_manager_alike() -> None:
     bare = decide_command_rows(["bun", "install"], bun_rows)
     assert bare.effect == "ask"
     assert "free to rewrite the lockfile" in bare.reason
-    assert "`--frozen-lockfile`" in bare.reason
+    assert "`--frozen-lockfile`" in bare.recovery
     added = decide_command_rows(["bun", "add", "zod"], bun_rows)
     assert added.effect == "ask" and "adding a dependency" in added.reason
 

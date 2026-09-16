@@ -268,7 +268,9 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
         word = words[position]
         if word in ("-ok", "-okdir"):
             return KernelDecision(
-                "deny", "find -ok prompts on a tty — use -exec instead"
+                "deny",
+                "find -ok waits for an answer on a terminal nobody is at",
+                recovery="Use -exec instead.",
             )
         if word in ("-exec", "-execdir"):
             terminator = next(
@@ -313,14 +315,16 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
         ):
             return KernelDecision("allow", "native-managed skill script")
         return KernelDecision(
-            "deny", f"{executable}: bare interpreters and inline code are not allowed"
+            "deny",
+            f"{executable}: a bare interpreter or inline code leaves nothing"
+            " behind to review",
+            recovery="Write the code to a named script file and run that.",
         )
     if executable == "git" and any("ext::" in word for word in words):
         transport = next(word for word in words if "ext::" in word)
         return KernelDecision(
             "ask",
-            f"the git ext transport in {transport!r} can execute commands"
-            " — requires approval",
+            f"the git ext transport in {transport!r} can run commands",
         )
     if executable == "git":
         recognized = (
@@ -383,7 +387,11 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
         return decide_awk_words(words)
     if executable == "uvx":
         if len(words) > 1 and posixpath.basename(words[1]) in INTERPRETERS:
-            return KernelDecision("deny", f"uvx {words[1]}: inline code is not allowed")
+            return KernelDecision(
+                "deny",
+                f"uvx {words[1]}: inline code leaves nothing behind to review",
+                recovery="Write the code to a named script file and run that.",
+            )
         return unjudged("uvx command is not classified")
     if executable == "uv" and len(words) > 1:
         return decide_uv(
@@ -433,9 +441,8 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
         SUBSTITUTION_SENTINEL in word for word in words[1:]
     ) and not argument_safe_words(words, context):
         return unjudged(
-            "a command substitution result could become a guarded flag — run"
-            " it in its own call and splice the literal output"
-        )
+            "a command substitution result could become a guarded flag"
+        ).advising("Run it in its own call and splice the literal output.")
     decision = decide_segment_words(words, context)
     if is_help_probe(words[1:]):
         return decision.revised(
@@ -1212,7 +1219,7 @@ def decide_shell(
     reading = read_escalation(command)
     if reading.refusal:
         return KernelDecision(
-            "deny", reading.refusal + hint, cause="deliberate", hard=True
+            "deny", reading.refusal, cause="deliberate", hard=True, recovery=hint
         )
     return settle(
         SettlementFacts(

@@ -61,11 +61,19 @@ from .semantics import UnjudgedAmbient
 
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 IN_PLACE_SED_REFUSAL = (
-    "in-place sed bypasses every gate an edit is judged by — the anti-pattern"
-    " table, the review-note gate, the size gate, and the protected paths. For"
-    " a rename across many sites, `rename_symbol` resolves scopes an"
+    "in-place sed names no file, so what it rewrites cannot be checked"
+)
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+IN_PLACE_SED_RECOVERY = (
+    "For a rename across many sites, `rename_symbol` resolves scopes an"
     " exact-string substitution cannot tell apart; otherwise make the change"
-    " through the edit tool, which is what those gates read"
+    " with a file edit, which the edit gates read."
+)
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+UNREAD_SED_RECOVERY = (
+    "The edit gates judge the file a rewrite would produce, and it could not be"
+    " produced here. Make the change with a file edit, which carries its own"
+    " content."
 )
 
 
@@ -129,6 +137,7 @@ def row_verdict(
         purpose=purpose,
         rule=row["rule"],
         evaluator="shell-vocabulary",
+        recovery=row["recovery"] if effect in ("ask", "deny") else "",
     )
 
 
@@ -591,9 +600,8 @@ def apply_command_row(
             return row_verdict(
                 row,
                 "ask",
-                f"{named} names the destination by {form} rather than by a"
-                " remote this repository holds — sending work there requires"
-                " approval",
+                f"{named} sends work to a {form} rather than to a remote this"
+                " repository holds",
             )
     if stated == "allow" and row["ask_refspecs"] and not probing:
         # No opacity test of its own: a row declaring refspec effects declares
@@ -794,15 +802,15 @@ def split_subcommand(
                     position += 2
                     continue
             redirect = (
-                " — or cd into that tree and run it there"
+                "Or cd into that tree and run it there."
                 if flag_matches(word, value_flags)
                 else ""
             )
             return row_verdict(
                 default,
                 "ask",
-                f"{executable} global flag {word} requires approval{redirect}",
-            )
+                f"{executable} global flag {word} points the command somewhere else",
+            ).advising(redirect)
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])
 
@@ -915,18 +923,19 @@ def decide_sed_words(words: list[str], context: "SedContext") -> KernelDecision:
     if not invocation["in_place"]:
         return KernelDecision("allow", "read-only sed script")
     if not invocation["targets"]:
-        return KernelDecision("deny", IN_PLACE_SED_REFUSAL)
+        return KernelDecision(
+            "deny", IN_PLACE_SED_REFUSAL, recovery=IN_PLACE_SED_RECOVERY
+        )
     documents = {row["target"]: row for row in context["rewritten_documents"]}
     verdicts = [
         rewrite_verdict(target, documents[target], context)
         if target in documents
         else KernelDecision(
             "ask",
-            f"sed would rewrite {target} in place and nothing read the result:"
-            " the edit gates judge the file this would produce, and that file"
-            " could not be produced. Make the change through the edit tool,"
-            " which carries its own content",
+            f"sed would rewrite {target} in place, and the result could not be"
+            " read to check it",
             purpose="quality_review",
+            recovery=UNREAD_SED_RECOVERY,
         )
         for target in invocation["targets"]
     ]
@@ -977,8 +986,8 @@ def rewrite_verdict(
         return verdict
     return KernelDecision(
         verdict.effect,
-        f"sed would rewrite {target} in place, and the edit gates refuse what"
-        f" it would produce: {verdict.reason}",
+        f"sed would rewrite {target} in place: {verdict.reason}",
+        recovery=verdict.recovery,
         checkpoint=verdict.checkpoint,
         purpose=verdict.purpose,
         rule=verdict.rule,
@@ -1167,9 +1176,7 @@ def decide_curl_words(
     if expect_value or expect_method:
         return unjudged("curl option has no value")
     if method not in ("GET", "HEAD"):
-        return KernelDecision(
-            "ask", f"curl {method} can change remote state — requires approval"
-        )
+        return KernelDecision("ask", f"curl {method} can change remote state")
     if not urls:
         return unjudged("curl has no URL")
     for url in urls:
@@ -1257,7 +1264,7 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
     if method.upper() not in GH_API_READ_METHODS:
         return KernelDecision(
             "ask",
-            f"gh api {method} can change remote state — requires approval",
+            f"gh api {method} can change remote state",
             purpose="external_consequence",
             rule="shell:gh.api",
             evaluator="gh-api-screen",
@@ -1364,6 +1371,7 @@ def declared_target_decision(
             if stated == "ask"
             else None
         ),
+        recovery=declared["recovery"] if stated in ("ask", "deny") else "",
     )
 
 
@@ -1432,7 +1440,7 @@ def decide_uv(
             return KernelDecision(
                 "ask",
                 f"{redirect} takes packages from somewhere this project does not"
-                " declare — requires approval",
+                " declare",
             )
         return KernelDecision("allow", "writes what this project already declares")
     if subcommand == "cache":
@@ -1471,22 +1479,24 @@ def decide_uv(
             subject = "uv run -c" if run_command == "-c" else f"uv run {run_command} -c"
             return KernelDecision(
                 "deny",
-                f"{subject}: inline code is not allowed — a named script"
-                " file can be reviewed and run again",
+                f"{subject}: inline code leaves nothing behind to review",
+                recovery="Write it to a named script file, which can be reviewed"
+                " and run again.",
             )
         if module_root is not None and declared_root is None:
             return KernelDecision(
                 "deny",
                 f"uv run -m: `{module_root}` is not a module root this project"
-                " declares — name a script file instead, or declare the root"
-                " as a runner target",
+                " declares",
+                recovery="Name a script file instead, or declare the root as a"
+                " runner target.",
             )
         if interpreted and not named:
             return KernelDecision(
                 "deny",
-                f"the bare interpreter uv run {run_command}: an interpreter with"
-                " nothing to run leaves nothing behind to read — name a script"
-                " file",
+                f"the bare interpreter uv run {run_command} runs whatever it is"
+                " fed, and leaves nothing behind to review",
+                recovery="Name a script file.",
             )
         # Between the refusal above and the target's own verdict below, which
         # is where the lattice would put it anyway: a deny outranks an ask,

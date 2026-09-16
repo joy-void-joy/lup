@@ -79,14 +79,10 @@ def decide_fetch(
         hostname = parsed.hostname
         port = parsed.port
     except ValueError as error:
-        return KernelDecision(
-            "ask", f"the URL {url!r} does not parse ({error}) — requires approval"
-        )
+        return KernelDecision("ask", f"the URL {url!r} does not parse ({error})")
     if not parsed.scheme or hostname is None:
         missing = "scheme" if not parsed.scheme else "host"
-        return KernelDecision(
-            "ask", f"the URL {url!r} names no {missing} — requires approval"
-        )
+        return KernelDecision("ask", f"the URL {url!r} names no {missing}")
     denied = next(
         (
             scope

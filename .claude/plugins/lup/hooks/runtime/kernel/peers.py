@@ -66,8 +66,16 @@ def decide_peer_send(
         return KernelDecision("defer", "no member of this repository's roster")
     why = escalated_reason(values)
     if why:
-        return KernelDecision("ask", f"escalated ({why}): {row['send_reason']}")
-    return KernelDecision("deny", f"{named}: {row['send_reason']}" + TOOL_ESCALATE_HINT)
+        return KernelDecision(
+            "ask",
+            f"escalated ({why}): {row['send_reason']}",
+            recovery=row["send_recovery"],
+        )
+    return KernelDecision(
+        "deny",
+        f"{named}: {row['send_reason']}",
+        recovery=f"{row['send_recovery']} {TOOL_ESCALATE_HINT}",
+    )
 
 
 def decide_peer_listing(row: PeerPolicyRow | None) -> KernelDecision:
@@ -117,7 +125,9 @@ def decide_foreign_claim(
     if row is None or not holders:
         return None
     return KernelDecision(
-        "ask", f"{path} is held by {', '.join(holders)} — {row['claim_reason']}"
+        "ask",
+        f"{path} is held by {', '.join(holders)} — {row['claim_reason']}",
+        recovery=row["claim_recovery"],
     )
 
 

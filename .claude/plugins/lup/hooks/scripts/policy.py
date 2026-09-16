@@ -3183,6 +3183,10 @@ def rendered(decision, payload, placed, attached):
     agent set for itself is not that request.
     """
     settled = decision.placed(escapable=True)
+    # The prompt is the approver's, so a question's recovery rides beside it
+    # as the agent's context; a refusal reaches only the agent and says both.
+    beside = settled.recovery if settled.effect == "ask" else ""
+    context = "\n\n".join(text for text in (attached, beside) if text)
 
     def carried(result):
         """The same answer, with whatever context rides beside the verdict.
@@ -3193,7 +3197,7 @@ def rendered(decision, payload, placed, attached):
         needs to carry it. An empty attachment adds no key, so a call with
         nothing to say returns exactly what it returned before.
         """
-        if not attached:
+        if not context:
             return result
         specific = (
             result["hookSpecificOutput"]
@@ -3202,7 +3206,7 @@ def rendered(decision, payload, placed, attached):
         )
         return {
             **result,
-            "hookSpecificOutput": {**specific, "additionalContext": attached},
+            "hookSpecificOutput": {**specific, "additionalContext": context},
         }
 
     if settled.effect == "defer":
@@ -3210,7 +3214,9 @@ def rendered(decision, payload, placed, attached):
     answer = {
         "hookEventName": "PreToolUse",
         "permissionDecision": settled.effect,
-        "permissionDecisionReason": settled.reason,
+        "permissionDecisionReason": (
+            settled.addressed() if settled.effect == "deny" else settled.reason
+        ),
     }
 
     def surfaced(result):

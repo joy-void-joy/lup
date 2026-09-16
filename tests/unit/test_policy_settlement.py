@@ -192,7 +192,7 @@ def test_the_legacy_bare_marker_works_and_says_it_is_an_alias() -> None:
     )
 
     assert settled.effect == "ask"
-    assert "escalate[decision]" in settled.reason
+    assert "escalate[decision]" in settled.recovery
 
 
 def test_sandbox_escalation_asks_before_an_allowed_operation_leaves() -> None:
@@ -349,7 +349,7 @@ def test_a_capture_that_failed_keeps_the_question_and_says_which_it_was() -> Non
     settled = settle(facts(local_loss(), checkpoint="failed"))
 
     assert settled.effect == "ask"
-    assert "capture that would have settled this failed" in settled.reason
+    assert "snapshot that would have made this undoable failed" in settled.reason
     assert settled.visibility == "notice"
 
 
@@ -453,7 +453,7 @@ def test_a_question_no_eligible_reviewer_can_be_reached_from_does_not_run() -> N
 
     assert contained.effect == "deny"
     assert exposed.effect == "deny"
-    assert "no eligible reviewer" in exposed.reason
+    assert "nobody who could approve it is reachable" in exposed.reason
 
 
 def test_a_judged_refusal_is_not_rescued_by_a_boundary() -> None:
@@ -566,7 +566,7 @@ def test_a_question_nobody_can_answer_is_refused_and_not_carried() -> None:
 
     assert contained.effect == "deny"
     assert escalated.effect == "deny"
-    assert "no eligible reviewer" in contained.reason
+    assert "nobody who could approve it is reachable" in contained.reason
 
 
 def test_what_the_boundary_still_carries_is_only_what_nobody_judged() -> None:

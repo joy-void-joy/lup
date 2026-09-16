@@ -462,7 +462,7 @@ def test_the_gate_asks_where_nothing_resolved_the_receiver() -> None:
     )
 
     assert decision is not None and decision.effect == "ask"
-    assert "could not resolve" in decision.reason
+    assert "could not resolve" in decision.recovery
 
 
 def test_a_resolved_receiver_is_admitted_without_a_directive() -> None:

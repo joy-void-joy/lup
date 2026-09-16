@@ -17,10 +17,11 @@ class RefusedTool(BaseModel, frozen=True):
 
     ``specifier`` narrows the refusal to a single subject of a tool — the
     ``artifact-design`` in ``Skill(artifact-design)`` — and is empty when the
-    whole tool is refused. ``reason`` is required because it is the whole of
-    what the agent is told: a refusal that says no and nothing else leaves the
-    next attempt to guesswork, which is what the generated-tree refusal avoids
-    by naming the command that does reach the same end.
+    whole tool is refused. ``reason`` says what the call would have done, in
+    words the person answering an escalated one reads. ``recovery`` is required
+    because it is what the agent does next: a refusal that says no and nothing
+    else leaves the next attempt to guesswork, which is what the generated-tree
+    refusal avoids by naming the command that does reach the same end.
 
     A refusal is never absolute. The kernel promotes it to an approval
     question when the call's own input carries the escalation marker, so a
@@ -30,6 +31,7 @@ class RefusedTool(BaseModel, frozen=True):
     tool: str
     specifier: str = ""
     reason: str = Field(min_length=1)
+    recovery: str = Field(min_length=1)
 
     def spelling(self) -> str:
         """``Tool`` or ``Tool(specifier)``, as a permission rule names it."""
@@ -65,6 +67,11 @@ def routed_for(routed: list[str], refused: list[RefusedTool]) -> list[str]:
 def erase_refused_tools(rules: list[RefusedTool]) -> list[RefusedToolRow]:
     """Erase validated refusals into the primitive rows the kernel matches."""
     return [
-        RefusedToolRow(tool=rule.tool, specifier=rule.specifier, reason=rule.reason)
+        RefusedToolRow(
+            tool=rule.tool,
+            specifier=rule.specifier,
+            reason=rule.reason,
+            recovery=rule.recovery,
+        )
         for rule in rules
     ]

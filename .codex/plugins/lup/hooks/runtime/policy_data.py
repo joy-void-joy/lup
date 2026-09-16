@@ -244,60 +244,70 @@ PATH_RULES: list[PathRuleRow] = [
         "kind": "subtree",
         "value": ".claude",
         "reason": "protected path requires approval",
+        "recovery": "",
         "allow_autonomous": True,
     },
     {
         "kind": "subtree",
         "value": ".codex",
         "reason": "protected path requires approval",
+        "recovery": "",
         "allow_autonomous": True,
     },
     {
         "kind": "subtree",
         "value": "pyproject.toml",
         "reason": "protected path requires approval",
+        "recovery": "",
         "allow_autonomous": True,
     },
     {
         "kind": "subtree",
         "value": "sync.json",
         "reason": "protected path requires approval",
+        "recovery": "",
         "allow_autonomous": True,
     },
     {
         "kind": "subtree",
         "value": "sync.json.local",
         "reason": "protected path requires approval",
+        "recovery": "",
         "allow_autonomous": True,
     },
     {
         "kind": "subtree",
         "value": "packages/lup/src/lup/policy",
         "reason": "protected path requires approval",
+        "recovery": "",
         "allow_autonomous": True,
     },
     {
         "kind": "subtree",
         "value": "src/lup_template/harness/catalog.py",
         "reason": "protected path requires approval",
+        "recovery": "",
         "allow_autonomous": True,
     },
     {
         "kind": "exact",
         "value": "README.md",
-        "reason": "README.md is human-authored; propose changes via AskUserQuestion instead of editing",
+        "reason": "README.md is human-authored",
+        "recovery": "Propose the exact change and let the user apply it.",
         "allow_autonomous": False,
     },
     {
         "kind": "name_prefix",
         "value": ".env",
         "reason": "protected path requires approval",
+        "recovery": "",
         "allow_autonomous": False,
     },
     {
         "kind": "new_devtools",
         "value": "src",
         "reason": "new devtools module requires approval",
+        "recovery": "",
         "allow_autonomous": False,
     },
 ]
@@ -2064,6 +2074,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:cat",
@@ -2102,6 +2113,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:echo",
@@ -2140,6 +2152,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:printf",
@@ -2178,6 +2191,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:test",
@@ -2216,6 +2230,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:file",
@@ -2254,6 +2269,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:wc",
@@ -2292,6 +2308,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:head",
@@ -2330,6 +2347,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:tail",
@@ -2368,6 +2386,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:nl",
@@ -2406,6 +2425,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:tac",
@@ -2444,6 +2464,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:rev",
@@ -2482,6 +2503,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:fold",
@@ -2520,6 +2542,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:cut",
@@ -2558,6 +2581,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:tr",
@@ -2596,6 +2620,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:expr",
@@ -2634,6 +2659,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:numfmt",
@@ -2672,6 +2698,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:comm",
@@ -2710,6 +2737,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:join",
@@ -2748,6 +2776,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:paste",
@@ -2786,6 +2815,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:column",
@@ -2824,6 +2854,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:col",
@@ -2862,6 +2893,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:uniq",
@@ -2900,6 +2932,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:grep",
@@ -2938,6 +2971,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:egrep",
@@ -2976,6 +3010,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:fgrep",
@@ -3014,6 +3049,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:diff",
@@ -3052,6 +3088,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:cmp",
@@ -3090,6 +3127,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:jq",
@@ -3128,6 +3166,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:stat",
@@ -3166,6 +3205,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:basename",
@@ -3204,6 +3244,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:dirname",
@@ -3242,6 +3283,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:realpath",
@@ -3280,6 +3322,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:readlink",
@@ -3318,6 +3361,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:date",
@@ -3356,6 +3400,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:seq",
@@ -3394,6 +3439,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:du",
@@ -3432,6 +3478,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:df",
@@ -3470,6 +3517,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:cksum",
@@ -3508,6 +3556,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:md5sum",
@@ -3546,6 +3595,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:sha256sum",
@@ -3584,6 +3634,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:which",
@@ -3622,6 +3673,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:man",
@@ -3660,6 +3712,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:true",
@@ -3698,6 +3751,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:false",
@@ -3736,6 +3790,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:set",
@@ -3774,6 +3829,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:continue",
@@ -3812,6 +3868,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:break",
@@ -3850,6 +3907,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:shift",
@@ -3888,6 +3946,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:return",
@@ -3926,6 +3985,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:local",
@@ -3964,6 +4024,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:exit",
@@ -4002,6 +4063,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:sleep",
@@ -4040,6 +4102,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:pwd",
@@ -4078,6 +4141,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:id",
@@ -4116,6 +4180,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:whoami",
@@ -4154,6 +4219,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:hostname",
@@ -4192,6 +4258,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:uname",
@@ -4230,6 +4297,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:printenv",
@@ -4268,6 +4336,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:env",
@@ -4306,6 +4375,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:ps",
@@ -4344,6 +4414,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:pgrep",
@@ -4382,6 +4453,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:pidof",
@@ -4420,6 +4492,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:lsof",
@@ -4458,6 +4531,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:free",
@@ -4496,6 +4570,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:uptime",
@@ -4534,6 +4609,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:nproc",
@@ -4572,6 +4648,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:xxd",
@@ -4610,6 +4687,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:od",
@@ -4648,6 +4726,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:strings",
@@ -4686,6 +4765,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:getent",
@@ -4724,6 +4804,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:zcat",
@@ -4762,6 +4843,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:[",
@@ -4800,6 +4882,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:rm",
@@ -4838,6 +4921,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "deleting files requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:rmdir",
@@ -4876,6 +4960,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "deleting directories requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:mv",
@@ -4914,6 +4999,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "moving files requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:cp",
@@ -4952,6 +5038,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "copying over files requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:chmod",
@@ -4990,6 +5077,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing permissions requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:chown",
@@ -5028,6 +5116,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing ownership requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:ln",
@@ -5066,6 +5155,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "creating links requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:tee",
@@ -5103,7 +5193,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "writing files requires approval \u2014 prefer the Write tool",
+        "reason": "writing files requires approval",
+        "recovery": "Prefer a file write, which the edit gates read.",
     },
     {
         "rule": "shell:dd",
@@ -5146,6 +5237,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "raw device or file writes require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:mount",
@@ -5184,6 +5276,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": True,
         "value_flags": [],
         "reason": "mounting a filesystem requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:truncate",
@@ -5222,6 +5315,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "truncating files requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:kill",
@@ -5260,6 +5354,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "terminating processes requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:pkill",
@@ -5298,6 +5393,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "terminating processes requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:command",
@@ -5338,7 +5434,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "'command' runs a program through a modified lookup \u2014 name it directly",
+        "reason": "'command' runs a program through a modified lookup",
+        "recovery": "Name the program directly.",
     },
     {
         "rule": "shell:tar",
@@ -5385,7 +5482,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "archive operations write files \u2014 requires approval",
+        "reason": "archive operations write files",
+        "recovery": "",
     },
     {
         "rule": "shell:unzip",
@@ -5428,7 +5526,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "archive extraction writes files \u2014 requires approval",
+        "reason": "archive extraction writes files",
+        "recovery": "",
     },
     {
         "rule": "shell:zip",
@@ -5469,7 +5568,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "archive creation writes files \u2014 requires approval",
+        "reason": "archive creation writes files",
+        "recovery": "",
     },
     {
         "rule": "shell:gzip",
@@ -5512,7 +5612,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "compression rewrites files \u2014 requires approval",
+        "reason": "compression rewrites files",
+        "recovery": "",
     },
     {
         "rule": "shell:gunzip",
@@ -5555,7 +5656,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "decompression rewrites files \u2014 requires approval",
+        "reason": "decompression rewrites files",
+        "recovery": "",
     },
     {
         "rule": "shell:sudo",
@@ -5594,6 +5696,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "privilege escalation requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:doas",
@@ -5632,6 +5735,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "privilege escalation requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:ssh",
@@ -5670,6 +5774,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "remote access requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:scp",
@@ -5708,6 +5813,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "remote copies require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:rsync",
@@ -5746,6 +5852,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "remote sync requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:wget",
@@ -5783,7 +5890,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "downloading files requires approval \u2014 prefer curl or WebFetch",
+        "reason": "downloading files requires approval",
+        "recovery": "Prefer curl or a web fetch, which the fetch scopes judge.",
     },
     {
         "rule": "shell:make",
@@ -5827,7 +5935,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "make executes arbitrary recipes \u2014 requires approval",
+        "reason": "make runs whatever its recipes say",
+        "recovery": "",
     },
     {
         "rule": "shell:npm",
@@ -5872,7 +5981,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "package tools fetch and execute code \u2014 requires approval",
+        "reason": "package tools fetch and run code",
+        "recovery": "",
     },
     {
         "rule": "shell:pnpm",
@@ -5910,7 +6020,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "package tools fetch and execute code \u2014 requires approval",
+        "reason": "package tools fetch and run code",
+        "recovery": "",
     },
     {
         "rule": "shell:yarn",
@@ -5948,7 +6059,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "package tools fetch and execute code \u2014 requires approval",
+        "reason": "package tools fetch and run code",
+        "recovery": "",
     },
     {
         "rule": "shell:apt",
@@ -5987,6 +6099,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "system package changes require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:apt-get",
@@ -6025,6 +6138,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "system package changes require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:pacman",
@@ -6063,6 +6177,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "system package changes require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:brew",
@@ -6101,6 +6216,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "system package changes require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:systemctl",
@@ -6139,6 +6255,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "service management requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:crontab",
@@ -6177,6 +6294,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "schedule changes require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:pip",
@@ -6198,7 +6316,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "use uv add / uv remove instead of pip",
+        "refuses": "pip changes packages outside this project's lockfile",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6214,7 +6332,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "use uv add / uv remove instead of pip",
+        "reason": "pip changes packages outside this project's lockfile",
+        "recovery": "Use uv add / uv remove instead of pip.",
     },
     {
         "rule": "shell:pip3",
@@ -6236,7 +6355,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "use uv add / uv remove instead of pip",
+        "refuses": "pip changes packages outside this project's lockfile",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6252,7 +6371,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "use uv add / uv remove instead of pip",
+        "reason": "pip changes packages outside this project's lockfile",
+        "recovery": "Use uv add / uv remove instead of pip.",
     },
     {
         "rule": "shell:eval",
@@ -6274,7 +6394,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "eval runs text as code, which no gate reading the command can see into \u2014 write the command out",
+        "refuses": "eval runs text as code that nothing checked",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6290,7 +6410,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "eval runs text as code, which no gate reading the command can see into \u2014 write the command out",
+        "reason": "eval runs text as code that nothing checked",
+        "recovery": "Write the command out.",
     },
     {
         "rule": "shell:source",
@@ -6312,7 +6433,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "sourcing a script runs its code in this shell, where no gate read it \u2014 run the commands it holds",
+        "refuses": "sourcing a script runs code in this shell that nothing checked",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6328,7 +6449,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "sourcing a script runs its code in this shell, where no gate read it \u2014 run the commands it holds",
+        "reason": "sourcing a script runs code in this shell that nothing checked",
+        "recovery": "Run the commands it holds.",
     },
     {
         "rule": "shell:.",
@@ -6350,7 +6472,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "sourcing a script runs its code in this shell, where no gate read it \u2014 run the commands it holds",
+        "refuses": "sourcing a script runs code in this shell that nothing checked",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6366,7 +6488,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "sourcing a script runs its code in this shell, where no gate read it \u2014 run the commands it holds",
+        "reason": "sourcing a script runs code in this shell that nothing checked",
+        "recovery": "Run the commands it holds.",
     },
     {
         "rule": "shell:export",
@@ -6388,7 +6511,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "an exported variable decides what later commands see \u2014 set it on the command that needs it",
+        "refuses": "an exported variable changes what later commands see",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6404,7 +6527,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "an exported variable decides what later commands see \u2014 set it on the command that needs it",
+        "reason": "an exported variable changes what later commands see",
+        "recovery": "Set it on the command that needs it.",
     },
     {
         "rule": "shell:declare",
@@ -6426,7 +6550,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "a declared variable decides what later commands see \u2014 set it on the command that needs it",
+        "refuses": "a declared variable changes what later commands see",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6442,7 +6566,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a declared variable decides what later commands see \u2014 set it on the command that needs it",
+        "reason": "a declared variable changes what later commands see",
+        "recovery": "Set it on the command that needs it.",
     },
     {
         "rule": "shell:unset",
@@ -6464,7 +6589,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "unsetting a variable decides what later commands see \u2014 set it on the command that needs it",
+        "refuses": "unsetting a variable changes what later commands see",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6480,7 +6605,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "unsetting a variable decides what later commands see \u2014 set it on the command that needs it",
+        "reason": "unsetting a variable changes what later commands see",
+        "recovery": "Set it on the command that needs it.",
     },
     {
         "rule": "shell:mkdir",
@@ -6519,6 +6645,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:touch",
@@ -6557,6 +6684,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:ssh-add",
@@ -6578,7 +6706,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "credential-agent changes stay with the user \u2014 ask them to run it",
+        "refuses": "credential-agent changes stay with the user",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6597,7 +6725,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "credential-agent changes stay with the user \u2014 ask them to run it",
+        "reason": "credential-agent changes stay with the user",
+        "recovery": "Ask the user to run it.",
     },
     {
         "rule": "shell:ssh-agent",
@@ -6619,7 +6748,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "command",
-        "refuses": "credential-agent lifecycle stays with the user \u2014 ask them to run it",
+        "refuses": "credential-agent lifecycle stays with the user",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -6635,7 +6764,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "credential-agent lifecycle stays with the user \u2014 ask them to run it",
+        "reason": "credential-agent lifecycle stays with the user",
+        "recovery": "Ask the user to run it.",
     },
     {
         "rule": "shell:sort",
@@ -6679,6 +6809,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a sort flag that writes a file or runs a program requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:tree",
@@ -6719,6 +6850,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a tree flag that writes a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:rg",
@@ -6762,6 +6894,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a ripgrep flag that runs another program requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:base64",
@@ -6803,6 +6936,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a base64 flag that writes a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:yq",
@@ -6847,6 +6981,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a yq flag that edits files in place or splits into files requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:xmllint",
@@ -6891,6 +7026,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "an xmllint flag that writes files or opens a shell requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:find",
@@ -6936,6 +7072,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a mutating find action requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:ss",
@@ -6977,6 +7114,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "killing sockets requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:nc",
@@ -7021,6 +7159,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "netcat moves data unless -z pins it to a port scan",
+        "recovery": "",
     },
     {
         "rule": "shell:cd",
@@ -7059,6 +7198,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "directory navigation",
+        "recovery": "",
     },
     {
         "rule": "shell:gh",
@@ -7097,6 +7237,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh command is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.list",
@@ -7135,6 +7276,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.view",
@@ -7173,6 +7315,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.diff",
@@ -7211,6 +7354,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.status",
@@ -7249,6 +7393,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.checks",
@@ -7287,6 +7432,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.checkout",
@@ -7338,7 +7484,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "checking out a pull request puts its author's code in this tree \u2014 requires approval",
+        "reason": "checking out a pull request puts its author's code in this tree",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.comment",
@@ -7380,6 +7527,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.reopen",
@@ -7421,6 +7569,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.create",
@@ -7462,6 +7611,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.edit",
@@ -7503,6 +7653,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.ready",
@@ -7544,6 +7695,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.close",
@@ -7587,6 +7739,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "deleting the branch alongside the close removes work no reopen restores",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.review",
@@ -7631,7 +7784,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "approving or requesting changes attests in your name \u2014 requires approval",
+        "reason": "approving or requesting changes attests in your name",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr.merge",
@@ -7669,7 +7823,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "merging runs the change into the base branch \u2014 requires approval",
+        "reason": "merging runs the change into the base branch",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.pr",
@@ -7708,6 +7863,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh pr operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.list",
@@ -7746,6 +7902,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.view",
@@ -7784,6 +7941,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.status",
@@ -7822,6 +7980,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.create",
@@ -7863,6 +8022,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.edit",
@@ -7904,6 +8064,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.comment",
@@ -7945,6 +8106,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.close",
@@ -7986,6 +8148,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.reopen",
@@ -8027,6 +8190,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.pin",
@@ -8068,6 +8232,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.unpin",
@@ -8109,6 +8274,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.delete",
@@ -8146,7 +8312,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "removing an issue from this repository is not restored by a follow-up \u2014 requires approval",
+        "reason": "removing an issue from this repository is not restored by a follow-up",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue.transfer",
@@ -8184,7 +8351,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "removing an issue from this repository is not restored by a follow-up \u2014 requires approval",
+        "reason": "removing an issue from this repository is not restored by a follow-up",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.issue",
@@ -8223,6 +8391,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh issue operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.run.list",
@@ -8261,6 +8430,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.run.view",
@@ -8299,6 +8469,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.run.watch",
@@ -8337,6 +8508,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.run.rerun",
@@ -8375,6 +8547,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing what a workflow run is doing requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.run.cancel",
@@ -8413,6 +8586,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing what a workflow run is doing requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.run.download",
@@ -8464,7 +8638,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a workflow artifact is code from a build \u2014 requires approval",
+        "reason": "a workflow artifact is code from a build",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.run",
@@ -8503,6 +8678,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh run operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo.view",
@@ -8541,6 +8717,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo.list",
@@ -8579,6 +8756,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo.clone",
@@ -8630,7 +8808,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "cloning brings a repository's code into this tree \u2014 requires approval",
+        "reason": "cloning brings a repository's code into this tree",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo.create",
@@ -8669,6 +8848,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing what this repository is, or creating another, requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo.fork",
@@ -8707,6 +8887,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing what this repository is, or creating another, requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo.rename",
@@ -8745,6 +8926,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing what this repository is, or creating another, requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo.archive",
@@ -8783,6 +8965,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing what this repository is, or creating another, requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo.delete",
@@ -8821,6 +9004,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing what this repository is, or creating another, requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo.edit",
@@ -8859,6 +9043,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing what this repository is, or creating another, requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.repo",
@@ -8897,6 +9082,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh repo operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.release.list",
@@ -8935,6 +9121,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.release.view",
@@ -8973,6 +9160,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.release.download",
@@ -9024,7 +9212,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a release asset is a published binary \u2014 requires approval",
+        "reason": "a release asset is a published binary",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.release.create",
@@ -9062,7 +9251,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a release is published where people consume it \u2014 requires approval",
+        "reason": "a release is published where people consume it",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.release.upload",
@@ -9100,7 +9290,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a release is published where people consume it \u2014 requires approval",
+        "reason": "a release is published where people consume it",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.release.edit",
@@ -9138,7 +9329,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a release is published where people consume it \u2014 requires approval",
+        "reason": "a release is published where people consume it",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.release.delete",
@@ -9176,7 +9368,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a release is published where people consume it \u2014 requires approval",
+        "reason": "a release is published where people consume it",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.release",
@@ -9215,6 +9408,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh release operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.secret.list",
@@ -9253,6 +9447,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.secret.set",
@@ -9290,7 +9485,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "repository secrets decide what automation can reach \u2014 requires approval",
+        "reason": "repository secrets decide what automation can reach",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.secret.delete",
@@ -9328,7 +9524,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "repository secrets decide what automation can reach \u2014 requires approval",
+        "reason": "repository secrets decide what automation can reach",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.secret",
@@ -9367,6 +9564,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh secret operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.variable.list",
@@ -9405,6 +9603,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.variable.get",
@@ -9443,6 +9642,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.variable.set",
@@ -9480,7 +9680,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "repository variables configure automation \u2014 requires approval",
+        "reason": "repository variables configure automation",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.variable.delete",
@@ -9518,7 +9719,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "repository variables configure automation \u2014 requires approval",
+        "reason": "repository variables configure automation",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.variable",
@@ -9557,6 +9759,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh variable operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.ruleset.list",
@@ -9595,6 +9798,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.ruleset.view",
@@ -9633,6 +9837,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.ruleset.check",
@@ -9671,6 +9876,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.ruleset.create",
@@ -9708,7 +9914,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "rulesets are this repository's own protection \u2014 requires approval",
+        "reason": "rulesets are this repository's own protection",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.ruleset.edit",
@@ -9746,7 +9953,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "rulesets are this repository's own protection \u2014 requires approval",
+        "reason": "rulesets are this repository's own protection",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.ruleset.delete",
@@ -9784,7 +9992,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "rulesets are this repository's own protection \u2014 requires approval",
+        "reason": "rulesets are this repository's own protection",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.ruleset",
@@ -9823,6 +10032,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh ruleset operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.workflow.list",
@@ -9861,6 +10071,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.workflow.view",
@@ -9899,6 +10110,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.workflow.run",
@@ -9936,7 +10148,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "dispatching or gating a workflow runs something \u2014 requires approval",
+        "reason": "dispatching or gating a workflow runs something",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.workflow.enable",
@@ -9974,7 +10187,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "dispatching or gating a workflow runs something \u2014 requires approval",
+        "reason": "dispatching or gating a workflow runs something",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.workflow.disable",
@@ -10012,7 +10226,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "dispatching or gating a workflow runs something \u2014 requires approval",
+        "reason": "dispatching or gating a workflow runs something",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.workflow",
@@ -10051,6 +10266,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh workflow operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.cache.list",
@@ -10089,6 +10305,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.cache.delete",
@@ -10126,7 +10343,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a deleted cache is not restored by a follow-up \u2014 requires approval",
+        "reason": "a deleted cache is not restored by a follow-up",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.cache",
@@ -10165,6 +10383,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh cache operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.auth.status",
@@ -10203,6 +10422,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.auth",
@@ -10241,6 +10461,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh auth operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.search.repos",
@@ -10279,6 +10500,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.search.issues",
@@ -10317,6 +10539,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.search.prs",
@@ -10355,6 +10578,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.search.code",
@@ -10393,6 +10617,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.search.commits",
@@ -10431,6 +10656,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.search",
@@ -10469,6 +10695,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh search operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.label.list",
@@ -10507,6 +10734,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.label.create",
@@ -10548,6 +10776,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.label.edit",
@@ -10589,6 +10818,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.label.clone",
@@ -10630,6 +10860,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.label.delete",
@@ -10667,7 +10898,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "deleting a label removes it from everything carrying it \u2014 requires approval",
+        "reason": "deleting a label removes it from everything carrying it",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.label",
@@ -10706,6 +10938,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh label operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.gist.list",
@@ -10744,6 +10977,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.gist.view",
@@ -10782,6 +11016,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.gist.clone",
@@ -10833,7 +11068,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a gist is somebody's code, cloned into this tree \u2014 requires approval",
+        "reason": "a gist is somebody's code, cloned into this tree",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.gist.create",
@@ -10871,7 +11107,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a gist is published outside this repository \u2014 requires approval",
+        "reason": "a gist is published outside this repository",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.gist.edit",
@@ -10909,7 +11146,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a gist is published outside this repository \u2014 requires approval",
+        "reason": "a gist is published outside this repository",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.gist.delete",
@@ -10947,7 +11185,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "a gist is published outside this repository \u2014 requires approval",
+        "reason": "a gist is published outside this repository",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.gist",
@@ -10986,6 +11225,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh gist operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.list",
@@ -11024,6 +11264,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.view",
@@ -11062,6 +11303,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.item-list",
@@ -11100,6 +11342,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.field-list",
@@ -11138,6 +11381,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.item-add",
@@ -11179,6 +11423,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.edit",
@@ -11220,6 +11465,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.close",
@@ -11261,6 +11507,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.create",
@@ -11298,7 +11545,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "creating or removing project state is not restored by a follow-up \u2014 requires approval",
+        "reason": "creating or removing project state is not restored by a follow-up",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.delete",
@@ -11336,7 +11584,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "creating or removing project state is not restored by a follow-up \u2014 requires approval",
+        "reason": "creating or removing project state is not restored by a follow-up",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project.item-delete",
@@ -11374,7 +11623,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "creating or removing project state is not restored by a follow-up \u2014 requires approval",
+        "reason": "creating or removing project state is not restored by a follow-up",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.project",
@@ -11413,6 +11663,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh project operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.config.get",
@@ -11451,6 +11702,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.config.list",
@@ -11489,6 +11741,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.config.set",
@@ -11530,6 +11783,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this operation against another repository requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.config",
@@ -11568,6 +11822,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this gh config operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.status",
@@ -11606,6 +11861,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.browse",
@@ -11644,6 +11900,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:gh.api",
@@ -11689,7 +11946,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "gh api can mutate anything \u2014 requires approval",
+        "reason": "gh api can mutate anything",
+        "recovery": "",
     },
     {
         "rule": "shell:docker",
@@ -11728,6 +11986,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "container operations require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.info",
@@ -11766,6 +12025,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.version",
@@ -11804,6 +12064,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.ps",
@@ -11842,6 +12103,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.images",
@@ -11880,6 +12142,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.inspect",
@@ -11918,6 +12181,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.logs",
@@ -11956,6 +12220,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.top",
@@ -11994,6 +12259,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.port",
@@ -12032,6 +12298,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.diff",
@@ -12070,6 +12337,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.history",
@@ -12108,6 +12376,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.stats",
@@ -12146,6 +12415,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.events",
@@ -12184,6 +12454,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.container.ls",
@@ -12222,6 +12493,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.container.inspect",
@@ -12260,6 +12532,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.container.logs",
@@ -12298,6 +12571,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.container.top",
@@ -12336,6 +12610,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.container.port",
@@ -12374,6 +12649,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.container.diff",
@@ -12412,6 +12688,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.container.stats",
@@ -12450,6 +12727,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.container",
@@ -12488,6 +12766,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "container operations require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.image.ls",
@@ -12526,6 +12805,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.image.inspect",
@@ -12564,6 +12844,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.image.history",
@@ -12602,6 +12883,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.image",
@@ -12640,6 +12922,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "container operations require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.volume.ls",
@@ -12678,6 +12961,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.volume.inspect",
@@ -12716,6 +13000,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.volume",
@@ -12754,6 +13039,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "container operations require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.network.ls",
@@ -12792,6 +13078,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.network.inspect",
@@ -12830,6 +13117,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.network",
@@ -12868,6 +13156,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "container operations require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.context.ls",
@@ -12906,6 +13195,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.context.show",
@@ -12944,6 +13234,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.context.inspect",
@@ -12982,6 +13273,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.context",
@@ -13020,6 +13312,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "container operations require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.system.df",
@@ -13058,6 +13351,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.system.info",
@@ -13096,6 +13390,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.system.events",
@@ -13134,6 +13429,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:docker.system",
@@ -13172,6 +13468,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "container operations require approval",
+        "recovery": "",
     },
     {
         "rule": "shell:lup-devtools",
@@ -13210,6 +13507,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "reach this toolchain through `uv run lup-devtools`, which guarantees the environment it runs in \u2014 only the conflict workflow, whose commands must start while the manifest does not parse, is documented without it",
+        "recovery": "",
     },
     {
         "rule": "shell:lup-devtools.dev.conflict",
@@ -13248,6 +13546,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:lup-devtools.dev",
@@ -13286,6 +13585,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "reach this toolchain through `uv run lup-devtools`, which guarantees the environment it runs in \u2014 only the conflict workflow, whose commands must start while the manifest does not parse, is documented without it",
+        "recovery": "",
     },
     {
         "rule": "shell:git",
@@ -13361,6 +13661,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--work-tree",
         ],
         "reason": "this git subcommand is not classified as read-only or reversible",
+        "recovery": "",
     },
     {
         "rule": "shell:git.status",
@@ -13399,6 +13700,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.rev-parse",
@@ -13437,6 +13739,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.ls-files",
@@ -13475,6 +13778,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.ls-tree",
@@ -13513,6 +13817,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.ls-remote",
@@ -13551,6 +13856,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.cat-file",
@@ -13589,6 +13895,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.blame",
@@ -13627,6 +13934,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.annotate",
@@ -13665,6 +13973,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.describe",
@@ -13703,6 +14012,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.rev-list",
@@ -13741,6 +14051,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.name-rev",
@@ -13779,6 +14090,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.merge-base",
@@ -13817,6 +14129,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.show-ref",
@@ -13855,6 +14168,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.for-each-ref",
@@ -13893,6 +14207,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.count-objects",
@@ -13931,6 +14246,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.cherry",
@@ -13969,6 +14285,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.check-ignore",
@@ -14007,6 +14324,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.check-attr",
@@ -14045,6 +14363,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.check-mailmap",
@@ -14083,6 +14402,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.check-ref-format",
@@ -14121,6 +14441,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.column",
@@ -14159,6 +14480,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.fmt-merge-msg",
@@ -14197,6 +14519,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.show-branch",
@@ -14235,6 +14558,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.show-index",
@@ -14273,6 +14597,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.verify-commit",
@@ -14311,6 +14636,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.verify-tag",
@@ -14349,6 +14675,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.verify-pack",
@@ -14387,6 +14714,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.pack-redundant",
@@ -14425,6 +14753,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.fsck",
@@ -14463,6 +14792,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.patch-id",
@@ -14501,6 +14831,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.request-pull",
@@ -14539,6 +14870,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stripspace",
@@ -14577,6 +14909,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.get-tar-commit-id",
@@ -14615,6 +14948,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.var",
@@ -14653,6 +14987,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.version",
@@ -14691,6 +15026,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.help",
@@ -14729,6 +15065,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.merge-tree",
@@ -14767,6 +15104,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.hash-object",
@@ -14805,6 +15143,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.commit-tree",
@@ -14843,6 +15182,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.mktree",
@@ -14881,6 +15221,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.mktag",
@@ -14919,6 +15260,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.write-tree",
@@ -14957,6 +15299,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.add",
@@ -14995,6 +15338,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.commit",
@@ -15033,6 +15377,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.mv",
@@ -15071,6 +15416,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.cherry-pick",
@@ -15109,6 +15455,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.revert",
@@ -15147,6 +15494,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.notes",
@@ -15185,6 +15533,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stage",
@@ -15223,6 +15572,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.merge",
@@ -15261,6 +15611,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "merging puts work on a branch other people build on",
+        "recovery": "",
     },
     {
         "rule": "shell:git.log",
@@ -15301,6 +15652,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.diff",
@@ -15341,6 +15693,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.show",
@@ -15381,6 +15734,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.whatchanged",
@@ -15421,6 +15775,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.diff-tree",
@@ -15461,6 +15816,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.diff-index",
@@ -15501,6 +15857,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.diff-files",
@@ -15541,6 +15898,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.diff-pairs",
@@ -15581,6 +15939,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.range-diff",
@@ -15621,6 +15980,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.shortlog",
@@ -15661,6 +16021,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.grep",
@@ -15702,6 +16063,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "opening matches in an arbitrary program requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.rebase",
@@ -15743,6 +16105,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "replaying commits through a shell command requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.fetch",
@@ -15790,6 +16153,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "overriding the transport program requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.pull",
@@ -15837,6 +16201,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "overriding the transport program requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.push",
@@ -15888,6 +16253,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "removing a remote ref, or aiming the push elsewhere, requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.clone",
@@ -15939,7 +16305,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "cloning fetches external code \u2014 requires approval",
+        "reason": "cloning fetches external code",
+        "recovery": "",
     },
     {
         "rule": "shell:git.apply",
@@ -15981,6 +16348,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a patch that writes outside the working area requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.restore",
@@ -16019,6 +16387,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "restoring files discards working-tree changes",
+        "recovery": "",
     },
     {
         "rule": "shell:git.rm",
@@ -16060,6 +16429,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "removing tracked files requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.clean",
@@ -16100,7 +16470,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "deleting untracked files is destructive \u2014 requires approval",
+        "reason": "deleting untracked files is destructive",
+        "recovery": "",
     },
     {
         "rule": "shell:git.config",
@@ -16171,7 +16542,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "git config can set what program git runs or which repository it talks to \u2014 this names such a key, redirects the write to a named file, or cannot be read",
+        "reason": "this git config write can change what program git runs or which repository it talks to",
+        "recovery": "",
     },
     {
         "rule": "shell:git.checkout",
@@ -16193,7 +16565,7 @@ SHELL_RULES: list[ShellRuleRow] = [
             },
         ],
         "effects_source": "subcommand",
-        "refuses": "use git switch for branches or git restore for files",
+        "refuses": "this project checks out through git switch and git restore",
         "ask_destinations": [],
         "ask_refspecs": [],
         "ask_flags": [],
@@ -16209,7 +16581,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "use git switch for branches or git restore for files",
+        "reason": "this project checks out through git switch and git restore",
+        "recovery": "Use git switch for branches or git restore for files.",
     },
     {
         "rule": "shell:git.reflog.expire",
@@ -16247,7 +16620,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "expiring reflog entries is destructive \u2014 requires approval",
+        "reason": "expiring reflog entries is destructive",
+        "recovery": "",
     },
     {
         "rule": "shell:git.reflog.delete",
@@ -16285,7 +16659,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "deleting reflog entries is destructive \u2014 requires approval",
+        "reason": "deleting reflog entries is destructive",
+        "recovery": "",
     },
     {
         "rule": "shell:git.reflog",
@@ -16324,6 +16699,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.branch",
@@ -16369,6 +16745,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "deleting or moving a branch requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.bisect.log",
@@ -16407,6 +16784,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.bisect.view",
@@ -16447,6 +16825,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.bisect",
@@ -16485,6 +16864,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a bisect step moves HEAD across commits",
+        "recovery": "",
     },
     {
         "rule": "shell:git.submodule.status",
@@ -16523,6 +16903,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.submodule.summary",
@@ -16561,6 +16942,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.submodule",
@@ -16606,6 +16988,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "submodule operations fetch and check out external code",
+        "recovery": "",
     },
     {
         "rule": "shell:git.tag",
@@ -16647,6 +17030,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "deleting a tag requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.symbolic-ref",
@@ -16685,6 +17069,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "pointing a symbolic ref somewhere else moves HEAD",
+        "recovery": "",
     },
     {
         "rule": "shell:git.reset",
@@ -16735,6 +17120,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a working-tree-destroying reset requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.switch",
@@ -16785,6 +17171,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "a force switch can discard working-tree changes",
+        "recovery": "",
     },
     {
         "rule": "shell:git.worktree.list",
@@ -16823,6 +17210,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.worktree.add",
@@ -16868,6 +17256,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.worktree.move",
@@ -16906,6 +17295,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.worktree.repair",
@@ -16944,6 +17334,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.worktree.remove",
@@ -16981,7 +17372,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "removing a worktree deletes it \u2014 requires approval",
+        "reason": "removing a worktree deletes it",
+        "recovery": "",
     },
     {
         "rule": "shell:git.worktree.prune",
@@ -17019,7 +17411,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "pruning worktrees is destructive \u2014 requires approval",
+        "reason": "pruning worktrees is destructive",
+        "recovery": "",
     },
     {
         "rule": "shell:git.worktree",
@@ -17058,6 +17451,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "this worktree operation is not classified",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stash.list",
@@ -17098,6 +17492,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stash.show",
@@ -17138,6 +17533,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "writing command output to a file requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stash.push",
@@ -17176,6 +17572,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stash.save",
@@ -17214,6 +17611,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stash.pop",
@@ -17252,6 +17650,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stash.apply",
@@ -17290,6 +17689,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stash.drop",
@@ -17327,7 +17727,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "dropping a stash is destructive \u2014 requires approval",
+        "reason": "dropping a stash is destructive",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stash.clear",
@@ -17365,7 +17766,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "clearing stashes is destructive \u2014 requires approval",
+        "reason": "clearing stashes is destructive",
+        "recovery": "",
     },
     {
         "rule": "shell:git.stash",
@@ -17404,6 +17806,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:git.remote.remove",
@@ -17442,6 +17845,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "removing a remote requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.remote.rm",
@@ -17480,6 +17884,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "removing a remote requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.remote.add",
@@ -17518,6 +17923,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "adding a remote requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.remote.rename",
@@ -17556,6 +17962,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "renaming a remote requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.remote.set-url",
@@ -17594,6 +18001,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "changing a remote URL requires approval",
+        "recovery": "",
     },
     {
         "rule": "shell:git.remote.prune",
@@ -17631,7 +18039,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "pruning a remote is destructive \u2014 requires approval",
+        "reason": "pruning a remote is destructive",
+        "recovery": "",
     },
     {
         "rule": "shell:git.remote",
@@ -17670,6 +18079,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:bun",
@@ -17711,6 +18121,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "bare interpreters and inline code are not allowed",
+        "recovery": "",
     },
     {
         "rule": "shell:bun.install",
@@ -17750,7 +18161,8 @@ SHELL_RULES: list[ShellRuleRow] = [
         "guarded_settings": [],
         "bare_reads": False,
         "value_flags": [],
-        "reason": "an install free to rewrite the lockfile resolves what this project depends on anew \u2014 requires approval; a frozen one (`--frozen-lockfile`) restores what it already pins",
+        "reason": "an install free to rewrite the lockfile resolves what this project depends on anew",
+        "recovery": "`--frozen-lockfile` restores what the lockfile already pins, and runs without asking.",
     },
     {
         "rule": "shell:bun.run",
@@ -17789,6 +18201,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:bun.test",
@@ -17827,6 +18240,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:bun.build",
@@ -17865,6 +18279,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "",
+        "recovery": "",
     },
     {
         "rule": "shell:bun.add",
@@ -17903,6 +18318,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "adding a dependency changes what this project needs",
+        "recovery": "",
     },
     {
         "rule": "shell:bun.remove",
@@ -17941,6 +18357,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "removing a dependency changes what this project needs",
+        "recovery": "",
     },
     {
         "rule": "shell:bun.x",
@@ -17979,6 +18396,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "running a package that is not a declared dependency",
+        "recovery": "",
     },
     {
         "rule": "shell:tsc",
@@ -18021,6 +18439,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "emitting compiler output writes files the command does not bound",
+        "recovery": "",
     },
     {
         "rule": "shell:bunx",
@@ -18059,6 +18478,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "the package runner fetches what is not already a dependency",
+        "recovery": "",
     },
     {
         "rule": "shell:bunx.tsc",
@@ -18100,6 +18520,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "emitting compiler output writes files the command does not bound",
+        "recovery": "",
     },
     {
         "rule": "shell:npx",
@@ -18138,6 +18559,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "the package runner fetches what is not already a dependency",
+        "recovery": "",
     },
     {
         "rule": "shell:npx.tsc",
@@ -18179,6 +18601,7 @@ SHELL_RULES: list[ShellRuleRow] = [
         "bare_reads": False,
         "value_flags": [],
         "reason": "emitting compiler output writes files the command does not bound",
+        "recovery": "",
     },
 ]
 
@@ -18287,17 +18710,20 @@ REFUSED_TOOLS: list[RefusedToolRow] = [
     {
         "tool": "Artifact",
         "specifier": "",
-        "reason": "publishing a page leaves the repository, and this project already owns surfaces that do not \u2014 run `uv run lup-devtools dev report` for everything left to implement, or the report skill to write it whole to a file named for the work, under tmp/",
+        "reason": "publishing a page puts this work outside the repository",
+        "recovery": "Run `uv run lup-devtools dev report` for everything left to implement, or the report skill to write it whole to a file named for the work, under tmp/.",
     },
     {
         "tool": "Skill",
         "specifier": "artifact-design",
-        "reason": "publishing a page leaves the repository, and this project already owns surfaces that do not \u2014 run `uv run lup-devtools dev report` for everything left to implement, or the report skill to write it whole to a file named for the work, under tmp/",
+        "reason": "publishing a page puts this work outside the repository",
+        "recovery": "Run `uv run lup-devtools dev report` for everything left to implement, or the report skill to write it whole to a file named for the work, under tmp/.",
     },
     {
         "tool": "EnterWorktree",
         "specifier": "",
-        "reason": "entering a worktree with this tool arms Claude Code's worktree isolation for the rest of the session, which then refuses eval, source, fc, coproc, trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and let in any argv position \u2014 including in read-only commands with no git in them, so `grep -c hash file.py` stops working. Measured: the tool call is what arms it, not where the session is. `git worktree create` already made the tree \u2014 launch a session rooted in it, or address its files by absolute path from here",
+        "reason": "entering a worktree this way makes Claude Code refuse ordinary shell words such as hash, alias and let for the rest of the session",
+        "recovery": "The tool call arms worktree isolation wherever the session is, and it then refuses eval, source, fc, coproc, trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and let in any argv position, even in read-only commands, so `grep -c hash file.py` stops working. `git worktree create` already made the tree: launch a session rooted in it, or address its files by absolute path from here.",
     },
 ]
 
@@ -18305,11 +18731,13 @@ PEER_POLICY: PeerPolicyRow | None = {
     "store": ["lup", "coordination"],
     "roster_file": "roster.jsonl",
     "names_file": "names.jsonl",
-    "send_reason": "that address is a session on this repository's roster, and a native send reaches it through a channel no other worktree can fold \u2014 nothing later can read that the two of you agreed on anything. Say it with the `coordination_send` tool instead, which reaches the same peer, records it where every session working in this clone can read it, and tells you whether the peer's own hook will put it in front of that peer's next tool call or it waits in the file until they next look",
+    "send_reason": "a native send to a session on this repository's roster leaves no record any other worktree can read",
+    "send_recovery": "Say it with `coordination_send` instead: it reaches the same peer, records it where every session in this clone can read it, and reports whether the peer's hook will put it in front of that peer's next tool call or it waits until they next look.",
     "listing_note": "This repository's own roster, which is a different population from the listing above: these are the sessions working in this clone, in whatever worktree, and they include peers no account-scoped listing can see. Reach any of them with `coordination_send`, which records what it carries. The person watching is always at `user`.",
     "touches_file": "touches.jsonl",
     "windows_dir": "windows",
-    "claim_reason": "a live session in this repository has that path, which nobody declared \u2014 it is there because that session's own calls changed it, or because it took the prefix deliberately. Writing under it is how two sessions overwrite each other between merges, and the loser finds out at merge time. Ask the holder with `coordination_send` first, or go ahead if you already know what they are doing. A claim expires with the session holding it, so one still standing means that session has not stopped",
+    "claim_reason": "another live session has changed or locked this path",
+    "claim_recovery": "Writing under a held path is how two sessions overwrite each other between merges. Ask the holder with `coordination_send` first, or go ahead if you already know what they are doing; a claim expires with the session holding it, so one still standing means that session has not stopped.",
     "member_env": "LUP_COORDINATION_MEMBER",
 }
 
@@ -18345,6 +18773,7 @@ RUNNER_TARGETS: list[RunnerTargetRow] = [
         ],
         "refuses": "",
         "reason": "",
+        "recovery": "",
     },
     {
         "name": "pytest",
@@ -18360,6 +18789,7 @@ RUNNER_TARGETS: list[RunnerTargetRow] = [
         ],
         "refuses": "",
         "reason": "",
+        "recovery": "",
     },
     {
         "name": "ruff",
@@ -18375,6 +18805,7 @@ RUNNER_TARGETS: list[RunnerTargetRow] = [
         ],
         "refuses": "",
         "reason": "",
+        "recovery": "",
     },
     {
         "name": "lup-devtools",
@@ -18390,6 +18821,7 @@ RUNNER_TARGETS: list[RunnerTargetRow] = [
         ],
         "refuses": "",
         "reason": "",
+        "recovery": "",
     },
     {
         "name": "examples",
@@ -18405,6 +18837,7 @@ RUNNER_TARGETS: list[RunnerTargetRow] = [
         ],
         "refuses": "",
         "reason": "",
+        "recovery": "",
     },
 ]
 

@@ -54,6 +54,7 @@ class PathRuleRow(TypedDict):
     kind: PathRuleKind
     value: str
     reason: str
+    recovery: str
     allow_autonomous: bool
 
 
@@ -219,13 +220,15 @@ class RefusedToolRow(TypedDict):
 
     ``specifier`` is ``""`` when the whole tool is refused, and otherwise the
     subject that selects one of its uses — the ``artifact-design`` in
-    ``Skill(artifact-design)``. ``reason`` is the whole of what the agent is
-    told, so it names the surface to reach for and not only the refusal.
+    ``Skill(artifact-design)``. ``reason`` says what the call would have done
+    and ``recovery`` names the surface to reach for instead, so a refusal is
+    never only a refusal.
     """
 
     tool: str
     specifier: str
     reason: str
+    recovery: str
 
 
 class RunnerTargetRow(TypedDict):
@@ -253,9 +256,12 @@ class RunnerTargetRow(TypedDict):
     effects: list[EffectRow]
     refuses: str
     reason: str
+    recovery: str
 
 
-type RunnerTargetField = Literal["name", "sandbox", "effects", "refuses", "reason"]
+type RunnerTargetField = Literal[
+    "name", "sandbox", "effects", "refuses", "reason", "recovery"
+]
 """Every field one erased runner target carries.
 
 Closed and enumerable on the same terms as :data:`ShellRowField`, and for the
@@ -279,6 +285,7 @@ def runner_target_values(
         "effects": row["effects"],
         "refuses": row["refuses"],
         "reason": row["reason"],
+        "recovery": row["recovery"],
     }
 
 
@@ -483,6 +490,7 @@ class ShellRuleRow(TypedDict):
     bare_reads: bool
     value_flags: list[str]
     reason: str
+    recovery: str
 
 
 type ShellRowField = Literal[
@@ -514,6 +522,7 @@ type ShellRowField = Literal[
     "bare_reads",
     "value_flags",
     "reason",
+    "recovery",
 ]
 """Every field name one erased shell row carries.
 
@@ -567,6 +576,7 @@ def shell_row_values(
         "bare_reads": row["bare_reads"],
         "value_flags": row["value_flags"],
         "reason": row["reason"],
+        "recovery": row["recovery"],
     }
 
 
@@ -636,8 +646,10 @@ class PeerPolicyRow(TypedDict):
     path, because the dispatcher rebuilds it with the host's own separator and
     a compiled literal carrying one platform's answers on one platform.
 
-    ``send_reason`` is the whole of what a stopped sender is told, so it names
-    the surface reaching the same peer durably rather than only refusing.
+    ``send_reason`` says why a send was stopped and ``send_recovery`` names the
+    surface reaching the same peer durably, so a sender is never only refused.
+    ``claim_reason`` is what an approver of a write into a held path reads, and
+    ``claim_recovery`` what the writing agent can do about the holder.
     ``listing_note`` frames the roster attached to a listing that speaks for a
     wider population, so a reader can tell the two apart.
 
@@ -650,8 +662,10 @@ class PeerPolicyRow(TypedDict):
     roster_file: str
     names_file: str
     send_reason: str
+    send_recovery: str
     listing_note: str
     touches_file: str
     windows_dir: str
     claim_reason: str
+    claim_recovery: str
     member_env: str

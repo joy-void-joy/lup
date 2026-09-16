@@ -32,10 +32,12 @@ class PeerPolicy(BaseModel, frozen=True):
     roster_file: str = Field(min_length=1)
     names_file: str = Field(min_length=1)
     send_reason: str = Field(min_length=1)
+    send_recovery: str = Field(min_length=1)
     listing_note: str = Field(min_length=1)
     touches_file: str = Field(min_length=1)
     windows_dir: str = Field(min_length=1)
     claim_reason: str = Field(min_length=1)
+    claim_recovery: str = Field(min_length=1)
     member_env: str = Field(min_length=1)
 
 
@@ -48,9 +50,11 @@ def erase_peer_policy(declared: PeerPolicy | None) -> PeerPolicyRow | None:
         roster_file=declared.roster_file,
         names_file=declared.names_file,
         send_reason=declared.send_reason,
+        send_recovery=declared.send_recovery,
         listing_note=declared.listing_note,
         touches_file=declared.touches_file,
         windows_dir=declared.windows_dir,
         claim_reason=declared.claim_reason,
+        claim_recovery=declared.claim_recovery,
         member_env=declared.member_env,
     )

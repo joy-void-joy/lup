@@ -466,6 +466,8 @@ class PathRule(BaseModel, frozen=True):
     kind: PathRuleKind
     value: str
     reason: str
+    recovery: str = ""
+    """What the agent does instead of writing here, where there is such a route."""
     allow_autonomous: bool = False
 
     def matches(self, path: Path) -> bool:
@@ -481,6 +483,7 @@ def path_rule_row(rule: PathRule) -> PathRuleRow:
         kind=rule.kind,
         value=rule.value,
         reason=rule.reason,
+        recovery=rule.recovery,
         allow_autonomous=rule.allow_autonomous,
     )
 
@@ -490,10 +493,8 @@ def human_owned_path_rule(path: str) -> PathRule:
     return PathRule(
         kind="exact",
         value=path,
-        reason=(
-            f"{path} is human-authored; propose changes via AskUserQuestion"
-            " instead of editing"
-        ),
+        reason=f"{path} is human-authored",
+        recovery="Propose the exact change and let the user apply it.",
     )
 
 

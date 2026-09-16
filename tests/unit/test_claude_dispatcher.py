@@ -579,7 +579,7 @@ def test_removing_a_directory_asks_where_no_capture_covers_it(
     effect, reason = effect_from("rm -rf src", delete_repo)
 
     assert effect == "ask"
-    assert "requires approval" in reason
+    assert "nothing in the command bounds what it holds" in reason
     assert "never granted" not in reason
 
 

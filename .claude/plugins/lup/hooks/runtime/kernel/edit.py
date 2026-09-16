@@ -16,7 +16,9 @@ from typing import NotRequired, TypedDict
 from .decision import KernelDecision, handed_over
 from .imports import ResolvedImportRule, resolved_import_rules
 from .roles import (
+    FOREIGN_REPOSITORY_RECOVERY,
     FOREIGN_REPOSITORY_REFERRAL,
+    GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
     is_generated_plugin_target,
     normalized_path,
@@ -1227,12 +1229,12 @@ def marker_decision(
             gate="feedback-removed",
             decision=KernelDecision(
                 "deny",
-                f"{removes} — {spelled}\n"
-                "Resolving a note means replacing `# lup:` "
-                "with `# lup: solved:` and keeping its text, so the claim can be "
-                "checked against what was asked; deleting it leaves nothing to "
-                "check. Where the note was mistaken rather than answered, "
-                "withdraw it with `dev comments --withdraw file:line --reason`",
+                f"{removes} — {spelled}",
+                recovery="Resolving a note means replacing `# lup:` with"
+                " `# lup: solved:` and keeping its text, so the claim can be"
+                " checked against what was asked; deleting it leaves nothing to"
+                " check. Where the note was mistaken rather than answered,"
+                " withdraw it with `dev comments --withdraw file:line --reason`.",
             ),
         )
     # Asked of the words, as survival is for open notes: a claim is lost when
@@ -1259,11 +1261,11 @@ def marker_decision(
             gate="claim-removed",
             decision=KernelDecision(
                 "deny",
-                f"this edit removes {claims} — {spelled}\n"
-                "Only the review pass "
-                "retires one — it either confirms the claim and removes the note "
-                "(`dev comments --retire file:line`), or restores it to open "
-                "feedback (`dev comments --restore file:line`)",
+                f"this edit removes {claims} — {spelled}",
+                recovery="Only the review pass retires one: it either confirms"
+                " the claim and removes the note (`dev comments --retire"
+                " file:line`), or restores it to open feedback (`dev comments"
+                " --restore file:line`).",
             ),
         )
     added_bodies = note_bodies(is_open) - note_bodies(was_open)
@@ -3048,16 +3050,15 @@ def anti_pattern_hits(
 
 def anti_pattern_denial(number: int, row: AntiPatternRow) -> KernelDecision:
     """Deny one matched line, saying whether a directive could have helped."""
-    refusal = (
-        " (no suppression: write the replacement)"
+    placement = (
+        "No suppression is accepted: write the replacement."
         if row["strength"] == "strong"
-        else ""
+        else f"Suppress on {suppression_placement(number)}."
     )
-    placement = refusal or f" — suppress on {suppression_placement(number)}"
     return KernelDecision(
         "deny",
-        f"line {number}: {row['message']}{placement} "
-        f"(rule {row['id']} — see docs/rules.md)",
+        f"line {number}: {row['message']} (rule {row['id']})",
+        recovery=f"{placement} See docs/rules.md.",
     )
 
 
@@ -3074,8 +3075,9 @@ def withdrawn_suppression_denial(number: int, row: AntiPatternRow) -> KernelDeci
         "deny",
         f"line {number}: this edit removes the `# lup: ignore[{row['id']}]` "
         f"covering it, and the line still trips the rule: {row['message']} "
-        f"— restore the directive or clear what it was silencing "
-        f"(rule {row['id']} — see docs/rules.md)",
+        f"(rule {row['id']})",
+        recovery="Restore the directive or clear what it was silencing. See"
+        " docs/rules.md.",
     )
 
 
@@ -3129,10 +3131,11 @@ def unresolved_anti_pattern_ask(number: int, row: AntiPatternRow) -> KernelDecis
     """
     return KernelDecision(
         "ask",
-        f"line {number}: {row['message']} — this gate could not resolve what the"
-        " receiver is declared on, so it cannot tell the defect from the"
-        " shape the rule permits; approve if the receiver is typed and not a"
-        f" mapping, and `dev check` will confirm it (rule {row['id']})",
+        f"line {number} may break rule {row['id']}; approve if its receiver is"
+        " typed and not a mapping, and `dev check` will confirm it",
+        recovery=f"{row['message']} The gate could not resolve what the receiver"
+        " is declared on, so it cannot tell the defect from the shape the rule"
+        " permits.",
     )
 
 
@@ -3155,10 +3158,11 @@ def spurious_refusal(number: int, dead: list[str], live: list[str]) -> KernelDec
     return KernelDecision(
         "deny",
         f"line {number}: this suppression names {named}, which nothing it guards "
-        f"trips{instead}. Drop {named} from it: a rule that does not fire is "
-        f"silenced by nothing, and the audit reports the directive spurious. One "
-        f"written on line {number} reaches that line, and where it stands alone "
-        "the line beneath its comment block (see docs/rules.md)",
+        f"trips{instead}",
+        recovery=f"Drop {named} from it: a rule that does not fire is silenced by"
+        f" nothing, and the audit reports the directive spurious. One written on"
+        f" line {number} reaches that line, and where it stands alone the line"
+        " beneath its comment block. See docs/rules.md.",
     )
 
 
@@ -3749,6 +3753,7 @@ def decide_edit(
             hard=True,
             rule="edit:generated-plugin",
             evaluator="edit-gate",
+            recovery=GENERATED_PLUGIN_RECOVERY,
         )
 
     # Whether this path is the file it names is prior to every gate below,
@@ -3760,9 +3765,8 @@ def decide_edit(
             "displaced-path",
             KernelDecision(
                 "ask",
-                f"{path} resolves through a symlink to {displaced['lands']}, so"
-                " the conventions this edit is judged against are not the ones"
-                " covering the file it would write",
+                f"{path} is a symlink to {displaced['lands']}, so this edit was"
+                " checked against the wrong file's rules",
                 purpose="quality_review",
             ),
         )
@@ -3783,7 +3787,10 @@ def decide_edit(
         return judged(
             "foreign-repository",
             KernelDecision(
-                "ask", FOREIGN_REPOSITORY_REFERRAL, purpose="policy_override"
+                "ask",
+                FOREIGN_REPOSITORY_REFERRAL,
+                purpose="policy_override",
+                recovery=FOREIGN_REPOSITORY_RECOVERY,
             ),
         )
 
@@ -3847,6 +3854,7 @@ def decide_edit(
                 "ask",
                 protected_path_reason(path, protected),
                 purpose="quality_review",
+                recovery=protected["recovery"],
             ),
         )
     # Feedback is feedback wherever it is left, so this gate follows the file
@@ -3895,8 +3903,7 @@ def decide_edit(
             "full-write",
             KernelDecision(
                 "ask",
-                f"full-file writes require approval — {path} arrives whole,"
-                f" {arriving} at once",
+                f"{path} is written whole, {arriving} at once",
                 purpose="quality_review",
                 reviewer="supervisor_allowed",
             ),

@@ -14,8 +14,8 @@ from .shell import ESCALATE_RE
 # lup: ignore[constant-declaration] — it quotes the marker's own spelling, so
 # the words are fixed by what the kernel parses rather than by anyone's taste
 TOOL_ESCALATE_HINT = (
-    " — or resubmit with a leading '# lup: escalate: <why>' line in one of the"
-    " call's own inputs to request approval"
+    "Or resubmit with a leading '# lup: escalate: <why>' line in one of the"
+    " call's own inputs to put it to a reviewer."
 )
 
 
@@ -79,8 +79,12 @@ def decide_tool(
     if row is not None:
         why = escalated_reason(values)
         if why:
-            return KernelDecision("ask", f"escalated ({why}): {row['reason']}")
-        return KernelDecision("deny", row["reason"] + TOOL_ESCALATE_HINT)
+            return KernelDecision(
+                "ask", f"escalated ({why}): {row['reason']}", recovery=row["recovery"]
+            )
+        return KernelDecision(
+            "deny", row["reason"], recovery=f"{row['recovery']} {TOOL_ESCALATE_HINT}"
+        )
     if any(row["tool"] == name for row in rows):
         return KernelDecision("defer", f"no refusal names this use of {name!r}")
     return None
