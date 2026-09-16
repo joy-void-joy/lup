@@ -39,6 +39,7 @@ from decisions import (
     claim_window_opened,
     fetch_decision,
     refused_tool_decision,
+    session_contained,
     written_review,
 )
 from host import (
@@ -363,8 +364,13 @@ def main():
         # to its plain effect rather than carrying an intent no channel here
         # performs. Asking for the launcher's host is a marker a reviewer
         # answers, and it reaches the same relay under every runtime, so
-        # nothing about that route depends on this channel existing.
-        decision = decision.placed(escapable=False)
+        # nothing about that route depends on this channel existing. The
+        # measured placement is handed in all the same, so the kernel seam
+        # receives from this dispatcher exactly what it receives from the
+        # other: with no channel it settles nothing here, and the moment a
+        # channel exists the question already says where the call lands.
+        root = Path(payload["cwd"]) if "cwd" in payload else None
+        decision = decision.placed(escapable=False, contained=session_contained(root))
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and a traceback exit is not the

@@ -334,6 +334,19 @@ def bash_decision(
     )
 
 
+def session_contained(cwd: Path | None) -> bool:
+    """Whether this session sits inside the container its launch measured.
+
+    The fact a renderer hands ``KernelDecision.placed`` beside its own
+    ``escapable``: a runtime's per-call escape reaches the host only where no
+    container is between, and the question an approved crossing asks has to
+    say which of the two it buys. Read here, from the same ledger the verdict
+    read, so neither dispatcher spells the measurement for itself — the same
+    reason ``bash_decision`` reads ``contained`` rather than being passed it.
+    """
+    return contained(measured_boundary(cwd))
+
+
 def unconfined_by_declaration(command: str) -> bool:
     """Whether the boundary declaration takes this command out of isolation.
 

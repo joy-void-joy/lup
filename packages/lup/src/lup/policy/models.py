@@ -343,9 +343,14 @@ class Decision(BaseModel, frozen=True):
         """
         return KernelDecision(info.data["effect"], sandbox=sandbox).sandbox
 
-    def placed(self, escapable: bool) -> "Decision":
-        """This verdict as a runtime that can, or cannot, place a call sees it."""
-        kernel = self.as_kernel().placed(escapable)
+    def placed(self, escapable: bool, contained: bool = False) -> "Decision":
+        """This verdict as a runtime that can, or cannot, place a call sees it.
+
+        ``contained`` is the session's measured placement, which decides what
+        an approved crossing is described as; see
+        :meth:`~lup.policy.kernel.decision.KernelDecision.placed`.
+        """
+        kernel = self.as_kernel().placed(escapable, contained=contained)
         return self.model_copy(
             update={
                 "effect": kernel.effect,

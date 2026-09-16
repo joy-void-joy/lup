@@ -43,6 +43,7 @@ from decisions import (
     placed_document,
     placed_edit_text,
     refused_tool_decision,
+    session_contained,
     written_review,
 )
 from host import (
@@ -337,7 +338,12 @@ def rendered(decision, payload, placed, attached):
     tool, so for the shell tool the object arrives whole and the sandbox is
     chosen from it. What remains outside this file's reach is the session
     itself: a host that forbids unsandboxed commands ignores the flag, and
-    the call runs confined with the verdict unchanged.
+    the call runs confined with the verdict unchanged. A contained launch
+    never arms the per-call sandbox at all, so there the flag lifts nothing
+    and the call runs in the container's own mount namespace — which is why
+    the sentence an approved crossing adds to its question is chosen by the
+    placement the launch measured, handed to the kernel beside `escapable`,
+    and never by this runtime.
 
     The rewrite replaces the arguments rather than merging into them, so the
     whole input is carried through. A deferral is placed nowhere, which is
@@ -362,7 +368,9 @@ def rendered(decision, payload, placed, attached):
     reviewed request spelled `# lup: escalate[sandbox]:`, and a native flag the
     agent set for itself is not that request.
     """
-    settled = decision.placed(escapable=True)
+    settled = decision.placed(
+        escapable=True, contained=session_contained(session_root(payload))
+    )
     # The prompt is the approver's, so a question's recovery rides beside it
     # as the agent's context; a refusal reaches only the agent and says both.
     beside = settled.recovery if settled.effect == "ask" else ""

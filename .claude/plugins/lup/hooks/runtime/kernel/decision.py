@@ -93,7 +93,29 @@ over.
 # lup: ignore[constant-declaration] — the words this gate says, in a kernel
 # compiled hermetically into a bare dispatcher that takes no arguments
 SANDBOX_ESCAPE_NOTICE = " — this will run on the host, outside the boundary"
-"""What an approval question adds when the call it approves also leaves."""
+"""What an approval question adds when the call it approves also leaves.
+
+The crossing as an uncontained session makes it: the runtime's per-call
+sandbox is the only boundary there is, and lifting it for one call puts that
+call on the launcher's host.
+"""
+
+# lup: ignore[constant-declaration] — the same gate's words for the other
+# boundary, declared beside the first so the two are read together
+CONTAINED_ESCAPE_NOTICE = (
+    " — this runs with the per-call sandbox off, still inside the container's"
+    " mounts; a path mounted read-only stays read-only"
+)
+"""What the same question adds where a container is the boundary.
+
+A contained launch never arms the per-call sandbox, so lifting it lifts
+nothing, and the approved command runs in the same mount namespace as every
+other: a write to a human-owned file, bind-mounted read-only over the
+checkout, fails approved exactly as it fails unmarked. The question names
+where the call lands rather than where the marker asked for it to go, because
+a sentence promising the host over a call that stays in the container is the
+approver being told the wrong thing at the one moment they decide.
+"""
 
 # lup: ignore[constant-declaration] — the recipe a diagnostic hands the agent;
 # its whole value is being the same words every time
@@ -437,7 +459,7 @@ class KernelDecision:
             changes["recovery"] if "recovery" in changes else self.recovery,
         )
 
-    def placed(self, escapable: bool) -> "KernelDecision":
+    def placed(self, escapable: bool, contained: bool = False) -> "KernelDecision":
         """This verdict as the runtime about to render it will carry it out.
 
         ``escapable`` is whether this runtime can put an operation outside the
@@ -446,6 +468,17 @@ class KernelDecision:
         operation runs contained — so the plain effect is rendered instead and
         :class:`~lup.policy.kernel.settlement.TrappedPlacement` is what refuses
         the one case where that substitution would be wrong.
+
+        ``contained`` is where the session sits, as its launch measured it,
+        and it decides what the question says about the crossing. A runtime's
+        per-call escape reaches the host only where no container is between;
+        inside one it lifts the per-call sandbox alone and the call lands in
+        the same mount namespace, so the sentence names that rather than a
+        host the approval does not buy. An input rather than a reading,
+        because the kernel measures nothing: the host hands it in beside
+        ``escapable``, and a caller that says nothing is read as a session
+        that measured no container — the answer the launch ledger gives when
+        it is absent.
 
         The reason is composed with the contributing verdicts here, because
         this is the last seam every renderer funnels through and the reason is
@@ -469,7 +502,8 @@ class KernelDecision:
         if not escapable:
             return composed.revised(sandbox="ambient")
         if self.effect == "ask" and self.sandbox == "outside":
-            return composed.revised(reason=composed.reason + SANDBOX_ESCAPE_NOTICE)
+            notice = CONTAINED_ESCAPE_NOTICE if contained else SANDBOX_ESCAPE_NOTICE
+            return composed.revised(reason=composed.reason + notice)
         return composed
 
     def stated_whole(self) -> str:

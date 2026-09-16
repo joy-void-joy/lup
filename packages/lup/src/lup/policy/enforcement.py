@@ -64,6 +64,7 @@ def policy_hook_output(
     decision: Decision,
     escapable: bool = False,
     relay: EscalationRelay | None = None,
+    contained: bool = False,
 ) -> LupHookOutput:
     """Render one policy verdict as the portable hook decision.
 
@@ -78,11 +79,18 @@ def policy_hook_output(
     channel is handed the plain effect instead of an intent it would
     silently drop.
 
+    ``contained`` is the session's measured placement, which decides what an
+    approved crossing is described as — the host where the per-call sandbox
+    is the only boundary, the container's own mounts where one is between.
+    Composed here for the same reason ``escapable`` is: the kernel measures
+    nothing, and a renderer that guessed would describe a crossing the
+    session does not make.
+
     The two audiences get their own text. A question's reason is what the
     approver reads, so the recovery rides beside it as context for the agent;
     a refusal reaches the agent alone, so it carries both.
     """
-    decision = decision.placed(escapable)
+    decision = decision.placed(escapable, contained=contained)
     match decision.effect:
         case "allow":
             return allow_hook(decision.sandbox, decision.reason)
@@ -179,6 +187,17 @@ class SandboxPosture(BaseModel, frozen=True):
 
     escapable: bool = False
     """Whether this session may place one call outside that sandbox."""
+
+    contained: bool = False
+    """Whether the boundary this session was opened inside is a container.
+
+    The profile's declaration rather than the runtime's sandbox, and it
+    decides what an approved sandbox escalation is described as: on a host the
+    per-call escape leaves the only boundary there is, while inside a
+    container it lifts the per-call sandbox alone and the call lands in the
+    same mount namespace, which the question has to say. Unstated reads as
+    uncontained, the same answer the compiled dispatchers reach from a launch
+    ledger that measured nothing."""
 
 
 class NativeSemantics(BaseModel, frozen=True):
@@ -287,6 +306,7 @@ def create_policy_hooks(
             policy.decide(semantics.decode(event).as_documents()),
             semantics.escapes_from(sandbox),
             relay,
+            contained=sandbox.contained,
         )
 
     return LupHooksConfig(
