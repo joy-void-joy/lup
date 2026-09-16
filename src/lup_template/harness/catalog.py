@@ -202,7 +202,11 @@ HARNESS_SESSION = "harness"
 """The session a natively launched tool server opens for itself.
 
 One name per worktree, shared by every group's process, so the tools of one
-native session write where the next one will find them."""
+native session write where the next one will find them. It names where a
+session's notes go and is no identity: what the roster knows a session by is
+the launcher's id, or the id its runtime gave the process, which
+:mod:`lup.providers.identity` asks the adapter for — never this word, which
+every session of one worktree would share."""
 
 
 def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer]:

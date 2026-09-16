@@ -12,6 +12,7 @@ from lup_template.agent.toolsets import (
     build_session_toolset,
 )
 from lup_template.agent.tools.example import EXAMPLE_TOOLS
+from lup.providers.identity import native_session_id
 from lup.workspace.context import SessionContext
 from lup.tools.mcp import LupMcpTool
 from lup_template.agent.config import Engine
@@ -39,13 +40,21 @@ def collect_tools_by_server(
     return toolset["groups"]
 
 
-def collect_session_toolset(context: SessionContext | None) -> SessionToolset | None:
+def collect_session_toolset(
+    context: SessionContext | None, identity: str | None = None
+) -> SessionToolset | None:
     """The session's whole toolset — groups and their servers' companions — or nothing.
 
     Nothing where no session is open, because every session-bound group
     closes over a session's directories and a sandbox registered for
     teardown; the static example group needs neither and is what a caller
     without a session serves.
+
+    *identity* is what the coordination group falls back to when no launcher
+    minted a member id: the session's own id where an adapter relayed one in
+    the context, and for a natively opened session whatever its runtime gave
+    the process — which the caller resolves, since the context names where
+    the session's notes go and not who it is.
     """
     if context is None:
         return None
@@ -75,7 +84,7 @@ def collect_session_toolset(context: SessionContext | None) -> SessionToolset | 
         subagent_tool=create_run_subagent_tool(
             get_subagent_specs(), factory_recipe=build_subagent_factory
         ),
-        session_id=context.session_id or "",
+        session_id=identity if identity is not None else (context.session_id or ""),
     )
 
 
@@ -142,12 +151,19 @@ def serve_tools(
         settings.agent_sdk = runtime
 
     context = read_session_context()
+    identity: str | None = None
     if context is None and session is not None:
+        # A native runtime relays no context, so the session opened here is
+        # named for where its notes go and not for who it is. What the roster
+        # knows it by is the launcher's id where one was minted, otherwise the
+        # id the runtime gave this process, which its adapter reads — and
+        # nothing where the runtime hands its servers none.
         context = harness_session_context(session)
+        identity = native_session_id(runtime) if runtime is not None else ""
     if context is not None:
         configure_metrics(metrics_path(context.session_dir))
 
-    toolset = collect_session_toolset(context)
+    toolset = collect_session_toolset(context, identity)
     by_server = (
         {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)} if toolset is None else toolset["groups"]
     )

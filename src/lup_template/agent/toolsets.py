@@ -158,12 +158,6 @@ def build_session_toolset(
             realtime_dir, gate=ReflectionGate(flag_path=meta_flag)
         )
 
-    # lup: defer: a session nobody launched falls back to the name its runtime
-    # hands the tool server, which for a native harness is the one constant
-    # `harness` — so every unlaunched session in a worktree joins as one
-    # member, while the prompt hook falls back to the runtime's own session
-    # id. One fallback both halves share is the fix, and it needs the
-    # runtime's session id to reach the tool server, which no adapter passes.
     member = session_member_id(session_id)
     if member:
         # The worktree is passed rather than looked up inside the tools,
