@@ -83,7 +83,7 @@ Based on the user's input above, explore the relevant sources and brainstorm sol
                 models.TextPart(
                     text=rf""" | `harness/content/template_sections.py` plus each flavor module |
 
-Content paths above are relative to `{layout.directory("devtools")}`. Every tree carries its own """
+Content paths above are relative to `{layout.directory()}`. Every tree carries its own """
                 ),
                 models.NativePath(location="ownership_manifest"),
                 models.TextPart(
