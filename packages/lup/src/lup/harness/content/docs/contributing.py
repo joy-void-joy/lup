@@ -2,11 +2,25 @@
 
 import lup.harness.content.conventions as conventions
 import lup.harness.models as models
+from lup.devtools.subapps import SubAppSpec
 from lup.harness.content.application import ApplicationLayout
 
 
-def document(layout: ApplicationLayout) -> models.PromptDocument:
-    """The contribution guide, naming this project's own half by its own name."""
+def document(
+    layout: ApplicationLayout, subapps: list[SubAppSpec]
+) -> models.PromptDocument:
+    """The contribution guide, naming this project's own half by its own name.
+
+    Takes the served sub-apps because its first fenced block instructs the
+    setup wizard, whose module a project may decline: the line renders only
+    where ``setup`` is among what the CLI serves, so the block never tells a
+    reader to run a command their checkout does not have.
+    """
+    setup = (
+        "uv run lup-devtools setup                  # interactive: keys, integrations\n"
+        if any(spec.name == "setup" for spec in subapps)
+        else ""
+    )
     return models.PromptDocument(
         source=__name__,
         parts=[
@@ -23,8 +37,7 @@ change once you know where it goes.
 
 ```bash
 uv sync                                    # both workspace packages
-uv run lup-devtools setup                  # interactive: keys, integrations
-uv run lup-devtools dev check --changed     # ruff + pyright on what you changed
+{setup}uv run lup-devtools dev check --changed     # ruff + pyright on what you changed
 uv run lup-devtools dev test <paths>       # while iterating: only these files
 uv run lup-devtools dev check              # the local pre-flight bar
 ```

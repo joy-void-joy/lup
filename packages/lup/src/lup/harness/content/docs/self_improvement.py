@@ -61,6 +61,7 @@ When the agent fails, the instinct is to patch the prompt. Resist it. Instead, t
 3. **Extract patterns**: Tool failures, capability requests, reasoning quality
 4. **Implement changes**: Fix tools → Build requested capabilities → Simplify prompts
 5. **Update documentation**: guidance should evolve with the agent
+6. **Commit the session data**: `uv run lup-devtools feedback commit` turns each session under `notes/traces/` into one `data(sessions):` commit — the commit skill leaves that data alone
 
 ## What to Track Per Session
 
