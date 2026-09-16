@@ -39,6 +39,7 @@ from lup.seams import Selection
 from lup_template.devtools.subapps import APPLICATION_ROSTER
 from lup_template.harness.content.modules.catalog import composed_entries
 from lup_template.harness.content.skills.meta import skill as build_meta
+from lup_template.harness.content.skills.review import skill as build_review
 
 LAYOUT = ApplicationLayout(package=Path(__file__).resolve().parents[2].name)
 """Where this application's own code sits, for the library prose that names it.
@@ -73,7 +74,11 @@ def adoptions(layout: ApplicationLayout) -> list[Adoption]:
     repository wrote about a subject the library owns — how *this* project's
     policy is changed, what its markers mean, where its deferred work goes —
     and each arrives under a new id, so the module goes on growing underneath
-    while this states only what it added.
+    while this states only what it added. The one declared under the library's
+    own id is ``review``: the library reviews a trace against the harness,
+    which is what every project has, and this repository reviews it against
+    the agent its sessions run as well, so the same id has to render the
+    fuller walk here.
 
     Built against a layout rather than declared, for the same reason the
     library's builders are: ``/lup:meta`` names a path inside the reading
@@ -102,6 +107,10 @@ def adoptions(layout: ApplicationLayout) -> list[Adoption]:
         ),
         Adoption(
             module="feedback-loop",
+            # The one rewrite under the library's own id: this repository's
+            # sessions run an agent, and a review of their traces reads its
+            # prompt and toolset sources beside the harness every project has.
+            content=models.ContentSelection(skills=[build_review(layout)]),
             guidance=Selection(overrides=[guidance.SELF_IMPROVEMENT]),
         ),
         Adoption(
