@@ -139,11 +139,12 @@ class CodexSpellings(NativeSpellings):
 
         No third route to name: this runtime cannot move a running session, so
         the tool the other adapter refuses does not exist here. The second
-        carries its condition for the same reason it does there -- a lease
-        mounts every pre-existing sibling read-only, so addressing one by
-        absolute path reaches a filesystem refusing every write, while a
-        worktree cut after the session started is outside the lease and
-        writable. Four words here and a paragraph in `docs/contributing.md`,
+        carries its condition for the same reason it does there -- a worker's
+        lease mounts every pre-existing sibling read-only, so from a worker,
+        addressing one by absolute path reaches a filesystem refusing every
+        write, while a worktree it cut itself is outside the lease and
+        writable, and an operator's session holds every checkout writable.
+        Four words here and a paragraph in `docs/contributing.md`,
         because what this renders into is budgeted: see the note on the
         other adapter's method.
         """

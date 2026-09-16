@@ -340,7 +340,8 @@ class UnleasedWrite(SettlementRule):
     """A write the measured boundary does not cover, wherever the session sits.
 
     The lease is what a launch actually mounted writable, and it is a snapshot:
-    the read-only overlays a contained launch punches over its siblings are
+    the read-only overlays a launch punches -- a worker's over its siblings,
+    any session's over `config`, `hooks/` and the human-owned paths -- are
     enumerated when the container starts, and a container's mount namespace is
     fixed from then on. So a worktree cut *after* that gets the writable base
     with no overlay over it, and a mount table cannot close that -- there is no

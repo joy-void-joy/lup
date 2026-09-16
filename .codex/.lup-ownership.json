@@ -205,7 +205,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/settlement.py",
       "category": "generated",
-      "sha256": "57320082e8f0e58abd774d1dd6b813e5cad2b35d862bc2346e91584830ec0ecd",
+      "sha256": "f7d40220b8dc470cf658f81566bf52da0358fa5d2259a3cf6c074fdd7d6a3a14",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

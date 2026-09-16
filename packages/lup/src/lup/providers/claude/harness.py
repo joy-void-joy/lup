@@ -120,12 +120,15 @@ class ClaudeSpellings(NativeSpellings):
         reaches the same branch from where it stands is named second.
 
         That fallback carries its condition, because it is the one route a
-        lease can take away. A contained session mounts every worktree but
-        its own read-only (:mod:`lup.sandbox.rail`), so addressing a
-        *pre-existing* sibling by absolute path reaches a filesystem refusing
-        every write -- while one cut after that session started is outside
-        the lease and writable, which is why the same sentence is right where
-        a worktree was just made and wrong where one was merely found. Stated
+        lease can take away. A resolver worker's lease mounts every sibling
+        that existed when the worker started read-only
+        (:func:`lup.sandbox.rail.worker_lease`), so from a worker, addressing
+        a *pre-existing* sibling by absolute path reaches a filesystem
+        refusing every write -- while one it cut itself is outside the lease
+        and writable, which is why the same sentence is right where a
+        worktree was just made and wrong where one was merely found. An
+        operator's session holds every checkout writable
+        (:func:`lup.sandbox.rail.lease_for`) and meets no such wall. Stated
         flatly it read as an equal alternative to launching, and an agent
         following it into a leased sibling spends its next hour discovering
         the mount.

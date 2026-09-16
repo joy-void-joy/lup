@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b79b8fe8cb38408606187f39fa9cc0480a0e84dcf231af3d5549d192be7b59ca",
+  "source_digest": "0f93252e768b9a1215d2fc81cc1dff0248edbee5551316baff00772862938fe0",
   "target_requirements": [
     "claude-code"
   ],
@@ -226,7 +226,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "d39de4719987709bda465b9c4484607e29eb35b0f249875a05860dbc47e86c01",
+      "sha256": "6c5933b57e1f8b20f8bfdbbc6e2148292b4f0be314a6fa64e3a31a936e411387",
       "semantic_id": "skill.land",
       "executable": false
     },
@@ -464,7 +464,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/settlement.py",
       "category": "generated",
-      "sha256": "57320082e8f0e58abd774d1dd6b813e5cad2b35d862bc2346e91584830ec0ecd",
+      "sha256": "f7d40220b8dc470cf658f81566bf52da0358fa5d2259a3cf6c074fdd7d6a3a14",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -569,7 +569,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "24069d51896b4e53de90c8bab99ab13dd6a2a7c726e9d4017b36cb6779e45831",
+      "sha256": "cec16cecb10a460ca594abf7b333c804d3f35059aecc702947e924ddaa3707bc",
       "semantic_id": "docs.contributing",
       "executable": false
     },
