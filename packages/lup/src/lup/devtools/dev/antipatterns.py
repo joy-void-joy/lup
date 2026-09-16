@@ -75,9 +75,9 @@ from lup.policy.kernel.edit import (
 from lup.policy.kernel.roles import path_role
 from lup.policy.kernel.rows import ResolutionRow
 from lup.devtools.dev.pyright_oracle import default_oracle
+from lup.devtools.dev.tracked import tracked_files
 from lup.devtools.project import DevProject
 from lup.devtools.utils import output_json
-from lup.execution.shell import git
 
 
 def scanned_roots(project: DevProject) -> AbstractSet[str]:
@@ -197,7 +197,7 @@ def scanned_files(
     declared = declared_rules(project)
 
     def found() -> Iterator[ScannedFile]:
-        for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
+        for rel in tracked_files(others=True):
             path = Path(rel)
             patterns = patterns_for_suffix(path.suffix.lower(), declared)
             if patterns is None or path_role(rel, roles) != "production":

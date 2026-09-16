@@ -26,9 +26,9 @@ from lup.harness.codescan.boundaries import (
     find_library_default_breaches,
     library_placement_path_is_audited,
 )
+from lup.devtools.dev.tracked import tracked_files
 from lup.devtools.project import DevProject
 from lup.devtools.utils import output_json
-from lup.execution.shell import git
 from lup.policy.kernel.roles import path_role
 
 
@@ -52,14 +52,11 @@ def tracked_python_sources(project: DevProject | None = None) -> list[TrackedSou
     Listed once each whatever the index holds: a path mid-merge sits there at
     three stages, and is still one file on disk and one module.
     """
-    tracked = git.lines(
-        "ls-files", "--cached", "--others", "--exclude-standard", "--deduplicate"
-    )
+    tracked = tracked_files(others=True, suffixes=(".py",))
     return [
         TrackedSource(rel=rel, path=path, text=path.read_text(encoding="utf-8"))
         for rel in tracked
-        if (path := Path(rel)).suffix == ".py"
-        and path.exists()
+        if (path := Path(rel)).exists()
         and (project is None or path_role(rel, project.path_roles) == "production")
     ]
 
