@@ -84,6 +84,7 @@ src/lup_template/
 │       │   ├── init.py      # Canonical declaration for the init skill.
 │       │   ├── install.py   # Canonical declaration for the install skill.
 │       │   ├── meta.py      # Canonical declaration for the meta skill.
+│       │   ├── review.py    # The review skill as this repository reviews a session: against its agent.
 │       │   └── update.py    # Canonical declaration for the update skill.
 │       ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
 │       ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
