@@ -9,6 +9,10 @@ name nothing will notice the loss of.
 
 from pathlib import Path
 
+import pytest
+import sh
+
+from lup.devtools.dev import preservation
 from lup.devtools.dev.boundaries import TrackedSource
 from lup.devtools.dev.preservation import (
     Capability,
@@ -18,6 +22,8 @@ from lup.devtools.dev.preservation import (
     compare,
     surfaces,
 )
+from lup.devtools.project import DevProject
+from lup.execution.shell import git
 
 
 def capture(
@@ -151,6 +157,51 @@ def test_a_module_no_root_can_import_is_not_a_surface() -> None:
     )
 
     assert [one.module for one in walked] == ["lup.client"]
+
+
+def test_a_module_mid_merge_is_one_surface_however_many_stages_it_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The index holds a conflicted path three times; the walk reads one file.
+
+    Built the way the duplication was met: both sides of a merge edit one
+    line, the merge stops, and the working copy is restored from one side
+    without being staged — so the file on disk parses clean while the index
+    still carries every stage of it.
+    """
+    work = tmp_path / "repo"
+    (work / "src/pkg").mkdir(parents=True)
+    module = work / "src/pkg/mod.py"
+    build = sh.Command("git").bake(
+        "-C",
+        str(work),
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "user.email=preservation@example.test",
+        "-c",
+        "user.name=Preservation Test",
+        _tty_out=False,
+    )
+    build("init", "-b", "main")
+    module.write_text("VALUE = 1\n", encoding="utf-8")
+    build("add", "--all")
+    build("commit", "-m", "base")
+    build("switch", "-c", "theirs")
+    module.write_text("VALUE = 2\n", encoding="utf-8")
+    build("commit", "-am", "theirs")
+    build("switch", "main")
+    module.write_text("VALUE = 3\n", encoding="utf-8")
+    build("commit", "-am", "ours")
+    build("merge", "theirs", _ok_code=[0, 1])
+    build("restore", "--ours", "--", "src/pkg/mod.py")
+    monkeypatch.chdir(work)
+    assert len(git.lines("ls-files", "--unmerged")) == 3
+
+    walked = preservation.capture([], DevProject(package="pkg"))
+
+    assert [one.module for one in walked.modules] == ["pkg.mod"]
+    assert walked.modules[0].declares == ["VALUE"]
 
 
 def test_every_captured_entry_carries_the_kind_that_resolves_it() -> None:

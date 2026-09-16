@@ -99,7 +99,7 @@ A rule's diagnostic names the shape it refuses and not the carve-outs that are o
 
 `uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green. `lup` itself is the one dependency not added that way: `dev library` reads and rewrites the mode a project obtains it through, and that mode decides what upgrading means — ask `dev library status` before assuming lup's source is on disk to edit, since in three of four modes it is not.
 
-An operation that genuinely needs the launcher's host is resubmitted with a leading `# lup: escalate[sandbox]: <why>` line rather than run from an unconfined session; the crossing is reviewed and dispatched once, so try inside first, since a missing path usually means the host was not needed.
+A leading `# lup: escalate[sandbox]: <why>` line turns a command into an approval question to run it with the runtime's per-call sandbox off, dispatched once. That is all it lifts: the mounts a contained launch made hold for every process in the session, so a write to a path mounted read-only — a human-owned file such as README.md — fails approved exactly as it failed unmarked, and is the user's to run from a host terminal, handed the exact command. Try inside first, since a missing path usually means the host was not needed.
 
 ### lup-devtools
 

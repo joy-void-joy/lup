@@ -48,16 +48,16 @@ def conflict_application() -> typer.Typer:
         pretty_exceptions_show_locals=False,
         no_args_is_help=True,
     )
-    dev_app = typer.Typer(no_args_is_help=True)
-    dev_app.add_typer(
+    git_app = typer.Typer(no_args_is_help=True)
+    git_app.add_typer(
         create_conflict_app(),
         name="conflict",
         help="Merge/rebase conflict resolution",
     )
     root_app.add_typer(
-        dev_app,
-        name="dev",
-        help="Conflict-safe development repair",
+        git_app,
+        name="git",
+        help="Conflict-safe git repair",
     )
 
     @root_app.callback()
@@ -73,7 +73,7 @@ def conflict_application() -> typer.Typer:
 def main() -> None:
     """Dispatch conflict repair without importing the project's application."""
     match sys.argv:
-        case [_, "dev", "conflict", *_]:
+        case [_, "git", "conflict", *_]:
             conflict_application()()
         case _:
             project_application()()

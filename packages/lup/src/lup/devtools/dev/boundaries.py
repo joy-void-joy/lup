@@ -47,10 +47,14 @@ class TrackedSource(BaseModel):
 
 
 def tracked_python_sources(project: DevProject | None = None) -> list[TrackedSource]:
-    """Every production Python file that exists on disk, with its text."""
-    tracked = str(
-        git("ls-files", "--cached", "--others", "--exclude-standard")
-    ).splitlines()
+    """Every production Python file that exists on disk, with its text.
+
+    Listed once each whatever the index holds: a path mid-merge sits there at
+    three stages, and is still one file on disk and one module.
+    """
+    tracked = git.lines(
+        "ls-files", "--cached", "--others", "--exclude-standard", "--deduplicate"
+    )
     return [
         TrackedSource(rel=rel, path=path, text=path.read_text(encoding="utf-8"))
         for rel in tracked
