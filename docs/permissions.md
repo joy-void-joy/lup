@@ -506,6 +506,15 @@ The guidance spells both; this is what each one does.
   decision half has already made it a question by the time the placement
   moves.
 
+  The question says which *there* it buys, from the placement the launch
+  measured rather than from the marker: on a host, that the call leaves for
+  the host, outside the only boundary there is; inside a container, that it
+  runs with the per-call sandbox off and still inside the container's
+  mounts, where a path mounted read-only stays read-only. A contained launch
+  never arms the per-call sandbox, so the escape lifts no mount, and a
+  write the mount table refuses fails approved exactly as it fails unmarked
+  — the exact command is then the user's to run from a host terminal.
+
   The bare `lup: escalate: <why>` keeps working as decision escalation and
   says it is an alias, because a migration that breaks every marker at once
   is one nobody can act on mid-run.
