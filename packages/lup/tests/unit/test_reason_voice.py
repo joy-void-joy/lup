@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from lup.policy.kernel.decision import CONTAINED_ESCAPE_NOTICE, SANDBOX_ESCAPE_NOTICE
+
 KERNEL = Path(__file__).resolve().parents[2] / "src" / "lup" / "policy"
 
 LONGEST_REASON = 200
@@ -126,3 +128,24 @@ def test_a_reason_tells_the_agent_nothing(path: Path) -> None:
         " the reason is read by whoever approves it. Move the instruction to"
         " `recovery`."
     )
+
+
+@pytest.mark.parametrize(
+    "notice",
+    [SANDBOX_ESCAPE_NOTICE, CONTAINED_ESCAPE_NOTICE],
+    ids=["host", "contained"],
+)
+def test_a_placement_notice_is_a_fact_the_approver_reads(notice: str) -> None:
+    """The sentence an approved crossing appends is part of the reason.
+
+    One per boundary, because the crossing differs: on a host the per-call
+    sandbox is the only boundary and the call leaves for the launcher's host;
+    inside a container that sandbox was never armed and the call stays in the
+    mounts. Each is read by whoever approves, so each states where the call
+    lands and tells the agent nothing -- what to do about a mount that refuses
+    is the guidance's to say, not the prompt's. Named constants rather than
+    literals in a call, so the walk above never sees them and they are put to
+    the same two gates by name.
+    """
+    assert len(notice) <= LONGEST_REASON
+    assert not [word for word in ADDRESSED_TO_THE_AGENT if word in notice.lower()]

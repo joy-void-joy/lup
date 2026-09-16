@@ -20,7 +20,11 @@ import sh
 from lup.providers.claude.hooks import claude_placed_input
 from lup.policy.grants import allowance_grants_environment, write_allowance_grants
 from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
-from lup.policy.kernel.decision import SandboxPlacement
+from lup.policy.kernel.decision import (
+    CONTAINED_ESCAPE_NOTICE,
+    SANDBOX_ESCAPE_NOTICE,
+    SandboxPlacement,
+)
 from lup.types import EnvVars, JsonObject
 from lup_template.harness.catalog import declared_hook_set
 from tests.unit.repos import commit_file, initialized_repo
@@ -1208,6 +1212,78 @@ def test_a_container_whose_placement_went_unmeasured_still_asks(
     unmeasured = {**CONTAINED_LEDGER, "delivered": ["question_relay"]}
 
     assert unjudged_effect_under(unmeasured, tmp_path, monkeypatch) == "ask"
+
+
+def escalated_reason_under(
+    ledger: dict[str, list[str]] | None, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, str, object]:
+    """What the deployed dispatcher asks about one sandbox escalation.
+
+    The ledger, where one is given, is written where that launch would have
+    put it and named by the nonce this session is entitled to believe; none
+    given is a launch that measured nothing, which the reader answers as
+    uncontained. The native sandbox is off in both, as it is in every
+    contained launch. Returns the effect, the reason the approver reads, and
+    the rewrite the call goes out with.
+    """
+    if ledger is None:
+        monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    else:
+        written = root / ".lup" / "preflight" / "launch.json"
+        written.parent.mkdir(parents=True, exist_ok=True)
+        written.write_text(json.dumps(ledger), encoding="utf-8")
+        monkeypatch.setenv("LUP_BOUNDARY_NONCE", "launch")
+    monkeypatch.delenv("LUP_SANDBOX_ACTIVE", raising=False)
+    payload = {
+        **bash_payload("# lup: escalate[sandbox]: the host has it\nls"),
+        "cwd": str(root),
+    }
+    specific = decide_from(payload, root)["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    rewritten = specific["updatedInput"] if "updatedInput" in specific else None
+    return (
+        str(specific["permissionDecision"]),
+        str(specific["permissionDecisionReason"]),
+        rewritten,
+    )
+
+
+def test_an_approved_crossing_on_a_host_is_described_as_leaving_for_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deployed dispatcher, on a launch that measured no container.
+
+    The rewrite lifts the runtime's per-call sandbox, which on a host is the
+    only boundary there is, so the question says the call leaves for the host.
+    """
+    effect, reason, rewritten = escalated_reason_under(None, tmp_path, monkeypatch)
+
+    assert effect == "ask"
+    assert reason.endswith(SANDBOX_ESCAPE_NOTICE)
+    assert isinstance(rewritten, dict)
+    assert rewritten["dangerouslyDisableSandbox"] is True
+
+
+def test_an_approved_crossing_inside_a_container_is_described_as_staying(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same rewrite under a contained launch, and a different sentence.
+
+    Measured under this boundary: an escalated `git merge --ff-only` failed
+    with `unable to unlink old 'README.md': Device or resource busy`, exactly
+    as it fails unmarked, because the per-call flag the rewrite sets is never
+    armed in a container and lifts no mount. The question the approver reads
+    says so. The rewrite itself is the same as on a host -- the sentence was
+    what had to change, never the placement.
+    """
+    effect, reason, rewritten = escalated_reason_under(
+        CONTAINED_LEDGER, tmp_path, monkeypatch
+    )
+
+    assert effect == "ask"
+    assert reason.endswith(CONTAINED_ESCAPE_NOTICE)
+    assert isinstance(rewritten, dict)
+    assert rewritten["dangerouslyDisableSandbox"] is True
 
 
 def created(path: str, content: str) -> JsonObject:
