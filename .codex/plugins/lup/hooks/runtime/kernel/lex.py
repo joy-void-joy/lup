@@ -1,23 +1,32 @@
 # lup: ignore[empty-collection]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
-"""Shell lexing: tokens, redirections, heredocs, and segment grouping."""
+"""Shell readers: what a parsed command writes, carries, runs and rewrites.
+
+Every reader here takes its words from one tree -- :func:`parse_shell`, the
+grammar in ``syntax.py`` with its variables bound once by ``bindings.py`` --
+so the classifier and the host readers that stat targets and produce
+rewritten documents cannot come to read one command two ways.
+"""
 
 import posixpath
-from typing import Literal, TypedDict
+from typing import TypedDict
 
-from .decision import (
-    BACKTICK_REASON,
-    BACKTICK_RECOVERY,
-    KernelDecision,
-    SUBSTITUTION_REASON,
-    SUBSTITUTION_RECOVERY,
-    SUBSTITUTION_SENTINEL,
-    unjudged,
-)
 from .archives import archive_write
+from .bindings import bind_script, carried_words, command_lists
+from .decision import KernelDecision, unjudged
 from .effects import EffectEvidence, declare, verdict_for
 from .roles import spells_its_path
 from .rows import PathRoleRow, PathRuleRow, ShellRuleRow
+from .syntax import (
+    Command,
+    Pipeline,
+    Redirect,
+    Script,
+    Word,
+    WordPart,
+    parse_script,
+    word_text,
+)
 from .words import (
     SCRATCH_VERB_FLAGS,
     effective_command,
@@ -36,482 +45,112 @@ from .words import (
 )
 
 
-class Scan(TypedDict):
-    """A balanced scan's inner text, and the position just past its close.
+def parse_shell(command: str) -> Script | KernelDecision:
+    """One command line as a tree with its variables bound, or why it is not one.
 
-    ``text`` is ``None`` when the construct never closed. Every caller turns
-    that into an unjudged verdict rather than guessing at the remainder, so
-    the position still says how far the scan got.
+    The only way a reader here reaches a command's words, which is what makes
+    the binding pass the one every reader shares.
     """
-
-    text: str | None
-    end: int
-
-
-class Lexeme(TypedDict):
-    """One lexed operator or expansion, and the position just past it."""
-
-    text: str
-    end: int
+    tree = parse_script(command)
+    if isinstance(tree, KernelDecision):
+        return tree
+    return bind_script(tree)
 
 
-class Heredoc(TypedDict):
-    """A delimiter awaiting its body, and whether quoting made the body literal.
+def substitutions(words: list[Word]) -> list[Script]:
+    """The commands every `$(…)` and `<(…)` in these words runs, in order."""
 
-    ``token`` is where the delimiter word landed, because the body arrives a
-    line later and has to be put back somewhere a reader of the segment can
-    find it. An index rather than the delimiter text, since one line may open
-    two heredocs under the same word.
+    def within(parts: list[WordPart]) -> list[Script]:
+        return [
+            script
+            for item in parts
+            for script in [*item["script"], *within(item["parts"])]
+        ]
+
+    return [script for word in words for script in within(word["parts"])]
+
+
+def list_commands(script: Script) -> list[Command]:
+    """Every command a list runs directly, in reading order."""
+    return [
+        command
+        for item in script["items"]
+        for pipeline in item["andor"]["pipelines"]
+        for command in pipeline["commands"]
+    ]
+
+
+def simple_commands(script: Script) -> list[Command]:
+    """Every simple command and `[[ ]]` test a list would run, in reading order.
+
+    Nested lists are walked where they stand, and a substitution's commands
+    follow the command whose words carry it -- the placement the classifier
+    judges them in.
     """
+    found: list[Command] = []
+    for command in list_commands(script):
+        if command["kind"] in ("simple", "test"):
+            found.append(command)
+        else:
+            for inner in command_lists(command):
+                found.extend(simple_commands(inner))
+        for inner in substitutions(carried_words(command)):
+            found.extend(simple_commands(inner))
+    return found
 
-    delimiter: str
-    quoted: bool
-    token: int
 
+def command_segments(script: Script) -> list[list[str]]:
+    """The words of every simple command a list runs, each as it reads.
 
-class Redirection(TypedDict):
-    """What classifying one redirection decided, and where to resume.
-
-    ``decision`` of ``None`` means the redirection is safe and consumed;
-    ``resume`` is the token index the caller continues from either way.
+    The one flattened view of a tree, for readers that ask a question of a
+    command's argv and none of its structure. A `[[ ]]` test reads as the
+    single word `[[`, and a command made only of redirections reads as none.
     """
+    return [
+        ["[["] if command["kind"] == "test" else texts
+        for command in simple_commands(script)
+        for texts in [[word_text(word) for word in command["words"]]]
+        if texts or command["kind"] == "test"
+    ]
 
-    decision: KernelDecision | None
-    resume: int
+
+def parse_shell_words(command: str) -> list[list[str]] | KernelDecision:
+    """Every simple command's words in one command line, or why it is not read."""
+    tree = parse_shell(command)
+    if isinstance(tree, KernelDecision):
+        return tree
+    segments = command_segments(tree)
+    if not segments:
+        return unjudged("shell command has no executable segment")
+    return segments
 
 
-class ShellToken:
-    """One lexed shell token: a word, an operator, or a substituted command.
+def all_redirects(script: Script) -> list[Redirect]:
+    """Every redirection a list carries, in reading order, substitutions included.
 
-    ``procsub`` carries a ``<(...)`` inner command and ``cmdsub`` a ``$(...)``
-    one; both are classified recursively. ``quoted`` records whether any part
-    of a word came from quotes or escapes, which decides whether a heredoc
-    delimiter suppresses body expansion.
+    A compound command's own redirections follow its body, where they are
+    written.
     """
-
-    kind: Literal["word", "op", "procsub", "cmdsub"]
-    text: str
-    quoted: bool
-    body: str
-    """The literal text a heredoc delimiter introduced, on that token alone.
-
-    Empty everywhere else, and empty for an unquoted delimiter: the shell
-    substitutes inside that body, so what is written here is not what lands.
-    Kept because a heredoc is one of the two ways a command carries the
-    content it is about to write, and content the command carries is content
-    the edit gates can read before it lands rather than after.
-    """
-
-    def __init__(
-        self,
-        kind: Literal["word", "op", "procsub", "cmdsub"],
-        text: str,
-        quoted: bool = False,
-        body: str = "",
-    ) -> None:
-        self.kind = kind
-        self.quoted = quoted
-        self.text = text
-        self.body = body
+    found: list[Redirect] = []
+    for command in list_commands(script):
+        for inner in command_lists(command):
+            found.extend(all_redirects(inner))
+        found.extend(command["redirects"])
+        for inner in substitutions(carried_words(command)):
+            found.extend(all_redirects(inner))
+    return found
 
 
-def read_process_substitution(command: str, position: int) -> Scan:
-    """Scan a balanced ``<(...)`` body, honoring quotes, returning its inner text."""
-    start = position
-    depth = 1
-    length = len(command)
-    while position < length:
-        character = command[position]
-        if character == "'":
-            closing = command.find("'", position + 1)
-            if closing == -1:
-                return Scan(text=None, end=position)
-            position = closing + 1
-            continue
-        if character == '"':
-            position += 1
-            while position < length and command[position] != '"':
-                position += 2 if command[position] == "\\" else 1
-            if position >= length:
-                return Scan(text=None, end=position)
-            position += 1
-            continue
-        if character == "\\":
-            position += 2
-            continue
-        if character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-            if depth == 0:
-                return Scan(text=command[start:position], end=position + 1)
-        position += 1
-    return Scan(text=None, end=position)
-
-
-def read_command_substitution(command: str, position: int) -> Scan:
-    """Scan a balanced ``$(...)`` expansion, returning its inner text.
-
-    ``position`` sits on the ``$``; the returned end position follows the
-    closing parenthesis, so ``command[position:end]`` is the raw expansion
-    the enclosing word keeps as its opaque spelling.
-    """
-    return read_process_substitution(command, position + 2)
-
-
-def read_redirection(command: str, position: int) -> Lexeme:
-    """Read a maximal redirection operator, returning its text and end position."""
-    start = position
-    length = len(command)
-    if command[position] == "&":
-        position += 1
-    core = command[position]
-    position += 1
-    if position < length and command[position] == core:
-        position += 1
-        if core == "<" and position < length and command[position] == "<":
-            position += 1
-        elif core == "<" and position < length and command[position] == "-":
-            position += 1
-    if position < length and command[position] == "&":
-        position += 1
-        while position < length and (
-            command[position].isdigit() or command[position] == "-"
-        ):
-            position += 1
-    return Lexeme(text=command[start:position], end=position)
-
-
-def read_control(command: str, position: int) -> Lexeme:
-    """Read a maximal control operator, returning its text and end position."""
-    character = command[position]
-    length = len(command)
-    if character == "&":
-        if position + 1 < length and command[position + 1] == "&":
-            return Lexeme(text="&&", end=position + 2)
-        return Lexeme(text="&", end=position + 1)
-    if character == "|":
-        if position + 1 < length and command[position + 1] == "|":
-            return Lexeme(text="||", end=position + 2)
-        if position + 1 < length and command[position + 1] == "&":
-            return Lexeme(text="|&", end=position + 2)
-        return Lexeme(text="|", end=position + 1)
-    if character == ";":
-        if command[position : position + 3] == ";;&":
-            return Lexeme(text=";;&", end=position + 3)
-        if command[position : position + 2] in (";;", ";&"):
-            return Lexeme(text=command[position : position + 2], end=position + 2)
-        return Lexeme(text=";", end=position + 1)
-    return Lexeme(text=character, end=position + 1)
-
-
-def read_arithmetic(command: str, position: int) -> Scan:
-    """Scan a balanced ``$((...))`` expansion whose interior is pure data.
-
-    ``position`` sits on the ``$``. Arithmetic cannot run commands, so the
-    expansion joins its word verbatim — unless the interior nests a command
-    substitution, in which case the scan stops on it and returns ``None``.
-    """
-    depth = 2
-    cursor = position + 3
-    length = len(command)
-    while cursor < length:
-        character = command[cursor]
-        if character == "`" or command[cursor : cursor + 2] == "$(":
-            return Scan(text=None, end=cursor)
-        if character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-            if depth == 0:
-                return Scan(text=command[position : cursor + 1], end=cursor + 1)
-        cursor += 1
-    return Scan(text=None, end=cursor)
-
-
-def arithmetic_token(command: str, position: int) -> Lexeme | KernelDecision:
-    """Read one ``$((...))`` expansion or explain why it cannot join a word."""
-    scan = read_arithmetic(command, position)
-    expansion = scan["text"]
-    end = scan["end"]
-    if expansion is not None:
-        return Lexeme(text=expansion, end=end)
-    if command[end : end + 2] == "$(" or command[end : end + 1] == "`":
-        return KernelDecision(
-            "deny", SUBSTITUTION_REASON, recovery=SUBSTITUTION_RECOVERY
-        )
-    return unjudged("arithmetic expansion does not parse")
-
-
-def without_leading_tabs(line: str) -> str:
-    """The line with its ``<<-``-style leading tab indentation removed."""
-    first = next(
-        (index for index, character in enumerate(line) if character != "\t"),
-        len(line),
-    )
-    return line[first:]
-
-
-def read_heredoc_bodies(
-    command: str,
-    position: int,
-    pending: list[Heredoc],
-    tokens: list[ShellToken] | None = None,
-) -> int | KernelDecision:
-    """Consume heredoc bodies after a newline, gating unquoted expansion.
-
-    A quoted delimiter makes the body literal data. An unquoted one lets the
-    shell substitute inside the body, so any substitution syntax there is
-    refused with the quoting recipe.
-
-    A literal body is put back on its delimiter token rather than discarded.
-    It was discarded here for as long as the only question asked of it was
-    whether it substitutes; the other question — what this command is about
-    to write — is answerable from the same lines, and only from them, since
-    the redirection that names the target is resolved a pass later.
-    """
-    for heredoc in pending:
-        delimiter = heredoc["delimiter"]
-        is_quoted = heredoc["quoted"]
-        lines: list[str] = []
-        terminated = False
-        while position <= len(command):
-            newline = command.find("\n", position)
-            end = len(command) if newline == -1 else newline
-            line = command[position:end]
-            position = end + 1
-            if line == delimiter or without_leading_tabs(line) == delimiter:
-                terminated = True
-                break
-            lines.append(line)
-            if newline == -1:
-                break
-        if not terminated:
-            return unjudged("heredoc does not terminate")
-        body = "".join(f"{line}\n" for line in lines)
-        if not is_quoted:
-            if "`" in body or "$(" in body:
-                return KernelDecision(
-                    "deny",
-                    f"the unquoted heredoc <<{delimiter} runs the commands its"
-                    " body substitutes",
-                    recovery=f"Quote the delimiter (<<'{delimiter}') to make the"
-                    " body literal.",
-                )
-            continue
-        # A trailing newline per line, because that is what the shell feeds:
-        # the delimiter line ends the body and is not part of it, and a body
-        # compared against a file has to agree with the file about its last
-        # byte or every such write reads as having changed the final line.
-        if tokens is not None and 0 <= heredoc["token"] < len(tokens):
-            tokens[heredoc["token"]].body = body
-    return position
-
-
-def tokenize_shell(command: str) -> list[ShellToken] | KernelDecision:
-    """Lex a command into words and operators, refusing opaque or unsafe syntax.
-
-    Heredoc bodies are consumed here: a delimiter registered by a ``<<``
-    redirection queues until the next newline, where the body lines are
-    skipped as data (quoted delimiter) or gated on substitution syntax
-    (unquoted delimiter).
-    """
-    tokens: list[ShellToken] = []
-    word: list[str] = []
-    started = False
-    quoted = False
-    heredoc_expected = False
-    pending_heredocs: list[Heredoc] = []
-    length = len(command)
-    position = 0
-
-    def flush() -> None:
-        nonlocal started, quoted, heredoc_expected
-        if started:
-            tokens.append(ShellToken("word", "".join(word), quoted))
-            if heredoc_expected:
-                pending_heredocs.append(
-                    Heredoc(
-                        delimiter="".join(word),
-                        quoted=quoted,
-                        token=len(tokens) - 1,
-                    )
-                )
-                heredoc_expected = False
-            word.clear()
-            started = False
-            quoted = False
-
-    while position < length:
-        character = command[position]
-        if character == "'":
-            closing = command.find("'", position + 1)
-            if closing == -1:
-                return unjudged("shell quoting does not parse")
-            word.extend(command[position + 1 : closing])
-            started = True
-            quoted = True
-            position = closing + 1
-            continue
-        if character == '"':
-            position += 1
-            quoted = True
-            while position < length and command[position] != '"':
-                inner = command[position]
-                if inner == "\\" and position + 1 < length:
-                    word.append(command[position + 1])
-                    position += 2
-                    continue
-                if inner == "$" and command[position + 1 : position + 3] == "((":
-                    outcome = arithmetic_token(command, position)
-                    if isinstance(outcome, KernelDecision):
-                        return outcome
-                    position = outcome["end"]
-                    word.append(outcome["text"])
-                    continue
-                if inner == "`":
-                    return KernelDecision(
-                        "deny", BACKTICK_REASON, recovery=BACKTICK_RECOVERY
-                    )
-                if (
-                    inner == "$"
-                    and position + 1 < length
-                    and command[position + 1] == "("
-                ):
-                    substitution = read_command_substitution(command, position)
-                    body = substitution["text"]
-                    if body is None:
-                        return unjudged("command substitution does not parse")
-                    tokens.append(ShellToken("cmdsub", body))
-                    word.append(SUBSTITUTION_SENTINEL)
-                    position = substitution["end"]
-                    continue
-                word.append(inner)
-                position += 1
-            if position >= length:
-                return unjudged("shell quoting does not parse")
-            started = True
-            position += 1
-            continue
-        if character == "\\":
-            if position + 1 < length and command[position + 1] != "\n":
-                word.append(command[position + 1])
-                started = True
-                quoted = True
-            position += 2
-            continue
-        if character in " \t\r":
-            flush()
-            position += 1
-            continue
-        if character == "$" and command[position + 1 : position + 3] == "((":
-            outcome = arithmetic_token(command, position)
-            if isinstance(outcome, KernelDecision):
-                return outcome
-            position = outcome["end"]
-            word.append(outcome["text"])
-            started = True
-            continue
-        if character == "`":
-            return KernelDecision("deny", BACKTICK_REASON, recovery=BACKTICK_RECOVERY)
-        if character == "$" and position + 1 < length and command[position + 1] == "(":
-            substitution = read_command_substitution(command, position)
-            body = substitution["text"]
-            if body is None:
-                return unjudged("command substitution does not parse")
-            tokens.append(ShellToken("cmdsub", body))
-            word.append(SUBSTITUTION_SENTINEL)
-            started = True
-            position = substitution["end"]
-            continue
-        if character == ">" and position + 1 < length and command[position + 1] == "(":
-            written = read_process_substitution(command, position + 2)["text"]
-            substitution = f">({written})" if written is not None else ">(...)"
-            return KernelDecision(
-                "ask",
-                f"writing into the process substitution {substitution} feeds a"
-                " command nothing checked",
-            )
-        if character == "<" and position + 1 < length and command[position + 1] == "(":
-            if started:
-                return unjudged("process substitution inside a word is not classified")
-            substitution = read_process_substitution(command, position + 2)
-            inner = substitution["text"]
-            if inner is None:
-                return unjudged("process substitution does not parse")
-            tokens.append(ShellToken("procsub", inner))
-            position = substitution["end"]
-            continue
-        if character == "#" and not started:
-            newline = command.find("\n", position)
-            if newline == -1:
-                break
-            position = newline
-            continue
-        if character in "<>" or (
-            character == "&" and position + 1 < length and command[position + 1] == ">"
-        ):
-            fd = ""
-            if started and word and all(digit.isdigit() for digit in word):
-                fd = "".join(word)
-                word.clear()
-                started = False
-                quoted = False
-            else:
-                flush()
-            redirection = read_redirection(command, position)
-            operator = redirection["text"]
-            position = redirection["end"]
-            tokens.append(ShellToken("op", fd + operator))
-            if "<<" in operator and "<<<" not in operator:
-                heredoc_expected = True
-            continue
-        if character in ";&|\n":
-            flush()
-            control = read_control(command, position)
-            operator = control["text"]
-            position = control["end"]
-            tokens.append(ShellToken("op", operator))
-            if operator == "\n" and pending_heredocs:
-                consumed = read_heredoc_bodies(
-                    command, position, pending_heredocs, tokens
-                )
-                if isinstance(consumed, KernelDecision):
-                    return consumed
-                position = consumed
-                pending_heredocs.clear()
-            continue
-        if character == "(":
-            if started:
-                return unjudged(
-                    "shell arrays and function definitions are not classified"
-                )
-            tokens.append(ShellToken("op", "("))
-            position += 1
-            continue
-        if character == ")":
-            flush()
-            tokens.append(ShellToken("op", ")"))
-            position += 1
-            continue
-        word.append(character)
-        started = True
-        position += 1
-    flush()
-    if heredoc_expected:
-        return unjudged("heredoc has no delimiter")
-    if pending_heredocs:
-        return unjudged("heredoc does not terminate")
-    return tokens
-
-
-# lup: ignore[library-default] — POSIX shell grammar operators
-SENTINEL_OPS = ("(", ")", ";;", ";&", ";;&")
-
-
-def is_control_operator(text: str) -> bool:
-    """Return whether an operator token separates command segments."""
-    return text in (";", "&", "&&", "||", "|", "|&", "\n")
+def all_pipelines(script: Script) -> list[Pipeline]:
+    """Every pipeline a list runs, nested lists included, substitutions not."""
+    found: list[Pipeline] = []
+    for item in script["items"]:
+        for pipeline in item["andor"]["pipelines"]:
+            found.append(pipeline)
+            for command in pipeline["commands"]:
+                for inner in command_lists(command):
+                    found.extend(all_pipelines(inner))
+    return found
 
 
 STREAM_WRITE_TARGETS = (
@@ -576,9 +215,9 @@ def python_script_targets(command: str, interpreters: tuple[str, ...]) -> list[s
     is run, and a script being run over and over is one that stopped being
     the one-off the rung was for.
 
-    Judged from the lexed segments rather than from the raw string, so a
+    Judged from the parsed commands rather than from the raw string, so a
     script named inside a pipeline or after a redirection is still found, and
-    a command that does not lex yields nothing.
+    a command that does not parse yields nothing.
     """
     segments = parse_shell_words(command)
     if not isinstance(segments, list):
@@ -832,104 +471,70 @@ def authored_writes(command: str) -> list[AuthoredWrite]:
     standard output forward across a `|`, which is what lets `echo 'x = 1' |
     tee packages/lup/src/lup/seams.py` be read as the module replacement it is.
     """
-    tokens = tokenize_shell(command)
-    if isinstance(tokens, KernelDecision):
+    tree = parse_shell(command)
+    if isinstance(tree, KernelDecision):
         return []
     authored: list[AuthoredWrite] = []
-    words: list[str] = []
-    bodies: list[str] = []
-    targets: list[str] = []
-    appends: list[bool] = []
-    legible = True
-    incoming: str | None = None
-
-    def close(piping: bool = False) -> None:
-        """End the segment being read, emitting what it authors.
-
-        ``piping`` says a `|` ended it, which makes what this segment wrote to
-        standard output the next segment's input -- unless a redirection took
-        that output somewhere else, where what reaches the pipe is no longer
-        what this read.
-        """
-        nonlocal legible, incoming
-        content = carried_text(words, bodies, incoming) if legible else None
-        piped = tee_operands(words)
-        landings = [
-            *(
-                []
-                if piped is None
-                else [(path, piped["append"]) for path in piped["paths"]]
-            ),
-            *([(targets[0], appends[0])] if len(targets) == 1 else []),
-        ]
-        if content is not None:
-            authored.extend(
-                AuthoredWrite(path=path, content=content, append=append)
-                for path, append in landings
-            )
-        incoming = content if piping and not targets else None
-        words.clear()
-        bodies.clear()
-        targets.clear()
-        appends.clear()
-        legible = True
-
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if token.kind in ("cmdsub", "procsub"):
-            legible = False
-            index += 1
-            continue
-        if token.kind != "op":
-            words.append(token.text)
-            index += 1
-            continue
-        operator = token.text
-        if is_control_operator(operator) or operator in SENTINEL_OPS:
-            close(operator == "|")
-            index += 1
-            continue
-        following = index + 1
-        carries = following < len(tokens) and tokens[following].kind == "word"
-        if "<<" in operator and "<<<" not in operator:
-            if not carries:
-                legible = False
-                index += 1
+    for pipeline in all_pipelines(tree):
+        incoming: str | None = None
+        for index, node in enumerate(pipeline["commands"]):
+            piping = pipeline["operators"][index : index + 1] == ["|"]
+            if node["kind"] != "simple":
+                incoming = None
                 continue
-            bodies.append(tokens[following].body)
-            index = following + 1
-            continue
-        if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
-            index += 1
-            continue
-        if not carries:
-            legible = False
-            index += 1
-            continue
-        spelled = resolved_target(
-            tokens[following].text, assigned_literals(tokens, index)
-        )
-        # A stream sink is not a target here for the reason it is not one in
-        # `shell_write_targets`: nothing is destroyed and no gate has anything
-        # to read. Dropped as it is met rather than at the end, or a
-        # `2>/dev/null` beside the write would count as a second target and
-        # take the whole segment out of reach.
-        if redirection_writes(operator) and not writes_to_a_stream(spelled):
-            targets.append(spelled)
-            appends.append(">>" in operator)
-        index = following + 1
-    close()
+            words = [word_text(word) for word in node["words"]]
+            legible = not substitutions(carried_words(node))
+            bodies: list[str] = []
+            targets: list[str] = []
+            appends: list[bool] = []
+            for redirect in node["redirects"]:
+                operator = redirect["operator"]
+                if redirect["heredoc"]:
+                    bodies.extend(
+                        heredoc["body"] if heredoc["quoted"] else ""
+                        for heredoc in redirect["heredoc"]
+                    )
+                    continue
+                if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
+                    continue
+                if not redirect["target"]:
+                    legible = False
+                    continue
+                spelled = word_text(redirect["target"][0])
+                # A stream sink is not a target here for the reason it is not
+                # one in `shell_write_targets`: nothing is destroyed and no
+                # gate has anything to read. Dropped as it is met rather than
+                # at the end, or a `2>/dev/null` beside the write would count
+                # as a second target and take the whole command out of reach.
+                if redirection_writes(operator) and not writes_to_a_stream(spelled):
+                    targets.append(spelled)
+                    appends.append(">>" in operator)
+            content = carried_text(words, bodies, incoming) if legible else None
+            piped = tee_operands(words)
+            landings = [
+                *(
+                    []
+                    if piped is None
+                    else [(path, piped["append"]) for path in piped["paths"]]
+                ),
+                *([(targets[0], appends[0])] if len(targets) == 1 else []),
+            ]
+            if content is not None:
+                authored.extend(
+                    AuthoredWrite(path=path, content=content, append=append)
+                    for path, append in landings
+                )
+            incoming = content if piping and not targets else None
     return authored
 
 
-def shell_write_targets(command: str, depth: int = 0) -> list[str]:
+def shell_write_targets(command: str) -> list[str]:
     """Name every path this command's redirections would open for writing.
 
     A caller that can reach the filesystem stats these and hands back the
     ones that already exist, so the kernel can tell creating a file from
     overwriting one without ever reading the filesystem itself. A command
-    that does not lex yields nothing and keeps its unjudged verdict.
+    that does not parse yields nothing and keeps its unjudged verdict.
 
     A stream sink is not among them. :func:`writes_to_a_stream` already holds
     that a redirection into one destroys nothing, and every caller asks a
@@ -939,110 +544,28 @@ def shell_write_targets(command: str, depth: int = 0) -> list[str]:
     writable root contains it, so naming it here puts an approval question in
     front of every ``2>/dev/null``.
     """
-    tokens = tokenize_shell(command)
-    if isinstance(tokens, KernelDecision):
+    tree = parse_shell(command)
+    if isinstance(tree, KernelDecision):
         return []
-    targets: list[str] = []
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if token.kind in ("cmdsub", "procsub"):
-            if depth < 2:
-                targets.extend(shell_write_targets(token.text, depth + 1))
-            index += 1
-            continue
-        if token.kind != "op" or not redirection_writes(token.text):
-            index += 1
-            continue
-        following = index + 1
-        if following < len(tokens) and tokens[following].kind == "word":
-            targets.append(
-                resolved_target(
-                    tokens[following].text, assigned_literals(tokens, index)
-                )
-            )
-            index = following + 1
-            continue
-        index += 1
-    return [target for target in targets if not writes_to_a_stream(target)]
-
-
-# lup: ignore[dict-str-payload] -- shell variable names, owned by the command
-# being judged rather than by this repository, so no closed set enumerates
-# them; the kernel is hermetic, which puts StringMap out of reach here
-def assigned_literals(tokens: list[ShellToken], before: int) -> dict[str, str]:
-    """Every name a standalone assignment gave a literal value, before an index.
-
-    Only a *standalone* assignment is read, and the segment the index falls in
-    is never read at all. `VAR=x cmd > $VAR` sets `VAR` for that one command's
-    environment, and the shell expands the redirection from the value it
-    already held -- so reading `x` as the target would judge a path the command
-    never writes, and judge it in the permissive direction.
-
-    Anything a segment holds that is not an assignment poisons that segment
-    rather than being skipped: a command word means the assignments beside it
-    were its environment, and a substitution means a value nothing here can
-    read. Later assignments to one name win, because the shell's do.
-    """
-    # lup: ignore[dict-str-payload] -- as above, shell variable names
-    literals: dict[str, str] = {}
-    # lup: ignore[dict-str-payload] -- as above, shell variable names
-    pending: dict[str, str] = {}
-    poisoned = False
-    for token in tokens[:before]:
-        if token.kind == "op" and is_control_operator(token.text):
-            if not poisoned:
-                literals.update(pending)
-            pending, poisoned = {}, False
-            continue
-        if poisoned:
-            continue
-        if token.kind != "word":
-            poisoned = True
-            continue
-        # lup: ignore[string-split] -- the shell's own assignment grammar, on a
-        # word the lexer has already separated; no parser here models it
-        name, separator, value = token.text.partition("=")
-        if not separator or not name.isidentifier() or not spells_its_path(value):
-            poisoned = True
-            continue
-        pending[name] = value
-    return literals
-
-
-# lup: ignore[dict-str-payload] -- as above, shell variable names
-def resolved_target(word: str, literals: dict[str, str]) -> str:
-    """The path a target spells once a known literal stands in for it.
-
-    Only a whole-word parameter is substituted -- `$NAME` or `${NAME}` and
-    nothing else. A word mixing an expansion with other text names a path this
-    cannot reconstruct, and half a substitution is worse than none: it would
-    hand the rows below a path that reads as resolved and is not.
-
-    Both readers of the redirection target need this and must not derive it
-    apart. :func:`shell_write_targets` decides which paths the caller tests for
-    existence and recoverability, and :func:`resolve_redirection` judges them;
-    resolving in one alone would let a resolved path that already exists reach
-    the create-versus-overwrite relaxation as though it were new.
-    """
-    name = word.removeprefix("$")
-    if name == word:
-        return word
-    if name.startswith("{") and name.endswith("}"):
-        name = name.removeprefix("{").removesuffix("}")
-    return literals[name] if name.isidentifier() and name in literals else word
+    return [
+        spelled
+        for redirect in all_redirects(tree)
+        if redirection_writes(redirect["operator"])
+        for target in redirect["target"]
+        for spelled in [word_text(target)]
+        if not writes_to_a_stream(spelled)
+    ]
 
 
 def resolve_redirection(
-    tokens: list[ShellToken],
-    index: int,
+    redirect: Redirect,
     existing_targets: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
     path_rules: list[PathRuleRow] | None = None,
     recoverable_targets: list[str] | None = None,
     contained: bool = False,
-) -> Redirection:
-    """Classify one redirection, consuming its target and stripping safe forms.
+) -> KernelDecision | None:
+    """Classify one redirection, or ``None`` where it is safe.
 
     What a write costs decides it, exactly as it decides for ``rm`` and
     ``cp``. Creating a file destroys nothing, so it passes once the caller
@@ -1063,41 +586,32 @@ def resolve_redirection(
     the create case: authoring a file there by hand is editing a build
     product, whether or not one is already sitting at that path.
     """
-    operator = tokens[index].text
-    if "<<" in operator and "<<<" not in operator:
-        target = index + 1
-        if target >= len(tokens) or tokens[target].kind != "word":
-            return Redirection(
-                decision=unjudged("heredoc has no delimiter"), resume=index + 1
-            )
-        return Redirection(decision=None, resume=target + 1)
+    operator = redirect["operator"]
+    if redirect["heredoc"]:
+        return None
     if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
-        return Redirection(decision=None, resume=index + 1)
-    target = index + 1
-    if target >= len(tokens) or tokens[target].kind != "word":
-        return Redirection(
-            decision=KernelDecision(
-                "ask",
-                f"file redirection {operator} names no target, so where it"
-                " writes is unknown",
-            ),
-            resume=index + 1,
+        return None
+    if not redirect["target"]:
+        return KernelDecision(
+            "ask",
+            f"file redirection {operator} names no target, so where it"
+            " writes is unknown",
         )
-    if "<" in operator:
-        return Redirection(decision=None, resume=target + 1)
-    spelled = resolved_target(tokens[target].text, assigned_literals(tokens, index))
+    if not redirection_writes(operator):
+        return None
+    spelled = word_text(redirect["target"][0])
     if writes_to_a_stream(spelled):
-        return Redirection(decision=None, resume=target + 1)
+        return None
     refused = refuses_generated_plugin_target(spelled)
     if refused is not None:
-        return Redirection(decision=refused, resume=target + 1)
+        return refused
     protected = protected_write_target(
         [spelled],
         path_rules or [],
         existing_targets is None or spelled in existing_targets,
     )
     if protected is not None:
-        return Redirection(decision=protected, resume=target + 1)
+        return protected
     scope = write_scope(spelled, path_roles or [])
     # A target still carrying an expansion names no path to scope, so what a
     # reviewer would be shown is `$B` and where that lands is the question.
@@ -1105,15 +619,12 @@ def resolve_redirection(
     # root is one of the things a role recognizes *through* the variable that
     # names it: `$TMPDIR/out.txt` spells no path and is still scratch.
     if scope != "scratch" and not spells_its_path(spelled):
-        return Redirection(
-            decision=KernelDecision(
-                "ask",
-                f"file redirection to {spelled} writes to a path that is only"
-                " known when the command runs",
-                checkpoint="targeted",
-                purpose="unrecovered_local_mutation",
-            ),
-            resume=target + 1,
+        return KernelDecision(
+            "ask",
+            f"file redirection to {spelled} writes to a path that is only"
+            " known when the command runs",
+            checkpoint="targeted",
+            purpose="unrecovered_local_mutation",
         )
     existing = existing_targets is None or spelled in existing_targets
     decided = verdict_for(
@@ -1135,160 +646,43 @@ def resolve_redirection(
         "inside" if contained else "ambient",
     )
     if decided == "allow":
-        return Redirection(decision=None, resume=target + 1)
+        return None
     written = "overwrites" if existing else "creates"
-    return Redirection(
-        decision=KernelDecision(
-            decided,
-            f"the redirection {written} {spelled}, a {scope} path",
-            checkpoint=write_checkpoint(scope),
-            purpose="unrecovered_local_mutation",
-        ),
-        resume=target + 1,
+    return KernelDecision(
+        decided,
+        f"the redirection {written} {spelled}, a {scope} path",
+        checkpoint=write_checkpoint(scope),
+        purpose="unrecovered_local_mutation",
     )
 
 
-def parse_shell_words(
-    command: str,
-    depth: int = 0,
+def redirection_verdict(
+    script: Script,
     existing_targets: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
     path_rules: list[PathRuleRow] | None = None,
     recoverable_targets: list[str] | None = None,
     contained: bool = False,
-) -> list[list[str]] | KernelDecision:
-    """Group lexed tokens into command segments, resolving safe redirections.
-
-    A read-side process substitution contributes a ``/dev/fd`` placeholder to
-    its enclosing segment and its inner command joins the segment list, so the
-    caller classifies it exactly like a piped command. Grouping parentheses
-    and case terminators become single-word sentinel segments the segment
-    walker interprets, and ``[[ ... ]]`` folds into one read-only test word.
-    """
-    tokens = tokenize_shell(command)
-    if isinstance(tokens, KernelDecision):
-        return tokens
-
-    recoverable = recoverable_targets or []
-
-    def substituted_segments(text: str) -> list[list[str]] | KernelDecision:
-        if depth >= 2:
-            return unjudged("command substitution nests too deeply")
-        return parse_shell_words(
-            text,
-            depth + 1,
-            existing_targets,
-            path_roles,
-            path_rules,
-            recoverable,
-            contained,
-        )
-
-    segments: list[list[str]] = []
-    current: list[str] = []
-    # A substitution's own command, held until the segment being built closes.
-    # Spliced the moment it is read, it lands ahead of the words around it —
-    # between a `for` header and its `do`, where the loop reader takes it for
-    # a condition and refuses a construct that parsed fine. It cannot simply
-    # flush the partial segment either: the tokenizer leaves a sentinel in the
-    # word where the substitution stood, and cutting the segment there strands
-    # that sentinel as a command of its own.
-    pending: list[list[str]] = []
-
-    def close_segment() -> None:
-        """End the segment being built, then place what it substituted."""
-        nonlocal current
-        if current:
-            segments.append(current)
-            current = []
-        segments.extend(pending)
-        pending.clear()
-
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if token.kind == "word" and token.text == "[[" and not token.quoted:
-            fold = index + 1
-            while fold < len(tokens) and not (
-                tokens[fold].kind == "word" and tokens[fold].text == "]]"
-            ):
-                if tokens[fold].kind == "procsub":
-                    return unjudged(
-                        "process substitution inside [[ ]] is not classified"
-                    )
-                if tokens[fold].kind == "cmdsub":
-                    folded = substituted_segments(tokens[fold].text)
-                    if isinstance(folded, KernelDecision):
-                        return folded
-                    segments.extend(folded)
-                fold += 1
-            if fold >= len(tokens):
-                return unjudged("test expression does not parse")
-            current.append("[[")
-            index = fold + 1
-            continue
-        if token.kind == "word":
-            current.append(token.text)
-            index += 1
-            continue
-        if (
-            token.kind == "op"
-            and token.text == "("
-            and current
-            and current[-1] not in ("then", "else", "elif", "do", "if", "in", "!")
-        ):
-            return unjudged("shell function definitions are not classified")
-        if token.kind == "op" and token.text in SENTINEL_OPS:
-            close_segment()
-            segments.append([token.text])
-            index += 1
-            continue
-        if token.kind == "procsub":
-            if depth >= 2:
-                return unjudged("process substitution nests too deeply")
-            inner = parse_shell_words(
-                token.text,
-                depth + 1,
-                existing_targets,
-                path_roles,
-                path_rules,
-                recoverable,
-                contained,
-            )
-            if isinstance(inner, KernelDecision):
-                return inner
-            pending.extend(inner)
-            current.append("/dev/fd/63")
-            index += 1
-            continue
-        if token.kind == "cmdsub":
-            spliced = substituted_segments(token.text)
-            if isinstance(spliced, KernelDecision):
-                return spliced
-            pending.extend(spliced)
-            index += 1
-            continue
-        if is_control_operator(token.text):
-            close_segment()
-            index += 1
-            continue
-        redirection = resolve_redirection(
-            tokens,
-            index,
-            existing_targets,
-            path_roles,
-            path_rules,
-            recoverable,
-            contained,
-        )
-        index = redirection["resume"]
-        verdict = redirection["decision"]
-        if verdict is not None:
-            return verdict
-    close_segment()
-    if not segments:
-        return unjudged("shell command has no executable segment")
-    return segments
+) -> KernelDecision | None:
+    """The first redirection in a command that is not safe, judged as it is met."""
+    return next(
+        (
+            decided
+            for redirect in all_redirects(script)
+            for decided in [
+                resolve_redirection(
+                    redirect,
+                    existing_targets,
+                    path_roles,
+                    path_rules,
+                    recoverable_targets,
+                    contained,
+                )
+            ]
+            if decided is not None
+        ),
+        None,
+    )
 
 
 def shell_flag_write_targets(command: str, rows: list[ShellRuleRow]) -> list[str]:
@@ -1311,7 +705,7 @@ def shell_flag_write_targets(command: str, rows: list[ShellRuleRow]) -> list[str
     to be reported as a write outside the lease, and the lease is the one
     reader that escalates on what it is handed.
     """
-    segments = parse_shell_words(command, 0)
+    segments = parse_shell_words(command)
     if isinstance(segments, KernelDecision):
         return []
     targets: list[str] = []
@@ -1339,11 +733,11 @@ def shell_patch_operands(command: str) -> list[str]:
     asking Git, so the two steps stay on the side of the boundary that can do
     them -- the words here, the file's contents there.
 
-    A command that does not lex yields nothing, on the same terms as every
+    A command that does not parse yields nothing, on the same terms as every
     reader beside it: an unparseable line keeps whatever verdict it already
     earned rather than gaining a relaxation from a reading that failed.
     """
-    segments = parse_shell_words(command, 0)
+    segments = parse_shell_words(command)
     if isinstance(segments, KernelDecision):
         return []
     return [
@@ -1379,10 +773,10 @@ def shell_path_verb_targets(command: str) -> list[str]:
     So ``sed`` names the files it rewrites in place, read by the one reader
     the classifier judges it with, and nothing where it only prints: neither
     its script, which is a program rather than a path, nor the file it reads,
-    which is at the path unchanged afterwards. A command that does not lex
+    which is at the path unchanged afterwards. A command that does not parse
     yields nothing and keeps its unjudged verdict.
     """
-    segments = parse_shell_words(command, 0)
+    segments = parse_shell_words(command)
     if isinstance(segments, KernelDecision):
         return []
     targets: list[str] = []
@@ -1434,11 +828,11 @@ def shell_sed_rewrites(command: str) -> list[SedRewrite]:
     keep from running — so an unscreened call yields nothing here and meets
     its refusal there.
 
-    A command that does not lex yields nothing, on the same terms as every
+    A command that does not parse yields nothing, on the same terms as every
     reader beside it: an unparseable line keeps whatever verdict it already
     earned rather than gaining a relaxation from a reading that failed.
     """
-    segments = parse_shell_words(command, 0)
+    segments = parse_shell_words(command)
     if isinstance(segments, KernelDecision):
         return []
     rewrites: list[SedRewrite] = []

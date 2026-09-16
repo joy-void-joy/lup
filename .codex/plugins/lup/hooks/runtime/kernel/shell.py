@@ -1,4 +1,4 @@
-# lup: ignore[empty-collection, import-re, re-call, string-split]
+# lup: ignore[empty-collection, import-re, re-call]
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Shell segment, structure, and whole-command classification."""
 
@@ -45,9 +45,28 @@ from .words import (
     refuses_generated_plugin_write,
     xargs_payload,
 )
+from .bindings import (
+    ShellBinding,
+    bind_name,
+    bind_script,
+    carried_words,
+    expanded_script,
+    literal_loop_word,
+    pure_assignment_names,
+    references,
+)
 from .escalation import read_escalation
 from .semantics import UnjudgedAmbient
-from .lex import parse_shell_words
+from .lex import (
+    command_segments,
+    list_commands,
+    parse_shell,
+    parse_shell_words,
+    redirection_verdict,
+    simple_commands,
+    substitutions,
+)
+from .syntax import Command, Script, Word, readable_prefix, word_text
 from .effects import declared_verdict
 from .commands import (
     SedContext,
@@ -455,72 +474,6 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
     return decision
 
 
-def loop_leader(segment: list[str]) -> str:
-    """The segment's effective first word, looking through a leading ``do``."""
-    if segment and segment[0] == "do" and len(segment) > 1:
-        return segment[1]
-    return segment[0] if segment else ""
-
-
-def find_loop_end(segments: list[list[str]], start: int) -> int | None:
-    """Locate the bare ``done`` segment closing the loop opened at ``start``."""
-    depth = 1
-    for index in range(start + 1, len(segments)):
-        if segments[index] == ["done"]:
-            depth -= 1
-            if depth == 0:
-                return index
-        elif loop_leader(segments[index]) in ("for", "while", "until"):
-            depth += 1
-    return None
-
-
-def variable_reference_end(word: str, position: int, name: str) -> int | None:
-    """The index just past a ``$name``/``${name}`` reference at ``position``."""
-    rest = word[position + 1 :]
-    if rest.startswith("{" + name + "}"):
-        return position + len(name) + 3
-    if rest.startswith(name):
-        follow = position + 1 + len(name)
-        if follow >= len(word) or not (word[follow].isalnum() or word[follow] == "_"):
-            return follow
-    return None
-
-
-def references_variable(word: str, name: str) -> bool:
-    """Detect a live ``$name`` or ``${name}`` reference inside one shell word."""
-    return any(
-        character == "$" and variable_reference_end(word, position, name) is not None
-        for position, character in enumerate(word)
-    )
-
-
-def substitute_variable(word: str, name: str, value: str) -> str:
-    """Replace every ``$name``/``${name}`` reference in one word with ``value``."""
-    pieces: list[str] = []
-    position = 0
-    while True:
-        found = word.find("$", position)
-        if found == -1:
-            pieces.append(word[position:])
-            return "".join(pieces)
-        end = variable_reference_end(word, found, name)
-        if end is None:
-            pieces.append(word[position : found + 1])
-            position = found + 1
-            continue
-        pieces.append(word[position:found])
-        pieces.append(value)
-        position = end
-
-
-def literal_loop_word(word: str) -> bool:
-    """A word whose runtime expansion is exactly its lexed text."""
-    return not word.startswith(("~", "/dev/fd/")) and not any(
-        character in "$*?[" for character in word
-    )
-
-
 def uv_post_target_words_safe(
     words: list[str], runner_targets: list[RunnerTargetRow]
 ) -> bool:
@@ -575,38 +528,6 @@ def argument_safe_words(words: list[str], context: ShellContext) -> bool:
     )
 
 
-class ShellBinding(TypedDict):
-    """One frozen variable binding: a name, and its literal value or None.
-
-    ``value`` is ``None`` where the word could not be read as a literal, which
-    is what makes the binding opaque to every later substitution.
-    """
-
-    name: str
-    value: str | None
-
-
-def bind_name(
-    bindings: tuple[ShellBinding, ...], name: str, value: str | None
-) -> tuple[ShellBinding, ...]:
-    """Rebind one name immutably, shadowing any earlier binding of it."""
-    kept = tuple(pair for pair in bindings if pair["name"] != name)
-    return (*kept, ShellBinding(name=name, value=value))
-
-
-def pure_assignment_names(segment: list[str]) -> list[ShellBinding] | None:
-    """The bindings of an assignment-only segment."""
-    pairs: list[ShellBinding] = []
-    for word in segment:
-        name, separator, value = word.partition("=")
-        if not separator or not name.isidentifier():
-            return None
-        pairs.append(
-            ShellBinding(name=name, value=value if literal_loop_word(value) else None)
-        )
-    return pairs
-
-
 def read_bindings(
     words: list[str], bindings: tuple[ShellBinding, ...]
 ) -> tuple[ShellBinding, ...] | KernelDecision:
@@ -628,40 +549,43 @@ def read_bindings(
     return bindings
 
 
-def resolve_segment_bindings(
-    segment: list[str],
-    bindings: tuple[ShellBinding, ...],
-    context: ShellContext,
-    gate_opaque: bool,
-) -> list[str] | KernelDecision:
-    """Substitute literal bindings and gate opaque ones by argument safety.
+def gate_references(
+    words: list[Word], bindings: tuple[ShellBinding, ...], context: ShellContext
+) -> KernelDecision | None:
+    """Gate a reference to a name this walk bound by argument safety.
 
-    A literal binding instantiates its references exactly, so guarded flags
-    are judged as the words they become. An opaque binding (``read``, a
-    non-literal assignment) can expand to any word, so a referencing segment
-    must name an argument-safe command.
+    Literal bindings were already expanded, once, by the binding pass over
+    the command's tree (:func:`~lup.policy.kernel.bindings.bind_script`),
+    which every other reader of the command shares. A reference still
+    standing is one that pass would not resolve -- a ``read``, a non-literal
+    assignment, or a name rebound inside a construct that may or may not run
+    -- so it can expand to any word, and a referencing command must name an
+    argument-safe one. Expanding it here instead would judge a word the
+    host's readers never see, which is the disagreement the pass removed.
     """
-    resolved = segment
     for binding in bindings:
-        name = binding["name"]
-        value = binding["value"]
-        if not any(references_variable(word, name) for word in resolved):
+        if not references(words, binding["name"]):
             continue
-        if value is not None:
-            resolved = [substitute_variable(word, name, value) for word in resolved]
-            continue
-        if not gate_opaque:
-            continue
-        words = command_words(resolved)
-        if not words or not argument_safe_words(words, context):
+        effective = command_words([word_text(word) for word in words])
+        if not effective or not argument_safe_words(effective, context):
             return unjudged("an opaquely bound variable could become a guarded flag")
-    return resolved
+    return None
+
+
+class Walked(TypedDict):
+    """What classifying a list decided, the bindings after it, and whether it stopped.
+
+    ``stopped`` is a construct the walk could not read: nothing after it in
+    the same list is judged, because what follows depends on what it did.
+    """
+
+    decisions: list[KernelDecision]
+    bindings: tuple[ShellBinding, ...]
+    stopped: bool
 
 
 def decide_for_body(
-    name: str,
-    loop_words: list[str],
-    body: list[list[str]],
+    command: Command,
     context: ShellContext,
     depth: int,
     bindings: tuple[ShellBinding, ...] = (),
@@ -670,13 +594,17 @@ def decide_for_body(
 
     A literal word list instantiates the body exactly, so a word landing in a
     guarded flag position is judged as the flag it becomes. A non-literal list
-    (globs, expansions) can become any word, so every segment referencing the
+    (globs, expansions) can become any word, so every command referencing the
     variable must name an argument-safe command before one placeholder pass.
     """
+    name = command["name"]
     if dangerous_env_name(name):
         return [
             KernelDecision("ask", dangerous_assignment_reason("looping over", [name]))
         ]
+    if not command["listed"]:
+        return [unjudged("loop form is not classified")]
+    loop_words = command["words"]
     if len(loop_words) > 16:
         return [unjudged("loop word list is too long to instantiate")]
 
@@ -684,22 +612,21 @@ def decide_for_body(
         return [
             decision
             for value in values
-            for decision in decide_segment_list(
-                [
-                    [substitute_variable(word, name, value) for word in segment]
-                    for segment in body
-                ],
+            for decision in decide_list(
+                expanded_script(
+                    command["body"], (ShellBinding(name=name, value=value),)
+                ),
                 context,
                 depth + 1,
                 bindings,
-            )
+            )["decisions"]
         ]
 
     if all(literal_loop_word(word) for word in loop_words):
-        return instantiations(loop_words or ["x"])
-    for segment in body:
-        if any(references_variable(word, name) for word in segment):
-            words = command_words(segment)
+        return instantiations([word_text(word) for word in loop_words] or ["x"])
+    for inner in simple_commands(command["body"]):
+        if references(inner["words"], name):
+            words = command_words([word_text(word) for word in inner["words"]])
             if not words or not argument_safe_words(words, context):
                 return [
                     unjudged(
@@ -710,248 +637,198 @@ def decide_for_body(
     return instantiations(["x"])
 
 
-class Group(TypedDict):
-    """What one compound construct decided, and the segment to resume at."""
+def joined_lists(scripts: list[Script]) -> Script:
+    """Several lists read as one, in order.
 
-    decisions: list[KernelDecision]
-    resume: int
-
-
-def decide_loop(
-    segments: list[list[str]],
-    start: int,
-    context: ShellContext,
-    depth: int,
-    bindings: tuple[ShellBinding, ...] = (),
-) -> Group | KernelDecision:
-    """Classify one loop construct, returning its decisions and the next index.
-
-    A while/until condition and body classify as one sequential list, so a
-    ``read`` in the condition binds for the body without shared mutation.
+    A construct's condition and bodies classify as one sequential list, so a
+    ``read`` in a ``while`` condition binds for the body it guards.
     """
-    if depth >= 2:
-        return unjudged("loops nest too deeply")
-    end = find_loop_end(segments, start)
-    if end is None:
-        return unjudged("loop construct is never closed by `done`")
-    interior = segments[start + 1 : end]
-    do_index = next(
-        (position for position, seg in enumerate(interior) if seg[0] == "do"), None
-    )
-    if do_index is None:
-        return unjudged("loop construct has no `do` introducing its body")
-    body = [seg for seg in [interior[do_index][1:], *interior[do_index + 1 :]] if seg]
-    if not body:
-        return unjudged("loop body is empty")
-    condition = interior[:do_index]
-    match segments[start]:
-        case ["for", name, "in", *loop_words] if name.isidentifier():
-            if condition:
-                return unjudged("a `for` loop cannot carry a condition")
-            return Group(
-                decisions=decide_for_body(
-                    name, loop_words, body, context, depth, bindings
-                ),
-                resume=end + 1,
-            )
-        case ["for", *_rest]:
-            return unjudged("loop form is not classified")
-        case [_keyword, *condition_head]:
-            conditions = [seg for seg in [condition_head, *condition] if seg]
-            if not conditions:
-                return unjudged("loop condition is empty")
-            decisions = decide_segment_list(
-                [*conditions, *body], context, depth + 1, bindings
-            )
-            return Group(decisions=decisions, resume=end + 1)
-    return unjudged("loop construct does not parse")
+    return Script(items=[item for script in scripts for item in script["items"]])
 
 
-# lup: ignore[library-default] — POSIX shell `case` clause terminators
-CASE_TERMINATORS = (";;", ";&", ";;&")
-
-
-def strip_structure_keywords(segment: list[str]) -> list[str]:
-    """Drop leading conditional keywords — pure structure, never commands."""
-    index = 0
-    while index < len(segment) and segment[index] in ("then", "else", "elif"):
-        index += 1
-    return segment[index:]
-
-
-def find_conditional_end(segments: list[list[str]], start: int) -> int | None:
-    """Locate the bare ``fi`` segment closing the conditional at ``start``."""
-    depth = 1
-    for index in range(start + 1, len(segments)):
-        if segments[index] == ["fi"]:
-            depth -= 1
-            if depth == 0:
-                return index
-        else:
-            stripped = strip_structure_keywords(segments[index])
-            if stripped and stripped[0] == "if":
-                depth += 1
-    return None
-
-
-def decide_conditional(
-    segments: list[list[str]],
-    start: int,
+def decide_substitutions(
+    words: list[Word],
     context: ShellContext,
     depth: int,
-    bindings: tuple[ShellBinding, ...] = (),
-) -> Group | KernelDecision:
-    """Classify one ``if`` construct: conditions and branches recursively."""
-    if depth >= 2:
-        return unjudged("conditionals nest too deeply")
-    end = find_conditional_end(segments, start)
-    if end is None:
-        return unjudged("conditional construct does not parse")
-    interior: list[list[str]] = []
-    for segment in [segments[start][1:], *segments[start + 1 : end]]:
-        stripped = strip_structure_keywords(segment)
-        if stripped:
-            interior.append(stripped)
-    if not interior:
-        return unjudged("conditional is empty")
-    return Group(
-        decisions=decide_segment_list(interior, context, depth + 1, bindings),
-        resume=end + 1,
-    )
+    bindings: tuple[ShellBinding, ...],
+) -> Walked:
+    """Classify every command the substitutions in these words run.
 
-
-def decide_case(
-    segments: list[list[str]],
-    start: int,
-    context: ShellContext,
-    depth: int,
-    bindings: tuple[ShellBinding, ...] = (),
-) -> Group | KernelDecision:
-    """Classify one ``case`` construct: patterns are match data, bodies recurse."""
-    if depth >= 2:
-        return unjudged("case constructs nest too deeply")
-    opener = segments[start]
-    if len(opener) < 3 or opener[2] != "in":
-        return unjudged("case construct does not parse")
-    body: list[list[str]] = []
-    collecting = False
-    nested = 0
-    end = None
-    for index in range(start + 1, len(segments)):
-        segment = segments[index]
-        if nested == 0 and segment == ["esac"]:
-            end = index
-            break
-        if nested == 0 and segment == [")"]:
-            collecting = True
-        elif nested == 0 and len(segment) == 1 and segment[0] in CASE_TERMINATORS:
-            collecting = False
-        elif nested == 0 and segment == ["("]:
-            continue
-        elif nested == 0 and not collecting:
-            continue
-        elif segment == ["esac"]:
-            nested -= 1
-            body.append(segment)
-        elif segment[0] == "case":
-            nested += 1
-            body.append(segment)
-        else:
-            body.append(segment)
-    if end is None:
-        return unjudged("case construct does not parse")
-    if not body:
-        return Group(decisions=[], resume=end + 1)
-    return Group(
-        decisions=decide_segment_list(body, context, depth + 1, bindings),
-        resume=end + 1,
-    )
-
-
-def decide_segment_list(
-    segments: list[list[str]],
-    context: ShellContext,
-    depth: int = 0,
-    bindings: tuple[ShellBinding, ...] = (),
-) -> list[KernelDecision]:
-    """Classify a segment list, grouping structured constructs recursively.
-
-    Bindings are frozen pairs: an assignment or read rebinds by producing a
-    new tuple for the segments that follow, recursion receives the current
-    value, and nothing mutates across scopes. A reference the walk cannot
-    resolve to a literal stays a live ``$`` word for the guarded-flag gates.
+    Each runs in a subshell of its own, so nothing it binds reaches the words
+    after it.
     """
-    segments = list(segments)
     decisions: list[KernelDecision] = []
-    index = 0
-    while index < len(segments):
-        segment = segments[index]
-        if segment in (["("], [")"]):
-            index += 1
-            continue
-        if len(segment) == 1 and segment[0] in CASE_TERMINATORS:
-            return [
-                *decisions,
-                unjudged("case terminator outside a case construct"),
-            ]
-        while segment and segment[0] == "{":
-            segment = segment[1:]
-        while segment and segment[-1] == "}":
-            segment = segment[:-1]
-        if not segment:
-            index += 1
-            continue
-        structural = segment[0] in ("for", "while", "until", "if", "case")
-        resolved = resolve_segment_bindings(
-            segment, bindings, context, gate_opaque=not structural
-        )
-        if isinstance(resolved, KernelDecision):
-            return [*decisions, resolved]
-        segment = resolved
-        segments[index] = segment
-        if structural:
-            match segment[0]:
-                case "for" | "while" | "until":
-                    outcome = decide_loop(segments, index, context, depth, bindings)
-                case "if":
-                    outcome = decide_conditional(
-                        segments, index, context, depth, bindings
-                    )
-                case _:
-                    outcome = decide_case(segments, index, context, depth, bindings)
-            if isinstance(outcome, KernelDecision):
-                return [*decisions, outcome]
-            index = outcome["resume"]
-            decisions.extend(outcome["decisions"])
-            continue
-        assignments = pure_assignment_names(segment)
-        if assignments is not None:
-            dangerous = [
-                pair["name"] for pair in assignments if dangerous_env_name(pair["name"])
-            ]
-            if dangerous:
-                decisions.append(
+    for inner in substitutions(words):
+        walked = decide_list(inner, context, depth, bindings)
+        decisions.extend(walked["decisions"])
+        if walked["stopped"]:
+            return Walked(decisions=decisions, bindings=bindings, stopped=True)
+    return Walked(decisions=decisions, bindings=bindings, stopped=False)
+
+
+def decide_simple(
+    command: Command,
+    context: ShellContext,
+    bindings: tuple[ShellBinding, ...],
+) -> Walked:
+    """Classify one simple command, rebinding where it assigns or reads."""
+    texts = [word_text(word) for word in command["words"]]
+    if not texts:
+        return Walked(decisions=[], bindings=bindings, stopped=False)
+    gated = gate_references(command["words"], bindings, context)
+    if gated is not None:
+        return Walked(decisions=[gated], bindings=bindings, stopped=True)
+    assignments = pure_assignment_names(texts)
+    if assignments is not None:
+        dangerous = [
+            pair["name"] for pair in assignments if dangerous_env_name(pair["name"])
+        ]
+        if dangerous:
+            return Walked(
+                decisions=[
                     KernelDecision(
                         "ask", dangerous_assignment_reason("assigning", dangerous)
                     )
-                )
-                index += 1
-                continue
-            for pair in assignments:
-                bindings = bind_name(bindings, pair["name"], pair["value"])
-            index += 1
-            continue
-        words = effective_command(segment)["words"]
-        if words and posixpath.basename(words[0]) == "read":
-            extended = read_bindings(words, bindings)
-            if isinstance(extended, KernelDecision):
-                return [*decisions, extended]
-            bindings = extended
-            index += 1
-            continue
-        decisions.append(decide_shell_segment(segment, context))
-        index += 1
-    return decisions
+                ],
+                bindings=bindings,
+                stopped=False,
+            )
+        for pair in assignments:
+            bindings = bind_name(bindings, pair["name"], pair["value"])
+        return Walked(decisions=[], bindings=bindings, stopped=False)
+    words = effective_command(texts)["words"]
+    if words and posixpath.basename(words[0]) == "read":
+        extended = read_bindings(words, bindings)
+        if isinstance(extended, KernelDecision):
+            return Walked(decisions=[extended], bindings=bindings, stopped=True)
+        return Walked(decisions=[], bindings=extended, stopped=False)
+    return Walked(
+        decisions=[decide_shell_segment(texts, context)],
+        bindings=bindings,
+        stopped=False,
+    )
+
+
+def decide_command(
+    command: Command,
+    context: ShellContext,
+    depth: int,
+    bindings: tuple[ShellBinding, ...],
+) -> Walked:
+    """Classify one command of any kind, recursing into the lists it runs.
+
+    A loop, a conditional and a case construct each open one level, and a
+    third level is left unjudged rather than walked. A brace group runs in
+    this shell, so what it binds stands after it; a subshell does not.
+    """
+    if command["kind"] == "simple":
+        own = decide_simple(command, context, bindings)
+        if own["stopped"]:
+            return own
+        inner = decide_substitutions(carried_words(command), context, depth, bindings)
+        return Walked(
+            decisions=[*own["decisions"], *inner["decisions"]],
+            bindings=own["bindings"],
+            stopped=inner["stopped"],
+        )
+    header = decide_substitutions(carried_words(command), context, depth, bindings)
+    if header["stopped"]:
+        return header
+
+    def stop(reason: str) -> Walked:
+        return Walked(
+            decisions=[*header["decisions"], unjudged(reason)],
+            bindings=bindings,
+            stopped=True,
+        )
+
+    def nested(scripts: list[Script]) -> Walked:
+        walked = decide_list(joined_lists(scripts), context, depth + 1, bindings)
+        return Walked(
+            decisions=[*header["decisions"], *walked["decisions"]],
+            bindings=bindings,
+            stopped=False,
+        )
+
+    match command["kind"]:
+        case "test":
+            return Walked(
+                decisions=[
+                    *header["decisions"],
+                    KernelDecision("allow", "test expression is read-only"),
+                ],
+                bindings=bindings,
+                stopped=False,
+            )
+        case "brace" | "subshell":
+            walked = decide_list(command["body"], context, depth, bindings)
+            return Walked(
+                decisions=[*header["decisions"], *walked["decisions"]],
+                bindings=walked["bindings"] if command["kind"] == "brace" else bindings,
+                stopped=walked["stopped"],
+            )
+        case "for" if depth >= 2:
+            return stop("loops nest too deeply")
+        case "for":
+            return Walked(
+                decisions=[
+                    *header["decisions"],
+                    *decide_for_body(command, context, depth, bindings),
+                ],
+                bindings=bindings,
+                stopped=False,
+            )
+        case "while" | "until" if depth >= 2:
+            return stop("loops nest too deeply")
+        case "while" | "until":
+            clause = command["clauses"][0]
+            return nested([clause["condition"], clause["body"]])
+        case "if" if depth >= 2:
+            return stop("conditionals nest too deeply")
+        case "if":
+            return nested(
+                [
+                    *(
+                        script
+                        for clause in command["clauses"]
+                        for script in (clause["condition"], clause["body"])
+                    ),
+                    command["body"],
+                ]
+            )
+        case "case" if depth >= 2:
+            return stop("case constructs nest too deeply")
+        case "case":
+            return nested([arm["body"] for arm in command["arms"]])
+        case "select":
+            return stop("loop form is not classified")
+        case "function":
+            return stop("shell function definitions are not classified")
+        case _:
+            return stop("arithmetic command is not classified")
+
+
+def decide_list(
+    script: Script,
+    context: ShellContext,
+    depth: int = 0,
+    bindings: tuple[ShellBinding, ...] = (),
+) -> Walked:
+    """Classify a command list in order, threading bindings through it.
+
+    Bindings are frozen pairs: an assignment or read rebinds by producing a
+    new tuple for the commands that follow, recursion receives the current
+    value, and nothing mutates across scopes. A reference the binding pass
+    left live stays a live ``$`` word for the guarded-flag gates.
+    """
+    decisions: list[KernelDecision] = []
+    for command in list_commands(script):
+        walked = decide_command(command, context, depth, bindings)
+        decisions.extend(walked["decisions"])
+        bindings = walked["bindings"]
+        if walked["stopped"]:
+            return Walked(decisions=decisions, bindings=bindings, stopped=True)
+    return Walked(decisions=decisions, bindings=bindings, stopped=False)
 
 
 def joined_checkpoint(
@@ -1014,18 +891,15 @@ def classify_shell(
     allowances: list[str] | None = None,
     rewritten_documents: list[RewrittenFileRow] | None = None,
 ) -> KernelDecision:
-    """Conservatively classify every segment in one shell command."""
-    segments = parse_shell_words(
-        command,
-        0,
-        existing_targets,
-        path_roles,
-        path_rules,
-        recoverable_targets,
-        contained,
-    )
-    if isinstance(segments, KernelDecision):
-        return segments
+    """Conservatively classify every command in one shell command line.
+
+    A line the grammar stops reading partway is still judged as far as it
+    was read. The shell runs a line's complete commands before it meets the
+    one that does not parse, so what reached a verdict before that point
+    keeps it -- an unjudged remainder is carried by a boundary, and a boundary
+    carrying `rm -rf ~` because a later line was malformed would be a
+    relaxation bought by a typo.
+    """
     # Named rather than positional: twelve lists of the same shape, and a
     # thirteenth inserted anywhere but the end silently re-seats every one
     # after it — passing a limit where a path list belongs.
@@ -1056,7 +930,45 @@ def classify_shell(
         allowances=allowances,
         rewritten_documents=rewritten_documents,
     )
-    decisions = decide_segment_list(segments, context)
+    tree = parse_shell(command)
+    if isinstance(tree, KernelDecision):
+        if tree.effect != "defer":
+            return tree
+        read = bind_script(readable_prefix(command))
+        if not read["items"]:
+            return tree
+        redirected = redirection_verdict(
+            read,
+            existing_targets,
+            path_roles,
+            path_rules,
+            recoverable_targets,
+            contained,
+        )
+        return joined_decision(
+            [
+                *([] if redirected is None else [redirected]),
+                *decide_list(read, context)["decisions"],
+                tree,
+            ]
+        )
+    redirected = redirection_verdict(
+        tree,
+        existing_targets,
+        path_roles,
+        path_rules,
+        recoverable_targets,
+        contained,
+    )
+    if redirected is not None:
+        return redirected
+    if not command_segments(tree):
+        return unjudged("shell command has no executable segment")
+    return joined_decision(decide_list(tree, context)["decisions"])
+
+
+def joined_decision(decisions: list[KernelDecision]) -> KernelDecision:
+    """One verdict for a whole line, from what each of its commands decided."""
     placement = joined_placement(decisions)
     restoration = joined_checkpoint(decisions)
     parts = tuple(decisions)
@@ -1102,25 +1014,32 @@ def sandbox_excluded(command: str, patterns: list[str]) -> bool:
     matches runs with nothing beneath it, and work the policy would have
     handed to the boundary has to be judged here instead. Every segment is
     tested, because a compound command carries an exclusion as a whole, and
-    one the lexer cannot read falls back to a single segment, which is what
+    one the parser cannot read falls back to a single segment, which is what
     the boundary does with it too.
     """
     prefixes = [excluded_prefix(pattern) for pattern in patterns]
     segments = parse_shell_words(command)
-    lexed = segments if isinstance(segments, list) else [command.split()]
+    read = segments if isinstance(segments, list) else [command.split()]
     return any(
         bool(prefix) and segment[: len(prefix)] == prefix
-        for segment in lexed
+        for segment in read
         for prefix in prefixes
     )
 
 
 def auto_escape_matches(command: str, prefixes: list[list[str]]) -> bool:
     """Whether one simple command has a native auto-escape prefix."""
-    segments = parse_shell_words(command)
-    if not isinstance(segments, list) or len(segments) != 1:
+    tree = parse_shell(command)
+    if isinstance(tree, KernelDecision):
         return False
-    words = segments[0]
+    commands = list_commands(tree)
+    if (
+        len(commands) != 1
+        or commands[0]["kind"] != "simple"
+        or substitutions(carried_words(commands[0]))
+    ):
+        return False
+    words = [word_text(word) for word in commands[0]["words"]]
     return any(bool(prefix) and words[: len(prefix)] == prefix for prefix in prefixes)
 
 
