@@ -603,16 +603,44 @@ SHELL_POLICY_CASES = [
     ),
     # The conflict workflow is documented without `uv run`, whose manifest
     # parse is exactly what a conflicted manifest defeats, so the classifier
-    # resolves the launcher named by path. Nothing else about the toolchain is
-    # admitted that way — it bounces back naming the spelling that is.
+    # resolves the launcher named by path or bare, in the shapes a session
+    # types it: behind a `cd` into the worktree, and ahead of a pipe into a
+    # reader. Nothing else about the toolchain is admitted that way — it
+    # bounces back naming the spelling that is, and `git conflict` is the
+    # only sub-app the carve-out reaches.
+    DecisionCase(input="lup-devtools git conflict status --json", effect="allow"),
     DecisionCase(
-        input=".venv/bin/lup-devtools dev conflict status --json", effect="allow"
+        input="cd /some/worktree && lup-devtools git conflict status --json",
+        effect="allow",
     ),
     DecisionCase(
-        input=".venv/bin/lup-devtools dev conflict audit pyproject.toml", effect="allow"
+        input="lup-devtools git conflict status --json 2>&1 | head -60",
+        effect="allow",
     ),
-    DecisionCase(input=".venv/bin/lup-devtools dev conflict complete", effect="allow"),
-    DecisionCase(input="lup-devtools dev conflict list", effect="allow"),
+    DecisionCase(
+        input=".venv/bin/lup-devtools git conflict status --json", effect="allow"
+    ),
+    DecisionCase(
+        input="./.venv/bin/lup-devtools git conflict audit a.py b.py --json",
+        effect="allow",
+    ),
+    DecisionCase(
+        input=(
+            "cd /some/worktree && .venv/bin/lup-devtools git conflict status"
+            " --json 2>&1 | head -60"
+        ),
+        effect="allow",
+    ),
+    DecisionCase(input=".venv/bin/lup-devtools git conflict complete", effect="allow"),
+    DecisionCase(
+        input="uv run --directory /some/worktree lup-devtools git conflict complete",
+        effect="allow",
+    ),
+    DecisionCase(input="lup-devtools git conflict list", effect="allow"),
+    DecisionCase(
+        input=".venv/bin/lup-devtools dev conflict status --json", effect="deny"
+    ),
+    DecisionCase(input=".venv/bin/lup-devtools git pr push", effect="deny"),
     DecisionCase(input=".venv/bin/lup-devtools dev check", effect="deny"),
     DecisionCase(input=".venv/bin/lup-devtools harness generate all", effect="deny"),
     # Redirections: discards and fd duplication are stripped; file writes ask.
