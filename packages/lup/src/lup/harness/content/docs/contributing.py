@@ -263,10 +263,12 @@ stacking a branch means a launch or absolute paths either way.
 A session launched already rooted in the worktree is never isolated and
 keeps all of them, which is why the workflow asks for a launch. Staying put
 and editing through absolute paths works too, but only into a worktree that
-is writable: a contained session mounts every sibling that already existed
-when it started read-only, so that route reaches a filesystem refusing every
-write, while one cut afterwards is outside the lease and takes edits
-normally. Measured against Claude Code
+is writable, and which those are is the lease's to say (`lup.sandbox.rail`):
+an operator's contained session holds every checkout of its repository
+writable, so that route reaches any sibling; a resolver worker's lease holds
+every sibling that existed when the worker started read-only, so there the
+route reaches a filesystem refusing every write, and only a worktree the
+worker cut itself takes edits. The isolation is measured against Claude Code
 2.1.237; `docs/native-capabilities.md` carries the evidence.
 
 Commit early, commit often, and keep commits atomic — if the message needs an
