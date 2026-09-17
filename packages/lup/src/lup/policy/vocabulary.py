@@ -670,6 +670,25 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
     ]
 
 
+def review_queue_rules() -> list[ShellSubcommandRule]:
+    """Queue decisions are operator actions; reading and cancelling stay available."""
+    return [
+        ShellSubcommandRule(
+            name="dev",
+            operations=[
+                ShellOperationRule(
+                    name=action,
+                    parents=["questions"],
+                    operator_only=True,
+                    reason="a requesting agent cannot approve or reject review-queue operations",
+                    recovery="The operator must answer from a terminal outside the agent session.",
+                )
+                for action in ("answer", "reject")
+            ],
+        )
+    ]
+
+
 def runner_target_rules(
     ambient: Sequence[str] = ("pyright", "pytest", "ruff"),
     session_opening: Sequence[str] = ("lup-devtools",),
@@ -725,7 +744,11 @@ def runner_target_rules(
     project declares as its own is reviewed as source before anything runs it.
     """
     return [
-        RunnerTargetRule(name=name, effects=[declare("runs_declared_target")])
+        RunnerTargetRule(
+            name=name,
+            effects=[declare("runs_declared_target")],
+            subcommands=review_queue_rules() if name == "lup-devtools" else [],
+        )
         for name in (*ambient, *session_opening, *also)
     ]
 

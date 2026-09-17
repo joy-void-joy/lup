@@ -119,6 +119,7 @@ def bash_decision(
     cwd: Path | None,
     relayed: bool = False,
     autonomous: bool = False,
+    park: bool = True,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -301,7 +302,7 @@ def bash_decision(
     # that record's renderer rather than a second authority. Written here, at
     # the one call site both runtimes pass through, so neither can reach a
     # question the queue does not hold.
-    if verdict.effect == "ask":
+    if verdict.effect == "ask" and park:
         record_question(
             cwd,
             command,

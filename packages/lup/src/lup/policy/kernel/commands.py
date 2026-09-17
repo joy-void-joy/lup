@@ -122,6 +122,15 @@ def row_verdict(
     is now about, rather than leaving it read off the operation nobody asked
     about.
     """
+    if row["operator_only"]:
+        return KernelDecision(
+            "deny",
+            row["reason"],
+            hard=True,
+            rule=row["rule"],
+            evaluator="shell-vocabulary",
+            recovery=row["recovery"],
+        )
     settled = row["checkpoint"] if checkpoint is None else checkpoint
     declared = row["effects"] if effects is None else effects
     purpose = purpose_of(declared, EffectEvidence()) if effect == "ask" else None
@@ -875,10 +884,17 @@ def decide_command_rows(
             return unlisted(f"{executable} {subword} is not classified")
         return apply_command_row(default, arguments, measured)
     if any(row["operation"] for row in subrows):
-        opword = next((word for word in remainder if not word.startswith("-")), "")
-        oprows = [row for row in subrows if opword and row["operation"] == opword]
+        operands = [word for word in remainder if not word.startswith("-")]
+        opword = next(iter(operands), "")
+        oprows = [
+            row
+            for row in subrows
+            if row["operation_path"]
+            and operands[: len(row["operation_path"])] == row["operation_path"]
+        ]
         if oprows:
-            return apply_command_row(oprows[0], remainder, measured)
+            matched = max(oprows, key=lambda row: len(row["operation_path"]))
+            return apply_command_row(matched, remainder, measured)
         subdefault = next((row for row in subrows if not row["operation"]), None)
         if subdefault is not None:
             return apply_command_row(subdefault, remainder, measured)

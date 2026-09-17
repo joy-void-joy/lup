@@ -466,6 +466,8 @@ class ShellRuleRow(TypedDict):
     command: str
     subcommand: str
     operation: str
+    operation_path: list[str]
+    operator_only: bool
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
     checkpoint: CheckpointRequirement
@@ -498,6 +500,8 @@ type ShellRowField = Literal[
     "command",
     "subcommand",
     "operation",
+    "operation_path",
+    "operator_only",
     "sandbox",
     "sandbox_source",
     "checkpoint",
@@ -552,6 +556,8 @@ def shell_row_values(
         "command": row["command"],
         "subcommand": row["subcommand"],
         "operation": row["operation"],
+        "operation_path": row["operation_path"],
+        "operator_only": row["operator_only"],
         "sandbox": row["sandbox"],
         "sandbox_source": row["sandbox_source"],
         "checkpoint": row["checkpoint"],

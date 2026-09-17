@@ -547,6 +547,36 @@ inherit whatever the operator had exported. A hook script is spawned by the
 runtime with the runtime's environment, so an agent exporting the variable
 inside a shell tool call never reaches the dispatcher that judges it.
 
+## Native hook review queue
+
+A runtime that cannot turn a pre-tool policy question into a native prompt
+parks the exact call in `.lup/questions.jsonl`. The refusal names its review
+id and the commands to inspect, approve, or reject it. Codex uses this
+fallback: its pre-tool event runs before native approval, and a pending
+native permission event is not evidence that anyone approved the call.
+
+The operator runs `uv run lup-devtools dev questions show <id>` from the
+indicated checkout, then `uv run lup-devtools dev questions answer <id>
+--as operator` or `uv run lup-devtools dev questions reject <id> --as
+operator` outside the agent session. Queue answer operations are declared
+`operator_only` in the shell vocabulary; an escalation cannot grant the
+requester authority to answer itself. Nested command paths are declared
+with `ShellOperationRule.parents`, and the deepest matching path decides.
+
+Approval releases one exact retry in the same session and directory.
+The hook re-runs policy, compares the payload and patch preimages, then
+claims the approval exclusively before allowing execution. A changed file
+or payload requires another review. Rejection leaves the operation stopped.
+A crash after claiming approval does not make it reusable. Native sandbox
+restrictions still apply; queue approval does not change execution placement.
+
+Native patches are decoded into file transitions before review. A standalone
+shell `apply_patch` with a single-quoted argument or a quoted heredoc reaches
+the same edit gates. Relative paths resolve against the hook payload's
+working directory. Add-file operations replacing existing files are judged
+as overwrites. Compound shell commands are never reduced to only their patch.
+
+
 ## Two markers change a decision
 
 The guidance spells both; this is what each one does.

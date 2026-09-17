@@ -130,6 +130,35 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        commit="2bb3da2ea",
+        subjects=[
+            "approval_fingerprint",
+            "approval_receipt_root",
+            "record_approval",
+            "spend_approval",
+            "uncorrelated",
+        ],
+        reason=(
+            "a queue approval is bound to the exact call, session, checkout "
+            "and file preimages and spent once on retry, so the receipts that "
+            "stood in for that correlation — written per pending prompt, and "
+            "matched by nothing narrower than a prompt — have nothing left to "
+            "answer"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Nothing outside the dispatcher called these. A project "
+                    "that carried its own copy of the Codex dispatcher asset "
+                    "takes the library's again by regenerating: the receipts "
+                    "directory it wrote under the session root is no longer "
+                    "read and can be removed."
+                ),
+                command=["uv", "run", "lup-devtools", "harness", "generate", "all"],
+            ),
+        ],
+    ),
+    Migration(
         commit="61d8c01e1",
         subjects=["LibraryMode.LINKED", "read_linked_path", "link_library"],
         reason=(

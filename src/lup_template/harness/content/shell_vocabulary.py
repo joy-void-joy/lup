@@ -35,6 +35,7 @@ from lup.policy.vocabulary import (
     bun_rule,
     git_rule,
     runner_target_rules,
+    review_queue_rules,
     typescript_rule,
 )
 from lup.seams import Selection
@@ -80,6 +81,7 @@ def lup_devtools_rule() -> ShellCommandRule:
         effects=[declare("runs_declared_target", scope="lup-devtools")],
         refuses=reach_through_uv,
         subcommands=[
+            *review_queue_rules(),
             ShellSubcommandRule(
                 name="git",
                 operations=[
@@ -88,7 +90,7 @@ def lup_devtools_rule() -> ShellCommandRule:
                     ShellOperationRule(name="conflict", refuses="")
                 ],
                 reason=reach_through_uv,
-            )
+            ),
         ],
         reason=reach_through_uv,
     )

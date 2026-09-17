@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "d846cca43c7969ad04b94a4f4664c82b597051ff85962f3c798fee1da36bff59",
+  "source_digest": "b1f300e006f1f978fafe5d4564b9c980c5c1efae358018a4b88634f27de56356",
   "target_requirements": [
     "claude-code"
   ],
@@ -394,7 +394,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "46ead74369da8926cc6a0725d7b71d86bb94afad1b490d1842ba86734c8ae0fd",
+      "sha256": "7a35fe93756207b7bc89fdb829fddc86f54e61ea24b16f2fa58988c30c0410ea",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -464,7 +464,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "03a26b28494085558105254de73a8b39ade0d87367e8a49c24f6606608e7210e",
+      "sha256": "4ea2ad4e08fb2e61e89c4b308957f0ff47e0dd3fcf78d98d7bbe14739dffb5c4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -513,7 +513,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "4a0edd64299f247e084c5c1c94ff226c81a0ccdcfbfdf1708848ae4dea660da7",
+      "sha256": "5bb95f4dca3caf168f5f9e5ab07298b6dc1cca20aa2315bdd7df744c07e07d1a",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -548,7 +548,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "13f329dc73ed8cb42e4896e6a15696b2f3cf529cf8b6ff0e10da36fba40c09b7",
+      "sha256": "2664f3bcf2866203ac538f3e88356ca134ff87eb49fa1285ddd9065a8608b34b",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -667,14 +667,14 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "682e8783574ec0d9d0f7d01c08ad11aef2226504078e99ea3cced4a9e3e41823",
+      "sha256": "79e26b4032819d729bb807ce989b04d197a5187635e28bf110a54007b4a74bc1",
       "semantic_id": "docs.permissions",
       "executable": false
     },
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "31aa9150e44dfc7f29a7ef2193f8fb4a6378cfcaae412e168e71ff8b44bc8158",
+      "sha256": "986fb2629ed2b50364a36952758837db453a2614bc3b93ecbe3956c7dcbcae38",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

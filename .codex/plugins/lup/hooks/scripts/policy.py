@@ -21,6 +21,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from codex_patch import patched_files
 from kernel.decision import KernelDecision
+from kernel.lex import parse_shell
+from kernel.syntax import word_text
 from kernel.shell import auto_escape_matches
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
@@ -30,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
+from typing import Literal
 from urllib.parse import urlsplit
 from kernel.edit import (
     awaits_resolution,
@@ -341,6 +344,100 @@ def script_run_nudge(
         " `lup-devtools` command, which lands in the diff and can be run"
         " again by name"
     )
+
+
+def review_hook_call(
+    root: Path,
+    session: str,
+    tool: str,
+    arguments: str,
+    preconditions: str,
+    reason: str,
+    rule: str,
+    purpose: str,
+    reviewer: str,
+) -> dict[Literal["state", "id", "reason"], str]:
+    """Park a native call or spend its explicit, single-use reviewer answer."""
+    if not session:
+        return {
+            "state": "unavailable",
+            "id": "",
+            "reason": "the hook carries no session_id",
+        }
+    payload = json.loads(arguments)
+    before = json.loads(preconditions)
+    material = json.dumps(
+        [session, str(root), tool, payload, before, reason, rule, purpose, reviewer],
+        sort_keys=True,
+    )
+    fingerprint = sha256(material.encode()).hexdigest()
+    log = root / ".lup/questions.jsonl"
+
+    def recorded():
+        if not log.exists():
+            return
+        for line in log.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            yield json.loads(line)
+
+    entries = {entry["id"]: entry for entry in recorded()}
+    matches = [
+        entry
+        for entry in entries.values()
+        if entry["fingerprint"] == fingerprint
+        and "resumption" in entry
+        and entry["resumption"] == "native_retry"
+    ]
+    entry = matches[-1] if matches else None
+    if entry is not None and entry["state"] == "approved":
+        answer = entry["answer"]
+        if not answer or not answer["approved"] or answer["principal"] == session:
+            raise ValueError("hook approval has no independent affirmative answer")
+        if answer["receipt"] != "recorded":
+            raise ValueError("a native permission request is not a recorded approval")
+        claim = root / ".lup/review-claims" / entry["id"]
+        claim.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with claim.open("x", encoding="utf-8") as handle:
+                handle.write(fingerprint)
+        except FileExistsError:
+            entry = None
+        else:
+            entry["state"] = "dispatched"
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+            return {"state": "approved", "id": entry["id"], "reason": ""}
+    if entry is not None and entry["state"] in ("pending", "rejected"):
+        return {"state": entry["state"], "id": entry["id"], "reason": entry["reason"]}
+    identifier = os.urandom(16).hex()
+    entry = {
+        "id": identifier,
+        "fingerprint": fingerprint,
+        "reason": reason,
+        "rule": rule,
+        "purpose": purpose or None,
+        "requirement": reviewer,
+        "eligible": [],
+        "chain_resolved": False,
+        "state": "pending",
+        "created": datetime.now(UTC).isoformat(),
+        "preconditions": before,
+        "resumption": "native_retry",
+        "operation": {
+            "id": identifier,
+            "session": session,
+            "requester": session,
+            "tool": tool,
+            "payload": payload,
+            "cwd": str(root),
+            "worktree": str(root),
+        },
+    }
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    return {"state": "pending", "id": identifier, "reason": reason}
 
 
 def record_question(
@@ -2261,6 +2358,7 @@ def bash_decision(
     cwd: Path | None,
     relayed: bool = False,
     autonomous: bool = False,
+    park: bool = True,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -2443,7 +2541,7 @@ def bash_decision(
     # that record's renderer rather than a second authority. Written here, at
     # the one call site both runtimes pass through, so neither can reach a
     # question the queue does not hold.
-    if verdict.effect == "ask":
+    if verdict.effect == "ask" and park:
         record_question(
             cwd,
             command,
@@ -3011,109 +3109,6 @@ def spent_escape(tool_input):
     )
 
 
-def approval_fingerprint(payload):
-    """Identify the fields both approval events carry for one Bash call."""
-    fields = ("session_id", "turn_id", "cwd", "tool_name")
-    if any(
-        field not in payload
-        or not isinstance(payload[field], str)
-        or not payload[field]
-        for field in fields
-    ):
-        return None
-    tool_input = payload["tool_input"]
-    if (
-        payload["tool_name"] != "Bash"
-        or not isinstance(tool_input, dict)
-        or "command" not in tool_input
-        or not isinstance(tool_input["command"], str)
-    ):
-        return None
-    identity = [payload[field] for field in fields]
-    identity.append(tool_input["command"])
-    return json.dumps(identity, ensure_ascii=True, separators=(",", ":"))
-
-
-def approval_receipt_root():
-    """The plugin-owned writable directory shared by hook processes."""
-    environ = hook_environment()
-    if "PLUGIN_DATA" not in environ:
-        return None
-    return Path(environ["PLUGIN_DATA"]) / "approval-receipts"
-
-
-def record_approval(payload, max_pending=256):
-    """Record one native permission event without merging identical calls."""
-    fingerprint = approval_fingerprint(payload)
-    root = approval_receipt_root()
-    if fingerprint is None or root is None:
-        return
-    root.mkdir(parents=True, exist_ok=True)
-    receipts = list(root.iterdir())
-    overflow = len(receipts) - max_pending + 1
-    for receipt in receipts[: max(0, overflow)]:
-        receipt.unlink(missing_ok=True)
-    receipt = root / os.urandom(16).hex()
-    receipt.write_text(fingerprint, encoding="utf-8")
-
-
-def uncorrelated(payload):
-    """Why a call that should carry an approval does not, in one sentence.
-
-    Empty when nothing is amiss, which is the ordinary case: a call that was
-    never escalated has no approval to find and no problem to report.
-
-    This exists because the failure it names is otherwise indistinguishable
-    from the one it is not. A call whose native approval was accepted and
-    whose receipt then failed to correlate reaches the same refusal as a call
-    nobody approved at all -- so #180 reads as "the policy rejected my
-    escalated diff" and the actual defect, whichever field the two events
-    disagreed on, leaves no trace. Naming the step that failed does not fix
-    it and does make the next run conclusive.
-    """
-    root = approval_receipt_root()
-    if root is None or not root.exists() or not list(root.iterdir()):
-        return ""
-    if approval_fingerprint(payload) is None:
-        missing = [
-            field
-            for field in ("session_id", "turn_id", "cwd", "tool_name")
-            if field not in payload or not payload[field]
-        ]
-        named = ", ".join(missing) if missing else "the command"
-        return (
-            f" — an approval is pending for this run and this call could not be"
-            f" matched to it: the event carries no {named}, so the two cannot"
-            " be correlated"
-        )
-    return (
-        " — an approval is pending for this run but none matches this exact"
-        " call; the escalation and this call disagree on the session, the turn,"
-        " the directory or the command text"
-    )
-
-
-def spend_approval(payload):
-    """Consume one pending permission event matching this exact Bash call."""
-    fingerprint = approval_fingerprint(payload)
-    root = approval_receipt_root()
-    if fingerprint is None or root is None or not root.exists():
-        return False
-    for receipt in root.iterdir():
-        try:
-            matches = receipt.read_text(encoding="utf-8") == fingerprint
-        except (FileNotFoundError, UnicodeDecodeError):
-            continue
-        if not matches:
-            continue
-        try:
-            receipt.unlink()
-        except FileNotFoundError:
-            continue
-        return True
-    return False
-
-
 def joined(decisions):
     """Join one envelope's files: deny beats ask beats defer beats allow."""
     for effect in ("deny", "ask", "defer"):
@@ -3121,6 +3116,75 @@ def joined(decisions):
             if decision.effect == effect:
                 return decision
     return KernelDecision("allow", "every patched file is declared safe")
+
+
+def shell_patch(command):
+    """Read one literal apply_patch invocation without hiding other shell effects."""
+    tree = parse_shell(command)
+    if isinstance(tree, KernelDecision):
+        return None
+    items = tree["items"]
+    if len(items) != 1 or items[0]["terminator"] == "&":
+        return None
+    pipelines = items[0]["andor"]["pipelines"]
+    if len(pipelines) != 1 or pipelines[0]["negated"]:
+        return None
+    commands = pipelines[0]["commands"]
+    if len(commands) != 1 or commands[0]["kind"] != "simple":
+        return None
+    invocation = commands[0]
+    words = invocation["words"]
+    if not words or word_text(words[0]) != "apply_patch":
+        return None
+    redirects = invocation["redirects"]
+    if len(words) == 2 and not redirects:
+        parts = words[1]["parts"]
+        if all(part["kind"] in ("single", "literal", "escaped") for part in parts):
+            return word_text(words[1])
+    if len(words) == 1 and len(redirects) == 1:
+        redirect = redirects[0]
+        if redirect["operator"] == "<<" and len(redirect["heredoc"]) == 1:
+            heredoc = redirect["heredoc"][0]
+            if heredoc["quoted"]:
+                return heredoc["body"]
+    raise ValueError(
+        "use one apply_patch with a single-quoted patch argument or quoted heredoc"
+    )
+
+
+def patch_changes(command, cwd):
+    """Resolve both the preimage and policy path against the tool's directory."""
+    root = cwd or Path.cwd()
+
+    def document(path):
+        return read_document(str(root / path))
+
+    changes = patched_files(command, document)
+    for change in changes:
+        change.path = str(root / change.path)
+    return changes
+
+
+def patch_decision(command, cwd, autonomous):
+    """Judge every decoded path, including the source of a move and peer claims."""
+    return joined(
+        [
+            edit_claim_decision(
+                edit_decision(
+                    change.path,
+                    change.before,
+                    change.after,
+                    change.path_exists,
+                    autonomous,
+                    change.operation(),
+                    cwd,
+                ),
+                change.path,
+                cwd,
+            )
+            for change in patch_changes(command, cwd)
+        ]
+    )
 
 
 def dispatch(payload, permission_request=False):
@@ -3137,6 +3201,9 @@ def dispatch(payload, permission_request=False):
     # first, since both branches need it now.
     autonomous = declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
+        envelope = shell_patch(tool_input["command"])
+        if envelope is not None:
+            return patch_decision(envelope, session_directory, autonomous)
         requested_escape = spent_escape(tool_input)
         # The snapshot a comparison afterwards is read against, taken only on
         # the event that runs immediately before the call: a permission
@@ -3151,7 +3218,8 @@ def dispatch(payload, permission_request=False):
             tool_input["command"],
             managed_root(),
             False if permission_request else sandbox_active(),
-            interactive=permission_request,
+            interactive=True,
+            park=False,
             # A native prefix rule can auto-escape one simple command; an explicit
             # request is the other supported route. Both are checked against
             # semantic placement before the hook lets the native boundary act.
@@ -3187,20 +3255,7 @@ def dispatch(payload, permission_request=False):
         # not one per surface.
         return fetch_decision(tool_input["url"], session_directory)
     if name == "apply_patch":
-        return joined(
-            [
-                edit_decision(
-                    change.path,
-                    change.before,
-                    change.after,
-                    change.path_exists,
-                    autonomous,
-                    change.operation(),
-                    session_directory,
-                )
-                for change in patched_files(tool_input["command"], read_document)
-            ]
-        )
+        return patch_decision(tool_input["command"], session_directory, autonomous)
     # Asked of whatever reached here rather than of a listed few, exactly as
     # the Claude half asks it: which tools are worth refusing is the
     # declaration's answer, and a runtime that shipped the table without
@@ -3212,6 +3267,63 @@ def dispatch(payload, permission_request=False):
     if refused is not None:
         return refused
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
+
+
+def queued_review(payload, decision):
+    """An explicit reviewer answer is the fallback for a hook that cannot prompt."""
+    cwd = Path(payload["cwd"]) if "cwd" in payload else Path.cwd()
+    tool_input = payload["tool_input"]
+    name = payload["tool_name"]
+    command = tool_input["command"] if "command" in tool_input else ""
+    envelope = (
+        command
+        if name == "apply_patch"
+        else shell_patch(command)
+        if name == "Bash"
+        else None
+    )
+    before = (
+        {
+            str(Path(change.path).resolve()): change.before
+            for change in patch_changes(envelope, cwd)
+        }
+        if envelope is not None
+        else {}
+    )
+    result = review_hook_call(
+        cwd,
+        payload["session_id"] if "session_id" in payload else "",
+        name,
+        json.dumps(tool_input, sort_keys=True),
+        json.dumps(before, sort_keys=True),
+        decision.reason,
+        decision.rule,
+        decision.purpose,
+        decision.reviewer,
+    )
+    if result["state"] == "approved":
+        return decision.revised(effect="allow")
+    if result["state"] == "rejected":
+        return decision.revised(
+            effect="deny",
+            recovery=f"Review {result['id']} was rejected: {result['reason']}. Revise the proposal before retrying.",
+        )
+    identifier = result["id"]
+    if not identifier:
+        return decision.revised(
+            effect="deny",
+            recovery=f"Review queue unavailable: {result['reason']}. Run this operation from an operator terminal.",
+        )
+    return decision.revised(
+        effect="deny",
+        recovery=(
+            f"Review {identifier} is {result['state']}. In {cwd}, the operator can run "
+            f"'uv run lup-devtools dev questions show {identifier}', then "
+            f"'uv run lup-devtools dev questions answer {identifier} --as operator' "
+            f"or 'uv run lup-devtools dev questions reject {identifier} --as operator'. "
+            "After approval, retry this exact tool call; changed file contents require fresh review."
+        ),
+    )
 
 
 def observe(payload):
@@ -3277,17 +3389,11 @@ def main():
             record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
         permission_request = event == "PermissionRequest"
-        permission_evidenced = event == "PreToolUse" and spend_approval(payload)
-        decision = dispatch(payload, permission_request or permission_evidenced)
-        # PermissionRequest has no tool-use id. A matching PreToolUse is the
-        # native proof that its session-, turn-, cwd-, tool-, and command-bound
-        # request proceeded; the policy is still re-run so a deny still wins.
-        if permission_evidenced and decision.effect == "ask":
-            decision = KernelDecision("allow", decision.reason, decision.sandbox)
-        # Record before replying: an undecided request reaches a human, and a
-        # later matching PreToolUse exists only when that human accepted it.
-        if permission_request and decision.effect != "deny":
-            record_approval(payload)
+        decision = dispatch(payload, permission_request)
+        # PreToolUse runs before native approval and cannot request a prompt.
+        # Only a recorded reviewer answer may release its exact pending call.
+        if not permission_request and decision.effect == "ask":
+            decision = queued_review(payload, decision)
         # A verdict from here places nothing: this hook answers, and the call
         # runs with the arguments the model wrote, so a placement is degraded
         # to its plain effect rather than carrying an intent no channel here
@@ -3334,20 +3440,13 @@ def main():
     if decision.effect in ("allow", "defer"):
         record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
         return
-    # A refusal that arrives while an approval is pending is two failures
-    # wearing one face -- the policy declining a call, and the correlation
-    # between a native approval and the call it approved not landing. They
-    # read identically without this, which is how #180 reads as the first
-    # when it is the second.
     # Exit 2 turns the call back to the agent whatever its effect, so a
     # question stopped here reaches the agent as a refusal does: reason and
     # recovery both, since no approver reads this channel.
-    detail = decision.addressed() + uncorrelated(payload)
+    detail = decision.addressed()
     # The journal is metadata-only: the reason names the refused input, which
-    # for a fetch is the full URL, so only the correlation diagnosis is kept.
-    record_hook_evidence(
-        plugin_data_root(), payload, "completed", decision.effect, uncorrelated(payload)
-    )
+    # for a fetch is the full URL, so it stays out of the metadata journal.
+    record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
     sys.stderr.write(detail)
     raise SystemExit(2)
 
