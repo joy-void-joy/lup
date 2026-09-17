@@ -77,15 +77,20 @@ def test_a_module_crossing_packages_lands_in_the_root_that_owns_the_name(
 
     Resolving the destination against the root the file came from wrote a
     second `lup/` tree beside the application, and every import repointed at
-    the library then resolved to nothing.
+    the library then resolved to nothing. The distribution root is a root of
+    its own so a sweep finds every importer, and it holds a directory named
+    for the package that no import resolves against — so the destination is
+    the root holding the name as a package, not the one spelling it.
     """
     application = tmp_path / "src"
-    library = tmp_path / "packages" / "lup" / "src"
+    distribution = tmp_path / "packages"
+    library = distribution / "lup" / "src"
     module_at(application, "app_package", "library")
     module_at(library, "lup", "devtools", "placed")
+    (library / "lup" / "__init__.py").write_text("", encoding="utf-8")
 
     carried = carry_module(
-        [application, library],
+        [application, distribution, library],
         Relocation(
             old=["app_package", "library"], new=["lup", "devtools", "dev", "library"]
         ),

@@ -299,9 +299,16 @@ def carry_module(roots: list[Path], move: Relocation) -> MovedModule | None:
         declaring the new top-level name is the one that takes it, and a name
         no root declares stays where it was, which is every move within one
         package.
+
+        Declaring it means holding it as a package, which is what the import
+        the move rewrites resolves against. A root is also a sweep's, named
+        wide so every importer is found — `packages/` holds a directory
+        called `lup` that no import has ever reached, and matching the name
+        alone would land the module in it.
         """
         return next(
-            (root for root in roots if (root / move.new[0]).is_dir()), source_root
+            (root for root in roots if (root / move.new[0] / "__init__.py").is_file()),
+            source_root,
         )
 
     for root in roots:
