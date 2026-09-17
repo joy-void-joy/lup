@@ -1,43 +1,90 @@
-"""Tool collection and the MCP stdio tool server (``serve-tools``)."""
+"""Opening the session a tool server serves, and handing it to the library.
+
+What a server serves is the library's: :mod:`lup.tools.toolsets` builds the
+declared groups for a session, decides which of them this one has anything to
+put in, and serves a group over MCP stdio. What is this application's is the
+session — which directories it has, whether a container was started for it,
+what the roster knows it by — so this module resolves those into the
+:class:`~lup.tools.toolsets.SessionNeeds` every builder reads.
+"""
 
 import atexit
 
 import typer
 
-from lup_template.agent.toolsets import (
-    EXAMPLE_GROUP,
-    NOTES_GROUP,
-    ServerGroup,
-    SessionToolset,
-    build_session_toolset,
-)
-from lup_template.agent.tools.example import EXAMPLE_TOOLS
 from lup.providers.identity import native_session_id
-from lup.workspace.context import SessionContext
 from lup.tools.mcp import LupMcpTool
+from lup.tools.toolsets import (
+    SessionNeeds,
+    SessionToolset,
+    assembled,
+    named_only,
+    serve_toolset,
+)
+from lup.workspace.context import SessionContext
 from lup_template.agent.config import Engine
+from lup_template.agent.toolsets import NOTES_GROUP, declared_tool_groups
 
 
-def collect_tools_by_server(
-    context: SessionContext | None = None,
-) -> dict[ServerGroup, list[LupMcpTool]]:
-    """Collect the servable LupMcpTool instances, grouped by server name.
+def collect_tools_by_server(context: SessionContext) -> dict[str, list[LupMcpTool]]:
+    """Collect one session's servable tools, grouped by server name.
 
-    The groups come from the toolsets registry
-    (:func:`~lup_template.agent.toolsets.build_session_toolset`) — the
-    same builder every backend registers — so the served names cannot
-    drift from the session's. Without a session context only the static
-    example group is servable; with one (relayed by the
-    subprocess-served-tool adapters via env vars) the session-bound
-    tools — reflect,
-    submit_output, sandbox, relay — are constructed and served too. To
-    enumerate the full registry without a session (inspection), use
-    :func:`collect_registry_tools`.
+    The groups come from the one declaration every backend registers, so what
+    is served cannot drift from what the session's own path registers.
     """
-    toolset = collect_session_toolset(context)
-    if toolset is None:
-        return {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)}
-    return toolset["groups"]
+    return assembled(declared_tool_groups(), session_needs(context, None)).groups
+
+
+def subagent_tool() -> LupMcpTool:
+    """The delegation verb this project's sessions carry, over its own specs."""
+    from lup.orchestration.subagents import create_run_subagent_tool
+    from lup_template.agent.core import build_subagent_factory
+    from lup_template.agent.subagents import get_subagent_specs
+
+    return create_run_subagent_tool(
+        get_subagent_specs(), factory_recipe=build_subagent_factory
+    )
+
+
+def session_needs(context: SessionContext, identity: str | None) -> SessionNeeds:
+    """What one session gives its groups, resolved from the context it opened.
+
+    *identity* is what the coordination group falls back to when no launcher
+    minted a member id: the session's own id where an adapter relayed one in
+    the context, and for a natively opened session whatever its runtime gave
+    the process — which the caller resolves, since the context names where the
+    session's notes go and not who it is.
+
+    A sandbox is started here rather than inside the group that serves its
+    tools, because it outlives that group: the container is registered for
+    teardown when this process exits, and a group builder is not where a
+    process-wide lifetime belongs.
+    """
+    from lup.coordination.identity import session_member_id
+    from lup.orchestration.reflection import ReviewGate
+    from lup.sandbox.container import Sandbox
+    from lup.workspace.paths import project_root
+    from lup_template.agent.config import settings
+
+    sandbox = None
+    if context.session_id and settings.sandbox_enabled:
+        sandbox = Sandbox(
+            session_id=context.session_id,
+            shared_dir=context.session_dir / "sandbox_shared",
+        )
+        atexit.register(sandbox.stop)
+
+    named = identity if identity is not None else (context.session_id or "")
+    return SessionNeeds(
+        session_dir=context.session_dir,
+        root=project_root(),
+        gate=ReviewGate(flag_path=context.gate_flag),
+        outputs_dir=context.outputs_dir,
+        sandbox=sandbox,
+        realtime_dir=context.realtime_dir,
+        subagent_tool=subagent_tool(),
+        member=session_member_id(named),
+    )
 
 
 def collect_session_toolset(
@@ -45,72 +92,44 @@ def collect_session_toolset(
 ) -> SessionToolset | None:
     """The session's whole toolset — groups and their servers' companions — or nothing.
 
-    Nothing where no session is open, because every session-bound group
-    closes over a session's directories and a sandbox registered for
-    teardown; the static example group needs neither and is what a caller
-    without a session serves.
-
-    *identity* is what the coordination group falls back to when no launcher
-    minted a member id: the session's own id where an adapter relayed one in
-    the context, and for a natively opened session whatever its runtime gave
-    the process — which the caller resolves, since the context names where
-    the session's notes go and not who it is.
+    Nothing where no session is open, because every group closes over a
+    session's directories, and a server with no session to serve is one
+    nothing asked for: the caller says so rather than serving a toolset built
+    against directories that do not exist.
     """
     if context is None:
         return None
-
-    from lup.orchestration.reflection import ReviewGate
-    from lup.orchestration.subagents import create_run_subagent_tool
-    from lup_template.agent.core import build_subagent_factory
-    from lup_template.agent.config import settings
-    from lup_template.agent.subagents import get_subagent_specs
-
-    sandbox = None
-    if context.session_id and settings.sandbox_enabled:
-        from lup.sandbox.container import Sandbox
-
-        sandbox = Sandbox(
-            session_id=context.session_id,
-            shared_dir=context.session_dir / "sandbox_shared",
-        )
-        atexit.register(sandbox.stop)
-
-    return build_session_toolset(
-        session_dir=context.session_dir,
-        outputs_dir=context.outputs_dir,
-        gate=ReviewGate(flag_path=context.gate_flag),
-        sandbox=sandbox,
-        realtime_dir=context.realtime_dir,
-        subagent_tool=create_run_subagent_tool(
-            get_subagent_specs(), factory_recipe=build_subagent_factory
-        ),
-        session_id=identity if identity is not None else (context.session_id or ""),
-    )
+    return assembled(declared_tool_groups(), session_needs(context, identity))
 
 
-def collect_registry_tools() -> dict[ServerGroup, list[LupMcpTool]]:
-    """Enumerate every tool group the registry can build, for inspection.
+def collect_registry_tools() -> dict[str, list[LupMcpTool]]:
+    """Enumerate every tool group the declaration can build, for inspection.
 
-    Builds the full toolset — session-bound groups included — against a
-    throwaway directory, so callers with no live session (``inspect``,
-    the ``repl`` welcome panel) can list real tools with real schemas.
-    The handlers close over the discarded paths: introspect these tools,
-    never serve or call them.
+    Built against a throwaway directory, so callers with no live session
+    (``inspect``, the ``repl`` welcome panel) can list real tools with real
+    schemas. The handlers close over the discarded paths: introspect these
+    tools, never serve or call them.
     """
     import tempfile
     from pathlib import Path
 
+    from lup.orchestration.reflection import ReviewGate
     from lup.sandbox.container import Sandbox
+    from lup.workspace.paths import project_root
 
     with tempfile.TemporaryDirectory(prefix="lup_toolset_enum_") as tmp:
         base = Path(tmp)
-        toolset = build_session_toolset(
-            session_dir=base / "session",
-            outputs_dir=None,
-            sandbox=Sandbox(session_id="toolset-enum", shared_dir=base / "shared"),
-            realtime_dir=base / "realtime",
+        toolset = assembled(
+            declared_tool_groups(),
+            SessionNeeds(
+                session_dir=base / "session",
+                root=project_root(),
+                gate=ReviewGate(),
+                sandbox=Sandbox(session_id="toolset-enum", shared_dir=base / "shared"),
+                realtime_dir=base / "realtime",
+            ),
         )
-    return toolset["groups"]
+    return toolset.groups
 
 
 def harness_session_context(name: str) -> SessionContext:
@@ -137,14 +156,13 @@ def harness_session_context(name: str) -> SessionContext:
 
 def serve_tools(
     list_only: bool,
-    server_group: ServerGroup | None,
+    server_group: str | None,
     session: str | None = None,
     runtime: Engine | None = None,
 ) -> None:
     """Serve the collected tools over MCP stdio (see the ``serve-tools`` command)."""
-    from lup.workspace.context import read_session_context
-    from lup.tools.mcp import create_mcp_server, serve_stdio
     from lup.observability.metrics import configure_metrics, metrics_path
+    from lup.workspace.context import read_session_context
     from lup_template.agent.config import settings
 
     if runtime is not None:
@@ -163,35 +181,24 @@ def serve_tools(
     if context is not None:
         configure_metrics(metrics_path(context.session_dir))
 
-    toolset = collect_session_toolset(context, identity)
-    by_server = (
-        {EXAMPLE_GROUP: list(EXAMPLE_TOOLS)} if toolset is None else toolset["groups"]
-    )
-    if server_group is None:
-        # Default tool set excludes the example placeholder, which ships
-        # fabricated data and is served to no live agent — matching the
-        # Claude path. Serve it explicitly with --server example to test it.
-        lup_tools = [
-            t for key, tools in by_server.items() if key != EXAMPLE_GROUP for t in tools
-        ]
-    else:
-        lup_tools = list(by_server.get(server_group, []))
-
-    if list_only:
-        for t in lup_tools:
-            typer.echo(t.name)
-        return
-
-    # A companion serves with the group it belongs to, so a server started
-    # for one group carries that group's, and the default set carries all.
-    beside = [
-        companion
-        for key, found in (toolset["companions"].items() if toolset else [])
-        if server_group is None or key == server_group
-        for companion in found
-    ]
-    serve_stdio(
-        create_mcp_server(
-            server_group or NOTES_GROUP, tools=lup_tools, companions=beside
+    groups = declared_tool_groups()
+    declared = [group.name for group in groups]
+    if server_group is not None and server_group not in declared:
+        raise typer.BadParameter(
+            f"no group named {server_group!r}: this project declares "
+            f"{', '.join(declared)}"
         )
-    )
+    toolset = collect_session_toolset(context, identity)
+    if toolset is None:
+        typer.echo(
+            "no session context and no --session name, so there is nothing to "
+            "serve: an adapter relays a session in the environment and a "
+            "native runtime names one on the command line",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if list_only:
+        for tool in toolset.served(server_group, named_only(groups)):
+            typer.echo(tool.name)
+        return
+    serve_toolset(toolset, groups, server_group, NOTES_GROUP)

@@ -28,7 +28,6 @@ from lup_template.agent.config import Engine
 import lup_template.devtools.agent.inspect_agent as inspect_agent
 import lup_template.devtools.agent.repl as repl
 import lup_template.devtools.agent.serve as serve
-from lup_template.agent.toolsets import ServerGroup
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -66,10 +65,10 @@ def serve_tools_cmd(
         typer.Option("--list", help="Print served tool names and exit"),
     ] = False,
     server_group: Annotated[
-        ServerGroup | None,
+        str | None,
         typer.Option(
             "--server",
-            help="Serve only this group; default: all but example",
+            help="Serve only this declared group; default: all but the named-only ones",
         ),
     ] = None,
     session: Annotated[

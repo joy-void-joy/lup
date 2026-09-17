@@ -1,192 +1,94 @@
-"""Single source of truth for the agent's MCP tool groups.
+"""Which tool groups this project's sessions carry.
 
-A *toolset* is the session's tools sorted into named groups, not one flat
-list. The grouping is what MCP needs: each group becomes one MCP server, the
-group name becomes the server name, and a tool ``foo`` in group ``notes`` is
-addressed as ``mcp__notes__foo`` on every backend. Grouping also lets the
-policy enable or withhold a whole capability (a server) at once.
+A declaration, not an assembly: :mod:`lup.tools.toolsets` builds a session's
+groups, decides which of them this session has anything to put in, and serves
+them; what belongs here is the list — lup's own groups, named rather than
+rebuilt, and this domain's own, built from whatever its tools need.
 
-Both backend paths consume this module — the Claude path registers the groups
-in-process, the Codex/OpenAI path serves them over stdio (``lup-devtools agent
-serve-tools``) and selects them by name; both assemblies live in
-``core.build_session_options`` — so adding a group or tool here reaches every
-backend, and there is deliberately nowhere else to add one.
+Each group becomes one MCP server, the group's name becomes the server's name,
+and a tool ``foo`` in group ``notes`` is addressed as ``mcp__notes__foo`` on
+every backend. A group that builds nothing for a session is not registered and
+not served, so nothing here has to ask whether this session has a sandbox, an
+identity, or a mailbox.
 
-Add each domain group in :func:`build_session_toolset`, and its name in
-:func:`tool_group_names` when it should be served to subprocess backends.
+Add a domain group by writing its builder and naming it in
+:func:`declared_tool_groups`. Everything downstream — server registration, the
+names a subprocess backend serves, the servers a native runtime starts — is
+read off that one list.
 """
 
-# lup: template: register tool groups in build_session_toolset + tool_group_names.
+# lup: template: declare each domain tool group in declared_tool_groups.
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypedDict
+from lup.tools.mcp import LupMcpTool
+from lup.tools.toolsets import (
+    SessionNeeds,
+    ToolGroup,
+    codeintel_group,
+    coordination_group,
+    ledger_group,
+    realtime_group,
+    sandbox_group,
+)
 
-if TYPE_CHECKING:
-    from lup.tools.mcp import LupMcpTool, ServerCompanion
-    from lup.orchestration.reflection import ReviewGate
-    from lup.sandbox.container import Sandbox
+NOTES_GROUP = "notes"
+"""Where this project's own reflection verbs are served, and its delegation one."""
 
-ServerGroup = Literal[
-    "notes", "sandbox", "codeintel", "session", "coordination", "ledger", "example"
-]
-"""A tool-group name this registry can build — the group vocabulary every
-consumer shares: server registration (``core.build_session_options``),
-subprocess serving and CLI selection (``lup-devtools agent serve-tools
---server``). Extend it together with :func:`build_session_toolset` when
-adding a group. (A plain alias, not a ``type`` statement, so typer can
-read the choices off the annotation.)"""
-
-# One name per member of the closed ``ServerGroup`` alias above, which the CLI
-# spells back and a served group is registered under.
-NOTES_GROUP: ServerGroup = "notes"
-# lup: ignore[constant-declaration] — group identity
-SANDBOX_GROUP: ServerGroup = "sandbox"
-# lup: ignore[constant-declaration] — group identity
-CODEINTEL_GROUP: ServerGroup = "codeintel"
-# lup: ignore[constant-declaration] — group identity
-SESSION_GROUP: ServerGroup = "session"
-# lup: ignore[constant-declaration] — group identity
-COORDINATION_GROUP: ServerGroup = "coordination"
-# lup: ignore[constant-declaration] — group identity
-LEDGER_GROUP: ServerGroup = "ledger"
-# lup: ignore[constant-declaration] — group identity
-EXAMPLE_GROUP: ServerGroup = "example"
-"""Placeholder tools with fabricated data — never served to a live agent
-by default; select explicitly (``serve-tools --server example``) to test."""
+EXAMPLE_GROUP = "example"
+"""Placeholder tools with fabricated data — served to no live agent by default;
+ask for it by name (``serve-tools --server example``) to try it."""
 
 
-class SessionToolset(TypedDict):
-    """Return type of :func:`build_session_toolset`."""
+def notes_group(name: str = NOTES_GROUP) -> ToolGroup:
+    """This domain's own verbs: structured self-review, and delegation.
 
-    groups: dict[ServerGroup, list["LupMcpTool"]]
-    companions: dict[ServerGroup, list["ServerCompanion"]]
-    """What each group's server keeps running beside itself while it serves."""
-    gate: "ReviewGate"
-
-
-def tool_group_names(*, realtime: bool) -> list[ServerGroup]:
-    """Group names served to subprocess backends (Codex/OpenAI).
-
-    Excludes :data:`EXAMPLE_GROUP`. Uses the same name constants as
-    :func:`build_session_toolset`; ``test_toolsets`` asserts the two
-    stay aligned.
+    The reviewer runs as a nested agent on the auxiliary model, so the
+    reflection tools are this project's rather than the library's: what a
+    reviewer is asked and what counts as approval are a domain's question.
     """
-    base: list[ServerGroup] = [
-        NOTES_GROUP,
-        SANDBOX_GROUP,
-        CODEINTEL_GROUP,
-        COORDINATION_GROUP,
-        LEDGER_GROUP,
-    ]
-    return [*base, SESSION_GROUP] if realtime else base
+
+    def tools(needs: SessionNeeds) -> list[LupMcpTool]:
+        from lup_template.agent.config import aux_model
+        from lup_template.agent.tools.reflect import create_reflect_tools
+
+        kit = create_reflect_tools(
+            session_dir=needs.session_dir,
+            outputs_dir=needs.outputs_dir,
+            gate=needs.gate,
+            reviewer_model=aux_model(),
+        )
+        built = list(kit["tools"])
+        return [*built, needs.subagent_tool] if needs.subagent_tool else built
+
+    return ToolGroup(name=name, tools=tools)
 
 
-def build_session_toolset(
-    *,
-    session_dir: Path,
-    outputs_dir: Path | None,
-    gate: "ReviewGate | None" = None,
-    sandbox: "Sandbox | None" = None,
-    realtime_dir: Path | None = None,
-    subagent_tool: "LupMcpTool | None" = None,
-    session_id: str = "",
-) -> SessionToolset:
-    """Build every MCP tool group for one session.
+def example_group(name: str = EXAMPLE_GROUP) -> ToolGroup:
+    """The scaffold's demonstration tools, which answer with fabricated data."""
 
-    Args:
-        session_dir: Session directory (``output.json``, review artifacts).
-        outputs_dir: Past outputs for reviewer calibration.
-        gate: Shared review gate. None creates an in-memory gate (the
-            Claude in-process path); subprocess paths pass a file-backed
-            gate so the parent and the tool subprocess agree.
-        sandbox: Session sandbox whose tools form the ``sandbox`` group.
-        session_id: What this session's runtime calls it, which the
-            coordination group falls back to when no launcher minted a
-            durable member id. Empty serves no coordination tools at all —
-            a process with no identity would either join the repository
-            roster as a new member on every call or read somebody else's
-            inbox, and neither is better than having no verbs.
-        realtime_dir: Relay mailbox directory; presence adds the
-            ``session`` group (persistent-mode tools), wired with a
-            file-backed reflection gate so this domain keeps its
-            meta-before-sleep requirement — reflection is opt-in and the
-            library imposes none by default.
+    def tools(needs: SessionNeeds) -> list[LupMcpTool]:
+        from lup_template.agent.tools.example import EXAMPLE_TOOLS
 
-    Returns:
-        The groups plus the shared reflection gate.
+        return list(EXAMPLE_TOOLS)
+
+    return ToolGroup(name=name, tools=tools, serving="named")
+
+
+def declared_tool_groups() -> list[ToolGroup]:
+    """Every group this project's sessions may carry, in the order they serve.
+
+    Five of them are lup's, named here rather than rebuilt: their tools, their
+    companions and the conditions under which a session has them arrive with
+    the library, so a pulse added to the coordination server reaches this
+    project by a dependency bump rather than by somebody porting it.
     """
-    from lup.coordination.identity import member_ref, session_member_id
-    from lup.coordination.peer_tools import RosterPulse, create_peer_tools
-    from lup.coordination.repository import RepositoryPeers
-    from lup.ledger.tools import create_ledger_tools
     from lup_template.kinds import EDGE_KINDS, LAYOUT, NODE_KINDS
-    from lup.tools.lsp.tools import create_codeintel_tools
-    from lup.workspace.paths import project_root
-    from lup_template.agent.config import aux_model
-    from lup_template.agent.tools.example import EXAMPLE_TOOLS
-    from lup_template.agent.tools.reflect import create_reflect_tools
-    from lup.devtools.dev.pyright_oracle import langserver_path
 
-    reflect_kit = create_reflect_tools(
-        session_dir=session_dir,
-        outputs_dir=outputs_dir,
-        gate=gate,
-        reviewer_model=aux_model(),
-    )
-    notes_tools = list(reflect_kit["tools"])
-    if subagent_tool is not None:
-        notes_tools.append(subagent_tool)
-
-    groups: dict[ServerGroup, list[LupMcpTool]] = {NOTES_GROUP: notes_tools}
-
-    if sandbox is not None:
-        groups[SANDBOX_GROUP] = sandbox.create_tools()
-
-    server = langserver_path()
-    if server is not None:
-        groups[CODEINTEL_GROUP] = create_codeintel_tools(server, project_root())
-
-    if realtime_dir is not None:
-        from lup.orchestration.realtime.relay import (
-            RealtimeMailbox,
-            create_realtime_relay_tools,
-        )
-        from lup.orchestration.reflection import ReflectionGate
-
-        meta_flag = RealtimeMailbox(realtime_dir).meta_flag_path
-        groups[SESSION_GROUP] = create_realtime_relay_tools(
-            realtime_dir, gate=ReflectionGate(flag_path=meta_flag)
-        )
-
-    member = session_member_id(session_id)
-    if member:
-        # The worktree is passed rather than looked up inside the tools,
-        # because it is what puts this session on the roster: a peer reading
-        # the listing is choosing between checkouts as much as between names.
-        working = project_root()
-        groups[COORDINATION_GROUP] = create_peer_tools(
-            RepositoryPeers(working), member, working
-        )
-        # The same identity stamps what this session records, and for the
-        # same reason the group waits on one: a record with no author is
-        # provenance nobody can read, which is worse than no record.
-        groups[LEDGER_GROUP] = create_ledger_tools(
-            working, member_ref(member), NODE_KINDS, EDGE_KINDS, LAYOUT
-        )
-
-    groups[EXAMPLE_GROUP] = list(EXAMPLE_TOOLS)
-
-    # The coordination server's lifetime is the session's, so it is the one
-    # that beats for it; the same identity, for the same reason the group
-    # waits on one.
-    companions: dict[ServerGroup, list[ServerCompanion]] = (
-        {COORDINATION_GROUP: [RosterPulse(root=project_root(), member_id=member)]}
-        if member
-        else {}
-    )
-
-    return SessionToolset(
-        groups=groups,
-        companions=companions,
-        gate=reflect_kit["gate"],
-    )
+    return [
+        notes_group(),
+        sandbox_group(),
+        codeintel_group(),
+        realtime_group(),
+        coordination_group(),
+        ledger_group(NODE_KINDS, EDGE_KINDS, LAYOUT),
+        example_group(),
+    ]

@@ -1,5 +1,5 @@
 {
-  "revision": "61d8c01e11c456c1f96310ae6b955b63de531eb2",
+  "revision": "a4acbd2b948956b528eb7d97e78c2110d557864f",
   "roots": [
     "lup",
     "lup_template"
@@ -15186,6 +15186,48 @@
       ]
     },
     {
+      "module": "lup.tools.toolsets",
+      "declares": [
+        "SessionNeeds",
+        "SessionNeeds.session_dir",
+        "SessionNeeds.root",
+        "SessionNeeds.gate",
+        "SessionNeeds.outputs_dir",
+        "SessionNeeds.sandbox",
+        "SessionNeeds.realtime_dir",
+        "SessionNeeds.subagent_tool",
+        "SessionNeeds.member",
+        "nothing_beside",
+        "Serving",
+        "ToolGroup",
+        "ToolGroup.name",
+        "ToolGroup.tools",
+        "ToolGroup.companions",
+        "ToolGroup.serving",
+        "SessionToolset",
+        "SessionToolset.groups",
+        "SessionToolset.companions",
+        "SessionToolset.served",
+        "SessionToolset.beside",
+        "assembled",
+        "served_names",
+        "startup_names",
+        "named_only",
+        "serve_toolset",
+        "coordination_group",
+        "coordination_group.tools",
+        "coordination_group.companions",
+        "ledger_group",
+        "ledger_group.tools",
+        "codeintel_group",
+        "codeintel_group.tools",
+        "sandbox_group",
+        "sandbox_group.tools",
+        "realtime_group",
+        "realtime_group.tools"
+      ]
+    },
+    {
       "module": "lup.types",
       "declares": [
         "JsonValue",
@@ -15872,20 +15914,13 @@
     {
       "module": "lup_template.agent.toolsets",
       "declares": [
-        "ServerGroup",
         "NOTES_GROUP",
-        "SANDBOX_GROUP",
-        "CODEINTEL_GROUP",
-        "SESSION_GROUP",
-        "COORDINATION_GROUP",
-        "LEDGER_GROUP",
         "EXAMPLE_GROUP",
-        "SessionToolset",
-        "SessionToolset.groups",
-        "SessionToolset.companions",
-        "SessionToolset.gate",
-        "tool_group_names",
-        "build_session_toolset"
+        "notes_group",
+        "notes_group.tools",
+        "example_group",
+        "example_group.tools",
+        "declared_tool_groups"
       ]
     },
     {
@@ -16029,6 +16064,8 @@
       "module": "lup_template.devtools.agent.serve",
       "declares": [
         "collect_tools_by_server",
+        "subagent_tool",
+        "session_needs",
         "collect_session_toolset",
         "collect_registry_tools",
         "harness_session_context",

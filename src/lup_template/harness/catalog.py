@@ -58,7 +58,8 @@ from lup.workspace.paths import (
     project_root,
     read_project_name,
 )
-from lup_template.agent.toolsets import tool_group_names
+from lup.tools.toolsets import startup_names
+from lup_template.agent.toolsets import declared_tool_groups
 from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
 from lup.harness.coverage import ContentRoot, ModuleCoverage
 from lup_template.devtools.subapps import APPLICATION_ROSTER
@@ -253,7 +254,12 @@ def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer
             ],
             startup_timeout_seconds=startup_deadline_seconds,
         )
-        for name in tool_group_names(realtime=False)
+        # What a runtime starts when a session opens, read off the same
+        # declaration the session's own assembly reads — and declared rather
+        # than built, since this list is rendered into a native tree and one
+        # that depended on what the generating machine had installed would
+        # make two checkouts' plugins differ.
+        for name in startup_names(declared_tool_groups())
     ]
 
 

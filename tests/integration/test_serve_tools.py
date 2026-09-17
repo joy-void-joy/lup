@@ -35,12 +35,16 @@ from lup.types import SubagentSpec
 
 from lup.workspace.paths import project_root
 
+from lup.coordination.identity import session_member_id
+from lup.orchestration.reflection import ReviewGate
+from lup.tools.toolsets import SessionNeeds, assembled
+from lup.tools.toolsets import served_names as declared_served
+
 from lup_template.agent.subagents import get_subagent_specs
 from lup_template.agent.toolsets import (
     EXAMPLE_GROUP,
     NOTES_GROUP,
-    build_session_toolset,
-    tool_group_names,
+    declared_tool_groups,
 )
 from lup_template.harness.catalog import HARNESS_SESSION
 
@@ -132,8 +136,11 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
         REALTIME_DIR_ENV: str(realtime_dir),
     }
 
-    groups = build_session_toolset(
+    declared = declared_tool_groups()
+    needs = SessionNeeds(
         session_dir=session_dir,
+        root=project_root(),
+        gate=ReviewGate(flag_path=tmp_path / "gate_flag"),
         outputs_dir=tmp_path / "outputs",
         sandbox=Sandbox(
             session_id="registry-match", shared_dir=session_dir / "sandbox_shared"
@@ -142,9 +149,13 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
         subagent_tool=create_run_subagent_tool(
             get_subagent_specs(), factory_recipe=unused_subagent_factory
         ),
-    )["groups"]
+        # The same identity the subprocess resolves from the relayed session
+        # id, so both sides build the groups that wait on one.
+        member=session_member_id("registry-match"),
+    )
+    groups = assembled(declared, needs).groups
 
-    for group in (*tool_group_names(realtime=True), EXAMPLE_GROUP):
+    for group in (*declared_served(declared, needs), EXAMPLE_GROUP):
         expected = {tool.name for tool in groups[group]}
         assert served_names(env, "--server", group) == expected
 

@@ -519,7 +519,8 @@ def build_session_factory(
     from lup.orchestration.realtime.relay import REALTIME_DIRNAME
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.subagents import get_subagent_specs
-    from lup_template.agent.toolsets import EXAMPLE_GROUP, build_session_toolset
+    from lup.tools.toolsets import SessionNeeds, assembled, named_only, served_names
+    from lup_template.agent.toolsets import declared_tool_groups
     from lup.coordination.identity import member_ref, session_member_id
     from lup_template.kinds import NODE_KINDS, LAYOUT
 
@@ -545,21 +546,33 @@ def build_session_factory(
     hooks = create_permission_hooks(notes.rw, notes.ro)
     tools: list[str] | None = [] if toolless else None
     sandbox: Sandbox | None = None
+    groups = declared_tool_groups()
     if not toolless and engine in ("claude", "claude-compat"):
+        from lup.orchestration.reflection import ReviewGate
+
         policy = ToolPolicy(settings)
         realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
         sandbox = build_session_sandbox(notes)
-        toolset = build_session_toolset(
-            session_dir=notes.session,
-            outputs_dir=notes.output.parent,
-            sandbox=sandbox,
-            realtime_dir=realtime_dir,
-            session_id=session_id,
+        # In memory, because this path assembles the tools in the process that
+        # waits on their verdict: a flag file is what the two-process path
+        # needs and this one would only be writing to itself through a file.
+        gate = ReviewGate()
+        toolset = assembled(
+            groups,
+            SessionNeeds(
+                session_dir=notes.session,
+                root=project_root(),
+                gate=gate,
+                outputs_dir=notes.output.parent,
+                sandbox=sandbox,
+                realtime_dir=realtime_dir,
+                member=session_member_id(session_id),
+            ),
         )
         servers = [
             create_mcp_server(name, tools=policy.filter_tools(group_tools))
-            for name, group_tools in toolset["groups"].items()
-            if name != EXAMPLE_GROUP
+            for name, group_tools in toolset.groups.items()
+            if name not in named_only(groups)
         ]
         tool_servers = dict(policy.get_mcp_servers(*servers))
         from lup.providers.claude.runtime import SUBMISSION_TOOL
@@ -576,11 +589,10 @@ def build_session_factory(
         # tool that finalizes the turn.
         allowed_tools.append(SUBMISSION_TOOL)
         hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
-        submission_gate = reflection_submission_gate(toolset["gate"])
+        submission_gate = reflection_submission_gate(gate)
     elif not toolless:
         from lup.orchestration.reflection import ReviewGate
         from lup.workspace.context import SessionContext
-        from lup_template.agent.toolsets import tool_group_names
 
         policy = ToolPolicy(settings)
         realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
@@ -620,7 +632,22 @@ def build_session_factory(
                 ],
                 env=environment,
             )
-            for name in policy.filter_group_names(tool_group_names(realtime=realtime))
+            # Which groups this session has, derived by building them rather
+            # than listed beside the builder: a server started for a group
+            # this session builds empty is a subprocess serving nothing.
+            for name in policy.filter_group_names(
+                served_names(
+                    groups,
+                    SessionNeeds(
+                        session_dir=notes.session,
+                        root=project_root(),
+                        gate=gate,
+                        outputs_dir=notes.output.parent,
+                        realtime_dir=realtime_dir,
+                        member=session_member_id(session_id),
+                    ),
+                )
+            )
         }
         writable_roots = list(notes.rw)
 

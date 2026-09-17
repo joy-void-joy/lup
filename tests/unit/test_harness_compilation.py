@@ -139,7 +139,8 @@ from lup.policy.dispatcher import (
     stranded_breaches,
 )
 from lup.types import EnvVars
-from lup_template.agent.toolsets import EXAMPLE_GROUP, NOTES_GROUP, tool_group_names
+from lup.tools.toolsets import startup_names
+from lup_template.agent.toolsets import EXAMPLE_GROUP, NOTES_GROUP, declared_tool_groups
 from lup_template.devtools.agent.serve import (
     collect_tools_by_server,
     harness_session_context,
@@ -3252,7 +3253,7 @@ def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
 def test_declared_tool_servers_are_the_registry_the_backends_assemble() -> None:
     """A group added to the toolsets registry reaches a native session too."""
     servers = portable_harness().plugins[0].mcp_servers
-    assert [server.name for server in servers] == tool_group_names(realtime=False)
+    assert [server.name for server in servers] == startup_names(declared_tool_groups())
 
 
 def test_each_runtime_spells_the_project_root_a_tool_server_starts_from() -> None:
@@ -3280,7 +3281,7 @@ def test_claude_tree_offers_the_tool_servers_as_a_plugin_configuration() -> None
         if artifact.path == Path(".claude/plugins/lup/.mcp.json")
     )
     servers = json.loads(declaration.content)["mcpServers"]
-    assert sorted(servers) == sorted(tool_group_names(realtime=False))
+    assert sorted(servers) == sorted(startup_names(declared_tool_groups()))
     assert servers["notes"]["command"] == "uv"
     assert "${CLAUDE_PROJECT_DIR}" in servers["notes"]["args"]
 
@@ -3295,7 +3296,9 @@ def test_codex_tree_offers_the_tool_servers_in_its_project_config() -> None:
     )
     parsed = tomllib.loads(config.content)
     assert parsed["features"]["hooks"] is True
-    assert sorted(parsed["mcp_servers"]) == sorted(tool_group_names(realtime=False))
+    assert sorted(parsed["mcp_servers"]) == sorted(
+        startup_names(declared_tool_groups())
+    )
     assert parsed["mcp_servers"]["notes"]["command"] == "uv"
 
 
@@ -3516,10 +3519,13 @@ def test_no_declared_deadline_leaves_the_settings_env_alone() -> None:
 
 def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:
     """No adapter relays a context to a natively launched server; it opens one."""
-    assert collect_tools_by_server(None).keys() == {EXAMPLE_GROUP}
     context = harness_session_context(HARNESS_SESSION)
+    groups = collect_tools_by_server(context)
+
     assert context.session_id == HARNESS_SESSION
-    assert NOTES_GROUP in collect_tools_by_server(context)
+    assert NOTES_GROUP in groups
+    # Built, and servable only by name: a live agent is handed the rest.
+    assert EXAMPLE_GROUP in groups
 
 
 def test_every_target_renders_every_declaration_the_source_names() -> None:

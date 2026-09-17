@@ -47,7 +47,7 @@ def test_a_native_server_joins_under_the_id_its_runtime_gave_the_process(
 
     toolset = serve.collect_session_toolset(context, identity="abc-123")
 
-    [pulse] = toolset["companions"]["coordination"] if toolset else []
+    [pulse] = toolset.companions["coordination"] if toolset else []
     assert isinstance(pulse, RosterPulse)
     assert pulse.member_id == "abc-123"
 
@@ -62,8 +62,8 @@ def test_a_native_server_with_no_identity_serves_no_coordination_verbs(
     toolset = serve.collect_session_toolset(context, identity="")
 
     assert toolset is not None
-    assert "coordination" not in toolset["groups"]
-    assert toolset["companions"] == {}
+    assert "coordination" not in toolset.groups
+    assert toolset.companions == {}
 
 
 def test_the_launcher_s_id_outranks_the_runtime_s(
@@ -75,7 +75,7 @@ def test_the_launcher_s_id_outranks_the_runtime_s(
 
     toolset = serve.collect_session_toolset(context, identity="abc-123")
 
-    [pulse] = toolset["companions"]["coordination"] if toolset else []
+    [pulse] = toolset.companions["coordination"] if toolset else []
     assert isinstance(pulse, RosterPulse)
     assert pulse.member_id == "launched1"
 
