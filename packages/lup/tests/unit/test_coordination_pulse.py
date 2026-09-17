@@ -15,10 +15,10 @@ from pathlib import Path
 from lup.channels.models import utc_now
 from lup.coordination.identity import member_ref, mint_member_id
 from lup.coordination.peer_tools import RosterPulse
-from lup.coordination.pulse import HEARTBEATS_DIR, Pulse, beat, heard_at
+from lup.coordination.pulse import HEARTBEATS_DIR, Pulse, beat, heard_at, reset
 from lup.coordination.refs import ActorRef
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import ActorJoined, SpawnedActor
+from lup.coordination.roster import ActorDescribed, ActorJoined, SpawnedActor
 from lup.coordination.store import coordination_root
 
 FOREVER = Pulse(stale_after_seconds=3600.0)
@@ -194,6 +194,34 @@ async def test_the_companion_writes_nothing_where_no_session_ever_joined(
         await serving
 
     assert not coordination_root(tmp_path).exists()
+
+
+def test_a_moved_conversation_leaves_the_description_unsaid_until_it_speaks_again(
+    tmp_path: Path,
+) -> None:
+    """A rewind keeps the id and the pulse; what the row said belongs to what is gone.
+
+    The description is written a second in the past because a file stamp
+    carries the kernel's coarse clock, which can trail the record's clock by a
+    tick; a real rewind is human time away from whatever the row last said.
+    """
+    peers, member = joined(tmp_path, "mine", FOREVER)
+    peers.cohort.roster.stream.append(
+        ActorDescribed(
+            actor=member_ref(member),
+            description="the work the rewind discards",
+            at=utc_now() - timedelta(seconds=1),
+        )
+    )
+
+    reset(peers.root, member)
+
+    assert row(peers, member).description == ""
+    assert row(peers, member).running
+
+    peers.describe(member, "the work after it")
+
+    assert row(peers, member).description == "the work after it"
 
 
 def test_the_listing_puts_the_present_first_whatever_the_record_says(

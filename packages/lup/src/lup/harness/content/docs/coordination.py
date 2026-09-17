@@ -282,6 +282,21 @@ saying how many others are here and where the listing is. A quiet roster costs
 no context at all, and a broken one costs the prompt nothing, because the hook
 fails open.
 
+The same hook beats for the session, which is the pulse its row is present
+by: a running row nothing has heard from within the window reads as gone, and
+a sweep retires it. And it is where a rewind is noticed. A runtime that
+rewinds or clears a conversation keeps the process, the session id and the
+tool server, and signals none of it — so the row would go on saying what the
+discarded conversation was doing, under a pulse the same server keeps beating.
+The fold reads the transcript the prompt names and counts its conversation
+roots; a root that was not there at the last prompt, or a transcript that is
+another file, means the conversation moved. It stamps a reset beside the
+session's pulse and starts over from a baseline, and every reader — the
+listing, this fold — treats a description older than that stamp as unsaid
+until the session describes itself again. What the session holds is left
+alone: a touch is what happened to the tree, and the tree is whatever the
+rewind left it.
+
 What does not reach a session this way: the roster itself, which
 `coordination_peers` lists whenever asked; mail, which the delivery hook puts
 in front of the next tool call; and holdings in other worktrees, which the

@@ -331,7 +331,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/coordination_changes.py",
       "category": "generated",
-      "sha256": "e23f8f8b7759e4a22fe0e7f05c4b2ac85927b4e6ce88cb7d58c750eb5107f78b",
+      "sha256": "c0b7a2d5c2018140dc9ac6d7a1acdd76154c139b55cfa0eb1a44062339c6683b",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -583,7 +583,7 @@
     {
       "path": "docs/coordination.md",
       "category": "generated",
-      "sha256": "a88839a62922793bcda8f827bc763fe7a04a88c21e844088d5de05b2c20ea270",
+      "sha256": "1f38f8374e77f9277da90cde246fb387dca2ee3fb3eec3fce0ca66d6cd36e21b",
       "semantic_id": "docs.coordination",
       "executable": false
     },

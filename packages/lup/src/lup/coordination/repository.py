@@ -35,7 +35,7 @@ from lup.coordination.identity import (
     member_ref,
 )
 from lup.coordination.mail import ActorDelivery
-from lup.coordination.pulse import Pulse, beat, heard_at
+from lup.coordination.pulse import Pulse, beat, heard_at, reset_at
 from lup.coordination.refs import ActorRef
 from lup.coordination.roster import Delivery, SpawnedActor
 from lup.coordination.store import coordination_root
@@ -250,11 +250,31 @@ class RepositoryPeers:
             update={"running": False, "error": f"unheard since {since}"}
         )
 
+    def rewound(self, member: SpawnedActor) -> SpawnedActor:
+        """This member as its conversation leaves it: unsaid where that moved.
+
+        A rewind or a clear keeps the process, the id and the pulse, and
+        discards what the session was saying, so a description older than the
+        reset stamp is the discarded conversation's and reads as empty —
+        derived at the read, so that describing again is enough to read as
+        current. What the session holds is left alone: a touch is what
+        happened to the tree, and the tree is whatever the rewind left it.
+        """
+        if member.actor.kind != MEMBER_KIND or not member.description:
+            return member
+        moved = reset_at(self.root, member.actor.id)
+        if moved is None or (member.heard is not None and member.heard >= moved):
+            return member
+        return member.model_copy(update={"description": ""})
+
     def present(self, now: datetime | None = None) -> list[SpawnedActor]:
         """Every member as the record and the pulses together say, the live ones first."""
         moment = now or utc_now()
         return sorted(
-            (self.pulsed(member, moment) for member in self.cohort.live()),
+            (
+                self.rewound(self.pulsed(member, moment))
+                for member in self.cohort.live()
+            ),
             key=lambda member: not member.running,
         )
 

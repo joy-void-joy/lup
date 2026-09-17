@@ -27,6 +27,18 @@ from pathlib import Path
 from pydantic import BaseModel
 
 HEARTBEATS_DIR = "heartbeats"
+RESETS_DIR = "resets"
+"""Where a session's conversation reset is kept, beside its pulse.
+
+A runtime that rewinds or clears a conversation keeps the process, the session
+id and the tool server, and signals none of it, so the row would go on
+carrying what the discarded conversation said it was doing under a pulse the
+same server keeps beating. The prompt-time fold is the one process that sees
+the transcript, so it is the one that notices the conversation move and stamps
+this file; every reader then treats a description older than the stamp as
+unsaid — derived at the read, like absence, so describing again is enough to
+read as current.
+"""
 
 
 class Pulse(BaseModel, frozen=True):
@@ -53,15 +65,39 @@ def beat_path(root: Path, member_id: str) -> Path:
 
 def beat(root: Path, member_id: str) -> None:
     """Record that this member is here now."""
-    path = beat_path(root, member_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.touch()
+    stamp(beat_path(root, member_id))
 
 
 def heard_at(root: Path, member_id: str) -> datetime | None:
     """When this member last beat, or nothing where it never has."""
+    return stamped_at(beat_path(root, member_id))
+
+
+def reset_path(root: Path, member_id: str) -> Path:
+    """Where one member's conversation reset is kept, under the coordination store."""
+    return root / RESETS_DIR / member_id
+
+
+def reset(root: Path, member_id: str) -> None:
+    """Record that the conversation this member's row described is gone."""
+    stamp(reset_path(root, member_id))
+
+
+def reset_at(root: Path, member_id: str) -> datetime | None:
+    """When this member's conversation last moved, or nothing where it never has."""
+    return stamped_at(reset_path(root, member_id))
+
+
+def stamp(path: Path) -> None:
+    """Mark this moment on one file, creating what is missing on the way."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+
+def stamped_at(path: Path) -> datetime | None:
+    """The moment one stamp file was last marked, or nothing where there is none."""
     try:
-        stamp = beat_path(root, member_id).stat().st_mtime
+        marked = path.stat().st_mtime
     except OSError:
         return None
-    return datetime.fromtimestamp(stamp, UTC)
+    return datetime.fromtimestamp(marked, UTC)
