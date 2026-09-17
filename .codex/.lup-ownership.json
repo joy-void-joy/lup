@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "34851b95b9d4fed70644d279a760b7dd1d645a9a9e8fe8b4c72fdce84bf3aa9d",
+  "source_digest": "d846cca43c7969ad04b94a4f4664c82b597051ff85962f3c798fee1da36bff59",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -422,7 +422,7 @@
     {
       "path": ".codex/plugins/lup/skills/import/SKILL.md",
       "category": "generated",
-      "sha256": "effc408814b4707d4785cd2167f784a5d16573b64b22a8ed30751497ccbe5227",
+      "sha256": "f12c7c8ff56b2cc0a543c1512be755f796bb31a2e0b25faa5b5db0d8c69799a7",
       "semantic_id": "skill.import",
       "executable": false
     },
@@ -527,8 +527,15 @@
     {
       "path": ".codex/plugins/lup/skills/update/SKILL.md",
       "category": "generated",
-      "sha256": "265425369857bf2dc51ce8df3d3c5703e78283d6b2394d3f59360bf46738f89a",
+      "sha256": "8c8876b83304f86316217731a67cbe4146db45f723753ab107a8f0cd6bfb3903",
       "semantic_id": "skill.update",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/skills/upstream/SKILL.md",
+      "category": "generated",
+      "sha256": "cce29130ee4c0e18713ff0973c792bfea2f5b6578636882a9d433e94feeef9cd",
+      "semantic_id": "skill.upstream",
       "executable": false
     },
     {
@@ -548,7 +555,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "22be7629a5d2fe018ea04af592da002189e18313ae18150edf0854345be99b60",
+      "sha256": "ae9aa38981798a8cd74b5f8bd39764382e24b1130480c19966bfc1ff3a5f9137",
       "semantic_id": "harness.guidance",
       "executable": false
     }

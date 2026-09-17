@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 102 artifacts
+## `claude` — 103 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -56,6 +56,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/commands/resolve.md` | lup.harness.content.skills.resolve |
 | `.claude/plugins/lup/commands/review.md` | lup_template.harness.content.skills.review |
 | `.claude/plugins/lup/commands/update.md` | lup_template.harness.content.skills.update |
+| `.claude/plugins/lup/commands/upstream.md` | lup_template.harness.content.skills.upstream_skill |
 | `.claude/plugins/lup/commands/verify-solved.md` | lup.harness.content.skills.verify_solved |
 | `.claude/plugins/lup/hooks/hooks.json` | hooks.lup-policy |
 | `.claude/plugins/lup/hooks/runtime/carrier_drift.py` | lup.devtools.dev.drift_fold |
@@ -115,7 +116,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 78 artifacts
+## `codex` — 79 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -194,6 +195,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/skills/resolve/SKILL.md` | lup.harness.content.skills.resolve |
 | `.codex/plugins/lup/skills/review/SKILL.md` | lup_template.harness.content.skills.review |
 | `.codex/plugins/lup/skills/update/SKILL.md` | lup_template.harness.content.skills.update |
+| `.codex/plugins/lup/skills/upstream/SKILL.md` | lup_template.harness.content.skills.upstream_skill |
 | `.codex/plugins/lup/skills/verify-solved/SKILL.md` | lup.harness.content.skills.verify_solved |
 | `.codex/rules/lup.rules` | lup.policy.shell_rules |
 | `AGENTS.md` | lup_template.harness.content.guidance |
