@@ -38,11 +38,13 @@ from lup.ledger.store import LedgerLayout
 from lup.orchestration.reflection import ReviewGate
 from lup.sandbox.container import Sandbox
 from lup.tools.mcp import (
+    LupMcpServerConfig,
     LupMcpTool,
     ServerCompanion,
     create_mcp_server,
     serve_stdio,
 )
+from lup.tools.policy import BaseToolPolicy
 
 
 class SessionNeeds(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -205,6 +207,24 @@ def startup_names(groups: list[ToolGroup]) -> list[str]:
 def named_only(groups: list[ToolGroup]) -> list[str]:
     """Which groups a default set leaves out, being servable only by name."""
     return [group.name for group in groups if group.serving == "named"]
+
+
+def registered(
+    toolset: SessionToolset, groups: list[ToolGroup], policy: BaseToolPolicy
+) -> list[LupMcpServerConfig]:
+    """One server per group a session registers in the process running it.
+
+    The in-process counterpart of :func:`serve_toolset`, and the same two
+    decisions: a group servable only by name is not registered, and what each
+    server carries is what the policy admits. A runtime's own spelling of a
+    server is its adapter's to make — this hands over the neutral
+    configuration every adapter is built from.
+    """
+    return [
+        create_mcp_server(name, tools=policy.filter_tools(tools))
+        for name, tools in toolset.groups.items()
+        if name not in named_only(groups)
+    ]
 
 
 def serve_toolset(

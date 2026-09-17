@@ -1,5 +1,5 @@
 {
-  "revision": "cf72246a23bdfde9cdf20367110f1b743d0df448",
+  "revision": "1f9a7b7feaa0d9c76d23d581869f88d8d37d42d3",
   "roots": [
     "lup",
     "lup_template"
@@ -15218,6 +15218,7 @@
         "served_names",
         "startup_names",
         "named_only",
+        "registered",
         "serve_toolset",
         "coordination_group",
         "coordination_group.tools",
