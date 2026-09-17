@@ -1,5 +1,5 @@
 {
-  "revision": "da7c56eb5648e734c8e1a54ec905cadf335890ab",
+  "revision": "cf72246a23bdfde9cdf20367110f1b743d0df448",
   "roots": [
     "lup",
     "lup_template"
@@ -5522,6 +5522,9 @@
         "NATIVE_PREFIXES",
         "SDK_PREFIXES",
         "IMPORT_BOUNDARY_MESSAGE",
+        "ASSEMBLED_TOOL_MODULES",
+        "ASSEMBLY_ROOT",
+        "ASSEMBLY_BOUNDARY_MESSAGE",
         "NATIVE_SPELLINGS",
         "generated_tree_paths",
         "ApplicationRoots",

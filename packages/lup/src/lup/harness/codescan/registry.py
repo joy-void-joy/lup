@@ -144,6 +144,15 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         defined_in=boundaries.__name__,
     ),
     RegisteredRule(
+        id=boundaries.RuleId.ASSEMBLY,
+        family="boundary",
+        scope="Neutral Python modules",
+        example="from lup.coordination.peer_tools import create_peer_tools",
+        cleared="groups = [coordination_group(), ledger_group(NODE_KINDS, ...)]",
+        message=boundaries.ASSEMBLY_BOUNDARY_MESSAGE,
+        defined_in=boundaries.__name__,
+    ),
+    RegisteredRule(
         id=boundaries.RuleId.NATIVE_SPELLING,
         family="spelling",
         scope="Neutral Python modules",

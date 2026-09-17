@@ -86,6 +86,30 @@ IMPORT_BOUNDARY_MESSAGE = (
     "provider SDK imports belong in adapter implementations. Use Lup contracts "
     "in shared code; canonical tool grants and provider mentions remain valid."
 )
+# lup: ignore[library-default] — the library's own modules, whose whole subject is
+# one tool group, so the list follows what `lup.tools.toolsets` assembles
+ASSEMBLED_TOOL_MODULES = ("lup.coordination.peer_tools", "lup.ledger.tools")
+"""The tool-group constructors a declared group is built out of.
+
+Both are a group and nothing else: the roster's verbs with the pulse that
+beats beside them, and the ledger's verbs bound to a project's own kinds. A
+module with a second surface stays off this list — `lup.tools.lsp.tools` also
+renders the tool reference a document reads — because ownership here is by
+module and a boundary that refused a doc's import would be refusing the wrong
+thing.
+"""
+
+ASSEMBLY_ROOT = f"{LIBRARY_ROOT}tools/toolsets.py"
+"""Where a session's groups are assembled, and so the one caller of those."""
+
+# lup: ignore[constant-declaration] — the diagnostic for the assembly-boundary rule
+ASSEMBLY_BOUNDARY_MESSAGE = (
+    "A tool group's constructor is the assembly's to call: name the group in "
+    "this project's toolset declaration instead of building it. Calling it "
+    "directly is how a project comes to hold a copy of the wiring — a "
+    "companion that was never started, a signature that gained parameters — "
+    "which the next dependency bump lands the other half of."
+)
 # lup: ignore[library-default] — each key is literally what the provider calls the thing
 NATIVE_SPELLINGS = {
     "/lup:": "Claude skill invocation",
@@ -213,6 +237,13 @@ def native_import_boundaries(
             source_roots=sources,
             rule_id=RuleId.SEAM,
             message=IMPORT_BOUNDARY_MESSAGE,
+        ),
+        ImportBoundary(
+            modules=list(ASSEMBLED_TOOL_MODULES),
+            owners=[ASSEMBLY_ROOT],
+            source_roots=sources,
+            rule_id=RuleId.ASSEMBLY,
+            message=ASSEMBLY_BOUNDARY_MESSAGE,
         ),
     ]
 

@@ -109,6 +109,38 @@ def test_canonical_vocabulary_and_provider_mentions_remain_valid() -> None:
     assert audit_boundaries(source) == []
 
 
+def test_a_tool_group_is_named_rather_than_rebuilt() -> None:
+    """The wiring two downstream repositories hand-ported, refused at the import.
+
+    A project reaching for the constructor is a project holding its own copy
+    of what a group is made of — which is how a companion goes unstarted and a
+    signature that gained parameters lands half-way.
+    """
+    reaching = "from lup.coordination.peer_tools import create_peer_tools\n"
+
+    findings = audit_path_boundaries(
+        Path("src/lup_template/agent/toolsets.py"), reaching, application_roots()
+    )
+
+    assert [(item.rule_id, item.module) for item in findings] == [
+        (RuleId.ASSEMBLY, "lup.coordination.peer_tools")
+    ]
+
+
+def test_the_assembly_is_what_may_call_a_group_constructor() -> None:
+    """One owner, because one module turns a declaration into a session's tools."""
+    reaching = "from lup.ledger.tools import create_ledger_tools\n"
+
+    assert (
+        audit_path_boundaries(
+            Path("packages/lup/src/lup/tools/toolsets.py"),
+            reaching,
+            application_roots(),
+        )
+        == []
+    )
+
+
 def test_application_composition_uses_adapters_instead_of_sdks() -> None:
     path = Path("src/lup_template/agent/core.py")
     roots = application_roots()

@@ -18704,6 +18704,21 @@ IMPORT_BOUNDARIES: list[ImportBoundaryRow] = [
         "rule_id": "seam-boundary",
         "message": "Concrete adapter imports belong in providers or declared composition roots; provider SDK imports belong in adapter implementations. Use Lup contracts in shared code; canonical tool grants and provider mentions remain valid.",
     },
+    {
+        "modules": [
+            "lup.coordination.peer_tools",
+            "lup.ledger.tools",
+        ],
+        "owners": [
+            "packages/lup/src/lup/tools/toolsets.py",
+        ],
+        "source_roots": [
+            "packages/lup/src/",
+            "src/",
+        ],
+        "rule_id": "assembly-boundary",
+        "message": "A tool group's constructor is the assembly's to call: name the group in this project's toolset declaration instead of building it. Calling it directly is how a project comes to hold a copy of the wiring \u2014 a companion that was never started, a signature that gained parameters \u2014 which the next dependency bump lands the other half of.",
+    },
 ]
 
 REFUSED_TOOLS: list[RefusedToolRow] = [
