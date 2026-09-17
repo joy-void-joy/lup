@@ -271,7 +271,7 @@ What the agent produces. Key fields and their meaning.
 
 ## Environment
 - How tasks are provided (CLI, API, file watch, etc.)
-- How the project will obtain lup — published, git, or linked. Initialization
+- How the project will obtain lup — published or git. Initialization
   settles this, and `dev library release` reads what the index actually holds
   rather than guessing.
 

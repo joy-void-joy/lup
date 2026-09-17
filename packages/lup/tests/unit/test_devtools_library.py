@@ -122,20 +122,6 @@ def test_publishing_keeps_the_generated_tree_environments(project: Path) -> None
     ]
 
 
-def test_linking_points_at_the_checkout_and_keeps_no_version_bound(
-    project: Path, tmp_path: Path
-) -> None:
-    checkout = tmp_path / "elsewhere" / "packages" / "lup"
-    checkout.mkdir(parents=True)
-
-    library.set_mode(project, library.LibraryMode.LINKED, checkout=checkout)
-
-    assert library.read_mode(project) is library.LibraryMode.LINKED
-    assert library.read_linked_path(project) == checkout
-    assert at(project, "tool", "uv", "sources", "lup", "editable") is True
-    assert "lup[claude,codex,docker]" in strings(project, "project", "dependencies")
-
-
 def test_un_vendoring_drops_the_tests_root_along_with_the_source_one(
     project: Path,
 ) -> None:

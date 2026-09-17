@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "0f93252e768b9a1215d2fc81cc1dff0248edbee5551316baff00772862938fe0",
+  "source_digest": "6964b90f65f0737a309825a0ce62d3cdfd207265c749f16e16404b15914d24ea",
   "target_requirements": [
     "claude-code"
   ],
@@ -86,7 +86,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "af1ed4de87923ca9b610d22ef000bedd20f954fbd8f2270a2b577803a71f8f07",
+      "sha256": "7e3ff99354eb1c0b0994a7253d69901f415bd3316d58fbf7284f4596f85dcc69",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -212,14 +212,14 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "191c03f32508fc5ac0fd3a23fcfa3f6bcf212e520d2b8a55a43f633d5b6e4457",
+      "sha256": "d9157397b4b7658b06328559eca7b42485283bf4b806ef3d18fa7dde3e73af0f",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "8caf1d13fdc90b091c77e975495028ac792ae438e62fa929efa14f1d7674f0c0",
+      "sha256": "e8dc93c384fd2a30d934d1d85d40ca63cfde5fc0e513f130f80d4064995a0ba1",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -310,7 +310,7 @@
     {
       "path": ".claude/plugins/lup/commands/update.md",
       "category": "generated",
-      "sha256": "8a72740d1e1f099b84f5b2c9b7d05fe9c87f0d9a9bcd03a9e2101ebcb04e18bd",
+      "sha256": "ba470a0081f75fc79d37a8680e6821419f57ee29bca46bca6c6b4970ba7da3e9",
       "semantic_id": "skill.update",
       "executable": false
     },
@@ -618,7 +618,7 @@
     {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "110f2b302bca11f7b0c2dc6696107cf130cf2cda0344198edcaeaebed1e1e539",
+      "sha256": "b1dab77f537057000c207e7dabd61263f05ddec63d4031a1e63b9fd5b16460c2",
       "semantic_id": "docs.library",
       "executable": false
     },

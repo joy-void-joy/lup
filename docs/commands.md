@@ -77,8 +77,6 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev library release` | Ask the package index whether a release exists, and which mode that settles. |
 | `dev library use` | Resolve lup from the package index, or from the vendored copy. |
 | `dev library git` | Resolve lup from its repository, for use before a release is published. |
-| `dev library link` | Develop against a lup checkout so library changes land in its repo. |
-| `dev library unlink` | Stop developing against a checkout and go back to the published release. |
 | `dev scaffold compile` | Materialize upstream&#x27;s copied half at one commit, under this name. |
 | `dev scaffold adopt` | Root the scaffold branch, once, at the commit this project came from. |
 | `dev model-config census` | Enumerate every `model_config` declaration by right-hand-side shape. |

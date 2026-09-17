@@ -1,6 +1,6 @@
 """How this project obtains the ``lup`` library.
 
-A project built on this template reaches ``lup`` one of four ways, and the
+A project built on this template reaches ``lup`` one of three ways, and the
 mode is a property of ``pyproject.toml`` that can be changed at any time:
 
 ``published``
@@ -15,10 +15,12 @@ mode is a property of ``pyproject.toml`` that can be changed at any time:
     A copy under ``packages/lup``, wired as a uv workspace member. What the
     template ships, and what a project that genuinely needs to modify library
     source keeps.
-``linked``
-    An editable install of a lup checkout elsewhere on disk. Library changes
-    made while working on this project land in lup's own repository, which is
-    how an improvement discovered downstream reaches the library.
+
+Every mode moves under a command, and the commit or version it moved to is
+written into ``uv.lock`` — which is what lets ``dev update`` hold the library,
+the generated trees and the copied half at one upstream commit. Improving lup
+from a project built on it is a worktree in ``refs/lup`` and a pin at the
+branch carrying the change.
 
 Leaving ``local`` also strips the workspace wiring that stops resolving once
 ``packages/lup`` is gone: the uv workspace, the pytest source path, and the
@@ -32,7 +34,6 @@ Examples::
     $ uv run lup-devtools dev library status
     $ uv run lup-devtools dev library use published --version 0.3.0
     $ uv run lup-devtools dev library git --branch dev
-    $ uv run lup-devtools dev library link ../lup.git/tree/dev
 """
 
 import tomllib
@@ -110,7 +111,6 @@ class LibraryMode(StrEnum):
     PUBLISHED = "published"
     GIT = "git"
     LOCAL = "local"
-    LINKED = "linked"
 
 
 type GitRefKind = Literal["branch", "tag", "rev"]
@@ -189,8 +189,6 @@ def read_mode(root: Path) -> LibraryMode:
     match data:
         case {"tool": {"uv": {"sources": {"lup": {"workspace": True}}}}}:
             return LibraryMode.LOCAL
-        case {"tool": {"uv": {"sources": {"lup": {"path": str()}}}}}:
-            return LibraryMode.LINKED
         case {"tool": {"uv": {"sources": {"lup": {"git": str()}}}}}:
             return LibraryMode.GIT
         case _:
@@ -215,17 +213,6 @@ def read_git_source(root: Path) -> GitSource | None:
             return GitSource(url=url, ref_kind="rev", ref=ref)
         case {"git": str(url)}:
             return GitSource(url=url)
-        case _:
-            return None
-
-
-def read_linked_path(root: Path) -> Path | None:
-    """Return the checkout an editable source points at, when linked."""
-    with (root / "pyproject.toml").open("rb") as handle:
-        data = tomllib.load(handle)
-    match data:
-        case {"tool": {"uv": {"sources": {"lup": {"path": str(path)}}}}}:
-            return Path(path)
         case _:
             return None
 
@@ -262,7 +249,6 @@ def apply_dependency(document: tomlkit.TOMLDocument, version: str | None) -> lis
 def apply_source(
     document: tomlkit.TOMLDocument,
     mode: LibraryMode,
-    checkout: Path | None,
     git: GitSource | None = None,
 ) -> list[str]:
     """Declare, or clear, the ``[tool.uv.sources]`` override for ``lup``."""
@@ -280,11 +266,6 @@ def apply_source(
         case LibraryMode.LOCAL:
             entry = tomlkit.inline_table()
             entry.update({"workspace": True})
-        case LibraryMode.LINKED:
-            if checkout is None:
-                raise ValueError("linked mode needs a checkout path")
-            entry = tomlkit.inline_table()
-            entry.update({"path": str(checkout), "editable": True})
     if DISTRIBUTION in sources and dict(sources[DISTRIBUTION]) == dict(entry):
         return []
     sources[DISTRIBUTION] = entry
@@ -409,13 +390,12 @@ def guard_leaving_local(root: Path, force: bool) -> None:
 
 
 # Rewriting `pyproject.toml` is about the checkout, and `git` is the argument
-# exactly one mode reads — beside `version` and `checkout`, which the others do.
+# exactly one mode reads — beside `version`, which one other does.
 def set_mode(
     root: Path,
     mode: LibraryMode,
     *,
     version: str | None = None,
-    checkout: Path | None = None,
     git: GitSource | None = None,
     dry_run: bool = False,
 ) -> list[str]:
@@ -424,13 +404,14 @@ def set_mode(
     if vendored and not (root / VENDORED_ROOT).is_dir():
         raise typer.BadParameter(
             f"{VENDORED_ROOT}/ is not present, so there is no library to vendor. "
-            "Use `dev library link <checkout>` to develop against one in place."
+            "Resolve it from its repository instead — "
+            "`dev library git --branch <branch>`."
         )
     pyproject = root / "pyproject.toml"
     document = tomlkit.parse(pyproject.read_text(encoding="utf-8"))
     changes = [
         *apply_dependency(document, version if mode is LibraryMode.PUBLISHED else None),
-        *apply_source(document, mode, checkout, git),
+        *apply_source(document, mode, git),
         *apply_workspace(document, vendored),
         *apply_search_path(
             document, ["tool", "pytest", "ini_options"], "pythonpath", vendored
@@ -500,29 +481,12 @@ def git_library(
     )
 
 
-def link_library(
-    checkout: Path, keep_vendored: bool, force: bool, dry_run: bool
-) -> None:
-    """CLI entry for ``lup-devtools dev library link`` (see module docstring)."""
-    root = project_root()
-    package = (checkout / VENDORED_ROOT).resolve()
-    if not (package / "pyproject.toml").is_file():
-        raise typer.BadParameter(f"no lup package at {package}")
-    guard_leaving_local(root, force)
-    changes = set_mode(root, LibraryMode.LINKED, checkout=package, dry_run=dry_run)
-    if not keep_vendored:
-        changes.extend(drop_vendored(root, dry_run))
-    report(changes, dry_run, f"Already linked to {package}.")
-
-
 def library_status() -> None:
     """CLI entry for ``lup-devtools dev library status`` (see module docstring)."""
     root = project_root()
     mode = read_mode(root)
     typer.echo(f"mode: {mode}")
     match mode:
-        case LibraryMode.LINKED:
-            typer.echo(f"checkout: {read_linked_path(root)}")
         case LibraryMode.LOCAL:
             typer.echo(f"vendored: {root / VENDORED_ROOT}")
         case LibraryMode.GIT:

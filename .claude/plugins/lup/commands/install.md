@@ -115,13 +115,18 @@ look-up does not make it. Ask the user which of these describes them:
 | --- | --- | --- |
 | published | A consumer of the library: it takes releases and upgrades on its own schedule | `uv run --directory <target> lup-devtools dev library use published --version <release>` |
 | **git** | Either nothing is published yet, or the project works *on* lup as well as with it — running a branch to dogfood it and sending changes back | `uv run --directory <target> lup-devtools dev library git --branch <branch>` |
-| linked | The library is being developed alongside this project, in a checkout on the same disk | `uv run --directory <target> lup-devtools dev library link <checkout>` |
+
+A project developing lup alongside its own work takes git mode as well, pinned
+at the branch carrying its changes: the library then moves when a command moves
+it, and `uv.lock` records the commit it moved to — which is what lets
+`uv run --directory <target> lup-devtools dev update` hold the library, the generated trees and the copied half
+at one upstream commit.
 
 With nothing published, git is the only mode that resolves, so the look-up
 settles it. Once a release exists, published is the quieter default and git
 stays a live choice: a project that reads the library's own diffs, or that
 expects to send work back, is better served by the branch it is improving than
-by the last release cut from it. All three hand the project a real package, so
+by the last release cut from it. Both hand the project a real package, so
 its `packages/lup/` stays absent and nothing has to be merged later. Vendoring
 is not on this list — a vendored copy is a fork with all the reconciliation
 that implies, and is only right for a project that genuinely intends to modify

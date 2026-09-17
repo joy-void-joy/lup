@@ -1066,30 +1066,6 @@ def create_dev_app(
             dry_run,
         )
 
-    @library_app.command("link")
-    def library_link_cmd(
-        checkout: Annotated[
-            Path, typer.Argument(help="Path to a lup checkout holding packages/lup")
-        ],
-        keep_vendored: KeepVendored = False,
-        force: Force = False,
-        dry_run: DryRun = False,
-    ) -> None:
-        """Develop against a lup checkout so library changes land in its repo."""
-        library_mod.link_library(checkout, keep_vendored, force, dry_run)
-
-    @library_app.command("unlink")
-    def library_unlink_cmd(
-        version: Annotated[
-            str | None, typer.Option("--version", help="Lower version bound to restore")
-        ] = None,
-        dry_run: DryRun = False,
-    ) -> None:
-        """Stop developing against a checkout and go back to the published release."""
-        library_mod.use_library(
-            library_mod.LibraryMode.PUBLISHED, version, True, True, dry_run
-        )
-
     # -- the copied half, and the update that moves every carrier --
 
     def adopted_source() -> scaffold_mod.ScaffoldSource:
