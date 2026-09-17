@@ -57,8 +57,10 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
 | `dev modules` | Report which modules this project takes, and what each one&#x27;s prose costs. |
+| `dev reach` | Report how this repository&#x27;s work reaches a project built on it. |
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
 | `dev relocate` | Move a module and repoint every import of it. |
+| `dev update` | Move the library, the native trees, and the copied half to one commit. |
 | `dev policy` | Show what the declared permission policy decides about an input, and why. |
 | `dev vocabulary` | Show every shell form the declared vocabulary judges, and how. |
 | `dev env status` | Where this project&#x27;s environment is, and who is installed in it. |
@@ -71,6 +73,12 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev preserve capture` | Record the surface this repository offers, as a checked-in fixture. |
 | `dev preserve check` | Resolve every captured capability against the tree as it stands. |
 | `dev preserve migration` | Print the relocation that repoints an importer of the captured tree. |
+| `dev library status` | Report where the lup library is resolved from. |
+| `dev library release` | Ask the package index whether a release exists, and which mode that settles. |
+| `dev library use` | Resolve lup from the package index, or from the vendored copy. |
+| `dev library git` | Resolve lup from its repository, for use before a release is published. |
+| `dev scaffold compile` | Materialize upstream&#x27;s copied half at one commit, under this name. |
+| `dev scaffold adopt` | Root the scaffold branch, once, at the commit this project came from. |
 | `dev model-config census` | Enumerate every `model_config` declaration by right-hand-side shape. |
 | `dev model-config aliases` | List every shared configuration alias, and who imports each one. |
 | `dev model-config convert` | Rewrite every assigned `model_config` as class keywords, in place. |
@@ -98,12 +106,6 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev usage codex` | Show live Codex usage with pacing bars (ChatGPT plan). |
 | `dev init rename-package` | Rename the lup Python package to a project-specific name. |
 | `dev init drop-examples` | Remove the scaffold&#x27;s demonstrations of itself, which no adopter wants. |
-| `dev library status` | Report where the lup library is resolved from. |
-| `dev library release` | Ask the package index whether a release exists, and which mode that settles. |
-| `dev library use` | Resolve lup from the package index, or from the vendored copy. |
-| `dev library git` | Resolve lup from its repository, for use before a release is published. |
-| `dev library link` | Develop against a lup checkout so library changes land in its repo. |
-| `dev library unlink` | Stop developing against a checkout and go back to the published release. |
 
 ## `feedback`
 

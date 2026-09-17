@@ -21,6 +21,7 @@ import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
 import lup.devtools.dev.guidance as guidance
 import lup.devtools.dev.issues as issues_mod
+import lup.devtools.dev.library as library_mod
 import lup.devtools.dev.history as history
 import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
@@ -29,6 +30,9 @@ import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.questions as questions_mod
+import lup.devtools.dev.reach as reach
+import lup.devtools.dev.scaffold as scaffold_mod
+import lup.devtools.dev.update as update_mod
 import lup.devtools.dev.preservation as preservation
 import lup.devtools.dev.modules as modules
 import lup.devtools.dev.seams as seams
@@ -51,6 +55,25 @@ from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.policy.vocabulary import default_vocabulary
 from lup.workspace.paths import is_template_scaffold, project_root
 
+DryRun = Annotated[
+    bool,
+    typer.Option("--dry-run", "-n", help="Show what would change without writing"),
+]
+KeepVendored = Annotated[
+    bool,
+    typer.Option("--keep-vendored", help=f"Leave {library_mod.VENDORED_ROOT}/ on disk"),
+]
+Force = Annotated[
+    bool,
+    typer.Option("--force", help="Un-vendor even from an unrenamed template"),
+]
+"""The flags every mode change takes, spelled once beside the commands taking them.
+
+Module scope because a Typer annotation is a type expression and a name bound
+inside the factory is not one — the three commands would otherwise each restate
+the same three options.
+"""
+
 
 def create_dev_app(
     declared: Callable[[], DevDeclarations],
@@ -66,6 +89,8 @@ def create_dev_app(
     app = typer.Typer(no_args_is_help=True)
     plugin_app = typer.Typer(no_args_is_help=True)
     preserve_app = typer.Typer(no_args_is_help=True)
+    library_app = typer.Typer(no_args_is_help=True)
+    scaffold_app = typer.Typer(no_args_is_help=True)
     env_app = typer.Typer(no_args_is_help=True)
     tracker_app = typer.Typer(no_args_is_help=True)
     app.add_typer(
@@ -83,6 +108,12 @@ def create_dev_app(
         preserve_app,
         name="preserve",
         help="The capability capture a reorganisation is measured against",
+    )
+    app.add_typer(library_app, name="library", help="How this project obtains lup")
+    app.add_typer(
+        scaffold_app,
+        name="scaffold",
+        help="Upstream's copied half, as a branch of this repository",
     )
     app.add_typer(
         model_config_mod.create_model_config_app(),
@@ -401,6 +432,7 @@ def create_dev_app(
             scope=check.changed_paths(since) if since is not None else None,
             node_classes=node_classes or [],
             ledger=ledger,
+            scaffold_source=declarations.scaffold,
         )
 
     # -- test command --
@@ -894,6 +926,35 @@ def create_dev_app(
         project = declared().project
         modules.report(project.coverage.modules, project.modules, verbose)
 
+    @app.command("reach")
+    def reach_cmd(
+        since: Annotated[
+            str,
+            typer.Option("--since", help="How far back to read, in git's own grammar"),
+        ] = "12 months ago",
+        limit: Annotated[
+            int,
+            typer.Option("--limit", help="How many copied modules the ranking names"),
+        ] = 10,
+    ) -> None:
+        """Report how this repository's work reaches a project built on it.
+
+        The question a scaffold cannot answer about itself by reading its own
+        tree: a commit's cost to an adopter is decided by which trees it
+        touched, and nothing records that at the time. The split row is the
+        one to watch — a bump lands its library half and leaves the call site,
+        so it arrives as a breakage rather than as work anybody chose to read.
+        """
+        spread = declared().spread
+        if spread is None:
+            typer.echo(
+                "no scaffold declared: nothing here is copied into another "
+                "repository, so every commit reaches an adopter by import or "
+                "not at all"
+            )
+            return
+        reach.report(since, spread, project_root(), limit)
+
     @app.command("guidance")
     def guidance_cmd(
         by_size: Annotated[
@@ -947,6 +1008,171 @@ def create_dev_app(
             typer.echo(f"{edit.path}: {edit.imports} import(s)")
         for mention in relocate_mod.surviving_mentions(roots, declared):
             typer.echo(f"still mentions a moved module: {mention}", err=True)
+
+    # -- library commands --
+
+    @library_app.command("status")
+    def library_status_cmd() -> None:
+        """Report where the lup library is resolved from."""
+        library_mod.library_status()
+
+    @library_app.command("release")
+    def library_release_cmd() -> None:
+        """Ask the package index whether a release exists, and which mode that settles."""
+        library_mod.library_release()
+
+    @library_app.command("use")
+    def library_use_cmd(
+        mode: Annotated[
+            library_mod.LibraryMode,
+            typer.Argument(help="published, local, or linked"),
+        ],
+        version: Annotated[
+            str | None,
+            typer.Option(
+                "--version", help="Lower version bound for the published release"
+            ),
+        ] = None,
+        keep_vendored: KeepVendored = False,
+        force: Force = False,
+        dry_run: DryRun = False,
+    ) -> None:
+        """Resolve lup from the package index, or from the vendored copy."""
+        library_mod.use_library(mode, version, keep_vendored, force, dry_run)
+
+    @library_app.command("git")
+    def library_git_cmd(
+        url: Annotated[
+            str, typer.Option("--url", help="Repository serving the lup package")
+        ] = library_mod.REPOSITORY_URL,
+        branch: Annotated[
+            str | None, typer.Option("--branch", help="Branch to resolve lup at")
+        ] = None,
+        tag: Annotated[
+            str | None, typer.Option("--tag", help="Tag to resolve lup at")
+        ] = None,
+        rev: Annotated[
+            str | None, typer.Option("--rev", help="Commit to pin lup at")
+        ] = None,
+        keep_vendored: KeepVendored = False,
+        force: Force = False,
+        dry_run: DryRun = False,
+    ) -> None:
+        """Resolve lup from its repository, for use before a release is published."""
+        library_mod.git_library(
+            library_mod.git_source(url, branch=branch, tag=tag, rev=rev),
+            keep_vendored,
+            force,
+            dry_run,
+        )
+
+    # -- the copied half, and the update that moves every carrier --
+
+    def adopted_source() -> scaffold_mod.ScaffoldSource:
+        """This project's declared scaffold, refused where there is none.
+
+        Two ways there is none, and they are different answers. A project that
+        wrote its own modules declares no source, and nothing here applies to
+        it. The scaffold itself declares one — every copy inherits the
+        declaration — and is still the origin of all of them, which the
+        template flag is what says.
+        """
+        source = declared().scaffold
+        if source is None:
+            raise typer.BadParameter(
+                "this project declares no scaffold source, so it has no copied "
+                "half to merge: nothing upstream stamped it out"
+            )
+        if is_template_scaffold(project_root()):
+            raise typer.BadParameter(
+                "this checkout is the scaffold itself rather than a project "
+                "built on it, so there is nothing upstream of it to merge. "
+                "`dev init rename-package <project>` is what adopts it."
+            )
+        return source
+
+    @scaffold_app.command("compile")
+    def scaffold_compile_cmd(
+        commit: Annotated[
+            str, typer.Argument(help="The upstream commit to compile the scaffold at")
+        ],
+        out: Annotated[
+            Path, typer.Option("--out", help="Where to write the compiled tree")
+        ],
+        decline: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--decline",
+                help="An upstream path to leave out, beside the declared ones",
+            ),
+        ] = None,
+    ) -> None:
+        """Materialize upstream's copied half at one commit, under this name.
+
+        The pure function the update rests on, exposed so it can be looked at:
+        what an update would merge, written to a directory rather than to a
+        branch. `--decline` asks what a wider selection would produce without
+        declaring it first, which is how a project decides what to declare.
+        """
+        declared_source = adopted_source()
+        source = declared_source.model_copy(
+            update={"declined": [*declared_source.declined, *(decline or [])]}
+        )
+        built = scaffold_mod.compiled(
+            update_mod.upstream_checkout(source.project, typer.echo),
+            commit,
+            source,
+            declared().project.package,
+            out,
+        )
+        typer.echo(f"{out}: {len(built.files)} file(s) at {built.commit}")
+
+    @scaffold_app.command("adopt")
+    def scaffold_adopt_cmd(
+        base: Annotated[
+            str,
+            typer.Option(
+                "--base", help="The upstream commit this project was stamped from"
+            ),
+        ],
+    ) -> None:
+        """Root the scaffold branch, once, at the commit this project came from.
+
+        What gives git the ancestor it has been missing: after this, every
+        update is a merge against the commit this project last took rather
+        than against an unrelated history.
+        """
+        update_mod.adopted(
+            project_root(),
+            adopted_source(),
+            declared().project.package,
+            base,
+            typer.echo,
+        )
+
+    @app.command("update")
+    def update_cmd(
+        commit: Annotated[
+            str,
+            typer.Option("--commit", help="Pin every carrier at this upstream commit"),
+        ] = "",
+    ) -> None:
+        """Move the library, the native trees, and the copied half to one commit.
+
+        The pin resolves first and decides the commit; the copied half is
+        compiled at exactly that commit and merged; the trees are regenerated
+        under the library that just landed. A conflicted merge stops the run
+        and says what to resolve, because everything after it is compiled from
+        declarations the merge has not finished writing.
+        """
+        update_mod.updated(
+            project_root(),
+            adopted_source(),
+            declared().project.package,
+            commit,
+            library_mod.DISTRIBUTION,
+            typer.echo,
+        )
 
     # -- preservation capture --
 

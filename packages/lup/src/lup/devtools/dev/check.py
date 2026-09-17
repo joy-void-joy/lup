@@ -52,6 +52,8 @@ from lup.ledger.store import LedgerLayout
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
 from lup.devtools.dev.records import branches_awaiting_adoption, record_location
+from lup.devtools.dev.scaffold import ScaffoldSource
+from lup.devtools.dev.update import drift as carrier_drift
 from lup.devtools.harness.drift import (
     RepositoryWriter,
     inspect_drift,
@@ -874,6 +876,7 @@ def scan_reports(
     node_classes: list[type[LedgerNode]] | None = None,
     ledger: LedgerLayout = LedgerLayout(),
     command_surface: Callable[[], CommandSurface] | None = None,
+    scaffold_source: ScaffoldSource | None = None,
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them."""
 
@@ -1139,6 +1142,28 @@ def scan_reports(
             else [f"harness drift: FAIL ({len(drift.stale_trees)} tree(s))"],
         )
 
+        # The same question one carrier further out: that row asks whether the
+        # trees match the declarations in this checkout, and this asks whether
+        # the three carriers that brought the checkout here stand at one
+        # upstream commit. Advisory, because both commits are ones this project
+        # moved deliberately, and because the row is read most often during an
+        # update a conflict interrupted — refusing then would bury the
+        # conflicts the gate was run to read.
+        carriers = (
+            carrier_drift(project_root(), scaffold_source)
+            if scaffold_source is not None and not is_template_scaffold(project_root())
+            else None
+        )
+        if carriers is not None and not carriers.settled():
+            yield CheckReport(
+                name="carrier drift",
+                counted=False,
+                lines=[
+                    f"carrier drift: {carriers.spelled()} (advisory)",
+                    "  `dev update` moves every carrier to one upstream commit",
+                ],
+            )
+
         # Beside parity because both ask whether the roster arrived whole, one
         # turn further out: parity reads a declaration against the trees, and
         # this reads the checkout against the modules that were meant to
@@ -1234,6 +1259,7 @@ def run_checks(
     test_workers: int = TEST_WORKERS,
     node_classes: list[type[LedgerNode]] | None = None,
     ledger: LedgerLayout = LedgerLayout(),
+    scaffold_source: ScaffoldSource | None = None,
 ) -> None:
     """Run ruff format, ruff check, pyright, pytest, and this gate's own sweeps.
 
@@ -1267,6 +1293,7 @@ def run_checks(
         node_classes=node_classes or [],
         ledger=ledger,
         command_surface=command_surface,
+        scaffold_source=scaffold_source,
     )
 
     if fix:

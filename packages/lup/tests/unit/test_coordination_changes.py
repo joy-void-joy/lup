@@ -8,6 +8,7 @@ contested path before everything else — over a store the typed writers
 produced, so the copy is read against the record as it is really written.
 """
 
+import json
 from datetime import timedelta
 from pathlib import Path
 
@@ -19,9 +20,16 @@ from lup.coordination.identity import (
     member_ref,
     mint_member_id,
 )
-from lup.coordination.pulse import HEARTBEATS_DIR, Pulse, beat, heard_at
+from lup.coordination.pulse import (
+    HEARTBEATS_DIR,
+    RESETS_DIR,
+    Pulse,
+    beat,
+    heard_at,
+    reset_at,
+)
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import ROSTER_FILE, ActorJoined
+from lup.coordination.roster import ROSTER_FILE, ActorDescribed, ActorJoined
 from lup.coordination.touches import TOUCHES_FILE
 
 
@@ -45,6 +53,7 @@ def test_the_copy_and_its_source_spell_the_store_alike() -> None:
     assert fold.MEMBER_KIND == MEMBER_KIND
     assert fold.HEARTBEATS_DIR == HEARTBEATS_DIR
     assert fold.STALE_AFTER_SECONDS == Pulse().stale_after_seconds
+    assert fold.RESETS_DIR == RESETS_DIR
 
 
 def test_a_prompt_beats_for_the_session_it_was_submitted_from(tmp_path: Path) -> None:
@@ -248,6 +257,84 @@ def test_a_session_with_no_identity_is_told_nothing(tmp_path: Path) -> None:
 
     assert fold.changes(peers.root, "", tmp_path / "mine") == []
     assert not (peers.root / fold.LOOKS_DIR).exists()
+
+
+def transcript(path: Path, roots: int) -> str:
+    """A transcript holding this many conversation roots, a turn and a note under each.
+
+    The shape a rewind leaves in the runtime's own file: every root is a
+    prompt with no parent, and the attachments between turns parent nothing
+    a turn descends from.
+    """
+    lines = [
+        json.dumps(entry)
+        for n in range(roots)
+        for entry in (
+            {"type": "user", "uuid": f"root-{n}", "parentUuid": None},
+            {"type": "assistant", "uuid": f"turn-{n}", "parentUuid": f"root-{n}"},
+            {"type": "attachment", "uuid": f"note-{n}", "parentUuid": f"turn-{n}"},
+        )
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def said_earlier(peers: RepositoryPeers, member: str, description: str) -> None:
+    """A description written a second ago, so a stamp taken now is later than it.
+
+    A file stamp carries the kernel's coarse clock, which can trail the
+    record's clock by a tick; a real rewind is human time away from whatever
+    the row last said, and the test says so in seconds rather than racing it.
+    """
+    peers.cohort.roster.stream.append(
+        ActorDescribed(
+            actor=member_ref(member),
+            description=description,
+            at=utc_now() - timedelta(seconds=1),
+        )
+    )
+
+
+def test_a_rewind_resets_what_the_row_said_and_re_baselines(tmp_path: Path) -> None:
+    """A new root in the same transcript is the one sign a rewind leaves."""
+    peers = RepositoryPeers(tmp_path)
+    me = joined(peers, tmp_path / "mine", "mine")
+    joined(peers, tmp_path / "theirs", "reviewer")
+    said_earlier(peers, me, "the work the rewind discards")
+    log = tmp_path / "session.jsonl"
+    fold.changes(peers.root, me, tmp_path / "mine", transcript(log, roots=1))
+    assert fold.changes(peers.root, me, tmp_path / "mine", str(log)) == []
+
+    rewound = fold.changes(peers.root, me, tmp_path / "mine", transcript(log, roots=2))
+
+    assert rewound == [
+        fold.MOVED_LINE,
+        "1 other session is working in this repository; `coordination_peers` lists it.",
+    ]
+    assert reset_at(peers.root, me) is not None
+    [mine] = [row for row in peers.listing() if row.member.actor.id == me]
+    assert mine.member.description == ""
+    assert mine.member.running
+    assert fold.changes(peers.root, me, tmp_path / "mine", str(log)) == []
+
+
+def test_a_peer_whose_conversation_moved_is_told_as_on_its_task(
+    tmp_path: Path,
+) -> None:
+    """What a discarded conversation said is unsaid until the session speaks again."""
+    peers = RepositoryPeers(tmp_path)
+    me = joined(peers, tmp_path / "mine", "mine")
+    other = joined(peers, tmp_path / "theirs", "reviewer")
+    said_earlier(peers, other, "reading the merge")
+    told(peers, me, tmp_path / "mine")
+
+    fold.reset(peers.root, other)
+    moved = told(peers, me, tmp_path / "mine")
+    peers.describe(other, "reading the rebase")
+    spoke = told(peers, me, tmp_path / "mine")
+
+    assert moved == [f"reviewer now: working in {tmp_path / 'theirs'}"]
+    assert spoke == ["reviewer now: reading the rebase"]
 
 
 def test_the_envelope_is_the_shape_both_runtimes_read() -> None:

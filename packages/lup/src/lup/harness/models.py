@@ -1229,6 +1229,24 @@ class HookSandbox(BaseModel, frozen=True):
     )
 
 
+class CarrierPins(BaseModel, frozen=True):
+    """What a prompt-time fold needs to ask whether the carriers still agree.
+
+    Two words rather than the whole scaffold declaration, because a fold
+    shipped into a plugin runs on a bare interpreter and can import neither
+    the declaration nor the reader that understands it. Rendered into the
+    guard that starts it, and derived from the declaration that owns them, so
+    a project that renamed its scaffold branch gets a hook naming the branch
+    it has.
+    """
+
+    branch: str
+    """Where the copied half is merged from, whose merge base carries the commit."""
+
+    distribution: str
+    """The package whose pin `uv.lock` records the other commit for."""
+
+
 class HookSet(BaseModel, frozen=True):
     id: str
     policy_ids: list[PolicyId]
@@ -1316,6 +1334,17 @@ class HookSet(BaseModel, frozen=True):
             "carrying the surface to reach for instead. Whether a tool is "
             "against the point of a project is that project's judgement, so "
             "an empty list — the library's own answer — refuses nothing"
+        ),
+    )
+    carriers: CarrierPins | None = Field(
+        default=None,
+        description=(
+            "Which branch this project's copied half is merged from and which "
+            "distribution its library pin resolves, so a session is told at "
+            "prompt time when the two stand at different upstream commits. "
+            "None is a project that took no copied half from anywhere — the "
+            "scaffold itself included, being the origin of every copy — and "
+            "registers no hook at all"
         ),
     )
     peer_policy: PeerPolicy | None = Field(

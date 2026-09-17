@@ -308,9 +308,9 @@ runtime is a later removal somebody decides on its own terms.
                 text=r"""That checkout is one you provide: clone the library beside the project, then
 `git switch --detach <commit>` it to the recorded commit. Not this project's
 own checkout — it stands at that commit too, and naming it makes the review
-read the project's own history as upstream work. The linked mode's checkout can
-serve when it already stands there, but it is someone's working checkout and is
-not yours to move.
+read the project's own history as upstream work. Any clone standing at that
+commit serves, as long as it is not one somebody is working in: a checkout
+that moves under the review is one whose history the review misreads.
 
 A recorded path is read in place and never fetched, so whichever checkout you
 name is the one to update before a review. The branch may also have advanced

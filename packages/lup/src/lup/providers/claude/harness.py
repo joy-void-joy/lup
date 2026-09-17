@@ -7,7 +7,8 @@ from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
-from lup.providers.roster_prompt import departure_hook, prompt_hook
+from lup.providers.drift_prompt import drift_hook
+from lup.providers.roster_prompt import departure_hook, folded, prompt_hook
 from lup.formats.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -611,11 +612,25 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         # Under its own event rather than beside the policy's: a prompt is not
         # a tool call, and what the roster has to say at that moment is
         # context rather than a verdict, so nothing here can refuse.
-        roster = prompt_hook(
-            Path(f".claude/plugins/{self.plugin_name}"),
-            "CLAUDE_PLUGIN_ROOT",
-            source,
-            CLAUDE_PROMPT_EVENT,
+        # Two folds under the one event, kept side by side rather than merged:
+        # who else is here, and whether what this project is built on still
+        # stands at one commit. Both are context and neither can refuse, so
+        # the runtime runs whichever of them the project declared.
+        roster = folded(
+            [
+                prompt_hook(
+                    Path(f".claude/plugins/{self.plugin_name}"),
+                    "CLAUDE_PLUGIN_ROOT",
+                    source,
+                    CLAUDE_PROMPT_EVENT,
+                ),
+                drift_hook(
+                    Path(f".claude/plugins/{self.plugin_name}"),
+                    "CLAUDE_PLUGIN_ROOT",
+                    source,
+                    CLAUDE_PROMPT_EVENT,
+                ),
+            ]
         )
         # The row that arrived under the prompt event ends under the ending
         # one, written by the session itself, so a clean exit is exact and

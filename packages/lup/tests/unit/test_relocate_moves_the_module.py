@@ -70,6 +70,37 @@ def test_an_occupied_destination_is_left_alone(tmp_path: Path) -> None:
     assert (tmp_path / "pkg" / "old_home.py").exists()
 
 
+def test_a_module_crossing_packages_lands_in_the_root_that_owns_the_name(
+    tmp_path: Path,
+) -> None:
+    """The move a two-package repository makes: an application's becomes the library's.
+
+    Resolving the destination against the root the file came from wrote a
+    second `lup/` tree beside the application, and every import repointed at
+    the library then resolved to nothing. The distribution root is a root of
+    its own so a sweep finds every importer, and it holds a directory named
+    for the package that no import resolves against — so the destination is
+    the root holding the name as a package, not the one spelling it.
+    """
+    application = tmp_path / "src"
+    distribution = tmp_path / "packages"
+    library = distribution / "lup" / "src"
+    module_at(application, "app_package", "library")
+    module_at(library, "lup", "devtools", "placed")
+    (library / "lup" / "__init__.py").write_text("", encoding="utf-8")
+
+    carried = carry_module(
+        [application, distribution, library],
+        Relocation(
+            old=["app_package", "library"], new=["lup", "devtools", "dev", "library"]
+        ),
+    )
+
+    assert carried is not None
+    assert carried.new == library / "lup" / "devtools" / "dev" / "library.py"
+    assert not (application / "lup").exists()
+
+
 def test_the_first_root_holding_the_module_is_the_one_that_moves(
     tmp_path: Path,
 ) -> None:

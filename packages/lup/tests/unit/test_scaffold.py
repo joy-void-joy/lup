@@ -1,0 +1,184 @@
+"""The copied half as a compiled branch, and what a merge of it does.
+
+The claim under test is the one the whole mechanism rests on: an adopter that
+roots a branch at the scaffold it was stamped from can take every later
+upstream change as an ordinary merge — upstream's own changes arriving for
+free, changes to files the adopter also touched being reconciled where git can
+and reported where it cannot, and the adopter's own work left alone.
+
+Two repositories are built here rather than mocked, because what is being
+tested is what git does: a merge base, three diffs, and a conflict.
+"""
+
+from pathlib import Path
+
+from lup.devtools.dev.scaffold import (
+    ScaffoldRoot,
+    ScaffoldSource,
+    adopt,
+    advanced,
+    compiled,
+    compiled_at,
+    merged,
+    merged_at,
+    pinned_commit,
+)
+from lup.execution.shell import git
+from tests.unit.test_ledger_placement import committed, repository
+
+SOURCE = ScaffoldSource(
+    project="upstream",
+    roots=[
+        ScaffoldRoot(upstream="src/lup_template", adopter="src/{package}"),
+        ScaffoldRoot(upstream="tests", adopter="tests"),
+    ],
+)
+PACKAGE = "demo"
+
+
+def wrote(root: Path, relative: str, text: str) -> Path:
+    """One file of a repository, with the directories above it."""
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def upstream_at_base(tmp_path: Path) -> tuple[Path, str]:
+    """An upstream repository holding a copied half, and its first commit."""
+    root = repository(tmp_path / "upstream")
+    wrote(root, "src/lup_template/serve.py", "from lup_template.tools import all\n")
+    wrote(root, "src/lup_template/tools.py", "all = []\n")
+    wrote(root, "src/lup_template/catalog.py", "declared = 1\n")
+    wrote(root, "tests/test_serve.py", "import lup_template.serve\n")
+    wrote(root, "tests/test_demonstration.py", "assert True\n")
+    wrote(root, "docs/upstream.md", "upstream's own\n")
+    committed(root, "the scaffold")
+    return root, git.out("-C", str(root), "rev-parse", "HEAD")
+
+
+def adopter_from(tmp_path: Path, upstream: Path, base: str) -> Path:
+    """A project stamped out of ``scaffold(base)``, with a domain of its own."""
+    root = repository(tmp_path / "adopter")
+    compiled(upstream, base, SOURCE, PACKAGE, root)
+    wrote(root, "src/demo/domain.py", "answer = 42\n")
+    wrote(root, "README.md", "the adopter's own\n")
+    committed(root, "stamped out")
+    return root
+
+
+def test_the_compiled_scaffold_is_upstreams_tree_under_this_name(
+    tmp_path: Path,
+) -> None:
+    upstream, base = upstream_at_base(tmp_path)
+
+    built = compiled(upstream, base, SOURCE, PACKAGE, tmp_path / "out")
+
+    assert built.files == [
+        "src/demo/catalog.py",
+        "src/demo/serve.py",
+        "src/demo/tools.py",
+        "tests/test_demonstration.py",
+        "tests/test_serve.py",
+    ]
+    assert (tmp_path / "out" / "src" / "demo" / "serve.py").read_text(
+        encoding="utf-8"
+    ) == "from demo.tools import all\n"
+
+
+def test_a_tree_outside_the_roots_is_not_the_scaffolds(tmp_path: Path) -> None:
+    """`docs/` and the root files are the adopting domain's from the first day."""
+    upstream, base = upstream_at_base(tmp_path)
+
+    compiled(upstream, base, SOURCE, PACKAGE, tmp_path / "out")
+
+    assert not (tmp_path / "out" / "docs").exists()
+
+
+def test_a_declined_path_is_absent_from_every_scaffold(tmp_path: Path) -> None:
+    """What the project never took is never offered, so no merge reports it."""
+    upstream, base = upstream_at_base(tmp_path)
+    declining = SOURCE.model_copy(update={"declined": ["tests/test_demonstration.py"]})
+
+    built = compiled(upstream, base, declining, PACKAGE, tmp_path / "out")
+
+    assert "tests/test_demonstration.py" not in built.files
+    assert not (tmp_path / "out" / "tests" / "test_demonstration.py").exists()
+
+
+def test_an_update_is_a_merge_against_the_commit_the_project_was_stamped_from(
+    tmp_path: Path,
+) -> None:
+    """The whole mechanism, in one pass: adopt once, then merge each update.
+
+    Upstream changes three files; the adopter changed one of those itself and
+    one of its own. What the merge owes a report is exactly the split it makes
+    here — taken whole, reconciled, or handed back.
+    """
+    upstream, base = upstream_at_base(tmp_path)
+    adopter = adopter_from(tmp_path, upstream, base)
+
+    wrote(adopter, "src/demo/tools.py", "all = ['domain tool']\n")
+    wrote(adopter, "src/demo/domain.py", "answer = 43\n")
+    committed(adopter, "the adopter's own work")
+
+    wrote(
+        upstream,
+        "src/lup_template/serve.py",
+        "from lup_template.tools import all\nserve = True\n",
+    )
+    wrote(upstream, "src/lup_template/tools.py", "all = []\npulse = True\n")
+    wrote(upstream, "src/lup_template/kinds.py", "kinds = []\n")
+    committed(upstream, "the pulse, and a new module")
+    head = git.out("-C", str(upstream), "rev-parse", "HEAD")
+
+    adopt(adopter, upstream, SOURCE, PACKAGE, base)
+    advanced(adopter, upstream, SOURCE, PACKAGE, head)
+    outcome = merged(adopter, SOURCE)
+
+    assert outcome.fast_forwarded() == ["src/demo/kinds.py", "src/demo/serve.py"]
+    assert outcome.merged_clean() == []
+    assert outcome.conflicted == ["src/demo/tools.py"]
+    assert (adopter / "src" / "demo" / "kinds.py").exists()
+    assert (adopter / "src" / "demo" / "domain.py").read_text(
+        encoding="utf-8"
+    ) == "answer = 43\n"
+
+
+def test_the_merge_base_carries_which_upstream_commit_was_taken(
+    tmp_path: Path,
+) -> None:
+    """What each carrier stands at is read from git, not from a file kept beside it."""
+    upstream, base = upstream_at_base(tmp_path)
+    adopter = adopter_from(tmp_path, upstream, base)
+
+    assert merged_at(adopter, SOURCE.branch) == ""
+
+    rooted = adopt(adopter, upstream, SOURCE, PACKAGE, base)
+
+    assert compiled_at(adopter, rooted) == base
+    assert merged_at(adopter, SOURCE.branch) == base
+
+
+def test_the_library_pin_is_the_commit_the_lock_resolved(tmp_path: Path) -> None:
+    """A project pinned to a branch names no commit; the lock names the one it got."""
+    root = tmp_path / "project"
+    wrote(
+        root,
+        "uv.lock",
+        "version = 1\n\n"
+        '[[package]]\nname = "other"\nversion = "1.0"\n\n'
+        '[[package]]\nname = "lup"\nversion = "0.2.0"\n'
+        'source = { git = "https://example.test/lup?'
+        'subdirectory=packages%2Flup&branch=dev#9f1c2d3e4a5b6c7d8e9f" }\n',
+    )
+
+    assert pinned_commit(root) == "9f1c2d3e4a5b6c7d8e9f"
+
+
+def test_a_project_resolving_no_git_source_pins_no_commit(tmp_path: Path) -> None:
+    """Every mode but git answers nothing here, and nothing is the honest answer."""
+    root = tmp_path / "project"
+    wrote(root, "uv.lock", 'version = 1\n\n[[package]]\nname = "lup"\n')
+
+    assert pinned_commit(root) == ""

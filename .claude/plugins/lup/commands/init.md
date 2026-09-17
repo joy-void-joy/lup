@@ -226,13 +226,18 @@ look-up does not make it. Ask the user which of these describes them:
 | --- | --- | --- |
 | published | A consumer of the library: it takes releases and upgrades on its own schedule | `uv run lup-devtools dev library use published --version <release>` |
 | **git** | Either nothing is published yet, or the project works *on* lup as well as with it — running a branch to dogfood it and sending changes back | `uv run lup-devtools dev library git --branch <branch>` |
-| linked | The library is being developed alongside this project, in a checkout on the same disk | `uv run lup-devtools dev library link <checkout>` |
+
+A project developing lup alongside its own work takes git mode as well, pinned
+at the branch carrying its changes: the library then moves when a command moves
+it, and `uv.lock` records the commit it moved to — which is what lets
+`uv run lup-devtools dev update` hold the library, the generated trees and the copied half
+at one upstream commit.
 
 With nothing published, git is the only mode that resolves, so the look-up
 settles it. Once a release exists, published is the quieter default and git
 stays a live choice: a project that reads the library's own diffs, or that
 expects to send work back, is better served by the branch it is improving than
-by the last release cut from it. All three hand the project a real package, so
+by the last release cut from it. Both hand the project a real package, so
 its `packages/lup/` stays absent and nothing has to be merged later. Vendoring
 is not on this list — a vendored copy is a fork with all the reconciliation
 that implies, and is only right for a project that genuinely intends to modify
@@ -302,9 +307,9 @@ That is the case an adoption mid-stream is always in — the code is already her
 That checkout is one you provide: clone the library beside the project, then
 `git switch --detach <commit>` it to the recorded commit. Not this project's
 own checkout — it stands at that commit too, and naming it makes the review
-read the project's own history as upstream work. The linked mode's checkout can
-serve when it already stands there, but it is someone's working checkout and is
-not yours to move.
+read the project's own history as upstream work. Any clone standing at that
+commit serves, as long as it is not one somebody is working in: a checkout
+that moves under the review is one whose history the review misreads.
 
 A recorded path is read in place and never fetched, so whichever checkout you
 name is the one to update before a review. The branch may also have advanced

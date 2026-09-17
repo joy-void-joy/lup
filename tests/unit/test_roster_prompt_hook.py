@@ -70,7 +70,14 @@ def test_the_prompt_event_registers_the_fold_and_refuses_nothing(
     plugin = rendered(tree)
     hooks = json.loads(artifacts[plugin / "hooks" / "hooks.json"].content)["hooks"]
 
-    [group] = hooks[event]
+    # One group per fold registered under the event, and the roster's is the
+    # one naming the roster's guard: the carriers' fold answers at the same
+    # moment and neither stands in for the other.
+    [group] = [
+        group
+        for group in hooks[event]
+        if any(GUARD_SCRIPT in entry["command"] for entry in group["hooks"])
+    ]
     [entry] = group["hooks"]
 
     assert "matcher" not in group

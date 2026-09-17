@@ -42,8 +42,7 @@ src/lup_template/
 │   │   └── serve.py         # Tool collection and the MCP stdio tool server (``serve-tools``).
 │   ├── dev/                 # Dev operations: worktrees, branches, and pre-flight checks.
 │   │   ├── app.py           # What only a template adds to the `dev` tree the library already builds.
-│   │   ├── init.py          # Package renaming for downstream project initialization.
-│   │   └── library.py       # How this project obtains the ``lup`` library.
+│   │   └── init.py          # Package renaming for downstream project initialization.
 │   ├── main.py              # Root CLI app composing all devtools sub-apps.
 │   ├── setup.py             # This project's setup integrations, over the reusable wizard framework.
 │   └── subapps.py           # This application's sub-app delta: what it declines, and what only it has.

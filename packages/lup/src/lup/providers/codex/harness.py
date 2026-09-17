@@ -9,7 +9,8 @@ from pathlib import Path
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.subagents import CodexModelTiers
-from lup.providers.roster_prompt import departure_hook, prompt_hook
+from lup.providers.drift_prompt import drift_hook
+from lup.providers.roster_prompt import departure_hook, folded, prompt_hook
 from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.formats.banner import (
@@ -750,11 +751,25 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 "hooks": [policy_hook],
             }
         ]
-        roster = prompt_hook(
-            Path(f".codex/plugins/{self.plugin_name}"),
-            "PLUGIN_ROOT",
-            source,
-            CODEX_PROMPT_EVENT,
+        # Two folds under the one event, kept side by side rather than merged:
+        # who else is here, and whether what this project is built on still
+        # stands at one commit. Both are context and neither can refuse, so
+        # the runtime runs whichever of them the project declared.
+        roster = folded(
+            [
+                prompt_hook(
+                    Path(f".codex/plugins/{self.plugin_name}"),
+                    "PLUGIN_ROOT",
+                    source,
+                    CODEX_PROMPT_EVENT,
+                ),
+                drift_hook(
+                    Path(f".codex/plugins/{self.plugin_name}"),
+                    "PLUGIN_ROOT",
+                    source,
+                    CODEX_PROMPT_EVENT,
+                ),
+            ]
         )
         departure = departure_hook(
             Path(f".codex/plugins/{self.plugin_name}"),
