@@ -288,11 +288,27 @@ def carry_module(roots: list[Path], move: Relocation) -> MovedModule | None:
         except sh.ErrorReturnCode:
             return False
 
+    def destination(source_root: Path) -> Path:
+        """The root the new name belongs under, which need not be the old one.
+
+        A module crossing packages — an application's becoming the library's —
+        spells a top-level name another root already holds, and resolving its
+        destination against the root it came from writes a second tree beside
+        the first: `src/lup/devtools/...` next to the application, where
+        `packages/lup/src/lup/` is the package that owns the name. The root
+        declaring the new top-level name is the one that takes it, and a name
+        no root declares stays where it was, which is every move within one
+        package.
+        """
+        return next(
+            (root for root in roots if (root / move.new[0]).is_dir()), source_root
+        )
+
     for root in roots:
         source = root.joinpath(*move.old).with_suffix(".py")
         if not source.is_file():
             continue
-        target = root.joinpath(*move.new).with_suffix(".py")
+        target = destination(root).joinpath(*move.new).with_suffix(".py")
         if target.exists():
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
