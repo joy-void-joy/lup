@@ -31,6 +31,8 @@ import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.questions as questions_mod
 import lup.devtools.dev.reach as reach
+import lup.devtools.dev.scaffold as scaffold_mod
+import lup.devtools.dev.update as update_mod
 import lup.devtools.dev.preservation as preservation
 import lup.devtools.dev.modules as modules
 import lup.devtools.dev.seams as seams
@@ -88,6 +90,7 @@ def create_dev_app(
     plugin_app = typer.Typer(no_args_is_help=True)
     preserve_app = typer.Typer(no_args_is_help=True)
     library_app = typer.Typer(no_args_is_help=True)
+    scaffold_app = typer.Typer(no_args_is_help=True)
     env_app = typer.Typer(no_args_is_help=True)
     tracker_app = typer.Typer(no_args_is_help=True)
     app.add_typer(
@@ -107,6 +110,11 @@ def create_dev_app(
         help="The capability capture a reorganisation is measured against",
     )
     app.add_typer(library_app, name="library", help="How this project obtains lup")
+    app.add_typer(
+        scaffold_app,
+        name="scaffold",
+        help="Upstream's copied half, as a branch of this repository",
+    )
     app.add_typer(
         model_config_mod.create_model_config_app(),
         name="model-config",
@@ -424,6 +432,7 @@ def create_dev_app(
             scope=check.changed_paths(since) if since is not None else None,
             node_classes=node_classes or [],
             ledger=ledger,
+            scaffold_source=declarations.scaffold,
         )
 
     # -- test command --
@@ -1079,6 +1088,103 @@ def create_dev_app(
         """Stop developing against a checkout and go back to the published release."""
         library_mod.use_library(
             library_mod.LibraryMode.PUBLISHED, version, True, True, dry_run
+        )
+
+    # -- the copied half, and the update that moves every carrier --
+
+    def adopted_source() -> scaffold_mod.ScaffoldSource:
+        """This project's declared scaffold, refused where there is none.
+
+        Two ways there is none, and they are different answers. A project that
+        wrote its own modules declares no source, and nothing here applies to
+        it. The scaffold itself declares one — every copy inherits the
+        declaration — and is still the origin of all of them, which the
+        template flag is what says.
+        """
+        source = declared().scaffold
+        if source is None:
+            raise typer.BadParameter(
+                "this project declares no scaffold source, so it has no copied "
+                "half to merge: nothing upstream stamped it out"
+            )
+        if is_template_scaffold(project_root()):
+            raise typer.BadParameter(
+                "this checkout is the scaffold itself rather than a project "
+                "built on it, so there is nothing upstream of it to merge. "
+                "`dev init rename-package <project>` is what adopts it."
+            )
+        return source
+
+    @scaffold_app.command("compile")
+    def scaffold_compile_cmd(
+        commit: Annotated[
+            str, typer.Argument(help="The upstream commit to compile the scaffold at")
+        ],
+        out: Annotated[
+            Path, typer.Option("--out", help="Where to write the compiled tree")
+        ],
+    ) -> None:
+        """Materialize upstream's copied half at one commit, under this name.
+
+        The pure function the update rests on, exposed so it can be looked at:
+        what an update would merge, written to a directory rather than to a
+        branch.
+        """
+        source = adopted_source()
+        built = scaffold_mod.compiled(
+            update_mod.upstream_checkout(source.project, typer.echo),
+            commit,
+            source,
+            declared().project.package,
+            out,
+        )
+        typer.echo(f"{out}: {len(built.files)} file(s) at {built.commit}")
+
+    @scaffold_app.command("adopt")
+    def scaffold_adopt_cmd(
+        base: Annotated[
+            str,
+            typer.Option(
+                "--base", help="The upstream commit this project was stamped from"
+            ),
+        ],
+    ) -> None:
+        """Root the scaffold branch, once, at the commit this project came from.
+
+        What gives git the ancestor it has been missing: after this, every
+        update is a merge against the commit this project last took rather
+        than against an unrelated history.
+        """
+        update_mod.adopted(
+            project_root(),
+            adopted_source(),
+            declared().project.package,
+            base,
+            typer.echo,
+        )
+
+    @app.command("update")
+    def update_cmd(
+        commit: Annotated[
+            str,
+            typer.Option("--commit", help="Pin every carrier at this upstream commit"),
+        ] = "",
+    ) -> None:
+        """Move the library, the native trees, and the copied half to one commit.
+
+        The pin resolves first and decides the commit; the copied half is
+        compiled at exactly that commit and merged; the trees are regenerated
+        under the library that just landed. A conflicted merge stops the run
+        and says what to resolve, because everything after it is compiled from
+        declarations the merge has not finished writing.
+        """
+        update_mod.updated(
+            project_root(),
+            adopted_source(),
+            declared().project.package,
+            commit,
+            library_mod.DISTRIBUTION,
+            typer.echo,
         )
 
     # -- preservation capture --

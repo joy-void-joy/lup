@@ -42,6 +42,7 @@ from lup.harness.codescan.boundaries import (
 from lup.harness.content.modules.specs import RESOLVER
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
 from lup.devtools.dev.reach import Spread
+from lup.devtools.dev.scaffold import ScaffoldSource
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import FrontendSpec, WorkflowSpec
 from lup.devtools.project import DevProject, Tracker
@@ -310,6 +311,25 @@ def declared_spread() -> Spread:
         copied=["src/", "tests/"],
         generated=application_roots().generated,
     )
+
+
+def declared_scaffold() -> ScaffoldSource:
+    """Where this project's copied half comes from, and what of it it took.
+
+    Inherited rather than written at initialization: a project stamped out of
+    this tree receives this declaration with the rest of the copied half, and
+    it is already true of it — the registration `sync.json` ships names the
+    repository it was stamped from, and the roots are the ones the stamp
+    copied. What it says of *this* checkout is that this is the scaffold
+    itself, which `dev update` refuses on the strength of the template flag
+    rather than of anything said here: the origin of every copy has nothing
+    upstream to merge from.
+
+    A project that declines part of the scaffold says so here, spelling the
+    paths as upstream spells them, and every later update leaves them out
+    instead of offering them again.
+    """
+    return ScaffoldSource(project="lup")
 
 
 WORKFLOW = WorkflowSpec(

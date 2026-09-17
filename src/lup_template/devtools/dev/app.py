@@ -34,6 +34,7 @@ def declared() -> DevDeclarations:
         plugin=catalog.declared_plugin(),
         test_roots=catalog.declared_test_roots(),
         spread=catalog.declared_spread(),
+        scaffold=catalog.declared_scaffold(),
     )
 
 
