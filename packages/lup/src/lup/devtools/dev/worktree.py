@@ -492,6 +492,12 @@ class RestoredWorkspace(SetupStep, frozen=True):
     the cache lacks: the gate restores whatever it finds behind, so a worktree
     without this step is one to work in, where one without its environment
     is not.
+
+    A workspace the new tree does not hold is nothing to restore rather than
+    something behind. The list comes from the project the command was *run
+    in*, and ``--base`` cuts from any branch, so a tree whose layout differs
+    — one obtaining the library as a link where the other vendors it — is
+    asked to restore a directory it has no copy of.
     """
 
     worktree: Path
@@ -502,7 +508,8 @@ class RestoredWorkspace(SetupStep, frozen=True):
         return f"the restored bun workspace ({self.workspace})"
 
     def satisfied(self) -> bool:
-        return not dependencies_behind(self.worktree / self.workspace)
+        held = self.worktree / self.workspace
+        return not held.is_dir() or not dependencies_behind(held)
 
     def run(self) -> None:
         typer.echo(f"Running bun install --frozen-lockfile in {self.workspace}...")
