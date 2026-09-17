@@ -51,7 +51,9 @@ from lup.ledger.models import LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
+from lup.devtools.dev.migrations import undeclared_breaks
 from lup.devtools.dev.records import branches_awaiting_adoption, record_location
+from lup.devtools.dev.reach import Spread
 from lup.devtools.dev.scaffold import ScaffoldSource
 from lup.devtools.dev.update import drift as carrier_drift
 from lup.devtools.harness.drift import (
@@ -877,6 +879,7 @@ def scan_reports(
     ledger: LedgerLayout = LedgerLayout(),
     command_surface: Callable[[], CommandSurface] | None = None,
     scaffold_source: ScaffoldSource | None = None,
+    spread: Spread | None = None,
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them."""
 
@@ -1164,6 +1167,29 @@ def scan_reports(
                 ],
             )
 
+        # The other direction on the same subject: that row is what this
+        # checkout owes its upstream, and this is what it owes the projects
+        # built on it. Asked only where one of those exists, because what
+        # makes a vanished name a broken import is somebody holding it.
+        # Gating rather than advisory — the commit that takes a capability is
+        # the one place that knows why, and a break landing without that leaves
+        # an adopter an unresolvable import and nothing to read.
+        owed = undeclared_breaks(project) if spread is not None else []
+        if spread is not None:
+            yield CheckReport(
+                name="declared migrations",
+                passed=not owed,
+                lines=[
+                    f"declared migrations: FAIL ({len(owed)} gone with nothing "
+                    "to read)",
+                    *(f"  {capability.spelled()}" for capability in owed),
+                    "  declare each in `lup.devtools.dev.migrations.DECLARED`, "
+                    "with what a caller does about it",
+                ]
+                if owed
+                else ["declared migrations: ok"],
+            )
+
         # Beside parity because both ask whether the roster arrived whole, one
         # turn further out: parity reads a declaration against the trees, and
         # this reads the checkout against the modules that were meant to
@@ -1260,6 +1286,7 @@ def run_checks(
     node_classes: list[type[LedgerNode]] | None = None,
     ledger: LedgerLayout = LedgerLayout(),
     scaffold_source: ScaffoldSource | None = None,
+    spread: Spread | None = None,
 ) -> None:
     """Run ruff format, ruff check, pyright, pytest, and this gate's own sweeps.
 
@@ -1294,6 +1321,7 @@ def run_checks(
         ledger=ledger,
         command_surface=command_surface,
         scaffold_source=scaffold_source,
+        spread=spread,
     )
 
     if fix:

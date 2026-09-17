@@ -24,6 +24,7 @@ import typer
 from pydantic import BaseModel
 
 import lup.devtools.dev.library as library
+import lup.devtools.dev.migrations as migrations
 import lup.devtools.dev.scaffold as scaffold
 from lup.devtools.sync import ensure_local, find_project
 from lup.devtools.utils import short_sha, uv
@@ -117,6 +118,28 @@ def resolved_pin(
     return scaffold.pinned_commit(root, distribution)
 
 
+def owed_since(
+    merged: str, repository: Path, report: Callable[[str], None]
+) -> list[str]:
+    """What this update asks of the project beyond what the merge already did.
+
+    Read from the library that just landed, because that is where a migration
+    is declared: whatever it holds that the commit this project came from did
+    not is what somebody has to act on. Ancestry is asked of upstream's own
+    clone, the only checkout that has both commits.
+
+    A project with nothing merged yet is told nothing: every declaration would
+    be pending for it, which is true of a project that has taken none of them
+    and useless to read.
+    """
+    if not merged:
+        return []
+    pending = migrations.unapplied(migrations.DECLARED, merged, repository)
+    if not pending:
+        return []
+    return [f"{len(pending)} migration(s) pending:", *migrations.rendered(pending)]
+
+
 def regenerated(root: Path, report: Callable[[str], None]) -> None:
     """Regenerate every native tree, under the library the update just installed.
 
@@ -165,6 +188,8 @@ def updated(
     scaffold.advanced(root, repository, source, package, resolved)
     outcome = scaffold.merged(root, source)
     report(f"Copied half: {outcome.spelled()}.")
+    for line in owed_since(already, repository, report):
+        report(line)
     for path in outcome.conflicted:
         report(f"  conflicted  {path}")
     if not outcome.complete():

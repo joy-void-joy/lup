@@ -70,9 +70,9 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev tracker close` | Close an issue, here or on a declared tracker. |
 | `dev tracker reopen` | Reopen an issue, here or on a declared tracker. |
 | `dev tracker list` | Which repositories this project may reach, and what each is for. |
-| `dev preserve capture` | Record the surface this repository offers, as a checked-in fixture. |
-| `dev preserve check` | Resolve every captured capability against the tree as it stands. |
-| `dev preserve migration` | Print the relocation that repoints an importer of the captured tree. |
+| `dev migrate map` | Print the relocation that repoints an importer across a range. |
+| `dev migrate pending` | What a project standing at that commit still owes, beyond the map. |
+| `dev migrate check` | Refuse a capability that went with no migration speaking for it. |
 | `dev library status` | Report where the lup library is resolved from. |
 | `dev library release` | Ask the package index whether a release exists, and which mode that settles. |
 | `dev library use` | Resolve lup from the package index, or from the vendored copy. |

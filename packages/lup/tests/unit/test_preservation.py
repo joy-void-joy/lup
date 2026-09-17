@@ -16,7 +16,6 @@ from lup.devtools.dev import preservation
 from lup.devtools.dev.boundaries import TrackedSource
 from lup.devtools.dev.preservation import (
     Capability,
-    CapabilityKind,
     SurfaceCapture,
     ModuleSurface,
     compare,
@@ -26,15 +25,8 @@ from lup.devtools.project import DevProject
 from lup.execution.shell import git
 
 
-def capture(
-    *modules: ModuleSurface, commands: list[str] | None = None
-) -> SurfaceCapture:
-    return SurfaceCapture(
-        revision="0" * 40,
-        roots=["lup"],
-        commands=commands or [],
-        modules=list(modules),
-    )
+def capture(*modules: ModuleSurface) -> SurfaceCapture:
+    return SurfaceCapture(revision="0" * 40, roots=["lup"], modules=list(modules))
 
 
 def source(text: str, path: str) -> TrackedSource:
@@ -98,14 +90,20 @@ def test_the_migration_map_is_the_module_pairs_the_moves_imply() -> None:
     }
 
 
-def test_a_renamed_command_is_a_disappearance_at_the_path_a_reader_types() -> None:
-    """A caller depends on the words, so changing them is not a move."""
+def test_a_renamed_command_is_a_disappearance_at_the_function_declaring_it() -> None:
+    """A command is walked through its own declaration rather than separately.
+
+    Nothing imports a command by the words a reader types, and a revision's
+    command list could only be read by importing it — so what stands for one
+    here is the function the decorator wraps, which a rename takes with it.
+    """
     divergence = compare(
-        capture(commands=["dev check"]), capture(commands=["dev verify"])
+        capture(ModuleSurface(module="lup.devtools.dev.app", declares=["check_cmd"])),
+        capture(ModuleSurface(module="lup.devtools.dev.app", declares=["verify_cmd"])),
     )
 
-    assert [row.identity for row in divergence.disappeared] == ["dev check"]
-    assert [row.identity for row in divergence.arrived] == ["dev verify"]
+    assert [row.identity for row in divergence.disappeared] == ["check_cmd"]
+    assert [row.identity for row in divergence.arrived] == ["verify_cmd"]
 
 
 def test_arrival_is_reported_without_failing_the_run() -> None:
@@ -198,24 +196,41 @@ def test_a_module_mid_merge_is_one_surface_however_many_stages_it_holds(
     monkeypatch.chdir(work)
     assert len(git.lines("ls-files", "--unmerged")) == 3
 
-    walked = preservation.capture([], DevProject(package="pkg"))
+    walked = preservation.surface_now(DevProject(package="pkg"))
 
     assert [one.module for one in walked.modules] == ["pkg.mod"]
     assert walked.modules[0].declares == ["VALUE"]
 
 
-def test_every_captured_entry_carries_the_kind_that_resolves_it() -> None:
+def test_every_entry_carries_the_module_that_resolves_it() -> None:
     """The flattening both halves of the comparison run over."""
     entries = list(
-        capture(
-            ModuleSurface(module="lup.client", declares=["Client"]),
-            commands=["dev check"],
-        ).capabilities()
+        capture(ModuleSurface(module="lup.client", declares=["Client"])).capabilities()
     )
 
-    assert entries == [
-        Capability(kind=CapabilityKind.COMMAND, identity="dev check", location=""),
-        Capability(
-            kind=CapabilityKind.EXPORT, identity="Client", location="lup.client"
-        ),
-    ]
+    assert entries == [Capability(identity="Client", location="lup.client")]
+
+
+def test_a_name_only_its_own_function_can_reach_is_not_a_surface() -> None:
+    """A command wired onto an app inside a factory is that factory's own.
+
+    No importer can name it however it is spelled, so its going is not a
+    break anybody downstream could have met — and counting it would ask for a
+    migration to be declared for a rename nobody outside the file can see.
+    """
+    walked = list(
+        surfaces(
+            [
+                source(
+                    "def create_app():\n"
+                    "    @app.command('check')\n"
+                    "    def check_cmd() -> None: ...\n"
+                    "    return app\n",
+                    "src/lup/app.py",
+                )
+            ],
+            {"lup"},
+        )
+    )
+
+    assert walked[0].declares == ["create_app"]

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "ffe8dcf914231e572145ad136c786ae8c671d5cee9ed01398cc3d29401c0b400",
+  "source_digest": "34851b95b9d4fed70644d279a760b7dd1d645a9a9e8fe8b4c72fdce84bf3aa9d",
   "target_requirements": [
     "claude-code"
   ],
@@ -93,7 +93,7 @@
     {
       "path": ".claude/plugins/lup/commands/bump.md",
       "category": "generated",
-      "sha256": "4598a661b182cfe31d7bf88075008b88ac4ead2e4cdedad0ed05cd2d9ecf9f85",
+      "sha256": "75121d21cce454581226afc6b78dae143a08feccf1a79ff8ba81aa0e8e081568",
       "semantic_id": "skill.bump",
       "executable": false
     },
@@ -247,7 +247,7 @@
     {
       "path": ".claude/plugins/lup/commands/modify-command.md",
       "category": "generated",
-      "sha256": "76b72c4429250b712157e660bd85809cc3c00494e03658cc3d18b70d9e908023",
+      "sha256": "6b2a7a064681cf40b9296edf3ed49752b9cf305e5ff490ac892a8eea4a222863",
       "semantic_id": "skill.modify-command",
       "executable": false
     },
