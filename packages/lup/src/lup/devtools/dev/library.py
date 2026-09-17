@@ -38,7 +38,7 @@ Examples::
 import tomllib
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, get_args
 
 import httpx
 import tomlkit
@@ -50,12 +50,13 @@ from packaging.requirements import Requirement
 
 from lup.workspace.paths import project_root
 from lup.execution.shell import git
+from lup.providers.routing import Provider
 
 # The three below spell where the vendored copy sits, which is a fact about
 # lup's own layout and this repository's, not a choice either end makes.
 VENDORED_ROOT = "packages/lup"  # lup: ignore[constant-declaration] — fixed layout
 VENDORED_SRC = "packages/lup/src"  # lup: ignore[constant-declaration] — fixed layout
-# lup: ignore[constant-declaration] — fixed layout
+# lup: ignore[library-default] — fixed layout
 VENDORED_SIBLINGS = {"src": VENDORED_SRC, "tests": f"{VENDORED_ROOT}/tests"}
 """Each plain search root and the vendored one that shadows it. A search path
 naming the plain root wants its vendored twin exactly while the package is
@@ -84,9 +85,13 @@ class ExecutionEnvironment(TypedDict):
 # Type-checking a vendored adapter's dispatcher asset needs the generated
 # runtime beside it on the search path. Both halves live under the package, so
 # the pair exists exactly when the library is vendored.
-# lup: ignore[constant-declaration] — the adapter packages lup actually ships,
-# so the value follows lup.providers rather than any taste
-RUNTIMES = ("claude", "codex")
+RUNTIMES: tuple[Provider, ...] = get_args(Provider.__value__)
+"""Which adapters have a tree under the package, read off the type naming them.
+
+Derived rather than listed: a search path exists for an adapter because lup
+ships one, so the answer is :data:`~lup.providers.routing.Provider`'s and a
+second spelling here is a list that would go on naming two after a third
+arrived."""
 VENDORED_EXECUTION_ENVIRONMENTS = [
     ExecutionEnvironment(
         root=f"{VENDORED_SRC}/lup/providers/{runtime}/assets",

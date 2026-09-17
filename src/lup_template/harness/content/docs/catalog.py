@@ -21,7 +21,7 @@ from lup.harness.content.docs.catalog import published
 from lup.harness.modules import DocumentContext, composed_documents
 from lup.providers.claude.harness import CLAUDE_DISPATCHER
 from lup.providers.codex.harness import CODEX_DISPATCHER
-from lup_template.devtools.dev.library import LibraryMode, read_mode
+from lup.devtools.dev.library import LibraryMode, read_mode
 from lup_template.harness.content.catalog import (
     AGENTS,
     LAYOUT,

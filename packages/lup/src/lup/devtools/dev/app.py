@@ -21,6 +21,7 @@ import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
 import lup.devtools.dev.guidance as guidance
 import lup.devtools.dev.issues as issues_mod
+import lup.devtools.dev.library as library_mod
 import lup.devtools.dev.history as history
 import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
@@ -52,6 +53,25 @@ from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.policy.vocabulary import default_vocabulary
 from lup.workspace.paths import is_template_scaffold, project_root
 
+DryRun = Annotated[
+    bool,
+    typer.Option("--dry-run", "-n", help="Show what would change without writing"),
+]
+KeepVendored = Annotated[
+    bool,
+    typer.Option("--keep-vendored", help=f"Leave {library_mod.VENDORED_ROOT}/ on disk"),
+]
+Force = Annotated[
+    bool,
+    typer.Option("--force", help="Un-vendor even from an unrenamed template"),
+]
+"""The flags every mode change takes, spelled once beside the commands taking them.
+
+Module scope because a Typer annotation is a type expression and a name bound
+inside the factory is not one — the three commands would otherwise each restate
+the same three options.
+"""
+
 
 def create_dev_app(
     declared: Callable[[], DevDeclarations],
@@ -67,6 +87,7 @@ def create_dev_app(
     app = typer.Typer(no_args_is_help=True)
     plugin_app = typer.Typer(no_args_is_help=True)
     preserve_app = typer.Typer(no_args_is_help=True)
+    library_app = typer.Typer(no_args_is_help=True)
     env_app = typer.Typer(no_args_is_help=True)
     tracker_app = typer.Typer(no_args_is_help=True)
     app.add_typer(
@@ -85,6 +106,7 @@ def create_dev_app(
         name="preserve",
         help="The capability capture a reorganisation is measured against",
     )
+    app.add_typer(library_app, name="library", help="How this project obtains lup")
     app.add_typer(
         model_config_mod.create_model_config_app(),
         name="model-config",
@@ -977,6 +999,87 @@ def create_dev_app(
             typer.echo(f"{edit.path}: {edit.imports} import(s)")
         for mention in relocate_mod.surviving_mentions(roots, declared):
             typer.echo(f"still mentions a moved module: {mention}", err=True)
+
+    # -- library commands --
+
+    @library_app.command("status")
+    def library_status_cmd() -> None:
+        """Report where the lup library is resolved from."""
+        library_mod.library_status()
+
+    @library_app.command("release")
+    def library_release_cmd() -> None:
+        """Ask the package index whether a release exists, and which mode that settles."""
+        library_mod.library_release()
+
+    @library_app.command("use")
+    def library_use_cmd(
+        mode: Annotated[
+            library_mod.LibraryMode,
+            typer.Argument(help="published, local, or linked"),
+        ],
+        version: Annotated[
+            str | None,
+            typer.Option(
+                "--version", help="Lower version bound for the published release"
+            ),
+        ] = None,
+        keep_vendored: KeepVendored = False,
+        force: Force = False,
+        dry_run: DryRun = False,
+    ) -> None:
+        """Resolve lup from the package index, or from the vendored copy."""
+        library_mod.use_library(mode, version, keep_vendored, force, dry_run)
+
+    @library_app.command("git")
+    def library_git_cmd(
+        url: Annotated[
+            str, typer.Option("--url", help="Repository serving the lup package")
+        ] = library_mod.REPOSITORY_URL,
+        branch: Annotated[
+            str | None, typer.Option("--branch", help="Branch to resolve lup at")
+        ] = None,
+        tag: Annotated[
+            str | None, typer.Option("--tag", help="Tag to resolve lup at")
+        ] = None,
+        rev: Annotated[
+            str | None, typer.Option("--rev", help="Commit to pin lup at")
+        ] = None,
+        keep_vendored: KeepVendored = False,
+        force: Force = False,
+        dry_run: DryRun = False,
+    ) -> None:
+        """Resolve lup from its repository, for use before a release is published."""
+        library_mod.git_library(
+            library_mod.git_source(url, branch=branch, tag=tag, rev=rev),
+            keep_vendored,
+            force,
+            dry_run,
+        )
+
+    @library_app.command("link")
+    def library_link_cmd(
+        checkout: Annotated[
+            Path, typer.Argument(help="Path to a lup checkout holding packages/lup")
+        ],
+        keep_vendored: KeepVendored = False,
+        force: Force = False,
+        dry_run: DryRun = False,
+    ) -> None:
+        """Develop against a lup checkout so library changes land in its repo."""
+        library_mod.link_library(checkout, keep_vendored, force, dry_run)
+
+    @library_app.command("unlink")
+    def library_unlink_cmd(
+        version: Annotated[
+            str | None, typer.Option("--version", help="Lower version bound to restore")
+        ] = None,
+        dry_run: DryRun = False,
+    ) -> None:
+        """Stop developing against a checkout and go back to the published release."""
+        library_mod.use_library(
+            library_mod.LibraryMode.PUBLISHED, version, True, True, dry_run
+        )
 
     # -- preservation capture --
 

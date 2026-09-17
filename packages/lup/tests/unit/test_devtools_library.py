@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 import typer
 
+import lup.devtools.dev.library as library
 from lup.types import JsonValue
-from lup_template.devtools.dev import library
 
 VENDORED_PYPROJECT = """\
 [project]
