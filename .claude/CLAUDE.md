@@ -48,7 +48,7 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** about the co
 
 ## Development Workflow
 
-Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools git worktree create feat-name`, then work in <the path it prints> by whichever of these you can reach: launch a session rooted there; or, already running, address its files by absolute path, where that tree is writable. `EnterWorktree` is refused, and takes a `tree/` path only as a session's first switch: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you must, and leave with `ExitWorktree(action="keep")` — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused words a late relocation meets, and the merge loop.
+Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools git worktree create feat-name` — which does not move this session, so an old-checkout edit misses the branch. Work in the path it prints: launch a session rooted there, or edit its files by absolute path where that tree is writable. `docs/contributing.md` carries the branch model, what a late relocation costs a running session, and the merge loop.
 
 ### Merge Conflict Resolution
 
@@ -97,9 +97,9 @@ A rule's diagnostic names the shape it refuses and not the carve-outs that are o
 
 ## Tooling
 
-`uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green. `lup` itself is the one dependency not added that way: `dev library` reads and rewrites the mode a project obtains it through, and that mode decides what upgrading means — ask `dev library status` before assuming lup's source is on disk to edit, since in three of four modes it is not.
+`uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green. `lup` itself is not added that way — `dev library status` says where it is resolved from, and whether its source is on disk to edit.
 
-A leading `# lup: escalate[sandbox]: <why>` line turns a command into an approval question to run it with the runtime's per-call sandbox off, dispatched once. That is all it lifts: the mounts a contained launch made hold for every process in the session, so a write to a path mounted read-only — a human-owned file such as README.md — fails approved exactly as it failed unmarked, and is the user's to run from a host terminal, handed the exact command. Try inside first, since a missing path usually means the host was not needed.
+A leading `# lup: escalate[sandbox]: <why>` line asks to run one command with the per-call sandbox off. That is all it lifts: a launch's mounts hold for every process in the session, so a write to a read-only path — a human-owned file such as README.md — fails approved exactly as it failed unmarked, and is the user's to run from a host terminal with the exact command. Try inside first.
 
 ### lup-devtools
 
@@ -126,6 +126,12 @@ Work outliving its tool call is launched to survive its launcher — never from 
 Configuration loads through pydantic-settings in `src/lup_template/agent/config.py`, the only module that reads the environment. `docs/template.md` lists the variables and how gitignored `.env.local` overrides `.env`.
 
 **A committed declaration is consumer-independent.** It holds what every machine and every downstream user of this repository shares, so no fact about *this* machine sits in one: a path, a device, a client, a login. Those go where the machine keeps them, `.env.local` for the application's settings, `sync.json.local` for what the launcher grants sessions here, a flag for one launch. A `# lup: template:` marker asks a downstream repository's authors a question about their domain, whose answer every user of that repository then shares; a question two machines running one commit would answer differently is not one.
+
+## What This Was Built From
+
+`dev update` moves all three carriers — the pin, the generated trees, the copied half — to one upstream commit, and reports the conflicts and migrations it leaves. Nothing else moves them: a hand-port diverges silently, where a merge makes the next update cheap.
+
+**A defect upstream is fixed upstream**, in a worktree at `refs/<project>` and under *that* repository's gate — this session's hooks enforce this project's policy, not the one those files answer to — with the branch pinned here until it lands. Working around it in the copied half is a decision taken for every project that meets the same defect, and the one nobody else can see.
 
 ---
 

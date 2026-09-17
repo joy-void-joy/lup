@@ -17,6 +17,7 @@ one and declines it goes on diverging from it silently, which is the failure
 this exists to make visible.
 """
 
+import lup_template.harness.content.guidance as guidance
 from lup.harness.content.docs import upstream_reports
 from lup.harness.content.docs.catalog import page
 from lup.harness.models import ContentRoster
@@ -32,6 +33,10 @@ def module() -> Module:
     return Module(
         spec=UPSTREAM,
         content=ContentRoster(skills=[SKILL_IMPORT, SKILL_UPDATE, SKILL_UPSTREAM]),
+        # The rule belongs to the module that owns the subject: a project with
+        # no upstream declines both, and reads no paragraph about keeping in
+        # step with something it does not have.
+        guidance=[guidance.KEEPING_IN_STEP],
         documents=[
             page(
                 "upstream_reports",
