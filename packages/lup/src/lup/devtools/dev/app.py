@@ -33,6 +33,7 @@ import lup.devtools.dev.questions as questions_mod
 import lup.devtools.dev.reach as reach
 import lup.devtools.dev.scaffold as scaffold_mod
 import lup.devtools.dev.update as update_mod
+import lup.devtools.dev.migrations as migrations
 import lup.devtools.dev.preservation as preservation
 import lup.devtools.dev.modules as modules
 import lup.devtools.dev.seams as seams
@@ -88,7 +89,7 @@ def create_dev_app(
     """Wire the dev command tree over what one repository declares about itself."""
     app = typer.Typer(no_args_is_help=True)
     plugin_app = typer.Typer(no_args_is_help=True)
-    preserve_app = typer.Typer(no_args_is_help=True)
+    migrate_app = typer.Typer(no_args_is_help=True)
     library_app = typer.Typer(no_args_is_help=True)
     scaffold_app = typer.Typer(no_args_is_help=True)
     env_app = typer.Typer(no_args_is_help=True)
@@ -105,9 +106,9 @@ def create_dev_app(
         help="Answer an issue here or on a declared tracker (comment, close, reopen)",
     )
     app.add_typer(
-        preserve_app,
-        name="preserve",
-        help="The capability capture a reorganisation is measured against",
+        migrate_app,
+        name="migrate",
+        help="What a range of this repository asks of a project built on it",
     )
     app.add_typer(library_app, name="library", help="How this project obtains lup")
     app.add_typer(
@@ -433,6 +434,7 @@ def create_dev_app(
             node_classes=node_classes or [],
             ledger=ledger,
             scaffold_source=declarations.scaffold,
+            spread=declarations.spread,
         )
 
     # -- test command --
@@ -1174,85 +1176,104 @@ def create_dev_app(
             typer.echo,
         )
 
-    # -- preservation capture --
+    # -- what a range asks of a project built on this one --
 
-    def walked(ctx: typer.Context) -> preservation.SurfaceCapture:
-        """The surface the tree offers right now, as this CLI can see it."""
-        return preservation.capture(preservation.operations(ctx), declared().project)
+    def surfaces_over(spelled: str) -> preservation.Divergence:
+        """The two surfaces a ``base..head`` argument names, compared.
 
-    def against(ctx: typer.Context, capture: Path) -> preservation.Divergence:
-        """What the live tree does and does not still answer for a capture."""
+        A head is optional and its absence means the working tree, which is
+        what a gate asks about: uncommitted work is exactly where a capability
+        goes missing before anybody notices.
+        """
+        # git's own range grammar, taken as given rather than invented here.
+        base, separator, head = spelled.partition("..")  # lup: ignore[string-split]
+        if not separator or not base:
+            raise typer.BadParameter(
+                f"expected <base>..<head>, or <base>.. for the working tree; "
+                f"got {spelled!r}"
+            )
+        project = declared().project
         return preservation.compare(
-            preservation.SurfaceCapture.read(capture), walked(ctx)
+            preservation.surface_at(base, project),
+            preservation.surface_at(head, project)
+            if head
+            else preservation.surface_now(project),
         )
 
-    @preserve_app.command("capture")
-    def preserve_capture_cmd(
-        ctx: typer.Context,
-        capture: Annotated[
-            Path, typer.Option("--capture", help="The capture to read or write")
-        ] = preservation.CAPTURE_FILE,
+    @migrate_app.command("map")
+    def migrate_map_cmd(
+        over: Annotated[
+            str, typer.Argument(help="The range to derive over, as <base>..<head>")
+        ],
     ) -> None:
-        """Record the surface this repository offers, as a checked-in fixture.
+        """Print the relocation that repoints an importer across a range.
 
-        Run before a reorganisation, and again after one whose removals were
-        deliberate: what leaves the fixture leaves it in a diff somebody
-        reads, which is the only place a dropped capability is ever noticed.
+        Derived from two surfaces rather than read from a record: every name
+        that survived somewhere else votes for the module pair it moved
+        between, so the map costs nothing to keep and cannot go stale.
         """
-        captured = walked(ctx)
-        captured.write(capture)
-        exports = sum(len(surface.declares) for surface in captured.modules)
-        typer.echo(
-            f"{capture}: {len(captured.commands)} operation(s), {exports} export(s) "
-            f"across {len(captured.modules)} module(s), at {captured.revision}"
-        )
-
-    @preserve_app.command("check")
-    def preserve_check_cmd(
-        ctx: typer.Context,
-        capture: Annotated[
-            Path, typer.Option("--capture", help="The capture to read or write")
-        ] = preservation.CAPTURE_FILE,
-        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
-    ) -> None:
-        """Resolve every captured capability against the tree as it stands.
-
-        A capability the tree no longer declares anywhere fails the run. One
-        declared somewhere else is reported and does not: a move is what a
-        reorganisation is, and telling the two apart is the whole point.
-        """
-        divergence = against(ctx, capture)
-        if as_json:
-            output_json(divergence)
-        else:
-            for capability in divergence.disappeared:
-                typer.echo(f"disappeared: {capability.spelled()}", err=True)
-            for relocation in divergence.relocated:
-                typer.echo(f"relocated:   {relocation.spelled()}")
-            for capability in divergence.arrived:
-                typer.echo(f"arrived:     {capability.spelled()}")
-        if not divergence.intact():
-            raise typer.Exit(1)
-
-    @preserve_app.command("migration")
-    def preserve_migration_cmd(
-        ctx: typer.Context,
-        capture: Annotated[
-            Path, typer.Option("--capture", help="The capture to read or write")
-        ] = preservation.CAPTURE_FILE,
-    ) -> None:
-        """Print the relocation that repoints an importer of the captured tree.
-
-        The command an adopter runs to follow this repository's move, derived
-        from the same difference that proved nothing was lost. Add `--root` to
-        aim it at the checkout being migrated.
-        """
-        moves = against(ctx, capture).module_moves()
+        moves = surfaces_over(over).module_moves()
         if not moves:
-            typer.echo("no module moved since the capture")
+            typer.echo(f"no module moved over {over}")
             return
         pairs = " ".join(f"{old}={new}" for old, new in sorted(moves.items()))
         typer.echo(f"uv run lup-devtools dev relocate {pairs}")
+
+    @migrate_app.command("pending")
+    def migrate_pending_cmd(
+        revision: Annotated[
+            str,
+            typer.Argument(help="Where the project stands, as a commit of this one"),
+        ],
+    ) -> None:
+        """What a project standing at that commit still owes, beyond the map.
+
+        The declared residue: a signature that gained parameters, a refusal
+        that split. A project already past the commit that made the break has
+        applied it, and is told nothing.
+        """
+        owed = migrations.unapplied(migrations.DECLARED, revision)
+        if not owed:
+            typer.echo(f"nothing declared since {revision}")
+            return
+        typer.echo(f"{len(owed)} migration(s) since {revision}:")
+        for line in migrations.rendered(owed):
+            typer.echo(f"  {line}")
+
+    @migrate_app.command("check")
+    def migrate_check_cmd(
+        over: Annotated[
+            str,
+            typer.Option("--over", help="The range to judge, as <base>..<head>"),
+        ] = "",
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """Refuse a capability that went with no migration speaking for it.
+
+        A name declared nowhere any more is a break an adopter meets as an
+        import that stopped resolving. One that moved is not, because the map
+        is derived — so what fails here is the difference: something gone, and
+        nothing in this repository saying what to do about it.
+        """
+        from lup.devtools.dev.branches import detect_base_branch
+
+        # The branch's own base rather than a branch named here: what this
+        # change took away is measured against where it started, and creation
+        # recorded that where topology can no longer recover it.
+        divergence = surfaces_over(over or f"{detect_base_branch().merge_base}..")
+        unnamed = migrations.unnamed(divergence.disappeared, migrations.DECLARED)
+        if as_json:
+            output_json(divergence)
+        else:
+            for capability in unnamed:
+                typer.echo(f"gone, undeclared: {capability.spelled()}", err=True)
+            typer.echo(
+                f"{len(divergence.relocated)} moved, {len(divergence.arrived)} "
+                f"arrived, {len(divergence.disappeared)} gone "
+                f"({len(unnamed)} with no migration)"
+            )
+        if unnamed:
+            raise typer.Exit(1)
 
     @app.command("policy")
     def policy_cmd(

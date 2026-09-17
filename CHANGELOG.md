@@ -6,13 +6,12 @@ Breaking reorganisation of the library's top level. Thirty-four entries became
 twenty by asking of each one which of four kinds it is: a foundation that
 imports nothing else here, a subject, the one vendor boundary, or tooling.
 Every import path an adopter holds is affected, and the migration is derived
-rather than written. The surface as it stood before the move is checked in, so
-one command reads it against whatever tree is in front of it and prints the
-exact `dev relocate` invocation — 106 module pairs — that repoints a checkout:
+rather than written. Both ends of the range are read out of git, so one command
+prints the exact `dev relocate` invocation that repoints a checkout from
+whichever commit it stands at:
 
 ```sh
-uv run lup-devtools dev preserve migration \
-    --capture preservation-capture-before-hierarchy.json
+uv run lup-devtools dev migrate map c564bc01a..
 ```
 
 Derived rather than pasted here for the reason the reorganisation itself gives:
