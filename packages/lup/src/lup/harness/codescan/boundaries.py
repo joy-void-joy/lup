@@ -24,6 +24,7 @@ offending line or as a file-level directive, with a reason.
 import ast
 from collections import deque
 from collections.abc import Collection, Iterator, Sequence
+from enum import StrEnum
 from pathlib import Path
 from typing import get_args
 
@@ -49,18 +50,27 @@ from lup.policy.kernel.decision import KERNEL_IMPORT_ALLOWLIST
 from lup.policy.imports import ImportBoundary
 from lup.policy.kernel.imports import import_violations as native_import_violations
 
-# lup: ignore[constant-declaration] — a rule id is the rule's own identity: it is
-# what a typed directive, a deny message, and the reference all name it by, so a
-# caller passing a different one would be silencing a rule nobody can spell
-RULE_ID = "seam-boundary"
-# lup: ignore[constant-declaration] — rule identity
-NATIVE_SPELLING_RULE_ID = "native-spelling"
-# lup: ignore[constant-declaration] — rule identity
-KERNEL_IMPORT_RULE_ID = "kernel-imports"
-# lup: ignore[constant-declaration] — rule identity
-LIBRARY_DEFAULT_RULE_ID = "library-default"
-# lup: ignore[constant-declaration] — rule identity
-CONSTANT_DECLARATION_RULE_ID = "constant-declaration"
+
+class RuleId(StrEnum):
+    """Every rule the audits in this module report under, by its own name.
+
+    A rule id is the rule's identity rather than a judgement a caller could
+    make differently: it is what a typed directive, a deny message and the
+    generated reference all name it by, and a caller passing a different one
+    would be silencing a rule nobody can spell. Elsewhere in this package that
+    is one ``RULE_ID`` beside the one audit that reports it; here several
+    audits share a module, and a constant apiece said the same thing as many
+    times in as many suppression comments. The type says it once.
+    """
+
+    SEAM = "seam-boundary"
+    NATIVE_SPELLING = "native-spelling"
+    KERNEL_IMPORTS = "kernel-imports"
+    LIBRARY_DEFAULT = "library-default"
+    CONSTANT_DECLARATION = "constant-declaration"
+    ASSEMBLY = "assembly-boundary"
+
+
 # lup: ignore[constant-declaration] — where this library's own sources sit in the
 # repository that publishes it, which is a fact about the distribution
 LIBRARY_ROOT = "packages/lup/src/lup/"
@@ -75,6 +85,30 @@ IMPORT_BOUNDARY_MESSAGE = (
     "Concrete adapter imports belong in providers or declared composition roots; "
     "provider SDK imports belong in adapter implementations. Use Lup contracts "
     "in shared code; canonical tool grants and provider mentions remain valid."
+)
+# lup: ignore[library-default] — the library's own modules, whose whole subject is
+# one tool group, so the list follows what `lup.tools.toolsets` assembles
+ASSEMBLED_TOOL_MODULES = ("lup.coordination.peer_tools", "lup.ledger.tools")
+"""The tool-group constructors a declared group is built out of.
+
+Both are a group and nothing else: the roster's verbs with the pulse that
+beats beside them, and the ledger's verbs bound to a project's own kinds. A
+module with a second surface stays off this list — `lup.tools.lsp.tools` also
+renders the tool reference a document reads — because ownership here is by
+module and a boundary that refused a doc's import would be refusing the wrong
+thing.
+"""
+
+ASSEMBLY_ROOT = f"{LIBRARY_ROOT}tools/toolsets.py"
+"""Where a session's groups are assembled, and so the one caller of those."""
+
+# lup: ignore[constant-declaration] — the diagnostic for the assembly-boundary rule
+ASSEMBLY_BOUNDARY_MESSAGE = (
+    "A tool group's constructor is the assembly's to call: name the group in "
+    "this project's toolset declaration instead of building it. Calling it "
+    "directly is how a project comes to hold a copy of the wiring — a "
+    "companion that was never started, a signature that gained parameters — "
+    "which the next dependency bump lands the other half of."
 )
 # lup: ignore[library-default] — each key is literally what the provider calls the thing
 NATIVE_SPELLINGS = {
@@ -190,7 +224,7 @@ def native_import_boundaries(
             modules=list(NATIVE_PREFIXES),
             owners=[providers, *LIBRARY_COMPOSITION, *application.composition],
             source_roots=sources,
-            rule_id=RULE_ID,
+            rule_id=RuleId.SEAM,
             message=IMPORT_BOUNDARY_MESSAGE,
         ),
         ImportBoundary(
@@ -201,8 +235,15 @@ def native_import_boundaries(
                 *application.native_dependencies,
             ],
             source_roots=sources,
-            rule_id=RULE_ID,
+            rule_id=RuleId.SEAM,
             message=IMPORT_BOUNDARY_MESSAGE,
+        ),
+        ImportBoundary(
+            modules=list(ASSEMBLED_TOOL_MODULES),
+            owners=[ASSEMBLY_ROOT],
+            source_roots=sources,
+            rule_id=RuleId.ASSEMBLY,
+            message=ASSEMBLY_BOUNDARY_MESSAGE,
         ),
     ]
 
@@ -339,9 +380,9 @@ class ConstantDeclaration(BaseModel):
         """
         vocabulary = self.entries is not None and self.entries >= 2
         return (
-            LIBRARY_DEFAULT_RULE_ID
+            RuleId.LIBRARY_DEFAULT
             if library_module and vocabulary
-            else CONSTANT_DECLARATION_RULE_ID
+            else RuleId.CONSTANT_DECLARATION
         )
 
     def judgement(self, carved: bool) -> str:
@@ -357,7 +398,7 @@ class ConstantDeclaration(BaseModel):
             f"constant {self.name} is a judgement a second implementer with the "
             "same intent could have made differently, frozen where no caller can "
             "replace it — take it as an overridable default, or suppress it with "
-            f"# lup: ignore[{CONSTANT_DECLARATION_RULE_ID}] and the reason it is "
+            f"# lup: ignore[{RuleId.CONSTANT_DECLARATION}] and the reason it is "
             "canonical: a provider's wire spelling, a language's own vocabulary, "
             "an identity this repository defines"
         )
@@ -744,7 +785,7 @@ def library_default_violations(
         )
         for constant in constant_declarations(text)
         if constant.name not in overridable
-        and constant.judging_rule(library_module=True) == LIBRARY_DEFAULT_RULE_ID
+        and constant.judging_rule(library_module=True) == RuleId.LIBRARY_DEFAULT
     ]
 
 
@@ -768,7 +809,7 @@ def constant_declaration_violations(
         )
         for constant in constant_declarations(text)
         if constant.name not in overridable
-        and constant.judging_rule(library_module) == CONSTANT_DECLARATION_RULE_ID
+        and constant.judging_rule(library_module) == RuleId.CONSTANT_DECLARATION
     ]
 
 
@@ -805,7 +846,7 @@ def audit_constant_declarations(
             source.path, source.text, overridable, carved, application
         )
     ]
-    return audit_suppressions(authored, violations, CONSTANT_DECLARATION_RULE_ID)
+    return audit_suppressions(authored, violations, RuleId.CONSTANT_DECLARATION)
 
 
 def audit_rule(
@@ -901,10 +942,10 @@ def audit_rule(
 def audit_boundaries(text: str) -> list[BoundaryAuditFinding]:
     """Audit native imports, native spellings, and both rule suppressions."""
     return [
-        *audit_rule(text, RULE_ID, import_violations(text)),
+        *audit_rule(text, RuleId.SEAM, import_violations(text)),
         *audit_rule(
             text,
-            NATIVE_SPELLING_RULE_ID,
+            RuleId.NATIVE_SPELLING,
             native_spelling_violations(text),
         ),
     ]
@@ -938,7 +979,7 @@ def audit_path_boundaries(
         findings.extend(
             audit_rule(
                 text,
-                NATIVE_SPELLING_RULE_ID,
+                RuleId.NATIVE_SPELLING,
                 native_spelling_violations(text),
             )
         )
@@ -947,7 +988,7 @@ def audit_path_boundaries(
 
 def audit_kernel_imports(text: str) -> list[BoundaryAuditFinding]:
     """Audit the canonical kernel against its pinned dependency allowlist."""
-    return audit_rule(text, KERNEL_IMPORT_RULE_ID, kernel_import_violations(text))
+    return audit_rule(text, RuleId.KERNEL_IMPORTS, kernel_import_violations(text))
 
 
 def audit_library_defaults(
@@ -957,7 +998,7 @@ def audit_library_defaults(
     """Audit one library module's tables against the names callers can replace."""
     return audit_rule(
         text,
-        LIBRARY_DEFAULT_RULE_ID,
+        RuleId.LIBRARY_DEFAULT,
         library_default_violations(text, overridable),
     )
 
@@ -966,7 +1007,7 @@ def find_boundary_breaches(text: str) -> list[BoundaryBreach]:
     """Find native adapter imports through Python syntax, honoring suppressions."""
     return [
         BoundaryBreach(line=item.line, module=item.module, text=item.text)
-        for item in audit_rule(text, RULE_ID, import_violations(text))
+        for item in audit_rule(text, RuleId.SEAM, import_violations(text))
         if item.kind == "missing"
     ]
 
@@ -977,7 +1018,7 @@ def find_native_spelling_breaches(text: str) -> list[BoundaryBreach]:
         BoundaryBreach(line=item.line, module=item.module, text=item.text)
         for item in audit_rule(
             text,
-            NATIVE_SPELLING_RULE_ID,
+            RuleId.NATIVE_SPELLING,
             native_spelling_violations(text),
         )
         if item.kind == "missing"
