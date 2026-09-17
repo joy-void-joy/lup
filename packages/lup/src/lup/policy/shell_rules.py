@@ -328,6 +328,8 @@ class ShellOperationRule(BaseModel, frozen=True):
     """One operation word under a subcommand — e.g. ``worktree remove``."""
 
     name: str
+    parents: list[str] = []
+    operator_only: bool = False
     effects: list[EffectRow] = []
     refuses: str = ""
     ask_flags: list[str] = []
@@ -668,10 +670,16 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
         axes = above.inherit(subcommand.declared(), "subcommand")
         operations = [
             ShellRuleRow(
-                rule=rule_id(command_name, subcommand.name, operation.name),
+                rule=rule_id(
+                    command_name,
+                    subcommand.name,
+                    ".".join([*operation.parents, operation.name]),
+                ),
                 command=command_name,
                 subcommand=subcommand.name,
                 operation=operation.name,
+                operation_path=[*operation.parents, operation.name],
+                operator_only=operation.operator_only,
                 ask_destinations=[],
                 ask_refspecs=[],
                 ask_flags=list(operation.ask_flags),
@@ -698,6 +706,8 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command_name,
             subcommand=subcommand.name,
             operation="",
+            operation_path=[],
+            operator_only=False,
             ask_destinations=list(subcommand.ask_destinations),
             ask_refspecs=list(subcommand.ask_refspecs),
             ask_flags=list(subcommand.ask_flags),
@@ -726,6 +736,8 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command.name,
             subcommand="",
             operation="",
+            operation_path=[],
+            operator_only=False,
             ask_destinations=[],
             ask_refspecs=[],
             ask_flags=list(command.ask_flags),

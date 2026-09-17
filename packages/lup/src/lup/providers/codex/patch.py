@@ -31,6 +31,7 @@ class PatchedFile:
     before: str | None
     after: str | None
     path_exists: bool
+    overwrite: bool
 
     def __init__(
         self,
@@ -39,11 +40,13 @@ class PatchedFile:
         after: str | None,
         *,
         path_exists: bool,
+        overwrite: bool = False,
     ) -> None:
         self.path = path
         self.before = before
         self.after = after
         self.path_exists = path_exists
+        self.overwrite = overwrite
 
     def operation(self) -> str:
         """Which class of change this is, for the gates that judge by it.
@@ -59,6 +62,8 @@ class PatchedFile:
             return "delete"
         if not self.path_exists:
             return "create"
+        if self.overwrite:
+            return "overwrite"
         return "modify"
 
 
@@ -187,10 +192,19 @@ class PatchParser:
                 return change.after
         return self.read_document(path)
 
-    def record(self, path: str, before: str | None, after: str | None) -> None:
+    def record(
+        self,
+        path: str,
+        before: str | None,
+        after: str | None,
+        *,
+        overwrite: bool = False,
+    ) -> None:
         """Append one policy-ready file transition."""
         self.files.append(
-            PatchedFile(path, before, after, path_exists=before is not None)
+            PatchedFile(
+                path, before, after, path_exists=before is not None, overwrite=overwrite
+            )
         )
 
     def parse_add(self) -> None:
@@ -207,7 +221,12 @@ class PatchParser:
         if not body:
             raise ValueError(f"Add File section for {path!r} has no added lines")
         before = self.current_document(path)
-        self.record(path, before, "".join(f"{line}\n" for line in body))
+        self.record(
+            path,
+            before,
+            "".join(f"{line}\n" for line in body),
+            overwrite=before is not None,
+        )
 
     def parse_delete(self) -> None:
         """Parse a Delete File section and require its preimage to exist."""

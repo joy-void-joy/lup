@@ -26,6 +26,7 @@ from datetime import UTC, datetime, timedelta
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 
@@ -287,6 +288,100 @@ def script_run_nudge(
         " `lup-devtools` command, which lands in the diff and can be run"
         " again by name"
     )
+
+
+def review_hook_call(
+    root: Path,
+    session: str,
+    tool: str,
+    arguments: str,
+    preconditions: str,
+    reason: str,
+    rule: str,
+    purpose: str,
+    reviewer: str,
+) -> dict[Literal["state", "id", "reason"], str]:
+    """Park a native call or spend its explicit, single-use reviewer answer."""
+    if not session:
+        return {
+            "state": "unavailable",
+            "id": "",
+            "reason": "the hook carries no session_id",
+        }
+    payload = json.loads(arguments)
+    before = json.loads(preconditions)
+    material = json.dumps(
+        [session, str(root), tool, payload, before, reason, rule, purpose, reviewer],
+        sort_keys=True,
+    )
+    fingerprint = sha256(material.encode()).hexdigest()
+    log = root / ".lup/questions.jsonl"
+
+    def recorded():
+        if not log.exists():
+            return
+        for line in log.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            yield json.loads(line)
+
+    entries = {entry["id"]: entry for entry in recorded()}
+    matches = [
+        entry
+        for entry in entries.values()
+        if entry["fingerprint"] == fingerprint
+        and "resumption" in entry
+        and entry["resumption"] == "native_retry"
+    ]
+    entry = matches[-1] if matches else None
+    if entry is not None and entry["state"] == "approved":
+        answer = entry["answer"]
+        if not answer or not answer["approved"] or answer["principal"] == session:
+            raise ValueError("hook approval has no independent affirmative answer")
+        if answer["receipt"] != "recorded":
+            raise ValueError("a native permission request is not a recorded approval")
+        claim = root / ".lup/review-claims" / entry["id"]
+        claim.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with claim.open("x", encoding="utf-8") as handle:
+                handle.write(fingerprint)
+        except FileExistsError:
+            entry = None
+        else:
+            entry["state"] = "dispatched"
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+            return {"state": "approved", "id": entry["id"], "reason": ""}
+    if entry is not None and entry["state"] in ("pending", "rejected"):
+        return {"state": entry["state"], "id": entry["id"], "reason": entry["reason"]}
+    identifier = os.urandom(16).hex()
+    entry = {
+        "id": identifier,
+        "fingerprint": fingerprint,
+        "reason": reason,
+        "rule": rule,
+        "purpose": purpose or None,
+        "requirement": reviewer,
+        "eligible": [],
+        "chain_resolved": False,
+        "state": "pending",
+        "created": datetime.now(UTC).isoformat(),
+        "preconditions": before,
+        "resumption": "native_retry",
+        "operation": {
+            "id": identifier,
+            "session": session,
+            "requester": session,
+            "tool": tool,
+            "payload": payload,
+            "cwd": str(root),
+            "worktree": str(root),
+        },
+    }
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    return {"state": "pending", "id": identifier, "reason": reason}
 
 
 def record_question(

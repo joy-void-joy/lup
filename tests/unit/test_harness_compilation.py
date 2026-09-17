@@ -2052,7 +2052,7 @@ def test_generated_codex_permission_request_preserves_assignment_guards(
     assert result.stdout == b""
 
 
-def test_generated_codex_pretool_consumes_only_its_correlated_approval(
+def test_generated_codex_pretool_never_treats_pending_requests_as_approval(
     tmp_path: Path,
 ) -> None:
     command = "gh pr merge 180"
@@ -2087,8 +2087,8 @@ def test_generated_codex_pretool_consumes_only_its_correlated_approval(
         "tool_input": {"command": command.replace("180", "181")},
     }
     assert codex_hook_result(mismatched, True, tmp_path).exit_code == 2
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 0
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 0
+    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
+    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
     assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
 
 

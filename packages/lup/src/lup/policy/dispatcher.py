@@ -82,6 +82,7 @@ DISPATCHER_STDLIB = (
     "hashlib",
     "csv",
     "urllib.parse",
+    "typing",
 )
 """The standard library a compiled dispatcher may reach.
 

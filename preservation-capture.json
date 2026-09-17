@@ -1,5 +1,5 @@
 {
-  "revision": "aaab7f5ecda64c9a1f3c6f50712e4a296c8ea437",
+  "revision": "d458b0de7bb71e66693033365b0bd3997ba36c26",
   "roots": [
     "lup",
     "lup_template"
@@ -3158,6 +3158,12 @@
         "archive",
         "keep_before_deleting",
         "report"
+      ]
+    },
+    {
+      "module": "lup.devtools.dev.tracked",
+      "declares": [
+        "tracked_files"
       ]
     },
     {
@@ -8879,6 +8885,7 @@
       "module": "lup.policy.assets.decisions",
       "declares": [
         "bash_decision",
+        "session_contained",
         "unconfined_by_declaration",
         "fetch_decision",
         "refused_tool_decision",
@@ -8912,6 +8919,8 @@
         "fetch_origin",
         "record_hook_evidence",
         "script_run_nudge",
+        "review_hook_call",
+        "review_hook_call.recorded",
         "record_question",
         "record_deferral",
         "managed_script_roots",
@@ -9296,6 +9305,7 @@
         "SandboxPosture",
         "SandboxPosture.active",
         "SandboxPosture.escapable",
+        "SandboxPosture.contained",
         "NativeSemantics",
         "NativeSemantics.decode",
         "NativeSemantics.routed_tools",
@@ -9617,6 +9627,7 @@
         "CheckpointRequirement",
         "SandboxPlacement",
         "SANDBOX_ESCAPE_NOTICE",
+        "CONTAINED_ESCAPE_NOTICE",
         "SANDBOX_ESCALATION_RECIPE",
         "SANDBOX_TRAPPED_REASON",
         "KERNEL_IMPORT_ALLOWLIST",
@@ -10220,6 +10231,8 @@
         "ShellRuleRow.command",
         "ShellRuleRow.subcommand",
         "ShellRuleRow.operation",
+        "ShellRuleRow.operation_path",
+        "ShellRuleRow.operator_only",
         "ShellRuleRow.sandbox",
         "ShellRuleRow.sandbox_source",
         "ShellRuleRow.checkpoint",
@@ -10863,6 +10876,8 @@
         "PersistentQuestion.id",
         "PersistentQuestion.operation",
         "PersistentQuestion.fingerprint",
+        "PersistentQuestion.preconditions",
+        "PersistentQuestion.resumption",
         "PersistentQuestion.reason",
         "PersistentQuestion.rule",
         "PersistentQuestion.purpose",
@@ -10981,6 +10996,8 @@
         "RunnerTargetRule.subcommands",
         "ShellOperationRule",
         "ShellOperationRule.name",
+        "ShellOperationRule.parents",
+        "ShellOperationRule.operator_only",
         "ShellOperationRule.effects",
         "ShellOperationRule.refuses",
         "ShellOperationRule.ask_flags",
@@ -11094,6 +11111,7 @@
         "redirected_rules",
         "reaching_builtin_rules",
         "guarded_tool_rules",
+        "review_queue_rules",
         "runner_target_rules",
         "GIT_READ_ONLY_SUBCOMMANDS",
         "GIT_REVERSIBLE_SUBCOMMANDS",
@@ -11302,6 +11320,15 @@
         "lup_hooks_to_claude",
         "lup_hooks_to_claude.native_matcher",
         "lup_hook_output_to_claude"
+      ]
+    },
+    {
+      "module": "lup.providers.claude.identity",
+      "declares": [
+        "CLAUDE_SESSION_ENV",
+        "ClaudeSessionEnv",
+        "ClaudeSessionEnv.session_id",
+        "claude_session_id"
       ]
     },
     {
@@ -11747,13 +11774,13 @@
         "plugin_data_root",
         "managed_root",
         "spent_escape",
-        "approval_fingerprint",
-        "approval_receipt_root",
-        "record_approval",
-        "uncorrelated",
-        "spend_approval",
         "joined",
+        "shell_patch",
+        "patch_changes",
+        "patch_changes.document",
+        "patch_decision",
         "dispatch",
+        "queued_review",
         "observe",
         "main"
       ]
@@ -11961,6 +11988,12 @@
       ]
     },
     {
+      "module": "lup.providers.codex.identity",
+      "declares": [
+        "codex_session_id"
+      ]
+    },
+    {
       "module": "lup.providers.codex.login",
       "declares": [
         "CODEX_HOME",
@@ -12038,6 +12071,7 @@
         "PatchedFile.before",
         "PatchedFile.after",
         "PatchedFile.path_exists",
+        "PatchedFile.overwrite",
         "PatchedFile.__init__",
         "PatchedFile.operation",
         "ChangeChunk",
@@ -12343,6 +12377,12 @@
         "compile_claude",
         "startup_deadline_settings",
         "compile_codex"
+      ]
+    },
+    {
+      "module": "lup.providers.identity",
+      "declares": [
+        "native_session_id"
       ]
     },
     {
