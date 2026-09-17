@@ -41,6 +41,7 @@ from lup.harness.codescan.boundaries import (
 )
 from lup.harness.content.modules.specs import RESOLVER
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
+from lup.devtools.dev.reach import Spread
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import FrontendSpec, WorkflowSpec
 from lup.devtools.project import DevProject, Tracker
@@ -288,6 +289,27 @@ def declared_test_roots() -> list[TestRoot]:
         TestRoot(name="pytest (lup)", directory=Path("packages/lup")),
         BunTestRoot(name="bun test", directory=Path("packages/lup/web")),
     ]
+
+
+def declared_spread() -> Spread:
+    """Which of this repository's trees reach a project built on it, and how.
+
+    lup is two things at once and an adopter receives them by two different
+    mechanisms: `packages/lup/` arrives as a dependency, while `src/` and
+    `tests/` are stamped out once at initialization and owned from then on.
+    Naming both here is what lets `dev reach` say which mechanism carried each
+    commit — the only fact about the cost of this scaffold that no file in
+    either tree records.
+
+    The generated prefixes are the ones the seam guard already resolves, taken
+    from there rather than restated: a tree is generated because a recipe
+    writes it, and a second list saying so would be the drift this measures.
+    """
+    return Spread(
+        library=["packages/lup/"],
+        copied=["src/", "tests/"],
+        generated=application_roots().generated,
+    )
 
 
 WORKFLOW = WorkflowSpec(

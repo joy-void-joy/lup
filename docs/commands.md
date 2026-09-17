@@ -57,6 +57,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
 | `dev modules` | Report which modules this project takes, and what each one&#x27;s prose costs. |
+| `dev reach` | Report how this repository&#x27;s work reaches a project built on it. |
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
 | `dev relocate` | Move a module and repoint every import of it. |
 | `dev policy` | Show what the declared permission policy decides about an input, and why. |
