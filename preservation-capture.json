@@ -1,5 +1,5 @@
 {
-  "revision": "a4acbd2b948956b528eb7d97e78c2110d557864f",
+  "revision": "da7c56eb5648e734c8e1a54ec905cadf335890ab",
   "roots": [
     "lup",
     "lup_template"
@@ -5510,11 +5510,13 @@
     {
       "module": "lup.harness.codescan.boundaries",
       "declares": [
-        "RULE_ID",
-        "NATIVE_SPELLING_RULE_ID",
-        "KERNEL_IMPORT_RULE_ID",
-        "LIBRARY_DEFAULT_RULE_ID",
-        "CONSTANT_DECLARATION_RULE_ID",
+        "RuleId",
+        "RuleId.SEAM",
+        "RuleId.NATIVE_SPELLING",
+        "RuleId.KERNEL_IMPORTS",
+        "RuleId.LIBRARY_DEFAULT",
+        "RuleId.CONSTANT_DECLARATION",
+        "RuleId.ASSEMBLY",
         "LIBRARY_ROOT",
         "KERNEL_ROOT",
         "NATIVE_PREFIXES",

@@ -135,7 +135,7 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         strength="strong",
     ),
     RegisteredRule(
-        id=boundaries.RULE_ID,
+        id=boundaries.RuleId.SEAM,
         family="boundary",
         scope="Neutral Python modules",
         example="from lup.providers.codex.runtime import CodexSessionConfig",
@@ -144,7 +144,7 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         defined_in=boundaries.__name__,
     ),
     RegisteredRule(
-        id=boundaries.NATIVE_SPELLING_RULE_ID,
+        id=boundaries.RuleId.NATIVE_SPELLING,
         family="spelling",
         scope="Neutral Python modules",
         example='instruction = "$lup:commit"',
@@ -167,7 +167,7 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         defined_in=portable.__name__,
     ),
     RegisteredRule(
-        id=boundaries.LIBRARY_DEFAULT_RULE_ID,
+        id=boundaries.RuleId.LIBRARY_DEFAULT,
         family="boundary",
         scope="Neutral library modules",
         example='READ_ONLY_COMMANDS = ("ls", "cat", "grep")',
@@ -181,7 +181,7 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         defined_in=boundaries.__name__,
     ),
     RegisteredRule(
-        id=boundaries.CONSTANT_DECLARATION_RULE_ID,
+        id=boundaries.RuleId.CONSTANT_DECLARATION,
         family="architecture",
         scope="Python constants",
         example="SNIPPET_LENGTH = 500",
@@ -203,7 +203,7 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         ),
     ),
     RegisteredRule(
-        id=boundaries.KERNEL_IMPORT_RULE_ID,
+        id=boundaries.RuleId.KERNEL_IMPORTS,
         family="boundary",
         scope="Policy kernel",
         example="from pydantic import BaseModel",

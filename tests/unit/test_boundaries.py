@@ -23,8 +23,7 @@ from lup.policy.models import EditBatch, EditChange
 from lup.policy.rules import EditPolicy
 
 from lup.harness.codescan.boundaries import (
-    CONSTANT_DECLARATION_RULE_ID,
-    LIBRARY_DEFAULT_RULE_ID,
+    RuleId,
     ApplicationRoots,
     audit_boundaries,
     audit_constant_declarations,
@@ -440,7 +439,7 @@ def test_a_judgement_constant_outside_the_library_is_reported() -> None:
     assert [item.kind for item in findings] == ["missing"]
     assert [item.line for item in findings] == [1]
     assert "overridable default" in findings[0].message
-    assert f"# lup: ignore[{CONSTANT_DECLARATION_RULE_ID}]" in findings[0].message
+    assert f"# lup: ignore[{RuleId.CONSTANT_DECLARATION}]" in findings[0].message
 
 
 def test_a_canonical_constant_is_cleared_by_a_reasoned_suppression() -> None:
@@ -545,12 +544,12 @@ def test_the_two_constant_rules_partition_every_declaration() -> None:
 
     assert [constant.name for constant in declared] == ["TABLE", "SCALAR", "SINGLETON"]
     assert [constant.judging_rule(library_module=True) for constant in declared] == [
-        LIBRARY_DEFAULT_RULE_ID,
-        CONSTANT_DECLARATION_RULE_ID,
-        CONSTANT_DECLARATION_RULE_ID,
+        RuleId.LIBRARY_DEFAULT,
+        RuleId.CONSTANT_DECLARATION,
+        RuleId.CONSTANT_DECLARATION,
     ]
     assert [constant.judging_rule(library_module=False) for constant in declared] == [
-        CONSTANT_DECLARATION_RULE_ID
+        RuleId.CONSTANT_DECLARATION
     ] * len(declared)
 
 

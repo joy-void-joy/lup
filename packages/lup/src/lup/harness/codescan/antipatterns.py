@@ -60,12 +60,7 @@ import re
 
 from pydantic import BaseModel, Field
 
-from lup.harness.codescan.boundaries import (
-    CONSTANT_DECLARATION_RULE_ID,
-    LIBRARY_DEFAULT_RULE_ID,
-    NATIVE_SPELLING_RULE_ID,
-    RULE_ID as SEAM_BOUNDARY_RULE_ID,
-)
+from lup.harness.codescan.boundaries import RuleId
 from lup.harness.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
 from lup.harness.codescan.dispatch import RULE_ID as OWN_MODEL_DISPATCH_RULE_ID
 from lup.harness.codescan.common import (
@@ -1339,20 +1334,18 @@ PY_SUFFIXES = (".py", ".pyi")
 # lup: ignore[library-default] — the ids other codescan scanners own, so the set
 # follows those rules' own identities rather than any taste of this module's
 FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
-    {
-        ABC_CAPABILITY_RULE_ID,
-        CONSTANT_DECLARATION_RULE_ID,
-        LIBRARY_DEFAULT_RULE_ID,
-        NATIVE_SPELLING_RULE_ID,
-        OWN_MODEL_DISPATCH_RULE_ID,
-        SEAM_BOUNDARY_RULE_ID,
-    }
+    {*RuleId, ABC_CAPABILITY_RULE_ID, OWN_MODEL_DISPATCH_RULE_ID}
 )
 """Rule ids owned by other codescan scanners.
 
 A typed ``# lup: ignore[...]`` naming one of these is judged by that
 scanner (the boundary scan honors its own id), so this auditor never
 reports it spurious — while an id no scanner owns still is.
+
+The boundary scanner's are taken as its whole enumeration rather than
+named one by one, so a rule added there is foreign here the moment it
+exists: the alternative is a second list that reports a new rule's every
+suppression as spurious until somebody remembers this file.
 """
 
 
