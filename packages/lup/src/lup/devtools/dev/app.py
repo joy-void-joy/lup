@@ -1099,14 +1099,25 @@ def create_dev_app(
         out: Annotated[
             Path, typer.Option("--out", help="Where to write the compiled tree")
         ],
+        decline: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--decline",
+                help="An upstream path to leave out, beside the declared ones",
+            ),
+        ] = None,
     ) -> None:
         """Materialize upstream's copied half at one commit, under this name.
 
         The pure function the update rests on, exposed so it can be looked at:
         what an update would merge, written to a directory rather than to a
-        branch.
+        branch. `--decline` asks what a wider selection would produce without
+        declaring it first, which is how a project decides what to declare.
         """
-        source = adopted_source()
+        declared_source = adopted_source()
+        source = declared_source.model_copy(
+            update={"declined": [*declared_source.declined, *(decline or [])]}
+        )
         built = scaffold_mod.compiled(
             update_mod.upstream_checkout(source.project, typer.echo),
             commit,
