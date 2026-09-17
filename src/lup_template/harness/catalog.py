@@ -19,6 +19,7 @@ from pathlib import Path
 from pydantic import AnyHttpUrl
 
 from lup.harness.models import (
+    CarrierPins,
     Harness,
     HookPathRole,
     HookSandbox,
@@ -41,7 +42,9 @@ from lup.harness.codescan.boundaries import (
 )
 from lup.harness.content.modules.specs import RESOLVER
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
+from lup.devtools.dev.library import DISTRIBUTION
 from lup.devtools.dev.reach import Spread
+from lup.devtools.dev.scaffold import ScaffoldSource
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import FrontendSpec, WorkflowSpec
 from lup.devtools.project import DevProject, Tracker
@@ -312,6 +315,25 @@ def declared_spread() -> Spread:
     )
 
 
+def declared_scaffold() -> ScaffoldSource:
+    """Where this project's copied half comes from, and what of it it took.
+
+    Inherited rather than written at initialization: a project stamped out of
+    this tree receives this declaration with the rest of the copied half, and
+    it is already true of it — the registration `sync.json` ships names the
+    repository it was stamped from, and the roots are the ones the stamp
+    copied. What it says of *this* checkout is that this is the scaffold
+    itself, which `dev update` refuses on the strength of the template flag
+    rather than of anything said here: the origin of every copy has nothing
+    upstream to merge from.
+
+    A project that declines part of the scaffold says so here, spelling the
+    paths as upstream spells them, and every later update leaves them out
+    instead of offering them again.
+    """
+    return ScaffoldSource(project="lup")
+
+
 WORKFLOW = WorkflowSpec(
     branches=["main", "dev"],
     frontend=FrontendSpec(workspace="packages/lup/web", bun_version="1.3.14"),
@@ -520,6 +542,13 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         hooks=HookSet(
             id="hooks.lup-policy",
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],
+            # Derived from the scaffold this project declares rather than
+            # spelled again: the branch a session is told about at prompt time
+            # is the branch `dev update` merges, and two spellings of it are
+            # how a fold ends up watching a branch nothing advances.
+            carriers=CarrierPins(
+                branch=declared_scaffold().branch, distribution=DISTRIBUTION
+            ),
             # The one selection, declared where the guidance reads it too, so
             # the hooks enforcing a rule and the section teaching it cannot
             # disagree; `dev seams --retire` edits it there.

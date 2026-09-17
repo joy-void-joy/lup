@@ -41,7 +41,6 @@ uv run lup-devtools dev library status
 | --- | --- | --- |
 | published | The newest release on the index | `uv run lup-devtools dev library release` to read what is published, then `uv lock --upgrade-package lup` |
 | git | The tip of the ref it pins | `uv lock --upgrade-package lup` re-resolves the same ref; `dev library git --branch <branch>` moves to a different one |
-| linked | Whatever the linked checkout holds | Pull in that checkout; the editable install follows it |
 | local | Nothing — `packages/lup/` is a fork of the library, so upstream arrives through the commit review below rather than through a version | — |
 
 `dev library release` asks the index rather than guessing, and reports one of

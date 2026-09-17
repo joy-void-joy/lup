@@ -343,15 +343,13 @@ run: the `application placement` row names each module under the application's
 fails, because the template is copied and frozen the moment an adopter takes
 it while `packages/lup` reaches them through an ordinary dependency bump — so
 the row is a debt that shrinks, and this is where its verdicts are settled
-rather than a list kept somewhere else. One module answers it today, and it is
-the one that should not: how a project obtains lup, across the published, git,
-local, and linked modes, is a question every adopter has and none of it is
-about this application, so `devtools/dev/library.py` belongs under
-`lup/devtools/dev/`. A single entry with a settled verdict is the shape a
-shrinking debt is supposed to have, and the row is read rather than trusted —
-a module that reaches the application, as `devtools/setup.py` does for its own
-harness composition, leaves the row by doing so rather than by being argued
-about here.
+rather than a list kept somewhere else. It names nothing today, which is the
+shape this debt is meant to reach: how a project obtains lup is a question
+every adopter has and no part of which is about any one application, so it
+lives at `lup/devtools/dev/library.py` where `dev update` reads the pin it
+writes. The row is read rather than trusted — a module that reaches the
+application, as `devtools/setup.py` does for its own harness composition,
+leaves it by doing so rather than by being argued about here.
 
 ## Building on it
 

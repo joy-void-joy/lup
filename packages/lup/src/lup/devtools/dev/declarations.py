@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import lup.devtools.dev.check as check
 import lup.devtools.dev.git_guards as git_guards_mod
 import lup.devtools.dev.reach as reach
+from lup.devtools.dev.scaffold import ScaffoldSource
 from lup.devtools.project import DevProject
 from lup.harness.models import HookSet, Plugin
 
@@ -46,6 +47,14 @@ class DevDeclarations(BaseModel, frozen=True):
     anything, so there is no scaffold whose cost could be asked about. A
     repository that does ship one declares it here, and `dev reach` measures
     what each mechanism carried."""
+
+    scaffold: ScaffoldSource | None = None
+    """Where this project's copied half came from, in a project that adopted one.
+
+    The mirror image of ``spread``: that one says this repository is somebody's
+    upstream, this one says somebody is ours. Absent is the honest answer for a
+    repository that wrote its own modules, and for the scaffold itself — which
+    is the origin of every copy and so has nothing to merge from."""
 
     def restored_workspaces(self) -> list[Path]:
         """The toolchain workspaces a fresh worktree restores beside `uv sync`.

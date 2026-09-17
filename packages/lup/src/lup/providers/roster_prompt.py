@@ -137,6 +137,28 @@ class PromptHook(BaseModel, frozen=True):
     artifacts: list[Artifact]
 
 
+def folded(hooks: list[PromptHook]) -> PromptHook:
+    """Several prompt-time hooks as one registration, entries side by side.
+
+    Two folds under one event are two entries under one key, and merging the
+    dictionaries would keep whichever was written last — a plugin quietly
+    registering one of the two. Every matching hook runs and none of these can
+    refuse, so what the runtime is being told is the concatenation.
+    """
+    registered: JsonObject = {}  # lup: ignore[empty-collection] — event fold
+    for hook in hooks:
+        for event, entries in hook.registered.items():
+            match (registered.get(event), entries):
+                case ([*standing], [*arriving]):
+                    registered[event] = [*standing, *arriving]
+                case _:
+                    registered[event] = entries
+    return PromptHook(
+        registered=registered,
+        artifacts=[artifact for hook in hooks for artifact in hook.artifacts],
+    )
+
+
 def prompt_hook(
     plugin_root: Path, plugin_root_env: str, source: HookSet, event: str
 ) -> PromptHook:
