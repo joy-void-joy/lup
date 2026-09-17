@@ -1,5 +1,5 @@
 {
-  "revision": "c86bd162fab6cd9e5f8493ee6cafd43899b519f5",
+  "revision": "61d8c01e11c456c1f96310ae6b955b63de531eb2",
   "roots": [
     "lup",
     "lup_template"
@@ -2308,6 +2308,31 @@
         "written_commands.mentions",
         "unresolved",
         "refuse_unresolved_commands"
+      ]
+    },
+    {
+      "module": "lup.devtools.dev.drift_fold",
+      "declares": [
+        "SCAFFOLD_TRAILER",
+        "LockedSource",
+        "LockedSource.git",
+        "LockedPackage",
+        "LockedPackage.name",
+        "LockedPackage.source",
+        "Lock",
+        "Lock.package",
+        "Pushed",
+        "Pushed.hookEventName",
+        "Pushed.additionalContext",
+        "HookOutput",
+        "HookOutput.hookSpecificOutput",
+        "text",
+        "asked",
+        "pinned",
+        "merged",
+        "drifted",
+        "envelope",
+        "main"
       ]
     },
     {
@@ -7155,6 +7180,9 @@
         "HookSandbox.credential_paths",
         "HookSandbox.excluded_commands",
         "HookSandbox.writable_paths",
+        "CarrierPins",
+        "CarrierPins.branch",
+        "CarrierPins.distribution",
         "HookSet",
         "HookSet.id",
         "HookSet.policy_ids",
@@ -7171,6 +7199,7 @@
         "HookSet.resolution_command",
         "HookSet.repair_command",
         "HookSet.refused_tools",
+        "HookSet.carriers",
         "HookSet.peer_policy",
         "HookSet.runner_targets",
         "HookSet.everyday_commands",
@@ -12544,6 +12573,18 @@
       ]
     },
     {
+      "module": "lup.providers.drift_prompt",
+      "declares": [
+        "RUNTIME_MODULE",
+        "GUARD_SCRIPT",
+        "RUNTIME_ORIGIN",
+        "RUNTIME_SOURCE",
+        "runtime_source",
+        "guard_body",
+        "drift_hook"
+      ]
+    },
+    {
       "module": "lup.providers.harness",
       "declares": [
         "AdapterName",
@@ -12669,6 +12710,7 @@
         "PromptHook",
         "PromptHook.registered",
         "PromptHook.artifacts",
+        "folded",
         "prompt_hook",
         "departure_hook",
         "roster_artifacts"

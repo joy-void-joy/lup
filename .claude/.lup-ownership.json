@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "6964b90f65f0737a309825a0ce62d3cdfd207265c749f16e16404b15914d24ea",
+  "source_digest": "419d7ba6d8fbf78cce0f9f2c8bfee548b7e620f45d4a62857d2b770b2d9e5c89",
   "target_requirements": [
     "claude-code"
   ],
@@ -324,7 +324,14 @@
     {
       "path": ".claude/plugins/lup/hooks/hooks.json",
       "category": "generated",
-      "sha256": "692ca510223a622db7e4606daf9dcbc9fb541f856249be6dc3d7c521ce10ea3d",
+      "sha256": "60f4ba3b1194394df4eec82ef6cbbd7c957b1102fea2c9eba8610c64d78f9e45",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/carrier_drift.py",
+      "category": "generated",
+      "sha256": "7d49d6a1d9c972f9af87bab039d2a42d6c0b70f65bb67a7487bf0ef84a79dc56",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -502,6 +509,13 @@
       "sha256": "29e9c9ed7bcfb2468921bced70c154d8f7724682e0d5fe1ac6f06bd1fe2c97a6",
       "semantic_id": "hooks.lup-policy",
       "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/scripts/carrier_drift.sh",
+      "category": "generated",
+      "sha256": "8f61e7d2a5ac48af9c8cde61a9945c9c3c7e22f9211f47b5dd5bf797f94c1153",
+      "semantic_id": "hooks.lup-policy",
+      "executable": true
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/coordination_changes.sh",

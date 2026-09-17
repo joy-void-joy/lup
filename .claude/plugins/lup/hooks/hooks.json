@@ -55,6 +55,15 @@
             "type": "command"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/carrier_drift.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
       }
     ]
   }

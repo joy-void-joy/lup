@@ -19,6 +19,7 @@ from pathlib import Path
 from pydantic import AnyHttpUrl
 
 from lup.harness.models import (
+    CarrierPins,
     Harness,
     HookPathRole,
     HookSandbox,
@@ -41,6 +42,7 @@ from lup.harness.codescan.boundaries import (
 )
 from lup.harness.content.modules.specs import RESOLVER
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
+from lup.devtools.dev.library import DISTRIBUTION
 from lup.devtools.dev.reach import Spread
 from lup.devtools.dev.scaffold import ScaffoldSource
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
@@ -540,6 +542,13 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         hooks=HookSet(
             id="hooks.lup-policy",
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],
+            # Derived from the scaffold this project declares rather than
+            # spelled again: the branch a session is told about at prompt time
+            # is the branch `dev update` merges, and two spellings of it are
+            # how a fold ends up watching a branch nothing advances.
+            carriers=CarrierPins(
+                branch=declared_scaffold().branch, distribution=DISTRIBUTION
+            ),
             # The one selection, declared where the guidance reads it too, so
             # the hooks enforcing a rule and the section teaching it cannot
             # disagree; `dev seams --retire` edits it there.
