@@ -34,6 +34,7 @@ def declared() -> DevDeclarations:
         hooks=catalog.declared_hook_set(),
         plugin=catalog.declared_plugin(),
         test_roots=catalog.declared_test_roots(),
+        spread=catalog.declared_spread(),
     )
 
 

@@ -29,6 +29,7 @@ import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.questions as questions_mod
+import lup.devtools.dev.reach as reach
 import lup.devtools.dev.preservation as preservation
 import lup.devtools.dev.modules as modules
 import lup.devtools.dev.seams as seams
@@ -893,6 +894,35 @@ def create_dev_app(
         """
         project = declared().project
         modules.report(project.coverage.modules, project.modules, verbose)
+
+    @app.command("reach")
+    def reach_cmd(
+        since: Annotated[
+            str,
+            typer.Option("--since", help="How far back to read, in git's own grammar"),
+        ] = "12 months ago",
+        limit: Annotated[
+            int,
+            typer.Option("--limit", help="How many copied modules the ranking names"),
+        ] = 10,
+    ) -> None:
+        """Report how this repository's work reaches a project built on it.
+
+        The question a scaffold cannot answer about itself by reading its own
+        tree: a commit's cost to an adopter is decided by which trees it
+        touched, and nothing records that at the time. The split row is the
+        one to watch — a bump lands its library half and leaves the call site,
+        so it arrives as a breakage rather than as work anybody chose to read.
+        """
+        spread = declared().spread
+        if spread is None:
+            typer.echo(
+                "no scaffold declared: nothing here is copied into another "
+                "repository, so every commit reaches an adopter by import or "
+                "not at all"
+            )
+            return
+        reach.report(since, spread, project_root(), limit)
 
     @app.command("guidance")
     def guidance_cmd(

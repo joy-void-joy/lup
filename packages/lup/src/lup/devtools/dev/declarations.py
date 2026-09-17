@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 import lup.devtools.dev.check as check
 import lup.devtools.dev.git_guards as git_guards_mod
+import lup.devtools.dev.reach as reach
 from lup.devtools.project import DevProject
 from lup.harness.models import HookSet, Plugin
 
@@ -36,6 +37,15 @@ class DevDeclarations(BaseModel, frozen=True):
     A default rather than a fixture: the pair lup arms is what most projects
     want, and one that guards a third moment — or runs its gate under another
     name — says so here instead of forking the module that writes them."""
+
+    spread: reach.Spread | None = None
+    """Which of this repository's trees reach a project built on it, and how.
+
+    Absent in almost every project, and that is the honest answer rather than
+    an omission: a repository nobody builds on carries nobody's copy of
+    anything, so there is no scaffold whose cost could be asked about. A
+    repository that does ship one declares it here, and `dev reach` measures
+    what each mechanism carried."""
 
     def restored_workspaces(self) -> list[Path]:
         """The toolchain workspaces a fresh worktree restores beside `uv sync`.
