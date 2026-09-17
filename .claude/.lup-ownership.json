@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "34851b95b9d4fed70644d279a760b7dd1d645a9a9e8fe8b4c72fdce84bf3aa9d",
+  "source_digest": "c724a2d514e2fdfb67ad8d7a01df9d093c6b2b449bac3badbdf1c49db4ab334e",
   "target_requirements": [
     "claude-code"
   ],
@@ -205,7 +205,7 @@
     {
       "path": ".claude/plugins/lup/commands/import.md",
       "category": "generated",
-      "sha256": "ab06313443cff99018c68682b64746adf037aa990e1cb69c7966a77c26d0176d",
+      "sha256": "438fbb51f504b901700f6dd2dd22149158fbf25bd9eadde5b19cfa1620f382b7",
       "semantic_id": "skill.import",
       "executable": false
     },
@@ -310,8 +310,15 @@
     {
       "path": ".claude/plugins/lup/commands/update.md",
       "category": "generated",
-      "sha256": "ba470a0081f75fc79d37a8680e6821419f57ee29bca46bca6c6b4970ba7da3e9",
+      "sha256": "b0804242710f9f738d520560858ccd3f373255701e2a1896223361198d353cd4",
       "semantic_id": "skill.update",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/commands/upstream.md",
+      "category": "generated",
+      "sha256": "30eac75e295be0d921cbddad43f52df7638cd7b4379afb1bc298adf22c937738",
+      "semantic_id": "skill.upstream",
       "executable": false
     },
     {
@@ -618,7 +625,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "ae94abe3790373edba101ec62a014926577d992b593974255f9401380aebf6ed",
+      "sha256": "306a9e3a93214c2f7acc59cf4ccb98af453d7efc963382f6c20071cbecc45155",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -667,7 +674,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "c8b5f9adaa53ec5f7527ee43c306eabfc9553cceba43d42cb9412076c78c4513",
+      "sha256": "31aa9150e44dfc7f29a7ef2193f8fb4a6378cfcaae412e168e71ff8b44bc8158",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
@@ -709,7 +716,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "a976d373d093846d7d6409e6bd950f587b3ab03d96f4414a37c0d97b8b2f591b",
+      "sha256": "617be5f2b42d97e4127f9de73ca25781ab2960bf8732023043fabca973b97314",
       "semantic_id": "docs.template",
       "executable": false
     },

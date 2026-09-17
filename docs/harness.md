@@ -254,7 +254,8 @@ owns the subject, then regenerate.
 - /lup:resolve — Resolve inline feedback through isolated work
 - /lup:resolve-reviewer — Review one resolver concern against its acceptance criteria
 - /lup:review — Review a session trace for workflow quality, tool usage, and improvement opportunities
-- /lup:update — Upgrade the lup dependency, then review upstream commits and apply improvements
+- /lup:update — Move every carrier of lup to one upstream commit, and resolve what it leaves
+- /lup:upstream — Fix a defect in lup itself, in a worktree of lup, and pin it until it lands
 - /lup:verify-solved — Check every claimed-resolved note and stale open issue against what it actually asked
 
 **Agents:**
