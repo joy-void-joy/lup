@@ -95,6 +95,9 @@ def test_the_question_names_the_rule_and_the_path_it_is_about() -> None:
     verdict = judged("touch tmp/x", ["/repo/tree/other/tmp"])
 
     assert verdict.rule == "unleased-write"
+    # The path leads: the allow this replaced said every segment was safe,
+    # which is true and decides nothing for whoever reads the question.
+    assert verdict.reason.startswith("writes /repo/tree/other/tmp")
     assert "/repo/tree/other/tmp" in verdict.reason
 
 
