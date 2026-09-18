@@ -24,6 +24,7 @@ isolation product over a hostile one.
 """
 
 import json
+import stat
 import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -32,6 +33,7 @@ from secrets import token_hex
 
 from pydantic import BaseModel, Field
 
+from lup.execution.shell import git
 from lup.harness.requirements import SENTINEL_VARIABLE
 from lup.policy.boundary import BoundaryPreflight
 from lup.types import EnvVars
@@ -194,3 +196,55 @@ def sweep_ledgers(root: Path, older_than: timedelta = timedelta(days=7)) -> int:
     for item in stale:
         item.unlink()
     return len(stale)
+
+
+def exclude_sandbox_placeholders(root: Path) -> list[str]:
+    """Keep the runtime sandbox's mount targets out of ``git status``, by name.
+
+    The runtime's own sandbox holds a set of dotfiles read-only over the
+    checkout -- shell profiles, ``.gitconfig``, ``.mcp.json``, the ``.claude/``
+    entries a command could plant a hook in -- by binding an empty file over
+    each. Where the file is absent, bubblewrap creates the mount target
+    itself: zero bytes, mode 0444, and on the host, because the checkout is
+    bound writable. The mount goes with the sandbox and the file stays,
+    untracked and matched by no ignore rule, in every worktree a sandboxed
+    session entered -- measured as eleven in one checkout and twenty-one in
+    its sibling, one ``git add -A`` away from a commit over harness-owned
+    paths.
+
+    Nothing in this repository writes them, so nothing here can stop them.
+    What it can do is take away the one harm they do, and ``info/exclude`` is
+    where: per clone, unversioned, and read by every worktree of the
+    repository. The names are read off the disk rather than kept in a list,
+    because the list is the sandbox's and moves with it; the signature --
+    untracked, empty, and exactly the mode bubblewrap gives a target it
+    created -- is what tells a placeholder from a file somebody meant.
+
+    Returns what it added, so a launch can say so once and a second launch
+    says nothing.
+    """
+    untracked = git.lines("-C", str(root), "ls-files", "--others", "--exclude-standard")
+    placeholders = [
+        name
+        for name in untracked
+        if (found := root / name).is_file()
+        and (held := found.stat()).st_size == 0
+        and stat.S_IMODE(held.st_mode) == 0o444
+    ]
+    if not placeholders:
+        return []
+    common = git.out(
+        "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"
+    ).strip()
+    exclude = Path(common) / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    held_lines = (
+        exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
+    )
+    added = [name for name in placeholders if f"/{name}" not in held_lines]
+    if added:
+        exclude.write_text(
+            "\n".join([*held_lines, *(f"/{name}" for name in added), ""]),
+            encoding="utf-8",
+        )
+    return added
