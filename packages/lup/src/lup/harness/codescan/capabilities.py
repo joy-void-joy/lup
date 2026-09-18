@@ -38,8 +38,8 @@ from lup.harness.codescan.project import (
     RuleFinding,
     RuleViolation,
     audit_suppressions,
-    build_symbol_index,
     descendants_of,
+    project_index,
 )
 
 # lup: ignore[constant-declaration] — the rule's own identity, what a typed
@@ -238,9 +238,19 @@ def architecture_violations(
 
 
 def audit_capabilities(sources: list[PythonSource]) -> list[RuleFinding]:
-    """Build the project index, enforce the rule, and audit its suppressions."""
-    symbols = build_symbol_index(sources)
-    violations = architecture_violations(symbols, capability_names(symbols))
+    """Build the project index, enforce the rule, and audit its suppressions.
+
+    The index resolves through the library's classes as well, so a class
+    descending from a library model reads as the variant union it is; what is
+    reported is only what stands in the sources handed in.
+    """
+    symbols = project_index(sources)
+    scanned = {source.path for source in sources}
+    violations = [
+        violation
+        for violation in architecture_violations(symbols, capability_names(symbols))
+        if violation.path in scanned
+    ]
     return audit_suppressions(sources, violations, RULE_ID)
 
 
@@ -283,7 +293,11 @@ def undeclared_abstractions(
 
 def audit_abstract_declarations(sources: list[PythonSource]) -> list[RuleFinding]:
     """Build the project index, enforce the rule, and audit its suppressions."""
-    symbols = build_symbol_index(sources)
-    return audit_suppressions(
-        sources, undeclared_abstractions(symbols), ABSTRACT_DECLARATION_RULE_ID
-    )
+    symbols = project_index(sources)
+    scanned = {source.path for source in sources}
+    violations = [
+        violation
+        for violation in undeclared_abstractions(symbols)
+        if violation.path in scanned
+    ]
+    return audit_suppressions(sources, violations, ABSTRACT_DECLARATION_RULE_ID)

@@ -38,11 +38,11 @@ from lup.harness.codescan.project import (
     RuleFinding,
     RuleViolation,
     audit_suppressions,
-    build_symbol_index,
     descendants_of,
     dotted_name,
     imported_names,
     named_types,
+    project_index,
     resolve_name,
 )
 
@@ -187,8 +187,13 @@ def dispatched_models(
 
 
 def audit_own_model_dispatch(sources: list[PythonSource]) -> list[RuleFinding]:
-    """Build the project index, enforce the rule, and audit its suppressions."""
-    symbols = build_symbol_index(sources)
+    """Build the project index, enforce the rule, and audit its suppressions.
+
+    The index resolves through the library's classes as well, so a walk in a
+    project built on this one that branches on a library variant -- a
+    ``TextPart`` among the parts -- is reported there as it is here.
+    """
+    symbols = project_index(sources)
     models = descendants_of(symbols, MODEL_BASES)
     violations = dispatch_violations(
         sources, dispatched_models(sources, symbols, models)

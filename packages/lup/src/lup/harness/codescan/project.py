@@ -24,12 +24,14 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+import lup
 from lup.harness.codescan.common import (
     PythonContext,
     PythonSource,
     RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
+    module_name,
 )
 from lup.policy.kernel.edit import (
     IGNORE_RE,
@@ -237,6 +239,60 @@ def build_symbol_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
                 member_lines=member_lines,
             )
     return symbols
+
+
+@cache
+def installed_library_sources() -> list[PythonSource]:
+    """Every module of the installed ``lup`` package, read once per process.
+
+    A project built on this library declares classes over its models -- a
+    ledger kind over ``LedgerNode``, a part over ``PromptPart`` -- and a rule
+    that resolves bases through the project's own files alone sees the
+    library's class as a name that resolves to nothing. Measured downstream:
+    a kind declared as ``class KnowledgeItem(LedgerNode, ABC)`` was reported
+    as a capability inheriting reusable behaviour, because the one base that
+    made it a variant union was outside the index. The library's sources are
+    what say what its classes are, so they are read beside the project's.
+
+    Read from wherever the package is installed -- an editable checkout or a
+    wheel -- and cached, because three rules index the same tree in one run
+    and the tree does not move during it.
+    """
+    root = Path(lup.__file__).resolve().parent
+    return [
+        PythonSource(
+            path=file,
+            module=module_name(Path(root.name) / file.relative_to(root)),
+            text=file.read_text(encoding="utf-8"),
+        )
+        for file in sorted(root.rglob("*.py"))
+        if "__pycache__" not in file.parts
+    ]
+
+
+@cache
+def library_index() -> dict[str, ClassSymbol]:
+    """The installed library's class index, built once per process.
+
+    Three rules index the same tree on every scan, and a project's test suite
+    scans hundreds of times; parsing three hundred modules for each would
+    cost more than the rules themselves.
+    """
+    return build_symbol_index(installed_library_sources())
+
+
+def project_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
+    """The class index a project rule resolves through: the library's, then its own.
+
+    The project's symbols are laid over the library's, keyed by qualified
+    name, which is the whole difference between this repository and one built
+    on it: here every library module is also a scanned source and its own
+    reading wins, there the library arrives from its installation and fills
+    in what the project's files cannot say. Rules report only over the
+    sources they were handed; what the library contributes is resolution,
+    never a finding about the library.
+    """
+    return {**library_index(), **build_symbol_index(sources)}
 
 
 def descendants_of(symbols: dict[str, ClassSymbol], ancestors: set[str]) -> set[str]:
