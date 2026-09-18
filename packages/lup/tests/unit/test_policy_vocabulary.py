@@ -377,33 +377,28 @@ def test_putting_a_destination_in_the_remote_table_asks() -> None:
     assert effect("git remote set-branches origin main") == "allow"
 
 
-def test_a_global_that_moves_git_to_another_tree_is_judged_before_the_verb() -> None:
+def test_a_global_that_moves_git_to_another_tree_is_not_itself_a_question() -> None:
     """The criterion is about refs, index and working tree — not about whose.
 
-    Naming a redirect in `value_flags` alone only advanced the parser past its
-    argument, so the verb behind it was answered by a row reasoning about this
-    worktree: `commit` allowed because the reflog that undoes it is here. The
-    redirect is exactly what makes that premise someone else's, and it is read
-    before the subcommand word is found, so it has to answer for itself.
+    A directory redirect is a value flag: the parser steps over its argument
+    and the verb behind it is answered by its own row in the other tree, as
+    `cd /tmp/o && git commit` always was by two segments. The reflog that
+    makes the commit reversible is that tree's, and undoes it as this one's
+    would. What still asks is a global that changes how git runs or what a
+    ref means, which no `cd` spells.
     """
     rules = [git_rule()]
 
     def effect(command: str) -> str:
         return verdict(command, rules).effect
 
-    assert effect("git -C /tmp/other commit -am x") == "ask"
-    assert effect("git -C /tmp/o merge --abort") == "ask"
-    assert effect("git --git-dir=/tmp/x --work-tree=/tmp add .") == "ask"
-    assert effect("git --namespace=other push") == "ask"
-    # The refusal names the way through rather than leaving it to be guessed —
-    # but only where one exists. A namespace is not a directory, so offering to
-    # cd into it would send an agent somewhere it cannot go.
-    assert "cd into that tree" in verdict("git -C /tmp/o commit -am x", rules).recovery
-    assert "cd into" not in verdict("git --namespace=o push", rules).recovery
-    # And the redirect is asked about only where it changes what the command
-    # does. A verb that reads is the same read `cd /tmp/o && git status` makes
-    # in two allowed segments, so asking here bought nothing but a turn.
+    assert effect("git -C /tmp/other commit -am x") == "allow"
+    assert effect("git --git-dir=/tmp/x --work-tree=/tmp add .") == "allow"
     assert effect("git -C /tmp/o status") == "allow"
+    # The verb keeps its own question wherever it runs.
+    assert effect("git -C /tmp/o merge --abort") == "ask"
+    assert effect("git --namespace=other push") == "ask"
+    assert "cd into" not in verdict("git --namespace=o push", rules).recovery
     # Forcing the pager moves nothing, and the program it names is reachable
     # only through the globals that already ask.
     assert effect("git --paginate diff") == "allow"

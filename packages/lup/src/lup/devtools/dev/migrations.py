@@ -130,6 +130,35 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        commit="d0af16a1b",
+        subjects=[
+            "repository_worktrees",
+            "WriteFacts.worktrees",
+            "ShellContext.repository_worktrees",
+            "redirected_verb_only_reads",
+            "redirect_stays_in_this_repository",
+        ],
+        reason=(
+            "a git directory redirect is a value flag and nothing more: the verb "
+            "behind `-C`, `--git-dir` and `--work-tree` is judged by its own row "
+            "in the other tree, as `cd there && git <verb>` always was, so the "
+            "guard that asked about the redirect and the worktree list it was "
+            "measured against have nothing left to decide"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Drop the `repository_worktrees` argument from any call into "
+                    "`decide_shell`, `classify_shell` or `shell_context`, and "
+                    "the `worktrees` key from a `WriteFacts` a project builds by "
+                    "hand; a project's own shell vocabulary needs no change, and "
+                    "a git rule that listed the directory flags under "
+                    "`ask_flags` keeps them under `value_flags` alone."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         commit="2bb3da2ea",
         subjects=[
             "approval_fingerprint",
