@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "97fd762d3c55c2ea61f9a56e76960538190a3ccf6c3d3368d576728350b286a1",
+  "source_digest": "a82c31f991c72ba40ae2781815d037f1c8f693a9975e64c7fc0c5ef7bc8d70f8",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "b2bb6752b46f50d57bae5c37bd30c82f1dccf174185efbfe421e61bde003b333",
+      "sha256": "9e9386dfe5bd0f71138f1e5cd85603271afebbe0a71dbb7625182a5f0b58ccf7",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -226,7 +226,7 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "a768a4467c4c1d026f69d9dbda6fb0dce0575cccd707b6031576fca87a572b80",
+      "sha256": "201fa6736549aac189777a42409fda646418f275a0886850c90ddb87a533e96e",
       "semantic_id": "skill.land",
       "executable": false
     },
@@ -569,7 +569,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "7742109ff22cf924d86dcbd3bef5497780b75ba850547ca5c244900d1a663688",
+      "sha256": "0b3d46e7dbe78ceb6532bf76294a1eceb266e63843ff046c9e82fc87c8ec1367",
       "semantic_id": "harness.project-settings",
       "executable": false
     },
@@ -674,7 +674,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "986fb2629ed2b50364a36952758837db453a2614bc3b93ecbe3956c7dcbcae38",
+      "sha256": "882c91620e08d12e012d107c3632239618531e19e1fa38ea27e3e3044ac20357",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
