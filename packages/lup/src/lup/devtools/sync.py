@@ -271,17 +271,32 @@ def ensure_ref_symlink(name: str, target: str) -> None:
     link is re-pointed at its current path; a pre-existing non-symlink at that
     name is left untouched so we never clobber real files.
     """
-    refs_dir().mkdir(exist_ok=True)
     link = refs_dir() / name
     target_path = Path(target).resolve()
-    if link.is_symlink():
-        if link.resolve() == target_path:
+    # A contained session holds `refs/` read-only, so a session cannot repoint
+    # what confines it -- and a link that has to move then cannot. The link is
+    # a shortcut and nothing a fetch depends on, so the sync goes on with the
+    # shortcut stale and says so, rather than aborting every command in the
+    # family before it has fetched anything.
+    try:
+        refs_dir().mkdir(exist_ok=True)
+        if link.is_symlink():
+            if link.resolve() == target_path:
+                return
+            link.unlink()
+        elif link.exists():
+            logger.warning("refs/%s exists but is not a symlink, skipping", name)
             return
-        link.unlink()
-    elif link.exists():
-        logger.warning("refs/%s exists but is not a symlink, skipping", name)
+        link.symlink_to(target_path)
+    except OSError as error:
+        logger.warning(
+            "refs/%s could not be pointed at %s (%s); the shortcut is stale and "
+            "the sync continues without it",
+            name,
+            target_path,
+            error.strerror,
+        )
         return
-    link.symlink_to(target_path)
     logger.debug("refs/%s -> %s", name, target_path)
 
 
