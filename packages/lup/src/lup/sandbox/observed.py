@@ -132,3 +132,20 @@ def leased_read_only(path: Path) -> bool:
     already failed.
     """
     return refuses_writes(str(path))
+
+
+def is_mount_point(path: Path) -> bool:
+    """Whether something is mounted at exactly this path.
+
+    Asked of the mount table rather than of :meth:`pathlib.Path.is_mount`,
+    which compares a directory's device number against its parent's and so
+    cannot see a bind mount that came from the same filesystem. Every
+    checkout a launch binds is one of those: the source is a directory on the
+    same disk, the device number is unchanged, and the standard probe reports
+    a mount point as an ordinary directory.
+
+    That case is not exotic here -- it is every worktree of a contained
+    session -- and the caller it matters to is deciding whether a removal
+    that failed at its final `rmdir` left the work done or undone.
+    """
+    return str(path) in {mount.container_path for mount in observed_topology().mounts}
