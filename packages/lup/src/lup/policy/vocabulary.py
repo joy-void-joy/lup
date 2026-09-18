@@ -1485,20 +1485,20 @@ def git_rule(
             ],
         ),
     ]
-    # A global that points git somewhere else is judged here rather than per
+    # The globals that change how git *runs* are judged here rather than per
     # subcommand, because the subcommand word is found only after these are
-    # read. A redirect left to `value_flags` alone would only advance the
-    # parser past its argument, and every verb behind it would be answered by a
-    # row reasoning about this worktree: `git -C /elsewhere commit` reads as
-    # reversible because the reflog that undoes it is *here*. The redirect is
-    # exactly what makes that premise someone else's.
+    # read: `--exec-path` names where git's own programs come from,
+    # `--super-prefix` and `--namespace` redirect what a ref means, and `-c`
+    # carries a setting, judged by its key below.
     #
-    # Only the three that name a directory are also in `value_flags`, which
-    # selects the wording of the question rather than the parse — the ask is
-    # reached before any value is skipped. Those three have a way through worth
-    # naming, because `cd there && git status` is two allowed segments.
-    # `--namespace` has none: it redirects refs rather than a path, and the
-    # environment spelling of it is a guarded assignment of its own.
+    # The three that name a directory are value flags and not guarded. They
+    # move the command to another tree, and the verb behind them is judged by
+    # its own row there exactly as `cd there && git <verb>` is judged by two
+    # allowed segments -- so a question on the redirect deterred nothing and
+    # cost a turn on every sibling worktree and every project the sync
+    # registry mounts, each addressed by absolute path. The reflog that makes
+    # a commit reversible is the other tree's, and it undoes the commit
+    # exactly as this one's would.
     #
     # `--paginate` is deliberately not among them, though it is on the list this
     # sweep was measured against. It moves no ref, no index entry, and no file:
@@ -1523,7 +1523,6 @@ def git_rule(
             "--exec-path",
             "--super-prefix",
             "--namespace",
-            *directory_flags,
         ],
         value_flags=directory_flags,
         # The two globals that set a setting, judged by the same keys the
