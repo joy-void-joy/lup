@@ -1203,6 +1203,57 @@ names a different set here.
 """
 
 
+UV_ADD_VALUE_FLAGS = (
+    "--package",
+    "--group",
+    "--optional",
+    "--extra",
+    "--index",
+    "--default-index",
+    "--index-url",
+    "--extra-index-url",
+    "--find-links",
+    "-f",
+    "--branch",
+    "--tag",
+    "--rev",
+    "--python",
+    "-p",
+    "--constraint",
+    "-c",
+    "--bounds",
+    "--script",
+    "--project",
+    "--directory",
+    "--marker",
+    "-m",
+)
+"""The `uv add` options whose next word is a value rather than a package.
+
+uv's own spellings: what a question names as installed is every other operand,
+so an option that takes a value has to be stepped over or its value is read as
+a package. A project spelling more of them names a longer set here.
+"""
+
+
+def uv_add_operands(
+    arguments: list[str], value_flags: tuple[str, ...] = UV_ADD_VALUE_FLAGS
+) -> list[str]:
+    """The packages a `uv add` names, which is what its question is about."""
+
+    def operands():
+        expecting = False
+        for word in arguments:
+            if expecting:
+                expecting = False
+            elif word in value_flags:
+                expecting = True
+            elif not word.startswith("-"):
+                yield word
+
+    return list(operands())
+
+
 def uv_package_source(
     arguments: list[str], guarded: tuple[str, ...] = UV_FOREIGN_SOURCE_FLAGS
 ) -> str | None:
@@ -1324,9 +1375,26 @@ def decide_uv(
         pinned = frozen_restore(words[2:], list(frozen), list(UV_FOREIGN_SOURCE_FLAGS))
         if pinned is not None:
             return pinned
-    if subcommand in ("add", "sync"):
+    # Named in the question: which packages `add` fetches, and that `sync`
+    # resolves the whole declaration anew, which is what the pinned spelling
+    # the recovery names does not. "Installing a package" said neither.
+    if subcommand == "add":
+        named = uv_add_operands(words[2:])
         return KernelDecision(
-            "ask", "installing a package fetches and runs its build code"
+            "ask",
+            f"uv add fetches and runs the build code of {', '.join(named)}"
+            if named
+            else f"uv add fetches and runs the build code of what it adds — `{' '.join(words)}`",
+        )
+    if subcommand == "sync":
+        return KernelDecision(
+            "ask",
+            "uv sync resolves every dependency anew and runs each package's build"
+            f" code — `{' '.join(words)}`",
+            recovery=(
+                "`uv sync --frozen` or `--locked` installs what the lockfile already"
+                " pins by hash, and is allowed."
+            ),
         )
     if subcommand in ("remove", "lock"):
         redirect = uv_package_source(words[2:])
