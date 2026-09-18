@@ -232,7 +232,6 @@ def progress_lines(entries: Sequence[CohortEntry], chars: int) -> list[ProgressL
             # either family rides the accessor its family already answers, and
             # a third family fails to type-check right here, because the
             # capture below would no longer carry `completed_message`.
-            # lup: ignore[own-model-dispatch] — separates the families, not their members
             case MailEventBase() as mail:
                 yield stamped(
                     entry, mail_kind(mail), brief(mail.text, chars), door=mail.door

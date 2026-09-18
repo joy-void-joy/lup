@@ -61,6 +61,7 @@ NARROWING_CALLS = {"isinstance", "issubclass"}
 EXHAUSTIVENESS_CALL = "assert_never"
 """The static net that only exists to catch a union gaining a member."""
 
+# lup: ignore[library-default] — typing's own spellings of a union; the value follows the language, not a project's taste
 UNION_SPELLINGS = {"typing.Union", "Union"}
 """The subscript form of "any of these", beside the ``|`` the language spells."""
 

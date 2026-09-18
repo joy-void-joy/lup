@@ -65,6 +65,13 @@ SPAN_BODY = (
     "    pass\n"
     "\n"
     "\n"
+    "class Other(BaseModel):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "type Either = Thing | Other\n"
+    "\n"
+    "\n"
     "def check(value: object) -> bool:\n"
 )
 SPAN_CALL = "    return isinstance(\n        value,\n        Thing,\n    )\n"
