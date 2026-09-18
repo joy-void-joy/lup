@@ -78,7 +78,7 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The permission policy** classifies every shell command, URL scope, and edit, naming what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on one; a leading `# lup: escalate[decision]: <why>` line promotes a deny or ask into an approval question carrying that reason, one-off — a recurring wall means widening the protected declaration.
 
-**The edit budget** auto-allows a change block of at most three "real" changed lines, so split large changes: imports in one edit, logic in another. A human-owned file surfaces every change as an approval — propose the exact edit and let the user apply it.
+**The edit budget** auto-allows a change block of at most three "real" changed lines, so split large changes: imports in one edit, logic in another. A human-owned file surfaces every change, edit or shell write, as an approval the author answers.
 
 **The drift check** refuses a hand-edit or hand-merge of a generated tree: take either side of a conflict, regenerate, and let the check confirm it settled.
 

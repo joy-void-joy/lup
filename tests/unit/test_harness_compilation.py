@@ -2965,7 +2965,9 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     filesystem = sandbox["filesystem"]
     network = sandbox["network"]
     assert isinstance(filesystem, dict) and isinstance(network, dict)
-    assert filesystem["denyWrite"] == ["README.md"]
+    # A human-owned path asks through the policy; the runtime sandbox, which
+    # can only refuse, is told nothing about it.
+    assert "denyWrite" not in filesystem
     domains = network["allowedDomains"]
     assert isinstance(domains, list)
     assert "code.claude.com" in domains

@@ -77,9 +77,6 @@
     "filesystem": {
       "allowWrite": [
         "~/.cache/uv"
-      ],
-      "denyWrite": [
-        "README.md"
       ]
     },
     "network": {

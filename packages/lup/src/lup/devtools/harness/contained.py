@@ -1562,7 +1562,6 @@ def contained_argv(
     image: Image,
     manifest: Manifest,
     root: Path,
-    human_owned: list[Path],
     host_config_home: Path | None,
     credential: Path | None,
     login: ProviderLogin,
@@ -1647,7 +1646,7 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
-    lease = lease if lease is not None else fleet_lease(root, human_owned, accessible)
+    lease = lease if lease is not None else fleet_lease(root, accessible)
     said.add(fleet_notice(accessible))
     said.add(
         pruning_notice(hold_pruning_across([root, *(item.path for item in accessible)]))
@@ -1803,7 +1802,6 @@ def worker_cli(
     image: Image,
     manifest: Manifest,
     lease_root: Path,
-    human_owned: list[Path],
     host_config_home: Path | None,
     credential: Path | None,
     login: ProviderLogin,
@@ -1856,14 +1854,13 @@ def worker_cli(
     speaks a protocol over stdin, and either other state would leave its
     runtime talking to a stream nothing reads.
     """
-    lease = worker_lease(lease_root, human_owned)
+    lease = worker_lease(lease_root)
     return written_wrapper(
         wrapper,
         contained_argv(
             image,
             manifest,
             lease_root,
-            human_owned,
             host_config_home,
             credential,
             login,

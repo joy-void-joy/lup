@@ -28,7 +28,7 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The permission policy** classifies every shell command, URL scope, and edit, naming what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on one; a leading `# lup: escalate[decision]: <why>` line promotes a deny or ask into an approval question carrying that reason, one-off — a recurring wall means widening the protected declaration.
 
-**The edit budget** auto-allows a change block of at most three "real" changed lines, so split large changes: imports in one edit, logic in another. A human-owned file surfaces every change as an approval — propose the exact edit and let the user apply it.
+**The edit budget** auto-allows a change block of at most three "real" changed lines, so split large changes: imports in one edit, logic in another. A human-owned file surfaces every change, edit or shell write, as an approval the author answers.
 
 **The drift check** refuses a hand-edit or hand-merge of a generated tree: take either side of a conflict, regenerate, and let the check confirm it settled.
 
@@ -99,7 +99,7 @@ A rule's diagnostic names the shape it refuses and not the carve-outs that are o
 
 `uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green. `lup` itself is not added that way — `dev library status` says where it is resolved from, and whether its source is on disk to edit.
 
-A leading `# lup: escalate[sandbox]: <why>` line asks to run one command with the per-call sandbox off. That is all it lifts: a launch's mounts hold for every process in the session, so a write to a read-only path — a human-owned file such as README.md — fails approved exactly as it failed unmarked, and is the user's to run from a host terminal with the exact command. Try inside first.
+A leading `# lup: escalate[sandbox]: <why>` line asks to run one command with the per-call sandbox off. That is all it lifts: a launch's mounts hold for every process in the session, so a write to a read-only path — the shared git `config` or `hooks/` — fails approved exactly as it failed unmarked, and is the user's to run from a host terminal with the exact command. Try inside first.
 
 ### lup-devtools
 
