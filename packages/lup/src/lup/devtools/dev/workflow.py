@@ -115,6 +115,8 @@ jobs:
     runs-on: {self.runner}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
