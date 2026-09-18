@@ -37,6 +37,7 @@ from lup.harness.image import Image, detected_client
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
+from lup.harness.notice import Banner
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.providers.profiles import ProfileDirectory
@@ -196,14 +197,26 @@ def create_harness_app(
         compositions = targets.resolve(target, project_root())
         # The two halves span the targets differently, because they answer
         # differently-scoped questions. What the image must carry is the
-        # image's own, so it is asked once per target; what the host must
-        # carry is the machine's, and asking it per target exercises one
-        # roster twice -- a container probe paid for twice, printed twice,
-        # with nothing on screen saying the second was the same question.
+        # image's own, and every runtime here composes against one image, so
+        # a check the first runtime exercised is not paid for again by the
+        # second: only what the second declares differently -- its own
+        # session probe -- runs, and the boundary notice is said once. What
+        # the host must carry is the machine's, asked once for all of them.
+        manifests = [
+            composition.recipe.source.requirements for composition in compositions
+        ]
+        exercised_before = [
+            {
+                signature
+                for manifest in manifests[:index]
+                for signature in manifest.inside_signatures(not launch_only)
+            }
+            for index in range(len(manifests))
+        ]
         findings = (
             [
                 finding
-                for composition in compositions
+                for index, composition in enumerate(compositions)
                 for finding in launch.report_inside_requirements(
                     composition,
                     composition.recipe.source.plugins[0],
@@ -212,6 +225,8 @@ def create_harness_app(
                     ),
                     composition.login,
                     setting_up=not launch_only,
+                    skipped=sorted(exercised_before[index]),
+                    banner=None if index == 0 else Banner(),
                 )
             ]
             if inside
