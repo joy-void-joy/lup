@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b1f300e006f1f978fafe5d4564b9c980c5c1efae358018a4b88634f27de56356",
+  "source_digest": "97fd762d3c55c2ea61f9a56e76960538190a3ccf6c3d3368d576728350b286a1",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -128,7 +128,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "6e660e928277c96a5f1818cfda071af1adf9742db203cd3fb7015927dae70249",
+      "sha256": "2b378793a57e3537095ca92312cf9e6bf460e33c5d1f7d69e3b13b42184ee9fe",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -219,7 +219,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "e1b8005afe4d2ef237745f712aefa16abbceec70eaed5af90bbe92406450fd31",
+      "sha256": "921f59ee261dea801e56495672bc7ab6fa77420d6326237a17debf762f07a409",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -247,7 +247,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "6a73dda2686b2d80bba868626f730eacbd453a3a26be4ae3c2ea57758ba509f7",
+      "sha256": "c645286f627f78ad18a768aff0c5c9308fc17cb2d6fa006657f14cd003c936d9",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -275,7 +275,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "af07b6ddda4a842f4e99d9da0e29d10aa5833264f5a829986dd904898e28a95d",
+      "sha256": "9720eb5bb72ef18823353ac6ebfc8644764868ccb982e97d4b85af55aa064533",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -443,7 +443,7 @@
     {
       "path": ".codex/plugins/lup/skills/land/SKILL.md",
       "category": "generated",
-      "sha256": "711423cb2ea46895a5b9ce921c13efd1f6fee097ab7e8823e86b7fe8162a5472",
+      "sha256": "a571f474cd79f97ccd5333304beda024b2b7ead0b004f2c5509168f384b644fc",
       "semantic_id": "skill.land",
       "executable": false
     },

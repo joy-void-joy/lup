@@ -95,6 +95,7 @@ from lup.devtools.harness.drift import (
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
+    exclude_sandbox_placeholders,
     record_preflight,
     release_ledger,
     retire_mount_table,
@@ -295,6 +296,15 @@ def ready_to_open(
     # rather than only on the way out, because the launch that crashed is
     # exactly the one that did not get to tidy up after itself.
     sweep_ledgers(project_root())
+    # The runtime sandbox's own leavings, taken out of `git status` before a
+    # session reads it: said only when something was added, because a line
+    # repeated on every launch is read on none.
+    excluded = exclude_sandbox_placeholders(project_root())
+    if excluded:
+        typer.echo(
+            f"excluded {len(excluded)} sandbox placeholder file(s) from git "
+            f"status: {', '.join(excluded)}"
+        )
     opening = LaunchOpening()
     typer.echo("checking the host")
     opening.findings = runtime_preflight(composition, sentinels, opening, contained)

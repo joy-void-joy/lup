@@ -130,6 +130,27 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        commit="625532040",
+        subjects=["refuse_a_blocked_registration"],
+        reason=(
+            "a merge-driver registration a contained session cannot make no "
+            "longer refuses the worktree: the registration is the host's "
+            "once-per-clone act, and the checkout is usable without it, so the "
+            "pre-flight reports the gap and answers whether it is blocked "
+            "instead of stopping"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call `report_a_blocked_registration` where the refusal was "
+                    "called; it returns whether the registration is blocked, "
+                    "which a caller that made the worktree conditional on it "
+                    "reads instead of catching the exit."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         commit="d0af16a1b",
         subjects=[
             "repository_worktrees",

@@ -34,7 +34,6 @@ from .effects import (
     EffectRow,
     declare,
     declared_verdict,
-    member_for,
     purpose_of,
     verdict_for,
 )
@@ -171,17 +170,6 @@ class WriteFacts(TypedDict):
     anything confines the write is the whole of the answer.
     """
 
-    worktrees: list[str]
-    """Every checkout git calls part of this repository, measured on the host.
-
-    Read by the `-C` guard below, and measured rather than derived for exactly
-    the reason that sank the first version of it: this module is pure, so the
-    only test it can make alone is a path prefix, and a prefix read every
-    absolute spelling as outside. Asked of git on the host and handed down
-    here, the question becomes one of identity, which a sibling worktree
-    answers wherever it happens to sit on disk.
-    """
-
 
 class SedContext(TypedDict):
     """Everything judging an in-place rewrite as an edit needs, in this shape.
@@ -234,7 +222,6 @@ def no_write_facts() -> WriteFacts:
         path_roles=[],
         path_rules=[],
         contained=False,
-        worktrees=[],
     )
 
 
@@ -660,93 +647,10 @@ class Subcommand(TypedDict):
     remainder: list[str]
 
 
-def redirected_verb_only_reads(
-    arguments: list[str],
-    value_flags: list[str],
-    rows: list[ShellRuleRow],
-) -> bool:
-    """Whether a directory redirect leads to a verb that only reads.
-
-    The guard on `-C` exists because the verb behind it is answered by a row
-    reasoning about *this* worktree: ``git -C /elsewhere commit`` reads as
-    reversible on the strength of a reflog that is somewhere else. That
-    premise is about mutation. A verb that only reads has no reflog in it to
-    be somebody else's, so the redirect changes which tree is read and
-    nothing about what the command does.
-
-    Where the redirect *points* is deliberately not asked, where a first
-    version required it to stay inside the checkout. The argument for asking
-    was that ``git -C /elsewhere log`` is an outside read, which a row
-    declaring one `project` scope for its verb cannot raise. What refutes it
-    is that no other spelling of the same read raises it either: ``cd
-    /elsewhere && git log`` is two allowed segments and ``cat
-    /elsewhere/file`` is an allowed read, both measured. So the question
-    deterred nothing and cost a turn every time, and its own text said as
-    much -- it named `cd` into that tree as the way through. A question
-    whose remedy is the unguarded spelling of the same act is friction
-    wearing a boundary's clothes.
-
-    Which leaves it costing most exactly where reading elsewhere is the
-    work: a sibling worktree, and a project the sync registry mounts for a
-    session to commit in. Both are addressed by absolute path, and the test
-    it used read every absolute path as outside.
-
-    The verb is judged by its own declared effects rather than by a list of
-    names kept here. A list would be a second statement of what `git log`
-    does, free to disagree with the table that already says it, and wrong
-    the first time a verb is reclassified.
-
-    Read as "observes", not as "allowed", and the difference is the whole
-    correctness of this: a commit is allowed for being reversible, so a first
-    version asking the verdict let ``git -C elsewhere commit`` through -- the
-    one case the guard was written for, and the one this still holds.
-    """
-    position = 0
-    while position < len(arguments):
-        word = arguments[position]
-        if not word.startswith("-"):
-            named = [row for row in rows if row["subcommand"] == word]
-            return bool(named) and all(
-                member_for(effect["kind"]).observes
-                for row in named
-                for effect in row["effects"]
-            )
-        position += 2 if word in value_flags else 1
-    return False
-
-
-def redirect_stays_in_this_repository(value: str, worktrees: list[str]) -> bool:
-    """Whether a directory redirect lands in a checkout of this same repository.
-
-    The `-C` guard exists because the verb behind it is answered by a row
-    reasoning about *this* worktree: `git -C /elsewhere commit` reads as
-    reversible on the strength of a reflog somewhere else. Inside this
-    repository that premise is satisfied rather than dodged -- linked worktrees
-    share one object store and one reflog, so the reversibility the row asserts
-    is the reflog that is actually there.
-
-    Compared against what git called a worktree rather than against a prefix of
-    this directory, which is the distinction the first version of this missed.
-    Worktrees of one repository sit wherever somebody put them, so a
-    containment test read every absolute spelling as outside and cost a turn on
-    exactly the case where reaching another checkout is the work.
-
-    An unresolvable or relative value answers no. A redirect this cannot settle
-    keeps its question, which is the direction that costs an approval rather
-    than a boundary.
-    """
-    if opaque_argument(value) or not posixpath.isabs(value):
-        return False
-    resolved = posixpath.normpath(value)
-    return any(resolved == worktree for worktree in worktrees)
-
-
 def split_subcommand(
     executable: str,
     arguments: list[str],
     default: ShellRuleRow | None,
-    rows: list[ShellRuleRow] = [],
-    worktrees: list[str] = [],
 ) -> Subcommand | KernelDecision:
     """Find the subcommand word, honoring global value-taking and guarded flags.
 
@@ -755,9 +659,14 @@ def split_subcommand(
     command declared it runs, and a question that dropped the placement would
     approve one thing and perform another.
 
-    A guarded global that also takes a value is one that moves the command to
-    another tree, so the question names the way through: running the same verb
-    from inside that tree is judged on its own and needs no redirect.
+    A global that only moves the command to another directory is a value flag
+    and nothing more: the parser steps over its argument and the verb behind
+    it is judged by its own row, exactly as ``cd there && git <verb>`` is
+    judged by two segments. ``git -C /elsewhere commit`` was once a question
+    on the ground that the reflog which makes a commit reversible is in the
+    other tree -- and it is, and it is that tree's reflog, which undoes the
+    commit exactly as this one's would. Every other spelling of the same act
+    was allowed, so the question deterred nothing and cost a turn each time.
 
     A guarded global whose value is a *setting* is judged by the setting, the
     way `git config` is judged by the key it writes. `git -c core.pager=x`
@@ -786,40 +695,11 @@ def split_subcommand(
             ):
                 position += named["words"]
                 continue
-            if flag_matches(word, value_flags):
-                # Asked before the question is raised rather than after it is
-                # answered, because the answer here was the whole verdict: the
-                # flag returned before the subcommand word had been read, so
-                # `git -C . log` was a question about a redirect to nowhere in
-                # front of a verb that reads. The guard stands for everything
-                # else, and the redirect it names still applies.
-                following = arguments[position + 2 :]
-                if redirected_verb_only_reads(following, value_flags, rows):
-                    position += 2
-                    continue
-                # A redirect that stays inside this repository leaves the
-                # guard's own premise intact: what it protects is a row
-                # reasoning about this worktree's reflog, and every checkout of
-                # one repository shares that reflog. The verb behind it is
-                # judged exactly as it would be here, which is what the guard
-                # was asking to be sure of.
-                if position + 1 < len(arguments) and (
-                    redirect_stays_in_this_repository(
-                        arguments[position + 1], worktrees
-                    )
-                ):
-                    position += 2
-                    continue
-            redirect = (
-                "Or cd into that tree and run it there."
-                if flag_matches(word, value_flags)
-                else ""
-            )
             return row_verdict(
                 default,
                 "ask",
-                f"{executable} global flag {word} points the command somewhere else",
-            ).advising(redirect)
+                f"{executable} global flag {word} changes how the command runs",
+            )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])
 
@@ -871,9 +751,7 @@ def decide_command_rows(
             next(row for row in matches if not row["subcommand"]), arguments, measured
         )
     default = next((row for row in matches if not row["subcommand"]), None)
-    split = split_subcommand(
-        executable, arguments, default, matches, measured["worktrees"]
-    )
+    split = split_subcommand(executable, arguments, default)
     if isinstance(split, KernelDecision):
         return split
     subword = split["word"]

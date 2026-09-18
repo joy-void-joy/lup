@@ -249,6 +249,7 @@ def test_a_launch_names_the_waits_it_spends_silent(
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "sweep_ledgers", lambda root: 0)
+    monkeypatch.setattr(launch, "exclude_sandbox_placeholders", lambda root: [])
     monkeypatch.setattr(launch, "runtime_preflight", lambda *a, **k: [])
     monkeypatch.setattr(launch, "settle_base_freshness", lambda *a, **k: None)
 
