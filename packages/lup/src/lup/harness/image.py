@@ -885,16 +885,27 @@ if [ ! -w "$config" ]; then
   exit 1
 fi
 if [ ! -f "$config/.claude.json" ]; then
-  # The checkout this container was started against is the one the operator
-  # chose when they wrote the mount and the workdir, so it is trusted here
-  # rather than enumerated at build time. Building the list from a directory
-  # listing was tried: it baked thirty-one host paths into the image, granted
-  # trust to directories that were not checkouts, and rebuilt the layer every
-  # time a worktree appeared or went.
-  jq --arg here "$PWD" \\
-     '.projects[$here] = {{"hasTrustDialogAccepted": true}}' \\
-     /opt/lup/trust-seed.json > "$config/.claude.json"
+  cp /opt/lup/trust-seed.json "$config/.claude.json"
 fi
+# The checkout this container was started against is the one the operator
+# chose when they wrote the mount and the workdir, so it is trusted here
+# rather than enumerated at build time. Building the list from a directory
+# listing was tried: it baked thirty-one host paths into the image, granted
+# trust to directories that were not checkouts, and rebuilt the layer every
+# time a worktree appeared or went. The repository the checkout belongs to
+# is trusted beside it: a linked worktree's project is its main repository
+# to the runtime, which asked for exactly that path and dropped the declared
+# permissions with a notice when the worktree alone was trusted. Merged on
+# every start rather than written once, because the document outlives the
+# image in its volume, and a runtime that moves where it looks would
+# otherwise meet a file nothing amends.
+repository=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || printf '%s' "$PWD")
+case "$repository" in */.git) repository=${{repository%/.git}} ;; esac
+jq --arg here "$PWD" --arg repository "$repository" \\
+   '.projects[$here] = ((.projects[$here] // {{}}) + {{"hasTrustDialogAccepted": true}})
+    | .projects[$repository] = ((.projects[$repository] // {{}}) + {{"hasTrustDialogAccepted": true}})' \\
+   "$config/.claude.json" > "$config/.claude.json.lup" \\
+  && mv "$config/.claude.json.lup" "$config/.claude.json"
 # A selected host login is applied once per change. Native renewal remains
 # container-private, and unrelated records in a shared credential file survive.
 if [ -n "${{LUP_CREDENTIAL_NAME:-}}" ]; then

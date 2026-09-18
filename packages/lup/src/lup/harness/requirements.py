@@ -1298,12 +1298,28 @@ class Manifest(BaseModel, frozen=True):
             for item in self.on_the_host(setting_up, contained=contained)
         ]
 
+    def inside_signatures(self, setting_up: bool = True) -> list[str]:
+        """What each image-side check asks, as one string per requirement.
+
+        The capability and the exercise as declared, before any launch aims
+        or places it. Two runtimes composed against one image declare the
+        same ``uv`` check and different session probes, and this is the
+        reading that tells those apart: the argv each runtime opens with
+        differs, so the placed exercise never compares equal, while the
+        declared one does exactly where the question is the same.
+        """
+        return [
+            f"{item.capability}\t{item.exercise.model_dump_json()}"
+            for item in self.inside_the_image(setting_up)
+        ]
+
     def check_inside(
         self,
         environment: EnvVars,
         opening: list[str],
         setting_up: bool = True,
         facts: HostFacts = HostFacts(),
+        skipped: Sequence[str] = (),
     ) -> list["Finding"]:
         """Exercise every image-side requirement inside what *opening* starts.
 
@@ -1319,12 +1335,20 @@ class Manifest(BaseModel, frozen=True):
         a container start in front of a command asking for a variable nothing
         had set. Every other shape answers ``given`` with itself, so the extra
         call costs the rest of the roster nothing.
+
+        *skipped* names, by :meth:`inside_signatures`, the checks another
+        composition over the same image already exercised. Every entry costs
+        a container start, and a second runtime asking the image whether
+        ``uv`` works is asking the same question of the same image.
         """
         return [
             item.model_copy(
                 update={"exercise": item.exercise.given(facts).behind(opening)}
             ).check(environment, location="image")
-            for item in self.inside_the_image(setting_up)
+            for item, signature in zip(
+                self.inside_the_image(setting_up), self.inside_signatures(setting_up)
+            )
+            if signature not in skipped
         ]
 
     def packages(self) -> list[Package]:

@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
 from enum import StrEnum
@@ -799,6 +799,7 @@ def verify_inside(
     sentinels: LaunchSentinels = LaunchSentinels(),
     environment: EnvVars | None = None,
     in_passing: bool = False,
+    skipped: Sequence[str] = (),
 ) -> list[Finding]:
     """Exercise the image half behind an argv somebody already assembled.
 
@@ -807,6 +808,9 @@ def verify_inside(
     proxy and may build the image, so a second call would not merely be slow
     -- it would print the whole boundary notice again, which reads as the
     launch having done it twice.
+
+    ``skipped`` is what another composition over the same image already
+    exercised, by :meth:`Manifest.inside_signatures`.
     """
     if environment is None:
         environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
@@ -822,6 +826,7 @@ def verify_inside(
                 inside_sentinel=sentinels.inside,
                 host_sentinel=sentinels.host,
             ),
+            skipped,
         ),
         in_passing,
     )
@@ -834,8 +839,15 @@ def report_inside_requirements(
     login: ProviderLogin,
     sentinels: LaunchSentinels = LaunchSentinels(),
     setting_up: bool = True,
+    skipped: Sequence[str] = (),
+    banner: Banner | None = None,
 ) -> list[Finding]:
     """Exercise the image-side requirements inside the container a session opens.
+
+    ``skipped`` and ``banner`` are for a caller asking two runtimes about one
+    image: the checks the first already exercised are not paid for again, and
+    the boundary notice the argv assembly says is collected into the banner
+    rather than printed a second time.
 
     The half of the manifest that had nowhere to run. An image requirement is
     excluded from the host roster for a good reason -- a laptop without
@@ -866,6 +878,7 @@ def report_inside_requirements(
         credential if credential.exists() else None,
         login,
         streams="captured",
+        banner=banner,
         sentinels=sentinels,
         # The same mounts and devices a session gets, for the reason this
         # probe assembles nothing of its own: a container built without the
@@ -880,7 +893,11 @@ def report_inside_requirements(
     # look for a value nothing had set and report the boundary broken on a
     # machine whose boundary was fine.
     return verify_inside(
-        harness.requirements, opening, setting_up=setting_up, sentinels=sentinels
+        harness.requirements,
+        opening,
+        setting_up=setting_up,
+        sentinels=sentinels,
+        skipped=skipped,
     )
 
 
