@@ -1525,14 +1525,21 @@ def decide_uv(
         # interpreter branch answered and returned first. Then measured
         # sitting above the refusal, which was worse:
         # `uv run --with X python -c 'code'` softened from deny to ask.
-        risky = ("--with", "--with-editable", "--with-requirements", "--env-file")
-        if any(
-            word == option or word.startswith(option + "=")
-            for word in words[2:]
+        risky = ["--with", "--with-editable", "--with-requirements", "--env-file"]
+        # Named in the question, because what is being installed is the whole
+        # of what an approver weighs: "external code" told them a source was
+        # involved and nothing about which one.
+        fetched = [
+            f"{option} {carried['value']}"
+            for position, word in enumerate(words[2:], start=2)
             for option in risky
-        ):
+            if (carried := carried_setting(word, [option], words[position + 1 :]))[
+                "value"
+            ]
+        ]
+        if fetched:
             return KernelDecision(
-                "ask", "uv run --with fetches and executes external code"
+                "ask", f"uv run fetches and runs external code: {' '.join(fetched)}"
             )
         # Above the interpreter's own allow, because `python -m examples.x`
         # reaches both and the module root is the more specific statement:
