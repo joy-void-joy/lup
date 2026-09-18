@@ -280,23 +280,24 @@ def sibling_worktrees(worktree: Path) -> list[Path]:
     return [path for path in found if path != worktree and path.is_dir()]
 
 
-def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
+def lease_for(worktree: Path) -> Lease:
     """The mounts one session needs over the repository it works in.
 
     Every checkout of this repository writable, the shared administrative
-    directory with them, and three things held read-only inside: the shared
-    `config`, the shared `hooks/`, and the paths the project declared its
-    author owns. Siblings
-    are mounted rather than left out for the reason the module docstring
-    gives -- absent, they are what `git worktree prune` deletes the
-    administrative state of -- and writable for the reason it gives beside
-    that.
+    directory with them, and two things held read-only inside: the shared
+    `config` and the shared `hooks/`. Siblings are mounted rather than left
+    out for the reason the module docstring gives -- absent, they are what
+    `git worktree prune` deletes the administrative state of -- and writable
+    for the reason it gives beside that.
 
-    ``human_owned`` are paths inside the checkout the project already
-    declared its author owns; they come back read-only here rather than being
-    listed a second time. That is the whole point of taking them: a path
-    added to that declaration becomes unwritable inside a container without
-    anybody remembering there was a second list to update.
+    A path the project declared its author owns is not among the read-only
+    mounts, and was. Held read-only, `README.md` refused the fast-forward
+    that landed a branch touching it: git replaces a file by unlinking it,
+    a mount point refuses that, and the merge was the user's from a host
+    terminal every time. What the mount was protecting is protected by the
+    policy: an edit or a shell write to a human-owned path asks, and the
+    approval is the author's answer, which a mount can neither ask for nor
+    honour.
     """
     layout = repository_layout(worktree)
     writable = [worktree, *sibling_worktrees(worktree)]
@@ -332,15 +333,10 @@ def lease_for(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
         ]
     else:
         writable.append(layout.common)
-    read_only += [
-        owned
-        for owned in (worktree / path for path in human_owned or [])
-        if owned.exists()
-    ]
     return resolved(same_path(writable), same_path(read_only))
 
 
-def worker_lease(worktree: Path, human_owned: list[Path] | None = None) -> Lease:
+def worker_lease(worktree: Path) -> Lease:
     """The mounts that confine one worker to the tree it was given.
 
     The arrangement :func:`lease_for` used to carry, at the level it is
@@ -357,13 +353,9 @@ def worker_lease(worktree: Path, human_owned: list[Path] | None = None) -> Lease
     can be created beside the others -- without which no worker can cut a
     worktree -- and those two are not carried along with it because a worker
     needs the directory to admit a new child, never that file rewritten or
-    that hook armed.
-
-    ``human_owned`` are paths inside the checkout the project already
-    declared its author owns; they come back read-only here rather than being
-    listed a second time. That is the whole point of taking them: a path
-    added to that declaration becomes unwritable inside a container without
-    anybody remembering there was a second list to update.
+    that hook armed. A human-owned path is not held either, for the reason
+    :func:`lease_for` gives: the policy asks about a write to one, and a
+    mount cannot.
     """
     layout = repository_layout(worktree)
     writable = [worktree]
@@ -404,11 +396,6 @@ def worker_lease(worktree: Path, human_owned: list[Path] | None = None) -> Lease
         ]
     else:
         writable.append(layout.common)
-    read_only += [
-        owned
-        for owned in (worktree / path for path in human_owned or [])
-        if owned.exists()
-    ]
     return resolved(same_path(writable), same_path(read_only))
 
 
@@ -467,7 +454,6 @@ def accessible_lease(root: AccessibleRoot) -> Lease:
 
 def fleet_lease(
     worktree: Path,
-    human_owned: list[Path] | None = None,
     accessible: list[AccessibleRoot] | None = None,
 ) -> Lease:
     """This worktree's lease, plus every root the project declared reachable.
@@ -483,7 +469,7 @@ def fleet_lease(
     of costing its own reachability -- which is the only thing it should
     cost.
     """
-    own = lease_for(worktree, human_owned)
+    own = lease_for(worktree)
     return merged(
         [
             own,

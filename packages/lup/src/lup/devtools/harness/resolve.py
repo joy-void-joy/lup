@@ -1696,7 +1696,6 @@ def run_resolve(
                 harness.image,
                 harness.requirements,
                 workspace,
-                plugin.hooks.human_owned_files if plugin.hooks is not None else [],
                 config_home,
                 credential if credential.exists() else None,
                 login,
