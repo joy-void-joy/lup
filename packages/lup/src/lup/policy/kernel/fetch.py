@@ -35,13 +35,23 @@ def url_matches_scope(
     )
 
 
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+SCOPES_HINT = "`dev policy --kind fetch <url>` lists the declared scopes."
+"""Where the agent reads the scope table, which the question itself never carries.
+
+The reason once listed every declared scope beside the URL -- twenty-five of
+them, four hundred characters -- so the one word that decided the question,
+the host, was the hardest to find in it. A scope table is reference: it does
+not change from one question to the next, and a line repeated on every
+occurrence is read by nobody. It is pulled from the command instead."""
+
+
 def scope_text(scope: UrlScopeRow) -> str:
     """One declared scope, spelled the way a URL it would admit is spelled.
 
-    Rendered into the reason a fetch outside every scope carries, so the
-    reviewer reads what was checked without opening the declaration: the URL
-    on one side of the sentence and each scope it missed on the other is the
-    whole comparison the classifier just made.
+    Rendered where the scope table is read on purpose -- ``dev policy`` -- so
+    the reader sees each scope the way a URL it admits is written, rather than
+    as the row's fields.
     """
     host = ("*." if scope["include_subdomains"] else "") + scope["host"]
     port = "" if scope["any_port"] or scope["port"] is None else f":{scope['port']}"
@@ -103,9 +113,7 @@ def decide_fetch(
     )
     if allowed is not None:
         return KernelDecision("allow", allowed["reason"])
-    checked = ", ".join(scope_text(scope) for scope in allowed_scopes)
-    against = f" ({checked})" if checked else " (none are declared)"
-    outside = f"{url} is outside the declared documentation scopes{against}"
+    outside = f"{url} is outside every declared fetch scope"
     if unjudged_ambient == "defer":
         return KernelDecision("defer", outside, abstention="provider_native")
-    return KernelDecision("ask", outside)
+    return KernelDecision("ask", outside, recovery=SCOPES_HINT)
