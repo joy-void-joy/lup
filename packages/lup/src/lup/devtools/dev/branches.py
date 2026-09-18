@@ -2356,6 +2356,27 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
     raise typer.Exit(1)
 
 
+def worktree_left_as_mount_point(path: str) -> bool:
+    """Whether git gave up the registration and only the directory's removal failed.
+
+    `git worktree remove` clears the checkout and unregisters it before the
+    final rmdir, and a directory that is a mount point in this session's
+    namespace -- every checkout a launch bind-mounted is one -- refuses that
+    last step alone, after everything before it succeeded. Measured on a land
+    sweep of twenty-eight branches: each first removal failed there, the entry
+    was gone and the directory empty, and the report said nothing had
+    completed. The mount is not a failure of the deletion; it is the host's
+    directory to drop once the container is gone, so the deletion carries on
+    to the branch and says what it left.
+
+    Asked of the filesystem and of git rather than read off the error's
+    words, because both facts are what the decision rests on: a mount point
+    still registered is a failure to report, and an unregistered directory
+    that is no mount point was removed outright.
+    """
+    return Path(path).is_mount() and path not in parse_worktrees().values()
+
+
 def run_deletion(plan: DeletionPlan, force: bool) -> None:
     """Carry out a plan whose preflight passed, reporting what actually ran."""
     completed: list[str] = []
@@ -2373,9 +2394,18 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
             typer.echo(f"Removed worktree: {plan.worktree}")
             completed.append("removed worktree")
         except sh.ErrorReturnCode as error:
-            abort_deletion(
-                plan, completed, f"worktree removal failed: {attributed_stderr(error)}"
+            if not worktree_left_as_mount_point(plan.worktree):
+                abort_deletion(
+                    plan,
+                    completed,
+                    f"worktree removal failed: {attributed_stderr(error)}",
+                )
+            typer.echo(
+                f"Unregistered worktree: {plan.worktree} — its directory is a "
+                "mount point of this session, so it stays, empty, for the host "
+                "to remove once the container is gone"
             )
+            completed.append("unregistered worktree")
 
     # A name origin alone carries has nothing here to delete, and asking git
     # to delete it anyway is what stopped the run before the push that was
