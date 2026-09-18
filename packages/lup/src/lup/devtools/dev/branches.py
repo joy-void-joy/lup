@@ -26,6 +26,7 @@ from lup.devtools.dev.remote_auth import (
     origin_auth_complaint,
     remote_auth_refusal,
 )
+from lup.sandbox.observed import is_mount_point
 from lup.resolver.models import HeldLease
 from lup.resolver.state import live_lease_branches
 from lup.types import StringMap
@@ -2330,16 +2331,17 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
     repair, and the caller cannot be expected to know that.
 
     Prune, removal, and the branch deletion itself all take the config lock,
-    so all three fail alike where the sandbox holds it — and there the repair
-    is not a repair, because the prune it prescribes fails the same way. The
-    mount state is what says which of the two failures this is.
+    so all three fail alike where the sandbox holds it, and there the repair
+    is not a repair. That is reported by attempting the prune and letting its
+    own failure carry the diagnosis, rather than by reading the lock first:
+    the admin directories of a contained session are unwritable for the whole
+    session, so a diagnosis conditioned on them alone explains every failure
+    equally, including the ones it has nothing to do with — and it stood
+    where the repair would otherwise have run.
     """
     typer.echo(f"Failed to delete {plan.branch}: {failure}", err=True)
 
-    diagnosis = config_lock_diagnosis()
-    if diagnosis:
-        typer.echo(diagnosis, err=True)
-    elif plan.worktree is not None and not Path(plan.worktree).exists():
+    if plan.worktree is not None and not Path(plan.worktree).exists():
         try:
             git("worktree", "prune")
             typer.echo(
@@ -2351,6 +2353,9 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
                 f"Recover with `git worktree prune`: {decode_stderr(error)}",
                 err=True,
             )
+            diagnosis = config_lock_diagnosis()
+            if diagnosis:
+                typer.echo(diagnosis, err=True)
 
     typer.echo(f"Completed first: {', '.join(completed) or 'nothing'}", err=True)
     raise typer.Exit(1)
@@ -2369,12 +2374,18 @@ def worktree_left_as_mount_point(path: str) -> bool:
     directory to drop once the container is gone, so the deletion carries on
     to the branch and says what it left.
 
-    Asked of the filesystem and of git rather than read off the error's
+    Asked of the mount table and of git rather than read off the error's
     words, because both facts are what the decision rests on: a mount point
     still registered is a failure to report, and an unregistered directory
     that is no mount point was removed outright.
+
+    The mount half goes through :func:`~lup.sandbox.observed.is_mount_point`
+    rather than :meth:`pathlib.Path.is_mount`, which answers by device number
+    and so cannot see the same-filesystem bind every launch makes. Under that
+    probe this returned false for the very sweep the paragraph above measured,
+    and the branch it guards was never taken.
     """
-    return Path(path).is_mount() and path not in parse_worktrees().values()
+    return is_mount_point(Path(path)) and path not in parse_worktrees().values()
 
 
 def run_deletion(plan: DeletionPlan, force: bool) -> None:
@@ -2395,6 +2406,13 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
             completed.append("removed worktree")
         except sh.ErrorReturnCode as error:
             if not worktree_left_as_mount_point(plan.worktree):
+                # `git worktree remove` unregisters before its final rmdir, so
+                # the entry can be gone even where the failure is real. Read
+                # what happened rather than what was attempted: a report of
+                # "nothing" sends the next run looking for an entry git no
+                # longer holds.
+                if plan.worktree not in parse_worktrees().values():
+                    completed.append("unregistered worktree")
                 abort_deletion(
                     plan,
                     completed,
