@@ -1,22 +1,19 @@
-"""What `git -C` costs, and what it should not.
+"""What `git -C` costs: nothing, because the verb behind it is what is judged.
 
-The guard exists because the verb behind the flag is answered by a row
-reasoning about *this* worktree: `git -C /elsewhere commit` reads as
-reversible on the strength of a reflog that is somewhere else. That is a
-statement about mutation, and it was enforced before the subcommand word had
-been read at all -- so `git -C . log` was a question about a redirect to
-nowhere in front of a verb that reads, and the guidance telling tests to bind
-git with `git -C <tmp>` collided with a policy that asked every time.
+A directory redirect moves the command to another tree and changes nothing
+about what the command does there. `cd there && git <verb>` has always been
+two segments judged on their own, and a question on the `-C` spelling of the
+same act deterred nothing -- its own recovery text named the `cd` spelling as
+the way through. It cost a turn on every sibling worktree, every project the
+sync registry mounts, and every relative or variable-carried path, thirty-five
+times in one checkout's question log.
 
-One condition, where there were two: the verb has to *observe*. The second
-asked that the directory be one this checkout covers, on the ground that a
-read of another tree is the placement question `reads_path` asks at its
-`outside` scope and a row declaring one `project` scope cannot raise it.
-What retired it is that no other spelling raises it either -- `cd /elsewhere
-&& git log` is two allowed segments and `cat /elsewhere/file` is an allowed
-read, both asserted below -- so the question deterred nothing and cost a
-turn on every sibling worktree and every project the sync registry mounts,
-each of which is named by absolute path.
+The argument the guard rested on was that a commit's reversibility belongs to
+the reflog of the tree it runs in. It does, and that reflog is exactly as
+present in the other tree: the redirect makes it that tree's reflog, not
+nobody's. So the verb's own row answers -- a commit allows, a merge asks, a
+push with a deleted ref asks -- wherever the flag points and however the path
+is spelled.
 """
 
 from lup.policy.kernel.decision import KernelDecision
@@ -38,53 +35,60 @@ def verdict(command: str) -> KernelDecision:
 
 
 def test_a_redirect_in_front_of_a_read_costs_nothing() -> None:
-    """The reported friction, in the three spellings it arrived in."""
     for command in (
         "git -C . log",
-        "git -C packages/lup log",
         "git -C packages/lup status",
-        "git -C packages/lup diff",
-    ):
-        assert verdict(command).effect == "allow", command
-
-
-def test_a_redirect_in_front_of_a_mutation_still_asks() -> None:
-    """What the guard was written for, and what a first fix let through.
-
-    Asking the verb's *verdict* rather than whether it observes allowed
-    `git -C elsewhere commit`: a commit is allowed for being reversible, and
-    the whole premise of the guard is that its reversibility belongs to the
-    tree it runs in.
-    """
-    for command in (
-        "git -C packages/lup commit -m x",
-        "git -C packages/lup push",
-        "git -C packages/lup reset --hard",
-    ):
-        settled = verdict(command)
-        assert settled.effect == "ask", command
-        assert "-C" in settled.reason, command
-
-
-def test_a_read_of_a_tree_outside_the_checkout_costs_nothing_either() -> None:
-    """Where the redirect earns its keep, and where the guard cost the most.
-
-    A sibling worktree and a mounted project are both addressed by absolute
-    path, and both are read constantly. The spelling that asked was the only
-    one: the two below make the identical read and are allowed, which is
-    what leaves the question with nothing to deter.
-    """
-    for command in (
         "git -C /etc/somerepo log",
         "git -C ../sibling status",
         "git -C /home/other/project diff",
     ):
         assert verdict(command).effect == "allow", command
 
-    assert verdict("cd /etc/somerepo && git log").effect == "allow"
-    assert verdict("cat /etc/somerepo/README.md").effect == "allow"
+
+def test_a_redirect_in_front_of_a_reversible_mutation_costs_nothing_either() -> None:
+    """The case the guard was written for, and the one `cd` never asked about.
+
+    Every spelling of the path, because the retired guard let an absolute
+    path through only where the host had measured it as a sibling and asked
+    about a relative one, a variable, and any other repository -- which is
+    where reaching another checkout is the work.
+    """
+    for command in (
+        "git -C packages/lup commit -m x",
+        "git -C . commit -m x",
+        "git -C ../sibling commit -m x",
+        'git -C "$W" add -A',
+        "git -C /tmp/elsewhere commit -m x",
+        "git --git-dir /tmp/elsewhere/.git status",
+        "git --work-tree /tmp/elsewhere add -A",
+    ):
+        assert verdict(command).effect == "allow", command
+
+    assert verdict("cd /tmp/elsewhere && git commit -m x").effect == "allow"
 
 
-def test_the_redirect_is_still_named_in_the_way_through() -> None:
-    """`cd there && git commit` is two allowed segments, and the agent is told."""
-    assert "cd into that tree" in verdict("git -C ../other commit -m x").recovery
+def test_the_verb_behind_the_redirect_is_still_judged() -> None:
+    """Stepping aside hands the question on rather than answering it.
+
+    A merge asks for its own reason -- it puts work on a branch other people
+    build on -- and a push that deletes a remote ref asks for its own, and
+    neither reason changes with the checkout the verb runs in.
+    """
+    merged = verdict("git -C ../sibling merge topic")
+    assert merged.effect == "ask"
+    assert "merg" in merged.reason
+
+    assert verdict("git -C ../sibling push --delete origin topic").effect == "ask"
+    assert verdict("git -C ../sibling reset --hard").effect == "ask"
+
+
+def test_a_global_that_changes_how_git_runs_still_asks() -> None:
+    """The globals that stay guarded: they name a program or move a ref."""
+    for command in (
+        "git --exec-path=/tmp/x status",
+        "git --namespace=other log",
+        "git -c core.pager=less log",
+    ):
+        settled = verdict(command)
+        assert settled.effect == "ask", command
+        assert "global flag" in settled.reason, command
