@@ -387,11 +387,21 @@ class UnleasedWrite(SettlementRule):
         ]
         if not reported or facts.decision.effect not in ("allow", "defer"):
             return None
+        # The write leads. The verdict this replaces said "every segment is
+        # declared safe", which is true and beside the point: what the
+        # approver decides on is the path, so the path is the first thing
+        # read. A deferral's own reason stays, since "nobody judged this"
+        # is a second fact the same approval answers.
+        written = (
+            f"writes {', '.join(reported)}, which this launch did not mount"
+            " writable and nothing captured"
+        )
         return facts.decision.revised(
             effect="ask",
             reason=(
-                f"{facts.decision.reason}; it writes to {', '.join(reported)},"
-                " which this launch did not mount writable and nothing captured"
+                written
+                if facts.decision.effect == "allow"
+                else f"{facts.decision.reason}; {written}"
             ),
             purpose="unrecovered_local_mutation",
             # Named, because the verdict this replaces was reached by the
@@ -435,11 +445,13 @@ class DisplacedWrite(SettlementRule):
         spelled = ", ".join(
             f"{row['path']} → {row['lands']}" for row in facts.displaced
         )
+        written = f"writes through a symlink that lands elsewhere: {spelled}"
         return facts.decision.revised(
             effect="ask",
             reason=(
-                f"{facts.decision.reason}; it writes through a symlink that"
-                f" lands elsewhere: {spelled}"
+                written
+                if facts.decision.effect == "allow"
+                else f"{facts.decision.reason}; {written}"
             ),
             purpose="unrecovered_local_mutation",
             rule=self.id,

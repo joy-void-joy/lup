@@ -3516,17 +3516,17 @@ def path_rule_matches(path: str, path_exists: bool, row: PathRuleRow) -> bool:
 def protected_path_reason(path: str, matched: PathRuleRow) -> str:
     """One protected-path question, naming the path and the rule it tripped.
 
-    The row's reason states the category; the path and the pattern are what
-    the evaluator matched on, and a reviewer answering from the reason alone
-    needs all three to know what they are approving. Beside
-    :func:`path_rule_matches` so the words a question uses and the match that
-    raised it come from one module, for the edit gate and the shell path
-    alike.
+    The row's reason states the category and the path is what tripped it; the
+    pattern is named only where it differs from the path, since a reviewer
+    told that ``README.md`` matched the rule ``README.md`` learned nothing
+    from the second mention. Beside :func:`path_rule_matches` so the words a
+    question uses and the match that raised it come from one module, for the
+    edit gate and the shell path alike.
     """
-    return (
-        f"{path} matches the protected-path rule {matched['value']!r}:"
-        f" {matched['reason']}"
-    )
+    reason = matched["reason"]
+    if path == matched["value"]:
+        return reason if path in reason else f"{path}: {reason}"
+    return f"{path} is under {matched['value']}: {reason}"
 
 
 PACKAGE_MARKER_FILES = ("__init__.py",)

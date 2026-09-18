@@ -624,6 +624,24 @@ The guidance spells both; this is what each one does.
 Each rule id is shown in the deny message that cites it, and indexed in
 [rules.md](rules.md).
 
+## What a question says
+
+A verdict carries two texts for two readers, and the contract is that
+neither borrows from the other. The `reason` is read by whoever approves,
+who answers yes or no and can act on nothing else, so it is one sentence of
+at most two hundred characters that leads with the operands the decision
+turns on — the packages a `--with` installs, the path a write lands on, the
+host a fetch reaches — and states the one fact that stopped it. A compound
+command that trips several rules lists each survivor after the first, one
+per line, because the answer is one decision over the whole operation. The
+`recovery` is read by the agent, on a refusal or a question nobody can be
+shown, and says what to change; it is where every instruction goes, and an
+instruction found in a reason is a defect
+`packages/lup/tests/unit/test_reason_voice.py` refuses. Neither carries
+reference. A scope table, a rule index, the marker grammar: each is the same
+on every occurrence and read on none, so a question names where it is
+pulled from — `dev policy`, this page — rather than repeating it.
+
 ## Asking before spending a turn on it
 
 A denial is the ordinary way to learn a verdict, and it costs a turn. Three
@@ -632,6 +650,7 @@ rather than a reading of this page:
 
 ```bash
 uv run lup-devtools dev policy '<the command as you would run it>'
+uv run lup-devtools dev policy --kind fetch '<the URL>'
 uv run lup-devtools dev vocabulary --provenance
 uv run lup-devtools dev hooks sweep
 ```
@@ -639,7 +658,9 @@ uv run lup-devtools dev hooks sweep
 `dev policy` prints the decision and the sentence explaining it — the same
 sentence the hook would have shown — for a shell command, and takes the same
 lattice through the same segments, so a pipeline or a `$(...)` answers as it
-actually would. `dev vocabulary` prints every shell form the vocabulary
+actually would. With `--kind fetch` it reads a URL against the declared
+scopes and lists every one of them beneath the verdict, which is where the
+question a fetch outside them raises sends its reader. `dev vocabulary` prints every shell form the vocabulary
 judges and where each rule came from, which is the one to reach for when the
 question is "what *would* be allowed here" rather than "is this".
 

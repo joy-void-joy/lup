@@ -20,10 +20,16 @@ import typer
 from pydantic import AnyHttpUrl, BaseModel
 
 from lup.devtools.utils import output_json
-from lup.harness.enforcement import measured_containment, semantic_policy_for
+from lup.harness.enforcement import (
+    declared_scope,
+    measured_containment,
+    semantic_policy_for,
+)
 from lup.harness.models import HookSet
+from lup.policy.kernel.fetch import scope_text
 from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import EditBatch, EditChange, FetchUrl, ShellCommand
+from lup.policy.rules import url_scope_row
 from lup.policy.shell_rules import ShellCommandRule
 from lup.policy.survey import classify_forms, survey_shell_rules
 from lup.types import StringMap
@@ -76,6 +82,12 @@ class PolicyVerdict(BaseModel, frozen=True):
     readings: list[PolicyReading]
     assumed: list[str] = []
     """Session facts every reading supplied itself, where they could move one."""
+    declared: list[str] = []
+    """The fetch scopes a URL was read against, spelled as URLs they admit.
+
+    Reference rather than verdict, and this is where reference is pulled from:
+    the question a fetch outside every scope raises names the URL and nothing
+    else, because a table repeated on every occurrence is read by nobody."""
 
     def settled(self) -> bool:
         """Whether placement changes nothing here, so one line says it all."""
@@ -189,7 +201,23 @@ def verdict_for(
             for placement in placements
         ],
         assumed=unresolved_facts(subject, kind),
+        declared=declared_scopes(kind, hooks),
     )
+
+
+def declared_scopes(kind: str, hooks: HookSet) -> list[str]:
+    """Every fetch scope the declaration admits, for the one kind judged by them.
+
+    Read off the same composition the verdict was read from, so the list a
+    reader is shown is the list the classifier consulted rather than a second
+    reading of the declaration.
+    """
+    if kind != "fetch":
+        return []
+    return [
+        scope_text(url_scope_row(declared_scope(scope)))
+        for scope in hooks.allowed_fetch
+    ]
 
 
 def chosen_placements(
@@ -244,6 +272,8 @@ def explain(
             typer.echo(f"       {label}{reading.reason}")
         for assumed in verdict.assumed:
             typer.echo(f"       assuming {assumed}")
+        for scope in verdict.declared:
+            typer.echo(f"       scope {scope}")
     if not any(verdict.allows_anywhere() for verdict in verdicts):
         raise typer.Exit(1)
 
