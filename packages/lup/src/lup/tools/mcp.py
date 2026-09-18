@@ -188,7 +188,7 @@ def relay_recursive_agent_to_mcp(
 ) -> McpServerEntry:
     """Forward a session's remaining allowance into a stdio tool process."""
     match server:
-        case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam arm
+        case LupMcpServerConfig():
             return server
         case {"command": str(command)}:
             relayed = RawStdioServerConfig(
@@ -326,7 +326,7 @@ def server_tool_names(server: McpServerEntry) -> list[str]:
     introspected without connecting, so they yield an empty list.
     """
     match server:
-        case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam arm
+        case LupMcpServerConfig():
             return list(server.tool_names)
         case _:
             return []

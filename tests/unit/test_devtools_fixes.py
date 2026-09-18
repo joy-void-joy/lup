@@ -564,8 +564,11 @@ class TestTheAntiPatternSweepIsScopedToWhatATreeChanged:
     ) -> None:
         work = tmp_path / "repo"
         git = initialized_repo(work, tmp_path / "no-hooks")
+        # A variant with a sibling, which is what the rule dispatches over: a
+        # lone model is one type, and a branch on it goes stale for nobody.
         (work / "models.py").write_text(
-            "from pydantic import BaseModel\n\nclass Entry(BaseModel):\n    pass\n",
+            "from pydantic import BaseModel\n\nclass Kind(BaseModel):\n    pass\n"
+            "\nclass Entry(Kind):\n    pass\n\nclass Other(Kind):\n    pass\n",
             encoding="utf-8",
         )
         (work / "adapter.py").write_text(
