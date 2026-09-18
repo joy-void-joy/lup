@@ -604,6 +604,153 @@ def record_deferral(
     return entry
 
 
+def approvals_log(root: Path) -> Path:
+    """Where the answers a question received are remembered, beside the checkout.
+
+    Append-only, for the reason the question relay is: the failure this
+    survives is a crash between two writes, and a file rewritten in place has
+    a window where it is neither the old record nor the new one. The latest
+    line for a fingerprint is its state, so forgetting is one more line rather
+    than an erasure. A function rather than a constant because the compiled
+    dispatcher carries this half's functions and nothing beside them.
+    """
+    return root / ".lup/hooks/approvals.jsonl"
+
+
+def approval_fingerprint(kind: str, subject: str, root: Path | None) -> str:
+    """One exact call as the memory keys it: what it does, and from where.
+
+    The kind and the text are the whole of what was judged -- a command, a
+    URL -- and the checkout it runs from is the third term, because the same
+    command means something else in another tree. What is deliberately left
+    out is the session: an answer is the author's, and the author is the same
+    person in the next session.
+    """
+    material = json.dumps([kind, subject, str(root) if root else ""], sort_keys=True)
+    return sha256(material.encode()).hexdigest()
+
+
+def approval_subject(
+    tool: str, tool_input: dict
+) -> dict[Literal["kind", "text"], str] | None:
+    """What one call did, as the memory keys it, for the tools it remembers.
+
+    A shell command and a fetch, under either runtime's name for them. An
+    edit is left out on purpose: its exact call includes the document it
+    replaces, which its first application changed, so a repeat is never the
+    same call and a memory of it would answer nothing.
+    """
+    if tool == "Bash" and "command" in tool_input:
+        return {"kind": "shell", "text": str(tool_input["command"])}
+    if tool in ("WebFetch", "web_fetch") and "url" in tool_input:
+        return {"kind": "fetch", "text": str(tool_input["url"])}
+    return None
+
+
+def approval_states(root: Path | None) -> dict[str, dict]:
+    """The latest line per fingerprint, which is that call's standing."""
+    if root is None:
+        return {}
+    path = approvals_log(root)
+
+    def entries():
+        try:
+            lines = (
+                path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+            )
+        except OSError:
+            return
+        for line in lines:
+            try:
+                held = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(held, dict) and "fingerprint" in held and "state" in held:
+                yield held
+
+    return {str(held["fingerprint"]): held for held in entries()}
+
+
+def noted_approval(root: Path | None, entry: dict) -> bool:
+    """Append one line, silent about a checkout that cannot be written."""
+    if root is None:
+        return False
+    path = approvals_log(root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as sink:
+            sink.write(json.dumps(entry, sort_keys=True) + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def remembered_approval(root: Path | None, fingerprint: str) -> str:
+    """When this exact call was answered yes, or ``""`` where it never was.
+
+    Forgetting is a later line, so a call retired with `dev hooks forget`
+    answers as one nobody ever approved.
+    """
+    latest = approval_states(root)
+    if fingerprint not in latest or latest[fingerprint]["state"] != "approved":
+        return ""
+    return str(latest[fingerprint]["at"])
+
+
+def note_asked(root: Path | None, fingerprint: str, kind: str, subject: str) -> None:
+    """Write down that this call was put to somebody, once per standing.
+
+    What makes the later observation an answer: a call that ran without ever
+    having been asked about was permitted by a rule, and remembering it would
+    be remembering nothing anybody decided.
+    """
+    latest = approval_states(root)
+    if fingerprint in latest and latest[fingerprint]["state"] == "asked":
+        return
+    noted_approval(
+        root,
+        {
+            "fingerprint": fingerprint,
+            "state": "asked",
+            "kind": kind,
+            "subject": subject,
+            "cwd": str(root) if root else "",
+            "at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def note_ran(root: Path | None, fingerprint: str) -> str:
+    """A call that was asked about and then ran was answered yes: remember it.
+
+    The runtime exposes the answer to no hook, so the answer is read off the
+    two events a hook does see. Only a standing question becomes an approval:
+    a call already remembered stays as it was, and one never asked about is
+    left alone.
+    """
+    latest = approval_states(root)
+    if fingerprint not in latest or latest[fingerprint]["state"] != "asked":
+        return ""
+    when = datetime.now(UTC).isoformat()
+    noted_approval(root, {**latest[fingerprint], "state": "approved", "at": when})
+    return when
+
+
+def forget_approval(root: Path | None, fingerprint: str) -> bool:
+    """Retire one remembered approval, so the next identical call asks again."""
+    latest = approval_states(root)
+    if fingerprint not in latest or latest[fingerprint]["state"] != "approved":
+        return False
+    return noted_approval(
+        root,
+        {
+            **latest[fingerprint],
+            "state": "forgotten",
+            "at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
 def managed_script_roots(root: Path | None) -> list[str]:
     """Name the package roots a runtime installed and therefore trusts.
 
@@ -2506,6 +2653,11 @@ def bash_decision(
         verdict.effect
     ):
         verdict = authored
+    # Before the relay, because a question the author already answered for
+    # this exact call is not a question, and parking it would hand the queue
+    # one nobody needs to answer.
+    if verdict.effect == "ask":
+        verdict = remembered_or_asked(verdict, cwd, "shell", command)
     # Parked before anything is rendered, because the relay is the durable
     # record every final ask is written to and the provider's own prompt is
     # that record's renderer rather than a second authority. Written here, at
@@ -2576,12 +2728,39 @@ def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
     surfaces. Read here rather than passed, because this entry point is what
     a dispatcher calls and a dispatcher holds nothing but the call.
     """
-    return decide_fetch(
+    verdict = decide_fetch(
         url,
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
         "defer" if defers_unjudged(measured_boundary(root)) else "ask",
     )
+    if verdict.effect != "ask":
+        return verdict
+    return remembered_or_asked(verdict, root, "fetch", url)
+
+
+def remembered_or_asked(
+    verdict: KernelDecision, root: Path | None, kind: str, subject: str
+) -> KernelDecision:
+    """The author's earlier answer to this exact call, or the question written down.
+
+    A question answered yes once is answered the same way for the same call
+    from the same checkout. The runtime's prompt exposes its answer to no
+    hook, so the memory is read off the two events a hook does see: the call
+    was asked about, and then it ran. Exact, never a prefix -- `git push
+    --delete origin topic` approved once approves that line and nothing else,
+    and the same line from another checkout is another call. Listed by `dev
+    hooks approvals`, retired by `dev hooks forget`; a refusal is never
+    remembered, because only a question can be answered.
+    """
+    fingerprint = approval_fingerprint(kind, subject, root)
+    approved = remembered_approval(root, fingerprint)
+    if approved:
+        return verdict.revised(
+            effect="allow", reason=f"approved {approved[:10]}: {verdict.reason}"
+        )
+    note_asked(root, fingerprint, kind, subject)
+    return verdict
 
 
 def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:
@@ -3296,6 +3475,22 @@ def queued_review(payload, decision):
     )
 
 
+def remembered_run(payload):
+    """A call that was asked about and then ran was answered yes: write it down.
+
+    The same reading the Claude half makes, off the same two events: read
+    from the input the tool actually ran with, so a call somebody changed on
+    the way through is a different call and approves nothing.
+    """
+    name = payload["tool_name"] if "tool_name" in payload else ""
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    subject = approval_subject(name, tool_input)
+    if subject is None:
+        return
+    root = Path(payload["cwd"]) if "cwd" in payload else None
+    note_ran(root, approval_fingerprint(subject["kind"], subject["text"], root))
+
+
 def observe(payload):
     """Record which checkout an edit landed in, and decide nothing.
 
@@ -3346,6 +3541,7 @@ def main():
         # a call that already happened.
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
+            remembered_run(payload)
             found = observe(payload)
             # Codex receives post-tool findings through stderr and exit 2.
             # A clean result needs no feedback.

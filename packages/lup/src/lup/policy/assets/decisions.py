@@ -24,8 +24,11 @@ against the workspace.
 from pathlib import Path
 
 from host import (
+    approval_fingerprint,
     contained,
     defers_unjudged,
+    note_asked,
+    remembered_approval,
     delivers,
     measured_boundary,
     unleased_write_targets,
@@ -295,6 +298,11 @@ def bash_decision(
         verdict.effect
     ):
         verdict = authored
+    # Before the relay, because a question the author already answered for
+    # this exact call is not a question, and parking it would hand the queue
+    # one nobody needs to answer.
+    if verdict.effect == "ask":
+        verdict = remembered_or_asked(verdict, cwd, "shell", command)
     # Parked before anything is rendered, because the relay is the durable
     # record every final ask is written to and the provider's own prompt is
     # that record's renderer rather than a second authority. Written here, at
@@ -365,12 +373,39 @@ def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
     surfaces. Read here rather than passed, because this entry point is what
     a dispatcher calls and a dispatcher holds nothing but the call.
     """
-    return decide_fetch(
+    verdict = decide_fetch(
         url,
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
         "defer" if defers_unjudged(measured_boundary(root)) else "ask",
     )
+    if verdict.effect != "ask":
+        return verdict
+    return remembered_or_asked(verdict, root, "fetch", url)
+
+
+def remembered_or_asked(
+    verdict: KernelDecision, root: Path | None, kind: str, subject: str
+) -> KernelDecision:
+    """The author's earlier answer to this exact call, or the question written down.
+
+    A question answered yes once is answered the same way for the same call
+    from the same checkout. The runtime's prompt exposes its answer to no
+    hook, so the memory is read off the two events a hook does see: the call
+    was asked about, and then it ran. Exact, never a prefix -- `git push
+    --delete origin topic` approved once approves that line and nothing else,
+    and the same line from another checkout is another call. Listed by `dev
+    hooks approvals`, retired by `dev hooks forget`; a refusal is never
+    remembered, because only a question can be answered.
+    """
+    fingerprint = approval_fingerprint(kind, subject, root)
+    approved = remembered_approval(root, fingerprint)
+    if approved:
+        return verdict.revised(
+            effect="allow", reason=f"approved {approved[:10]}: {verdict.reason}"
+        )
+    note_asked(root, fingerprint, kind, subject)
+    return verdict
 
 
 def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:

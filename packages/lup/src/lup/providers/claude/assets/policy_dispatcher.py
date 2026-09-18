@@ -47,8 +47,11 @@ from decisions import (
     written_review,
 )
 from host import (
+    approval_fingerprint,
+    approval_subject,
     declared_identity,
     file_diagnostics,
+    note_ran,
     publish_edition,
     read_document,
     record_hook_evidence,
@@ -429,6 +432,22 @@ def rendered(decision, payload, placed, attached):
     )
 
 
+def remembered_run(payload):
+    """A call that was asked about and then ran was answered yes: write it down.
+
+    Read off the input the tool actually ran with rather than the one that
+    was judged, so a call somebody changed on the way through is a different
+    call and approves nothing.
+    """
+    name = payload["tool_name"] if "tool_name" in payload else ""
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    subject = approval_subject(name, tool_input)
+    if subject is None:
+        return
+    root = session_root(payload)
+    note_ran(root, approval_fingerprint(subject["kind"], subject["text"], root))
+
+
 def observe(payload):
     """Record where a write landed and read it, deciding nothing.
 
@@ -482,6 +501,7 @@ def main():
         # nothing left to permit, and the conservative ask below would be an
         # approval prompt for work already done.
         if event == "PostToolUse":
+            remembered_run(payload)
             found = observe(payload)
             # Structured feedback reaches the agent beside the completed tool.
             # A file diagnostic is a successful check, so it exits normally.

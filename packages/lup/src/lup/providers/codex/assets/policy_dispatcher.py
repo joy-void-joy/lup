@@ -44,7 +44,10 @@ from decisions import (
     written_review,
 )
 from host import (
+    approval_fingerprint,
+    approval_subject,
     declared_identity,
+    note_ran,
     publish_edition,
     read_document,
     record_hook_evidence,
@@ -303,6 +306,22 @@ def queued_review(payload, decision):
     )
 
 
+def remembered_run(payload):
+    """A call that was asked about and then ran was answered yes: write it down.
+
+    The same reading the Claude half makes, off the same two events: read
+    from the input the tool actually ran with, so a call somebody changed on
+    the way through is a different call and approves nothing.
+    """
+    name = payload["tool_name"] if "tool_name" in payload else ""
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    subject = approval_subject(name, tool_input)
+    if subject is None:
+        return
+    root = Path(payload["cwd"]) if "cwd" in payload else None
+    note_ran(root, approval_fingerprint(subject["kind"], subject["text"], root))
+
+
 def observe(payload):
     """Record which checkout an edit landed in, and decide nothing.
 
@@ -353,6 +372,7 @@ def main():
         # a call that already happened.
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
+            remembered_run(payload)
             found = observe(payload)
             # Codex receives post-tool findings through stderr and exit 2.
             # A clean result needs no feedback.
