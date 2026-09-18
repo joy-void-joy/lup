@@ -51,6 +51,27 @@ def test_a_requirements_file_and_an_env_file_are_named_the_same_way() -> None:
     assert asked.reason.endswith("--with-requirements r.txt --env-file .env")
 
 
+def test_a_uv_add_question_names_the_packages_past_the_valued_flags() -> None:
+    """`--package lup` names where the dependency goes, not what it is."""
+    asked = verdict('uv add --package lup "mcp>=2.1.1,<3" jinja2 --dev')
+
+    assert asked.effect == "ask"
+    assert (
+        asked.reason
+        == "uv add fetches and runs the build code of mcp>=2.1.1,<3, jinja2"
+    )
+
+
+def test_a_uv_sync_question_says_it_resolves_anew_and_names_the_pinned_route() -> None:
+    asked = verdict("uv sync --all-extras")
+
+    assert asked.effect == "ask"
+    assert asked.reason.startswith("uv sync resolves every dependency anew")
+    assert asked.reason.endswith("— `uv sync --all-extras`")
+    assert "--frozen" in asked.recovery
+    assert verdict("uv sync --frozen").effect == "allow"
+
+
 def test_a_path_rule_whose_reason_names_the_path_is_not_named_twice() -> None:
     """`README.md matches the rule README.md: README.md is ...` said it three times."""
     stated = protected_path_reason(
