@@ -642,6 +642,24 @@ reference. A scope table, a rule index, the marker grammar: each is the same
 on every occurrence and read on none, so a question names where it is
 pulled from — `dev policy`, this page — rather than repeating it.
 
+## An answer is remembered
+
+A question the author answered yes to is not asked again for the same exact
+call: the same command or URL, from the same checkout. The runtime's prompt
+exposes its answer to no hook, so the memory is read off the two events a
+hook does see — the call was asked about, and then it ran — and it is keyed
+on the input the tool actually ran with, so a call changed on the way
+through is a different call. Exact, never a prefix: `git push --delete
+origin topic` approved once approves that line and nothing else, and the
+same line from another checkout is another call. An edit is not remembered,
+because its exact call includes the document it replaces, which the first
+application changed. A refusal is never remembered, since only a question can
+be answered. The memory is `.lup/hooks/approvals.jsonl` beside the checkout;
+`dev hooks approvals` lists it, and `dev hooks forget <prefix or exact
+call>` retires one, after which the next identical call asks again. `dev
+policy` reads the declaration and not this memory, and says so under a
+question.
+
 ## Asking before spending a turn on it
 
 A denial is the ordinary way to learn a verdict, and it costs a turn. Three

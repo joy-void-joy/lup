@@ -274,6 +274,13 @@ def explain(
             typer.echo(f"       assuming {assumed}")
         for scope in verdict.declared:
             typer.echo(f"       scope {scope}")
+        # The declaration's answer, which a remembered approval overrides in
+        # a session: said only under a question, since it moves nothing else.
+        if any(reading.effect == "ask" for reading in shown):
+            typer.echo(
+                "       unless this exact call was answered yes before"
+                " (`dev hooks approvals`)"
+            )
     if not any(verdict.allows_anywhere() for verdict in verdicts):
         raise typer.Exit(1)
 
