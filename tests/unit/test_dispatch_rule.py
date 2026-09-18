@@ -24,6 +24,26 @@ class Part(BaseModel):
 
 class TextPart(Part):
     text: str
+
+
+class ImagePart(Part):
+    url: str
+
+
+class Capability(BaseModel):
+    name: str
+    built: bool = True
+
+
+class Shown(BaseModel):
+    text: str
+
+
+class Hidden(BaseModel):
+    reason: str
+
+
+type Display = Shown | Hidden
 """
 
 
@@ -100,12 +120,71 @@ def test_narrowing_untyped_data_at_a_boundary_is_not_reported() -> None:
 
 
 def test_every_type_in_a_multi_type_check_is_resolved_separately() -> None:
-    """A tuple or ``|`` check reports its declared models and skips the rest."""
+    """A tuple or ``|`` check reports its declared variants and skips the rest.
+
+    The family's base is not a variant: matching it narrows to the whole
+    family, which a new member joins rather than escapes.
+    """
     assert audit(
-        "from models import Part, TextPart\n"
+        "from models import ImagePart, Part, TextPart\n"
         "def walk(part):\n"
-        "    return isinstance(part, (str, TextPart, Part))\n"
+        "    return isinstance(part, (str, TextPart, ImagePart, Part))\n"
     ) == ["missing:3", "missing:3"]
+
+
+def test_a_model_with_no_variants_is_not_dispatched_over() -> None:
+    """One type is nothing to dispatch over, whatever the arm's sub-patterns.
+
+    Measured in a project built on this one: a `case Capability(built=False)`
+    arm is a value test the class happens to be the subject of, the shape the
+    conventions prefer to an `if` chain, and the remedy the rule names has no
+    union base to move the operation onto.
+    """
+    assert (
+        audit(
+            "from models import Capability\n"
+            "def problem(capability):\n"
+            "    match capability:\n"
+            "        case None:\n"
+            "            return ['absent']\n"
+            "        case Capability(built=False):\n"
+            "            return ['unbuilt']\n"
+            "        case _:\n"
+            "            return []\n"
+        )
+        == []
+    )
+    assert (
+        audit(
+            "from models import Capability\n"
+            "def problem(capability):\n"
+            "    return isinstance(capability, Capability)\n"
+        )
+        == []
+    )
+
+
+def test_a_member_of_a_declared_union_is_dispatched_over() -> None:
+    """Siblings by alias rather than by base: the same set, spelled without one."""
+    assert audit(
+        "from models import Shown\n"
+        "def walk(display):\n"
+        "    match display:\n"
+        "        case Shown(text=text):\n"
+        "            return text\n"
+        "        case _:\n"
+        "            return ''\n"
+    ) == ["missing:4"]
+
+
+def test_a_union_written_inline_counts_the_same() -> None:
+    """An annotation naming two models beside each other is a set to walk."""
+    assert audit(
+        "from typing import Union\n"
+        "from models import Capability, Shown\n"
+        "def walk(item: Union[Capability, Shown]):\n"
+        "    return isinstance(item, Capability)\n"
+    ) == ["missing:4"]
 
 
 def test_a_typed_suppression_covers_the_site() -> None:

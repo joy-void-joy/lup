@@ -108,6 +108,7 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         family="architecture",
         scope="Python architecture",
         example="if isinstance(part, TextPart): ...",
+        cleared="case Capability(built=False): ...  # Capability has no variants",
         message=(
             "A union we declare answers through its members: the base names the "
             "operation and each variant answers or declines it. Branching on the "
@@ -115,7 +116,11 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
             "leaves a filter that goes stale the moment a variant is added. "
             "Narrowing untyped data at a boundary is the different case and is "
             "not reported: the rule fires only on project classes that inherit "
-            "pydantic.BaseModel."
+            "pydantic.BaseModel and have something to be dispatched over — "
+            "sibling variants under one project base, or a union they are "
+            "written into beside another model. A model with neither is one "
+            "type, and a case arm over it is a value test with no union base "
+            "for the remedy to name."
         ),
         defined_in=dispatch.__name__,
     ),
