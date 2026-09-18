@@ -82,7 +82,11 @@ STRUCTURAL_RULES: list[RegisteredRule] = [
         example="class Combined(Reader, Writer): ...",
         message=(
             "Capability ABCs stay independently constructible and cohesive; "
-            "implementations do not inherit multiple capabilities or reusable behavior."
+            "implementations do not inherit multiple capabilities or reusable behavior. "
+            "A class descending from a pydantic model is a variant union rather than "
+            "a capability, and the base is read through the library's own classes as "
+            "well as the project's, so a kind declared over a lup model is not judged "
+            "a capability."
         ),
         defined_in=capabilities.__name__,
     ),
