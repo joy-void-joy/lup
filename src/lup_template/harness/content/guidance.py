@@ -145,7 +145,7 @@ TOOLING = models.GuidanceSection(
 
 `uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green. `lup` itself is not added that way — `dev library status` says where it is resolved from, and whether its source is on disk to edit.
 
-A leading `# lup: escalate[sandbox]: <why>` line asks to run one command with the per-call sandbox off. That is all it lifts: a launch's mounts hold for every process in the session, so a write to a read-only path — a human-owned file such as README.md — fails approved exactly as it failed unmarked, and is the user's to run from a host terminal with the exact command. Try inside first.
+A leading `# lup: escalate[sandbox]: <why>` line asks to run one command with the per-call sandbox off. That is all it lifts: a launch's mounts hold for every process in the session, so a write to a read-only path — the shared git `config` or `hooks/` — fails approved exactly as it failed unmarked, and is the user's to run from a host terminal with the exact command. Try inside first.
 
 ### lup-devtools
 
