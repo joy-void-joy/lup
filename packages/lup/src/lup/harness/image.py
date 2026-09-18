@@ -335,9 +335,17 @@ class Image(BaseModel, frozen=True):
     """
 
     base: str = Field(
-        default="archlinux:base",
+        default=(
+            "archlinux:base@sha256:"
+            "63c7b061c0c001cb7ce4f8d11b63d351c23e7f97121bc5c8bd5d9f431e615d7d"
+        ),
         description=(
-            "Base image, chosen for what its archive carries rather than for "
+            "Base image, pinned by digest for the reason the snapshot below "
+            "is pinned by date: a floating tag never appears in a diff, and a "
+            "base that moved rebuilds every layer above it on either engine. "
+            "This is the manifest list `archlinux:base` resolved to on "
+            "2026-09-18; bumping it is a decision somebody makes and reviews. "
+            "Chosen for what its archive carries rather than for "
             "size. Measured against Debian stable: ``gh``, ``bun`` and ``uv`` "
             "are all absent there, so each would have to be fetched by a "
             "shell line the build executes unverified -- three holes opened "
@@ -475,7 +483,8 @@ class Image(BaseModel, frozen=True):
             "line. An empty version is resolved to the registry's current "
             "release at each contained launch and rendered as a concrete "
             "pin, so the image tag still content-addresses a real version "
-            "and a new release is what triggers the rebuild; declaring a "
+            "and a new release rebuilds the one layer that installs them, "
+            "which sits below everything else for that reason; declaring a "
             "version freezes it instead. The installs land in a layer the "
             "run mounts read-only, which is what stops a self-update from "
             "silently making the image disagree with what was rendered"
@@ -755,9 +764,13 @@ class Image(BaseModel, frozen=True):
         """Render the image as a Dockerfile.
 
         Layered by how often each part changes: the OS toolchain is baked in
-        and rebuilt when the manifest changes, the pinned CLI sits above it,
-        and the project's own dependencies are installed at container *start*
-        into a cache volume rather than copied in. That last choice is what
+        and rebuilt when the manifest changes, the agent CLIs sit last so a
+        release rebuilds one layer, and the project's own dependencies are
+        installed at container *start* into a cache volume rather than copied
+        in. Metadata that changes together is one instruction -- one ``ENV``,
+        one ``VOLUME``, one ``chmod`` -- because both engines commit a layer
+        per instruction, and a layer per variable is a layer for nothing.
+        That last choice is what
         makes ``uv add`` cost a sync instead of a rebuild, and it is also why
         no ``COPY`` of the project appears here -- the checkout arrives as a
         mount, at its own absolute path, for the reason
@@ -807,11 +820,10 @@ class Image(BaseModel, frozen=True):
         # JSON is the quoting, since its escapes are the ones this parser
         # reads and nothing here wants shell expansion -- `PATH`, which does,
         # is written literally a few lines up.
-        exported = "\n".join(
-            f"ENV {name}={json.dumps(value)}"
-            for name, value in self.environment().items()
+        exported = "ENV " + " \\\n    ".join(
+            f"{name}={json.dumps(value)}" for name, value in self.environment().items()
         )
-        volumes = "\n".join(f"VOLUME {cache.path}" for cache in self.caches)
+        volumes = "VOLUME " + json.dumps([cache.path for cache in self.caches])
         seed = json.dumps(self.seed_configuration(), indent=2)
         return f"""\
 # Generated from the project's Manifest. Edit the declaration, not this file.
@@ -842,12 +854,6 @@ RUN pacman -S --noconfirm --needed \\
 ENV BUN_INSTALL={self.registry_root}
 ENV PATH={self.registry_bin()}:$PATH
 {registry_layers}{script_layer}
-# Every agent runtime the harness launches, from the registry at the version
-# the launch resolved (or the declaration pinned) rather than an install
-# script, so what lands is what was rendered and the layer the run mounts
-# read-only cannot be rewritten by a self-update.
-RUN bun add -g {agent_clis}
-
 # Trust, seeded where a fresh config home will find it. A workspace this
 # image was built for is one the operator already decided to run, but an
 # unseeded config home does not know that: it discards the declared
@@ -907,7 +913,6 @@ if [ -n "${{{self.forge.token_variable}:-}}" ]; then
 fi
 exec "$@"
 ENTRY
-RUN chmod +x /usr/local/bin/lup-entrypoint
 ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
 
 COPY <<'CREDENTIAL' /opt/lup/credential-seed.py
@@ -920,7 +925,6 @@ CREDENTIAL
 COPY <<'OPEN' {self.browser.opener}
 {opening}
 OPEN
-RUN chmod +x {self.browser.opener}
 
 # Every name a clipboard is asked for by, pointed at one program that speaks
 # to the broker in the launcher. The socket is mounted per launch; with none
@@ -929,16 +933,18 @@ RUN chmod +x {self.browser.opener}
 COPY <<'CLIP' /usr/local/bin/clipboard_shim.py
 {clipping}
 CLIP
-RUN chmod +x /usr/local/bin/clipboard_shim.py \\
+COPY <<'X11' /usr/local/bin/lup-clipboard-x11
+{self.clipboard.native_program()}
+X11
+# One layer marks every program above executable and links the clipboard
+# names: each is a metadata change, and a layer per file is a layer for
+# nothing.
+RUN chmod +x /usr/local/bin/lup-entrypoint {self.browser.opener} \\
+        /usr/local/bin/clipboard_shim.py /usr/local/bin/lup-clipboard-x11 \\
     && ln -sf /usr/local/bin/clipboard_shim.py /usr/local/bin/lup-clipboard \\
     && for name in {shim_names}; do \\
         ln -sf /usr/local/bin/lup-clipboard "/usr/local/bin/$name"; \\
     done
-
-COPY <<'X11' /usr/local/bin/lup-clipboard-x11
-{self.clipboard.native_program()}
-X11
-RUN chmod +x /usr/local/bin/lup-clipboard-x11
 
 # The identity the session runs as. Supplied at build time from the host's own
 # uid/gid, because a bind mount carries numbers rather than names: a container
@@ -965,6 +971,16 @@ RUN groupadd -g $GID agent 2>/dev/null || true \\
 {exported}
 
 {volumes}
+
+# Every agent runtime the harness launches, from the registry at the version
+# the launch resolved (or the declaration pinned) rather than an install
+# script, so what lands is what was rendered and the layer the run mounts
+# read-only cannot be rewritten by a self-update. The last layer, because it
+# is the one that changes most: a release lands most days, and every layer
+# below an install is rebuilt with it. Handed to the session's uid in the
+# same layer, since a chown in a later one copies every file it touches.
+RUN bun add -g {agent_clis} \\
+    && chown -R $UID:$GID {self.registry_root}
 
 USER $UID:$GID
 """

@@ -251,7 +251,7 @@ def test_the_egress_environment_is_not_baked_into_the_image() -> None:
     # The control, so this is checking a file the image facts really are in.
     # Quoted, because a baked value with whitespace in it has to be and the
     # renderer does not special-case which ones do.
-    assert 'ENV LUP_CONTAINED="1"' in rendered
+    assert 'LUP_CONTAINED="1"' in rendered
 
 
 def test_a_running_proxy_off_the_network_is_repaired_rather_than_believed(

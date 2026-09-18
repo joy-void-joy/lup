@@ -93,7 +93,7 @@ def test_the_generated_opener_is_a_script_the_shell_accepts(tmp_path: Path) -> N
 def test_the_image_bakes_the_opener_and_the_variable_naming_it() -> None:
     """Both halves, or `BROWSER` points at a script the image does not have."""
     bridge, rendered = BrowserBridge(), Image().dockerfile(Manifest())
-    assert f"ENV BROWSER={json.dumps(bridge.opener)}" in rendered
+    assert f"BROWSER={json.dumps(bridge.opener)}" in rendered
     assert f"COPY <<'OPEN' {bridge.opener}" in rendered
 
 

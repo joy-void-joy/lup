@@ -33,7 +33,7 @@ from lup.devtools.harness.contained import (
     retire_images,
     superseded_images,
 )
-from lup.harness.image import detected_client
+from lup.harness.image import Image, detected_client
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
@@ -263,18 +263,42 @@ def create_harness_app(
         no checkout tag on it; what stays is anything a checkout still points
         at, and the image this declaration would build right now.
         """
-        for composition in targets.resolve(target, project_root()):
-            source = composition.recipe.source
+
+        def pinned(image: Image) -> Image:
             # Everything resolution says goes to stderr: stdout is the
             # Dockerfile a build reads, and a progress line in the pipe is a
             # parse error inside `docker build -f -`.
             resolution = resolved_agent_clis(
-                source.image,
-                say=lambda notice: typer.echo(notice.painted(), err=True),
+                image, say=lambda notice: typer.echo(notice.painted(), err=True)
             )
             for notice in resolution.said:
                 typer.echo(notice.painted(), err=True)
-            rendered = resolution.image.dockerfile(source.requirements)
+            return resolution.image
+
+        # One resolution per distinct image declaration and one Dockerfile per
+        # distinct rendering, however many runtimes compose against them:
+        # every runtime here shares one image, so the default target rendered
+        # it once per runtime, asked the registry as often, and handed a build
+        # reading stdin two files.
+        sources = {
+            composition.recipe.source.image.model_dump_json()
+            + composition.recipe.source.requirements.model_dump_json(): (
+                composition.recipe.source
+            )
+            for composition in targets.resolve(target, project_root())
+        }
+        images = {
+            key: pinned(image)
+            for key, image in {
+                source.image.model_dump_json(): source.image
+                for source in sources.values()
+            }.items()
+        }
+        renderings = dict.fromkeys(
+            images[source.image.model_dump_json()].dockerfile(source.requirements)
+            for source in sources.values()
+        )
+        for rendered in renderings:
             if not prune:
                 typer.echo(rendered)
                 continue
