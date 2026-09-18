@@ -40,7 +40,7 @@ from lup.devtools.dev.boundaries import (
     scan_application_placement,
     scan_library_placement,
 )
-from lup.devtools.dev.branches import unlanded_siblings
+from lup.devtools.dev.branches import get_integration_branch, unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
 from lup.devtools.dev.cites import sweep_cites
@@ -51,7 +51,7 @@ from lup.ledger.models import LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
-from lup.devtools.dev.migrations import undeclared_breaks
+from lup.devtools.dev.migrations import gate_base, undeclared_breaks
 from lup.devtools.dev.records import branches_awaiting_adoption, record_location
 from lup.devtools.dev.reach import Spread
 from lup.devtools.dev.scaffold import ScaffoldSource
@@ -1174,8 +1174,21 @@ def scan_reports(
         # Gating rather than advisory — the commit that takes a capability is
         # the one place that knows why, and a break landing without that leaves
         # an adopter an unresolvable import and nothing to read.
-        owed = undeclared_breaks(project) if spread is not None else []
-        if spread is not None:
+        base = gate_base(get_integration_branch()) if spread is not None else None
+        owed = undeclared_breaks(project, base) if base is not None else []
+        if spread is not None and base is None:
+            # Said rather than exited: a checkout with no base to read from
+            # is a fact about the clone, and a report that names it is what
+            # lets somebody fetch one.
+            yield CheckReport(
+                name="declared migrations",
+                counted=False,
+                lines=[
+                    "declared migrations: skipped — no base to judge from (advisory)",
+                    "  fetch the integration branch or `main` so a merge base exists",
+                ],
+            )
+        elif spread is not None:
             yield CheckReport(
                 name="declared migrations",
                 passed=not owed,

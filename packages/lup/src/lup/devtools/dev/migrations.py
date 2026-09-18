@@ -358,16 +358,48 @@ def unnamed(
     ]
 
 
-def undeclared_breaks(
-    project: DevProject, declared: list[Migration] = DECLARED
-) -> list[Capability]:
-    """Every capability this branch took that nothing here speaks for.
+def gate_base(integration: str, release: str = "main") -> str | None:
+    """The commit this checkout's breaks are judged from, or ``None`` with none to read.
 
-    Measured against the branch's own base rather than a branch named here:
-    what this change took away is judged against where it started, and
-    creation recorded that where topology can no longer recover it.
+    A feature branch is judged from where it started, which creation recorded
+    and topology can otherwise guess among the local branches. The
+    integration branch is judged from the release branch: what it has taken
+    since the last release is what an adopter meets on their next update.
+    Where no local branch stands beside the current one -- a CI clone holds
+    the branch it checks out and nothing else, and a pull request's checkout
+    stands on no branch at all -- the remote's copy of the base is read
+    instead, which a full fetch carries.
+
+    No base at all is a reading, not a refusal. The base detector exits the
+    process where it finds no other local branch, and for every push after
+    this gate was written that exit took the whole report with it: the log
+    held one line and an exit code, and named no check.
     """
-    base = detect_base_branch().merge_base
+    current = git.out("branch", "--show-current").strip()
+    siblings = [
+        branch
+        for branch in git.lines("branch", "--format=%(refname:short)")
+        if branch != current
+    ]
+    if current and current != integration and siblings:
+        return detect_base_branch(current).merge_base
+    named = release if current == integration else integration
+    for ref in (named, f"origin/{named}"):
+        found = git.out("merge-base", ref, "HEAD", _ok_code=[0, 1, 128]).strip()
+        if found:
+            return found
+    return None
+
+
+def undeclared_breaks(
+    project: DevProject, base: str, declared: list[Migration] = DECLARED
+) -> list[Capability]:
+    """Every capability this checkout took since ``base`` that nothing speaks for.
+
+    ``base`` is what :func:`gate_base` answered: what this change took away is
+    judged against where it started, and creation recorded that where
+    topology can no longer recover it.
+    """
     divergence = compare(surface_at(base, project), surface_now(project))
     return unnamed(divergence.disappeared, declared)
 
