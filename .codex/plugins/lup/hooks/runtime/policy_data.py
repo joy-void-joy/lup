@@ -670,6 +670,15 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "resolution": "required",
         },
         {
+            "id": "derived-interpolation",
+            "pattern": "\\b(?:body|content)\\s*=\\s*(?:f[\\\"']|[\\\"'][^\\\"']*[\\\"']\\s*\\.\\s*(?:format|join)\\b)",
+            "message": "A value derived from a declaration enters a generated file as a value, not spliced into its text: a colon, a newline or a quote in it ends the container it lands in, and the file stays plausible until something parses it. Build the body as a document and hand it to the constructor for its format \u2014 `Artifact.in_yaml` with a `YamlDocument`, `Artifact.in_markdown` with a `MarkdownDocument`, `Artifact.in_toml`, `Artifact.in_json` \u2014 each emitted by a library and parsed back before the file exists. A piece fixed where it is written, a literal or a name spelled as a constant, is not derived and is not flagged. A format with no document yet takes `# lup: ignore[derived-interpolation]` naming the format",
+            "context": "code",
+            "matcher": "derived_interpolation_sites",
+            "strength": "soft",
+            "resolution": "",
+        },
+        {
             "id": "bare-object",
             "pattern": "(?:(?<!\\w)(?!_)\\w+\\s*:|->)\\s*object\\b",
             "message": "Bare `object` says nothing about the value \u2014 use a concrete type, TypedDict, or BaseModel, and narrow at untyped boundaries",
@@ -1084,6 +1093,15 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "matcher": "dict_get_sites",
             "strength": "soft",
             "resolution": "required",
+        },
+        {
+            "id": "derived-interpolation",
+            "pattern": "\\b(?:body|content)\\s*=\\s*(?:f[\\\"']|[\\\"'][^\\\"']*[\\\"']\\s*\\.\\s*(?:format|join)\\b)",
+            "message": "A value derived from a declaration enters a generated file as a value, not spliced into its text: a colon, a newline or a quote in it ends the container it lands in, and the file stays plausible until something parses it. Build the body as a document and hand it to the constructor for its format \u2014 `Artifact.in_yaml` with a `YamlDocument`, `Artifact.in_markdown` with a `MarkdownDocument`, `Artifact.in_toml`, `Artifact.in_json` \u2014 each emitted by a library and parsed back before the file exists. A piece fixed where it is written, a literal or a name spelled as a constant, is not derived and is not flagged. A format with no document yet takes `# lup: ignore[derived-interpolation]` naming the format",
+            "context": "code",
+            "matcher": "derived_interpolation_sites",
+            "strength": "soft",
+            "resolution": "",
         },
         {
             "id": "bare-object",
