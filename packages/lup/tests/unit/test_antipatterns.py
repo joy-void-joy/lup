@@ -7,17 +7,25 @@ projection and audit missing, untyped, and spurious suppressions.
 """
 
 import re
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from lup.harness.codescan.antipatterns import (
+    PROJECT_RULES,
     PYTHON_ANTI_PATTERNS,
     TS_ANTI_PATTERNS,
     audit_text,
     python_anti_patterns,
 )
-from lup.harness.codescan.common import AntiPattern, RuleExample
+from lup.harness.codescan.common import (
+    AntiPattern,
+    PythonSource,
+    RuleExample,
+    module_name,
+)
+from lup.harness.codescan.project import AuditedProject, ProjectRule
 from lup.harness.contracts import Spelled, Unsupported
 from lup.policy.bundle import bundled_antipattern_rows
 from lup.policy.kernel.edit import (
@@ -1546,3 +1554,50 @@ def test_typescript_masking_keeps_every_line_and_column() -> None:
     )
     assert code[5:] == ["const url = '            ", "const t: any = 2;"]
     assert typescript_comment_columns(source) == {1: 0, 3: 32}
+
+
+# The project rules carry their snippets the same way, so the sweep's whole
+# table is covered by construction too: a rule declared without both verdicts
+# does not import, and one declared with them arrives here through the set.
+PROJECT_EXAMPLE_CASES = [
+    pytest.param(rule, example, id=f"{rule.id}-{index}-{example.verdict}")
+    for rule in PROJECT_RULES
+    for index, example in enumerate(rule.examples)
+]
+
+
+@pytest.mark.parametrize(("rule", "example"), PROJECT_EXAMPLE_CASES)
+def test_each_project_rule_answers_its_own_examples(
+    rule: ProjectRule, example: RuleExample
+) -> None:
+    """The sweep says about each snippet what its rule declared it would.
+
+    One surface rather than two, because a project rule has no hook verdict:
+    it reads the whole tree, which an edit gate judging a fragment never
+    holds. The snippet is the whole project here, written at the path the
+    example names, since several of these rules answer by where a line sits
+    as much as by what it says.
+    """
+    path = Path(example.path)
+    audited = AuditedProject(
+        sources=[
+            PythonSource(path=path, module=module_name(path), text=f"{example.code}\n")
+        ]
+    )
+    reported = [
+        finding.rule_id for finding in rule.audit(audited) if finding.kind == "missing"
+    ]
+
+    match example.verdict:
+        case "flagged":
+            assert reported, f"the sweep admits {rule.id} at: {example.code}"
+            assert set(reported) == {rule.id}, (
+                f"the sweep reports another rule at: {example.code}"
+            )
+        case "cleared":
+            assert reported == [], f"the sweep reports {rule.id} at: {example.code}"
+        case "refuted":
+            raise AssertionError(
+                f"{rule.id} claims a refuted example, but a project rule has no "
+                "hook verdict for the sweep to take back"
+            )

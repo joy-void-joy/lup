@@ -17,7 +17,7 @@ bare, or guarding nothing at all.
 """
 
 import ast
-from collections.abc import Set as AbstractSet
+from collections.abc import Callable, Set as AbstractSet
 from functools import cache
 from pathlib import Path
 from typing import Literal
@@ -26,13 +26,18 @@ from pydantic import BaseModel
 
 import lup
 from lup.harness.codescan.common import (
+    NO_APPLICATION,
+    ApplicationRoots,
+    ProjectRuleFamily,
     PythonContext,
     PythonSource,
+    Rule,
     RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
     module_name,
 )
+from lup.policy.imports import ImportBoundary
 from lup.policy.kernel.edit import (
     IGNORE_RE,
     python_tree,
@@ -83,6 +88,10 @@ class RuleFinding(BaseModel, frozen=True):
     line: int
     message: str
     rule_id: str
+    text: str = ""
+    """The line the finding is about, where the rule kept it, so a report
+    shows the site under the verdict; empty where a rule reports a
+    declaration by its position alone."""
 
 
 class Directive(BaseModel, frozen=True):
@@ -92,6 +101,46 @@ class Directive(BaseModel, frozen=True):
     line: int
     rule_ids: set[str] | None
     file_level: bool = False
+
+
+class AuditedProject(BaseModel, arbitrary_types_allowed=True):
+    """Everything a rule read off the whole project is handed at once.
+
+    ``sources`` is every production Python module, the whole tree rather than
+    the files a caller is answerable for, because a class index or the names a
+    library's callers can replace are properties of the project and a verdict
+    scoped to a subset would differ from the sweep's. ``application`` is what
+    the repository declared about itself — where it composes natively, what
+    it generates — and ``boundaries`` the import ownership it holds, or
+    ``None`` for the library's own.
+    """
+
+    sources: list[PythonSource]
+    application: ApplicationRoots = NO_APPLICATION
+    boundaries: list[ImportBoundary] | None = None
+
+
+class ProjectRule(Rule):
+    """A rule decided over the whole project, which only the sweep can run.
+
+    ``audit`` is the rule: handed the project, it returns every missing,
+    untyped and spurious suppression verdict under this rule's id, the same
+    three kinds the line rules report, so one report holds both. The sweep
+    runs every project rule the set holds, so declaring one is what wires it
+    in — there is no list of calls to be missing from.
+
+    ``family`` and ``scope`` are what the reference card shows; a line rule
+    derives both from the table it sits in, a project rule says them.
+    """
+
+    family: ProjectRuleFamily
+    scope: str
+    audit: Callable[[AuditedProject], list[RuleFinding]]
+
+    @property
+    def defined_in(self) -> str:
+        """The module holding the audit, which is where the rule is enforced."""
+        return self.audit.__module__
 
 
 def dotted_name(node: ast.expr) -> str | None:

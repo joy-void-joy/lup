@@ -19,7 +19,7 @@ from lup.providers.codex.harness import (
     CodexSkillRenderer,
     CodexSpellings,
 )
-from lup.harness.codescan.portable import prose_breaches
+from lup.harness.codescan.portable import PORTABLE_RULE
 from lup.harness.contracts import NativeSpellings
 from lup.harness.prompts import SpelledPromptRenderer
 from lup.harness.models import (
@@ -113,7 +113,7 @@ def reject_native_prose(source: Harness) -> None:
     Composition is the only place that sees the assembled text, so a
     description built elsewhere and folded into a prompt is judged here too.
     """
-    breaches = prose_breaches(source, [ClaudeSpellings(), CodexSpellings()])
+    breaches = PORTABLE_RULE.judge(source, [ClaudeSpellings(), CodexSpellings()])
     if breaches:
         named = ", ".join(
             f"{breach.declaration_id} names {breach.spelling!r}"

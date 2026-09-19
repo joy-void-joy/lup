@@ -32,9 +32,10 @@ from live in :mod:`lup.harness.codescan.project`, which it shares with
 :mod:`lup.harness.codescan.dispatch`.
 """
 
-from lup.harness.codescan.common import PythonSource
+from lup.harness.codescan.common import PythonSource, RuleExample
 from lup.harness.codescan.project import (
     ClassSymbol,
+    ProjectRule,
     RuleFinding,
     RuleViolation,
     audit_suppressions,
@@ -301,3 +302,88 @@ def audit_abstract_declarations(sources: list[PythonSource]) -> list[RuleFinding
         if violation.path in scanned
     ]
     return audit_suppressions(sources, violations, ABSTRACT_DECLARATION_RULE_ID)
+
+
+CAPABILITY_RULE = ProjectRule(
+    id=RULE_ID,
+    family="architecture",
+    scope="Python architecture",
+    examples=[
+        RuleExample(
+            code=(
+                "from abc import ABC, abstractmethod\n"
+                "class Reader(ABC):\n"
+                "    @abstractmethod\n"
+                "    def read(self) -> str: ...\n"
+                "class Writer(ABC):\n"
+                "    @abstractmethod\n"
+                "    def write(self, text: str) -> None: ...\n"
+                "class Combined(Reader, Writer):\n"
+                "    def read(self) -> str: return ''\n"
+                "    def write(self, text: str) -> None: ..."
+            ),
+            verdict="flagged",
+        ),
+        RuleExample(
+            code=(
+                "from abc import ABC, abstractmethod\n"
+                "class Reader(ABC):\n"
+                "    @abstractmethod\n"
+                "    def read(self) -> str: ...\n"
+                "class FileReader(Reader):\n"
+                "    def read(self) -> str: return ''"
+            ),
+            verdict="cleared",
+        ),
+    ],
+    message=(
+        "Capability ABCs stay independently constructible and cohesive; "
+        "implementations do not inherit multiple capabilities or reusable behavior. "
+        "A class descending from a pydantic model is a variant union rather than "
+        "a capability, and the base is read through the library's own classes as "
+        "well as the project's, so a kind declared over a lup model is not judged "
+        "a capability."
+    ),
+    audit=lambda audited: audit_capabilities(audited.sources),
+)
+"""The capability rule, as the set that runs it and the reference read it."""
+
+ABSTRACT_DECLARATION_RULE = ProjectRule(
+    id=ABSTRACT_DECLARATION_RULE_ID,
+    family="architecture",
+    scope="Python architecture",
+    examples=[
+        RuleExample(
+            code=(
+                "from abc import abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel):\n"
+                "    @abstractmethod\n"
+                "    def render(self) -> str: ..."
+            ),
+            verdict="flagged",
+        ),
+        RuleExample(
+            code=(
+                "from abc import ABC, abstractmethod\n"
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel, ABC):\n"
+                "    @abstractmethod\n"
+                "    def render(self) -> str: ..."
+            ),
+            verdict="cleared",
+        ),
+    ],
+    message=(
+        "A class declaring an abstract member cannot be constructed, and its "
+        "bases are where it says so. Pydantic's metaclass is an ABCMeta, so on "
+        "a model the member binds and the class turns abstract while the word "
+        "ABC never appears — leaving the fact readable only to whoever knows "
+        "that about the dependency. Name ABC among the bases: nothing changes "
+        "at runtime, and abc-capability reads the same list to tell a "
+        "capability seam from a variant union. A Protocol is exempt, being "
+        "satisfied structurally rather than by declaration."
+    ),
+    audit=lambda audited: audit_abstract_declarations(audited.sources),
+)
+"""The abstract-declaration rule, declared beside the audit that decides it."""

@@ -63,6 +63,17 @@ there reaches every scan that projects a line per context without anyone
 having to widen a second list.
 """
 
+type ProjectRuleFamily = Literal["boundary", "spelling", "architecture"]
+"""What a rule read off the whole project is about, as the reference groups it.
+
+A ``boundary`` rule says where an import or a table may sit, a ``spelling``
+rule which words a neutral module may hold, an ``architecture`` rule what a
+class's base list or a branch on a type declares.
+"""
+
+type RuleFamily = Literal["anti-pattern"] | ProjectRuleFamily
+"""Every family the reference indexes: the line rules, and the project ones."""
+
 
 class Matcher(BaseModel, arbitrary_types_allowed=True):
     """The AST shape one rule selects, where the source parses.
@@ -153,71 +164,43 @@ class RuleExample(BaseModel, frozen=True):
 
     code: str
     verdict: ExampleVerdict
+    path: str = "sample.py"
+    """Where the snippet is taken to be written, for a rule whose verdict turns
+    on that: a provider import is sanctioned under the adapters and refused in
+    a neutral module, a third-party import is refused in the hermetic kernel
+    and ordinary anywhere else. A line rule reads the code alone, and leaves
+    the default standing."""
 
 
-class AntiPattern(BaseModel, arbitrary_types_allowed=True):
-    """One forbidden code shape: a stable id, the regex that detects it, and why.
-
-    Declared here rather than beside the tables that use it, because a project
-    composing its own rules holds this and the harness declaration that carries
-    them, and the tables sit above both.
+class Rule(BaseModel, arbitrary_types_allowed=True):
+    """What every rule declares, whichever surface decides it.
 
     ``id`` is a stable kebab-case name a typed `# lup: ignore[id]` directive
     targets, so a single site can silence exactly one rule without opting out
-    of the rest. Ids are pinned alongside the pattern and message by
-    ``tests/unit/test_antipatterns.py`` and must stay in step with the hook.
-
-    ``context`` declares the syntactic surface the pattern inspects. A "code"
-    rule is matched against token-masked source — string literals and comments
-    both blanked — so an identifier quoted in prose never trips it; a
-    "comment" rule targets comment directives (`# type: ignore`, `# noqa`) and
-    is matched with comments intact. Python is masked through its tokenizer
-    and the TypeScript family through the kernel's own span scan; where
-    neither applies (text of another family, a Python fragment that fails to
-    tokenize) every rule scans the raw line.
-
-    ``matcher`` is present when the tree decides the rule outright: it selects
-    the violating lines itself, and ``pattern`` is what the gate falls back to
-    where no tree can be had — a file mid-edit that will not parse, or the
-    TypeScript-family table, which this grammar is not for. Where the regex
-    is wider than the defect the rule names, the matcher subtracts the excess
-    itself rather than leaving a second pass to take it back out, so the rule
-    is stated once and a reader has one place to read it.
+    of the rest. It is what a denial, a sweep finding, the generated reference
+    and a project's retirement list all name the rule by.
 
     ``examples`` are the snippets the rule is checked against, and carrying
     them on the declaration is what makes a rule impossible to add untested:
-    a table-driven test runs every one of them through the gate, so there is
-    no separate list of covered ids for a new rule to be missing from. The
-    generated reference renders them too, which is why they are written as
-    code somebody could paste rather than as the regex that happens to catch
-    them.
+    a table-driven test runs every one of them through the gates that enforce
+    the rule, so there is no separate list of covered ids for a new rule to be
+    missing from. The generated reference renders them too, which is why they
+    are written as code somebody could paste rather than as whatever happens
+    to catch them.
+
+    The variants say how the rule is decided. An :class:`AntiPattern` is a
+    line rule the hermetic kernel runs on every edit, from a regex and an AST
+    selector it can carry with no dependencies. A project rule reads the whole
+    tree at once — a class index, the module roles, the roots an application
+    declared — which only the repository sweep can hand it. A composition rule
+    reads the assembled harness, which only generation ever sees. Each carries
+    the fields this base does not, and the reference card, the example test
+    and the sweep's call list are all derived from the set that holds them.
     """
 
     id: str
-    pattern: re.Pattern[str]
     examples: list[RuleExample]
     message: str
-    context: RuleContext = "code"
-    matcher: Matcher | None = None
-    family: TypeFamily | None = None
-    """The classes a site's subject must resolve into for this rule to stand.
-
-    Present when the shape alone cannot settle the rule and only the type of
-    what it is written on can: `.get` on a mapping hides a schema, the same
-    spelling on an HTTP client is a request. The sites the ``matcher`` chose
-    carry the positions, this names what they must resolve to, and
-    `lup.harness.codescan.resolution` refutes every site shown to be outside it.
-
-    Declared here rather than in a table keyed by rule id, because a rule is
-    one thing. A second list saying which rules resolve is a list that can
-    disagree with the rules it describes, and every gate that needed to know
-    — the hermetic row, the reference page, the audit — had to perform the
-    same join to find out.
-
-    A rule with no family never reaches a checker at all, which is most of
-    them: nothing about a bare `except` or an `import re` turns on a type.
-    """
-
     refinement: str = ""
     """How resolution sharpens this rule, in the words the reference shows.
 
@@ -258,6 +241,56 @@ class AntiPattern(BaseModel, arbitrary_types_allowed=True):
                 f"clears — the cleared one is what says where the rule stops"
             )
         return self
+
+
+class AntiPattern(Rule):
+    """One forbidden code shape: a stable id, the regex that detects it, and why.
+
+    Declared here rather than beside the tables that use it, because a project
+    composing its own rules holds this and the harness declaration that carries
+    them, and the tables sit above both. Ids are pinned alongside the pattern
+    and message by ``tests/unit/test_antipatterns.py`` and must stay in step
+    with the hook.
+
+    ``context`` declares the syntactic surface the pattern inspects. A "code"
+    rule is matched against token-masked source — string literals and comments
+    both blanked — so an identifier quoted in prose never trips it; a
+    "comment" rule targets comment directives (`# type: ignore`, `# noqa`) and
+    is matched with comments intact. Python is masked through its tokenizer
+    and the TypeScript family through the kernel's own span scan; where
+    neither applies (text of another family, a Python fragment that fails to
+    tokenize) every rule scans the raw line.
+
+    ``matcher`` is present when the tree decides the rule outright: it selects
+    the violating lines itself, and ``pattern`` is what the gate falls back to
+    where no tree can be had — a file mid-edit that will not parse, or the
+    TypeScript-family table, which this grammar is not for. Where the regex
+    is wider than the defect the rule names, the matcher subtracts the excess
+    itself rather than leaving a second pass to take it back out, so the rule
+    is stated once and a reader has one place to read it.
+    """
+
+    pattern: re.Pattern[str]
+    context: RuleContext = "code"
+    matcher: Matcher | None = None
+    family: TypeFamily | None = None
+    """The classes a site's subject must resolve into for this rule to stand.
+
+    Present when the shape alone cannot settle the rule and only the type of
+    what it is written on can: `.get` on a mapping hides a schema, the same
+    spelling on an HTTP client is a request. The sites the ``matcher`` chose
+    carry the positions, this names what they must resolve to, and
+    `lup.harness.codescan.resolution` refutes every site shown to be outside it.
+
+    Declared here rather than in a table keyed by rule id, because a rule is
+    one thing. A second list saying which rules resolve is a list that can
+    disagree with the rules it describes, and every gate that needed to know
+    — the hermetic row, the reference page, the audit — had to perform the
+    same join to find out.
+
+    A rule with no family never reaches a checker at all, which is most of
+    them: nothing about a bare `except` or an `import re` turns on a type.
+    """
 
     @model_validator(mode="after")
     def a_family_reaches_the_sites_it_judges(self) -> Self:
@@ -395,6 +428,59 @@ class PythonSource(BaseModel, frozen=True):
     path: Path
     module: str
     text: str
+
+
+class ApplicationRoots(BaseModel, frozen=True):
+    """Where one application composes concrete implementations of the seams.
+
+    The library guards its own package and can name nothing beyond it: an
+    adopter renames the application package before writing a line, so a path
+    written down here would go on naming a package that no longer exists and
+    silently sanction nothing.
+    """
+
+    composition: list[str] = []
+    """Repository-relative files, or directory prefixes ending in ``/``."""
+
+    portable_prose: list[str] = []
+    """Those composition roots whose prose must still name no provider — a
+    declaration every tree renders is written in one of them."""
+
+    generated: list[str] = []
+    """Directory prefixes a runtime writes its own tree at.
+
+    Nothing under one is authored, so a rule about a choice has nothing to say
+    there: the artifact renders a judgement made in the declaration it is
+    compiled from, which is both where the rule can report it and the only
+    place a fix survives the next generation."""
+
+    native_dependencies: list[str] = []
+    """Additional owners of provider SDK imports, such as integration fixtures."""
+
+    source_roots: list[str] = []
+    """Python source directories used to resolve relative imports statically."""
+
+    def sanctions(self, rel_path: Path) -> bool:
+        """Whether this application composes natively at that path."""
+        posix = rel_path.as_posix()
+        return any(
+            posix.startswith(root) if root.endswith("/") else posix == root
+            for root in self.composition
+        )
+
+    def renders(self, rel_path: Path) -> bool:
+        """Whether that path is compiled rather than written."""
+        return rel_path.as_posix().startswith(tuple(self.generated))
+
+    def sanctions_spelling(self, rel_path: Path) -> bool:
+        """Whether that path may also own a provider's own wire words."""
+        return self.sanctions(rel_path) and not rel_path.as_posix().startswith(
+            tuple(self.portable_prose)
+        )
+
+
+NO_APPLICATION = ApplicationRoots()
+"""What an adopter sanctions before it says so: nothing beyond the library."""
 
 
 def module_name(path: Path, roots: AbstractSet[str] = PACKAGE_ROOTS) -> str:

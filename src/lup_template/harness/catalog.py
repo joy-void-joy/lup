@@ -35,8 +35,8 @@ from lup.harness.models import (
 )
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.codex.harness import CodexSpellings
+from lup.harness.codescan.common import ApplicationRoots
 from lup.harness.codescan.boundaries import (
-    ApplicationRoots,
     generated_tree_paths,
     native_import_boundaries,
 )

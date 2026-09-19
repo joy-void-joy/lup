@@ -40,9 +40,10 @@ import ast
 from collections import Counter
 from collections.abc import Iterator
 
-from lup.harness.codescan.common import PythonSource
+from lup.harness.codescan.common import PythonSource, RuleExample
 from lup.policy.kernel.edit import python_nodes, python_tree
 from lup.harness.codescan.project import (
+    ProjectRule,
     RuleFinding,
     RuleViolation,
     audit_suppressions,
@@ -141,3 +142,30 @@ def audit_isinstance_chains(sources: list[PythonSource]) -> list[RuleFinding]:
     return audit_suppressions(
         sources, chain_violations(sources), RULE_ID, strength="strong"
     )
+
+
+CHAIN_RULE = ProjectRule(
+    id=RULE_ID,
+    family="architecture",
+    scope="Python architecture",
+    examples=[
+        RuleExample(
+            code="if isinstance(n, Name):\n    a()\nelif isinstance(n, Attribute):\n    b()",
+            verdict="flagged",
+        ),
+        RuleExample(
+            code="if isinstance(n, Name):\n    a()\nelse:\n    b()",
+            verdict="cleared",
+        ),
+    ],
+    message=(
+        "Narrowing one subject again, in a later arm of the same if/elif chain, "
+        "is a dispatch in the older spelling: each arm becomes a case pattern, an "
+        "and conjunct becomes its guard, and the fallthrough becomes case _. A "
+        "single narrowing is sanctioned and stays silent, as does isinstance in "
+        "expression position, where match has no spelling at all."
+    ),
+    strength="strong",
+    audit=lambda audited: audit_isinstance_chains(audited.sources),
+)
+"""The isinstance-chain rule, declared beside the audit that decides it."""

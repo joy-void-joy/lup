@@ -19,8 +19,8 @@ from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.harness import claude_prompt_renderer
 from lup.harness.codescan.antipatterns import (
     DOCUMENT_IN_HAND,
-    AntiPatternSet,
-    antipattern_set_for,
+    RuleSet,
+    rule_set_for,
 )
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.codescan.registry import all_rules
@@ -33,7 +33,7 @@ RETIRED = RuleSelection(retired=["model-config", "default-factory"])
 
 
 def test_a_retired_rule_leaves_the_table_the_sweep_reads() -> None:
-    kept = AntiPatternSet().selected(RETIRED)
+    kept = RuleSet().selected(RETIRED)
 
     assert [rule.id for rule in kept.python if rule.id in set(RETIRED.retired)] == []
     assert any(rule.id == "import-re" for rule in kept.python)
@@ -41,16 +41,14 @@ def test_a_retired_rule_leaves_the_table_the_sweep_reads() -> None:
 
 def test_selecting_nothing_keeps_every_rule_the_library_ships() -> None:
     """The default has to be the whole table, or adopting the seam changes it."""
-    whole = AntiPatternSet()
+    whole = RuleSet()
 
     assert whole.selected(RuleSelection()).python == whole.python
 
 
 def test_a_retired_rule_leaves_the_compiled_plugin() -> None:
     """The hook is compiled separately from the sweep and drifted before."""
-    compiled = antipattern_set_for(
-        ClaudeSpellings().read_document(DOCUMENT_IN_HAND), RETIRED
-    )
+    compiled = rule_set_for(ClaudeSpellings().read_document(DOCUMENT_IN_HAND), RETIRED)
 
     assert [
         rule.id for rule in compiled.python if rule.id in set(RETIRED.retired)
