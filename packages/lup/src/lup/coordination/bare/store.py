@@ -785,16 +785,26 @@ def addresses(root: Path, now: datetime | None = None) -> list[str]:
     check knowing only one of them would let the others through, which is the
     failure that made a redirect reach nobody.
 
+    Names are read both ways round, which is one line and the whole of a hole.
+    `name_holders` answers which member a name reaches now, so a name somebody
+    wrote down before a rename still refuses; `called` answers what a member is
+    called now, so a member that went quiet long enough to read as gone, lost
+    its name to a newcomer, and came back once the newcomer had left is still
+    refused under the name every listing prints for it. Either reading alone
+    leaves a live member a sender can type their way to unrecorded.
+
     Live members only. A session that has left is not somewhere a durable
     message would arrive either, so redirecting a send to it would trade one
     call reaching nobody for another.
     """
     live = live_ids(root, now)
+    calling = called(root)
     return sorted(
         {
             *live,
             *[f"{MEMBER_KIND}:{member}" for member in live],
             *[name for name, member in name_holders(root).items() if member in live],
+            *[calling[member] for member in live if calling.get(member)],
         }
     )
 
