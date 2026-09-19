@@ -1123,13 +1123,9 @@ def xargs_payload(words: list[str]) -> list[str]:
     value_options = ("-I", "-i", "-n", "-d", "-P", "-s", "-L", "-a", "-E", "-e")
     position = 1
     while position < len(words) and words[position].startswith("-"):
-        option = words[position]
-        if "=" in option or (len(option) > 2 and not option.startswith("--")):
-            position += 1
-        elif option in value_options:
-            position += 2
-        else:
-            position += 1
+        # A value option is two characters and carries no `=`, so it is the
+        # one spelling that skips its operand too.
+        position += 2 if words[position] in value_options else 1
     return words[position:]
 
 
