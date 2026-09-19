@@ -66,7 +66,20 @@ from lup.workspace.paths import find_project_root
 
 pytestmark = pytest.mark.integration
 
-PROBE_MODEL = "gpt-5.5"
+PROBE_MODEL = None
+"""Whichever model the scoped home is configured with, rather than a pin.
+
+A pinned model went stale and took all three arms down with it. The home is
+seeded from the operator's own `config.toml`, so it carries their
+`model_reasoning_effort` as well as their `model` — and a session that
+overrides only the first sends the two to the API as a pair that never existed
+together. On this machine that was `gpt-5.5` with `max`, which answers
+`400 unsupported_value: 'max' is not supported with the 'gpt-5.5' model`.
+
+Naming nothing leaves both the home's, which is consistent by construction and
+cannot go stale. What this file measures is an approval boundary, and no part
+of that question is about which model answers the prompt.
+"""
 
 ALLOWED = "echo lup-approval-control"
 """Classified `allow`, so the dispatcher answers with a native allow decision."""
