@@ -91,7 +91,15 @@ class ReleasePlan(BaseModel, frozen=True):
     date: dt.date
     tag: str
     migrations: list[str]
-    """The pending instructions this release folds into its section."""
+    """The pending instructions this release folds into its section.
+
+    Rendered lines rather than migrations: one break contributes its reason
+    and a line per step, so the length of this is not a count of anything a
+    reader recognises. :attr:`breaks` is that count.
+    """
+
+    breaks: int
+    """How many declared breaks those lines speak for."""
 
     entries: bool
     """Whether the open section had anything under it."""
@@ -106,7 +114,7 @@ class ReleasePlan(BaseModel, frozen=True):
                 if self.entries
                 else "the changelog has no open section — the release records only itself"
             ),
-            f"folding in {len(self.migrations)} pending migration(s)",
+            f"folding in what {self.breaks} declared break(s) ask of a caller",
         ]
 
 
