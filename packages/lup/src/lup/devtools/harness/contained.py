@@ -54,6 +54,7 @@ from lup.harness.image import (
 from lup.harness.notice import Banner, Notice
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
+from lup.harness.terminal import host_timezone
 from lup.providers.login import ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.sandbox.rail import (
@@ -1704,8 +1705,10 @@ def contained_argv(
     # The operator's terminal, answered here rather than in the declaration
     # the digest hashes. Same rule as the container client and for the same
     # measured reason: a `TERM` folded into the declaration would report the
-    # generated trees stale on any machine whose terminal differed.
-    terminal = image.terminal.for_host(environ)
+    # generated trees stale on any machine whose terminal differed. The zone
+    # is read beside it and for the same reason, off `/etc/localtime` rather
+    # than out of `environ`, which is where a Linux host does not keep it.
+    terminal = image.terminal.for_host(environ, host_timezone())
     said.add(terminal.notices())
     if banner is None:
         said.say()

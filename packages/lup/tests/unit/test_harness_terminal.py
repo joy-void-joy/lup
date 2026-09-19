@@ -12,6 +12,8 @@ have — because that is where a naive forward turns a missing feature into a
 broken one.
 """
 
+from pathlib import Path
+
 from lup.harness.image import Image
 from lup.harness.terminal import CarriedEditor, GeneratedLocale, TerminalHandoff
 from lup.harness.requirements import Package
@@ -289,7 +291,7 @@ def test_two_editor_commands_from_one_package_install_it_once() -> None:
         ]
     )
 
-    assert handoff.packages() == [Package(name="vim")]
+    assert handoff.packages().count(Package(name="vim")) == 1
 
 
 def test_the_build_compiles_every_locale_the_handoff_declares() -> None:
@@ -310,3 +312,106 @@ def manifest_of_nothing():
     from lup.harness.requirements import Manifest
 
     return Manifest()
+
+
+def test_the_machines_zone_crosses_although_the_host_exports_no_variable() -> None:
+    """The gap that made every contained session run in UTC.
+
+    ``TZ`` was declared as a description that crosses, which is true of
+    ``TERM`` and false of this one: a Linux host keeps its zone in
+    ``/etc/localtime`` and exports the variable for nobody, so the handoff
+    forwarded an absence and the container fell back to UTC. Measured in the
+    history rather than on a screen -- every commit authored inside recorded
+    ``+00:00`` in a repository whose other three thousand carry ``+02:00``.
+    """
+    crossing = TerminalHandoff().for_host({"TERM": "xterm"}, "Europe/Paris").environment
+
+    assert crossing["TZ"] == "Europe/Paris"
+
+
+def test_an_exported_zone_beats_the_file_it_would_have_been_read_from() -> None:
+    """An operator who exported ``TZ`` is overriding their own system zone.
+
+    A launch that preferred ``/etc/localtime`` would undo that override at
+    the boundary -- the one place they cannot watch it happen.
+    """
+    crossing = (
+        TerminalHandoff().for_host({"TZ": "Asia/Tokyo"}, "Europe/Paris").environment
+    )
+
+    assert crossing["TZ"] == "Asia/Tokyo"
+
+
+def test_a_machine_naming_no_zone_is_given_utc_rather_than_nothing() -> None:
+    """The base is written whether anything answered it or not.
+
+    UTC is what a container with no ``TZ`` was already doing, so this changes
+    no clock -- it changes who chose it, from a fallback nobody saw to a
+    value a reader can find in the argv.
+    """
+    crossing = TerminalHandoff().for_host({"TERM": "xterm"}).environment
+
+    assert crossing["TZ"] == "UTC"
+
+
+def test_a_zone_no_database_resolves_is_substituted_out_loud() -> None:
+    """A name that reaches the container unresolvable is silently UTC inside.
+
+    Which is the failure this whole handoff exists to refuse: the session
+    gets a working clock in the wrong zone, and the only evidence is that it
+    is not the one that was asked for.
+    """
+    resolution = TerminalHandoff().for_host({"TZ": "Mars/Olympus_Mons"}, "")
+
+    assert resolution.environment["TZ"] == "UTC"
+    assert [item.asked for item in resolution.substitutions] == ["Mars/Olympus_Mons"]
+
+
+def test_an_image_that_carries_no_zone_database_substitutes_every_name() -> None:
+    """``zones_carried`` is the adopter's answer, not a probe of this machine.
+
+    The check runs against the launcher's own tzdata, which an adopter who
+    stripped the package out of the image would have lying to them. Saying so
+    in the declaration is what turns that into a notice rather than a
+    ``TZ`` naming a zone nothing inside can resolve.
+    """
+    resolution = TerminalHandoff(zones_carried=False).for_host({}, "Europe/Paris")
+
+    assert resolution.environment["TZ"] == "UTC"
+    assert [item.variable for item in resolution.substitutions] == ["TZ"]
+
+
+def test_the_image_installs_the_zone_database_the_handoff_resolves_against() -> None:
+    """An unnamed dependency is one a later slimming removes.
+
+    The base image carries tzdata already, which is exactly why it is written
+    down: what its absence would break is a timestamp rather than a command,
+    so nothing would fail loudly enough to be blamed on it.
+    """
+    assert Package(name="tzdata") in TerminalHandoff().packages()
+
+
+def test_the_resolved_zone_reaches_the_engine_as_a_value_in_the_argv(
+    tmp_path: Path,
+) -> None:
+    """The half of this the handoff's own tests cannot see.
+
+    Every case above ends at a mapping, and a mapping the launch never
+    forwarded is the same UTC session with a passing suite behind it. This
+    ends at the flag the engine reads.
+    """
+    crossing = TerminalHandoff().for_host({"TERM": "xterm"}, "Europe/Paris")
+    argv = Image().session_arguments(
+        tag="lup-agent:test",
+        checkout=tmp_path,
+        uid=1000,
+        gid=1000,
+        writable={},
+        read_only={},
+        state_volume="lup-cfg-test",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        terminal=crossing.environment,
+    )
+
+    index = argv.index("TZ=Europe/Paris")
+    assert argv[index - 1] == "-e"

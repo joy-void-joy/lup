@@ -22,29 +22,61 @@ checkouts of one commit. So this module holds names, and
 :meth:`TerminalHandoff.for_host` is where a machine answers them.
 
 **Some variables name a thing the image has to have.** ``EDITOR`` is not a
-description, it is a command the session will try to run, and ``LANG`` is not
-a description either -- it names a compiled locale, and glibc answers a name
-it cannot find by falling back to ASCII and complaining once per program. In
-both cases forwarding blind turns a missing feature into a broken one, and the
-operator sees an editor fail to open or a screenful of ``setlocale`` warnings
-rather than learning what the image was not carrying.
+description, it is a command the session will try to run; ``LANG`` is not a
+description either -- it names a compiled locale, and glibc answers a name it
+cannot find by falling back to ASCII and complaining once per program; and
+``TZ`` names a zone in a database. In each case forwarding blind turns a
+missing feature into a broken one, and the operator sees an editor fail to
+open or a screenful of ``setlocale`` warnings rather than learning what the
+image was not carrying.
 
-The answer for both is the same, and it is to *carry more*, not to forward
-less: the image installs the editors and generates the locales this declares,
-so an operator's own variable crosses unchanged. Substitution is what happens
-when it names something outside that list, and it is said out loud with the
-one-line widening that would carry it.
+The answer for all three is the same, and it is to *carry more*, not to
+forward less: the image installs the editors and the zone database and
+generates the locales this declares, so an operator's own variable crosses
+unchanged. Substitution is what happens when it names something outside that
+list, and it is said out loud with the one-line widening that would carry it.
+
+**And one of them the host does not keep in a variable at all.** A Linux
+machine keeps its zone in ``/etc/localtime`` and exports ``TZ`` for nobody, so
+a handoff that carried the variable by name carried an absence: the
+declaration read as satisfied and every contained session ran in UTC.
+:func:`host_timezone` is where that one is read instead, which is why a group
+here can be answered from somewhere other than the environment.
 """
 
 import shlex
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
+from tzlocal import get_localzone_name
 
 from lup.harness.notice import Notice
 from lup.harness.requirements import Package
 from lup.types import EnvVars
+
+
+def host_timezone() -> str:
+    """The IANA zone this machine keeps, or ``""`` where it names none.
+
+    Read here rather than taken from the environment, because on the machines
+    this launches from the environment does not hold it: a Linux host keeps
+    its zone in ``/etc/localtime`` and exports ``TZ`` for nobody, so a handoff
+    that only forwarded the variable forwarded an absence. That is the whole
+    gap -- ``TZ`` was declared as crossing, the operator's shell had never set
+    it, and every contained session ran in UTC with the declaration looking
+    satisfied.
+
+    Delegated to ``tzlocal``, which reads the source each platform actually
+    keeps it in -- ``/etc/localtime`` on Linux, the registry on Windows,
+    system preferences on macOS -- rather than string-munging the one this
+    machine happens to be.
+    """
+    try:
+        return get_localzone_name()
+    except ZoneInfoNotFoundError:
+        return ""
 
 
 class CarriedEditor(BaseModel, frozen=True):
@@ -163,7 +195,6 @@ class TerminalHandoff(BaseModel, frozen=True):
             "TERM",
             "COLORTERM",
             "CLAUDE_CODE_TMUX_TRUECOLOR",
-            "TZ",
             "TMUX",
             "STY",
             "ZELLIJ",
@@ -187,10 +218,7 @@ class TerminalHandoff(BaseModel, frozen=True):
             "parity this whole model is for: the same terminal, capped in "
             "both places or in neither. Left behind while ``TMUX`` crossed, "
             "it was measured as a session dropping to 256 colour on entering "
-            "a container it had rendered 24-bit in the week before. ``TZ`` "
-            "is here because a container with none runs "
-            "in UTC, so every timestamp a session writes into the operator's "
-            "checkout is stamped in somebody else's day. ``TMUX``, ``STY`` "
+            "a container it had rendered 24-bit in the week before. ``TMUX``, ``STY`` "
             "and ``ZELLIJ`` say which multiplexer sits between what the "
             "session prints and the screen, which is what decides whether a "
             "runtime wraps an escape sequence in the passthrough that "
@@ -242,6 +270,53 @@ class TerminalHandoff(BaseModel, frozen=True):
             "this fallback cannot itself be missing"
         ),
     )
+    zone_variables: list[str] = Field(
+        default=["TZ"],
+        description=(
+            "Variables naming the zone a session reads its own clock in. "
+            "``TZ`` is the *base*, written whether the host exported it or "
+            "not, and that is the whole repair: unlike every description "
+            "above, a Linux host keeps its zone in ``/etc/localtime`` and "
+            "exports the variable for nobody, so carrying ``TZ`` by name "
+            "carried an absence and the container fell back to UTC. What "
+            "fills it is :func:`host_timezone`, not the environment. The "
+            "cost of leaving it unset is not cosmetic: git reads ``TZ`` for "
+            "the author offset, so a session's commits record ``+00:00`` in "
+            "a history whose every other commit carries the operator's own"
+        ),
+    )
+    zones_carried: bool = Field(
+        default=True,
+        description=(
+            "Whether the image holds a zone database, which decides whether "
+            "a resolved name is written or substituted for. The image "
+            "installs :attr:`zone_package`, so this is true here; it is a "
+            "field rather than a constant for the adopter who strips tzdata "
+            "out, whose sessions should then read the substitution notice "
+            "rather than a ``TZ`` naming a zone nothing inside can resolve"
+        ),
+    )
+    zone_package: Package = Field(
+        default=Package(name="tzdata"),
+        description=(
+            "What puts the zone database in the image, declared for the same "
+            "reason the editors are: a name the operator's machine answered "
+            "reaches a container that has to be able to answer it too. The "
+            "base image happens to carry it already, which is exactly why it "
+            "is written down -- an unnamed dependency is one a later slimming "
+            "removes, and what it would break is a timestamp rather than a "
+            "command, so nothing would fail loudly enough to blame it"
+        ),
+    )
+    fallback_zone: str = Field(
+        default="UTC",
+        description=(
+            "What ``TZ`` is set to when this machine names no zone, which is "
+            "what a container without the variable was already doing. Written "
+            "rather than left out, so a session reading UTC is reading a zone "
+            "somebody chose rather than a default nobody saw"
+        ),
+    )
     editor_variables: list[str] = Field(
         default=["EDITOR", "VISUAL"],
         description=(
@@ -290,13 +365,18 @@ class TerminalHandoff(BaseModel, frozen=True):
     )
 
     def packages(self) -> list[Package]:
-        """Everything the image installs to carry these editors, deduplicated.
+        """Everything the image installs to carry this handoff, deduplicated.
 
         Deduplicated because two commands legitimately come from one package
         -- ``vi`` and ``vim`` are the standing case -- and asking pacman for
         the same package twice in one layer is a line a reader has to stop at.
+
+        The zone database joins the editors because it answers the same kind
+        of variable: a name the host resolved, which a container has to be
+        able to resolve too.
         """
-        return list(dict.fromkeys(item.package for item in self.editors))
+        carried = [item.package for item in self.editors]
+        return list(dict.fromkeys([*carried, self.zone_package]))
 
     def commands(self) -> list[str]:
         """Every editor command this image answers to, for a probe to check."""
@@ -344,9 +424,27 @@ class TerminalHandoff(BaseModel, frozen=True):
             item.name == locale for item in self.locales
         )
 
+    def keeps(self, zone: str) -> bool:
+        """Whether a zone name is one the image's database can resolve.
+
+        Asked of this machine's own database rather than the container's,
+        which is the same trade the locale check makes and sound for the same
+        reason: both sides carry a whole distribution's tzdata, so a name one
+        resolves the other resolves. What it cannot catch is an adopter who
+        stripped the package out, which is what :attr:`zones_carried` is for
+        -- set false there, every name substitutes and the notice says so.
+        """
+        if not zone or not self.zones_carried:
+            return False
+        try:
+            return bool(ZoneInfo(zone))
+        except (ZoneInfoNotFoundError, ValueError):
+            return False
+
     def for_host(
         self,
         environment: Mapping[str, str],  # lup: ignore[dict-str-payload] — env map
+        zone: str = "",
     ) -> TerminalResolution:
         """This handoff answered by the machine the launch is running on.
 
@@ -355,8 +453,16 @@ class TerminalHandoff(BaseModel, frozen=True):
         believes, where an absent one is the question it was already prepared
         for.
 
-        The two groups that name something are handled by :meth:`answered`,
+        The three groups that name something are handled by :meth:`answered`,
         which copies the host's own state rather than filling the group in.
+
+        ``zone`` is what :func:`host_timezone` read off this machine, passed
+        in rather than read here for the reason every machine fact in this
+        file is passed in: a declaration that resolved it would hash a
+        different digest on every machine in a different zone. It is the
+        group's answer only where the operator exported no ``TZ`` of their
+        own, which keeps an explicitly set variable ahead of the file it
+        would have been read from.
         """
         described = {
             name: environment[name]
@@ -377,10 +483,46 @@ class TerminalHandoff(BaseModel, frozen=True):
             self.fallback_locale,
             "another entry in the handoff's `locales`, which the build generates",
         )
-        return TerminalResolution(
-            environment={**described, **editor.environment, **locale.environment},
-            substitutions=[*editor.substitutions, *locale.substitutions],
+        # Merged rather than passed alongside, so the zone travels the same
+        # path as the two groups above: the host's own variable wins where it
+        # set one, and what this machine keeps fills the base where it did not.
+        keeping = self.answered(
+            {**environment, self.zone_variables[0]: self.chosen(environment, zone)},
+            self.zone_variables,
+            self.keeps,
+            self.fallback_zone,
+            "the handoff's `zone_package`, which the image installs",
         )
+        return TerminalResolution(
+            environment={
+                **described,
+                **editor.environment,
+                **locale.environment,
+                **keeping.environment,
+            },
+            substitutions=[
+                *editor.substitutions,
+                *locale.substitutions,
+                *keeping.substitutions,
+            ],
+        )
+
+    def chosen(
+        self,
+        environment: Mapping[str, str],  # lup: ignore[dict-str-payload] — env map
+        zone: str,
+    ) -> str:
+        """The operator's own ``TZ`` where they exported one, else the machine's.
+
+        The precedence matters in the one direction a reader would not guess:
+        an operator who exported ``TZ`` is overriding their own
+        ``/etc/localtime``, and a launch that preferred the file would undo
+        that override at the boundary -- the one place they cannot see it
+        happen.
+        """
+        base = self.zone_variables[0]
+        exported = base in environment and environment[base]
+        return environment[base] if exported else zone
 
     def answered(
         self,
