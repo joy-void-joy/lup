@@ -130,6 +130,94 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        commit="cf72246a2",
+        subjects=[
+            "NATIVE_SPELLING_RULE_ID",
+            "KERNEL_IMPORT_RULE_ID",
+            "LIBRARY_DEFAULT_RULE_ID",
+            "CONSTANT_DECLARATION_RULE_ID",
+        ],
+        reason=(
+            "the boundary scanner's rule ids are one enumeration: several audits "
+            "share that module, and a constant apiece said the same thing as "
+            "many times as there were suppression comments naming it, so "
+            "`RuleId` says it once"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read the id off `RuleId` instead: `RuleId.NATIVE_SPELLING`, "
+                    "`RuleId.KERNEL_IMPORTS`, `RuleId.LIBRARY_DEFAULT` and "
+                    "`RuleId.CONSTANT_DECLARATION`, all from "
+                    "`lup.harness.codescan.boundaries`. Note the plural in the "
+                    "second, whose constant was singular. Each carries the same "
+                    "string it always did and the type is a `StrEnum`, so a "
+                    "comparison against a rule id read from anywhere else -- a "
+                    "directive, a deny message, the generated reference -- holds "
+                    "without being converted."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        commit="a329d017d",
+        subjects=[
+            "changes_runtime_source",
+            "prompt_command",
+            "prompt_entry",
+            "prompt_artifacts",
+        ],
+        reason=(
+            "the roster's prompt hook became one guard serving the arriving and "
+            "the departing event alike, so none of these names a thing that is "
+            "only about the prompt any more, and each has to be told which "
+            "script and which runtime module it is building for"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call `runtime_source(module)` for `changes_runtime_source()`, "
+                    "`guard_command(plugin_root_env, guard_script)` for "
+                    "`prompt_command(plugin_root_env)`, and "
+                    "`hook_entry(plugin_root_env, guard_script)` for "
+                    "`prompt_entry(plugin_root_env)`. The added argument is which "
+                    "guard the entry points at, and a caller that had one hook "
+                    "passes the script it was already generating."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Call `roster_artifacts` for `prompt_artifacts`. It keeps "
+                    "`plugin_root`, `semantic_id` and `event` and adds "
+                    "`guard_script`, `runtime_module`, `source_file` and "
+                    "`origin` -- what the one prompt guard used to hold as its "
+                    "own constants, passed now that two events render it."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        commit="05c5b945e",
+        subjects=["CallToolResultWithAlias", "CallToolResultWithAlias.is_error"],
+        reason=(
+            "in-process MCP servers are built on the mcp 2.x server API, whose "
+            "result already answers to `is_error`; the subclass existed only to "
+            "alias `isError` onto the snake-case spelling an SDK query runner "
+            "looked for, and it has nothing left to translate"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Drop the subclass and let the server's own result stand. A "
+                    "caller that built one to get the alias reads `is_error` off "
+                    "the response envelope instead -- which is what a `@lup_tool` "
+                    "handler's failure already crosses as, and what "
+                    "`mcp_response(text, is_error=True)` sets."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         commit="625532040",
         subjects=["refuse_a_blocked_registration"],
         reason=(
