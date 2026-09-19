@@ -48,6 +48,7 @@ from pathlib import Path
 import sh
 from pydantic import BaseModel
 
+from lup.harness.toolchain import preflight_namespace
 from lup.policy.assets.host import undo_namespace
 
 REF_FORMAT = "%(refname) %(objectname)"
@@ -187,37 +188,41 @@ def watched_config(
 def repository_state(root: Path, namespace: str = "") -> dict[str, str]:
     """Everything the guard watches: every ref, and the config a fixture can leak.
 
-    Minus the undo namespace, which is the one place in this repository that
-    is *written by design* while a suite runs. The permission dispatcher takes
-    a snapshot in front of every command an agent is allowed, so a suite an
-    agent starts has refs appearing under it throughout — measured, twenty-four
-    in the ninety seconds around one `dev check`, and eight identical teardown
-    failures, one per xdist worker, naming refs no fixture had touched.
+    Minus the two namespaces this repository's own tooling *writes by design*
+    while a suite runs. The permission dispatcher takes an undo snapshot in
+    front of every command an agent is allowed, so a suite an agent starts has
+    refs appearing under that namespace throughout — measured, twenty-four in
+    the ninety seconds around one `dev check`, and eight identical teardown
+    failures, one per xdist worker, naming refs no fixture had touched. And
+    `dev check` runs its harness rows beside the two test suites, one of which
+    probes the checkpoint store by writing a ref under the preflight namespace
+    and deleting it again, which the worker running a test just then reported
+    as that test's doing.
 
-    Excluded rather than reported, on the strength of what the namespace is.
-    A ref moving there carries no evidence either way: it is written from
+    Excluded rather than reported, on the strength of what the namespaces are.
+    A ref moving in either carries no evidence either way: it is written from
     outside the suite on a schedule the suite does not control, so it is never
     the suite's doing, and a notice saying so on every agent-run check is the
     line people learn to skip above the line that mattered. And it cannot be
     the accident this guard exists for — that accident is a branch moving or a
-    shared identity being overwritten, and a snapshot is a tree hung outside
-    `refs/heads`, pointed at by nothing, that moves no branch and writes no
+    shared identity being overwritten, and both are trees hung outside
+    `refs/heads`, pointed at by nothing, that move no branch and write no
     config.
 
-    The namespace is imported from the half that writes it rather than spelled
-    again here, for the reason that half gives for being importable at all:
-    the writer and the reader must not end up looking in two places for one
-    safety net. ``namespace`` is a parameter for the callers that pass their
-    own — the same override :func:`~lup.policy.assets.host.undo_snapshot`
-    takes, so a suite testing snapshots against a namespace of its own is
-    still watched in the real one.
+    Each namespace is imported from the half that writes it rather than
+    spelled again here, for the reason that half gives for being importable
+    at all: the writer and the reader must not end up looking in two places
+    for one safety net. ``namespace`` is a parameter for the callers that pass
+    their own undo namespace — the same override
+    :func:`~lup.policy.assets.host.undo_snapshot` takes, so a suite testing
+    snapshots against a namespace of its own is still watched in the real one.
     """
-    where = namespace or undo_namespace()
+    written = (namespace or undo_namespace(), preflight_namespace())
     return {
         **{
             name: value
             for name, value in repository_refs(root).items()
-            if not name.startswith(f"{where}/")
+            if not any(name.startswith(f"{where}/") for where in written)
         },
         **watched_config(root),
     }

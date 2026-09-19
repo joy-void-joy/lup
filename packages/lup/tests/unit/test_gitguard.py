@@ -23,6 +23,7 @@ from lup.devtools.gitguard import (
     repository_state,
     watched_config,
 )
+from lup.harness.toolchain import preflight_namespace
 from lup.policy.assets.host import undo_namespace
 
 
@@ -193,6 +194,22 @@ def test_a_snapshot_taken_while_the_suite_runs_is_not_the_suites_doing(
     git = guarded_repository(tmp_path)
     before = repository_state(tmp_path)
     git("update-ref", f"{undo_namespace()}/20260822T030458856293-25ed70890b45", "HEAD")
+
+    assert moved_refs(before, repository_state(tmp_path)) == []
+
+
+def test_a_preflight_probe_beside_the_suite_is_not_the_suites_doing(
+    tmp_path: Path,
+) -> None:
+    """`dev check` probes the checkpoint store while the suites run beside it.
+
+    The probe writes a ref named for its process under the preflight
+    namespace and deletes it again, so whichever worker happened to be
+    between tests just then reported a ref created that no fixture wrote.
+    """
+    git = guarded_repository(tmp_path)
+    before = repository_state(tmp_path)
+    git("update-ref", f"{preflight_namespace()}/45421", "HEAD")
 
     assert moved_refs(before, repository_state(tmp_path)) == []
 
