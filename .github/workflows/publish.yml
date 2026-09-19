@@ -3,13 +3,13 @@
 
 name: Publish
 
-on:
+'on':
   push:
-    tags: ["v*"]
+    tags: [v*]
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: pypi
     # What stands in for a stored token: the forge mints an identity for this
     # run, and the index trusts it for this repository and this workflow.

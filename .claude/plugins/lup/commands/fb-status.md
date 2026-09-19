@@ -1,5 +1,5 @@
 ---
-description: "Feedback loop entry point \u2014 status, targets, and previous session context"
+description: Feedback loop entry point — status, targets, and previous session context
 allowed-tools: Bash(uv run lup-devtools:*), Read, AskUserQuestion
 ---
 

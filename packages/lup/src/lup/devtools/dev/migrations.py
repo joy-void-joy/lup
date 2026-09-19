@@ -130,6 +130,77 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        subjects=["agent_roster_text", "topic_bullets", "UpstreamReport.section"],
+        reason=(
+            "a roster and a report section are a list and a document rather "
+            "than joined text: each is parts now, so a name or a description "
+            "carrying a newline cannot end the bullet or the heading it was "
+            "written into"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Compose the parts instead of the string: "
+                    "`agent_roster_bullets(agents)` from "
+                    "`lup.harness.content.catalog` answers with a `BulletList`, "
+                    "and a report's section is `section(report)` from "
+                    "`lup.harness.content.docs.upstream_reports`, a `Passage`. "
+                    "Where the text itself was wanted, `part.text_payload` "
+                    "reads it back. `topic_bullets` has no replacement: its one "
+                    "caller builds a `BulletList` from `REPORT_TOPICS`."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "WorkflowSpec.body",
+            "WorkflowSpec.install_step",
+            "PublishSpec.body",
+        ],
+        reason=(
+            "a generated workflow is a declared document rather than a formatted "
+            "string: the steps are `WorkflowStep` declarations and the file is a "
+            "`YamlDocument`, which is emitted and parsed back before it is "
+            "written, so a runner label or a command carrying a colon can no "
+            "longer end the mapping it lands in"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read the YAML off `spec.document().text()` where "
+                    "`spec.body()` was read, or take the whole artifact from "
+                    "`spec.artifact()` as the generator does. A project that "
+                    "appended its own step by formatting text around `body()` "
+                    "declares a `WorkflowStep` instead and overrides `steps()`; "
+                    "`install_step` is `install_steps()`, which answers with a "
+                    "list rather than a block of YAML."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["MarkdownCell", "MarkdownCell.text", "MarkdownCell.render"],
+        reason=(
+            "the base every generated Markdown leaf answers through is an "
+            "inline node rather than a table cell: the same escaping is what a "
+            "heading compiled from a catalog and a value inside a sentence "
+            "need, and a name saying `cell` said the table was the only "
+            "container there could be"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import `InlineNode` from `lup.formats.markdown` where "
+                    "`MarkdownCell` was imported; `text` and `render` are "
+                    "unchanged, and every concrete kind — `PlainCell`, "
+                    "`CodeCell`, `HtmlCodeCell`, `LinkCell` — keeps its name and "
+                    "its behaviour."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         subjects=[
             "PYTHON_SUFFIXES",
             "MARKDOWN_SUFFIXES",

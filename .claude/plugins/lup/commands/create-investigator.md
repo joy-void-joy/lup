@@ -1,7 +1,7 @@
 ---
-description: "Create a new diagnostic command that traces pasted output to a root cause, like the debug skill"
+description: Create a new diagnostic command that traces pasted output to a root cause, like the debug skill
 allowed-tools: Write, Read, AskUserQuestion
-argument-hint: "[command-name] [brief description of what it investigates]"
+argument-hint: '[command-name] [brief description of what it investigates]'
 ---
 
 # Create Investigator Command

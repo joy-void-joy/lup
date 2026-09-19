@@ -1,6 +1,6 @@
 ---
 name: init
-description: "Initialize the self-improvement loop for a specific domain"
+description: Initialize the self-improvement loop for a specific domain
 ---
 
 # Initialize Self-Improvement Loop

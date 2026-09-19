@@ -10,7 +10,8 @@ beside its managing module instead (see the package docstring).
 import re  # lup: ignore[import-re] — prose has no parser; its shape is the rule
 from abc import ABC, abstractmethod
 from itertools import dropwhile
-from pathlib import Path, PurePosixPath
+from json import dumps
+from pathlib import Path, PurePath, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import (
@@ -28,7 +29,18 @@ from lup.devtools.launcher import DEFAULT_ENVIRONMENT
 from lup.formats.banner import ArtifactBanner, GeneratedBanner
 from lup.harness.image import Image
 from lup.harness.requirements import Manifest
-from lup.formats.markdown import CodeCell, PlainCell, TableCell, escaped
+from lup.formats.markdown import (
+    ProseCell,
+    ProseCode,
+    CodeCell,
+    MarkdownDocument,
+    PlainCell,
+    TableCell,
+    escaped,
+)
+from lup.formats.toml import TomlDocument
+from lup.harness.passages import passage_text, rendered
+from lup.formats.yaml import PlainData, YamlDocument
 from lup.tools.mcp import ToolDeclaration
 from lup.policy.boundary import BoundaryCapability
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName, SpawnNameRow
@@ -125,6 +137,18 @@ class SemanticPart(BaseModel, ABC, frozen=True):
         return None
 
     @property
+    def carried(self) -> list["PromptPart"]:
+        """The parts this one holds inside itself, if it holds any.
+
+        A passage names values, and a value is a part: an invocation it
+        issues, a plugin path it spells, an argument reference it reaches.
+        Every walk that asks a document's parts a question has to reach those
+        too, or a skill's own invocation becomes invisible by being written
+        inside a sentence rather than beside one.
+        """
+        return []
+
+    @property
     def invocation(self) -> "SkillInvocation | None":
         """The skill invocation this part issues, if it issues one."""
         return None
@@ -166,6 +190,129 @@ class TextPart(SemanticPart, frozen=True):
     @property
     def text_payload(self) -> str:
         return self.text
+
+
+class InlinePart(SemanticPart, frozen=True):
+    """One derived value standing inside authored prose, escaped by its node.
+
+    What a passage names is always a part, and a value that is not one of the
+    parts already — a path, a count, a description read off a declaration —
+    becomes this. The node it holds decides the formatting and does the
+    escaping, which is the same node a table cell holds: a pipe cannot break
+    a row, a backtick cannot close a span, whichever container it lands in.
+    """
+
+    type: Literal["inline"] = "inline"
+    node: TableCell
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.node.render()
+
+
+def code(text: str | PurePath) -> InlinePart:
+    """A derived value shown as code, which is most of what prose names.
+
+    A path is taken as the path it is rather than as a string somebody
+    spelled, because that is what the declarations carrying one hold.
+    """
+    return InlinePart(node=ProseCode(text=str(text)))
+
+
+def plain(text: str | PurePath) -> InlinePart:
+    """A derived value shown as it reads."""
+    return InlinePart(node=ProseCell(text=str(text)))
+
+
+def counted(total: int) -> InlinePart:
+    """A number a document quotes, as the text a reader sees."""
+    return InlinePart(node=ProseCell(text=str(total)))
+
+
+class BulletItem(BaseModel, frozen=True):
+    """One bullet of a derived list: what it names, and what it says of it.
+
+    The lead is a node rather than a string because a roster shows what it
+    names in whatever form the roster is about — a topic strong, an agent as
+    the code its name is — and each of those is a node that already knows how
+    to escape itself.
+    """
+
+    lead: TableCell
+    text: str
+
+    def render(self) -> str:
+        """This bullet's line, both halves escaped where they enter it."""
+        return f"- {self.lead.render()} — {ProseCell(text=self.text).render()}\n"
+
+
+class BulletList(SemanticPart, frozen=True):
+    """A list derived from declarations, one bullet per line.
+
+    What a cell is for a value inside a sentence, this is for a roster: a
+    list of topics, of skills, of whatever a declaration enumerates, laid out
+    once here with every item escaped on the way in. An inline node cannot
+    serve, holding one line by construction — right for a value in a
+    sentence, wrong for a list that is several.
+    """
+
+    type: Literal["bullets"] = "bullets"
+    items: list[BulletItem]
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.text_payload
+
+    @property
+    def text_payload(self) -> str:
+        return "".join(item.render() for item in self.items)
+
+
+class Passage(SemanticPart, frozen=True):
+    """Prose authored as Markdown beside its module, with its values placed.
+
+    The parts around it stay parts: a table derived from declarations, an
+    invocation each runtime spells its own way, an argument reference. What
+    this carries is the words, which are prose and belong in a file that is
+    prose — and the values those words name, each entering escaped because
+    the type admits nothing that could enter otherwise.
+    """
+
+    type: Literal["passage"] = "passage"
+    module: str = Field(min_length=1)
+    """The module whose declaration this prose belongs to, spelled ``__name__``."""
+
+    name: str = ""
+    """Which passage beside that module, where it declares more than one."""
+
+    values: dict[str, "PromptPart"] = {}
+    """What the prose names, under the name it names it by.
+
+    Parts rather than text, which is the guarantee: a part spells itself —
+    escaped by its node, or in the vocabulary of the runtime reading it — so
+    there is no way to name a value that arrives as somebody's unescaped
+    string. An argument reference, a skill invocation and a path are all one
+    kind of thing here, and the prose names each the same way.
+    """
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return rendered(
+            self.module,
+            self.name,
+            {name: value.spell(renderer) for name, value in self.values.items()},
+        )
+
+    @property
+    def carried(self) -> list["PromptPart"]:
+        return list(self.values.values())
+
+    @property
+    def text_payload(self) -> str:
+        """The authored prose, which is what a reader of this document reads.
+
+        The words rather than the rendering: the portability scan is about
+        the prose somebody wrote, and what each value becomes is that value's
+        own answer, checked where the value is declared.
+        """
+        return passage_text(self.module, self.name)
 
 
 class SpellingExample(SemanticPart, frozen=True):
@@ -545,6 +692,9 @@ class ArgumentsRef(SemanticPart, frozen=True):
 
 type PromptPart = Annotated[
     TextPart
+    | Passage
+    | InlinePart
+    | BulletList
     | SpellingExample
     | MarkdownTable
     | ToolRoster
@@ -583,9 +733,21 @@ class PromptDocument(BaseModel, frozen=True):
             raise ValueError("a document rendered to its own artifact needs a source")
         return self.source
 
+    def walked(self) -> list[PromptPart]:
+        """Every part this document holds, the ones inside a passage included.
+
+        What a walk asks a part is asked of the values a passage names too: a
+        skill invoked inside a sentence is invoked, and a plugin named there
+        is named. Reading order, so a report listing what a document does
+        lists it the way the document reads.
+        """
+        return [found for part in self.parts for found in [part, *part.carried]]
+
     def prose(self) -> list[str]:
         """Every literal prose payload this document carries, in reading order."""
-        return [text for part in self.parts if (text := part.text_payload) is not None]
+        return [
+            text for part in self.walked() if (text := part.text_payload) is not None
+        ]
 
     def text_size(self) -> int:
         """Lower bound on what this document costs a session, in UTF-8 bytes.
@@ -787,7 +949,7 @@ class Skill(SelectableRule, frozen=True):
                 f"skill {self.id!r} has a required argument after an optional one"
             )
         references_arguments = any(
-            part.references_arguments for part in self.prompt.parts
+            part.references_arguments for part in self.prompt.walked()
         )
         if bool(self.arguments) != references_arguments:
             raise ValueError(
@@ -811,7 +973,7 @@ class Skill(SelectableRule, frozen=True):
         granted = [
             read for grant in self.tools if (read := BashGrant.read(grant)) is not None
         ]
-        for part in self.prompt.parts:
+        for part in self.prompt.walked():
             command = part.shell_command
             if command is None:
                 continue
@@ -1827,7 +1989,7 @@ class Harness(BaseModel, frozen=True):
         invocations = [
             issued
             for prompt in prompts
-            for part in prompt.parts
+            for part in prompt.walked()
             if (issued := part.invocation) is not None
         ]
         if self.resolver is not None:
@@ -1879,7 +2041,7 @@ class Harness(BaseModel, frozen=True):
             for plugin in self.plugins
             for agent in plugin.agents
         ]
-        parts = [part for prompt in prompts for part in prompt.parts]
+        parts = [part for prompt in prompts for part in prompt.walked()]
         unknown_plugins = [
             named
             for part in parts
@@ -1962,6 +2124,93 @@ class Artifact(BaseModel, frozen=True):
             content=banner.applied_to(path, body),
             semantic_id=semantic_id,
             executable=executable,
+            banner=banner,
+        )
+
+    @classmethod
+    def in_yaml(
+        cls,
+        *,
+        path: ArtifactPath,
+        document: YamlDocument,
+        semantic_id: str,
+        banner: GeneratedBanner,
+    ) -> "Artifact":
+        """One artifact whose body is a YAML document rather than text about one.
+
+        The constructor a generator reaches for instead of formatting the
+        file: what it is handed is a tree that has already been emitted and
+        parsed back, so a derived value cannot arrive having ended the mapping
+        it was written into. YAML inside a Markdown file is frontmatter, which
+        :class:`lup.formats.markdown.MarkdownDocument` holds instead.
+        """
+        return cls.generated(
+            path=path,
+            body=document.text(),
+            semantic_id=semantic_id,
+            banner=banner,
+        )
+
+    @classmethod
+    def in_markdown(
+        cls,
+        *,
+        path: ArtifactPath,
+        document: MarkdownDocument,
+        semantic_id: str,
+        banner: ArtifactBanner,
+    ) -> "Artifact":
+        """One artifact whose body is a Markdown document, frontmatter included.
+
+        The banner is asked rather than applied, because most of these carry
+        the exemption instead: a skill file is verbatim model-facing text, and
+        a comment opening it would open every prompt compiled from it.
+        """
+        return cls(
+            path=path,
+            content=banner.applied_to(path, document.text()),
+            semantic_id=semantic_id,
+            banner=banner,
+        )
+
+    @classmethod
+    def in_toml(
+        cls,
+        *,
+        path: ArtifactPath,
+        document: TomlDocument,
+        semantic_id: str,
+        banner: GeneratedBanner,
+    ) -> "Artifact":
+        """One artifact whose body is a TOML document rather than text about one."""
+        return cls.generated(
+            path=path,
+            body=document.text(),
+            semantic_id=semantic_id,
+            banner=banner,
+        )
+
+    @classmethod
+    def in_json(
+        cls,
+        *,
+        path: ArtifactPath,
+        data: PlainData,
+        semantic_id: str,
+        banner: ArtifactBanner,
+        indent: int = 2,
+    ) -> "Artifact":
+        """One artifact whose body is JSON, serialized rather than formatted.
+
+        Keys are sorted, because the artifact is compared against what is
+        committed and a mapping that reordered itself between runs would read
+        as a change nobody made. JSON holds no comment, so the banner most of
+        these carry is the exemption saying why.
+        """
+        return cls(
+            path=path,
+            content=dumps(data, indent=indent, sort_keys=True),
+            semantic_id=semantic_id,
             banner=banner,
         )
 

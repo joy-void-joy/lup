@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: "Hand one piece of work to another session, or park it for whoever picks it up"
+description: Hand one piece of work to another session, or park it for whoever picks it up
 ---
 
 # Delegate

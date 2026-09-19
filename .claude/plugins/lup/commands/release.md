@@ -1,7 +1,7 @@
 ---
-description: "Cut a release: settle the level, close the changelog, tag it"
+description: 'Cut a release: settle the level, close the changelog, tag it'
 allowed-tools: Bash(uv run lup-devtools:*, git:*, gh:*), Read, Edit, AskUserQuestion
-argument-hint: "[patch|minor|major]"
+argument-hint: '[patch|minor|major]'
 ---
 
 # Cut a Release

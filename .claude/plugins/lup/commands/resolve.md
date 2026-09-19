@@ -1,6 +1,6 @@
 ---
-description: "Resolve inline feedback through isolated work"
-argument-hint: "[what needs resolving, in your own words]"
+description: Resolve inline feedback through isolated work
+argument-hint: '[what needs resolving, in your own words]'
 ---
 
 **What this run is about:** $ARGUMENTS

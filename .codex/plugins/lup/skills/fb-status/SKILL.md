@@ -1,6 +1,6 @@
 ---
 name: fb-status
-description: "Feedback loop entry point \u2014 status, targets, and previous session context"
+description: Feedback loop entry point — status, targets, and previous session context
 ---
 
 # Status: Feedback Loop Entry Point

@@ -1,5 +1,5 @@
 ---
-description: "Meta and meta-meta reflection on the feedback loop process itself"
+description: Meta and meta-meta reflection on the feedback loop process itself
 allowed-tools: Bash(uv run lup-devtools:*), Read, Edit, Write, AskUserQuestion
 ---
 

@@ -1,7 +1,7 @@
 ---
-description: "Move every carrier of lup to one upstream commit, and resolve what it leaves"
+description: Move every carrier of lup to one upstream commit, and resolve what it leaves
 allowed-tools: Bash(git:*, uv run lup-devtools:*, uv sync:*, uv lock:*), Read, Edit, Write, AskUserQuestion, Skill(lup:commit)
-argument-hint: "[commit]"
+argument-hint: '[commit]'
 ---
 
 # Update from Upstream

@@ -11,6 +11,7 @@ import importlib
 from pathlib import Path
 
 from lup.harness.content.skills import fb_status
+from lup.providers.harness import claude_prompt_renderer
 from lup.workspace import paths
 
 
@@ -32,4 +33,10 @@ def test_fb_status_names_the_checkout_directory_under_an_override(
     rendered = importlib.reload(fb_status)
 
     assert rendered.ANALYSIS_DIRECTORY == "notes/feedback_loop"
-    assert "notes/feedback_loop" in rendered.SKILL.prompt.parts[0].text
+    # Read off the rendering rather than the declaration: the directory is a
+    # value the passage names, so the prose beside the module carries that
+    # name and the rendered document carries the path it resolved to — which
+    # is the half a session is shown, and the half this is about.
+    assert "notes/feedback_loop" in claude_prompt_renderer().render(
+        rendered.SKILL.prompt
+    )

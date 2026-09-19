@@ -17,6 +17,8 @@ from lup.providers.roster_prompt import (
     store_artifacts,
 )
 from lup.formats.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
+from lup.formats.markdown import MarkdownDocument, Prose
+from lup.formats.yaml import YamlDocument, YamlEntry, YamlList, YamlMap, scalars
 from lup.harness.contracts import (
     ArtifactRenderer,
     Atom,
@@ -384,33 +386,55 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
         self.plugin_name = plugin.name
 
     def render(self, source: Skill) -> ArtifactTree:
-        frontmatter = [f"description: {json.dumps(source.description)}"]
         granted = claude_granted_tools(source.tools, self.plugin)
-        if granted:
-            frontmatter.append("allowed-tools: " + ", ".join(granted))
-        match source.argument_hint, source.arguments:
-            case str() as hint, _:
-                frontmatter.append(f"argument-hint: {json.dumps(hint)}")
-            case None, [_, *_]:
-                arguments = "\n".join(
-                    f"  - name: {argument.name}\n"
-                    f"    description: {json.dumps(argument.description)}\n"
-                    f"    required: {str(argument.required).lower()}"
-                    for argument in source.arguments
-                )
-                frontmatter.append(f"arguments:\n{arguments}")
-        content = (
-            "---\n" + "\n".join(frontmatter) + "\n"
-            "---\n\n"
-            f"{self.prompts.render(source.prompt)}"
-        )
+        # A hint and a list of arguments answer the same question two ways,
+        # so a skill declaring both is shown the hint it spelled itself.
+        declared = [] if source.argument_hint is not None else source.arguments
         return ArtifactTree(
             artifacts=[
-                Artifact(
+                Artifact.in_markdown(
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/commands/{source.name}.md"
                     ),
-                    content=content,
+                    document=MarkdownDocument(
+                        frontmatter=YamlDocument(
+                            root=YamlMap(
+                                entries=[
+                                    *scalars(
+                                        {
+                                            "description": source.description,
+                                            "allowed-tools": ", ".join(granted),
+                                            "argument-hint": source.argument_hint or "",
+                                        }
+                                    ),
+                                    *(
+                                        [
+                                            YamlEntry(
+                                                key="arguments",
+                                                value=YamlList(
+                                                    items=[
+                                                        YamlMap(
+                                                            entries=scalars(
+                                                                {
+                                                                    "name": argument.name,
+                                                                    "description": argument.description,
+                                                                    "required": argument.required,
+                                                                }
+                                                            )
+                                                        )
+                                                        for argument in declared
+                                                    ]
+                                                ),
+                                            )
+                                        ]
+                                        if declared
+                                        else []
+                                    ),
+                                ]
+                            )
+                        ),
+                        blocks=[Prose(text=self.prompts.render(source.prompt))],
+                    ),
                     semantic_id=source.id,
                     banner=PROMPT_TEXT.compiled_from(source.prompt.declared_source()),
                 )
@@ -430,29 +454,35 @@ class ClaudeAgentRenderer(ArtifactRenderer[Agent]):
         self.spellings = spellings
 
     def render(self, source: Agent) -> ArtifactTree:
-        tools = ", ".join(claude_granted_tools(source.tools, self.plugin))
         alias = (
             None if source.model is None else self.spellings.model_alias(source.model)
         )
-        model = f"model: {alias}\n" if alias is not None else ""
-        color = f"color: {source.color}\n" if source.color is not None else ""
-        content = (
-            "---\n"
-            f"name: {source.name}\n"
-            f"description: {json.dumps(source.description)}\n"
-            f"tools: {tools}\n"
-            f"{model}"
-            f"{color}"
-            "---\n\n"
-            f"{self.prompts.render(source.prompt)}"
-        )
         return ArtifactTree(
             artifacts=[
-                Artifact(
+                Artifact.in_markdown(
                     path=Path(
                         f".claude/plugins/{self.plugin_name}/agents/{source.name}.md"
                     ),
-                    content=content,
+                    document=MarkdownDocument(
+                        frontmatter=YamlDocument(
+                            root=YamlMap(
+                                entries=scalars(
+                                    {
+                                        "name": source.name,
+                                        "description": source.description,
+                                        "tools": ", ".join(
+                                            claude_granted_tools(
+                                                source.tools, self.plugin
+                                            )
+                                        ),
+                                        "model": alias or "",
+                                        "color": source.color or "",
+                                    }
+                                )
+                            )
+                        ),
+                        blocks=[Prose(text=self.prompts.render(source.prompt))],
+                    ),
                     semantic_id=source.id,
                     banner=PROMPT_TEXT.compiled_from(source.prompt.declared_source()),
                 )

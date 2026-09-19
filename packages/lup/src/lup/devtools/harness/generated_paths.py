@@ -79,9 +79,16 @@ def target_section(
     trailing its table, because a table already ends in its own newline and
     the document has to end in exactly one.
     """
-    spacing = "" if first else "\n"
     return [
-        TextPart(text=f"{spacing}## `{label}` — {len(artifacts)} artifacts\n\n"),
+        *([] if first else [TextPart(text="\n")]),
+        models.Passage(
+            module=__name__,
+            name="generated_paths-section",
+            values={
+                "label": models.code(label),
+                "count": models.counted(len(artifacts)),
+            },
+        ),
         models.MarkdownTable(
             headers=["Generated path", "Compiled from"],
             rows=list(compiled_rows(artifacts)),

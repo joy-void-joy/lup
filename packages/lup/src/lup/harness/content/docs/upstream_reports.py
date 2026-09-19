@@ -304,30 +304,35 @@ ROSTER = UpstreamRoster(
 """Every report this project holds against a component it does not own."""
 
 
+def section(report: UpstreamReport) -> models.Passage:
+    """One report as the section of the page that lists it.
+
+    The heading and the filing command are values rather than text spliced
+    into a page: a title carrying a newline would end the heading it was
+    written into, and a command carrying a backtick would close the fence
+    around it. The body is the prose the declaration already holds.
+    """
+    return models.Passage(
+        module=__name__,
+        name="upstream_reports-section",
+        values={
+            "title": models.plain(report.title),
+            "component": models.plain(report.component),
+            "version": models.plain(report.version),
+            "repository": models.code(report.repository or "an unknown repository"),
+            "status": models.plain(report.status()),
+            "command": models.plain(report.command()),
+            "body": models.TextPart(text=report.body.strip()),
+        },
+    )
+
+
 def document(roster: UpstreamRoster = ROSTER) -> models.PromptDocument:
     """Render the roster as the page a reader browses before filing."""
     return models.PromptDocument(
         source=__name__,
         parts=[
-            models.TextPart(
-                text="\n".join(
-                    [
-                        "# Upstream reports",
-                        "",
-                        "Defects this project measured in components it does "
-                        "not own, each with the evidence that was actually "
-                        "run and the command that files it.",
-                        "",
-                        "Nothing here files anything. Publishing under an "
-                        "account belongs to whoever owns the account, so a "
-                        "report stays *not filed* until a human runs the "
-                        "command and records the URL in the declaration at "
-                        "`packages/lup/src/lup/harness/content/docs/"
-                        "upstream_reports.py`.",
-                        "",
-                        *[report.section() for report in roster.reports],
-                    ]
-                )
-            )
+            models.Passage(module=__name__),
+            *[section(report) for report in roster.reports],
         ],
     )

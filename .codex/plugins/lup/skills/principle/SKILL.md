@@ -1,6 +1,6 @@
 ---
 name: principle
-description: "Propagate a general principle across the entire repo"
+description: Propagate a general principle across the entire repo
 ---
 
 # Propagate Principle

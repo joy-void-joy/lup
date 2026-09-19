@@ -1,7 +1,7 @@
 ---
-description: "Land every branch that has not reached the integration branch, and clear the ones that have"
+description: Land every branch that has not reached the integration branch, and clear the ones that have
 allowed-tools: Bash(uv run lup-devtools:*, git:*, findmnt:*, grep:*), AskUserQuestion, EnterWorktree, Skill(lup:commit), Skill(lup:rebase), Skill(lup:merge)
-argument-hint: "[branch-name ...]"
+argument-hint: '[branch-name ...]'
 ---
 
 # Land Every Branch

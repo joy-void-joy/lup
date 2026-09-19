@@ -1,5 +1,5 @@
 ---
-description: "Review all diffs and create atomic commits"
+description: Review all diffs and create atomic commits
 allowed-tools: Bash(uv run lup-devtools:*, git:*), Read
 ---
 

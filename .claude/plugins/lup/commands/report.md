@@ -1,5 +1,5 @@
 ---
-description: "Write the report of everything left to implement, rewritten whole under tmp/, after a long session or after implementing a plan"
+description: Write the report of everything left to implement, rewritten whole under tmp/, after a long session or after implementing a plan
 allowed-tools: Bash(uv run lup-devtools:*), Read, Write
 ---
 

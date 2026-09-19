@@ -1,6 +1,6 @@
 ---
 name: install
-description: "Install lup plugin and scaffolding into a target repo"
+description: Install lup plugin and scaffolding into a target repo
 ---
 
 # Install Lup into Target Repo

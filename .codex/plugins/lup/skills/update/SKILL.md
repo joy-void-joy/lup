@@ -1,6 +1,6 @@
 ---
 name: update
-description: "Move every carrier of lup to one upstream commit, and resolve what it leaves"
+description: Move every carrier of lup to one upstream commit, and resolve what it leaves
 ---
 
 # Update from Upstream

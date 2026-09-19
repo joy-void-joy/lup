@@ -1,9 +1,9 @@
 ---
-description: "Design exploration \u2014 a new agent before init or a feature inside a project, every decision walked with the user"
+description: Design exploration — a new agent before init or a feature inside a project, every decision walked with the user
 allowed-tools: Bash(find:*, ls:*, uv run lup-devtools:*), Read, Write, Edit, Agent, WebFetch, WebSearch, AskUserQuestion
 arguments:
   - name: arguments
-    description: "Optional arguments supplied with the skill invocation"
+    description: Optional arguments supplied with the skill invocation
     required: false
 ---
 

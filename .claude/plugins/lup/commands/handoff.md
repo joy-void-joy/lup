@@ -1,5 +1,5 @@
 ---
-description: "Hand a body of work to another session, with what it takes to resume it"
+description: Hand a body of work to another session, with what it takes to resume it
 allowed-tools: Bash(uv run lup-devtools:*), Read
 ---
 

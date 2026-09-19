@@ -1,6 +1,6 @@
 ---
 name: import
-description: "Import a feature or pattern from a tracked project or local Git source"
+description: Import a feature or pattern from a tracked project or local Git source
 ---
 
 # Import from Another Git Line
