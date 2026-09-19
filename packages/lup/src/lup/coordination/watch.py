@@ -101,6 +101,41 @@ class Nudged(WatchEvent, frozen=True):
         return f"{self.address} not woken — {self.outcome.reason}"
 
 
+def nudge_text(fresh: list[ActorMessage]) -> str:
+    """What a woken peer is handed, carrying the mail rather than pointing at it.
+
+    Whole rather than a pointer, because the nudge arrives *as a turn*: a peer
+    told only that something is waiting spends that turn fetching what the
+    nudge could have carried, and a peer told nothing but the text cannot tell
+    mail from an instruction its operator typed. So the frame says what this
+    is and the body is every fresh message verbatim, in the order they were
+    sent.
+
+    Every one of them, not the newest. A watcher looks on a clock and two
+    messages posted between looks are equally new to a peer that has read
+    neither; handing over the last would leave the first readable only to
+    somebody who thought to fold their inbox, which is the habit the nudge
+    exists because idle peers do not have.
+
+    The record is named at the end rather than the beginning: it is what the
+    reader needs *after* deciding the mail matters, and a line repeated on
+    every nudge ahead of the content is a line that stops being read.
+    """
+    return "\n\n".join(
+        [
+            (
+                f"{len(fresh)} message(s) from your peers are on this"
+                " repository's coordination record, copied here in full:"
+            ),
+            *[f"from {message.door} —\n{message.text}" for message in fresh],
+            (
+                "This is a nudge on top of the record, not instead of it —"
+                " `coordination_inbox` holds these and anything since."
+            ),
+        ]
+    )
+
+
 def mail_key(message: ActorMessage) -> str:
     """What makes one message the same message on the next look.
 
@@ -195,9 +230,9 @@ class Watcher:
                         redirect=message.redirect,
                     )
                 if fresh and self.nudge:
-                    # One nudge per look, not one per message: the member is
-                    # made to look at its inbox, and the inbox has all of them.
-                    roused = wake(view.member.wake, fresh[-1].text, self.root)
+                    # One nudge per look, not one per message: a wake starts a
+                    # turn, so two would interrupt the turn the first began.
+                    roused = wake(view.member.wake, nudge_text(fresh), self.root)
                     yield Nudged(at=now, address=view.address, outcome=roused)
 
         events = [*roster_changes(), *mail_changes()]

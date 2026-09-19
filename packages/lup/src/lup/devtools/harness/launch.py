@@ -1719,6 +1719,7 @@ def launch_claude(
     # shows the name in its own chrome and the flag carrying it is built now;
     # the same identity is handed on so the exported one agrees with it.
     member = launched_member(root)
+    inboxes = composition.recipe.source.image.inboxes
     named = [
         root / ".claude" / "plugins" / plugin.name,
         *companion_plugin_directories(root, plugin.name),
@@ -1749,6 +1750,19 @@ def launch_claude(
             # still wins.
             "--name",
             member.cli_name,
+            # Where this session binds the inbox a peer nudges it through.
+            # Named by the launcher rather than left to the runtime, whose own
+            # default is a directory a container does not share and a file
+            # named after a pid its namespace assigns -- so two sessions in
+            # sibling containers name one path and neither can reach the
+            # other. A directory that could not be made leaves the flag off
+            # and the session on its own default, which is a peer that waits
+            # for its mail rather than a launch that fails.
+            *(
+                ["--messaging-socket-path", inboxes.socket(member.cli_name)]
+                if inboxes.serve() is not None
+                else []
+            ),
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]

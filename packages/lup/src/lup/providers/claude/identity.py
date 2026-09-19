@@ -60,9 +60,19 @@ def claude_wake(cli_name: str) -> WakePath:
     the session through a tool another session holds, and the wake does not
     go that way.
 
+    The session id travels beside the path, because the receiving inbox
+    checks a frame against its own id and drops one that disagrees. A path is
+    not unique the way a session is -- every contained session's default inbox
+    is named after a pid its own namespace assigns -- so the pair is what
+    reaches a member, where the path alone reaches whoever bound it.
+
     Blank where the runtime set nothing, which is the honest answer for a
     session whose inbox this process cannot name. The mail still waits in the
     durable record, and a sender is told nothing will nudge it.
     """
-    inbox = ClaudeSessionEnv().inbox
-    return WakePath(runtime="claude", handle=inbox) if inbox else WakePath()
+    reported = ClaudeSessionEnv()
+    if not reported.inbox:
+        return WakePath()
+    return WakePath(
+        runtime="claude", handle=reported.inbox, session=reported.session_id
+    )

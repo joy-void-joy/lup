@@ -41,6 +41,7 @@ from lup.harness.credential import (
 )
 from lup.harness.egress import SessionEgress
 from lup.harness.environment import NON_INTERACTIVE_SHELL_ENV
+from lup.harness.messaging import SessionInboxes
 from lup.harness.requirements import Manifest, Package, PackageManager
 from lup.harness.terminal import TerminalHandoff
 from lup.types import EnvVars, JsonObject
@@ -535,6 +536,17 @@ class Image(BaseModel, frozen=True):
             "host's display socket, which on X11 would hand a confined "
             "session the ability to read and type into every other window, "
             "and on Wayland or macOS would not work at all"
+        ),
+    )
+    inboxes: SessionInboxes = Field(
+        default=SessionInboxes(),
+        description=(
+            "Where this session binds the inbox a peer nudges it through, and "
+            "where it finds its peers'. Declared beside the other two bridges "
+            "and unlike them in what it crosses: the browser and the clipboard "
+            "run between a session and its operator, and this runs between two "
+            "sessions. Mounted at the same path it has outside, because the "
+            "path is what a member publishes and another container reads back"
         ),
     )
     credential_seed: str = Field(
@@ -1179,6 +1191,7 @@ USER $UID:$GID
         identity: GitIdentity | None = None,
         browser_directory: Path | None = None,
         clipboard_directory: Path | None = None,
+        inbox_directory: Path | None = None,
         terminal: EnvVars | None = None,
         streams: SessionStreams = "terminal",
         proxy_address: str = "",
@@ -1287,6 +1300,16 @@ USER $UID:$GID
             if clipboard_directory is not None
             else []
         )
+        # Source and target are one string rather than two, which is the only
+        # mount here that has to be: a member publishes the path it bound and
+        # a peer in another container opens that same text, so a target that
+        # renamed it would leave every handle right where it was written and
+        # wrong everywhere it was read.
+        nudging = (
+            ["-v", f"{inbox_directory}:{inbox_directory}:rw"]
+            if inbox_directory is not None
+            else []
+        )
         # The forge configuration is passed rather than baked, and passed
         # here rather than through `run_arguments`, because it is the one
         # part of the run that is neither an image fact nor a posture: it is
@@ -1345,6 +1368,7 @@ USER $UID:$GID
             *bridged,
             *opening,
             *clipping,
+            *nudging,
             tag,
         ]
 
