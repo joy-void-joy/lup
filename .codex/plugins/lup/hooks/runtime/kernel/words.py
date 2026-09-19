@@ -254,6 +254,61 @@ def leaves_the_checkout(path_text: str) -> bool:
     return path_text == ".." or path_text.startswith("../")
 
 
+# lup: ignore[library-default] — git's own directory contents, a vocabulary
+# fixed outside this repository rather than a choice made for an adopter
+GIT_ADMIN_ENTRIES = (
+    "HEAD",
+    "ORIG_HEAD",
+    "FETCH_HEAD",
+    "MERGE_HEAD",
+    "COMMIT_EDITMSG",
+    "config",
+    "description",
+    "index",
+    "packed-refs",
+    "shallow",
+    "branches",
+    "hooks",
+    "info",
+    "logs",
+    "modules",
+    "objects",
+    "refs",
+    "worktrees",
+)
+"""What git itself keeps at the top of a repository directory.
+
+The discriminator between the repository and whatever else is stored beside
+it: everything here is git's, and a name that is not is somebody else's.
+"""
+
+
+def reaches_git_administration(path_text: str) -> bool:
+    """Whether this spelling reaches git's own content inside a repository.
+
+    A ``.git`` segment alone does not say so. A bare repository is a directory
+    *named* ``<name>.git``, and a layout that keeps its checkouts inside it --
+    which `lup.devtools.layout` is, placing every sibling worktree under
+    ``tree/`` -- puts ordinary source under a segment ending in ``.git``. So
+    the segment test on its own grades every file of every checkout as the
+    repository, and in that layout no absolute path to source can be spelled
+    that does not.
+
+    What separates them is the segment after it, because git's top-level
+    contents are a closed vocabulary: ``config`` and ``hooks`` and
+    ``worktrees`` are the repository, and ``tree`` and ``trace-archive`` are
+    things a layout put beside it. A path that stops at the segment is the
+    directory itself and counts as reaching it.
+    """
+    segments = path_text.split("/")
+    for index, segment in enumerate(segments):
+        if not segment.endswith(".git"):
+            continue
+        beneath = segments[index + 1 :]
+        return not beneath or beneath[0] in GIT_ADMIN_ENTRIES
+    return False
+
+
 def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     """Which tree a write's target is in, as :class:`WritesPath` names them.
 
@@ -280,6 +335,13 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     shared administrative directory writable on purpose. A hook written there
     runs on the operator's next Git command, outside whatever granted it.
 
+    Which segment follows decides it, through
+    :func:`reaches_git_administration`, because the same layout that puts the
+    administrative directory on an absolute path puts every checkout there
+    too: under a bare ``repo.git`` the worktrees are ``repo.git/tree/<name>``,
+    so a segment test alone grades all of their source as the repository and
+    leaves no absolute spelling of a source file that is not ``protected``.
+
     A declared role is read before either spelling, because a role is somebody
     saying where a path belongs and a spelling is only this reading guessing.
     The session scratchpad is the case that settles it: it is absolute, so the
@@ -288,11 +350,30 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     """
     if path_role(path_text, path_roles) == "scratch":
         return "scratch"
-    if any(segment.endswith(".git") for segment in path_text.split("/")):
+    if reaches_git_administration(path_text):
         return "protected"
     if leaves_the_checkout(path_text):
         return "outside"
     return "production"
+
+
+# lup: ignore[library-default] — the scope vocabulary this repository defines,
+# spelled once; `WritesPath.scopes` is the same closed set
+SCOPE_PHRASES = {
+    "scratch": "a scratch path",
+    "production": "a production path",
+    "protected": "a protected path",
+    "outside": "an outside path",
+    "unbounded": "an unbounded path",
+}
+"""How a reason line names each scope, written out rather than assembled.
+
+One entry per member of the same closed set :attr:`WritesPath.scopes` holds,
+so a scope added there has a spelling here or has none at all. Assembling the
+phrase instead means deciding the article from the word, which is a rule about
+English -- "an hour" against "a university" -- standing in for a table of five
+entries that were known when the vocabulary was written.
+"""
 
 
 def write_checkpoint(scope: str) -> CheckpointRequirement:

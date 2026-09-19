@@ -40,6 +40,7 @@ from .words import (
     sed_invocation,
     sed_rewrite_operands,
     uv_run_words,
+    SCOPE_PHRASES,
     write_checkpoint,
     write_scope,
 )
@@ -650,7 +651,7 @@ def resolve_redirection(
     written = "overwrites" if existing else "creates"
     return KernelDecision(
         decided,
-        f"the redirection {written} {spelled}, a {scope} path",
+        f"the redirection {written} {spelled}, {SCOPE_PHRASES[scope]}",
         checkpoint=write_checkpoint(scope),
         purpose="unrecovered_local_mutation",
     )
