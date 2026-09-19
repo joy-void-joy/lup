@@ -534,7 +534,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/subagents.py",
       "category": "generated",
-      "sha256": "250d657cd76b06e16f50d1e10429fee14e89a35695f4db3479eeee587d35954d",
+      "sha256": "b7a2620dd7e9291c7de31feee3e9413f93760a09c3a6c25f99881afce971af28",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -576,7 +576,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/subagent_cleanup.py",
       "category": "generated",
-      "sha256": "89b58417cc7658066c185388a3a084b53c66d0d427f3685b24997a0044bd4da1",
+      "sha256": "13c75ae70a540e5e7ddac2488523dcd131b21980d9b4b3466343f258a1d0e37c",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -716,7 +716,7 @@
     {
       "path": "docs/native-capabilities.md",
       "category": "generated",
-      "sha256": "9af92d99d5bd73c0f7960a8acaf17556d05ef5f467b113b095fc8abcc7a29d4d",
+      "sha256": "fa3eafc9d18c303b25b916b4d1cb59f50d0c9957281c05737b256767915091d5",
       "semantic_id": "docs.native-capabilities",
       "executable": false
     },
@@ -744,7 +744,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "3631d455e8e9c5ba3b63a119bc27d4446598d5fa74c72ee477467aa63c6da162",
+      "sha256": "cfbc405ef0e74897373a045e680c4391e09aab7db0baf0dfa829117ab92020e4",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

@@ -65,7 +65,7 @@
     {
       "path": ".codex/plugins/lup/hooks/hooks.json",
       "category": "generated",
-      "sha256": "d00eefa0726735872f277974b25253e7d6f204395e55afeb0c14744822b5a932",
+      "sha256": "9df3c3e95eca0374882b95bbd0840a60c2544857c75c98f60d41bb144600f667",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -261,7 +261,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/subagents.py",
       "category": "generated",
-      "sha256": "250d657cd76b06e16f50d1e10429fee14e89a35695f4db3479eeee587d35954d",
+      "sha256": "b7a2620dd7e9291c7de31feee3e9413f93760a09c3a6c25f99881afce971af28",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -301,6 +301,13 @@
       "executable": false
     },
     {
+      "path": ".codex/plugins/lup/hooks/runtime/subagent_cleanup.py",
+      "category": "generated",
+      "sha256": "3626c79be0794942e59f4633891a20e5fc67d4fed69e1c894086593f9655742b",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
       "path": ".codex/plugins/lup/hooks/scripts/carrier_drift.sh",
       "category": "generated",
       "sha256": "8f61e7d2a5ac48af9c8cde61a9945c9c3c7e22f9211f47b5dd5bf797f94c1153",
@@ -332,6 +339,13 @@
       "path": ".codex/plugins/lup/hooks/scripts/policy.sh",
       "category": "generated",
       "sha256": "d1cfb6d3ed4c2f2054933374c2e4f784ac238f8522e132dd5adad7df02b43dfc",
+      "semantic_id": "hooks.lup-policy",
+      "executable": true
+    },
+    {
+      "path": ".codex/plugins/lup/hooks/scripts/subagent_cleanup.sh",
+      "category": "generated",
+      "sha256": "cc2684263b5024c9fb01c06365730c840310a7ff4f2aee0bcde09dd53c6da0d8",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

@@ -7,6 +7,16 @@ The runtime's own note on such a subagent reads "stopped with background work
 of its own still running. It may resume on its own when that work completes
 or reports."
 
+That the work outlives the report and that its output resumes the reporter
+are two facts, and they were measured apart: a runtime has been seen holding
+the first without the second, its leftover session running on with nothing it
+emitted waking anybody. The start-time sentence is owed wherever the work
+outlives the report, since the leak is real either way; the stop-time refusal
+is owed only where the resume is, because a report refused to prevent a loop
+that runtime does not have buys nothing and costs a turn. ``Leftover`` is how
+a host half says which it has, and the two moments below are written so
+either can be registered without the other.
+
 Two moments, one judgement. As a subagent starts, it is told that what it
 arms is its own to stop. As it is about to report, the runtime hands the hook
 every background task of the session and the subagent's own transcript; the
@@ -106,12 +116,39 @@ def refusal(tasks: list[BackgroundTask], ending_call: str) -> str:
     )
 
 
-def notice(watch_call: str, ending_call: str) -> str:
+class Leftover(TypedDict):
+    """What a runtime does with work a subagent leaves running, as measured.
+
+    ``resumes`` is whether a line from that work wakes the subagent that has
+    already reported, which is the loop the stop-time refusal exists to
+    break. ``refused`` is whether the refusal is registered there, which is
+    the same answer wherever the loop occurs and a separate field because a
+    runtime may have one without the other.
+
+    Both are measurements rather than settings, and the notice says what is
+    true where it is read: a sentence promising a refusal that never comes
+    teaches a subagent to discount the next one it is handed.
+    """
+
+    resumes: bool
+    refused: bool
+
+
+def notice(watch_call: str, ending_call: str, leftover: Leftover) -> str:
     """What a subagent is told as it starts: what it arms is its own to stop."""
+    consequence = (
+        "A task left running resumes you after you have finished"
+        if leftover["resumes"]
+        else "Work left running outlives your report and holds what it opened"
+        " until this session ends"
+    )
+    refused = (
+        ", and your report is refused once while any of it runs"
+        if leftover["refused"]
+        else ""
+    )
     return (
-        f"Background work you start — a {watch_call}, a command run in the"
+        f"Background work you start — {watch_call}, a command run in the"
         " background, a subagent — is yours to stop with"
-        f" {ending_call} before you report. A task left running resumes you"
-        " after you have finished, and your report is refused once while any"
-        " of it runs."
+        f" {ending_call} before you report. {consequence}{refused}."
     )

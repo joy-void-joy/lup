@@ -83,6 +83,40 @@ part of probing.
   is spent as a denial. The hook itself governs — that is what
   {{ exec_fixtures }} settled — and what is missing is the middle verdict, which
   is a Codex surface gap rather than a Lup one.
+- **A session an application opens cannot be asked, only refused — measured on
+  Codex CLI {{ codex_cli }}, both halves, by `tests/integration/test_codex_approval_request.py`.**
+  `PermissionRequest` does not fire there: a live app-server turn under
+  `approval_policy='on-request'` added nothing to the plugin's journal, 48
+  completed records before and 48 after, and the 48 it already held came from a
+  surface that is not this one. Nor does anything reach the client when the
+  dispatcher declines: the shell call was refused by `PreToolUse`,
+  `queued_review` parked it, and the turn returned the queue's own recovery
+  text with no approval request for the session's hooks to answer.
+
+  Three things follow, and they are the reason this row is worth its length.
+  The `exec` finding above is not a property of `exec`: the middle verdict is
+  missing from every surface Lup can open, so an `ask` is spent as a denial
+  wherever an application is the one asking. The fail-closed denial is
+  therefore correct rather than a workaround. And `dev questions` is Codex's
+  review surface rather than its fallback, which is what makes that surface's
+  diff rendering load-bearing instead of a convenience. Issue #180 is this gap
+  met from a real session, and it has no native answer.
+
+  Both arms stay in the suite as `xfail(strict=True)`, so the day a vendor
+  grows the channel they pass and the suite says so.
+- **Reasoning effort is a per-model vocabulary, and the seeded home holds one
+  chosen for a different model.** A scoped home is seeded from the operator's
+  own configuration, so it carries their `model_reasoning_effort` beside their
+  `model` — and a session naming only the model sent the API a pair nobody
+  chose. Measured here: `gpt-5.5` with the home's `max` answers
+  `400 unsupported_value`, and the message names the rungs that model takes —
+  `'none', 'low', 'medium', 'high', 'xhigh'`. Two readings follow. The ladder
+  is per model rather than global: `max` is real for the newer model the home
+  was written for, and `minimal` sits in Lup's own accepted vocabulary while
+  that list omits it. And a named model must carry an effort, which is what
+  `CodexSessionConfig.model_selection` now guarantees — the literal is
+  deliberately *not* narrowed to one model's answer, because which rungs a
+  model accepts is the vendor's to state per model.
 - **A Codex home decides whether the policy runs at all, through four gates,
   and `codex doctor` reports on none of them.** The plugin has to be installed
   and enabled; `[features] hooks = true` has to reach *that* home; the project
