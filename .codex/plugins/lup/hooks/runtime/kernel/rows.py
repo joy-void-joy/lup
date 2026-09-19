@@ -711,3 +711,64 @@ class PathWord(TypedDict):
     at: int
     prefix: str
     path: str
+
+
+UnreadCause = Literal["missing", "irregular", "unreadable", "refused"]
+"""Why running a screened script over one file produced no after-document.
+
+A cause and not a sentence, because the host establishes these and the kernel
+words them -- the same division ``resolution`` crosses the boundary by. Four,
+because each sends its writer somewhere different: ``missing`` names no file
+at that path, ``irregular`` a path holding something an in-place rewrite
+cannot replace, ``unreadable`` a file whose text could not be read either
+before or after, and ``refused`` a script sed itself would not run.
+"""
+
+
+class UnreadFileRow(TypedDict):
+    """One file an in-place rewrite names that the host could not produce.
+
+    The difference between "nothing was read" and "this is why", which the
+    classifier acts on: a target with neither a document nor a row here was
+    never looked at by anything, and that stays a question a composition
+    cannot forget its way past. A target with this row *was* looked at, so
+    the refusal can say what stopped it and what to do instead.
+    """
+
+    target: str
+    cause: UnreadCause
+
+
+class RewriteReading(TypedDict):
+    """Every in-place rewrite a command names, each produced or each explained.
+
+    The two travel together because they are one reading: a target reaches
+    exactly one of them, and a caller that computed the documents has, by
+    construction, computed the reasons for the rest. Splitting them at the
+    classifier's door is safe in the direction that matters -- a composition
+    passing the documents and not these leaves the classifier saying only
+    that nothing read the rewrite, which is the answer it gives when nothing
+    did.
+    """
+
+    documents: list[RewrittenFileRow]
+    unread: list[UnreadFileRow]
+
+
+def unread_cause(reported: str | None) -> UnreadCause:
+    """The kernel's own literal for what the host reported about a rewrite.
+
+    The host half may name no kernel type, so what stopped it reading a file
+    crosses as the word it read off its own reading; this is the one place
+    that word becomes the value the classifier words, and both halves narrow
+    it here rather than each keeping a copy of the mapping.
+
+    A spelling this does not know reads as ``unreadable``, the least specific
+    of them, because a refusal that says less is still a refusal — and a
+    classifier that raised instead would turn an unknown reading into a
+    crashed hook, which grants rather than refuses.
+    """
+    match reported:
+        case "missing" | "irregular" | "unreadable" | "refused":
+            return reported
+    return "unreadable"

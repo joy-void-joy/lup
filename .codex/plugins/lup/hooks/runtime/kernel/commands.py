@@ -25,6 +25,8 @@ from .rows import (
     RewrittenFileRow,
     RunnerTargetRow,
     ShellRuleRow,
+    UnreadCause,
+    UnreadFileRow,
     UrlScopeRow,
 )
 from .edit import decide_edit
@@ -203,6 +205,7 @@ class SedContext(TypedDict):
     autonomous: bool
     allowances: list[str]
     rewritten_documents: list[RewrittenFileRow]
+    unread_documents: list[UnreadFileRow]
     """What each named file would hold afterwards, where the host could say.
 
     A list rather than a mapping because it crosses the same boundary every
@@ -835,16 +838,13 @@ def decide_sed_words(words: list[str], context: "SedContext") -> KernelDecision:
             "deny", IN_PLACE_SED_REFUSAL, recovery=IN_PLACE_SED_RECOVERY
         )
     documents = {row["target"]: row for row in context["rewritten_documents"]}
+    unread: dict[str, UnreadCause] = {
+        row["target"]: row["cause"] for row in context["unread_documents"]
+    }
     verdicts = [
         rewrite_verdict(target, documents[target], context)
         if target in documents
-        else KernelDecision(
-            "ask",
-            f"sed would rewrite {target} in place, and the result could not be"
-            " read to check it",
-            purpose="quality_review",
-            recovery=UNREAD_SED_RECOVERY,
-        )
+        else unread_verdict(target, unread.get(target))
         for target in invocation["targets"]
     ]
     stopped = [verdict for verdict in verdicts if verdict.effect != "allow"]
@@ -855,6 +855,72 @@ def decide_sed_words(words: list[str], context: "SedContext") -> KernelDecision:
             " the edit gates passed it",
         )
     return max(stopped, key=lambda verdict: STRENGTH.index(verdict.effect))
+
+
+def unread_verdict(target: str, cause: UnreadCause | None) -> KernelDecision:
+    """What to say about a file an in-place rewrite names and nothing produced.
+
+    Four causes and a fifth silence, each sending the writer somewhere else.
+    One sentence stood for all five, so a mistyped path, a rewrite aimed at a
+    directory and a script sed would not run were told the same thing, and
+    offered the one recovery that fits none of them -- make the change as an
+    edit instead, which answers only the case where the document exists and
+    could not be judged.
+
+    ``None`` is the silence, and it keeps the old words because they are true
+    of it: nothing read the rewrite. That is what a composition reaching the
+    documents late, or not at all, leaves behind, and it stays a question for
+    the reason it always did.
+    """
+    match cause:
+        case "missing":
+            return KernelDecision(
+                "ask",
+                f"sed would rewrite {target} in place, and no file stands there",
+                purpose="quality_review",
+                recovery=(
+                    "Check the path, and the directory the command runs in: a"
+                    " relative operand after a `cd` resolves from where the"
+                    " `cd` left the shell."
+                ),
+            )
+        case "irregular":
+            return KernelDecision(
+                "ask",
+                f"sed would rewrite {target} in place, and that is not a regular file",
+                purpose="quality_review",
+                recovery=(
+                    "`-i` replaces the file with the script's output, so a"
+                    " directory or a device is not something it can rewrite."
+                    " Name the file itself, or drop `-i` to print instead."
+                ),
+            )
+        case "refused":
+            return KernelDecision(
+                "ask",
+                f"sed would rewrite {target} in place, and sed itself would not"
+                " run the script over it",
+                purpose="quality_review",
+                recovery=(
+                    "Run the same script without `-i` to see what sed says"
+                    " about it; nothing is judged until it runs."
+                ),
+            )
+        case "unreadable":
+            return KernelDecision(
+                "ask",
+                f"sed would rewrite {target} in place, and neither what stands"
+                " there nor what would replace it reads as text",
+                purpose="quality_review",
+                recovery=UNREAD_SED_RECOVERY,
+            )
+    return KernelDecision(
+        "ask",
+        f"sed would rewrite {target} in place, and nothing read what it would"
+        " leave behind",
+        purpose="quality_review",
+        recovery=UNREAD_SED_RECOVERY,
+    )
 
 
 def rewrite_verdict(

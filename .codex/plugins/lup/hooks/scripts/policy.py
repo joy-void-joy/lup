@@ -59,7 +59,14 @@ from kernel.lex import (
     shell_sed_rewrites,
     shell_write_targets,
 )
-from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
+from kernel.rows import (
+    DisplacedTargetRow,
+    ResolutionRow,
+    RewriteReading,
+    RewrittenFileRow,
+    UnreadFileRow,
+    unread_cause,
+)
 from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
@@ -1646,7 +1653,9 @@ def undo_snapshot(
     return reference
 
 
-def rewritten_text(scripts: list[str], target: str, root: Path) -> str | None:
+def rewritten_text(
+    scripts: list[str], target: str, root: Path
+) -> dict[Literal["text", "cause"], str | None]:
     """What one file would hold after these scripts, without touching the file.
 
     sed is run over the file and its output captured, which is the same
@@ -1655,18 +1664,29 @@ def rewritten_text(scripts: list[str], target: str, root: Path) -> str | None:
     leaves the result on standard output and the file as it was. A command
     still about to be refused has therefore changed nothing by being judged.
 
-    ``None`` wherever the answer is not established — the path is not a
-    regular file, sed is missing, sed itself rejected the script, or the
-    output is not text this can read. Each of those means nothing read what
-    would land, and the caller turns that into a question rather than a grant.
+    Both keys always stand and exactly one is filled: ``text`` is the
+    after-document, ``cause`` is what stopped one being produced.
+
+    A cause rather than a bare absence, because each of the four sends the
+    writer somewhere different: nothing stands at the path, something stands
+    there that a rewrite cannot replace, sed would not run the script, or what
+    came back is not text this can read. One sentence covering all four told a
+    writer who typed a wrong path the same thing it told one who aimed ``-i``
+    at a directory, and offered a recovery that fitted neither.
+
+    The cause crosses as the word this half read rather than as the
+    classifier's own literal, which this half may not name -- the arrangement
+    a checker's verdicts already cross by, and the kernel narrows it.
 
     The scripts are passed as ``-e`` expressions and the file as an operand
     after ``--``, so a filename beginning with a dash stays a filename and a
     script is never re-read as one.
     """
     landed = root / target
+    if not landed.exists():
+        return {"text": None, "cause": "missing"}
     if not landed.is_file():
-        return None
+        return {"text": None, "cause": "irregular"}
     expressions = [word for script in scripts for word in ("-e", script)]
     try:
         finished = subprocess.run(
@@ -1676,9 +1696,13 @@ def rewritten_text(scripts: list[str], target: str, root: Path) -> str | None:
             text=True,
             check=False,
         )
-    except (OSError, ValueError, UnicodeDecodeError):
-        return None
-    return finished.stdout if finished.returncode == 0 else None
+    except UnicodeDecodeError:
+        return {"text": None, "cause": "unreadable"}
+    except (OSError, ValueError):
+        return {"text": None, "cause": "refused"}
+    if finished.returncode:
+        return {"text": None, "cause": "refused"}
+    return {"text": finished.stdout, "cause": None}
 
 
 def recoverable_write_targets(
@@ -2124,6 +2148,9 @@ def bash_decision(
     # exist yet, and a refused command is snapshotted too -- one ref for a
     # state the tree was already in, which dedup collapses.
     reference = undo_snapshot(cwd, command)
+    # Both halves of one reading: the documents a rewrite would leave, and why
+    # the rest left none. Computed together so a target reaches exactly one.
+    reading = rewritten_files(command, cwd or Path.cwd())
     verdict = decide_shell(
         command,
         SHELL_RULES,
@@ -2160,7 +2187,8 @@ def bash_decision(
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
-        rewritten_documents=rewritten_files(command, cwd or Path.cwd()),
+        rewritten_documents=reading["documents"],
+        unread_documents=reading["unread"],
         interactive=interactive,
         # A reviewed worker is non-interactive and not therefore alone: it
         # holds a mailbox reaching the human supervising its run, and a
@@ -2467,7 +2495,7 @@ def resolution_of(
     return ResolutionRow(refuted=reply["refuted"], unresolved=reply["unresolved"])
 
 
-def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
+def rewritten_files(command: str, cwd: Path) -> RewriteReading:
     """What every in-place rewrite in this command would leave behind.
 
     The kernel names which files a screened rewrite would replace and this
@@ -2476,26 +2504,34 @@ def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
     two questions are different, and only this one is the question the edit
     gates ask.
 
-    A file that could not be produced yields no row, and the classifier turns
-    that absence into a question. So a rewrite is never granted on a reading
-    that failed — which is what makes it safe for a composition to reach this
-    late, or not at all.
+    A file that could not be produced yields a reason instead of a document,
+    and the classifier says which reason. A rewrite is never granted on a
+    reading that failed — which is what makes it safe for a composition to
+    reach this late, or not at all.
 
     Each row is deduplicated by target, because one file named twice is one
     file, and the second reading would run the script over the same bytes to
     reach the same answer.
     """
     rows: list[RewrittenFileRow] = []
+    unread: list[UnreadFileRow] = []
     for rewrite in shell_sed_rewrites(command):
         for target in rewrite["targets"]:
-            if any(row["target"] == target for row in rows):
+            if any(row["target"] == target for row in rows) or any(
+                row["target"] == target for row in unread
+            ):
                 continue
-            after = rewritten_text(rewrite["scripts"], target, cwd)
+            attempt = rewritten_text(rewrite["scripts"], target, cwd)
+            after = attempt["text"]
             if after is None:
+                unread.append(
+                    UnreadFileRow(target=target, cause=unread_cause(attempt["cause"]))
+                )
                 continue
             try:
                 before = (cwd / target).read_text()
             except (OSError, ValueError, UnicodeDecodeError):
+                unread.append(UnreadFileRow(target=target, cause="unreadable"))
                 continue
             path_text = worktree_path(target)
             suffix = Path(path_text).suffix.lower()
@@ -2526,7 +2562,7 @@ def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
                     ),
                 )
             )
-    return rows
+    return RewriteReading(documents=rows, unread=unread)
 
 
 def edit_decision(

@@ -27,6 +27,7 @@ from .rows import (
     DisplacedTargetRow,
     RewrittenFileRow,
     RunnerTargetRow,
+    UnreadFileRow,
     ShellRuleRow,
     UrlScopeRow,
 )
@@ -151,6 +152,13 @@ class ShellContext(TypedDict):
     rewrite nested in a loop met a weaker lattice than the same rewrite at the
     top level."""
 
+    unread_documents: list[UnreadFileRow]
+    """Why the host produced no document for a target that names one.
+
+    Absent where nothing looked, present where something looked and was
+    stopped -- which is the difference between a refusal that can say what
+    to do about it and one that can only say a reading failed."""
+
     rewritten_documents: list[RewrittenFileRow]
     """What each in-place rewrite would leave behind, as the host produced it.
 
@@ -212,6 +220,7 @@ def shell_context(
     autonomous: bool = False,
     allowances: list[str] | None = None,
     rewritten_documents: list[RewrittenFileRow] | None = None,
+    unread_documents: list[UnreadFileRow] | None = None,
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists.
 
@@ -251,6 +260,7 @@ def shell_context(
         autonomous=autonomous,
         allowances=allowances or [],
         rewritten_documents=rewritten_documents or [],
+        unread_documents=unread_documents or [],
     )
 
 
@@ -274,6 +284,7 @@ def sed_facts(context: ShellContext) -> SedContext:
         autonomous=context["autonomous"],
         allowances=context["allowances"],
         rewritten_documents=context["rewritten_documents"],
+        unread_documents=context["unread_documents"],
     )
 
 
@@ -916,6 +927,7 @@ def classify_shell(
     autonomous: bool = False,
     allowances: list[str] | None = None,
     rewritten_documents: list[RewrittenFileRow] | None = None,
+    unread_documents: list[UnreadFileRow] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every command in one shell command line.
 
@@ -955,6 +967,7 @@ def classify_shell(
         autonomous=autonomous,
         allowances=allowances,
         rewritten_documents=rewritten_documents,
+        unread_documents=unread_documents,
     )
     tree = parse_shell(command)
     if isinstance(tree, KernelDecision):
@@ -1107,6 +1120,7 @@ def decide_shell(
     autonomous: bool = False,
     allowances: list[str] | None = None,
     rewritten_documents: list[RewrittenFileRow] | None = None,
+    unread_documents: list[UnreadFileRow] | None = None,
 ) -> KernelDecision:
     """Classify one command, honoring an escalation marker and hinting denies.
 
@@ -1211,6 +1225,7 @@ def decide_shell(
                 autonomous=autonomous,
                 allowances=allowances,
                 rewritten_documents=rewritten_documents,
+                unread_documents=unread_documents,
             ),
             escalation=reading.request,
             contained=contained,
