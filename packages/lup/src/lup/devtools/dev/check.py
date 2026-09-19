@@ -1105,16 +1105,18 @@ def scan_reports(
 
         # The same reading the commit hook and the pipeline refuse on, asked
         # here rather than recomposed, so a tree cannot be stale at one gate
-        # and current at another.
+        # and current at another. The summary names both halves because the
+        # verdict reads both: a stale repository artifact with every tree
+        # current is a failure whose tree count is zero, and a line saying so
+        # tells a reader nothing at all — while `report_stale` writes the
+        # detail to stderr, where a two-hundred-second run buries it.
         drift = inspect_drift(compositions, repository_writers)
         if not drift.clean:
             report_stale(drift)
         yield CheckReport(
             name="harness drift",
             passed=drift.clean,
-            lines=["harness drift: ok"]
-            if drift.clean
-            else [f"harness drift: FAIL ({len(drift.stale_trees)} tree(s))"],
+            lines=drift.summary,
         )
 
         # The same question one carrier further out: that row asks whether the

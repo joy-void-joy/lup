@@ -180,6 +180,25 @@ class DriftVerdict(BaseModel, frozen=True):
         """Whether nothing generated is behind the source that renders it."""
         return not self.stale_trees and not self.stale_repository
 
+    @property
+    def summary(self) -> list[str]:
+        """This verdict as a check row prints it, naming what is behind.
+
+        Counted over both halves because the verdict is: a stale artifact
+        outside every native tree fails a run whose tree count is zero, and
+        a row saying only that tells its reader nothing to act on. Each
+        repository message already carries the command that settles it, so
+        the row repeats none of them and quotes them whole.
+        """
+        if self.clean:
+            return ["harness drift: ok"]
+        return [
+            f"harness drift: FAIL ({len(self.stale_trees)} tree(s),"
+            f" {len(self.stale_repository)} repository artifact(s))",
+            *(f"  stale tree: {report.target}" for report in self.stale_trees),
+            *(f"  {message}" for message in self.stale_repository),
+        ]
+
 
 def generate_targets(
     compositions: list[NativeHarnessComposition],
