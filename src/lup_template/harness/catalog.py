@@ -465,8 +465,28 @@ def dev_project() -> DevProject:
     plugin actually decline.
     """
     hooks = declared_hook_set()
+    package = Path(__file__).resolve().parents[1].name
     return DevProject(
-        package=Path(__file__).resolve().parents[1].name,
+        package=package,
+        # What the preservation gate judges is what an adopter could have
+        # imported, and two subtrees here are reachable by name without
+        # anybody being able to hold one.
+        internal_modules=[
+            # The scaffold. `dev init` copies this half into the adopting
+            # repository and renames it, so its names never reach anybody as
+            # an import: they arrive as the adopter's own source, under the
+            # adopter's own package, theirs to edit. An instruction about one
+            # would say to repoint an import nobody was able to write.
+            package,
+            # The permission kernel, compiled into the hermetic dispatcher
+            # every generated plugin runs. The generated copy is already left
+            # out of the walk; this is the source it is projected from, and
+            # the dispatcher reaches it as bare `kernel.*` rather than through
+            # this package at all. What went from it is a hand-rolled shell
+            # tokenizer and the control-flow readers beside it, replaced in
+            # place, which is the freedom not publishing them is for.
+            "lup.policy.kernel",
+        ],
         roots=application_roots(),
         rules=hooks.rules,
         import_boundaries=hooks.import_boundaries,
