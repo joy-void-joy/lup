@@ -131,6 +131,29 @@ class Migration(BaseModel, frozen=True):
 DECLARED = [
     Migration(
         subjects=[
+            "PYTHON_SUFFIXES",
+            "MARKDOWN_SUFFIXES",
+            "JS_SUFFIXES",
+            "JSON_SUFFIXES",
+        ],
+        reason=(
+            "the marker scanner routes a file by one dict from suffix to scan "
+            "mode, where four parallel tuples each guarded an arm of a match "
+            "that decided on nothing the subject carried"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read `SCAN_MODES` from `lup.harness.codescan.markers` where "
+                    "one of the suffix tuples was read: its keys are the suffixes "
+                    "and its values the `ScanMode` each routes to, so the "
+                    "suffixes of one mode are the keys whose value is that mode."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
             "AntiPatternSet",
             "AntiPatternSet.python",
             "AntiPatternSet.typescript",
