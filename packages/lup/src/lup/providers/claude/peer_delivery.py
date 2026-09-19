@@ -26,9 +26,8 @@ guard with it, instead of leaving a script that reads a path nobody writes.
 from importlib import resources
 from pathlib import Path
 
-from lup.coordination.identity import MEMBER_KIND
+from lup.coordination.bare.store import COORDINATION_DIR, MEMBER_KIND, STORE_DIR
 from lup.coordination.mail import DELIVERY_DIR, MESSAGE_FILE
-from lup.coordination.store import COORDINATION_DIR, STORE_DIR
 from lup.formats.banner import (
     REGENERATE_COMMAND,
     VERBATIM_COPY,

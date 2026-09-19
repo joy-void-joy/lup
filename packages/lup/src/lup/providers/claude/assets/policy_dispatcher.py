@@ -44,6 +44,7 @@ from decisions import (
     placed_edit_text,
     refused_tool_decision,
     session_contained,
+    spawn_decision,
     written_review,
 )
 from host import (
@@ -298,6 +299,14 @@ def dispatch(payload):
         # wider than one repository, so the roster rides alongside as context
         # rather than as a verdict that could take the answer away.
         return peer_listing_decision()
+    if name == "Agent":
+        # A spawn is judged by the one thing that makes its subagent legible
+        # and addressable: the name it carries. The runtime validates the
+        # spelling; this only insists there is one.
+        return spawn_decision(
+            tool_input["name"] if "name" in tool_input else "",
+            [value for value in tool_input.values() if isinstance(value, str)],
+        )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them
     # here would be this file holding a second, narrower copy of it. The

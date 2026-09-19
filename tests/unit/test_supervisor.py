@@ -29,7 +29,8 @@ from lup.sessions.events import TurnEvent
 from lup.coordination.mailbox import AnswerDoor, RecordedAnswer
 from lup.coordination.questions import QuestionAnswer
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import ROSTER_FILE, Roster
+from lup.coordination.bare.store import ROSTER_FILE
+from lup.coordination.roster import Roster
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
     AcceptanceCriterion,

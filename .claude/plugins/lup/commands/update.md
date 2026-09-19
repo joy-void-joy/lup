@@ -92,7 +92,7 @@ uv run lup-devtools dev migrate map <the-commit-you-came-from>..
 
 ## 5. Verify, then commit
 
-Start a `Monitor` over `uv run lup-devtools dev check` and leave it live. Each line it emits arrives as an event, and the watch ends when the command does. Do not run it through `Bash`, whose long timeout returns once at the end, and do not read a backgrounded session on a loop — both are polling, however patient
+Start a `Monitor` over `uv run lup-devtools dev check`. Each line it emits arrives as an event, and the watch ends when the command does. Do not run it through `Bash`, whose long timeout returns once at the end, and do not read a backgrounded session on a loop — both are polling, however patient. A watch that outlives your report wakes you after you have finished, so stop it with `TaskStop` before reporting unless the command has exited
 
 The `carrier drift` row is the one to read: it names the commit the library is
 pinned at and the commit the copied half was merged at, and says nothing at all

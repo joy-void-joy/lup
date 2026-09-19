@@ -27,27 +27,22 @@ class PeerPolicy(BaseModel, frozen=True):
     dispatcher rebuilds the path with the host's own separator, and a compiled
     literal carrying one platform's answers on one platform.
 
-    ``member_kind``, ``heartbeats_dir`` and ``stale_after_seconds`` are what
-    the dispatcher's fold needs to read a session's pulse: which rows are
-    sessions that answer for themselves, where each one's beat is kept, and
-    how long a silence reads as absence — so a killed session stops holding
-    its paths and stops being somewhere a send is redirected to.
+    What lives *inside* that directory is not declared here. The fold the
+    dispatcher reads the store with ships into the plugin beside it and owns
+    every file name, every stamp directory and the window a silence is read
+    against — so a declaration restating any of them would be the second
+    spelling this arrangement exists to remove. ``windows_dir`` stays because
+    it is the one place under the store nothing but the dispatcher touches.
     """
 
     store: list[str] = Field(min_length=1)
-    roster_file: str = Field(min_length=1)
-    names_file: str = Field(min_length=1)
+    windows_dir: str = Field(min_length=1)
+    member_env: str = Field(min_length=1)
     send_reason: str = Field(min_length=1)
     send_recovery: str = Field(min_length=1)
     listing_note: str = Field(min_length=1)
-    touches_file: str = Field(min_length=1)
-    windows_dir: str = Field(min_length=1)
     claim_reason: str = Field(min_length=1)
     claim_recovery: str = Field(min_length=1)
-    member_env: str = Field(min_length=1)
-    member_kind: str = Field(min_length=1)
-    heartbeats_dir: str = Field(min_length=1)
-    stale_after_seconds: float = Field(gt=0)
 
 
 def erase_peer_policy(declared: PeerPolicy | None) -> PeerPolicyRow | None:
@@ -56,17 +51,11 @@ def erase_peer_policy(declared: PeerPolicy | None) -> PeerPolicyRow | None:
         return None
     return PeerPolicyRow(
         store=list(declared.store),
-        roster_file=declared.roster_file,
-        names_file=declared.names_file,
+        windows_dir=declared.windows_dir,
+        member_env=declared.member_env,
         send_reason=declared.send_reason,
         send_recovery=declared.send_recovery,
         listing_note=declared.listing_note,
-        touches_file=declared.touches_file,
-        windows_dir=declared.windows_dir,
         claim_reason=declared.claim_reason,
         claim_recovery=declared.claim_recovery,
-        member_env=declared.member_env,
-        member_kind=declared.member_kind,
-        heartbeats_dir=declared.heartbeats_dir,
-        stale_after_seconds=declared.stale_after_seconds,
     )

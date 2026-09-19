@@ -340,7 +340,7 @@ def create_dev_app(
             typer.Option(
                 "--boundaries",
                 help="Scan for native adapter imports outside composition roots "
-                "only — the lup.harness.codescan.boundaries guard the full check also runs",
+                "only — the seam rules the full check's sweep also runs",
             ),
         ] = False,
         placement: Annotated[
@@ -348,7 +348,7 @@ def create_dev_app(
             typer.Option(
                 "--placement",
                 help="List library data tables no adopter can replace only — the "
-                "lup.harness.codescan.boundaries placement guard the full check also runs",
+                "library-default rule the full check's sweep also runs",
             ),
         ] = False,
         stats: Annotated[
@@ -411,12 +411,15 @@ def create_dev_app(
             )
             return
         if antipatterns:
-            if profiled:
-                antipatterns_mod.profile(declarations.project, path)
-            elif stats:
-                antipatterns_mod.summarize(declarations.project, as_json, path)
-            else:
-                antipatterns_mod.report(declarations.project, as_json, path, fix=fix)
+            match (profiled, stats):
+                case (True, _):
+                    antipatterns_mod.profile(declarations.project, path)
+                case (False, True):
+                    antipatterns_mod.summarize(declarations.project, as_json, path)
+                case _:
+                    antipatterns_mod.report(
+                        declarations.project, as_json, path, fix=fix
+                    )
             return
         if boundaries:
             boundaries_mod.report(declarations.project, as_json)

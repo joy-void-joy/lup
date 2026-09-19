@@ -280,13 +280,14 @@ def ensure_ref_symlink(name: str, target: str) -> None:
     # family before it has fetched anything.
     try:
         refs_dir().mkdir(exist_ok=True)
-        if link.is_symlink():
-            if link.resolve() == target_path:
+        match (link.is_symlink(), link.exists()):
+            case (True, _):
+                if link.resolve() == target_path:
+                    return
+                link.unlink()
+            case (False, True):
+                logger.warning("refs/%s exists but is not a symlink, skipping", name)
                 return
-            link.unlink()
-        elif link.exists():
-            logger.warning("refs/%s exists but is not a symlink, skipping", name)
-            return
         link.symlink_to(target_path)
     except OSError as error:
         logger.warning(

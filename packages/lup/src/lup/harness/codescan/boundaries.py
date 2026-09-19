@@ -31,12 +31,22 @@ from typing import get_args
 from pydantic import BaseModel
 
 from lup.harness.codescan.common import (
+    ApplicationRoots,
+    NO_APPLICATION,
     PythonContext,
     PythonSource,
+    RuleExample,
     file_level_ignore,
     ignore_rule_ids,
 )
-from lup.harness.codescan.project import RuleFinding, RuleViolation, audit_suppressions
+from lup.harness.codescan.project import (
+    AuditedProject,
+    FindingKind,
+    ProjectRule,
+    RuleFinding,
+    RuleViolation,
+    audit_suppressions,
+)
 from lup.policy.kernel.edit import (
     IGNORE_RE,
     python_nodes,
@@ -160,59 +170,6 @@ def generated_tree_paths(
     )
 
 
-class ApplicationRoots(BaseModel, frozen=True):
-    """Where one application composes concrete implementations of the seams.
-
-    The library guards its own package and can name nothing beyond it: an
-    adopter renames the application package before writing a line, so a path
-    written down here would go on naming a package that no longer exists and
-    silently sanction nothing.
-    """
-
-    composition: list[str] = []
-    """Repository-relative files, or directory prefixes ending in ``/``."""
-
-    portable_prose: list[str] = []
-    """Those composition roots whose prose must still name no provider — a
-    declaration every tree renders is written in one of them."""
-
-    generated: list[str] = []
-    """Directory prefixes a runtime writes its own tree at.
-
-    Nothing under one is authored, so a rule about a choice has nothing to say
-    there: the artifact renders a judgement made in the declaration it is
-    compiled from, which is both where the rule can report it and the only
-    place a fix survives the next generation."""
-
-    native_dependencies: list[str] = []
-    """Additional owners of provider SDK imports, such as integration fixtures."""
-
-    source_roots: list[str] = []
-    """Python source directories used to resolve relative imports statically."""
-
-    def sanctions(self, rel_path: Path) -> bool:
-        """Whether this application composes natively at that path."""
-        posix = rel_path.as_posix()
-        return any(
-            posix.startswith(root) if root.endswith("/") else posix == root
-            for root in self.composition
-        )
-
-    def renders(self, rel_path: Path) -> bool:
-        """Whether that path is compiled rather than written."""
-        return rel_path.as_posix().startswith(tuple(self.generated))
-
-    def sanctions_spelling(self, rel_path: Path) -> bool:
-        """Whether that path may also own a provider's own wire words."""
-        return self.sanctions(rel_path) and not rel_path.as_posix().startswith(
-            tuple(self.portable_prose)
-        )
-
-
-NO_APPLICATION = ApplicationRoots()
-"""What an adopter sanctions before it says so: nothing beyond the library."""
-
-
 def native_import_boundaries(
     application: ApplicationRoots = NO_APPLICATION,
 ) -> list[ImportBoundary]:
@@ -318,7 +275,7 @@ class BoundaryBreach(BaseModel):
 class BoundaryAuditFinding(BaseModel):
     """One missing, untyped, or spurious boundary-rule suppression."""
 
-    kind: str
+    kind: FindingKind
     line: int
     text: str
     message: str
@@ -1044,3 +1001,246 @@ def find_kernel_import_breaches(text: str) -> list[BoundaryBreach]:
         for item in audit_kernel_imports(text)
         if item.kind == "missing"
     ]
+
+
+def rule_finding(path: Path, finding: BoundaryAuditFinding) -> RuleFinding:
+    """One boundary verdict in the shape every project rule reports."""
+    return RuleFinding(
+        kind=finding.kind,
+        path=path,
+        line=finding.line,
+        message=finding.message,
+        rule_id=finding.rule_id,
+        text=finding.text,
+    )
+
+
+def import_boundary_findings(
+    audited: AuditedProject, rule_id: str
+) -> list[RuleFinding]:
+    """One import rule's verdicts across the project, from the boundaries it owns.
+
+    The declared boundaries are split by the rule id each carries, so the seam
+    rule judges the adapter and SDK families and the assembly rule the tool
+    constructors, each reporting under its own id and grading only the
+    directives that name it.
+    """
+    declared = (
+        native_import_boundaries(audited.application)
+        if audited.boundaries is None
+        else audited.boundaries
+    )
+    owned = [boundary for boundary in declared if boundary.rule_id == rule_id]
+    return [
+        rule_finding(source.path, finding)
+        for source in audited.sources
+        for finding in audit_rule(
+            source.text,
+            rule_id,
+            import_violations(source.text, source.path, audited.application, owned),
+        )
+    ]
+
+
+def native_spelling_findings(audited: AuditedProject) -> list[RuleFinding]:
+    """Every native spelling in a module the application did not sanction."""
+    return [
+        rule_finding(source.path, finding)
+        for source in audited.sources
+        if not native_spelling_path_is_sanctioned(source.path, audited.application)
+        for finding in audit_rule(
+            source.text, RuleId.NATIVE_SPELLING, native_spelling_violations(source.text)
+        )
+    ]
+
+
+def kernel_import_findings(audited: AuditedProject) -> list[RuleFinding]:
+    """Every import outside the pinned allowlist, in the kernel's own files."""
+    return [
+        rule_finding(source.path, finding)
+        for source in audited.sources
+        if source.path.as_posix().startswith(KERNEL_ROOT)
+        for finding in audit_kernel_imports(source.text)
+    ]
+
+
+def library_default_findings(audited: AuditedProject) -> list[RuleFinding]:
+    """Every library table no adopter can replace, judged against the whole library.
+
+    Whether a table is reachable as an overridable default is a property of
+    the library as a whole, so the names callers can replace are pooled across
+    every library module — adapters included — before any one neutral module
+    is judged against them.
+    """
+    library = [
+        source
+        for source in audited.sources
+        if source.path.as_posix().startswith(LIBRARY_ROOT)
+    ]
+    overridable = {
+        name for source in library for name in default_position_names(source.text)
+    }
+    return [
+        rule_finding(source.path, finding)
+        for source in library
+        if library_placement_path_is_audited(source.path)
+        for finding in audit_library_defaults(source.text, overridable)
+    ]
+
+
+NEUTRAL_MODULE = f"{LIBRARY_ROOT}sessions/client.py"
+ADAPTER_MODULE = f"{LIBRARY_ROOT}providers/codex/harness.py"
+KERNEL_MODULE = f"{KERNEL_ROOT}sample.py"
+"""Where the examples below are taken to be written: a neutral library module,
+an adapter, and a kernel file, for the rules whose verdict turns on that."""
+
+SEAM_RULE = ProjectRule(
+    id=RuleId.SEAM,
+    family="boundary",
+    scope="Neutral Python modules",
+    examples=[
+        RuleExample(
+            code="from lup.providers.codex.runtime import CodexSessionConfig",
+            verdict="flagged",
+            path=NEUTRAL_MODULE,
+        ),
+        RuleExample(
+            code='tools = ["Read", "WebSearch"]; runtime = "codex"',
+            verdict="cleared",
+            path=NEUTRAL_MODULE,
+        ),
+        RuleExample(
+            code="from lup.providers.codex.runtime import CodexSessionConfig",
+            verdict="cleared",
+            path=ADAPTER_MODULE,
+        ),
+    ],
+    message=IMPORT_BOUNDARY_MESSAGE,
+    audit=lambda audited: import_boundary_findings(audited, RuleId.SEAM),
+)
+"""The seam rule: adapter and SDK imports stay where the declaration owns them."""
+
+ASSEMBLY_RULE = ProjectRule(
+    id=RuleId.ASSEMBLY,
+    family="boundary",
+    scope="Neutral Python modules",
+    examples=[
+        RuleExample(
+            code="from lup.coordination.peer_tools import create_peer_tools",
+            verdict="flagged",
+            path=NEUTRAL_MODULE,
+        ),
+        RuleExample(
+            code="groups = [coordination_group(), ledger_group(NODE_KINDS, ...)]",
+            verdict="cleared",
+            path=NEUTRAL_MODULE,
+        ),
+    ],
+    message=ASSEMBLY_BOUNDARY_MESSAGE,
+    audit=lambda audited: import_boundary_findings(audited, RuleId.ASSEMBLY),
+)
+"""The assembly rule: a tool group's constructor is the toolset's to call."""
+
+NATIVE_SPELLING_RULE = ProjectRule(
+    id=RuleId.NATIVE_SPELLING,
+    family="spelling",
+    scope="Neutral Python modules",
+    examples=[
+        RuleExample(
+            code='instruction = "$lup:commit"', verdict="flagged", path=NEUTRAL_MODULE
+        ),
+        RuleExample(
+            code='instruction = "$lup:commit"', verdict="cleared", path=ADAPTER_MODULE
+        ),
+    ],
+    message=(
+        "Provider command, event, environment, and manifest spellings stay at "
+        "the native adapter boundary."
+    ),
+    audit=native_spelling_findings,
+)
+"""The native-spelling rule: a wire word is the adapter's to spell."""
+
+KERNEL_IMPORTS_RULE = ProjectRule(
+    id=RuleId.KERNEL_IMPORTS,
+    family="boundary",
+    scope="Policy kernel",
+    examples=[
+        RuleExample(
+            code="from pydantic import BaseModel", verdict="flagged", path=KERNEL_MODULE
+        ),
+        RuleExample(
+            code="from pathlib import Path", verdict="cleared", path=KERNEL_MODULE
+        ),
+    ],
+    message=(
+        "The copied hook kernel imports only its pinned standard-library allowlist."
+    ),
+    audit=kernel_import_findings,
+)
+"""The kernel-imports rule: the copied kernel carries no dependency."""
+
+LIBRARY_DEFAULT_RULE = ProjectRule(
+    id=RuleId.LIBRARY_DEFAULT,
+    family="boundary",
+    scope="Neutral library modules",
+    examples=[
+        RuleExample(
+            code='READ_ONLY_COMMANDS = ("ls", "cat", "grep")',
+            verdict="flagged",
+            path=NEUTRAL_MODULE,
+        ),
+        RuleExample(
+            code=(
+                'READ_ONLY_COMMANDS = ("ls", "cat", "grep")\n'
+                "def run(commands: tuple[str, ...] = READ_ONLY_COMMANDS) -> None: ..."
+            ),
+            verdict="cleared",
+            path=NEUTRAL_MODULE,
+        ),
+    ],
+    message=(
+        "A data table a library declares is a choice made for every adopter: it "
+        "reaches them as an overridable default — a parameter default, a pydantic "
+        "field default, or the sentinel a mutable default is written as — so they "
+        "replace the vocabulary instead of editing the library. Suppress only a "
+        "canonical table, whose value is fixed outside this repository."
+    ),
+    audit=library_default_findings,
+)
+"""The library-default rule: a table reaches an adopter as a default."""
+
+CONSTANT_DECLARATION_RULE = ProjectRule(
+    id=RuleId.CONSTANT_DECLARATION,
+    family="architecture",
+    scope="Python constants",
+    examples=[
+        RuleExample(code="SNIPPET_LENGTH = 500", verdict="flagged"),
+        RuleExample(
+            code=(
+                "SNIPPET_LENGTH = 500\n"
+                "def snippet(text: str, length: int = SNIPPET_LENGTH) -> str: ..."
+            ),
+            verdict="cleared",
+        ),
+    ],
+    message=(
+        "A constant is a judgement a second implementer with the same intent "
+        "could have made differently — a ceiling, a retry count, an allowlist — "
+        "frozen where no caller can replace it. It reaches them as an overridable "
+        "default instead: a parameter default, a pydantic field default, or the "
+        "sentinel a mutable default is written as. Suppress only a canonical "
+        "value — a provider's wire spelling, a language's own vocabulary, an "
+        "identity this repository defines. A constant that exists to carve "
+        "text by hand is steered to the parser rather than to a parameter, "
+        "because parametrizing it would keep the surgery."
+    ),
+    refinement=(
+        "The library's own multi-entry tables are library-default's instead, so "
+        "the two partition every declaration and neither reaches the other's."
+    ),
+    audit=lambda audited: audit_constant_declarations(
+        audited.sources, audited.application
+    ),
+)
+"""The constant-declaration rule: a judgement reaches its callers as a default."""

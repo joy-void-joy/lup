@@ -14,6 +14,7 @@ from kernel.rows import (
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
+    SpawnNameRow,
     UrlScopeRow,
 )
 
@@ -985,6 +986,24 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "resolution": "",
         },
         {
+            "id": "elif-chain",
+            "pattern": "^\\s*elif\\b",
+            "message": "A chain of three or more ways is a `match` written long: name the subject the arms decide on and write each arm as a pattern of it \u2014 a literal or dotted name per value, a class pattern with the fields it reads, a tuple of the fields, a sequence pattern over the split line, the variant of a union \u2014 with a guard on a pattern that binds what the guard reads. An arm with no pattern to write, an ordered comparison among them, becomes a guard clause that returns, each its own statement. Where the chain is the honest shape, `# lup: ignore[elif-chain]` carries why",
+            "context": "code",
+            "matcher": "elif_chain_sites",
+            "strength": "soft",
+            "resolution": "",
+        },
+        {
+            "id": "wildcard-guard",
+            "pattern": "^\\s*case\\s+(?:_|[A-Za-z_]\\w*)\\s+if\\b",
+            "message": "A guard on a wildcard \u2014 `case _ if \u2026`, `case name if \u2026` \u2014 decides on the guard alone, which is the chain in a `match` costume. Bind what the guard reads in the pattern instead: a class pattern with the field, a tuple of the fields, a literal. Where no pattern exists, write the decision as guard clauses that return; a guarded fallthrough after real arms nests its `if` inside `case _:`. Where the guard is the honest shape, `# lup: ignore[wildcard-guard]` carries why",
+            "context": "code",
+            "matcher": "wildcard_guard_sites",
+            "strength": "soft",
+            "resolution": "",
+        },
+        {
             "id": "pdf-extraction",
             "pattern": "\\b(?:import|from)\\s+(?:fitz|pymupdf|pypdf|PyPDF2|PyPDF4|pdfplumber|pdfminer|pypdfium2)\\b",
             "message": "A PDF text extractor comes back empty from a scanned or image-only page, and an empty string reads as an empty document rather than as an extraction that failed \u2014 read the document whole instead of pulling text out of it.",
@@ -1406,6 +1425,24 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
             "message": "No `_` prefix on variables/constants \u2014 nothing is private (unused `_` function parameters are exempt)",
             "context": "code",
             "matcher": "private_variable_sites",
+            "strength": "soft",
+            "resolution": "",
+        },
+        {
+            "id": "elif-chain",
+            "pattern": "^\\s*elif\\b",
+            "message": "A chain of three or more ways is a `match` written long: name the subject the arms decide on and write each arm as a pattern of it \u2014 a literal or dotted name per value, a class pattern with the fields it reads, a tuple of the fields, a sequence pattern over the split line, the variant of a union \u2014 with a guard on a pattern that binds what the guard reads. An arm with no pattern to write, an ordered comparison among them, becomes a guard clause that returns, each its own statement. Where the chain is the honest shape, `# lup: ignore[elif-chain]` carries why",
+            "context": "code",
+            "matcher": "elif_chain_sites",
+            "strength": "soft",
+            "resolution": "",
+        },
+        {
+            "id": "wildcard-guard",
+            "pattern": "^\\s*case\\s+(?:_|[A-Za-z_]\\w*)\\s+if\\b",
+            "message": "A guard on a wildcard \u2014 `case _ if \u2026`, `case name if \u2026` \u2014 decides on the guard alone, which is the chain in a `match` costume. Bind what the guard reads in the pattern instead: a class pattern with the field, a tuple of the fields, a literal. Where no pattern exists, write the decision as guard clauses that return; a guarded fallthrough after real arms nests its `if` inside `case _:`. Where the guard is the honest shape, `# lup: ignore[wildcard-guard]` carries why",
+            "context": "code",
+            "matcher": "wildcard_guard_sites",
             "strength": "soft",
             "resolution": "",
         },
@@ -2053,6 +2090,11 @@ PATH_ROLES: list[PathRoleRow] = [
 ]
 
 ACCEPTANCE_GUARD: AcceptanceGuardRow | None = None
+
+SPAWN_NAMES: SpawnNameRow | None = {
+    "reason": "a subagent spawned without a name is listed, addressed and stopped by its type alone, which says nothing about what it is doing",
+    "recovery": "pass a name beside the agent type: the task in two or three words, letters, digits, hyphens or underscores, at most 64 characters \u2014 it is what the listing shows and what a message or a stop addresses",
+}
 
 SHELL_RULES: list[ShellRuleRow] = [
     {
@@ -20004,19 +20046,13 @@ REFUSED_TOOLS: list[RefusedToolRow] = [
 
 PEER_POLICY: PeerPolicyRow | None = {
     "store": ["lup", "coordination"],
-    "roster_file": "roster.jsonl",
-    "names_file": "names.jsonl",
+    "windows_dir": "windows",
+    "member_env": "LUP_COORDINATION_MEMBER",
     "send_reason": "a native send to a session on this repository's roster leaves no record any other worktree can read",
     "send_recovery": "Say it with `coordination_send` instead: it reaches the same peer, records it where every session in this clone can read it, and reports whether the peer's hook will put it in front of that peer's next tool call or it waits until they next look.",
     "listing_note": "This repository's own roster, which is a different population from the listing above: these are the sessions working in this clone, in whatever worktree, and they include peers no account-scoped listing can see. Reach any of them with `coordination_send`, which records what it carries. The person watching is always at `user`.",
-    "touches_file": "touches.jsonl",
-    "windows_dir": "windows",
     "claim_reason": "another live session has changed or locked this path",
     "claim_recovery": "Writing under a held path is how two sessions overwrite each other between merges. Ask the holder with `coordination_send` first, or go ahead if you already know what they are doing; a claim expires with the session holding it, so one still standing means that session has not stopped.",
-    "member_env": "LUP_COORDINATION_MEMBER",
-    "member_kind": "session",
-    "heartbeats_dir": "heartbeats",
-    "stale_after_seconds": 120.0,
 }
 
 AUTONOMOUS_AGENT_IDENTITIES: list[str] = [

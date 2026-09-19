@@ -55,8 +55,9 @@ below's, which is why both layers exist.
 `main` and `dev`. Its first step is `harness check all` — the same command
 the commit hook installs, spelled from the same constant — and its second is
 `dev check`: `ruff format --check`, `ruff check`, `pyright`, both `pytest`
-suites, the review-note report, the anti-pattern rules, the native seam
-boundaries, library placement, hook reachability, generated-tree drift, the
+suites, the review-note report, the rule sweep (line rules and project rules,
+seam boundaries and library placement among them), hook reachability,
+generated-tree drift, the
 guidance budget, and — while `[tool.lup] template` still stands — the tighter
 scaffold budget that holds guidance to the share a template may spend of it.
 
@@ -90,7 +91,7 @@ One command:
 
 That is deliberately the whole of the gate. `dev check` is the same bar a
 checkout runs locally — format, lint, types, tests, review notes,
-anti-patterns, seam boundaries, library placement, hook reachability,
+the rule sweep with seam boundaries and library placement among its rules,
 generated-tree drift, the guidance budget, and the scaffold budget where a
 repository is still a template — so a green local run and a green pipeline
 cannot mean different things. Putting `harness check all` in a step ahead of it, as this

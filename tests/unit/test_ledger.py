@@ -15,8 +15,9 @@ from typing import Literal
 import pytest
 from pydantic import Field, ValidationError
 
+from lup.coordination.bare.store import ROSTER_FILE
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import ActorJoined, Delivery, SpawnedActor
+from lup.coordination.roster import ActorJoined, Delivery, Roster, SpawnedActor
 from lup.coordination.wake import WakePath
 from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.models import LedgerEdge, LedgerNode, Standing, Surroundings
@@ -309,13 +310,20 @@ def test_a_blocker_that_finished_stops_blocking_without_amending_the_edge(
     assert store.standing(blocked, NODE_CLASSES).label == "held"
 
 
-def test_every_field_an_arrival_carries_reaches_the_member_it_becomes() -> None:
+def test_every_field_an_arrival_carries_reaches_the_member_it_becomes(
+    tmp_path: Path,
+) -> None:
     """A fold that drops a field is a fact that silently stops applying.
 
     Structural rather than per-field, because the failure this catches is
     somebody adding a field to the arrival record and not to the fold — which
     happened while `wake` was being added, and which the type checker cannot
     see because both sides default.
+
+    Through the file rather than through a call, because the fold is now the
+    one every reader of the store shares: what is asserted is that a record
+    the typed writer serializes survives being read back by a half that
+    imports none of its types.
     """
     shared = set(ActorJoined.model_fields) & set(SpawnedActor.model_fields)
     arrival = ActorJoined(
@@ -327,7 +335,8 @@ def test_every_field_an_arrival_carries_reaches_the_member_it_becomes() -> None:
         wake=WakePath(runtime="codex", handle="thread-1"),
         at=datetime(2026, 9, 9, tzinfo=UTC),
     )
-    member = arrival.applied(None)
-    assert member is not None
+    roster = Roster(tmp_path / ROSTER_FILE)
+    roster.stream.append(arrival)
+    member = next(iter(roster.standing()))
     for field in shared - {"at", "type", "running"}:
         assert getattr(member, field) == getattr(arrival, field), field

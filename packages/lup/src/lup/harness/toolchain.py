@@ -1126,10 +1126,21 @@ def question_relay_requirement(
     )
 
 
+def preflight_namespace() -> str:
+    """Where the checkpoint-store probe writes its ref: a namespace of its own.
+
+    Beside the undo log rather than inside it, so a probe never reads as a
+    snapshot, and a function for the reason the undo namespace is one: the
+    guard that watches a checkout for refs a suite moved imports it from
+    here, so the writer and the reader cannot end up naming two places.
+    """
+    return "refs/lup/preflight"
+
+
 def checkpoint_store_requirement(
     where: Side = "host",
     install: list[Package] = [],
-    namespace: str = "refs/lup/preflight",
+    namespace: str = preflight_namespace(),
 ) -> Requirement:
     """Whether the store a recovery-backed permission rests on accepts a write.
 

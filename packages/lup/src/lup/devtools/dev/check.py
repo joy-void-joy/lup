@@ -35,11 +35,7 @@ from lup.workspace.paths import is_template_scaffold, project_root
 
 from lup.devtools.dev.antipatterns import scan_antipatterns
 from lup.devtools.project import DevProject
-from lup.devtools.dev.boundaries import (
-    scan_boundaries,
-    scan_application_placement,
-    scan_library_placement,
-)
+from lup.devtools.dev.boundaries import scan_application_placement
 from lup.devtools.dev.branches import get_integration_branch, unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
@@ -936,18 +932,6 @@ def scan_reports(
             else [f"antipatterns: ok{tail}"],
         )
 
-        breaches = scan_boundaries(project)
-        yield CheckReport(
-            name="seam boundaries",
-            passed=not breaches,
-            lines=[
-                f"seam boundaries: FAIL ({len(breaches)} breach(es))",
-                *(f"  {b.file}:{b.line}  {b.module}" for b in breaches),
-            ]
-            if breaches
-            else ["seam boundaries: ok"],
-        )
-
         # A document naming a node is held to what the node says now, so prose
         # cannot go on citing a corrected figure. Counted only where there is
         # a cite to hold: a repository with none has nothing this can fail.
@@ -957,18 +941,6 @@ def scan_reports(
             counted=bool(cited.checked or cited.failing),
             passed=cited.passed(),
             lines=cited.lines(),
-        )
-
-        tables = scan_library_placement()
-        yield CheckReport(
-            name="library placement",
-            passed=not tables,
-            lines=[
-                f"library placement: FAIL ({len(tables)} baked-in table(s))",
-                *(f"  {t.file}:{t.line}  {t.module}" for t in tables),
-            ]
-            if tables
-            else ["library placement: ok"],
         )
 
         portable = scan_application_placement(project)
@@ -1176,32 +1148,37 @@ def scan_reports(
         # an adopter an unresolvable import and nothing to read.
         base = gate_base(get_integration_branch()) if spread is not None else None
         owed = undeclared_breaks(project, base) if base is not None else []
-        if spread is not None and base is None:
-            # Said rather than exited: a checkout with no base to read from
-            # is a fact about the clone, and a report that names it is what
-            # lets somebody fetch one.
-            yield CheckReport(
-                name="declared migrations",
-                counted=False,
-                lines=[
-                    "declared migrations: skipped — no base to judge from (advisory)",
-                    "  fetch the integration branch or `main` so a merge base exists",
-                ],
-            )
-        elif spread is not None:
-            yield CheckReport(
-                name="declared migrations",
-                passed=not owed,
-                lines=[
-                    f"declared migrations: FAIL ({len(owed)} gone with nothing "
-                    "to read)",
-                    *(f"  {capability.spelled()}" for capability in owed),
-                    "  declare each in `lup.devtools.dev.migrations.DECLARED`, "
-                    "with what a caller does about it",
-                ]
-                if owed
-                else ["declared migrations: ok"],
-            )
+        match (spread, base):
+            case (None, _):
+                pass
+            case (_, None):
+                # Said rather than exited: a checkout with no base to read from
+                # is a fact about the clone, and a report that names it is what
+                # lets somebody fetch one.
+                yield CheckReport(
+                    name="declared migrations",
+                    counted=False,
+                    lines=[
+                        "declared migrations: skipped — no base to judge from "
+                        "(advisory)",
+                        "  fetch the integration branch or `main` so a merge base "
+                        "exists",
+                    ],
+                )
+            case _:
+                yield CheckReport(
+                    name="declared migrations",
+                    passed=not owed,
+                    lines=[
+                        f"declared migrations: FAIL ({len(owed)} gone with nothing "
+                        "to read)",
+                        *(f"  {capability.spelled()}" for capability in owed),
+                        "  declare each in `lup.devtools.dev.migrations.DECLARED`, "
+                        "with what a caller does about it",
+                    ]
+                    if owed
+                    else ["declared migrations: ok"],
+                )
 
         # Beside parity because both ask whether the roster arrived whole, one
         # turn further out: parity reads a declaration against the trees, and

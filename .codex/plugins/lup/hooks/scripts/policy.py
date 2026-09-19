@@ -34,6 +34,7 @@ from datetime import UTC, datetime, timedelta
 import subprocess
 from typing import Literal
 from urllib.parse import urlsplit
+from coordination import store
 from kernel.edit import (
     awaits_resolution,
     decide_edit,
@@ -59,6 +60,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
+from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
@@ -83,6 +85,7 @@ from policy_data import (
     RUNNER_TARGETS,
     SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
+    SPAWN_NAMES,
 )
 
 
@@ -1927,335 +1930,6 @@ def peer_store(root: Path | None, store: list[str]) -> Path | None:
     return Path(shared).joinpath(*store)
 
 
-def stream_records(path: Path) -> list[dict]:
-    """Every legible JSON object an append-only record holds, oldest first.
-
-    A line that does not parse is skipped rather than raised on. These files
-    are appended to by other sessions while this one reads them, so a torn
-    final line is the ordinary state of a healthy store — and a reader that
-    failed on it would stop judging peer calls for the duration of somebody
-    else's write.
-    """
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-
-    def legible():
-        """Each line that is a JSON object, skipping whatever is not one."""
-        for line in raw.splitlines():
-            try:
-                loaded = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(loaded, dict):
-                yield loaded
-
-    return list(legible())
-
-
-def peer_members(directory: Path, roster_file: str) -> list[dict]:
-    """Every member the roster still holds, folded from its own record.
-
-    Keyed by kind and id rather than by the printed address, because a member
-    taken through a second round is that member further on and not a second
-    one — which is what the roster's own fold says, and a reader answering
-    differently would show one session twice.
-
-    A record about nobody standing is dropped rather than inventing a member,
-    so a description or a finish arriving before its join says nothing.
-    """
-    # lup: ignore[empty-collection] — a fold whose every step reads what the
-    # steps before it left, which is the one shape a comprehension has no
-    # spelling for: a description updates a member an earlier record created
-    standing: dict = {}
-    for record in stream_records(directory / roster_file):
-        actor = record["actor"] if "actor" in record else {}
-        if not isinstance(actor, dict) or "id" not in actor or "kind" not in actor:
-            continue
-        held = f"{actor['kind']}-{actor['id']}"
-        match record["type"] if "type" in record else "":
-            case "spawned" | "joined":
-                standing[held] = {**record, "running": True}
-            case "described" | "finished" if held in standing:
-                standing[held] = {
-                    **standing[held],
-                    **record,
-                    "running": record["type"] != "finished",
-                }
-            case _:
-                continue
-    return [member for member in standing.values() if member["running"]]
-
-
-def peer_heard(directory: Path, heartbeats_dir: str, member: dict) -> datetime | None:
-    """When a member was last heard from: its newest record, or a later beat."""
-
-    def recorded() -> datetime | None:
-        spelled = (
-            member["at"] if "at" in member and isinstance(member["at"], str) else ""
-        )
-        try:
-            moment = datetime.fromisoformat(spelled)
-        except ValueError:
-            return None
-        return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
-
-    def beaten() -> datetime | None:
-        try:
-            stamp = (directory / heartbeats_dir / member["actor"]["id"]).stat().st_mtime
-        except OSError:
-            return None
-        return datetime.fromtimestamp(stamp, UTC)
-
-    return max(
-        (moment for moment in (recorded(), beaten()) if moment is not None),
-        default=None,
-    )
-
-
-def peer_present(
-    directory: Path,
-    roster_file: str,
-    member_kind: str,
-    heartbeats_dir: str,
-    stale_after_seconds: float,
-) -> list[dict]:
-    """Every member the roster holds whose pulse says it is still there.
-
-    The record fold says who never wrote a departure; a session that was
-    killed wrote none either, so a session's row is present only while its
-    newest record or its latest beat is within the window. Only a session
-    answers for itself this way: a spawned agent's presence is its spawner's
-    word and the person is never finished, so both pass through as the record
-    says.
-    """
-    now = datetime.now(UTC)
-
-    def present(member: dict) -> bool:
-        if member["actor"]["kind"] != member_kind:
-            return True
-        heard = peer_heard(directory, heartbeats_dir, member)
-        return heard is not None and now - heard <= timedelta(
-            seconds=stale_after_seconds
-        )
-
-    return [
-        member for member in peer_members(directory, roster_file) if present(member)
-    ]
-
-
-def peer_name_claims(directory: Path, names_file: str) -> dict:
-    """Which member each name reaches now, the newest claim on a name winning.
-
-    Every name ever recorded rather than only the current ones: a name
-    somebody wrote down before a rename goes on reaching the session it named
-    until something else claims it, which is what the record is kept
-    append-only for. A sender typing the older name is typing what was correct
-    when they read it, and there is no error they could have been shown.
-
-    Newest wins by construction — a later record for one name replaces the
-    earlier entry as the comprehension walks the stream in order.
-    """
-    return {
-        record["cli_name"]: record["id"]
-        for record in stream_records(directory / names_file)
-        if "cli_name" in record and "id" in record
-    }
-
-
-def peer_addresses(
-    root: Path | None,
-    store: list[str],
-    roster_file: str,
-    names_file: str,
-    member_kind: str,
-    heartbeats_dir: str,
-    stale_after_seconds: float,
-) -> list[str]:
-    """Every spelling that currently reaches a live member of this roster.
-
-    Ids, the kind-qualified label a door prints, and whatever each member is
-    called now, because a sender types whichever of those it last read — a
-    check knowing only one of them would let the others through, which is the
-    failure that made a redirect reach nobody.
-
-    Live members only. A session that has left is not somewhere a durable
-    message would arrive either, so redirecting a send to it would trade one
-    call reaching nobody for another.
-    """
-    directory = peer_store(root, store)
-    if directory is None:
-        return []
-    members = peer_present(
-        directory, roster_file, member_kind, heartbeats_dir, stale_after_seconds
-    )
-    live = [member["actor"]["id"] for member in members]
-    return sorted(
-        {
-            *live,
-            *[
-                f"{member['actor']['kind']}:{member['actor']['id']}"
-                for member in members
-            ],
-            *[
-                name
-                for name, held in peer_name_claims(directory, names_file).items()
-                if held in live
-            ],
-        }
-    )
-
-
-def peer_listing(
-    root: Path | None,
-    store: list[str],
-    roster_file: str,
-    names_file: str,
-    member_kind: str,
-    heartbeats_dir: str,
-    stale_after_seconds: float,
-) -> list[str]:
-    """One line per live member, as somebody choosing who to reach reads it.
-
-    The same four facts a console prints — who, which checkout they are in,
-    what they are on, and what carries a message to them — because a listing
-    naming members without saying what reaches them leaves a reader to guess
-    which of them will hear anything.
-    """
-    directory = peer_store(root, store)
-    if directory is None:
-        return []
-    names = peer_name_claims(directory, names_file)
-
-    def described(member: dict) -> list[str]:
-        """The parts one member's line is joined from, blanks included."""
-        actor = member["actor"]
-        called = [name for name, held in names.items() if held == actor["id"]]
-        worktree = member["worktree"] if "worktree" in member else ""
-        saying = member["description"] if "description" in member else ""
-        return [
-            called[-1] if called else actor["id"],
-            Path(worktree).name if worktree else "",
-            saying or (member["task"] if "task" in member else ""),
-            member["delivery"] if "delivery" in member else "",
-        ]
-
-    return [
-        " — ".join(part for part in described(member) if part)
-        for member in peer_present(
-            directory, roster_file, member_kind, heartbeats_dir, stale_after_seconds
-        )
-    ]
-
-
-def claim_covers(claim: dict, candidate: str) -> bool:
-    """Whether a path about to be written falls under one standing claim."""
-    held = claim["path"]
-    if not claim["prefix"]:
-        return candidate == held
-    return candidate == held or candidate.startswith(held + "/")
-
-
-def peer_claims(directory: Path, touches_file: str) -> list[dict]:
-    """Every claim standing on the record, alive or not, folded in order.
-
-    Keyed by the kind as well as the path, because locking a directory and
-    touching a file of that name are different claims and a later record must
-    not silently convert one into the other.
-    """
-    # lup: ignore[empty-collection] — a fold whose every step reads what the
-    # steps before it left: a release answers against the claim an earlier
-    # record created, which is the one shape a comprehension cannot spell
-    standing: dict = {}
-    for record in stream_records(directory / touches_file):
-        actor = record["actor"] if "actor" in record else {}
-        path = record["path"] if "path" in record else ""
-        if not isinstance(actor, dict) or "id" not in actor or not path:
-            continue
-        kind = record["type"] if "type" in record else ""
-        prefix = (
-            record["prefix"] is True
-            if kind == "vacated" and "prefix" in record
-            else kind in ("locked", "released")
-        )
-        subject = f"{'under' if prefix else 'at'} {path}"
-        match kind:
-            case "vacated":
-                standing.pop(subject, None)
-            case "touched" | "contested":
-                rivals = record["rivals"] if "rivals" in record else []
-                standing[subject] = {
-                    "path": path,
-                    "prefix": False,
-                    "holders": [
-                        actor,
-                        *[rival for rival in rivals if isinstance(rival, dict)],
-                    ],
-                }
-            case "locked":
-                standing[subject] = {"path": path, "prefix": True, "holders": [actor]}
-            case "released" if subject in standing:
-                if actor["id"] in [
-                    holder["id"] for holder in standing[subject]["holders"]
-                ]:
-                    del standing[subject]
-            case _:
-                continue
-    return list(standing.values())
-
-
-def claim_holders(
-    root: Path | None,
-    store: list[str],
-    roster_file: str,
-    names_file: str,
-    touches_file: str,
-    path_text: str,
-    mine: str,
-    member_kind: str,
-    heartbeats_dir: str,
-    stale_after_seconds: float,
-) -> list[str]:
-    """Who else, still working here, is holding the path a write would land on.
-
-    Live holders other than the asker. A claim expires with the session that
-    made it, so a departed holder is nobody to ask; and a session meeting its
-    own claim on every edit would be asked about its own work.
-
-    Named where a session has a name and identified by id otherwise, because
-    this reaches somebody deciding whom to ask, and an id is what you fall
-    back on when nothing has been called anything yet.
-    """
-    directory = peer_store(root, store)
-    if directory is None:
-        return []
-    live = [
-        member["actor"]["id"]
-        for member in peer_present(
-            directory, roster_file, member_kind, heartbeats_dir, stale_after_seconds
-        )
-    ]
-    names = peer_name_claims(directory, names_file)
-    target = str(Path(path_text).resolve())
-    holding = [
-        holder["id"]
-        for claim in peer_claims(directory, touches_file)
-        if claim_covers(claim, target)
-        for holder in claim["holders"]
-        if holder["id"] in live and holder["id"] != mine
-    ]
-    return sorted(
-        {
-            next(
-                (name for name, held in names.items() if held == member),
-                member,
-            )
-            for member in holding
-        }
-    )
-
-
 def writable_snapshot(root: Path) -> dict:
     """What every file Git reports as moved looks like right now, by size and time.
 
@@ -2387,91 +2061,6 @@ def close_claim_window(
         ),
         "rivals": sorted(rivals),
     }
-
-
-def file_digest(path_text: str) -> str:
-    """What one file's bytes hash to, or nothing where they cannot be read.
-
-    Carried on the claim so a later reader can tell the content this session
-    left from whatever stands there now — which is what makes a claim evidence
-    of a change rather than only an assertion that one happened.
-    """
-    try:
-        return sha256(Path(path_text).read_bytes()).hexdigest()
-    except OSError:
-        return ""
-
-
-def member_actor(directory: Path, roster_file: str, member: str) -> dict | None:
-    """This session's own address as the roster holds it, or nothing.
-
-    Read rather than composed. A session that never joined has no address to
-    write claims under, and inventing one here would put a holder on the
-    record that no listing shows and nothing can ask.
-    """
-    return next(
-        (
-            found["actor"]
-            for found in peer_members(directory, roster_file)
-            if found["actor"]["id"] == member
-        ),
-        None,
-    )
-
-
-def record_claims(
-    root: Path | None,
-    store: list[str],
-    roster_file: str,
-    touches_file: str,
-    mine: str,
-    paths: list[str],
-    rivals: list[str],
-) -> None:
-    """Write down what this session's call changed, and who else it could be.
-
-    A claim per path. Where another session had a window open across the same
-    moment, every name goes on the record instead of one being guessed at: a
-    before-and-after comparison sees the change and cannot see who made it,
-    and a confident wrong author is worse than an honest pair, because the
-    next reader is deciding whether it is safe to write.
-
-    Silent on every failure. This runs after the work has already happened, so
-    the call it belongs to cannot be undone by refusing — and a claim nobody
-    could record costs a later reader an attribution, while a raised exception
-    here costs the session its ability to work.
-    """
-    directory = peer_store(root, store)
-    if directory is None or not mine or not paths:
-        return
-    actor = member_actor(directory, roster_file, mine)
-    if actor is None:
-        return
-    contenders = [
-        found
-        for other in rivals
-        for found in [member_actor(directory, roster_file, other)]
-        if found is not None
-    ]
-    stamped = datetime.now(UTC).isoformat()
-    lines = [
-        json.dumps(
-            {
-                "type": "contested" if contenders else "touched",
-                "actor": actor,
-                "at": stamped,
-                "path": path,
-                "digest": file_digest(path),
-                "rivals": contenders,
-            }
-        )
-        for path in paths
-    ]
-    try:
-        with (directory / touches_file).open("a", encoding="utf-8") as record:
-            record.write("".join(f"{line}\n" for line in lines))
-    except OSError:
-        return
 
 
 def bash_decision(
@@ -2785,6 +2374,19 @@ def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None
     return decide_tool(name, values, REFUSED_TOOLS)
 
 
+def peer_directory(cwd: Path | None) -> Path | None:
+    """Where this repository's sessions meet, or nothing where none do.
+
+    The one thing the shipped fold cannot answer for itself: which repository
+    this call is in, and where beneath its shared git directory this project
+    put its store. Everything inside that directory the fold knows, because
+    it is the same fold the store's own library reads it with.
+    """
+    if PEER_POLICY is None:
+        return None
+    return peer_store(cwd, PEER_POLICY["store"])
+
+
 def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     """Judge one native send against who this repository's roster holds.
 
@@ -2794,26 +2396,25 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     recipient in is that runtime's business and this half answers for all of
     them.
     """
-    if PEER_POLICY is None:
-        return decide_peer_send(values, [], None)
-    return decide_peer_send(
-        values,
-        peer_addresses(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-            PEER_POLICY["member_kind"],
-            PEER_POLICY["heartbeats_dir"],
-            PEER_POLICY["stale_after_seconds"],
-        ),
-        PEER_POLICY,
-    )
+    directory = peer_directory(cwd)
+    if directory is None:
+        return decide_peer_send(values, [], PEER_POLICY)
+    return decide_peer_send(values, store.addresses(directory), PEER_POLICY)
 
 
 def peer_listing_decision() -> KernelDecision:
     """Judge one native listing of who this session can reach, which defers."""
     return decide_peer_listing(PEER_POLICY)
+
+
+def spawn_decision(name: str, values: list[str]) -> KernelDecision:
+    """Judge one native spawn by the name it carries, against what this project declared.
+
+    ``name`` is the runtime's own field for it, read by the host half that
+    knows which key that is; every string the call carries rides beside it
+    so an escalation marker in any of them is found.
+    """
+    return decide_spawn(name, values, SPAWN_NAMES)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:
@@ -2824,18 +2425,11 @@ def peer_listing_attachment(cwd: Path | None) -> str:
     acts on rather than a condition of the call happening — folding it into
     a reason would make it visible only where something refused.
     """
-    if PEER_POLICY is None:
+    directory = peer_directory(cwd)
+    if directory is None:
         return ""
     return peer_listing_context(
-        peer_listing(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-            PEER_POLICY["member_kind"],
-            PEER_POLICY["heartbeats_dir"],
-            PEER_POLICY["stale_after_seconds"],
-        ),
+        store.listing(directory),
         PEER_POLICY,
     )
 
@@ -3154,21 +2748,13 @@ def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision |
     handed over as the names they resolve to — the kernel reads no filesystem
     and decides from what it is given.
     """
-    if PEER_POLICY is None:
+    directory = peer_directory(cwd)
+    if PEER_POLICY is None or directory is None:
         return None
     return decide_foreign_claim(
         path_text,
-        claim_holders(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-            PEER_POLICY["touches_file"],
-            path_text,
-            declared_identity(PEER_POLICY["member_env"]),
-            PEER_POLICY["member_kind"],
-            PEER_POLICY["heartbeats_dir"],
-            PEER_POLICY["stale_after_seconds"],
+        store.claim_holders(
+            directory, path_text, declared_identity(PEER_POLICY["member_env"])
         ),
         PEER_POLICY,
     )
@@ -3195,19 +2781,13 @@ def claim_window_closed(cwd: Path | None) -> None:
     """Attribute what a command changed, contested where nothing could tell."""
     if PEER_POLICY is None:
         return
+    directory = peer_directory(cwd)
     mine = declared_identity(PEER_POLICY["member_env"])
     closed = close_claim_window(
         cwd, PEER_POLICY["store"], PEER_POLICY["windows_dir"], mine
     )
-    record_claims(
-        cwd,
-        PEER_POLICY["store"],
-        PEER_POLICY["roster_file"],
-        PEER_POLICY["touches_file"],
-        mine,
-        closed["paths"],
-        closed["rivals"],
-    )
+    if directory is not None:
+        store.record_claims(directory, mine, closed["paths"], closed["rivals"])
 
 
 def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
@@ -3218,13 +2798,11 @@ def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
     act on without qualification, and it settles a path an earlier comparison
     could only guess at.
     """
-    if PEER_POLICY is None or not path_text:
+    directory = peer_directory(cwd)
+    if PEER_POLICY is None or directory is None or not path_text:
         return
-    record_claims(
-        cwd,
-        PEER_POLICY["store"],
-        PEER_POLICY["roster_file"],
-        PEER_POLICY["touches_file"],
+    store.record_claims(
+        directory,
         declared_identity(PEER_POLICY["member_env"]),
         [str(Path(path_text).resolve())],
         [],
@@ -3417,6 +2995,15 @@ def dispatch(payload, permission_request=False):
         return fetch_decision(tool_input["url"], session_directory)
     if name == "apply_patch":
         return patch_decision(tool_input["command"], session_directory, autonomous)
+    if name == "collaborationspawn_agent":
+        # Measured on 0.155.1: the spawn carries `task_name` and `message`,
+        # and the hook names the tool this way. The runtime requires the task
+        # name on the call, so this insists on the same thing Claude's half
+        # does, and defers where it is there.
+        return spawn_decision(
+            tool_input["task_name"] if "task_name" in tool_input else "",
+            [value for value in tool_input.values() if isinstance(value, str)],
+        )
     # Asked of whatever reached here rather than of a listed few, exactly as
     # the Claude half asks it: which tools are worth refusing is the
     # declaration's answer, and a runtime that shipped the table without

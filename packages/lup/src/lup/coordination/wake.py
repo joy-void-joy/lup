@@ -30,6 +30,14 @@ from lup.execution.shell import LazyCommand
 # which is what `codex queue` is spelled as and not a choice a caller makes
 CODEX_COMMAND = LazyCommand("codex")
 
+type WakeRuntime = Literal["", "claude", "codex"]
+"""Which runtimes a member can declare a wake path for, named once.
+
+Named rather than spelled at the field, because a fold reading a member back
+off disk has to narrow a string to exactly this set, and a second spelling of
+the set is a second place a runtime would have to be added.
+"""
+
 
 class WakePath(BaseModel, frozen=True):
     """How one member can be made to look, and by whom.
@@ -40,7 +48,7 @@ class WakePath(BaseModel, frozen=True):
     would have no way to tell those apart.
     """
 
-    runtime: Literal["", "claude", "codex"] = ""
+    runtime: WakeRuntime = ""
     """Which runtime's path this is, empty where the member declared none.
 
     Empty is the honest default. A session that never said how to reach it
@@ -55,6 +63,20 @@ class WakePath(BaseModel, frozen=True):
     verbatim. For Claude it is the name its peers address it by, which only
     the session itself can learn — nothing in the environment carries it.
     """
+
+
+def declared_wake(runtime: str, handle: str) -> WakePath:
+    """One member's wake path as a fold read it off the record.
+
+    Narrowing rather than validating, because this is the read path a listing
+    goes through: a runtime nobody here can reach reads as none declared, which
+    costs that member a nudge and never the listing it appears in.
+    """
+    match runtime:
+        case "claude" | "codex":
+            return WakePath(runtime=runtime, handle=handle)
+        case _:
+            return WakePath(handle=handle)
 
 
 class Woken(BaseModel, frozen=True):

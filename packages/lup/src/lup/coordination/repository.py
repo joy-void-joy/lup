@@ -17,6 +17,12 @@ session names itself and may rename, says what it is doing as that changes, and
 is addressed by that name as readily as by its id. A run's members are named by
 the run; peers name themselves, and a name somebody wrote down has to go on
 working after the session behind it has moved on.
+
+Everything derived at the read — a row the pulse retired, a description a
+rewind unsaid, a claim whose holders have stopped — is derived in
+:mod:`lup.coordination.bare.store`, which a hook and the permission
+dispatcher read the same store through. What is here is the vocabulary: the
+verbs a session uses on the roster, and the rows a surface renders.
 """
 
 from datetime import datetime, timedelta
@@ -26,10 +32,10 @@ from pathlib import Path
 from pydantic import BaseModel, computed_field
 
 from lup.channels.models import Door, utc_now
+from lup.coordination.bare import store
+from lup.coordination.bare.store import ROSTER_FILE
 from lup.coordination.cohort import ActorCohort
 from lup.coordination.identity import (
-    MEMBER_KIND,
-    NAMES_FILE,
     LaunchedMember,
     MemberNames,
     NameTakenError,
@@ -40,12 +46,12 @@ from lup.coordination.identity import (
     unique_cli_name,
 )
 from lup.coordination.mail import ActorDelivery
+from lup.coordination.meeting import coordination_root
 from lup.coordination.peers import USER_KIND, user_peer
-from lup.coordination.pulse import Pulse, beat, heard_at, reset_at
+from lup.coordination.pulse import Pulse
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import ROSTER_FILE, Delivery, Roster, SpawnedActor
-from lup.coordination.store import coordination_root
-from lup.coordination.touches import TOUCHES_FILE, Claim, Touches
+from lup.coordination.roster import Delivery, Roster, SpawnedActor, folded_member
+from lup.coordination.touches import Claim, Touches
 
 
 class Retention(BaseModel, frozen=True):
@@ -58,7 +64,7 @@ class Retention(BaseModel, frozen=True):
     short enough that a roster read a month on is not a history of everyone.
     """
 
-    departed_seconds: float = 86400.0
+    departed_seconds: float = 18000.0
 
     def since(self, now: datetime) -> datetime:
         """The moment before which a departure is history rather than news."""
@@ -157,7 +163,7 @@ class RepositoryPeers:
         retention: Retention = Retention(),
     ) -> None:
         self.root = coordination_root(root)
-        self.names = MemberNames(self.root / NAMES_FILE)
+        self.names = MemberNames(self.root)
         self.pulse = pulse
         self.retention = retention
 
@@ -334,48 +340,11 @@ class RepositoryPeers:
 
     def heard(self, member: SpawnedActor) -> datetime | None:
         """When this member was last heard from: its newest record, or a later pulse."""
-        pulsed = heard_at(self.root, member.actor.id)
+        pulsed = store.heard_at(self.root, member.actor.id)
         return max(
             (moment for moment in (member.heard, pulsed) if moment is not None),
             default=None,
         )
-
-    def pulsed(self, member: SpawnedActor, now: datetime) -> SpawnedActor:
-        """This member as its pulse leaves it: gone where the pulse has stopped.
-
-        Only a session answers for itself this way. A spawned agent's presence
-        is the word of the process that spawned it, which writes the finish;
-        the person is never finished at all. A session whose record says
-        running and whose pulse says nothing within the window reads as gone,
-        with the silence named where the finish would have been — derived at
-        the read, so that beating again is enough to read as back.
-        """
-        if member.actor.kind != MEMBER_KIND or not member.running:
-            return member
-        heard = self.heard(member)
-        if heard is not None and not self.pulse.stale(heard, now):
-            return member
-        since = heard.isoformat() if heard is not None else "it joined"
-        return member.model_copy(
-            update={"running": False, "error": f"unheard since {since}"}
-        )
-
-    def rewound(self, member: SpawnedActor) -> SpawnedActor:
-        """This member as its conversation leaves it: unsaid where that moved.
-
-        A rewind or a clear keeps the process, the id and the pulse, and
-        discards what the session was saying, so a description older than the
-        reset stamp is the discarded conversation's and reads as empty —
-        derived at the read, so that describing again is enough to read as
-        current. What the session holds is left alone: a touch is what
-        happened to the tree, and the tree is whatever the rewind left it.
-        """
-        if member.actor.kind != MEMBER_KIND or not member.description:
-            return member
-        moved = reset_at(self.root, member.actor.id)
-        if moved is None or (member.heard is not None and member.heard >= moved):
-            return member
-        return member.model_copy(update={"description": ""})
 
     def standing(self) -> list[SpawnedActor]:
         """Every member the record holds but the person, as the record alone says."""
@@ -384,24 +353,31 @@ class RepositoryPeers:
         ]
 
     def present(self, now: datetime | None = None) -> list[SpawnedActor]:
-        """Every member as the record and the pulses together say, the live ones first."""
-        moment = now or utc_now()
-        return sorted(
-            (self.rewound(self.pulsed(member, moment)) for member in self.standing()),
-            key=lambda member: not member.running,
-        )
+        """Every member as the record and the pulses together say, the live ones first.
+
+        The shared fold's, so a row the prompt hook reads as gone and a row a
+        tool call reads as gone are the same row. Only the window is this
+        caller's, which is what a test moves.
+        """
+        return [
+            folded_member(member)
+            for member in store.present(
+                self.root, now, window=self.pulse.stale_after_seconds
+            )
+            if member["kind"] != USER_KIND
+        ]
 
     def beat(self, member_id: str) -> None:
         """Record that this session is here now."""
-        beat(self.root, member_id)
+        store.beat(self.root, member_id)
 
     def lapsed(self, now: datetime | None = None) -> list[SpawnedActor]:
         """Every session the record says is running and the pulse says is gone."""
-        moment = now or utc_now()
+        recorded = {member.actor.id for member in self.standing() if member.running}
         return [
-            gone
-            for member in self.standing()
-            if member.running and not (gone := self.pulsed(member, moment)).running
+            member
+            for member in self.present(now)
+            if not member.running and member.actor.id in recorded
         ]
 
     def vacant(self) -> list[Claim]:
@@ -487,7 +463,7 @@ class RepositoryPeers:
         listing of who is here is asked once; what they are holding is asked
         before every write.
         """
-        return Touches(self.root / TOUCHES_FILE)
+        return Touches(self.root)
 
     def live_ids(self) -> list[str]:
         """Every member still working here, by id, which is what expires a claim.

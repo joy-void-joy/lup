@@ -132,30 +132,34 @@ def events_from_legacy_markdown(content: str) -> list[TraceEvent]:
     pending_tool: str | None = None
     # Legacy markdown carries no per-event timestamps; "" marks them unknown.
     for block in iter_markdown_blocks(content):
-        label = block.label
         body = block.body
-        if label.startswith("Tool:"):
-            pending_tool = label.removeprefix("Tool:").strip() or "unknown"
-        elif label == "Result":
-            name = pending_tool or "unknown"
-            pending_tool = None
-            ok = tool_result_ok(body)
-            brief = truncate_str(body.strip(), 300)
-            events.append(
-                TraceEvent(
-                    kind="tool_call", timestamp="", tool=name, ok=ok, brief=brief
-                )
-            )
-            if not ok:
+        match block.label.split(maxsplit=1):
+            case ["Tool:"]:
+                pending_tool = "unknown"
+            case ["Tool:", name]:
+                pending_tool = name.strip()
+            case ["Result"]:
+                name = pending_tool or "unknown"
+                pending_tool = None
+                ok = tool_result_ok(body)
+                brief = truncate_str(body.strip(), 300)
                 events.append(
-                    TraceEvent(kind="error", timestamp="", tool=name, brief=brief)
+                    TraceEvent(
+                        kind="tool_call", timestamp="", tool=name, ok=ok, brief=brief
+                    )
                 )
-        else:
-            request = capability_request_from_text(body)
-            if request is not None:
-                events.append(
-                    TraceEvent(kind="capability_request", timestamp="", brief=request)
-                )
+                if not ok:
+                    events.append(
+                        TraceEvent(kind="error", timestamp="", tool=name, brief=brief)
+                    )
+            case _:
+                request = capability_request_from_text(body)
+                if request is not None:
+                    events.append(
+                        TraceEvent(
+                            kind="capability_request", timestamp="", brief=request
+                        )
+                    )
     return events
 
 
@@ -193,7 +197,8 @@ def iter_markdown_blocks(
             parts = heading.split(" ", 1)
             label = parts[1].strip() if len(parts) > 1 else heading
             body_lines = []
-        elif label is not None:
+            continue
+        if label is not None:
             body_lines.append(line)
     flush()
     return blocks
@@ -414,18 +419,21 @@ def show(session_id: str, full: bool, tool_calls: bool, as_json: bool) -> None:
 
     content = load_trace(trace_path)
 
-    if tool_calls:
-        content = render_tool_calls(trace_path)
-    elif not full:
-        lines = content.split("\n")
-        if len(lines) > HEAD_LINES:
-            # lup: ignore[silent-truncation] — `--full` is the whole trace, and
-            # the line below says how much this view is standing in for
-            head = "\n".join(lines[:HEAD_LINES])
-            content = (
-                f"{head}\n\n… {len(lines) - HEAD_LINES} more line(s) — "
-                f"re-run with --full for the whole trace"
-            )
+    match (tool_calls, full):
+        case (True, _):
+            content = render_tool_calls(trace_path)
+        case (False, False):
+            lines = content.split("\n")
+            if len(lines) > HEAD_LINES:
+                # lup: ignore[silent-truncation] — `--full` is the whole trace,
+                # and the line below says how much this view is standing in for
+                head = "\n".join(lines[:HEAD_LINES])
+                content = (
+                    f"{head}\n\n… {len(lines) - HEAD_LINES} more line(s) — "
+                    f"re-run with --full for the whole trace"
+                )
+        case _:
+            pass
 
     if as_json:
         output_json(

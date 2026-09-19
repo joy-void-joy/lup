@@ -10,9 +10,14 @@ import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.subagents import CodexModelTiers
 from lup.providers.drift_prompt import drift_hook
-from lup.providers.roster_prompt import departure_hook, folded, prompt_hook
+from lup.providers.roster_prompt import (
+    departure_hook,
+    folded,
+    prompt_hook,
+    store_artifacts,
+)
 from lup.types import ModelTier
-from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
+from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.formats.markdown import MarkdownDocument, Prose
 from lup.formats.toml import TomlDocument, TomlEntry, TomlScalar
 from lup.formats.yaml import YamlDocument, YamlMap, scalars
@@ -128,9 +133,12 @@ class CodexSpellings(NativeSpellings):
             f"for the answer: {question}"
         )
 
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+    def delegate(
+        self, subagent_type: QualifiedAgentName, prompt: str, name: str = ""
+    ) -> Instruction:
+        named = f", naming the task {name!r}," if name else ""
         return Instruction(
-            f"Delegate to the {subagent_type} custom agent with this task: {prompt}"
+            f"Delegate to the {subagent_type} custom agent{named} with this task: {prompt}"
         )
 
     def request_approval(self, action: str, reason: str) -> Instruction:
@@ -215,6 +223,24 @@ class CodexSpellings(NativeSpellings):
             "keystrokes. Keep the one session for as long as the command "
             "runs: re-running it starts over and loses everything it already "
             "reported"
+        )
+
+    def nested_run(self, prompt: str) -> Instruction:
+        """Spell the non-interactive launch, `codex exec`.
+
+        Read from codex-cli 0.155.1's own help rather than from a run, since
+        no Codex session is signed in where this was written: `exec` takes
+        the prompt as its argument, `--dangerously-bypass-approvals-and-sandbox`
+        answers every approval a hook probe would otherwise stall on, and
+        `--dangerously-bypass-hook-trust` admits a hooks file this machine has
+        not trusted, which a throwaway kit's never is.
+        """
+        return Instruction(
+            "Run `codex exec --dangerously-bypass-approvals-and-sandbox"
+            f" --dangerously-bypass-hook-trust {json.dumps(prompt)}` from the"
+            " kit's directory. A non-interactive run loads the hooks in that"
+            " directory's settings at launch and exits when the prompt is"
+            " answered"
         )
 
     def read_document(self, path: str) -> Spelling:
@@ -555,7 +581,7 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     runtime_name="Codex",
     package="lup.providers.codex",
     managed_root_env=CODEX_LOGIN.config_home_env,
-    routed_tools=["Bash", "web_fetch", "apply_patch"],
+    routed_tools=["Bash", "web_fetch", "apply_patch", "collaborationspawn_agent"],
     hook_events=["PermissionRequest", "PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
     observed_tools=["apply_patch", "Bash"],
@@ -682,13 +708,15 @@ def codex_allow_prefixes(
         )
         if earned != "allow" or row["ask_flags"] or row["sandbox"] == "inside":
             continue
-        if not row["subcommand"]:
-            if row["command"] not in gated and row["command"] not in dynamic:
-                add([row["command"]], row["sandbox"])
-        elif row["operation"]:
-            add([row["command"], row["subcommand"], row["operation"]], row["sandbox"])
-        elif f"{row['command']} {row['subcommand']}" not in operational:
-            add([row["command"], row["subcommand"]], row["sandbox"])
+        match row["subcommand"], row["operation"]:
+            case "", _:
+                if row["command"] not in gated and row["command"] not in dynamic:
+                    add([row["command"]], row["sandbox"])
+            case subcommand, "":
+                if f"{row['command']} {subcommand}" not in operational:
+                    add([row["command"], subcommand], row["sandbox"])
+            case subcommand, operation:
+                add([row["command"], subcommand, operation], row["sandbox"])
     for target in runner_targets:
         # Read on the same terms as a command row above, which it was not
         # while a target stated its verdict outright: every declared target
@@ -836,6 +864,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 ),
                 *roster.artifacts,
                 *departure.artifacts,
+                *store_artifacts(Path(f".codex/plugins/{self.plugin_name}"), source.id),
                 *[
                     Artifact(
                         path=Path(
@@ -898,6 +927,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         acceptance_guard=guard.erased()
                         if (guard := source.acceptance_guard)
                         else None,
+                        spawn_names=names.erased()
+                        if (names := source.spawn_names)
+                        else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),
                         import_boundaries=source.resolved_import_boundaries(),
@@ -914,7 +946,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         diagnostics_command=source.diagnostics_command,
                         resolution_command=source.resolution_command,
                         repair_command=source.repair_command,
-                        rules=antipattern_set_for(
+                        rules=rule_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,
                             source.anti_patterns,

@@ -87,6 +87,16 @@ architecture forks earn their turn.
   so and give the recommendation the evidence now supports — a reversed
   recommendation with a measurement behind it is the turn worth taking, not
   an embarrassment to soften.
+- **A harness behaviour is measured with a probe kit, not asked about.** A
+  throwaway project under `tmp/`, with its own `git init` so this project's
+  plugin stays out of it; a hook script that appends every payload it is
+  handed to a JSONL file beside it and answers only the event under test; and
+  the kit's own `.codex/config.toml` registering it under the events in question. Run it from where you are first:
+Run `codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "<the kit's first prompt>"` from the kit's directory. A non-interactive run loads the hooks in that directory's settings at launch and exits when the prompt is answered
+That run records the whole sequence, so no escalation marker is needed. Hand
+the user the directory and the prompt only for what print mode cannot show — a
+subagent left running in the background, a runtime this session is not signed
+in to. The recording is evidence the build keeps as a fixture.
 
 ### A second case study
 

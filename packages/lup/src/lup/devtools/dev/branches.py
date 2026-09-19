@@ -343,10 +343,11 @@ def parse_worktrees() -> dict[str, str]:  # lup: ignore[dict-str-payload]
     current_path = ""
 
     for line in git.lines("worktree", "list", "--porcelain"):
-        if line.startswith("worktree "):
-            current_path = line.removeprefix("worktree ")
-        elif line.startswith("branch refs/heads/"):
-            mapping[line.removeprefix("branch refs/heads/")] = current_path
+        match line.split(maxsplit=1):
+            case ["worktree", path]:
+                current_path = path
+            case ["branch", ref] if ref.startswith("refs/heads/"):
+                mapping[ref.removeprefix("refs/heads/")] = current_path
 
     return mapping
 
@@ -2000,10 +2001,13 @@ def locked_worktrees() -> dict[str, str]:  # lup: ignore[dict-str-payload]
     current_path = ""
 
     for line in git.lines("worktree", "list", "--porcelain"):
-        if line.startswith("worktree "):
-            current_path = line.removeprefix("worktree ")
-        elif line == "locked" or line.startswith("locked "):
-            locked[current_path] = line.removeprefix("locked").strip()
+        match line.split(maxsplit=1):
+            case ["worktree", path]:
+                current_path = path
+            case ["locked"]:
+                locked[current_path] = ""
+            case ["locked", reason]:
+                locked[current_path] = reason.strip()
 
     return locked
 
@@ -2392,38 +2396,41 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
     """Carry out a plan whose preflight passed, reporting what actually ran."""
     completed: list[str] = []
 
-    if plan.stranded:
-        try:
-            git("worktree", "prune")
-            typer.echo(f"Pruned stranded worktree: {plan.worktree}")
-            completed.append("pruned worktree")
-        except sh.ErrorReturnCode as error:
-            abort_deletion(plan, completed, f"prune failed: {attributed_stderr(error)}")
-    elif plan.worktree is not None:
-        try:
-            git("worktree", "remove", *(["--force"] if force else []), plan.worktree)
-            typer.echo(f"Removed worktree: {plan.worktree}")
-            completed.append("removed worktree")
-        except sh.ErrorReturnCode as error:
-            if not worktree_left_as_mount_point(plan.worktree):
-                # `git worktree remove` unregisters before its final rmdir, so
-                # the entry can be gone even where the failure is real. Read
-                # what happened rather than what was attempted: a report of
-                # "nothing" sends the next run looking for an entry git no
-                # longer holds.
-                if plan.worktree not in parse_worktrees().values():
-                    completed.append("unregistered worktree")
+    match plan:
+        case DeletionPlan(stranded=True):
+            try:
+                git("worktree", "prune")
+                typer.echo(f"Pruned stranded worktree: {plan.worktree}")
+                completed.append("pruned worktree")
+            except sh.ErrorReturnCode as error:
                 abort_deletion(
-                    plan,
-                    completed,
-                    f"worktree removal failed: {attributed_stderr(error)}",
+                    plan, completed, f"prune failed: {attributed_stderr(error)}"
                 )
-            typer.echo(
-                f"Unregistered worktree: {plan.worktree} — its directory is a "
-                "mount point of this session, so it stays, empty, for the host "
-                "to remove once the container is gone"
-            )
-            completed.append("unregistered worktree")
+        case DeletionPlan(worktree=str() as worktree):
+            try:
+                git("worktree", "remove", *(["--force"] if force else []), worktree)
+                typer.echo(f"Removed worktree: {worktree}")
+                completed.append("removed worktree")
+            except sh.ErrorReturnCode as error:
+                if not worktree_left_as_mount_point(worktree):
+                    # `git worktree remove` unregisters before its final rmdir,
+                    # so the entry can be gone even where the failure is real.
+                    # Read what happened rather than what was attempted: a
+                    # report of "nothing" sends the next run looking for an
+                    # entry git no longer holds.
+                    if worktree not in parse_worktrees().values():
+                        completed.append("unregistered worktree")
+                    abort_deletion(
+                        plan,
+                        completed,
+                        f"worktree removal failed: {attributed_stderr(error)}",
+                    )
+                typer.echo(
+                    f"Unregistered worktree: {worktree} — its directory is a "
+                    "mount point of this session, so it stays, empty, for the "
+                    "host to remove once the container is gone"
+                )
+                completed.append("unregistered worktree")
 
     # A name origin alone carries has nothing here to delete, and asking git
     # to delete it anyway is what stopped the run before the push that was

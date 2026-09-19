@@ -3,8 +3,13 @@
 from pathlib import Path
 
 from lup.providers.harness import claude_prompt_renderer, codex_prompt_renderer
-from lup.harness.codescan.antipatterns import PYTHON_ANTI_PATTERNS, TS_ANTI_PATTERNS
-from lup.harness.codescan.registry import STRUCTURAL_RULES, all_rules
+from lup.harness.codescan.antipatterns import (
+    PYTHON_ANTI_PATTERNS,
+    TS_ANTI_PATTERNS,
+    RuleSet,
+)
+from lup.harness.codescan.common import Rule
+from lup.harness.codescan.registry import all_rules
 from lup.devtools.dev.rules import rule_reference_artifact, rule_reference_document
 
 
@@ -12,7 +17,7 @@ def test_checked_in_rule_reference_matches_canonical_objects() -> None:
     artifact = rule_reference_artifact()
 
     assert Path("docs/rules.md").read_text(encoding="utf-8") == artifact.content
-    for rule in [*PYTHON_ANTI_PATTERNS, *TS_ANTI_PATTERNS, *STRUCTURAL_RULES]:
+    for rule in every_declared():
         assert f"`{rule.id}`" in artifact.content
 
 
@@ -37,9 +42,7 @@ def test_every_card_carries_the_strength_its_rule_declares() -> None:
     and this projection has already done that twice — so the declared strength
     and the rendered strength are compared rather than assumed equal.
     """
-    declared = {
-        rule.id: rule.strength for rule in [*PYTHON_ANTI_PATTERNS, *TS_ANTI_PATTERNS]
-    }
+    declared = {rule.id: rule.strength for rule in every_declared()}
     cards = {rule.id: rule.strength for rule in all_rules()}
 
     for rule_id, strength in declared.items():
@@ -72,3 +75,14 @@ def test_registry_covers_every_family_with_unique_ids_and_homes() -> None:
         "architecture",
     }
     assert all(rule.defined_in.startswith("lup.harness.codescan.") for rule in rules)
+
+
+def every_declared() -> list[Rule]:
+    """Every rule the set holds, whichever surface decides it."""
+    held = RuleSet()
+    return [
+        *PYTHON_ANTI_PATTERNS,
+        *TS_ANTI_PATTERNS,
+        *held.project,
+        *held.composition,
+    ]

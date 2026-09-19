@@ -79,9 +79,6 @@ measured before, so the cross is what the corpus is worth.
 """
 
 
-# lup: ignore[library-default] — the shapes an ordinary session takes, which
-# are a fact about the offered vocabulary rather than a choice made for an
-# adopter; a project that runs something else says so in a family of its own
 READING_THE_CHECKOUT = (
     "ls",
     "ls -la src",
@@ -97,7 +94,7 @@ READING_THE_CHECKOUT = (
     "test -f README.md",
 )
 
-SEARCHING_IT = (  # lup: ignore[library-default] — as above
+SEARCHING_IT = (
     "grep -rn 'def main' src",
     "grep -c def README.md",
     "grep -rln 'pydantic' packages",
@@ -111,7 +108,7 @@ SEARCHING_IT = (  # lup: ignore[library-default] — as above
     "comm -13 README.md pyproject.toml",
 )
 
-ASKING_GIT_WHAT_HAPPENED = (  # lup: ignore[library-default] — as above
+ASKING_GIT_WHAT_HAPPENED = (
     "git status",
     "git status --short",
     "git diff",
@@ -139,7 +136,7 @@ ASKING_GIT_WHAT_HAPPENED = (  # lup: ignore[library-default] — as above
     "git describe --tags --always",
 )
 
-OFFERING_WORK_FOR_REVIEW = (  # lup: ignore[library-default] — as above
+OFFERING_WORK_FOR_REVIEW = (
     "git add README.md",
     "git commit -m 'docs: a line'",
     "git fetch",
@@ -150,7 +147,7 @@ OFFERING_WORK_FOR_REVIEW = (  # lup: ignore[library-default] — as above
     "gh pr checks",
 )
 
-RUNNING_THE_CHECKERS = (  # lup: ignore[library-default] — as above
+RUNNING_THE_CHECKERS = (
     "uv run pytest -q",
     "uv run ruff check .",
     "uv run ruff format --check .",
@@ -158,7 +155,7 @@ RUNNING_THE_CHECKERS = (  # lup: ignore[library-default] — as above
     "uv run python tmp/script.py",
 )
 
-WRITING_WHERE_NOTHING_IS_REVIEWED = (  # lup: ignore[library-default] — as above
+WRITING_WHERE_NOTHING_IS_REVIEWED = (
     "mkdir -p tmp/build",
     "echo hello > tmp/scratch.txt",
     "cat > tmp/notes.txt <<'EOF'\nhello\nEOF",
@@ -171,7 +168,7 @@ WRITING_WHERE_NOTHING_IS_REVIEWED = (  # lup: ignore[library-default] — as abo
     "rm -r tmp/build",
 )
 
-SHAPING_OUTPUT = (  # lup: ignore[library-default] — as above
+SHAPING_OUTPUT = (
     "git log --oneline | head -20",
     "ls src | sort",
     "cat pyproject.toml | wc -l",
@@ -184,7 +181,7 @@ SHAPING_OUTPUT = (  # lup: ignore[library-default] — as above
     'echo "$(git rev-parse HEAD)"',
 )
 
-READING_THE_MACHINE = (  # lup: ignore[library-default] — as above
+READING_THE_MACHINE = (
     "pwd",
     "cd src",
     "echo hello",

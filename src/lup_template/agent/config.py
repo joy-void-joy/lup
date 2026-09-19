@@ -310,17 +310,15 @@ def engine_for_model(model: str | None) -> Engine:
     ``claude-compat`` when ``OPENROUTER_API_KEY`` selects OpenRouter's
     Anthropic-protocol endpoint, ``openai-compat`` otherwise.
     """
-    match model:
-        case None | "opus" | "sonnet" | "haiku":
-            return "claude"
-        case model if model.startswith("claude-"):
-            return "claude"
-        case model if model.startswith(("gpt-", "codex")) or (
-            model[:1] == "o" and model[1:2].isdigit()
-        ):
-            return "codex"
-        case _:
-            return "claude-compat" if settings.openrouter_api_key else "openai-compat"
+    if model is None or model in {"opus", "sonnet", "haiku"}:
+        return "claude"
+    if model.startswith("claude-"):
+        return "claude"
+    if model.startswith(("gpt-", "codex")) or (
+        model[:1] == "o" and model[1:2].isdigit()
+    ):
+        return "codex"
+    return "claude-compat" if settings.openrouter_api_key else "openai-compat"
 
 
 def engine_for_settings(model: str | None = None) -> Engine:

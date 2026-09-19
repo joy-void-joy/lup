@@ -613,12 +613,13 @@ def register_worktree(name: str, worktree_path: Path, base_branch: str | None) -
         typer.echo(f"New branch: {name}")
 
     try:
-        if already_exists:
-            git("worktree", "add", str(worktree_path), name)
-        elif base_branch:
-            git("worktree", "add", str(worktree_path), "-b", name, base_branch)
-        else:
-            git("worktree", "add", str(worktree_path), "-b", name)
+        match (already_exists, base_branch):
+            case (True, _):
+                git("worktree", "add", str(worktree_path), name)
+            case (False, str() as base) if base:
+                git("worktree", "add", str(worktree_path), "-b", name, base)
+            case _:
+                git("worktree", "add", str(worktree_path), "-b", name)
     except sh.ErrorReturnCode as e:
         typer.echo(f"Error creating worktree: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)
@@ -789,16 +790,17 @@ def list_worktrees() -> None:
                 entries.append(current)
                 current = WorktreeEntry()
             continue
-        if line.startswith("worktree "):
-            current.path = line.removeprefix("worktree ")
-        elif line.startswith("HEAD "):
-            current.head = short_sha(line.removeprefix("HEAD "))
-        elif line.startswith("branch "):
-            current.branch = line.removeprefix("branch ").removeprefix("refs/heads/")
-        elif line == "bare":
-            current.bare = True
-        elif line == "prunable":
-            current.prunable = True
+        match line.split(maxsplit=1):
+            case ["worktree", path]:
+                current.path = path
+            case ["HEAD", sha]:
+                current.head = short_sha(sha)
+            case ["branch", ref]:
+                current.branch = ref.removeprefix("refs/heads/")
+            case ["bare"]:
+                current.bare = True
+            case ["prunable", *_]:
+                current.prunable = True
 
     if current.path:
         entries.append(current)

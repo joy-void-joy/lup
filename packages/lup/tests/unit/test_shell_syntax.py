@@ -11,6 +11,8 @@ from lup.policy.kernel.syntax import (
     Command,
     Script,
     WordPart,
+    balanced_end,
+    brace_end,
     parse_script,
     readable_prefix,
     word_text,
@@ -248,3 +250,42 @@ def test_the_lines_before_a_refused_one_are_still_readable() -> None:
         for item in prefix["items"]
     ] == ["rm"]
     assert readable_prefix("ls; )")["items"] == []
+
+
+@pytest.mark.parametrize(
+    ("source", "end"),
+    [
+        ("${x:-'}'}", 8),
+        ('${x:-"}"}', 6),
+        ("${x:-$(echo })}", 14),
+        ("${x:-\\}}", 7),
+        ("${x:-", None),
+    ],
+)
+def test_a_parameter_expansion_ends_where_its_own_quoting_says(
+    source: str, end: int | None
+) -> None:
+    """A `${…}` steps over single quotes, a backslash and a whole `$(…)`, and
+    steps over double quotes not at all: a `}` written inside them closes the
+    expansion, as the shell has it. ``None`` where the brace never closes.
+    """
+    assert brace_end(source, 2) == end
+
+
+@pytest.mark.parametrize(
+    ("source", "end"),
+    [
+        ("a ')' b)", 7),
+        ('a ")" b)', 7),
+        ("a \\) b)", 6),
+        ("a (b) c)", 7),
+        ("a 'unclosed)", None),
+    ],
+)
+def test_a_group_steps_over_the_quoting_a_parenthesis_can_hide_in(
+    source: str, end: int | None
+) -> None:
+    """Quoting and escapes are honoured inside `$(…)`, so a parenthesis within
+    them does not count, while a bare one nests and must close first.
+    """
+    assert balanced_end(source, 0) == end

@@ -126,9 +126,11 @@ def tmux_operand(argv):
         for word in argv:
             if expecting:
                 expecting = False
-            elif word in TMUX_VALUE_FLAGS:
+                continue
+            if word in TMUX_VALUE_FLAGS:
                 expecting = True
-            elif word == "-" or not word.startswith("-"):
+                continue
+            if word == "-" or not word.startswith("-"):
                 yield word
 
     return next(operands(), "")
@@ -182,11 +184,12 @@ def main():
     if "--list-types" in argv or asked == "TARGETS":
         for offered in ask({"op": "types"})["types"]:
             sys.stdout.write(offered + "\n")
-    elif asked:
+        return
+    if asked:
         reply = ask({"op": "typed", "media_type": asked})
         sys.stdout.buffer.write(base64.b64decode(reply["data"]))
-    else:
-        sys.stdout.write(ask({"op": "text"})["text"])
+        return
+    sys.stdout.write(ask({"op": "text"})["text"])
 
 
 if __name__ == "__main__":

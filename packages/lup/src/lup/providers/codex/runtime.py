@@ -16,7 +16,7 @@ from lup.providers.codex.hooks import (
     APPROVAL_METHODS,
     CodexApprovalResponder,
 )
-from lup.providers.codex.home import install_declared_policy
+from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
 from lup.providers.codex.login import CODEX_HOME
 from lup.providers.codex.subagents import CodexSubagentTools
 from lup.policy.hooks import LupHooksConfig
@@ -324,38 +324,41 @@ class CodexTurnChannel:
                     if completed_turn.duration_ms is not None
                     else (perf_counter() - self.started) * 1000
                 )
-                if status == "completed":
-                    messages = fold_transcript(self.durable)
-                    if not self.completed.done():
-                        self.completed.set_result(
-                            CompletedTurn(
-                                messages=messages,
+                if not self.completed.done():
+                    match status:
+                        case "completed":
+                            self.completed.set_result(
+                                CompletedTurn(
+                                    messages=fold_transcript(self.durable),
+                                    blocks=self.blocks,
+                                    usage=self.usage,
+                                    duration=duration,
+                                )
+                            )
+                        case _:
+                            message = (
+                                completed_turn.error.message
+                                if completed_turn.error
+                                else None
+                            )
+                            failure = TurnFailure(
+                                message=(
+                                    message
+                                    if message
+                                    else f"Codex turn ended with status {status}"
+                                ),
                                 blocks=self.blocks,
                                 usage=self.usage,
                                 duration=duration,
+                                identifiers=self.identifiers(),
                             )
-                        )
-                elif not self.completed.done():
-                    message = (
-                        completed_turn.error.message if completed_turn.error else None
-                    )
-                    failure = TurnFailure(
-                        message=(
-                            message
-                            if message
-                            else f"Codex turn ended with status {status}"
-                        ),
-                        blocks=self.blocks,
-                        usage=self.usage,
-                        duration=duration,
-                        identifiers=self.identifiers(),
-                    )
-                    error = (
-                        TurnInterruptedError(failure)
-                        if status.lower() in {"interrupted", "cancelled", "canceled"}
-                        else ProviderTurnError(failure)
-                    )
-                    self.completed.set_exception(error)
+                            error = (
+                                TurnInterruptedError(failure)
+                                if status.lower()
+                                in {"interrupted", "cancelled", "canceled"}
+                                else ProviderTurnError(failure)
+                            )
+                            self.completed.set_exception(error)
                 self.events.put_nowait(
                     TurnCompletedEvent(identifiers=self.identifiers())
                 )
@@ -682,7 +685,8 @@ class CodexSessionOpener:
             }
         )
         if CODEX_HOME in config.environment:
-            install_declared_policy(Path(config.environment[CODEX_HOME]))
+            home = Path(config.environment[CODEX_HOME])
+            install_declared_policy(home, seed=CodexWorktreeHomeStore().derived(home))
         server = CodexAppServer(
             config.executable,
             arguments=(
