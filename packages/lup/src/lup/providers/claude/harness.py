@@ -188,14 +188,19 @@ class ClaudeSpellings(NativeSpellings):
         something moves" and "tell me when it is over" without the agent
         asking again. Running the same command through `Bash` with a long
         timeout returns once, at the end, and reading a background session
-        repeatedly is the polling loop this exists to avoid.
+        repeatedly is the polling loop this exists to avoid. A watch left
+        live past the report is the other failure: the runtime keeps it, and
+        each line it emits resumes the finished reader, so the spelling says
+        when to stop it as well as when not to.
         """
         return Instruction(
-            f"Start a `Monitor` over `{command}` and leave it live. Each line "
-            "it emits arrives as an event, and the watch ends when the command "
-            "does. Do not run it through `Bash`, whose long timeout returns "
-            "once at the end, and do not read a backgrounded session on a "
-            "loop — both are polling, however patient"
+            f"Start a `Monitor` over `{command}`. Each line it emits arrives "
+            "as an event, and the watch ends when the command does. Do not run "
+            "it through `Bash`, whose long timeout returns once at the end, "
+            "and do not read a backgrounded session on a loop — both are "
+            "polling, however patient. A watch that outlives your report wakes "
+            "you after you have finished, so stop it with `TaskStop` before "
+            "reporting unless the command has exited"
         )
 
     def read_document(self, path: str) -> Spelling:

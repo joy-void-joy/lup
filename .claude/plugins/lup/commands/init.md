@@ -491,7 +491,7 @@ After generating files:
 2. Run the pre-flight bar, which is ruff, pyright and the suite in one pass and
    reports as it goes:
 
-Start a `Monitor` over `uv run lup-devtools dev check` and leave it live. Each line it emits arrives as an event, and the watch ends when the command does. Do not run it through `Bash`, whose long timeout returns once at the end, and do not read a backgrounded session on a loop — both are polling, however patient
+Start a `Monitor` over `uv run lup-devtools dev check`. Each line it emits arrives as an event, and the watch ends when the command does. Do not run it through `Bash`, whose long timeout returns once at the end, and do not read a backgrounded session on a loop — both are polling, however patient. A watch that outlives your report wakes you after you have finished, so stop it with `TaskStop` before reporting unless the command has exited
 
 3. Run `uv run lup --help` to verify CLI
 4. Verify the feedback loop command references the right scripts

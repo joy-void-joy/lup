@@ -3639,3 +3639,24 @@ def test_a_current_repository_artifact_is_neither_rewritten_nor_announced(
     generate_targets([], [current, behind])
     assert calls == ["current:write", "behind:write"]
     assert capsys.readouterr().out.count("repository artifact ready") == 2
+
+
+def test_the_claude_watch_says_when_to_stop_it() -> None:
+    """A watch that outlives the report resumes the finished reader.
+
+    So the Claude spelling names the call that ends a watch and the moment
+    to make it, beside the advice against polling it was written for. The
+    Codex spelling describes a session that is read rather than pushed, and
+    says nothing of the kind.
+    """
+    prompt = PromptDocument(
+        parts=[WatchOutput(command="uv run lup-devtools dev check")]
+    )
+
+    claude = claude_prompt_renderer().render(prompt)
+    codex = codex_prompt_renderer().render(prompt)
+
+    assert "`Monitor`" in claude
+    assert "`TaskStop`" in claude
+    assert "before reporting" in claude
+    assert "TaskStop" not in codex
