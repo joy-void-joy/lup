@@ -1,0 +1,39 @@
+"""What the gate's drift row tells a reader who only reads the summary.
+
+Two halves go stale independently — the native trees and the generated
+artifacts outside them — and the row counted only the first. The failure this
+repository meets most often is the second, which read `FAIL (0 tree(s))` and
+named nothing: a true verdict, a useless line. The detail exists, on stderr,
+three minutes up a run that prints two thousand other lines.
+"""
+
+from lup.devtools.harness.drift import DriftVerdict
+
+WORK_STATUS_STALE = (
+    "/repo/docs/work-status.md is stale; run `uv run lup-devtools ledger writeup`"
+)
+
+
+def test_a_current_tree_and_a_current_repository_read_ok() -> None:
+    assert DriftVerdict(reports=[], stale_repository=[]).summary == [
+        "harness drift: ok"
+    ]
+
+
+def test_a_stale_repository_artifact_is_named_where_no_tree_is() -> None:
+    verdict = DriftVerdict(reports=[], stale_repository=[WORK_STATUS_STALE])
+
+    assert verdict.summary == [
+        "harness drift: FAIL (0 tree(s), 1 repository artifact(s))",
+        f"  {WORK_STATUS_STALE}",
+    ]
+
+
+def test_the_count_says_which_half_is_behind() -> None:
+    # The number a reader acts on is not "how much is stale" but "which of the
+    # two regenerations do I owe" — `harness generate all` for a tree, the
+    # command each repository message names for the other.
+    verdict = DriftVerdict(reports=[], stale_repository=[WORK_STATUS_STALE])
+
+    assert verdict.summary[0].endswith("(0 tree(s), 1 repository artifact(s))")
+    assert not verdict.clean

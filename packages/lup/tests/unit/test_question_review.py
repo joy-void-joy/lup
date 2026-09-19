@@ -1,0 +1,153 @@
+"""What a parked question proposes, derived from the operation as submitted.
+
+The surface a Codex whole-file review has is `dev questions show`, because no
+Codex hook can ask: an `ask` becomes a queued review that denies the call and
+sends the operator to another terminal. What that terminal showed was the raw
+payload with the preimage printed beneath it. These pin the derivation that
+replaces it, and in particular that it is derived from the *record* — an
+approval binds to the operation somebody was shown, not to whatever the file
+says by the time they answer.
+"""
+
+from datetime import UTC, datetime
+from pathlib import Path
+
+from lup.policy.operations import Operation
+from lup.types import JsonObject
+from lup.policy.relay import PersistentQuestion
+from lup.policy.review import ReviewedFile, reviewed_files, spliced
+
+ROOT = Path("/repo")
+
+
+def parked(
+    tool: str,
+    payload: JsonObject,
+    preconditions: dict[Path, str | None] | None = None,
+) -> PersistentQuestion:
+    """One question as the relay would have recorded it."""
+    operation = Operation(
+        id="op",
+        session="session",
+        requester="session",
+        tool=tool,
+        payload=payload,
+        cwd=ROOT,
+        worktree=ROOT,
+    )
+    return PersistentQuestion(
+        id="q",
+        operation=operation,
+        fingerprint=operation.fingerprint(),
+        preconditions=preconditions or {},
+        reason="review",
+        created=datetime.now(UTC),
+    )
+
+
+def test_a_whole_file_write_carries_its_own_result() -> None:
+    """The case the surface exists for: the payload already holds the after."""
+    question = parked(
+        "Write",
+        {"file_path": "docs/plan.md", "content": "new\n"},
+        {ROOT / "docs/plan.md": "old\n"},
+    )
+
+    [change] = reviewed_files(question)
+
+    assert change.path == ROOT / "docs/plan.md"
+    assert change.before == "old\n"
+    assert change.after == "new\n"
+
+
+def test_a_write_over_nothing_is_a_creation_rather_than_an_overwrite() -> None:
+    """Absence and emptiness are different acts and get different words."""
+    question = parked("Write", {"file_path": "new.md", "content": "hello\n"})
+
+    [change] = reviewed_files(question)
+
+    assert change.before is None
+    assert change.operation() == "create"
+
+
+def test_a_fragment_edit_is_spliced_against_the_captured_preimage() -> None:
+    """Against the record, because that is what the reviewer is answering."""
+    question = parked(
+        "Edit",
+        {"file_path": "a.py", "old_string": "one", "new_string": "two"},
+        {ROOT / "a.py": "one and only\n"},
+    )
+
+    [change] = reviewed_files(question)
+
+    assert change.path == ROOT / "a.py"
+    assert change.after == "two and only\n"
+    assert change.operation() == "modify"
+
+
+def test_a_fragment_edit_with_no_captured_preimage_yields_no_diff() -> None:
+    """Nothing to splice against is reported as no diff, never as a guess.
+
+    Reading the file off disk instead would show a splice against a document
+    the operation was never judged against, which is the one rendering a
+    reviewer must not be given.
+    """
+    question = parked(
+        "Edit", {"file_path": "a.py", "old_string": "one", "new_string": "two"}
+    )
+
+    assert reviewed_files(question) == []
+
+
+def test_a_shell_command_has_nothing_to_diff_and_says_so_by_being_empty() -> None:
+    """Empty means "not a file change", which is what the payload is for."""
+    question = parked("Bash", {"command": "git status"})
+
+    assert reviewed_files(question) == []
+
+
+def test_an_edit_whose_preimage_no_longer_fits_is_unapplyable_not_fatal() -> None:
+    """A record outlives the tree it was recorded against; a listing must not die."""
+    assert spliced("nothing here\n", "absent", "x", False) is None
+
+
+def test_an_ambiguous_fragment_applies_only_where_every_was_asked_for() -> None:
+    """The Edit tool's own semantics: one occurrence, or explicitly all of them."""
+    assert spliced("a a\n", "a", "b", False) is None
+    assert spliced("a a\n", "a", "b", True) == "b b\n"
+
+
+def test_an_overwrite_is_carried_because_the_documents_cannot_say() -> None:
+    """A fragment edit that rewrites every line and a whole-file write agree."""
+    replaced = ReviewedFile(path=Path("a"), before="x", after="y", overwrite=True)
+    edited = ReviewedFile(path=Path("a"), before="x", after="y")
+
+    assert replaced.operation() == "overwrite"
+    assert edited.operation() == "modify"
+
+
+def test_a_change_that_changes_nothing_is_reported_rather_than_diffed() -> None:
+    """An empty diff reads as a rendering failure; saying so reads as an answer."""
+    unchanged = ReviewedFile(path=Path("a"), before="same\n", after="same\n")
+
+    assert unchanged.unchanged()
+
+
+def test_the_diff_labels_absence_as_no_file_rather_than_an_empty_one() -> None:
+    """What a reviewer must be able to tell apart at a glance."""
+    created = ReviewedFile(path=Path("a.md"), after="hello\n")
+
+    rendered = created.unified()
+
+    assert "/dev/null" in rendered
+    assert "+hello" in rendered
+
+
+def test_every_diff_line_ends_in_a_newline_however_the_file_ended() -> None:
+    """`difflib` emits its own marker mid-hunk, which reads as content."""
+    change = ReviewedFile(path=Path("a"), before="one", after="two")
+
+    rendered = change.unified()
+
+    assert all(line for line in rendered.splitlines())
+    assert rendered.endswith("\n")

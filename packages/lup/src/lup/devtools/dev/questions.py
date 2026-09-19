@@ -12,12 +12,19 @@ command" is one that changes when somebody adds a tool.
 """
 
 from pathlib import Path
+from tempfile import mkdtemp
 
+import sh
 import typer
 from pydantic import BaseModel
+from rich.console import Console
+from rich.syntax import Syntax
 
+from lup.devtools.sync import registered_difftool
 from lup.devtools.utils import output_json
 from lup.policy.relay import PersistentQuestion, QuestionRelay
+from lup.policy.review import ReviewedFile, reviewed_files
+from lup.providers.harness import patch_review
 
 
 class QuestionView(BaseModel, frozen=True):
@@ -83,7 +90,70 @@ def listing(root: Path, principal: str, everything: bool, as_json: bool) -> None
         typer.echo(entry.summary())
 
 
-def show(root: Path, question: str, as_json: bool) -> None:
+def changes(entry: PersistentQuestion) -> list[ReviewedFile]:
+    """The file changes this question proposes, patch envelopes included.
+
+    The patch reader is supplied here rather than reached for inside
+    :mod:`lup.policy.review`, which both runtimes read: the envelope's grammar
+    is one provider's word, and this command is already where one is named.
+    """
+    return reviewed_files(entry, patch_review)
+
+
+def render_diffs(entry: PersistentQuestion, console: Console) -> bool:
+    """Print what each file would become, and say whether anything was shown.
+
+    A diff rather than the payload, because a payload carrying the new
+    contents with the preimage printed underneath is two documents a reviewer
+    compares by eye — which is the whole of what was wrong with this surface,
+    and most of why an operator would rather answer somewhere else.
+    """
+    rendered = False
+    for change in changes(entry):
+        rendered = True
+        console.print(f"  {change.operation():<9} {change.path}", style="bold")
+        if change.unchanged():
+            console.print("    this would leave the file exactly as it stands")
+            continue
+        console.print(Syntax(change.unified(), "diff", theme="ansi_dark"))
+    return rendered
+
+
+def opened(entry: PersistentQuestion, difftool: list[str]) -> None:
+    """Hand each before/after pair to whatever this machine opens diffs with.
+
+    Written to a directory that outlives this process, because a difftool that
+    forks and returns — which an editor does — would otherwise be handed two
+    paths deleted before it read them. Each side keeps the reviewed file's own
+    name under a ``before``/``after`` directory, so the editor's tab titles say
+    which file is being reviewed rather than which temporary it landed in.
+    """
+    if not difftool:
+        typer.echo(
+            "this machine registers no difftool. Add one to sync.json.local as"
+            ' `"difftool": ["code", "--diff"]`, whose argv takes the two paths'
+            " last — it is a fact about this machine, so it is not committed",
+            err=True,
+        )
+        raise typer.Exit(2)
+    staged = Path(mkdtemp(prefix="lup-review-"))
+    for change in changes(entry):
+        pair = [staged / side / change.path.name for side in ("before", "after")]
+        for target, document in zip(pair, [change.before, change.after]):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(document or "", encoding="utf-8")
+        typer.echo(f"  opening {change.path}")
+        sh.Command(difftool[0])(*difftool[1:], *[str(path) for path in pair])
+    typer.echo(f"  the pair stays under {staged} until you remove it")
+
+
+def show(
+    root: Path,
+    question: str,
+    as_json: bool,
+    open_externally: bool = False,
+    difftool: list[str] | None = None,
+) -> None:
     """Print one question whole, including the operation it would resume.
 
     The operation whole rather than summarized, because what an approval binds
@@ -107,9 +177,18 @@ def show(root: Path, question: str, as_json: bool) -> None:
         typer.echo(f"  escalated   {entry.escalation}")
     if entry.checkpoint_failure:
         typer.echo(f"  capture     failed: {entry.checkpoint_failure}")
-    typer.echo(f"  payload     {entry.operation.payload}")
-    for path, before in entry.preconditions.items():
-        typer.echo(f"  preimage {path}\n{before if before is not None else '(absent)'}")
+    if open_externally:
+        opened(entry, difftool if difftool is not None else registered_difftool())
+        return
+    if not render_diffs(entry, Console()):
+        # No file change to render, which is every shell command: the payload
+        # *is* what a reviewer reads there, so it stands rather than being
+        # replaced by a diff of nothing.
+        typer.echo(f"  payload     {entry.operation.payload}")
+        for path, before in entry.preconditions.items():
+            typer.echo(
+                f"  preimage {path}\n{before if before is not None else '(absent)'}"
+            )
     if entry.answer is not None:
         typer.echo(
             f"  answered    {'yes' if entry.answer.approved else 'no'}"
@@ -181,9 +260,14 @@ def create_questions_app(root: Path) -> typer.Typer:
     def show_cmd(
         question: str = typer.Argument(help="The question id"),
         as_json: bool = typer.Option(False, "--json", help="Emit JSON"),
+        open_externally: bool = typer.Option(
+            False,
+            "--open",
+            help="Open each change in this machine's difftool from sync.json.local",
+        ),
     ) -> None:
         """Show one question whole, including the operation it would resume."""
-        show(root, question, as_json)
+        show(root, question, as_json, open_externally)
 
     @app.command("answer")
     def answer_cmd(

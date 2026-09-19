@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "4dba9de44241e25ef0c9ba0690b289c7b557f8fa81d2d72be0a11f32b9364a9b",
+  "source_digest": "f31448fb04048562e3a857fbce89beedc356610ed148d4923cfc5017abb4c82e",
   "target_requirements": [
     "claude-code"
   ],
@@ -86,7 +86,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "392429cfe57e0048299137a0d593e5fbf645ab5fecb189e1646a0e3d2c07c0da",
+      "sha256": "9aef22a9d8d8a0128c8a2981cc20fc3b0c68a39aca1ebcaf32f0bd06cad2267b",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -135,7 +135,7 @@
     {
       "path": ".claude/plugins/lup/commands/distill.md",
       "category": "generated",
-      "sha256": "8cca71345982705655abd56b0ff369a0d2823781c16cf7c9ff797d11f2db313a",
+      "sha256": "0e40524938ae0e7d1741ee364c6fad4b26e08492975bc2aec426162dd258df01",
       "semantic_id": "skill.distill",
       "executable": false
     },
@@ -240,7 +240,7 @@
     {
       "path": ".claude/plugins/lup/commands/meta.md",
       "category": "generated",
-      "sha256": "bf871a6fc0c2b36e7bd0ef079affdc5576202d13239045aef4df7b35e42fa424",
+      "sha256": "008fa22b3aaca15720102a4790bee42527f45f12f645c69d2ab7224dd451e258",
       "semantic_id": "skill.meta",
       "executable": false
     },
@@ -744,7 +744,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "9865860ad31ecef20ad204668dfe6a8d63c53e623624517a1d063655d38f9f4f",
+      "sha256": "3631d455e8e9c5ba3b63a119bc27d4446598d5fa74c72ee477467aa63c6da162",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

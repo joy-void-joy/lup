@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "4dba9de44241e25ef0c9ba0690b289c7b557f8fa81d2d72be0a11f32b9364a9b",
+  "source_digest": "f31448fb04048562e3a857fbce89beedc356610ed148d4923cfc5017abb4c82e",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -352,7 +352,7 @@
     {
       "path": ".codex/plugins/lup/skills/brainstorm/SKILL.md",
       "category": "generated",
-      "sha256": "cdf9336fea6c6c9b0b0c419be9f9d5cf6e523217288306c8eb050c256c48c374",
+      "sha256": "a0ae6a42bd267af216c9fe9e45af5ed13fa770bd9b5fd2de77ba248ae6a1c932",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -401,7 +401,7 @@
     {
       "path": ".codex/plugins/lup/skills/distill/SKILL.md",
       "category": "generated",
-      "sha256": "3147c8acb2920eab22bfbaab2c208756b36d786d4277da1d5907b7b53dcf024f",
+      "sha256": "21ad5649cd7676509f0c492ac70d835095323660f952e1126ad32effbc67e3bb",
       "semantic_id": "skill.distill",
       "executable": false
     },
@@ -506,7 +506,7 @@
     {
       "path": ".codex/plugins/lup/skills/meta/SKILL.md",
       "category": "generated",
-      "sha256": "f4d885907e6784b015c26b8a4f07394629a978592bcc66b038c1ef72254f9659",
+      "sha256": "f9c2d9439f125ef345ea356c1193e2405e62ab6336308341ea01f6622aeaae4f",
       "semantic_id": "skill.meta",
       "executable": false
     },
