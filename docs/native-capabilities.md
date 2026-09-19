@@ -103,6 +103,19 @@ part of probing.
   returns saying nothing so the runtime's own flow can proceed, reaches a
   client that can answer it. `tests/integration/test_codex_approval_request.py`
   is built to settle both halves and needs a signed-in host to run.
+- **Reasoning effort is a per-model vocabulary, and the seeded home holds one
+  chosen for a different model.** A scoped home is seeded from the operator's
+  own configuration, so it carries their `model_reasoning_effort` beside their
+  `model` — and a session naming only the model sent the API a pair nobody
+  chose. Measured here: `gpt-5.5` with the home's `max` answers
+  `400 unsupported_value`, and the message names the rungs that model takes —
+  `'none', 'low', 'medium', 'high', 'xhigh'`. Two readings follow. The ladder
+  is per model rather than global: `max` is real for the newer model the home
+  was written for, and `minimal` sits in Lup's own accepted vocabulary while
+  that list omits it. And a named model must carry an effort, which is what
+  `CodexSessionConfig.model_selection` now guarantees — the literal is
+  deliberately *not* narrowed to one model's answer, because which rungs a
+  model accepts is the vendor's to state per model.
 - **A Codex home decides whether the policy runs at all, through four gates,
   and `codex doctor` reports on none of them.** The plugin has to be installed
   and enabled; `[features] hooks = true` has to reach *that* home; the project
