@@ -430,6 +430,10 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 escapable=self.escapable,
                 recovered=self.recovered,
                 contained=self.contained,
+                # The same root the write readings above resolve against, so
+                # an absolute path inside the checkout reaches the declared
+                # roles that are anchored at its top.
+                checkout_root=str(root),
                 inside_placement=self.inside_placement,
                 relayed=self.relayed,
             )

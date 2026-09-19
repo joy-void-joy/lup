@@ -115,6 +115,15 @@ class ShellContext(TypedDict):
     runner_targets: list[RunnerTargetRow]
     target_tables: list[ShellRuleRow]
     contained: bool
+    checkout_root: str
+    """Where this repository sits, for reading an absolute path back against.
+
+    Travels with the paths for the reason ``contained`` does: the write rows
+    read it beside them. A declared role is anchored at the repository top and
+    reaches no absolute spelling, so without this one file answers twice
+    depending on how a caller named it. The machine's own path, so it arrives
+    from the host per call rather than from any declaration."""
+
     unjudged_ambient: UnjudgedAmbient
     """The profile's answer for what nothing classified, carried for `curl`.
 
@@ -172,6 +181,7 @@ def write_facts(context: ShellContext) -> WriteFacts:
         path_roles=context["path_roles"],
         path_rules=context["path_rules"],
         contained=context["contained"],
+        checkout_root=context["checkout_root"],
     )
 
 
@@ -191,6 +201,7 @@ def shell_context(
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
+    checkout_root: str = "",
     unjudged_ambient: UnjudgedAmbient = "ask",
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
@@ -229,6 +240,7 @@ def shell_context(
         runner_targets=runner_targets or [],
         target_tables=target_tables or [],
         contained=contained,
+        checkout_root=checkout_root,
         unjudged_ambient=unjudged_ambient,
         antipattern_rows=antipattern_rows or {},
         edit_rules=edit_rules or [],
@@ -870,6 +882,7 @@ def classify_shell(
     runner_targets: list[RunnerTargetRow] | None = None,
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
+    checkout_root: str = "",
     unjudged_ambient: UnjudgedAmbient = "ask",
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
@@ -908,6 +921,7 @@ def classify_shell(
         runner_targets=runner_targets,
         target_tables=target_tables,
         contained=contained,
+        checkout_root=checkout_root,
         unjudged_ambient=unjudged_ambient,
         antipattern_rows=antipattern_rows,
         edit_rules=edit_rules,
@@ -932,6 +946,7 @@ def classify_shell(
             path_rules,
             recoverable_targets,
             contained,
+            checkout_root,
         )
         return joined_decision(
             [
@@ -947,6 +962,7 @@ def classify_shell(
         path_rules,
         recoverable_targets,
         contained,
+        checkout_root,
     )
     if redirected is not None:
         return redirected
@@ -1052,6 +1068,7 @@ def decide_shell(
     target_tables: list[ShellRuleRow] | None = None,
     escapable: bool = False,
     contained: bool = False,
+    checkout_root: str = "",
     inside_placement: bool = False,
     recovered: bool = False,
     relayed: bool = False,
@@ -1149,6 +1166,11 @@ def decide_shell(
                 # same way a read of one is, so the redirection reading needs
                 # the same fact the settlement below already has.
                 contained=contained,
+                # And the same root, because a declared role is anchored at
+                # the repository top: without it the absolute spelling of a
+                # path inside the checkout reaches no declaration, and one
+                # file answers twice depending on how it was named.
+                checkout_root=checkout_root,
                 # And `curl` needs the same declaration the settlement below
                 # reads for a command nothing classified, because reaching an
                 # undeclared origin is that silence spelled as a verb.

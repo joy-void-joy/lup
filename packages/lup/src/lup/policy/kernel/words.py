@@ -20,6 +20,7 @@ from .roles import (
     GENERATED_PLUGIN_REFUSAL,
     is_generated_plugin_target,
     path_role,
+    repository_relative,
 )
 from .rows import PathRoleRow, PathRuleRow
 
@@ -309,7 +310,9 @@ def reaches_git_administration(path_text: str) -> bool:
     return False
 
 
-def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
+def write_scope(
+    path_text: str, path_roles: list[PathRoleRow], checkout: str = ""
+) -> str:
     """Which tree a write's target is in, as :class:`WritesPath` names them.
 
     One reading for every spelling of a write, which is the whole point: a
@@ -347,12 +350,23 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     The session scratchpad is the case that settles it: it is absolute, so the
     escape test would call it outside, and it is declared scratch, which is
     what it is.
+
+    ``checkout`` is where this repository sits, and every reading below runs
+    on the spelling :func:`repository_relative` returns for it, because the
+    declared roots are anchored at the repository top and reach no absolute
+    spelling of the same file. Without it ``tmp/run.log`` is scratch and
+    ``/home/you/project/tmp/run.log`` is production, for one file and one
+    write. It is a fact about the machine rather than about this repository,
+    so it arrives from the host per call and is never declared; empty is the
+    honest answer where the caller has none, and leaves the reading exactly as
+    it was.
     """
-    if path_role(path_text, path_roles) == "scratch":
+    spelled = repository_relative(path_text, checkout)
+    if path_role(spelled, path_roles) == "scratch":
         return "scratch"
-    if reaches_git_administration(path_text):
+    if reaches_git_administration(spelled):
         return "protected"
-    if leaves_the_checkout(path_text):
+    if leaves_the_checkout(spelled):
         return "outside"
     return "production"
 

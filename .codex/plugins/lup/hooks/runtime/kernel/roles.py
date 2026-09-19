@@ -109,6 +109,44 @@ def is_generated_plugin_target(word: str) -> bool:
     )
 
 
+def repository_relative(word: str, checkout: str) -> str:
+    """This path as the declarations spell it, where it names a file inside.
+
+    Every reading below is lexical, and every declared root is anchored at the
+    repository top, so a role reaches a path only when the path is spelled
+    relative to that top. An absolute spelling of the very same file therefore
+    matches nothing -- ``tmp/run.log`` is scratch by declaration and
+    ``/home/you/project/tmp/run.log`` is not, though they name one file and
+    one write.
+
+    That gap is not hypothetical here: a session that cannot move between
+    worktrees is told to reach another checkout by absolute path, which is the
+    spelling no declaration can see.
+
+    Rewriting is arithmetic on the segments rather than a resolution, so this
+    stays a reading of the spelling and makes no filesystem call: what the
+    host resolved is a separate fact, and ``..`` is normalized before the
+    prefix is taken so nothing climbs out of the checkout and back in under a
+    root it was never given.
+
+    ``checkout`` is empty wherever the caller has no root in hand, and then a
+    path is returned untouched -- the conservative answer this had before any
+    root was passed, rather than a rewrite against a root that was guessed.
+    """
+    if not checkout or "$" in word:
+        return word
+    normalized = posixpath.normpath(word)
+    if not normalized.startswith("/"):
+        return word
+    top = posixpath.normpath(checkout)
+    if normalized == top:
+        return "."
+    prefix = top if top.endswith("/") else f"{top}/"
+    if not normalized.startswith(prefix):
+        return word
+    return normalized[len(prefix) :]
+
+
 def is_session_scratch_target(word: str) -> bool:
     """Recognize a path confined to the session scratchpad.
 

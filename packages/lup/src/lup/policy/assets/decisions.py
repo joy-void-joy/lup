@@ -229,6 +229,11 @@ def bash_decision(
         # promised is a fact about the host with no runtime variation to it,
         # so neither dispatcher is given the chance to forget it.
         contained=inside,
+        # Where this checkout sits, so an absolute spelling of a path inside
+        # it is read back to the form the declared roles are anchored at. The
+        # host's to supply for the reason it resolves symlinks: a fact about
+        # this machine, which the kernel holds none of.
+        checkout_root=str(cwd or Path.cwd()),
         # The other half of that pair, and the reason the first one alone
         # settles nothing: a container is a promise about where an operation
         # lands, and `bounded()` counts it only where the launch measured that

@@ -565,6 +565,7 @@ def resolve_redirection(
     path_rules: list[PathRuleRow] | None = None,
     recoverable_targets: list[str] | None = None,
     contained: bool = False,
+    checkout_root: str = "",
 ) -> KernelDecision | None:
     """Classify one redirection, or ``None`` where it is safe.
 
@@ -613,7 +614,7 @@ def resolve_redirection(
     )
     if protected is not None:
         return protected
-    scope = write_scope(spelled, path_roles or [])
+    scope = write_scope(spelled, path_roles or [], checkout_root)
     # A target still carrying an expansion names no path to scope, so what a
     # reviewer would be shown is `$B` and where that lands is the question.
     # Asked after the scope is read rather than before it, because a declared
@@ -664,6 +665,7 @@ def redirection_verdict(
     path_rules: list[PathRuleRow] | None = None,
     recoverable_targets: list[str] | None = None,
     contained: bool = False,
+    checkout_root: str = "",
 ) -> KernelDecision | None:
     """The first redirection in a command that is not safe, judged as it is met."""
     return next(
@@ -678,6 +680,7 @@ def redirection_verdict(
                     path_rules,
                     recoverable_targets,
                     contained,
+                    checkout_root,
                 )
             ]
             if decided is not None
