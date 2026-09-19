@@ -57,6 +57,23 @@ from lup.sessions.transcript import fold_transcript
 from lup.types import EnvVars, JsonObject, JsonValue, Usage
 
 
+type CodexEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+"""How much reasoning a Codex turn is asked to spend, in Codex's own words.
+
+Declared beside the config that carries it rather than beside the table that
+translates a portable tier into it, because a model and its effort are one
+choice on the wire and this is where that choice is assembled.
+
+Not every model accepts every rung, and the ladder moves: a home written for a
+newer model here carried ``max``, which the API refused for an older one with
+"Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'" — a list
+that also omits the ``minimal`` this closes over. What follows from that is
+:meth:`CodexSessionConfig.model_selection`, not a narrower literal: which
+rungs a given model accepts is the vendor's to answer per model, and guessing
+it here would refuse configurations that work.
+"""
+
+
 class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Immutable Codex-only app-server configuration."""
 
@@ -73,7 +90,23 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
         None
     )
     hooks: LupHooksConfig | None = None
-    effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None = None
+    effort: CodexEffort | None = None
+    """What this session asks the model to spend, or None to leave it to the home.
+
+    ``None`` means inherit, which is right only while the *model* is also
+    inherited. Where a model is named, :attr:`paired_effort` answers instead —
+    see :meth:`model_selection` for why the two cannot travel apart.
+    """
+
+    paired_effort: CodexEffort = "medium"
+    """The effort a named model carries when the caller names none.
+
+    A judgement, so it is an overridable default rather than a constant: a
+    caller who knows what their model should spend says so and this is never
+    read. What it must not be is *absent*, because absence is what let a
+    caller's model reach the API beside a stranger's effort.
+    """
+
     environment: EnvVars = {}
     submission_gate_resolver: SubmissionGateResolver | None = None
     mcp_servers: dict[str, "CodexMcpServerConfig"] = {}
@@ -109,6 +142,30 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
                 "or use 'never'"
             )
         return self
+
+    def model_selection(self) -> JsonObject:
+        """The model and the effort that goes with it — both, or neither.
+
+        A model and its reasoning effort are one choice, and the home this
+        session opens against already holds an answer to both: it is seeded
+        from the operator's own configuration, so it carries the model *they*
+        chose and the effort they chose for it.
+
+        Naming only the model therefore does not select a model. It selects
+        half of somebody else's pair, and the API is the first thing to notice
+        — ``'max' is not supported with the 'gpt-5.5' model``, a 400 before the
+        turn does anything, naming neither the home nor the caller. Every
+        Codex session Lup opened through a named model was one home edit away
+        from it.
+
+        So the two travel together. Naming neither inherits a pair that was
+        chosen together and is therefore coherent; naming a model sends an
+        effort beside it, the caller's where they gave one and
+        :attr:`paired_effort` where they did not.
+        """
+        if self.model is None:
+            return {} if self.effort is None else {"effort": self.effort}
+        return {"model": self.model, "effort": self.effort or self.paired_effort}
 
 
 class CodexMcpServerConfig(BaseModel, frozen=True):
@@ -462,8 +519,11 @@ class CodexConversationState:
             "cwd": str(self.config.cwd),
             "developerInstructions": self.config.developer_instructions,
         }
-        if self.config.model is not None:
-            params["model"] = self.config.model
+        # One half of the pair `model_selection` settles; its other half rides
+        # `turn/start`, which is the only reason they are written apart.
+        selected = self.config.model_selection()
+        if "model" in selected:
+            params["model"] = selected["model"]
         if self.config.model_provider is not None:
             params["modelProvider"] = self.config.model_provider
         configuration = dict(self.config.provider_config or {})
@@ -497,8 +557,11 @@ class CodexConversationState:
             "threadId": thread_id,
             "input": [{"type": "text", "text": text}],
         }
-        if self.config.effort is not None:
-            params["effort"] = self.config.effort
+        # The other half. A named model always brings one, so the home's own
+        # effort never rides beside a model the home did not choose.
+        selected = self.config.model_selection()
+        if "effort" in selected:
+            params["effort"] = selected["effort"]
         result = await self.server.request("turn/start", params)
         response = CodexTurnResponse.model_validate(result)
         channel.turn_id = response.turn.id

@@ -31,6 +31,7 @@ from typing import Literal
 from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.runtime import (
+    CodexEffort,
     CodexMcpServerConfig,
     CodexSessionConfig,
     create_codex,
@@ -46,7 +47,7 @@ from lup.providers.selection import (
 from lup.types import EnvVars
 
 type CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
-type CodexEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+
 
 # lup: ignore[constant-declaration] — each value is Codex's own sandbox name for
 # the autonomy beside it, over a vocabulary this library closes
