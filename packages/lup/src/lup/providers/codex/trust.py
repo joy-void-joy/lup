@@ -38,6 +38,11 @@ from lup.providers.codex.app_server import CodexAppServer
 from lup.providers.codex.login import CODEX_HOME
 from lup.types import JsonObject
 
+# lup: ignore[constant-declaration] — the app-server method Codex answers to
+HOOKS_LIST = "hooks/list"
+"""The request whose reply :class:`CodexHook` is read from."""
+
+
 type CodexHookTrust = Literal["managed", "untrusted", "trusted", "modified"]
 """Every verdict Codex reaches about one hook definition it has been given.
 
@@ -126,10 +131,26 @@ async def read_hooks(
         async with asyncio.timeout(timeout_seconds):
             await server.start()
             return CodexHookReport.model_validate(
-                await server.request("hooks/list", {"cwds": [str(cwd)]})
+                await server.request(HOOKS_LIST, {"cwds": [str(cwd)]})
             )
     finally:
         await server.close()
+
+
+def hook_wire_fields() -> list[str]:
+    """Every field this reads off a ``hooks/list`` reply, as Codex spells it.
+
+    Read off the model rather than listed beside it. A second declaration of
+    the same names is free to fall behind the first, which is precisely the
+    failure that retired the hand-kept event table this module replaced.
+
+    What it is for: a rename on this reply fails *open*. Trust would be
+    seeded against a field that is no longer there, every hook would resolve
+    untrusted, and the session would run with the dispatcher present and
+    never consulted -- so the doctor is given the names to check rather than
+    the next operator being given the symptom.
+    """
+    return sorted(field.alias or name for name, field in CodexHook.model_fields.items())
 
 
 def hooks_of(report: CodexHookReport, selector: str) -> list[CodexHook]:

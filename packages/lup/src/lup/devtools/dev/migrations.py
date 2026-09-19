@@ -694,6 +694,31 @@ DECLARED = [
             ),
         ],
     ),
+    Migration(
+        subjects=["schema_digest_drift"],
+        reason=(
+            "one regeneration of the app-server schemas answers two questions "
+            "— whether the shapes the typed models were read from have moved, "
+            "and whether the reply hook trust is seeded from still carries the "
+            "fields it is read by — and a second invocation for the second "
+            "question could answer about a different version"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call `schema_reading(contracts)` from "
+                    "`lup.devtools.harness.doctor` where `schema_digest_drift()` "
+                    "was called. It takes the `WireContract`s the composition "
+                    "declares — `NativeHarnessComposition.wire_contracts`, empty "
+                    "for a runtime that depends on no reply by field name — and "
+                    "returns a `SchemaReading` carrying `digests` and "
+                    "`contracts`. The digests are what the old call returned; "
+                    "`findings()` renders both as the messages to print, and "
+                    "`drifted()` answers whether anything moved."
+                ),
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
