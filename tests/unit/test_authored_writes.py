@@ -203,3 +203,27 @@ def test_a_comment_reading_like_an_annotation_is_not_refused(tmp_path: Path) -> 
     assert "any-annotation" not in accepted.reason
     assert refused.effect == "deny"
     assert "any-annotation" in refused.reason
+
+
+def test_a_target_nothing_bound_is_not_read_as_a_create(tmp_path: Path) -> None:
+    """`cat > $P` names no file, and naming none is not naming an empty one.
+
+    The reader resolves what the binding pass can — `P=tmp/f.py; cat > $P`
+    lands on `tmp/f.py` and is read there. What it could not resolve it has
+    to hand back, and it did not: `$P` was carried through as a path, the
+    review looked for a file of that name, found none, and judged an
+    overwrite of whatever `P` holds as a create — the size budget, the note
+    gate and the audit all reading "no prior content" about a tracked module.
+    The prompt then named `$P`, which a reviewer cannot resolve either.
+    """
+    assert authored_writes("P=tmp/f.py; cat > $P <<'EOF'\nx = 1\nEOF") == [
+        {"path": "tmp/f.py", "content": "x = 1\n", "append": False}
+    ]
+    assert authored_writes("cat > $P <<'EOF'\nx = 1\nEOF") == []
+    assert authored_writes("cat > \"$P\" <<'EOF'\nx = 1\nEOF") == []
+    assert authored_writes("echo 'x = 1' > $HOME/f.py") == []
+
+    verdict = judged("cat > $P <<'EOF'\nx = 1\nEOF", tmp_path)
+
+    assert verdict.effect == "ask", verdict.reason
+    assert "only known when the command runs" in verdict.reason
