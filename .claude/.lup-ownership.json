@@ -441,6 +441,13 @@
       "executable": false
     },
     {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/delegation.py",
+      "category": "generated",
+      "sha256": "738262373beaab10112d16000a05d16d1e7aa4dcac926963268ba8648615e799",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
       "sha256": "09c9d2256c613eec77fcfd08a6336fcc4d9a5359be6abeba74860e844683ab52",
@@ -576,7 +583,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/subagent_cleanup.py",
       "category": "generated",
-      "sha256": "13c75ae70a540e5e7ddac2488523dcd131b21980d9b4b3466343f258a1d0e37c",
+      "sha256": "5e81a619069655a92dbd56a71af4d6a5e14e0702b4f37e1dbc6b5e8a975c13ea",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -695,7 +702,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "94adb2f42e6913b9fbd056be158d8f421ff122a2b836b19b12100775b0a72f7f",
+      "sha256": "c93cde6e4472ee90094756208f74cfad826cceb6c909e110baa798d353b267c8",
       "semantic_id": "docs.harness",
       "executable": false
     },
