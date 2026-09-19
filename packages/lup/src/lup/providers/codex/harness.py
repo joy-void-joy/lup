@@ -228,8 +228,10 @@ class CodexSpellings(NativeSpellings):
     def nested_run(self, prompt: str) -> Instruction:
         """Spell the non-interactive launch, `codex exec`.
 
-        Read from codex-cli 0.155.1's own help rather than from a run, since
-        no Codex session is signed in where this was written: `exec` takes
+        Read from codex-cli 0.155.1's own help rather than from a run, since a
+        contained session reaches no Codex login and a nested `codex exec`
+        answers 401, the credential sitting outside what a session is granted.
+        `exec` takes
         the prompt as its argument, `--dangerously-bypass-approvals-and-sandbox`
         answers every approval a hook probe would otherwise stall on, and
         `--dangerously-bypass-hook-trust` admits a hooks file this machine has
@@ -607,9 +609,11 @@ Claude Code's: the hook reads `session_id`, `cwd`, `prompt` and
 `hook_event_name` on stdin, `matcher` is not read for this event, and on exit
 0 its stdout's `hookSpecificOutput.additionalContext` is added as context,
 under a default limit of about 2,500 tokens per hook past which it spills to
-disk. Documented and not yet measured: no Codex session is signed in on the
-machine this was written on. The runtime's own spelling of the moment, so
-not a value a project could choose.
+disk. Documented and not yet measured: a contained session reaches no Codex
+login — a nested `codex exec` answers 401, the credential sitting outside
+what a session is granted — so the run that would measure this is the
+operator's to start from a host terminal. The runtime's own spelling of the
+moment, so not a value a project could choose.
 """
 
 # lup: ignore[constant-declaration] — the runtime's wire spelling of its own
@@ -619,9 +623,11 @@ CODEX_EXIT_EVENT = "SessionEnd"
 
 Documented at https://learn.chatgpt.com/docs/hooks beside `SessionStart` and
 the tool events, with `session_id` and `cwd` on stdin as for the prompt
-event. Documented and not yet measured: no Codex session is signed in on the
-machine this was written on. The runtime's own spelling of the moment, so not
-a value a project could choose.
+event. Documented and not yet measured: a contained session reaches no Codex
+login — a nested `codex exec` answers 401, the credential sitting outside
+what a session is granted — so the run that would measure this is the
+operator's to start from a host terminal. The runtime's own spelling of the
+moment, so not a value a project could choose.
 """
 
 CODEX_PATCH_RUNTIME = (

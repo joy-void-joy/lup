@@ -83,6 +83,25 @@ part of probing.
   is spent as a denial. The hook itself governs — that is what
   {{ exec_fixtures }} settled — and what is missing is the middle verdict, which
   is a Codex surface gap rather than a Lup one.
+- **A Codex home decides whether the policy runs at all, through four gates,
+  and `codex doctor` reports on none of them.** The plugin has to be installed
+  and enabled; `[features] hooks = true` has to reach *that* home; the project
+  has to be trusted in the home's own `config.toml`; and each hook has to be
+  trusted per event and per hash. Project trust is a second gate distinct from
+  hook trust, with its own failure mode, and
+  `--dangerously-bypass-hook-trust` does not lift it — so a session can carry
+  a fully trusted plugin and still run ungoverned because the *project* was
+  never trusted. Each gate fails the same way: the dispatcher is present, is
+  never consulted, and nothing says so.
+- **`hooks/list` is now a contract Lup depends on.** Trust-record names were
+  once composed from the hook manifest, which meant keeping a table of events
+  level with what generation declares — and it was not level, so the one call
+  deciding whether an application-opened session carries the policy raised on
+  the events it had never heard of. The runtime is asked instead, and each
+  hook's `key`, `currentHash`, `trustStatus` and `isManaged` are read off the
+  reply. A move in those four field names breaks trust seeding silently, in
+  the direction that fails open, so it belongs in the doctor's drift check
+  beside the pinned thread schemas rather than being rediscovered.
 - Claude Code's **worktree isolation** refuses a command carrying any of
   fifteen shell words as an argv element, in any position, whether or not the
   command is a git command. Read out of the 2.1.237 binary rather than
