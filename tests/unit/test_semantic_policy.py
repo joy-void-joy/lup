@@ -1358,7 +1358,37 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="timeout 5 uv run pytest", effect="allow"),
     DecisionCase(input="nice -n 10 uv run pytest", effect="allow"),
     DecisionCase(input="timeout 5 rm -rf x", effect="ask"),
-    DecisionCase(input="env", effect="allow"),
+    # A transparent wrapper is read through its own options to the command it
+    # wraps, rather than by skipping one word: skipping landed on the wrapper's
+    # flag, and a word beginning with `-` matches no rule, so the segment was
+    # "not classified" and allowed inside the boundary. Each of these carried
+    # an interpreter the table refuses outright.
+    DecisionCase(input="env -i node evil.js", effect="deny"),
+    DecisionCase(input="stdbuf -oL node evil.js", effect="deny"),
+    DecisionCase(input="setsid -f node evil.js", effect="deny"),
+    DecisionCase(input="time -p node evil.js", effect="deny"),
+    DecisionCase(input="command -p node evil.js", effect="deny"),
+    DecisionCase(input="exec -a nice node evil.js", effect="deny"),
+    DecisionCase(input="nohup env stdbuf -oL node evil.js", effect="deny"),
+    # And the wrapper still reaches an ordinary command through those options.
+    DecisionCase(input="stdbuf -oL cat f", effect="allow"),
+    DecisionCase(input="env --unset=GH_TOKEN ls", effect="allow"),
+    DecisionCase(input="env -- ls -la", effect="allow"),
+    DecisionCase(input="env FOO=1 ls", effect="allow"),
+    # `env` wrapping nothing readable prints the whole environment, which is
+    # every variable the launcher set and the credentials among them, into a
+    # transcript that outlives the turn. Refused rather than asked: a question
+    # is answered yes on the way to something else. `-S` re-splits the rest of
+    # the line by its own quoting rules, so what runs cannot be read at all.
+    DecisionCase(input="env", effect="deny"),
+    DecisionCase(input="env -0", effect="deny"),
+    DecisionCase(input="env FOO=1", effect="deny"),
+    DecisionCase(input="printenv", effect="deny"),
+    DecisionCase(input="printenv --null", effect="deny"),
+    DecisionCase(input="env | sort", effect="deny"),
+    DecisionCase(input='env -S "rm -rf src"', effect="deny"),
+    DecisionCase(input="printenv PATH", effect="allow"),
+    DecisionCase(input="printenv -0 HOME", effect="allow"),
     DecisionCase(input="uv run pytest > tmp/out.txt", effect="allow"),
     # find -exec payloads recurse; the sed scanner reads the full stdout-only
     # grammar; curl is screened to read methods against the fetch scopes.
