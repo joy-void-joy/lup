@@ -174,8 +174,24 @@ def walked_roots(
     return {*roots, project.package}
 
 
+def offers_a_surface(parts: list[str], internal: Iterable[str]) -> bool:
+    """Whether a name declared in this module is one anybody could import.
+
+    A declared prefix says no, and says it for the whole subtree beneath it:
+    :attr:`~lup.devtools.project.DevProject.internal_modules` carries what
+    this repository publishes nothing out of. Compared as the segments both
+    names parse to, so ``lup.policy.kernel`` reaches ``lup.policy.kernel.lex``
+    without also reaching a ``lup.policy.kernels`` that a test on the text
+    would have swallowed.
+    """
+    prefixes = [parsed for entry in internal if (parsed := name_parts(entry))]
+    return not any(parts[: len(prefix)] == prefix for prefix in prefixes)
+
+
 def surfaces(
-    sources: Iterable[TrackedSource], roots: AbstractSet[str]
+    sources: Iterable[TrackedSource],
+    roots: AbstractSet[str],
+    internal: Iterable[str] = (),
 ) -> Iterator[ModuleSurface]:
     """Every walked module one of ``roots`` can import, and what it declares.
 
@@ -184,11 +200,20 @@ def surfaces(
     not a capability whatever else it is. A path no import statement could
     spell at all — a generated tree under a dot directory — parses to no
     names and is left out by the same test.
+
+    ``internal`` is that same judgement made by declaration rather than by
+    layout: a module an importer can reach by name, out of a subtree this
+    repository publishes nothing from. Empty walks everything, which is what
+    a repository that declared nothing means.
     """
     for source in sources:
         module = module_name(source.path, roots)
         parts = name_parts(module)
-        if parts is not None and parts[0] in roots:
+        if (
+            parts is not None
+            and parts[0] in roots
+            and offers_a_surface(parts, internal)
+        ):
             yield ModuleSurface(
                 module=module,
                 declares=[
@@ -235,7 +260,9 @@ def surface_at(revision: str, project: DevProject) -> SurfaceCapture:
         revision=revision,
         roots=sorted(roots),
         modules=sorted(
-            surfaces(revision_sources(revision, roots), roots),
+            surfaces(
+                revision_sources(revision, roots), roots, project.internal_modules
+            ),
             key=lambda one: one.module,
         ),
     )
@@ -248,7 +275,8 @@ def surface_now(project: DevProject) -> SurfaceCapture:
         revision=git.out("rev-parse", "HEAD"),
         roots=sorted(roots),
         modules=sorted(
-            surfaces(tracked_python_sources(project), roots), key=lambda one: one.module
+            surfaces(tracked_python_sources(project), roots, project.internal_modules),
+            key=lambda one: one.module,
         ),
     )
 

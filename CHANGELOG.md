@@ -75,6 +75,29 @@ the page mentioned. Every other export in the ledger resolved to its new home.
   `+build` suffix orders with the release it came from, and `resolve_version`
   takes the counter and the word for what it counts as overridable defaults.
 
+### What this release carries no migration for
+
+A repository declares which of its subtrees it publishes nothing out of, in
+`DevProject.internal_modules`, and the preservation gate walks what is left.
+Two are declared here, and what went from them is not a break an adopter can
+meet:
+
+- **`lup_template`**, the scaffold. `dev init` copies this half into the
+  adopting repository and renames it, so its names arrive there as that
+  project's own source rather than as an import. Thirteen went, among them
+  `build_session_toolset`, the five `*_GROUP` toolsets, and the `library_*`
+  commands.
+- **`lup.policy.kernel`**, compiled into the hermetic dispatcher each
+  generated plugin runs and reached there as bare `kernel.*`. Forty-seven
+  went, nearly all of them the hand-rolled shell tokenizer — `ShellToken`,
+  `Lexeme`, `Scan`, `tokenize_shell`, `read_heredoc_bodies` — and the
+  control-flow readers beside it, replaced in place.
+
+A project that imported either subtree was reaching past what this repository
+publishes. The declaration sits in the catalog with its reasoning, so the
+judgement can be read and argued with rather than inferred from a gate that
+quietly stopped firing.
+
 ## 0.2.0 — 2026-07-23
 
 Breaking capability-composition and semantic-policy release. A clean break:

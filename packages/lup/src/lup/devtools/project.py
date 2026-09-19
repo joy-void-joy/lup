@@ -109,6 +109,26 @@ class DevProject(BaseModel, frozen=True):
     and silently resolve nothing.
     """
 
+    internal_modules: list[str] = []
+    """Module prefixes this repository offers no importable surface from.
+
+    The preservation gate refuses a name that stopped resolving, because an
+    adopter meets one as an import that stopped working. That reasoning needs
+    somebody to have been able to import it, and two shapes of module exist
+    that nobody can: a scaffold copied and renamed on the way out of the
+    template, and source compiled into an artifact rather than imported from
+    where it sits. Names under either go with the code that held them, and an
+    instruction about one would name an import nobody could have spelled.
+
+    Declared per repository rather than inferred, because nothing in a
+    module's text says which it is: this repository refuses the leading
+    underscore that elsewhere marks a name as nobody's business, so every name
+    reads as public and the gate has no signal to go on. Empty by default, so
+    a project that says nothing keeps the whole of its surface judged.
+
+    A prefix, matched against the module path, so one entry covers a subtree.
+    """
+
     path_roles: list[PathRoleRow] = []
     """Roots whose contents are judged by a purpose other than production.
 
