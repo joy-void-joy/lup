@@ -74,6 +74,27 @@ def test_the_store_is_shared_by_every_worktree_of_one_repository(
     assert coordination_root(tmp_path) == tmp_path / ".git" / "lup" / "coordination"
 
 
+def test_a_store_rooted_outside_any_repository_stays_under_that_root(
+    tmp_path: Path,
+) -> None:
+    """The path answers for itself, so nothing reaches the checkout it ran in.
+
+    A root in no repository has no shared git directory to derive from, and
+    the recoverable answer is the root itself rather than whatever `git` would
+    say about the process's working directory. Anything else and a caller
+    handed a throwaway path — a test, a probe, a tool pointed somewhere — would
+    silently join the real roster and be read by every session on it.
+    """
+    outside = tmp_path / "nowhere"
+    outside.mkdir()
+
+    root = coordination_root(outside)
+
+    assert root.is_relative_to(outside)
+    RepositoryPeers(outside).join(mint_member_id(), outside, cli_name="alone")
+    assert [view.address for view in RepositoryPeers(outside).listing()] == ["alone"]
+
+
 def test_mentioning_the_roster_does_not_create_it(tmp_path: Path) -> None:
     """Opening a cohort writes, so a session assembling its tools must not."""
     RepositoryPeers(tmp_path)
