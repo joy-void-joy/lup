@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "4da936707888d56d076d43f7de4dd666a1a91e3ca68d8db1e3944df32c3b52f0",
+  "source_digest": "40d71c75f4ea89f3de248ad252b16e8a2c75b7aa9ad5d483d9e74366aad85128",
   "target_requirements": [
     "claude-code"
   ],

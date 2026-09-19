@@ -74,8 +74,20 @@ class SpelledPromptRenderer(PromptRenderer):
         self.every = every
 
     def render(self, prompt: PromptDocument) -> str:
-        text = "".join(part.spell(self) for part in prompt.parts)
-        return text if text.endswith("\n") else text + "\n"
+        """Every part spelled in turn, ending on exactly one newline.
+
+        The tail is the one thing no part can answer for. A section ends with
+        the blank line separating it from the next, so whichever lands last
+        would otherwise decide whether the document is well-formed — and which
+        section that is depends on the modules a project took, so a document
+        valid here would stop being valid for whoever declined the subject
+        that closed it. Settled here because this is the one place that sees a
+        whole document, whatever kinds of part composed it.
+        """
+        # lup: ignore[string-strip] — prose, not structured data: the subject
+        # is how many blank lines a rendered document ends with, which no
+        # parser has an opinion about
+        return "".join(part.spell(self) for part in prompt.parts).rstrip("\n") + "\n"
 
     def location(self, part: LocatedPart) -> str:
         """Spell one location for the reader, or for every runtime at once."""

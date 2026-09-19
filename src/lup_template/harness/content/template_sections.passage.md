@@ -610,3 +610,16 @@ When proposing changes:
 3. Are we changing the right level (object/meta/meta-meta)?
 4. What general principle would have prevented this failure?
 5. What data would we need to validate this change worked?
+
+<!-- passage: permission-hooks -->
+## Permission Hooks
+
+Permissions come from the canonical semantic policies in `lup.policy` and the
+application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
+compiles one hermetic dispatcher and dependency-free runtime for each native
+plugin. Do not edit generated policy files directly.
+
+{{ textpart }} Use
+`{{ hooks_skill }}` to update canonical inputs, regenerate both plugins, and run the
+shared canonical/bundled fixture suite.
+

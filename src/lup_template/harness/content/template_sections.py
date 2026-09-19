@@ -121,30 +121,13 @@ def permission_hooks(policy_scope: str) -> list[models.PromptPart]:
     so each template passes its own scope paragraph.
     """
     return [
-        models.TextPart(
-            text=r"""## Permission Hooks
-
-Permissions come from the canonical semantic policies in `lup.policy` and the
-application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
-compiles one hermetic dispatcher and dependency-free runtime for each native
-plugin. Do not edit generated policy files directly.
-
-"""
-        ),
-        # The paragraph each platform passes in: authored there rather than
-        # derived here, so it is a part of its own instead of text spliced
-        # into the page around it.
-        models.TextPart(text=policy_scope),
-        models.TextPart(
-            text=r""" Use
-`"""
-        ),
-        models.SkillInvocation(plugin="lup", skill="hooks"),
-        models.TextPart(
-            text=r"""` to update canonical inputs, regenerate both plugins, and run the
-shared canonical/bundled fixture suite.
-
-"""
+        models.Passage(
+            module=__name__,
+            name="permission-hooks",
+            values={
+                "textpart": models.TextPart(text=policy_scope),
+                "hooks_skill": models.SkillInvocation(plugin="lup", skill="hooks"),
+            },
         ),
     ]
 

@@ -1128,26 +1128,13 @@ def sectioned(sections: list[GuidanceSection]) -> list[PromptPart]:
     list through one function, instead of one of them re-deriving what the
     other already had.
 
-    The tail is normalised to exactly one newline, which is what the artifact
-    rule requires and what no section can answer for. A section ends with the
-    blank line separating it from the next, so whichever lands last would
-    otherwise decide whether the document is well-formed — and which section
-    that is depends on the modules a project took, so a document valid here
-    would stop being valid for whoever declined the subject that closed it.
+    How many newlines the document ends on is the renderer's, because that is
+    the one reader that sees a whole document whatever kinds of part composed
+    it. Trimming the last part here can only reach a part that carries its
+    text in the declaration, and a section whose words are a passage carries
+    none.
     """
-    parts = [part for section in sections for part in section.parts]
-    match parts:
-        # lup: ignore[own-model-dispatch] — not a behaviour each variant
-        # answers for: only a text part can carry a trailing blank line, so
-        # asking every part how to trim one would put a rendering concern on
-        # the parts that render no text at all
-        case [*earlier, TextPart(text=tail)]:
-            # lup: ignore[string-strip] — prose, not structured data: the
-            # subject is how many blank lines a rendered document ends with,
-            # which no parser has an opinion about
-            return [*earlier, TextPart(text=tail.rstrip("\n") + "\n")]
-        case _:
-            return parts
+    return [part for section in sections for part in section.parts]
 
 
 class ContentRoster(BaseModel, frozen=True):
