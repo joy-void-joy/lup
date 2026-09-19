@@ -1,6 +1,6 @@
 [project]
 name = "lup"
-version = "0.2.0"
+version = "0.3.0"
 description = "Agent development library for Claude and Codex agent SDKs"
 readme = "README.md"
 license = "MIT"
