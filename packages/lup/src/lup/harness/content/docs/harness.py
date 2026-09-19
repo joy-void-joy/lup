@@ -654,6 +654,52 @@ the derived homes still land under `~/.claude`. Both spellings matter for an
 interactive fix: accepting a trust dialog in a shell that does not export the
 same variable writes to a different profile and appears to do nothing.
 
+### Reviewing a session's edits in an editor
+
+Reviewing a whole-file write in a terminal is reading a wall of text and
+deciding. An editor renders the same approval as a side-by-side diff you can
+edit before accepting it, and a contained session can reach one on the host.
+Nothing had to be built for this — the pieces were already here — so the recipe
+is the whole of it:
+
+1. Install the editor's Claude Code extension.
+2. Open the editor on the checkout the session runs in.
+3. Set `diffTool` to `auto` in your own Claude Code settings. It is global
+   configuration rather than anything this repository declares, and the entry
+   appears in `/config` only while an editor is connected.
+4. Launch the session as usual, then `/ide` inside it.
+
+`--profile` is not a reason to avoid any of this. The bridge binds the
+lockfile directory the *editor* uses — resolved from `CLAUDE_CONFIG_DIR` as the
+editor's own process reads it — so which account the session runs under and
+which editor it talks to are independent. Each launch says which directory it
+bound, so a bridge that will not connect is visible at the top of the session
+rather than as an editor that never appears.
+
+`/ide` is spelled out because a container is neither case the vendor documents:
+a CLI started from the editor's own terminal attaches on its own, and one
+started from an external terminal attaches when `autoConnectIde` is set. A
+contained session is documented as neither, so it asks.
+
+Two checkers will otherwise disagree over the same files. This repository
+already refuses Claude Code's own `pyright-lsp` plugin, because the per-edit
+check in the policy's host half is the one wired to the gates. The editor's own
+Python checker is a third opinion and is not this repository's to turn off:
+set `python.analysis.typeCheckingMode` to `off` in your editor if its
+diagnostics start contradicting the ones the gate produces.
+
+**Codex has no equivalent, and this is not an omission.** Its extension drives
+the app-server and spawns its own core, so there is no lockfile rendezvous to
+bridge; `ProviderLogin.editor_lockfiles` records that as a declaration rather
+than as prose. The only attachment point the vendor exposes is a setting
+naming the executable to run, which its own description marks as for
+development only, warns may break the extension, and scopes to the whole editor
+install — so it cannot differ per worktree, and it is user-level configuration
+this repository does not write. A Codex editor session would need the extension
+host inside the image, or a host posture with a prepared home. Neither is
+built, and neither is needed for the review problem: what a Codex session's
+reviewer reads is `dev questions show`.
+
 Commit generated artifacts together with the catalog changes that produced
 them. [contributing.md](contributing.md) covers what review looks for.
 '''
