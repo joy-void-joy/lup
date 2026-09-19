@@ -194,3 +194,27 @@ def test_a_held_path_turns_an_allowed_edit_into_a_question() -> None:
     ).placed(escapable=True)
     assert settled.effect == "ask"
     assert "feat-rewriting" in settled.reason
+
+
+def test_a_claim_the_sweep_vacated_no_longer_asks(tmp_path: Path) -> None:
+    """A worktree cut again at the same path starts with no claims from the old one."""
+    work = tmp_path / "work"
+    git = initialized_repo(work, tmp_path / "hooks")
+    commit_file(git, work, "a.py", "value = 1\n", "seed the file under claim")
+    peers = RepositoryPeers(work)
+    holder, mine = mint_member_id(), mint_member_id()
+    peers.join(holder, work, cli_name="feat-rewriting")
+    peers.join(mine, work, cli_name="feat-transducer")
+    peers.touches.touched(peers.join(holder, work), work / "a.py", "abc")
+    asked = decide(edit_payload(work / "a.py", "value = 1", "value = 2", work), mine)
+    assert isinstance(asked["hookSpecificOutput"], dict)
+    assert asked["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+    (work / "a.py").unlink()
+    peers.sweep()
+    (work / "a.py").write_text("value = 1\n", encoding="utf-8")
+
+    decision = decide(edit_payload(work / "a.py", "value = 1", "value = 2", work), mine)
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert "feat-rewriting" not in str(specific.get("permissionDecisionReason", ""))

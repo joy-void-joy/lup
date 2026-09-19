@@ -2118,8 +2118,15 @@ def peer_claims(directory: Path, touches_file: str) -> list[dict]:
         if not isinstance(actor, dict) or "id" not in actor or not path:
             continue
         kind = record["type"] if "type" in record else ""
-        subject = f"{'under' if kind in ('locked', 'released') else 'at'} {path}"
+        prefix = (
+            record["prefix"] is True
+            if kind == "vacated" and "prefix" in record
+            else kind in ("locked", "released")
+        )
+        subject = f"{'under' if prefix else 'at'} {path}"
         match kind:
+            case "vacated":
+                standing.pop(subject, None)
             case "touched" | "contested":
                 rivals = record["rivals"] if "rivals" in record else []
                 standing[subject] = {

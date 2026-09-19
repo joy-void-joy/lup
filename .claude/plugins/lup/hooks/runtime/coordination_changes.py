@@ -131,6 +131,7 @@ class TouchRecord(TypedDict, total=False):
     type: str
     actor: Actor
     path: str
+    prefix: bool
     rivals: list[Actor]
 
 
@@ -451,9 +452,15 @@ def held(path: Path, live: list[str]) -> list[Held]:
         if not holder or not path_text:
             continue
         kind = text(record.get("type"))
-        prefix = kind in ("locked", "released")
+        prefix = (
+            record.get("prefix") is True
+            if kind == "vacated"
+            else kind in ("locked", "released")
+        )
         subject = f"{'under' if prefix else 'at'} {path_text}"
         match kind:
+            case "vacated":
+                claims.pop(subject, None)
             case "touched" | "contested":
                 rivals = record.get("rivals")
                 claims[subject] = Held(

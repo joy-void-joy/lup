@@ -235,7 +235,7 @@ def test_the_listing_puts_the_present_first_whatever_the_record_says(
     fresh = mint_member_id()
     peers.join(fresh, tmp_path / "tree", cli_name="fresh")
 
-    listed = [(view.cli_name, view.member.running) for view in peers.listing()]
+    listed = [(view.cli_name, view.member.running) for view in peers.recent()]
 
     assert listed[0] == ("fresh", True)
     assert ("stale", False) in listed

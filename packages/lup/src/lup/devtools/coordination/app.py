@@ -18,8 +18,12 @@ from typing import Annotated
 import typer
 
 from lup.channels.models import Door
-from lup.coordination.identity import mint_member_id
-from lup.coordination.repository import PeerView, RepositoryPeers
+from lup.coordination.identity import NameTakenError, mint_member_id
+from lup.coordination.repository import (
+    PeerDepartedError,
+    PeerView,
+    RepositoryPeers,
+)
 from lup.coordination.roster import Delivery
 from lup.coordination.touches import Claim
 from lup.coordination.watch import Watcher
@@ -83,16 +87,17 @@ def create_coordination_app() -> typer.Typer:
 
     @app.command("roster")
     def roster_cmd() -> None:
-        """List every session working in this repository, the live ones first.
+        """List every session working in this repository, and the recent departures.
 
-        The whole roster rather than the live half, because a session that has
-        stopped is what a person is often looking for: whether the peer they
-        sent something to is still there is exactly the question the listing
-        has to answer, and hiding the dead rows answers it by omission.
+        The live rows and those that stopped within the retention window,
+        rather than everyone who ever joined: whether the peer a person sent
+        something to is still there is a question the listing has to answer,
+        and a roster read a month on must not answer it with a month of
+        history.
         """
-        listing = peers().listing()
+        listing = peers().recent()
         if not listing:
-            typer.echo("No session has joined this repository.")
+            typer.echo("No session is working in this repository.")
             return
         for view in listing:
             typer.echo(peer_line(view))
@@ -120,7 +125,10 @@ def create_coordination_app() -> typer.Typer:
         """
         chosen = member_id or mint_member_id()
         tree = worktree or project_root()
-        peers().join(chosen, tree, cli_name=name, delivery=Delivery.MAILBOX)
+        try:
+            peers().join(chosen, tree, cli_name=name, delivery=Delivery.MAILBOX)
+        except NameTakenError as taken:
+            raise typer.BadParameter(str(taken)) from taken
         typer.echo(chosen)
 
     @app.command("describe")
@@ -141,7 +149,10 @@ def create_coordination_app() -> typer.Typer:
         ],
     ) -> None:
         """Rename one session, leaving the old name resolving to it."""
-        peers().rename(member_id, name)
+        try:
+            peers().rename(member_id, name)
+        except NameTakenError as taken:
+            raise typer.BadParameter(str(taken)) from taken
 
     @app.command("leave")
     def leave_cmd(
@@ -174,8 +185,9 @@ def create_coordination_app() -> typer.Typer:
         """
         found = peers()
         rows = found.lapsed() if dry_run else found.sweep()
-        # The address beside the name, because names derive from worktrees and
-        # every session of one checkout answers to the same one.
+        # The address beside the name, because a retired session's name may
+        # since have been taken by a live one, and the label is what still
+        # reaches its record.
         for member in rows:
             name = found.names.current(member.actor.id) or member.actor.id
             typer.echo(f"{name} — {member.actor.label()} — {member.error}")
@@ -199,7 +211,12 @@ def create_coordination_app() -> typer.Typer:
         accepting a message says nothing about anyone reading it, and a sender
         told "sent" goes on believing a peer was informed.
         """
-        found = peers().send(to, text, redirect=redirect, door=Door.CONSOLE)
+        try:
+            found = peers().send(to, text, redirect=redirect, door=Door.CONSOLE)
+        except PeerDepartedError as departed:
+            raise typer.BadParameter(
+                f"{departed}; `dev coordination roster` lists who is here"
+            ) from departed
         if found is None:
             raise typer.BadParameter(
                 f"no session answers to {to!r}; "
@@ -254,7 +271,12 @@ def create_coordination_app() -> typer.Typer:
         ],
     ) -> None:
         """Take everything beneath a prefix, before having touched any of it."""
-        peers().lock(member_id, prefix.resolve())
+        target = prefix.resolve()
+        if not target.exists():
+            raise typer.BadParameter(
+                f"{target} does not exist; a lock covers what is there to write"
+            )
+        peers().lock(member_id, target)
 
     @app.command("release")
     def release_cmd(
@@ -263,8 +285,13 @@ def create_coordination_app() -> typer.Typer:
             str, typer.Option("--id", help="Which session, by its durable id")
         ],
     ) -> None:
-        """Give a prefix back, which does nothing unless this session held it."""
-        peers().release(member_id, prefix.resolve())
+        """Give a prefix back, refusing where this session does not hold it."""
+        target = prefix.resolve()
+        if not peers().release(member_id, target):
+            raise typer.BadParameter(
+                f"session {member_id} does not hold {target}; "
+                "`dev coordination holdings` lists who holds what"
+            )
 
     @app.command("watch")
     def watch_cmd(
