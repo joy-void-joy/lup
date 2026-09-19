@@ -126,8 +126,13 @@ architecture forks earn their turn.
   recommendation with a measurement behind it is the turn worth taking, not
   an embarrassment to soften.
 - **A harness behaviour is measured with a probe kit, not asked about.** A
-  throwaway project under `tmp/`, with its own `git init` so this project's
-  plugin stays out of it; a hook script that appends every payload it is
+  throwaway project under `tmp/`, with its own `git init`, which keeps this
+  project's plugin out of the kit only where a plugin arrives per launch —
+  where a runtime installs plugins into its own home instead, every session
+  on the machine runs under them whatever directory it starts in, and the
+  kit is governed by the policy it was built to sit outside. Check a command
+  the kit will issue with `dev policy` before writing it down; a hook script
+  that appends every payload it is
   handed to a JSONL file beside it and answers only the event under test; and
   the kit's own `.codex/config.toml` registering it under the events in question. Run it from where you are first:
 Run `codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "<the kit's first prompt>"` from the kit's directory. A non-interactive run loads the hooks in that directory's settings at launch and exits when the prompt is answered
