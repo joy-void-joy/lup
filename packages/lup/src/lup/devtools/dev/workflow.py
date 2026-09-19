@@ -32,6 +32,17 @@ from lup.formats.yaml import (
 from lup.harness.models import Artifact
 from lup.workspace.paths import project_root
 
+RUNNER_IMAGE = "ubuntu-24.04"
+"""The runner image a generated job names, pinned rather than `ubuntu-latest`.
+
+A moving label is a change nobody makes: GitHub repoints `ubuntu-latest` at
+the next release on a date of its choosing — 2026-10-19 for Ubuntu 26 — and
+that lands under this repository and every project generated from it at once,
+as a gate that fails with nothing in the checkout having moved. Pinned, the
+move is a commit somebody writes, a release says, and an adopter takes when
+their own tree is ready for it.
+"""
+
 # lup: ignore[constant-declaration] — the directory GitHub Actions itself reads
 WORKFLOW_PATH = Path(".github/workflows/quality.yml")
 WORKFLOW_COMMAND = REGENERATE_COMMAND
@@ -102,7 +113,7 @@ class WorkflowSpec(BaseModel, frozen=True):
     branches: list[str] = ["main"]
     """Which pushed branches run the gate, beyond every pull request."""
 
-    runner: str = "ubuntu-latest"
+    runner: str = RUNNER_IMAGE
     """The label the job asks for."""
 
     sync_flags: list[str] = ["--all-extras"]
@@ -285,7 +296,7 @@ class PublishSpec(BaseModel, frozen=True):
     tags: str = "v*"
     """Which pushed tags publish, as the forge matches them."""
 
-    runner: str = "ubuntu-latest"
+    runner: str = RUNNER_IMAGE
     """The label the job asks for."""
 
     def steps(self) -> list[WorkflowStep]:
