@@ -16,7 +16,7 @@ from lup.providers.codex.hooks import (
     APPROVAL_METHODS,
     CodexApprovalResponder,
 )
-from lup.providers.codex.home import install_declared_policy
+from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
 from lup.providers.codex.login import CODEX_HOME
 from lup.providers.codex.subagents import CodexSubagentTools
 from lup.policy.hooks import LupHooksConfig
@@ -685,7 +685,8 @@ class CodexSessionOpener:
             }
         )
         if CODEX_HOME in config.environment:
-            install_declared_policy(Path(config.environment[CODEX_HOME]))
+            home = Path(config.environment[CODEX_HOME])
+            install_declared_policy(home, seed=CodexWorktreeHomeStore().derived(home))
         server = CodexAppServer(
             config.executable,
             arguments=(

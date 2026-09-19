@@ -1,11 +1,10 @@
 """Stable per-worktree Codex homes for locally installed harness plugins."""
 
-import json
+import asyncio
 import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 import jwt
 import tomlkit
@@ -15,6 +14,7 @@ from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCach
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.theme import claude_daltonized_theme
+from lup.providers.codex.trust import CodexHook, read_hooks, skipped
 from lup.types import EnvVars
 from lup.workspace.paths import declared_project_root, project_root
 
@@ -47,28 +47,19 @@ PROJECTS_KEY = "projects"
 TRUSTED_PROJECT = "trusted"
 """How a home records that it will read one checkout's own configuration."""
 
-# lup: ignore[constant-declaration] — Codex's own plugin layout, and the same
-# spelling it writes into a trust record; a caller given it to set would be
-# naming a file the runtime looks for somewhere else
-HOOKS_MANIFEST = Path("hooks/hooks.json")
-"""Where a plugin declares its hooks, and how a trust record names that file."""
+# lup: ignore[constant-declaration] — Codex's own spelling for the state a home
+# keeps its hook decisions under; a caller given these to set would be writing
+# records the runtime reads somewhere else
+HOOKS_KEY = "hooks"
+STATE_KEY = "state"
+TRUSTED_HASH_KEY = "trusted_hash"
+ENABLED_KEY = "enabled"
+"""How a home records which hook definitions it has answered for.
 
-type CodexHookEvent = Literal["PreToolUse", "PostToolUse", "PermissionRequest"]
-"""Every event a hook manifest may declare, as the manifest spells it."""
-
-# lup: ignore[constant-declaration] — each value is Codex's own spelling for the
-# event beside it, over a vocabulary the manifest closes
-CODEX_HOOK_EVENTS: dict[CodexHookEvent, str] = {
-    "PreToolUse": "pre_tool_use",
-    "PostToolUse": "post_tool_use",
-    "PermissionRequest": "permission_request",
-}
-"""What Codex calls each declared event where it records trust for one.
-
-The manifest spells an event one way and the trust record another, and the
-two have to be matched to ask whether a declared hook is trusted. A table
-rather than a transformation, so an event added to the manifest and unknown
-here is refused rather than quietly read as needing no trust."""
+Keyed by the name the runtime reports for each hook, so nothing here
+constructs one: a record written under a name this composed would be a
+record Codex never reads, and the failure looks exactly like an untrusted
+hook."""
 
 
 class CodexHomeSelection(BaseModel, frozen=True):
@@ -288,6 +279,19 @@ class CodexWorktreeHomeStore:
         canonical = worktree.expanduser().resolve()
         return (declared_project_root(canonical) or canonical) / self.scoped_dir
 
+    def derived(self, home: Path) -> bool:
+        """Whether this store made that home, which decides what may be written.
+
+        Asked of the path rather than carried beside it because a session
+        reaches its home as one environment variable, and a second variable
+        saying "this one may be written into" would be a claim any caller
+        who controls the environment could make. The path is the claim: only
+        this store puts a home at :attr:`scoped_dir`, and a home somewhere
+        else is somebody's own.
+        """
+        resolved = home.expanduser().resolve()
+        return resolved.parts[-len(self.scoped_dir.parts) :] == self.scoped_dir.parts
+
     def prepare(self, worktree: Path, profile: str | None = None) -> Path:
         """Refresh Lup-owned files and seed account files into a scoped home."""
         scoped_home = self.home_for(worktree)
@@ -340,64 +344,46 @@ class CodexPolicyUntrusted(RuntimeError):
     """A home carries the policy plugin and would run none of its hooks."""
 
 
-def declared_hook_records(marketplace: CodexMarketplace) -> list[str]:
-    """Every trust record Codex keeps for the hooks this plugin declares.
+def seed_hook_trust(home: Path, hooks: list[CodexHook]) -> list[str]:
+    """Answer for this project's own hooks, in a home this project made.
 
-    A record is named for the plugin, the manifest it was read from, the
-    event, and the hook's place within it — so the names can be constructed
-    from the manifest rather than read back out of Codex's own state and
-    taken apart, which would be reading a spelling this does not own.
-    """
-    manifest = marketplace.source / HOOKS_MANIFEST
-    if not manifest.is_file():
-        return []
-    declared = json.loads(manifest.read_text(encoding="utf-8"))["hooks"]
-    unknown = [event for event in declared if event not in CODEX_HOOK_EVENTS]
-    if unknown:
-        raise ValueError(
-            f"{manifest} declares hook events this cannot ask about: {unknown}. "
-            "Add each to CODEX_HOOK_EVENTS with the name Codex records it under"
-        )
-    return [
-        f"{marketplace.selector}:{HOOKS_MANIFEST.as_posix()}:{spelled}:{group}:{index}"
-        for event, spelled in CODEX_HOOK_EVENTS.items()
-        if event in declared
-        for group, matched in enumerate(declared[event])
-        for index in range(len(matched["hooks"]))
-    ]
+    Only ever for a home derived for this checkout, and only over hooks the
+    runtime has just reported for the plugin generated from this
+    repository's declarations — the same act, and the same reasoning, as
+    :func:`trust_project`. What an operator's grant protects them from is
+    third-party code they did not write; these bytes were rendered here
+    minutes ago, are guarded by the ownership manifest and the drift check,
+    and the decision to run them is the decision to launch this checkout.
 
+    Granting it per hash is what the alternative could not do. A generated
+    plugin's digest moves every time anything it is compiled from moves, so
+    the interactive grant is not one decision but a prompt at every
+    regeneration — and a security question asked that often is answered by
+    reflex, which is worse than the record written here in the open.
 
-def untrusted_hooks(home: Path, marketplace: CodexMarketplace) -> list[str]:
-    """Which of this plugin's declared hooks the home would not actually run.
-
-    Codex trusts a hook per event and per hash, and *skips* one it does not
-    trust rather than refusing it — so a home carrying the plugin, enabled,
-    with trust recorded for one event of three runs every session past the
-    two it never granted, and says nothing.
-
-    Presence and enablement are what can be asked here. A recorded hash that
-    has since gone stale is not: computing it would mean reimplementing a
-    digest this does not own, and getting that wrong refuses every session
-    over a hook that is fine. Codex skips a stale hook exactly as it skips an
-    absent one, so what is left uncovered is a hook whose trust was granted
-    and whose body has since been regenerated.
+    The hash comes from the runtime rather than from a digest recomputed
+    here, so a record either names the definition Codex is holding or is not
+    written at all.
     """
     config = home / "config.toml"
-    if not config.is_file():
-        return declared_hook_records(marketplace)
-    document = tomlkit.parse(config.read_text(encoding="utf-8"))
-    hooks = document["hooks"] if "hooks" in document else {}
-    state = hooks["state"] if "state" in hooks else {}
-    return [
-        record
-        for record in declared_hook_records(marketplace)
-        if record not in state
-        or ("enabled" in state[record] and not state[record]["enabled"])
-    ]
+    document = (
+        tomlkit.parse(config.read_text(encoding="utf-8"))
+        if config.is_file()
+        else tomlkit.document()
+    )
+    hooks_table = document.setdefault(HOOKS_KEY, tomlkit.table(is_super_table=True))
+    state = hooks_table.setdefault(STATE_KEY, tomlkit.table(is_super_table=True))
+    for hook in hooks:
+        entry = tomlkit.table()
+        entry[TRUSTED_HASH_KEY] = hook.current_hash
+        entry[ENABLED_KEY] = True
+        state[hook.key] = entry
+    config.write_text(tomlkit.dumps(document), encoding="utf-8")
+    return [hook.key for hook in hooks]
 
 
 def install_declared_policy(
-    home: Path, root: Path | None = None
+    home: Path, root: Path | None = None, seed: bool = False
 ) -> CodexMarketplace | None:
     """Install the project's own plugin into one home, and say which it was.
 
@@ -407,17 +393,21 @@ def install_declared_policy(
     installs nothing carries no dispatcher, and every refusal the project
     declares goes unenforced with nothing saying so.
 
-    Failure is raised rather than warned past. A session that opened without
-    the policy it was meant to run under is indistinguishable from one running
-    under it, which is the property that made this worth finding.
-
     Installing it is not the whole of carrying it, which is why the trust is
-    read here too. Trust is a decision about a hook, and only a person makes
-    one: this refuses a session the decision was never made for rather than
-    recording it on their behalf, because a trust granted by the thing being
-    trusted is not one. The decision is made in an interactive session, which
-    is where Codex asks — and which does not come through here, so refusing
-    cannot close the door on its own remedy.
+    read here too, and read from the runtime: Codex resolves a home's hooks
+    against records this does not write the names of, so what a home would
+    actually run is its answer to give.
+
+    ``seed`` is for a home this project derived for this checkout, where
+    :func:`seed_hook_trust` answers for the plugin generated here. Off by
+    default, so a home the operator brought — an explicit ``--codex-home``,
+    or whatever the environment already selected — keeps their decisions
+    and is refused rather than written into.
+
+    Failure is raised rather than warned past, either way. A session that
+    opened without the policy it was meant to run under is
+    indistinguishable from one running under it, which is the property that
+    made this worth finding.
     """
     project = root or project_root()
     declared = CodexMarketplace.declared(project)
@@ -429,14 +419,29 @@ def install_declared_policy(
         )
     )
     installer.ensure(declared.source, project)
-    skipped = untrusted_hooks(home, declared)
-    if skipped:
+    unanswered = policy_hooks_skipped(home, project, declared)
+    if unanswered and seed:
+        # Verified rather than asserted: the records were written from the
+        # hashes this read reported, and whether Codex then honours them is
+        # the runtime's answer rather than a property of having written a
+        # file. A record it rejects reads exactly like one never written.
+        seed_hook_trust(home, unanswered)
+        unanswered = policy_hooks_skipped(home, project, declared)
+    if unanswered:
         raise CodexPolicyUntrusted(
             f"{home} carries {declared.selector} and would run none of "
-            f"{len(skipped)} declared hook(s): {', '.join(skipped)}. Codex skips "
-            "a hook it does not trust rather than refusing it, so this session "
-            "would run ungoverned and read exactly like one that is governed. "
-            "Open an interactive session in this checkout and trust the plugin "
-            "there, which is where Codex asks."
+            f"{len(unanswered)} declared hook(s): "
+            f"{', '.join(hook.key for hook in unanswered)}. Codex skips a hook it "
+            "does not trust rather than refusing it, so this session would run "
+            "ungoverned and read exactly like one that is governed. Open an "
+            "interactive session in this checkout and trust the plugin there, "
+            "which is where Codex asks."
         )
     return declared
+
+
+def policy_hooks_skipped(
+    home: Path, project: Path, marketplace: CodexMarketplace
+) -> list[CodexHook]:
+    """Which of this plugin's hooks the home resolves but would not run."""
+    return skipped(asyncio.run(read_hooks(home, project)), marketplace.selector)
