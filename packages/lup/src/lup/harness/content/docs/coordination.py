@@ -132,13 +132,22 @@ A claim is alive while its holder is on the roster and its path is on the
 disk, and expires with either. There is no timeout to tune and no release to
 forget, which is what makes an observed claim safe to act on: the failure mode
 of the whole mechanism is a session that stopped, and a stopped session's
-claims go with it. A worktree removed from under a live session takes its
-paths with it, and a claim over one names nothing anybody could write, so the
-sweep every coordination server runs on its tick ends it on the record — a
-worktree cut again at the same path starts with no claims from the one that
-was removed. What a session asks for itself fails early instead: a lock over a
-path that does not exist is refused, and so is releasing a prefix the session
-does not hold, naming who does.
+claims go with it.
+
+**A claim is evidence, not an assertion.** It records the modification time of
+the path it was taken over, so a reader asks the filesystem rather than the
+record: the path is gone and the claim names nothing anybody could write;
+somebody has written it since and what stands there is not what this session
+left; otherwise it holds. Nothing has to be written to retire one, which is
+what a worktree removed from under a live session used to need — the claim
+outlived the tree, and only another record could end it. A prefix lock is
+exempt from the second test, because a directory's time moves whenever
+anything under it does, including by the holder: a lock ends when it is
+released, when its holder leaves, or when the prefix is gone.
+
+What a session asks for itself fails early instead: a lock over a path that
+does not exist is refused, and so is releasing a prefix the session does not
+hold, naming who does.
 
 Editing under somebody else's live claim is an approval question naming the
 holder, never a refusal. Two sessions in one file is sometimes exactly right,
@@ -147,15 +156,16 @@ it must not be is silent — the failure this exists for is finding out at merge
 time. Claims are keyed by absolute path, so two sessions in different worktrees
 never collide over the same source; the merge is what reconciles those.
 
-**A claim can have more than one holder, and that is honest rather than
-broken.** A call that names its file attributes exactly. A shell command names
+**A claim can have more than one holder, and that is derived rather than
+guessed.** A call that names its file attributes exactly. A shell command names
 nothing it will write, so what it changed is read by comparing the tree before
 and after — and that comparison sees every change in its window regardless of
-who made it. Where two sessions had windows open over one path, both names go
-on the record and neither is guessed at: a confident wrong author is worse than
-an honest pair, because the next reader is deciding whether it is safe to
-write. The next named edit or explicit lock settles it, because both of those
-attribute exactly.
+who made it. Each session writes down what it left, on its own file, and a
+contest is two live members' claims meeting on one path: nothing records it,
+and nobody names a rival at the moment of writing. That is the difference
+between an honest pair and a guess — a before-and-after sees the change and
+cannot see who made it, so the reader deciding whether it is safe to write
+gets both names from evidence rather than one from a suspicion.
 
 **Holdings ride on the roster row, beside the description rather than behind a
 second call.** A session listing its peers is asking one question — is it safe
@@ -173,15 +183,14 @@ anything here to ask about — and `coordination holdings` carries the paths,
 because a person who wants those wants all of them at once rather than one row
 at a time.
 
-**A listing is who is here, and who left while the reader was.** The record
-keeps every session that ever joined, and a listing that showed them all would
-be a history rather than a roster: a month on, a reader would scroll past
-everyone who ever worked here to find the two who still do. So a session is
+**A listing is who is here, and who left while the reader was.** A session is
 shown the live rows and the rows that stopped since it joined — the departures
 it was here for, each saying it stopped and what it concluded — and a console,
-which has no arrival of its own, is shown the live rows and the departures of
-the last day. What left before that is on the record and reachable by id, and
-a message to it is refused with when it left.
+which has no arrival of its own, is shown the live rows and the departures
+still inside the retention window. A session that stopped longer ago than that
+is gone from the store entirely, because the store is the population rather
+than its history: a listing that showed everyone who ever joined would be read
+a month on by scrolling past them to find the two who still work here.
 
 ## A rate is owed by the repository, not by each session
 
@@ -287,6 +296,100 @@ The handle a peer is addressed by is **self-reported on the roster**, because
 on one runtime it can only be: the session identifiers in its environment are
 not what peers address it by, and the address is discoverable only by asking
 the runtime from inside the session.
+
+## The store is state, not records
+
+The store was append-only logs folded whole by every reader on every call. It
+answered *who is here* by replaying everyone who had ever been here, which grew
+without bound — 597 KB of touches and sixteen rows for two live sessions — and
+it could not be asked anything the records had not been written to answer. A
+claim over a path in a deleted worktree stood until another record retired it.
+A change nothing could attribute was written down with a guess and a list of
+suspects beside it. Presence needed a second stamp directory, because the only
+record that ended a row was the one a session wrote on its way out, and a
+killed session writes nothing.
+
+It is one file per member now, written by nobody but that member's own
+processes, and every relation between members derived at the read:
+
+| Question | What answers it |
+| --- | --- |
+| Is this member still here? | Its own file's modification time — the owner touches it while it lives |
+| Does this claim still hold? | A stat of the path, against the time the claim recorded |
+| Do two sessions contest a path? | Their two files both claiming it |
+| What is this member called? | The names on its file, newest last |
+| What is waiting for it? | The files in its inbox |
+
+Nothing is folded and nothing is replayed, so what the store holds is bounded
+by the population rather than by its history: a member that stops takes its
+file to `departed/`, and the sweep deletes that after the retention window.
+Compaction was designed for the old shape and is moot in this one.
+
+**The one place this spends more is the stat**, because settling a claim means
+asking the filesystem rather than reading a record. Measured on 2026-09-19
+over a throwaway store, against the 8 ms a dispatcher-shaped fold took over
+the real one: a claim check costs 0.6 ms against an empty roster, 2.3 ms with
+one member holding a hundred paths, and 3.8 ms with ten members holding ten
+each — the shape a busy clone reaches. It degrades with the *total* claims
+rather than the population, reaching 32 ms at a thousand, which is a figure to
+watch and not one a repository roster produces.
+
+**Writing is the owner's.** A member file is revised under a lock of its own,
+because three of that member's processes revise it — its tool server, its
+prompt hook, and the permission dispatcher recording what a command just
+changed. Per member rather than per store, so one session's writes never wait
+on another's, and the region held is one read and one rename wide. The one
+store-wide lock is taken for a join or a rename, which are the only decisions
+made against every other member's file.
+
+Both of those were raced in real processes on 2026-09-19 rather than reasoned
+about: twelve sessions joining one worktree at once took twelve distinct
+names, and twelve senders writing into one inbox at once all landed and all
+consumed. That is `flock` and `rename` on one Linux filesystem. Whether they
+hold across a bind mount on Docker Desktop's virtiofs is the assumption this
+store hands its adopters, and the reason it needs neither a daemon nor SQLite
+to be wrong about.
+
+## A notice is not a message
+
+Two things reach a member and only one of them is mail.
+
+**A message is addressed and consumed.** It is one file in one member's inbox,
+written by the sender and deleted by that member once it has been handed over,
+so "what is waiting for me" is a directory listing. There is no position for
+anybody to keep: nothing to commit after a crash but what was never handed
+over, and no way for a second reader to be behind a first.
+
+**A notice is neither.** "The base moved under all of you" is a fact about the
+population rather than about its recipients: it stays true after it is said,
+and a member arriving afterwards needs it as much as one already here. It sits
+in one file per notice, is read at the head of a turn, and is retracted by
+deleting it. Nothing consumes it, so nothing has to remember having read it —
+which is why a replayed or resumed turn reads exactly what a first one did.
+
+That separation is what killed the broadcast token. "To everyone" used to be a
+`*` every reader matched against itself, and matching at *read* is what forced
+the delivery cursor: a message nobody had addressed to you could still be
+yours, so you had to remember how far you had got. It was also wrong for half
+its uses — `redirect --to everyone` stopped every worker spawned *after* the
+stop, with a reason that was never about it.
+
+So the two acts are spelled apart. A **redirect** is about now: it denies a
+tool call, and a member that does not exist cannot be stopped, so "everyone"
+means everyone working and the sender resolves it against the roster. A
+**statement** stays true, so it is not delivered at all — `notify` posts the
+notice *and* sends a message to whoever is live, because a fact worth stating
+is worth hearing before the turn they are in ends. The member that arrives
+later never sees that copy and does not need to: the notice is still there at
+its first turn.
+
+A repository session reads its notices at the prompt fold, once each rather
+than restated — a session here reads one prompt after another for hours, and a
+line repeated at every one of them is read at none. The session that starts
+tomorrow is told at its own first prompt, which is the whole of what a notice
+being state rather than mail buys. `coordination notice`, `coordination
+notices` and `coordination unnotice` are the console's; a run's are the same
+three verbs under `resolve`.
 
 ## One fold, three readers
 
