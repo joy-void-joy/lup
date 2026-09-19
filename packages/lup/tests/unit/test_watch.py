@@ -8,7 +8,7 @@ population was gone.
 
 import socket
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 
 from lup.coordination.identity import member_ref, mint_member_id
 from lup.coordination.repository import RepositoryPeers
@@ -124,18 +124,30 @@ def test_nudging_wakes_a_peer_through_its_inbox_and_says_so_for_one_without(
 
     peers.send("claude", "look")
     peers.send("silent", "look")
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
-        listener.bind(str(inbox))
-        listener.listen(1)
+    # Served until closed rather than accepting once: how many times a tick
+    # nudges one address is the watcher's business, and a listener that took
+    # a single connection would fail the test on the second rather than
+    # report what the watcher did.
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(inbox))
+    listener.listen(8)
+    listener.settimeout(0.1)
+    stopping = Event()
 
-        def take_one_frame() -> None:
-            connection, _ = listener.accept()
+    def serve_until_stopped() -> None:
+        while not stopping.is_set():
+            try:
+                connection, _ = listener.accept()
+            except TimeoutError:
+                continue
             connection.close()
 
-        waiting = Thread(target=take_one_frame)
-        waiting.start()
-        nudges = [event for event in watcher.tick() if isinstance(event, Nudged)]
-        waiting.join(timeout=5)
+    serving = Thread(target=serve_until_stopped)
+    serving.start()
+    nudges = [event for event in watcher.tick() if isinstance(event, Nudged)]
+    stopping.set()
+    serving.join(timeout=5)
+    listener.close()
 
     by_address = {nudge.address: nudge.outcome for nudge in nudges}
     assert by_address["claude"].reached
