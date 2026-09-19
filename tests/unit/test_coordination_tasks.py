@@ -4,7 +4,10 @@
 # what each row costs its reader rather than by when it was written.
 """Tasks, delegation, and the rendering a person reads them in."""
 
+import json
+import socket
 from pathlib import Path
+from threading import Thread
 
 from lup.coordination.refs import ActorRef
 from lup.coordination.rendering import USER_HOLDER, render, user_tasks
@@ -133,15 +136,43 @@ def test_a_member_with_no_wake_path_is_told_so_rather_than_nudged() -> None:
     )
 
 
-def test_a_claude_peer_hands_the_wake_back_to_a_caller_that_can_make_it() -> None:
-    """The asymmetry, carried rather than papered over.
+def test_a_claude_peer_is_woken_by_a_frame_written_to_its_own_inbox(
+    tmp_path: Path,
+) -> None:
+    """Claude's path is a socket every session binds, not a tool a caller holds.
 
-    Claude serves no command that speaks to a running session — measured
-    against its own `--help`, which offers `agents`, `attach`, `logs`,
-    `respawn`, `rm` and `stop` and nothing that sends. So the only path is a
-    tool a session holds, and this says which and to whom.
+    A session takes a turn on a frame written there, so the library finishes
+    the wake itself rather than handing it back with instructions.
     """
-    answered = wake(WakePath(runtime="claude", handle="dev [36024e]"), "look")
+    inbox = tmp_path / "peer.sock"
+    delivered: list[bytes] = []
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(inbox))
+        listener.listen(1)
+
+        def take_one_frame() -> None:
+            connection, _ = listener.accept()
+            with connection:
+                delivered.append(connection.recv(4096))
+
+        waiting = Thread(target=take_one_frame)
+        waiting.start()
+        answered = wake(WakePath(runtime="claude", handle=str(inbox)), "look")
+        waiting.join(timeout=5)
+
+    assert answered == Woken(reached=True)
+    assert json.loads(delivered[0]) == {
+        "type": "user",
+        "message": {"role": "user", "content": "look"},
+    }
+
+
+def test_a_claude_peer_whose_inbox_has_gone_leaves_the_mail_waiting(
+    tmp_path: Path,
+) -> None:
+    """A wake that fails costs latency and never a message, so it never raises."""
+    answered = wake(
+        WakePath(runtime="claude", handle=str(tmp_path / "vanished.sock")), "look"
+    )
     assert not answered.reached
-    assert "SendMessage" in answered.instruction
-    assert "dev [36024e]" in answered.instruction
+    assert "nothing is listening" in answered.reason

@@ -16,7 +16,28 @@ from Claude Code, whose runtime does set a session id in its servers'
 environment, is stated on the parity page rather than papered over here.
 """
 
+from lup.coordination.wake import WakePath
+
 
 def codex_session_id() -> str:
     """Blank: Codex documents no session id reaching a server it starts."""
     return ""
+
+
+def codex_wake(cli_name: str) -> WakePath:
+    """Blank: nothing hands this session the thread `codex queue` takes.
+
+    The verb exists and reaches a session from any process, which is the half
+    Claude Code lacks -- but ``codex queue --thread`` takes a thread id or a
+    session name, and neither reaches a server Codex starts: the launch has
+    no flag that names a session, so there is nothing for a launcher to pass
+    on, and the session id that would stand in for one is the same one
+    :func:`codex_session_id` cannot read.
+
+    *cli_name* is accepted and unused, because what the launcher calls a
+    session is a fact about lup's roster here and not about anything Codex
+    would resolve -- passing the roster's name to ``--thread`` would name a
+    thread that does not exist. Declaring blank is what makes a sender told
+    that nothing will wake this peer rather than told a wake was attempted.
+    """
+    return WakePath()

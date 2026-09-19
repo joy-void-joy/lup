@@ -319,7 +319,9 @@ def folded_member(member: store.Member) -> SpawnedActor:
         description=member["description"],
         liveness=member["liveness"],
         wake=declared_wake(
-            store.text(wake.get("runtime")), store.text(wake.get("handle"))
+            store.text(wake.get("runtime")),
+            store.text(wake.get("handle")),
+            store.text(wake.get("session")),
         ),
         delivery=carried(member["delivery"], Delivery.INBOX),
     )

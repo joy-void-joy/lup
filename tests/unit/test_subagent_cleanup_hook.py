@@ -340,3 +340,27 @@ def test_a_project_that_declined_registers_nothing_and_carries_nothing() -> None
 
     assert quiet.registered == {}
     assert quiet.artifacts == []
+
+
+def test_the_start_event_tells_the_subagent_what_it_verifies(tmp_path: Path) -> None:
+    """The other half of what is true at that moment, and the costlier half.
+
+    A delegated agent inherits the repository's guidance and reads, correctly,
+    that the full gate is what has to be green — and nothing there says it is
+    not the one to run it. Several agents dispatched into one working tree
+    each start the whole suite over a tree the others are still editing, so
+    the answer is about a state that never existed and a failure in it cannot
+    be attributed to whoever caused it.
+
+    Said at the start rather than refused at the call, because a refusal lands
+    after the agent has planned around running it.
+    """
+    guard = laid_out(tmp_path / "plugin")
+    [start] = recorded("payloads-claude-print.jsonl", CLAUDE_SUBAGENT_START_EVENT)
+
+    said = json.loads(judged(guard, start))["hookSpecificOutput"]["additionalContext"]
+
+    assert "--changed" in said
+    assert "dev check" in said
+    # Both halves arrive together or a subagent reads neither.
+    assert "TaskStop" in said

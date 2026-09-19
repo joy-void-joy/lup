@@ -158,6 +158,36 @@ def test_a_name_a_member_has_renamed_away_from_still_reaches_it(
     assert "feat-locks" in found
 
 
+def test_a_name_reclaimed_while_a_member_was_quiet_still_reaches_it(
+    tmp_path: Path,
+) -> None:
+    """The live member is called this, whoever else holds the newest claim on it.
+
+    The sequence is ordinary and the state it leaves is not: a session goes
+    quiet long enough to read as gone, a newcomer in the same worktree takes
+    the name it derives from that worktree, the newcomer finishes, and the
+    first speaks again. It is live, every listing prints that name for it, and
+    the newest claim on the string belongs to somebody who has left -- so a
+    reading that asked only who a name reaches now found nobody live and let
+    the send through with no record. Measured on this repository's own roster,
+    where one of five live members was in exactly that state.
+    """
+    work = tmp_path / "work"
+    peers = joined_repository(work, tmp_path / "hooks")
+    quiet = mint_member_id()
+    peers.join(quiet, work, cli_name="feat-touches")
+    peers.leave(quiet, summary="stepped away")
+    newcomer = mint_member_id()
+    peers.join(newcomer, work, cli_name="feat-touches")
+    peers.leave(newcomer, summary="landed")
+    peers.join(quiet, work, cli_name="feat-touches")
+
+    found = folded_addresses(work)
+
+    assert store.called(coordination_root(work))[quiet] == "feat-touches"
+    assert "feat-touches" in found
+
+
 def test_a_member_that_has_left_is_no_longer_reached(tmp_path: Path) -> None:
     """Redirecting to a departed peer trades one call reaching nobody for another."""
     work = tmp_path / "work"

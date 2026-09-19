@@ -6,7 +6,10 @@ explicit environment always wins over them, and that merging never mutates
 the caller's mapping.
 """
 
+import os
+
 from lup.coordination.identity import LaunchedMember
+from lup.providers.identity import RUNTIME_DECIDED_ENV
 from lup.harness.environment import (
     NON_INTERACTIVE_SHELL_ENV,
     launcher_decided_names,
@@ -59,3 +62,22 @@ def test_every_variable_a_launcher_mints_is_one_the_suite_takes_away() -> None:
     minted = LaunchedMember(member_id="m", cli_name="n").environment()
 
     assert set(minted) <= set(launcher_decided_names({}))
+
+
+def test_the_suite_cannot_reach_the_session_that_is_running_it() -> None:
+    """The variables a runtime sets about a session are taken away too.
+
+    Written against an incident rather than a theory. `wake()` learned to
+    reach a Claude session by writing to the inbox socket its runtime names
+    in the environment, and a test calling `native_wake` without setting that
+    variable read the live one — so the suite delivered its own payload into
+    the session running pytest, which then reported a peer message nobody had
+    sent. Clearing what the launcher decided was never enough: these are set
+    by the runtime, and it is the runtime's that say which live session a
+    process belongs to.
+    """
+    for name in RUNTIME_DECIDED_ENV:
+        assert os.environ.get(name) is None, (
+            f"{name} survived into the suite, so anything calling wake() here"
+            " would reach whoever is running it"
+        )

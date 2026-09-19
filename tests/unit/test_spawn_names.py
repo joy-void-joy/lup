@@ -68,7 +68,74 @@ def test_a_blank_name_is_no_name() -> None:
 
 def test_a_named_spawn_is_left_to_the_runtime() -> None:
     """Deferred, not allowed: the kernel grants nothing it was not asked to."""
-    assert decide(spawn("leak-probe")) == {}
+    assert decide(spawn("leak_probe")) == {}
+
+
+def test_a_hyphen_is_refused_here_rather_than_silently_where_it_lands() -> None:
+    """Measured on Codex 0.155.1: a hyphenated name produced no PostToolUse at all.
+
+    The model retried with underscores unprompted, having learned the shape
+    by guessing. Refusing it here leaves a record and says what to pass.
+    """
+    declared = portable_harness().declared_hooks.spawn_names
+    assert declared is not None
+
+    decision = decide(spawn("leak-probe"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "deny"
+    reason = str(specific["permissionDecisionReason"])
+    assert "leak-probe" in reason
+    assert declared.misspelled in reason
+    assert declared.recovery in reason
+
+
+def test_a_name_longer_than_the_limit_is_refused() -> None:
+    """The shorter of the two runtimes' limits, counted rather than trusted."""
+    declared = portable_harness().declared_hooks.spawn_names
+    assert declared is not None
+
+    decision = decide(spawn("a" * (declared.limit + 1)))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "deny"
+    assert decide(spawn("a" * declared.limit)) == {}
+
+
+def test_a_name_may_not_open_with_its_punctuation() -> None:
+    """Both runtimes want a letter or a digit first, so the check does too."""
+    decision = decide(spawn("_leak_probe"))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "deny"
+
+
+def test_a_project_running_one_runtime_may_widen_what_a_name_carries() -> None:
+    """The safe set is the declaration's, since it follows from where it runs."""
+    declared = portable_harness().declared_hooks.spawn_names
+    assert declared is not None
+    widened = declared.model_copy(update={"punctuation": "-_"}).erased()
+
+    assert decide_spawn("leak-probe", [], widened).effect == "defer"
+    assert decide_spawn("leak.probe", [], widened).effect == "deny"
+
+
+def test_a_misspelled_name_escalates_the_way_a_missing_one_does() -> None:
+    """One refusal shape for both, so a caller who can answer for it is asked."""
+    declared = portable_harness().declared_hooks.spawn_names
+    assert declared is not None
+
+    escalated = decide_spawn(
+        "leak-probe",
+        ["# lup: escalate: the name is the runtime's to reject"],
+        declared.erased(),
+    )
+
+    assert escalated.effect == "ask"
+    assert "the name is the runtime's to reject" in escalated.reason
 
 
 def test_an_escalated_spawn_becomes_the_question_the_caller_asked_for() -> None:

@@ -52,6 +52,7 @@ from lup.coordination.pulse import Pulse
 from lup.coordination.refs import ActorRef
 from lup.coordination.roster import Delivery, Roster, SpawnedActor, folded_member
 from lup.coordination.touches import Claim, Touches
+from lup.coordination.wake import WakePath
 
 
 class Retention(BaseModel, frozen=True):
@@ -205,6 +206,7 @@ class RepositoryPeers:
         worktree: Path,
         cli_name: str = "",
         delivery: Delivery = Delivery.MAILBOX,
+        wake: WakePath = WakePath(),
     ) -> ActorRef:
         """Put this session on the roster, and hand back the address it answers to.
 
@@ -222,6 +224,13 @@ class RepositoryPeers:
         answers to is refused rather than numbered, because the caller meant
         it, and the refusal comes before the arrival so a refused join leaves
         no row behind.
+
+        The wake path arrives rather than being worked out here, because what
+        makes a session look is its runtime's own arrangement and this module
+        is neither runtime's. Empty is the honest default and the answer for
+        anything that did not ask its adapter: a member with no wake path
+        still has its inbox, and a sender is told nothing will nudge it
+        rather than told a nudge was sent.
         """
         current = self.names.current(member_id)
         taken = self.names.called(self.live_ids(), except_id=member_id)
@@ -234,6 +243,7 @@ class RepositoryPeers:
             task=f"working in {worktree}",
             delivery=delivery,
             worktree=str(worktree),
+            wake=wake,
         )
         chosen = (
             cli_name

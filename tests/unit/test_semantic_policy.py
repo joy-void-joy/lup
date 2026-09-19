@@ -1285,6 +1285,29 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="docker compose up", effect="ask"),
     DecisionCase(input="docker rm abc123", effect="ask"),
     DecisionCase(input="docker $verb ps", effect="ask"),
+    # Codex: `queue` reaches another session and is refused in favour of the
+    # recorded stream, which is the act `lup.policy.kernel.peers` already
+    # refuses when a runtime spells it as a tool call. Everything that only
+    # renders allows; everything that opens an agent, a server or a plugin
+    # asks; and a word the CLI does not recognize asks rather than denying,
+    # because it becomes the prompt of an interactive session a sandbox
+    # confines rather than a verb reaching a remote it does not.
+    DecisionCase(input="codex queue --thread t --message hello", effect="deny"),
+    DecisionCase(input="codex --version", effect="allow"),
+    DecisionCase(input="codex doctor", effect="allow"),
+    DecisionCase(input="codex agents", effect="allow"),
+    DecisionCase(input="codex features list", effect="allow"),
+    DecisionCase(input="codex debug models", effect="allow"),
+    DecisionCase(input="codex debug prompt-input", effect="allow"),
+    DecisionCase(input="codex plugin list", effect="allow"),
+    DecisionCase(input="codex exec hello", effect="ask"),
+    DecisionCase(input="codex app-server", effect="ask"),
+    DecisionCase(input="codex plugin add p@m --json", effect="ask"),
+    DecisionCase(input="codex remote-control start", effect="ask"),
+    DecisionCase(input="codex login", effect="ask"),
+    DecisionCase(input="codex delete some-session", effect="ask"),
+    DecisionCase(input="codex notaverb", effect="ask"),
+    DecisionCase(input="codex -m gpt-5 queue --thread t --message hi", effect="deny"),
     DecisionCase(input="ps aux", effect="allow"),
     DecisionCase(input="zcat f.gz", effect="allow"),
     DecisionCase(input="# lup: escalate: build the crate\ncargo build", effect="ask"),
@@ -1358,7 +1381,37 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="timeout 5 uv run pytest", effect="allow"),
     DecisionCase(input="nice -n 10 uv run pytest", effect="allow"),
     DecisionCase(input="timeout 5 rm -rf x", effect="ask"),
-    DecisionCase(input="env", effect="allow"),
+    # A transparent wrapper is read through its own options to the command it
+    # wraps, rather than by skipping one word: skipping landed on the wrapper's
+    # flag, and a word beginning with `-` matches no rule, so the segment was
+    # "not classified" and allowed inside the boundary. Each of these carried
+    # an interpreter the table refuses outright.
+    DecisionCase(input="env -i node evil.js", effect="deny"),
+    DecisionCase(input="stdbuf -oL node evil.js", effect="deny"),
+    DecisionCase(input="setsid -f node evil.js", effect="deny"),
+    DecisionCase(input="time -p node evil.js", effect="deny"),
+    DecisionCase(input="command -p node evil.js", effect="deny"),
+    DecisionCase(input="exec -a nice node evil.js", effect="deny"),
+    DecisionCase(input="nohup env stdbuf -oL node evil.js", effect="deny"),
+    # And the wrapper still reaches an ordinary command through those options.
+    DecisionCase(input="stdbuf -oL cat f", effect="allow"),
+    DecisionCase(input="env --unset=GH_TOKEN ls", effect="allow"),
+    DecisionCase(input="env -- ls -la", effect="allow"),
+    DecisionCase(input="env FOO=1 ls", effect="allow"),
+    # `env` wrapping nothing readable prints the whole environment, which is
+    # every variable the launcher set and the credentials among them, into a
+    # transcript that outlives the turn. Refused rather than asked: a question
+    # is answered yes on the way to something else. `-S` re-splits the rest of
+    # the line by its own quoting rules, so what runs cannot be read at all.
+    DecisionCase(input="env", effect="deny"),
+    DecisionCase(input="env -0", effect="deny"),
+    DecisionCase(input="env FOO=1", effect="deny"),
+    DecisionCase(input="printenv", effect="deny"),
+    DecisionCase(input="printenv --null", effect="deny"),
+    DecisionCase(input="env | sort", effect="deny"),
+    DecisionCase(input='env -S "rm -rf src"', effect="deny"),
+    DecisionCase(input="printenv PATH", effect="allow"),
+    DecisionCase(input="printenv -0 HOME", effect="allow"),
     DecisionCase(input="uv run pytest > tmp/out.txt", effect="allow"),
     # find -exec payloads recurse; the sed scanner reads the full stdout-only
     # grammar; curl is screened to read methods against the fetch scopes.

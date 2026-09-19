@@ -279,12 +279,17 @@ def guard_report(
 ) -> str:
     """What to tell a developer whose checkout the suite just wrote into.
 
+    The fixture reading leads, because it is the one the suite exists to
+    catch and the one the reader cannot see for themselves. It is not the only
+    one: where several sessions share a clone, a commit made in this worktree
+    while the suite ran moves a ref exactly as a stray fixture does, and from
+    the refs alone the two are the same event. So both are named, with the
+    command that separates them — a reader handed one reading and meeting the
+    other spends the length of a gate looking for a fixture that is not there.
+
     Empty when nothing moved, which is the caller's signal to say nothing.
-    The wording names the cause the evidence actually supports — a fixture
-    that reached the enclosing repository — because the alternative reading,
-    that the developer moved a branch mid-run, is one they can rule out
-    themselves and the suite cannot. ``window`` locates the change where the
-    caller settles per test; a caller comparing two bare states has none.
+    ``window`` locates the change where the caller settles per test; a caller
+    comparing two bare states has none.
     """
     moved = moved_refs(before, after)
     if not moved:
@@ -314,6 +319,13 @@ def guard_report(
             "Then find the fixture: it is one that runs git without",
             "`-C <tmp_path>` or without `monkeypatch.chdir` into the",
             "repository it built.",
+            "",
+            "If there is no such fixture, read the other cause: something",
+            "committed in this worktree while the suite ran. `git reflog show",
+            "<ref>` dates the move and names what made it, and an ordinary",
+            "commit message there is a bystander rather than this run — from",
+            "the refs alone the suite cannot tell the two apart. Re-run over",
+            "a tree that has stopped moving.",
         ]
     )
 

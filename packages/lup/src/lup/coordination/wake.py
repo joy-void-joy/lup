@@ -4,21 +4,32 @@ Mail is the durable record and it is always written; a wake sits on top of it,
 never instead of it. That ordering is the whole safety property here — a wake
 that fails costs a peer some latency, and never a message.
 
-**The runtimes differ, and the difference is not ours to paper over.** Codex
-serves `codex queue`, which reaches a session from any process on the machine.
-Claude serves no such command: its only path to a running session is a tool
-inside another session, so nothing this library runs can take it. Measured
-against Claude Code's own `--help`, which lists `agents`, `attach`, `logs`,
-`respawn`, `rm` and `stop` and no verb that speaks to a live session, and
-against the environment a session holds — the handle its peers address it by
-appears in none of the variables it is given.
+**Both runtimes can be reached from any process on the machine**, by means that
+are each the runtime's own. Codex serves ``codex queue``. Claude gives every
+session a private inbox on a Unix socket and accepts a newline-delimited JSON
+frame written to it, which arrives in that session as a message and starts a
+turn — measured against a background session confirmed idle, which answered a
+token it could only have read there, and measured again through an inbox moved
+by ``--messaging-socket-path``. The frame shape is the runtime's own, spelled
+in its own startup output.
 
-So this reports what would wake a member rather than always doing it. Where
-lup can act it acts; where only the caller can, it says so in the words the
-caller needs, and the caller is a skill running inside a session that has the
-tool. A member nothing can wake is an honest third answer, not a failure.
+A frame also names the session it is for, and an inbox drops one whose name
+disagrees with its own — measured, by sending two frames at one live session
+and watching only the one carrying its id arrive. That matters because a
+socket path is not unique the way a session is: every contained session's
+default inbox is ``/tmp/cc-socks/<pid>.sock``, and two containers whose
+runtime is pid 1 or pid 7 in their own namespaces name the same file. So the
+id travels with the path, and a nudge that reached the wrong session is
+refused by it rather than delivered to it. :mod:`lup.harness.messaging` is
+where lup puts the sockets so that case is rare rather than ordinary; this is
+what makes it harmless when it happens anyway.
+
+So this finishes the job on both, and a member nothing can wake is one that
+declared no path rather than one whose runtime offers none.
 """
 
+import json
+import socket
 from pathlib import Path
 from typing import Literal
 
@@ -40,12 +51,13 @@ the set is a second place a runtime would have to be added.
 
 
 class WakePath(BaseModel, frozen=True):
-    """How one member can be made to look, and by whom.
+    """How one member can be made to look, and by what.
 
-    A runtime and a handle rather than a command line, because who can run the
-    command differs by runtime: one is a process anybody may start and the
-    other is a tool only a session holds. A caller that was handed a command
-    would have no way to tell those apart.
+    A runtime and a handle rather than a command line, because what the handle
+    means is the runtime's own: one addresses a conversation the provider's CLI
+    knows by name, the other names a socket on this filesystem. A caller handed
+    a command line would have no way to tell those apart, and no way to report
+    which of them failed.
     """
 
     runtime: WakeRuntime = ""
@@ -57,15 +69,27 @@ class WakePath(BaseModel, frozen=True):
     """
 
     handle: str = ""
-    """What that runtime addresses this member by, in its own spelling.
+    """What that runtime reaches this member by, in its own spelling.
 
-    A thread id or session name for Codex, which `codex queue --thread` takes
-    verbatim. For Claude it is the name its peers address it by, which only
-    the session itself can learn — nothing in the environment carries it.
+    A thread id or session name for Codex, which ``codex queue --thread`` takes
+    verbatim. For Claude it is the filesystem path of the session's own inbox
+    socket, which the launcher places and the session binds.
+    """
+
+    session: str = ""
+    """Which session the handle belongs to, where the runtime checks it.
+
+    Claude's own id for the session, which it compares against a frame's
+    ``session_id`` and drops the frame on a mismatch. Carried beside the
+    handle rather than folded into it because it answers a different question:
+    the handle says where to write, and this says who has to be there for the
+    write to count. Empty asks for no check, which is the honest reading of a
+    member that never said — and the reason Codex leaves it so, its queue
+    addressing a conversation by name rather than a file anybody could bind.
     """
 
 
-def declared_wake(runtime: str, handle: str) -> WakePath:
+def declared_wake(runtime: str, handle: str, session: str = "") -> WakePath:
     """One member's wake path as a fold read it off the record.
 
     Narrowing rather than validating, because this is the read path a listing
@@ -74,37 +98,28 @@ def declared_wake(runtime: str, handle: str) -> WakePath:
     """
     match runtime:
         case "claude" | "codex":
-            return WakePath(runtime=runtime, handle=handle)
+            return WakePath(runtime=runtime, handle=handle, session=session)
         case _:
-            return WakePath(handle=handle)
+            return WakePath(handle=handle, session=session)
 
 
 class Woken(BaseModel, frozen=True):
     """What happened when somebody tried to make a member look.
 
-    Three outcomes rather than a boolean, because they need different things
-    of the caller: one is done, one is the caller's to finish with a tool this
-    library does not have, and one is nothing anybody can do. A boolean would
-    collapse the middle into the last and lose a peer that was reachable.
+    Two outcomes, because there are two: the peer was made to look, or it was
+    not and the mail waits for it. Nothing here asks the caller to finish the
+    job, since on both runtimes this library can.
     """
 
     reached: bool
     """Whether the member has been made to look, by this call."""
 
-    instruction: str = ""
-    """What the caller must do to finish it, empty where nothing is left.
-
-    Filled for a runtime whose only path is a tool the caller holds and this
-    library does not, which is Claude's whole case: the words name the tool and
-    the address, so a skill can act on them without knowing the asymmetry.
-    """
-
     reason: str = ""
-    """Why nothing happened, for a member nothing can wake."""
+    """Why nothing happened, empty where something did."""
 
 
 def wake(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
-    """Make one member look at what is waiting, as far as this process can.
+    """Make one member look at what is waiting.
 
     Never raises on a failed wake. The mail is already written by the time
     anything calls this, so a runtime that is missing, a session that has since
@@ -116,14 +131,7 @@ def wake(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
         case "codex" if path.handle:
             return queued(path.handle, message, cwd)
         case "claude" if path.handle:
-            return Woken(
-                reached=False,
-                instruction=(
-                    f"send this to {path.handle!r} with your SendMessage tool —"
-                    " Claude serves no command that speaks to a running session,"
-                    " so only a session holding the tool can carry it"
-                ),
-            )
+            return injected(Path(path.handle), message, path.session)
         case _:
             return Woken(
                 reached=False,
@@ -134,11 +142,49 @@ def wake(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
             )
 
 
-def queued(thread: str, message: str, cwd: Path | None = None) -> Woken:
-    """Hand one message to a Codex session through its own queue.
+def injected(
+    inbox: Path, message: str, session: str = "", patience: float = 3.0
+) -> Woken:
+    """Write one message into a Claude session's own inbox socket.
 
-    The one runtime where this library can finish the job, so it does.
+    One frame, carrying the message as the session's own user turn, because
+    that is what makes an idle session take a turn rather than merely record
+    something. The authentication frame the runtime's help describes is left
+    off: the socket accepts a message without one, and the token that frame
+    would carry belongs to the receiving session and is published only for
+    some of them, so requiring it here would make the wake work for a subset
+    of peers and fail silently for the rest.
+
+    *session* is the id the receiving inbox checks the frame against, and
+    omitting it asks for no check. It is the difference between reaching a
+    path and reaching a member: paths collide across pid namespaces and
+    members do not, so a frame that names its session is dropped by whoever
+    else has bound that path rather than delivered by them.
+
+    *patience* bounds the write rather than leaving it to the kernel, because
+    a socket file can outlive the process that bound it, and the worst this
+    call is allowed to cost is a peer that stays un-nudged.
     """
+    frame = {
+        "type": "user",
+        "message": {"role": "user", "content": message},
+        **({"session_id": session} if session else {}),
+    }
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+            peer.settimeout(patience)
+            peer.connect(str(inbox))
+            peer.sendall(json.dumps(frame).encode() + b"\n")
+    except OSError as failure:
+        return Woken(
+            reached=False,
+            reason=f"nothing is listening at {str(inbox)!r}: {failure}",
+        )
+    return Woken(reached=True)
+
+
+def queued(thread: str, message: str, cwd: Path | None = None) -> Woken:
+    """Hand one message to a Codex session through its own queue."""
     try:
         CODEX_COMMAND(
             "queue",
