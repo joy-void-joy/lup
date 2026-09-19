@@ -1,6 +1,7 @@
 """Claude-native prompt and artifact renderers."""
 
 import json
+from importlib import resources
 import shlex
 from collections.abc import Sequence
 from pathlib import Path
@@ -8,6 +9,7 @@ from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.drift_prompt import drift_hook
+from lup.providers.subagent_cleanup import cleanup_hooks
 from lup.providers.roster_prompt import (
     departure_hook,
     folded,
@@ -552,6 +554,41 @@ moment, so not a value a project could choose.
 
 # lup: ignore[constant-declaration] — the runtime's wire spelling of its own
 # event, which no project could choose differently and still be heard
+CLAUDE_SUBAGENT_START_EVENT = "SubagentStart"
+"""The event Claude Code fires as a subagent begins, before its first turn.
+
+Documented at https://code.claude.com/docs/en/hooks under "SubagentStart" and
+measured on 2.1.278: the hook reads `agent_id`, `agent_type`, `session_id`,
+`cwd` and `hook_event_name` on stdin, cannot block the subagent, and on exit
+0 its stdout's `hookSpecificOutput.additionalContext` is added as context the
+subagent reads. The runtime's own spelling of the moment, so not a value a
+project could choose.
+"""
+
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
+CLAUDE_SUBAGENT_STOP_EVENT = "SubagentStop"
+"""The event Claude Code fires as a subagent is about to hand back its report.
+
+Documented at https://code.claude.com/docs/en/hooks under "SubagentStop" and
+measured on 2.1.278: the hook reads `agent_id`, `agent_type`,
+`agent_transcript_path`, `stop_hook_active`, `last_assistant_message`,
+`background_tasks` and `session_crons` beside the common fields, and a
+stdout of `{"decision": "block", "reason": ...}` on exit 0 keeps the subagent
+running with the reason as its next instruction; the next stop then carries
+`stop_hook_active` true. The runtime's own spelling of the moment, so not a
+value a project could choose.
+"""
+
+CLAUDE_SUBAGENT_CLEANUP = (
+    resources.files("lup.providers.claude")
+    .joinpath("assets/subagent_cleanup.py")
+    .read_text("utf-8")
+)
+"""The host half of the subagent cleanup fold, shipped verbatim beside the kernel."""
+
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
 CLAUDE_EXIT_EVENT = "SessionEnd"
 """The event Claude Code fires as a session ends, before its process exits.
 
@@ -647,10 +684,22 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
             source,
             CLAUDE_EXIT_EVENT,
         )
+        # A subagent is told at its start what it arms is its own to stop,
+        # and refused once at its stop while any of it is still listed.
+        cleanup = cleanup_hooks(
+            Path(f".claude/plugins/{self.plugin_name}"),
+            "CLAUDE_PLUGIN_ROOT",
+            source,
+            CLAUDE_SUBAGENT_CLEANUP,
+            "lup.providers.claude.assets.subagent_cleanup",
+            CLAUDE_SUBAGENT_START_EVENT,
+            CLAUDE_SUBAGENT_STOP_EVENT,
+        )
         hooks = {
             "description": (
                 "Lup semantic permission policy, peer delivery, the roster's "
-                "changes at each prompt, and this session's departure as it ends"
+                "changes at each prompt, this session's departure as it ends, "
+                "and a subagent's report waiting on its background work"
             ),
             "hooks": {
                 **{
@@ -663,6 +712,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 },
                 **roster.registered,
                 **departure.registered,
+                **cleanup.registered,
             },
         }
         evidence = {"schemaVersion": 1, "policyIds": source.policy_ids}
@@ -691,6 +741,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 ),
                 *roster.artifacts,
                 *departure.artifacts,
+                *cleanup.artifacts,
                 *store_artifacts(
                     Path(f".claude/plugins/{self.plugin_name}"), source.id
                 ),
