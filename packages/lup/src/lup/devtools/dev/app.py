@@ -7,6 +7,7 @@ the declarations the policy and plugin commands explain. An application adds
 whatever else its own `dev` tree offers to the app it gets back.
 """
 
+import datetime as dt
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -39,6 +40,9 @@ import lup.devtools.dev.modules as modules
 import lup.devtools.dev.seams as seams
 import lup.devtools.dev.relocate as relocate_mod
 import lup.devtools.dev.rules as rules
+from lup.devtools.changelog import Changelog
+from lup.devtools.dev.branches import get_integration_branch
+from lup.execution.shell import git
 from lup.harness.codescan.markers import NoteKind
 from lup.harness.codescan.registry import all_rules
 import lup.devtools.py.app as py
@@ -1239,6 +1243,111 @@ def create_dev_app(
         typer.echo(f"{len(owed)} migration(s) since {revision}:")
         for line in migrations.rendered(owed):
             typer.echo(f"  {line}")
+
+    @app.command("release")
+    def release_cmd(
+        level: Annotated[
+            str,
+            typer.Argument(help="Which part of the version moves: patch, minor, major"),
+        ],
+        dry_run: DryRun = False,
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """Cut a release: close the changelog, move the version, tag it.
+
+        One transaction over the files a release touches, because it had been
+        four prose steps in a skill and three of them had never run. What
+        stays outside is what cannot be derived — which level the release is,
+        and what the entries under `## Unreleased` say — and everything
+        downstream of those is arithmetic, carried out the same way each time.
+
+        Refused on a dirty tree and on an undeclared break, in that order. The
+        first because a release commit should hold the release and not
+        whatever somebody left lying about; the second because the gate exists
+        to stop a break shipping with no instruction, and a release is the
+        moment it would ship.
+        """
+        from lup.devtools.dev.release import (
+            ReleasePlan,
+            cleared_declarations,
+            is_level,
+            next_version,
+            published_version,
+            released,
+            with_version,
+        )
+
+        if not is_level(level):
+            typer.echo(f"{level} is not patch, minor or major", err=True)
+            raise typer.Exit(1)
+        # Only where something is about to be written. A dry run is what
+        # somebody asks *while* the tree is dirty, to see what a release would
+        # do before deciding what to do with the rest of it.
+        if not dry_run and git.out("status", "--porcelain").strip():
+            typer.echo(
+                "the working tree has uncommitted changes — a release commit "
+                "holds the release, so land or discard them first",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        declarations = declared()
+        spec = declarations.release
+        root = project_root()
+        base = migrations.gate_base(get_integration_branch())
+        undeclared = (
+            migrations.undeclared_breaks(declarations.project, base) if base else []
+        )
+        if undeclared:
+            for capability in undeclared:
+                typer.echo(f"undeclared break: {capability.spelled()}", err=True)
+            typer.echo(
+                "a release cannot carry a break with nothing to read — declare "
+                "each in `lup.devtools.dev.migrations.DECLARED`",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        manifest = root / spec.version_file
+        changelog_path = root / spec.changelog
+        previous = published_version(manifest)
+        version = next_version(previous, level)
+        today = dt.date.today()
+        pending = migrations.rendered(migrations.DECLARED)
+        log = Changelog.read(changelog_path)
+        plan = ReleasePlan(
+            previous=previous,
+            version=version,
+            date=today,
+            tag=f"{spec.tag_prefix}{version}",
+            migrations=pending,
+            breaks=len(migrations.DECLARED),
+            entries=bool(log.unreleased),
+        )
+
+        if dry_run:
+            if as_json:
+                output_json(plan)
+            else:
+                for line in plan.spelled():
+                    typer.echo(f"would release: {line}")
+            return
+
+        declared_source = Path(migrations.__file__)
+        changelog_path.write_text(released(log, version, today, pending).render())
+        manifest.write_text(with_version(manifest.read_text(), version))
+        declared_source.write_text(cleared_declarations(declared_source.read_text()))
+
+        git.add(*(str(path) for path in (changelog_path, manifest, declared_source)))
+        git.commit("-m", f"release: {previous} → {version}")
+        git.tag("-a", plan.tag, "-m", f"{spec.version_file} {version}")
+
+        if as_json:
+            output_json(plan)
+        else:
+            for line in plan.spelled():
+                typer.echo(f"released: {line}")
+            typer.echo(f"tagged {plan.tag} — pushing the tag is what publishes")
 
     @migrate_app.command("check")
     def migrate_check_cmd(

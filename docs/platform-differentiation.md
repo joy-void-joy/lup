@@ -78,7 +78,7 @@ Every family in `.claude/` vs `.codex/`/`.agents/`, with an explicit decision.
 
 | Family | Claude | Codex | Decision |
 | --- | --- | --- | --- |
-| Skills (37) | `commands/*.md` | `skills/*/SKILL.md` | Parity — same 37 declarations, native formats. |
+| Skills (38) | `commands/*.md` | `skills/*/SKILL.md` | Parity — same 38 declarations, native formats. |
 | Agents (4) | `plugins/lup/agents/*.md` | `.codex/agents/*.toml` | Parity — same 4 declarations, native formats. |
 | Plugin manifest | `.claude-plugin/plugin.json` + marketplace | `.codex-plugin/plugin.json` + `.agents/plugins/marketplace.json` | Parity — native schemas. |
 | Hooks (`hooks.json`, `scripts/policy.py`, `runtime/kernel.py`, `runtime/policy_data.py`, `runtime/evidence.json`) | Structured decisions, edit inspection, autonomous identities | Structured native permission decisions, per-file patch inspection, explicit review-queue approval for exact retries, identities from the environment | Shared semantic kernel and edit gates; approval presentation differs as stated above. Pending native permission events are never approval evidence. |

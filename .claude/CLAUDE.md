@@ -18,7 +18,7 @@ Two kinds of delegated agent look alike and must not be conflated: the **native 
 
 ## Who Else Is Here
 
-Other sessions work in this repository, in other worktrees, started by whoever. Before starting something substantial, call `coordination_peers`. Each row carries what a session *says* it is doing and, separately, `holding` — what its calls actually changed or locked. Read `holding`: a description is only as fresh as the last time somebody wrote one. A path somebody holds is not forbidden, but say so with `coordination_send` before writing it, and call `coordination_describe` when what you are on changes, so the row peers read of you is true.
+Other sessions work in this repository, started by whoever. Before starting something substantial, `coordination_describe` what you are on, then call `coordination_peers`, which is refused until you have. Each row carries what a session *says* it is doing and, separately, `holding`, what its calls changed or locked. Read `holding`: a description is only as fresh as its last writing. A held path is not forbidden, but say so with `coordination_send` before writing it, and describe again when what you are on changes, so your row is true.
 
 ## The Gates You Will Meet
 

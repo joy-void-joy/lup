@@ -2,26 +2,40 @@
 
 Written against the failures that make a repository roster useless without
 being visibly broken — a name that stops resolving the moment its session
-renames, a description that still says what somebody was doing an hour ago,
-and a store that comes into being because a process mentioned it.
+renames, two sessions in one worktree printed under one address so a message
+to the other lands on oneself, a description that still says what somebody
+was doing an hour ago, a listing that is a month of history, mail queued for
+a session that left, and a store that comes into being because a process
+mentioned it.
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
+from lup.channels.models import utc_now
 from lup.coordination.identity import (
     MEMBER_ENV,
+    NAME_ENV,
     MemberNames,
+    NameTakenError,
     derived_cli_name,
     member_ref,
     mint_member_id,
     session_member_id,
 )
 from lup.coordination.peer_tools import create_peer_tools
-from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import Delivery
+from lup.coordination.pulse import reset
+from lup.coordination.repository import (
+    PeerDepartedError,
+    RepositoryPeers,
+    Retention,
+    launched_member,
+)
+from lup.coordination.roster import ActorDescribed, Delivery
 from lup.coordination.store import coordination_root
+from lup.tools.mcp import LupMcpTool, ToolResponse, response_text
 
 
 def joined(
@@ -73,17 +87,117 @@ def test_a_name_written_down_before_a_rename_still_reaches_its_session(
     assert peers.names.current(member) == "merger"
 
 
-def test_a_reused_name_reaches_whoever_claimed_it_last(tmp_path: Path) -> None:
+def test_a_name_a_live_session_answers_to_cannot_be_taken(tmp_path: Path) -> None:
+    """One address for two peers is the collision the roster exists to rule out."""
+    peers, first = joined(tmp_path, "reviewer")
+    second = mint_member_id()
+    peers.join(second, tmp_path / "other", cli_name="worker")
+
+    with pytest.raises(NameTakenError) as refused:
+        peers.rename(second, "reviewer")
+
+    assert refused.value.holder_id == first
+    assert peers.names.current(second) == "worker"
+    with pytest.raises(NameTakenError):
+        peers.join(mint_member_id(), tmp_path / "third", cli_name="reviewer")
+
+
+def test_a_name_a_session_renamed_away_from_reaches_whoever_took_it(
+    tmp_path: Path,
+) -> None:
     """A name is a handle, and handles get reused after they are released."""
     peers, first = joined(tmp_path, "reviewer")
     second = mint_member_id()
     peers.join(second, tmp_path / "other", cli_name="worker")
+    peers.rename(first, "merger")
 
     peers.rename(second, "reviewer")
 
     found = peers.address("reviewer")
     assert found is not None and found.id == second
     assert found.id != first
+
+
+def test_a_name_reaches_the_live_session_ahead_of_one_that_left(
+    tmp_path: Path,
+) -> None:
+    """The session somebody typing a name means is the one still here."""
+    peers, first = joined(tmp_path, "reviewer")
+    peers.rename(first, "merger")
+    second = mint_member_id()
+    peers.join(second, tmp_path / "other", cli_name="reviewer")
+
+    peers.leave(second, summary="landed")
+
+    found = peers.address("reviewer")
+    assert found is not None and found.id == first
+
+
+def test_two_sessions_in_one_worktree_are_numbered_apart(tmp_path: Path) -> None:
+    """The address a listing prints for either reaches that one and not the other."""
+    peers = RepositoryPeers(tmp_path)
+    first, second, third = mint_member_id(), mint_member_id(), mint_member_id()
+    worktree = tmp_path / "dev"
+
+    peers.join(first, worktree)
+    peers.join(second, worktree)
+    peers.join(third, worktree)
+
+    assert [peers.names.current(one) for one in (first, second, third)] == [
+        "dev",
+        "dev-2",
+        "dev-3",
+    ]
+    assert {view.address for view in peers.listing()} == {"dev", "dev-2", "dev-3"}
+    found = peers.address("dev-2")
+    assert found is not None and found.id == second
+
+
+def test_a_numbered_name_is_kept_across_rejoins_and_freed_by_a_departure(
+    tmp_path: Path,
+) -> None:
+    """Numbered against the live sessions, so a departure gives the name back."""
+    peers = RepositoryPeers(tmp_path)
+    first, second, third = mint_member_id(), mint_member_id(), mint_member_id()
+    worktree = tmp_path / "dev"
+    peers.join(first, worktree)
+    peers.join(second, worktree)
+
+    peers.join(second, worktree)
+    peers.leave(first)
+    peers.join(third, worktree)
+
+    assert peers.names.current(second) == "dev-2"
+    assert peers.names.current(third) == "dev"
+
+
+def test_a_launched_session_joins_under_the_name_its_launcher_minted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runtime's chrome and the roster show one name, because one process chose it."""
+    monkeypatch.setenv(NAME_ENV, "dev-2")
+    peers = RepositoryPeers(tmp_path)
+    member = mint_member_id()
+
+    peers.join(member, tmp_path / "dev")
+
+    assert peers.names.current(member) == "dev-2"
+
+
+def test_a_launcher_mints_a_name_no_live_session_answers_to(tmp_path: Path) -> None:
+    """Numbered against the roster it reads, and reading it creates nothing."""
+    worktree = tmp_path / "dev"
+    worktree.mkdir()
+
+    alone = launched_member(worktree)
+    assert alone.cli_name == "dev"
+    assert not coordination_root(worktree).exists()
+
+    RepositoryPeers(worktree).join(mint_member_id(), worktree)
+    beside = launched_member(worktree)
+    assert beside.cli_name == "dev-2"
+    assert beside.member_id != alone.member_id
+    assert beside.environment() == {MEMBER_ENV: beside.member_id, NAME_ENV: "dev-2"}
 
 
 def test_a_listing_says_what_each_session_is_doing_now(tmp_path: Path) -> None:
@@ -160,15 +274,48 @@ def test_a_session_that_never_described_itself_falls_back_to_its_task(
     assert view.doing.endswith("feature")
 
 
-def test_a_session_that_left_is_still_listed_and_says_so(tmp_path: Path) -> None:
+def test_a_departure_since_the_reader_joined_is_listed_and_says_so(
+    tmp_path: Path,
+) -> None:
     """Whether the peer you wrote to is still there is what a listing answers."""
-    peers, member = joined(tmp_path, "reviewer")
+    peers, reviewer = joined(tmp_path, "reviewer")
+    reader = mint_member_id()
+    peers.join(reader, tmp_path / "other", cli_name="reader")
+    arrived = peers.row(reader)
+    assert arrived is not None and arrived.arrived is not None
 
-    peers.leave(member, summary="landed it")
+    peers.leave(reviewer, summary="landed it")
 
-    [view] = peers.listing()
-    assert not view.member.running
-    assert view.member.summary == "landed it"
+    rows = {view.address: view for view in peers.listing(since=arrived.arrived)}
+    assert set(rows) == {"reader", "reviewer"}
+    assert not rows["reviewer"].member.running
+    assert rows["reviewer"].member.summary == "landed it"
+    assert [view.address for view in peers.listing()] == ["reader"]
+
+
+def test_a_departure_before_the_reader_joined_is_history(tmp_path: Path) -> None:
+    """What left before the reader came is nothing the reader could have written to."""
+    peers, reviewer = joined(tmp_path, "reviewer")
+    peers.leave(reviewer, summary="landed it")
+    reader = mint_member_id()
+    peers.join(reader, tmp_path / "other", cli_name="reader")
+    arrived = peers.row(reader)
+    assert arrived is not None
+
+    assert [view.address for view in peers.listing(since=arrived.arrived)] == ["reader"]
+
+
+def test_a_console_is_told_the_recent_departures_and_not_the_old(
+    tmp_path: Path,
+) -> None:
+    """No arrival of its own, so the retention window stands in for one."""
+    peers, reviewer = joined(tmp_path, "reviewer")
+    peers.leave(reviewer, summary="landed it")
+
+    assert [view.address for view in peers.recent()] == ["reviewer"]
+
+    peers.retention = Retention(departed_seconds=0.0)
+    assert peers.recent(now=utc_now() + timedelta(seconds=1)) == []
 
 
 def test_a_message_to_nobody_is_reported_rather_than_raised(tmp_path: Path) -> None:
@@ -176,6 +323,21 @@ def test_a_message_to_nobody_is_reported_rather_than_raised(tmp_path: Path) -> N
     peers, _member = joined(tmp_path, "reviewer")
 
     assert peers.send("nobody", "hello") is None
+
+
+def test_a_message_to_a_session_that_left_is_refused_with_its_departure(
+    tmp_path: Path,
+) -> None:
+    """Mail waiting for nobody tells the sender it was delivered."""
+    peers, member = joined(tmp_path, "reviewer")
+    peers.leave(member, summary="landed it")
+
+    with pytest.raises(PeerDepartedError) as refused:
+        peers.send("reviewer", "the base moved under you")
+
+    assert "reviewer left at" in str(refused.value)
+    assert "landed it" in str(refused.value)
+    assert peers.waiting(member).messages == []
 
 
 def test_mail_reaches_a_peer_and_is_taken_once(tmp_path: Path) -> None:
@@ -273,7 +435,159 @@ async def test_joining_twice_leaves_one_member(tmp_path: Path) -> None:
         for tool in create_peer_tools(peers, "abc123", tmp_path / "feat-thing")
     }
 
+    await tools["coordination_describe"].handler({"description": "rewriting"})
     await tools["coordination_peers"].handler({})
     await tools["coordination_peers"].handler({})
 
     assert len(peers.listing()) == 1
+
+
+def verbs(peers: RepositoryPeers, member: str, worktree: Path) -> dict[str, LupMcpTool]:
+    """One session's coordination verbs, by name."""
+    return {tool.name: tool for tool in create_peer_tools(peers, member, worktree)}
+
+
+def refusal(response: ToolResponse) -> str:
+    """What a verb said when it refused, failing the test where it did not refuse."""
+    assert response.get("is_error"), response_text(response)
+    return response_text(response)
+
+
+async def test_the_verbs_are_refused_until_the_session_has_described_itself(
+    tmp_path: Path,
+) -> None:
+    """A row saying only where a session is answers its readers wrongly."""
+    peers = RepositoryPeers(tmp_path)
+    tools = verbs(peers, "abc123", tmp_path / "feat-thing")
+
+    assert "coordination_describe" in refusal(
+        await tools["coordination_peers"].handler({})
+    )
+    assert "coordination_describe" in refusal(
+        await tools["coordination_send"].handler({"address": "user", "text": "hi"})
+    )
+
+    await tools["coordination_describe"].handler({"description": "rewriting"})
+
+    await tools["coordination_peers"].handler({})
+    assert [view.doing for view in peers.listing()] == ["rewriting"]
+
+
+async def test_a_rewind_unsays_the_description_and_the_verbs_ask_again(
+    tmp_path: Path,
+) -> None:
+    """What a discarded conversation said it was on is not what this one is on.
+
+    The description is written a second in the past because a file stamp
+    carries the kernel's coarse clock, which can trail the record's clock by a
+    tick; a real rewind is human time away from whatever the row last said.
+    """
+    peers = RepositoryPeers(tmp_path)
+    tools = verbs(peers, "abc123", tmp_path / "feat-thing")
+    peers.join("abc123", tmp_path / "feat-thing")
+    peers.cohort.roster.stream.append(
+        ActorDescribed(
+            actor=member_ref("abc123"),
+            description="the old plan",
+            at=utc_now() - timedelta(seconds=1),
+        )
+    )
+    await tools["coordination_peers"].handler({})
+
+    reset(peers.root, "abc123")
+
+    assert "coordination_describe" in refusal(
+        await tools["coordination_peers"].handler({})
+    )
+
+
+async def test_a_send_to_ones_own_address_is_refused(tmp_path: Path) -> None:
+    """The name resolved, to the sender, which is the one peer it cannot mean."""
+    peers = RepositoryPeers(tmp_path)
+    tools = verbs(peers, "abc123", tmp_path / "dev")
+    await tools["coordination_describe"].handler({"description": "rewriting"})
+
+    assert "own address" in refusal(
+        await tools["coordination_send"].handler({"address": "dev", "text": "hi"})
+    )
+
+
+async def test_a_send_to_a_session_that_left_is_a_refusal_naming_its_departure(
+    tmp_path: Path,
+) -> None:
+    peers, gone = joined(tmp_path, "reviewer")
+    peers.leave(gone, summary="landed it")
+    tools = verbs(peers, "abc123", tmp_path / "dev")
+    await tools["coordination_describe"].handler({"description": "rewriting"})
+
+    assert "landed it" in refusal(
+        await tools["coordination_send"].handler({"address": "reviewer", "text": "hi"})
+    )
+
+
+async def test_the_rename_verb_refuses_a_name_a_live_session_answers_to(
+    tmp_path: Path,
+) -> None:
+    peers, _other = joined(tmp_path, "reviewer")
+    tools = verbs(peers, "abc123", tmp_path / "dev")
+
+    assert "reviewer" in refusal(
+        await tools["coordination_rename"].handler({"name": "reviewer"})
+    )
+
+    await tools["coordination_rename"].handler({"name": "merger"})
+    assert peers.names.current("abc123") == "merger"
+    found = peers.address("merger")
+    assert found is not None and found.id == "abc123"
+
+
+async def test_a_lock_over_a_path_that_does_not_exist_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A lock covers what is there to write."""
+    peers = RepositoryPeers(tmp_path)
+    tools = verbs(peers, "abc123", tmp_path / "dev")
+    await tools["coordination_describe"].handler({"description": "rewriting"})
+
+    assert "does not exist" in refusal(
+        await tools["coordination_lock"].handler({"path": str(tmp_path / "gone")})
+    )
+    assert peers.held() == []
+
+
+async def test_releasing_a_prefix_this_session_does_not_hold_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Named rather than silent, because the asker is about to act on the answer."""
+    peers, holder = joined(tmp_path, "reviewer")
+    held = tmp_path / "src"
+    held.mkdir()
+    peers.lock(holder, held)
+    tools = verbs(peers, "abc123", tmp_path / "dev")
+    await tools["coordination_describe"].handler({"description": "rewriting"})
+
+    assert holder in refusal(
+        await tools["coordination_release"].handler({"path": str(held)})
+    )
+    assert peers.holding(held / "a.py")
+
+
+def test_a_claim_over_a_path_that_has_gone_is_ended_by_the_sweep(
+    tmp_path: Path,
+) -> None:
+    """A worktree removed from under a live session takes its paths with it."""
+    peers, member = joined(tmp_path, "reviewer")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    changed = tree / "a.py"
+    changed.write_text("value = 1\n", encoding="utf-8")
+    peers.touches.touched(member_ref(member), changed, digest="abc")
+    assert [claim.path for claim in peers.held()] == [str(changed)]
+
+    changed.unlink()
+    assert [claim.path for claim in peers.held()] == [str(changed)]
+    peers.sweep()
+    assert peers.held() == []
+
+    changed.write_text("value = 2\n", encoding="utf-8")
+    assert peers.held() == []

@@ -19,7 +19,8 @@ from unittest.mock import Mock
 import pytest
 
 import lup.devtools.harness.launch as launch
-from lup.coordination.identity import MEMBER_ENV
+from lup.coordination.identity import MEMBER_ENV, NAME_ENV, mint_member_id
+from lup.coordination.repository import RepositoryPeers
 
 
 def composition() -> Mock:
@@ -33,11 +34,12 @@ def composition() -> Mock:
 
 
 @pytest.fixture
-def uncontained(monkeypatch: pytest.MonkeyPatch) -> None:
+def uncontained(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Everything an uncontained `session_argv` reaches that is not its subject."""
     monkeypatch.setattr(launch, "accessible_roots", lambda _told: [])
     monkeypatch.setattr(launch, "settle_boundary", lambda *a, **k: None)
     monkeypatch.setattr(launch, "say_opening", lambda *a, **k: None)
+    monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
 
 
 def opened(environment: dict[str, str], tmp_path: Path) -> list[str]:
@@ -68,6 +70,22 @@ def test_a_launched_session_is_given_a_member_id(tmp_path: Path) -> None:
 
     assert argv == ["claude", "--model", "opus"]
     assert environment[MEMBER_ENV]
+    assert environment[NAME_ENV] == tmp_path.name
+
+
+@pytest.mark.usefixtures("uncontained")
+def test_a_second_session_in_a_worktree_is_named_apart_from_the_first(
+    tmp_path: Path,
+) -> None:
+    """The exported name is the one the roster will answer to, so it is minted
+    against the sessions already there rather than derived twice.
+    """
+    RepositoryPeers(tmp_path).join(mint_member_id(), tmp_path)
+    environment: dict[str, str] = {}
+
+    opened(environment, tmp_path)
+
+    assert environment[NAME_ENV] == f"{tmp_path.name}-2"
 
 
 @pytest.mark.usefixtures("uncontained")
@@ -121,6 +139,22 @@ def test_the_runtime_display_name_follows_the_worktree(
 
     assert "--name" in captured[0]
     assert captured[0][captured[0].index("--name") + 1] == "feat-coordination"
+
+
+def test_the_runtime_display_name_is_numbered_apart_from_a_live_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the chrome shows is what the roster answers to, so it is minted once
+    against the sessions already there.
+    """
+    worktree = tmp_path / "feat-coordination"
+    worktree.mkdir()
+    RepositoryPeers(worktree).join(mint_member_id(), worktree)
+    captured: list[list[str]] = []  # lup: ignore[empty-collection] — argv record
+
+    launched(worktree, monkeypatch, captured, extra=[])
+
+    assert captured[0][captured[0].index("--name") + 1] == "feat-coordination-2"
 
 
 def test_a_caller_who_named_their_own_session_still_wins(

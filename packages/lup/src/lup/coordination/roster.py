@@ -83,7 +83,11 @@ class ActorSpawned(RosterRecord, frozen=True):
         if standing is not None and self.actor.round < standing.actor.round:
             return standing
         return SpawnedActor(
-            actor=self.actor, task=self.task, running=True, heard=self.at
+            actor=self.actor,
+            task=self.task,
+            running=True,
+            heard=self.at,
+            arrived=self.at,
         )
 
 
@@ -176,6 +180,7 @@ class ActorJoined(RosterRecord, frozen=True):
             task=self.task,
             running=True,
             heard=self.at,
+            arrived=self.at,
             liveness=self.liveness,
             delivery=self.delivery,
             worktree=self.worktree,
@@ -278,6 +283,15 @@ class SpawnedActor(BaseModel, frozen=True):
     there starts from here and takes a later pulse where one was written; the
     record alone says when a member last *said* something, which is not the
     same question.
+    """
+
+    arrived: datetime | None = None
+    """When this member's present standing began: its newest arrival's own time.
+
+    Kept apart from ``heard`` because the two move differently — every record
+    advances ``heard``, and only an arrival sets this — and a reader has a
+    question only this answers: which departures happened while this member
+    was here to have written to the departed.
     """
 
     worktree: str = ""

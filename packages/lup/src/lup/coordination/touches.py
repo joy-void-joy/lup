@@ -84,6 +84,16 @@ class Claim(BaseModel, frozen=True):
         """
         return f"{'under' if self.prefix else 'at'} {self.path}"
 
+    def vacant(self) -> bool:
+        """Whether the path this claim is over has gone from the filesystem.
+
+        A worktree removed from under a session takes every path in it, and a
+        claim over one names nothing anybody could write. Asked of the
+        filesystem rather than of git, because a claim is keyed by the path
+        and the path is what has to be there.
+        """
+        return not Path(self.path).exists()
+
 
 class TouchRecord(BaseModel, frozen=True):
     """One thing that happened to a claim, and what it makes of that claim.
@@ -191,14 +201,41 @@ class PrefixReleased(TouchRecord, frozen=True):
         return None if self.actor.id in held else standing
 
 
-type TouchEntry = PathTouched | PathContested | PrefixLocked | PrefixReleased
-"""What the claim record carries: two ways to take one, and one way to give it back.
+class PathVacated(TouchRecord, frozen=True):
+    """The path a claim was over is gone, so the claim is over whoever held it.
+
+    Written by whichever session's sweep noticed, which is why it ends the
+    claim without being a holder: a path that is not there is held by nobody,
+    and that is a fact of the filesystem any session can check rather than a
+    say-so about somebody else's work. Recorded rather than derived at every
+    read, so that a worktree cut again at the same path starts with no claims
+    from the one that was removed.
+    """
+
+    type: Literal["vacated"] = "vacated"
+    prefix: bool = False
+    """Which claim over the path this ends, since a lock and a touch differ."""
+
+    def claim(self) -> Claim:
+        return Claim(
+            path=self.path, prefix=self.prefix, holders=[self.actor], at=self.at
+        )
+
+    def applied(self, standing: "Claim | None") -> "Claim | None":
+        return None
+
+
+type TouchEntry = (
+    PathTouched | PathContested | PrefixLocked | PrefixReleased | PathVacated
+)
+"""What the claim record carries: two ways to take one, and two ways it ends.
 
 A touch and a contest are the same event seen with and without an attribution,
 which is why they are separate records rather than one carrying an optional
 list — a reader deciding whether to write wants "somebody, and we know who"
 told apart from "somebody, and nobody could tell" without inspecting a field's
-emptiness.
+emptiness. A release is a holder giving a prefix back; a vacating is the path
+itself going, which ends a touch as readily as a lock.
 """
 
 TOUCH_ADAPTER: TypeAdapter[TouchEntry] = TypeAdapter(TouchEntry)
@@ -247,6 +284,12 @@ class Touches:
     def released(self, actor: ActorRef, prefix: Path) -> TouchEntry:
         """Record that one session has given a prefix back, if it held it."""
         return self.record(PrefixReleased(actor=actor, at=utc_now(), path=str(prefix)))
+
+    def vacated(self, actor: ActorRef, claim: Claim) -> TouchEntry:
+        """Record that the path under one claim has gone, ending the claim."""
+        return self.record(
+            PathVacated(actor=actor, at=utc_now(), path=claim.path, prefix=claim.prefix)
+        )
 
     def claims(self) -> list[Claim]:
         """Every claim standing, whether or not the session holding it is alive."""

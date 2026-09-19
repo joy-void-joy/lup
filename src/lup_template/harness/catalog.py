@@ -42,11 +42,12 @@ from lup.harness.codescan.boundaries import (
 )
 from lup.harness.content.modules.specs import RESOLVER
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
-from lup.devtools.dev.library import DISTRIBUTION
+from lup.devtools.dev.library import DISTRIBUTION, VENDORED_ROOT
+from lup.devtools.dev.release import ReleaseSpec
 from lup.devtools.dev.reach import Spread
 from lup.devtools.dev.scaffold import ScaffoldSource
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
-from lup.devtools.dev.workflow import FrontendSpec, WorkflowSpec
+from lup.devtools.dev.workflow import FrontendSpec, PublishSpec, WorkflowSpec
 from lup.devtools.project import DevProject, Tracker
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
@@ -321,6 +322,23 @@ def declared_spread() -> Spread:
     )
 
 
+def declared_release() -> ReleaseSpec:
+    """Which files a release moves here, and what its tag is called.
+
+    The distribution this repository publishes sits under ``packages/``, not
+    at the root. The root manifest is ``lup-template``, the scaffold, whose
+    version belongs to whoever adopts it and is never a release's to move —
+    and ``[tool.lup] agent_version`` beside it is not a release number at all,
+    it names the directory a project's traces are kept under. Three version
+    numbers, one of which ships, so the one that ships is named.
+
+    A project stamped out of this tree publishes itself from its own root and
+    inherits nothing here: the library's default already describes that, and
+    this override is a fact about lup's own layout.
+    """
+    return ReleaseSpec(version_file=f"{VENDORED_ROOT}/pyproject.toml")
+
+
 def declared_scaffold() -> ScaffoldSource:
     """Where this project's copied half comes from, and what of it it took.
 
@@ -348,6 +366,14 @@ WORKFLOW = WorkflowSpec(
 carries what has landed, so both deserve a run of their own. The frontend
 workspace is the library's, installed first because `dev check` rebuilds the
 bundles it compares against what is committed."""
+
+
+PUBLISH = PublishSpec(package=DISTRIBUTION)
+"""What a release tag publishes here: the library, not the scaffold.
+
+The workspace root is `lup-template`, which nobody installs — so the member
+is named, and `uv build` is told which of the two distributions in this
+repository is the one that ships."""
 
 
 NATIVE_RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]

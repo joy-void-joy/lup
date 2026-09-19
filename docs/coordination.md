@@ -58,19 +58,41 @@ started them and a listing of spawns should not claim otherwise.
 
 Two facts, deliberately separate. The **id** is minted once and never moves:
 mail is addressed to it, and a restart reattaches by it. The **name** is what
-a person types, and a session renames itself whenever what it is doing
-changes. Renames are journaled rather than overwritten, so a name somebody
-wrote down an hour ago still reaches the session it named until something else
-claims it — there is no error a sender could be shown, because the name they
-used was correct when they read it.
+a person types, and a session renames itself whenever a name would tell its
+peers more than its checkout does. Renames are journaled rather than
+overwritten, so a name somebody wrote down an hour ago still reaches the
+session it named until something else claims it — there is no error a sender
+could be shown, because the name they used was correct when they read it.
 
-A launcher exports the id as `LUP_COORDINATION_MEMBER` and can prove it, the
-way `LUP_AGENT_IDENTITY` is proven: a hook is spawned by the runtime CLI with
-the CLI's own environment, so an agent exporting this inside a shell call
-cannot reach the hook that reads it. A bare session in a worktree has the
-plugin and no launcher, so it falls back to the identity its own runtime gave
-it and registers under a name derived from its worktree. It is a full peer
-that cannot prove who started it.
+**A name reaches one live session.** A session is called after its worktree,
+and two sessions in one worktree want the same name, so the second is
+numbered — `dev`, then `dev-2` — against whatever the live sessions are called
+when it joins. A name chosen deliberately, by rename or by a launch, is
+refused rather than numbered where a live session already answers to it,
+because the caller meant it. Resolution runs the other way round: a name
+reaches the live session that claimed it most recently, and only where none is
+live does it reach the last claimant of all, so that a message to a session
+that has stopped is refused with when it left and what it concluded rather
+than queued for nobody. A message to one's own address is refused too.
+
+A launcher mints both halves and exports them as `LUP_COORDINATION_MEMBER` and
+`LUP_COORDINATION_NAME`, and can prove them, the way `LUP_AGENT_IDENTITY` is
+proven: a hook is spawned by the runtime CLI with the CLI's own environment, so
+an agent exporting these inside a shell call cannot reach the hook that reads
+them. The name is minted by the launcher rather than at the join because the
+runtime's own chrome shows it, and a chrome saying `dev` over a roster
+answering to `dev-2` would be two names for one session. A bare session in a
+worktree has the plugin and no launcher, so it falls back to the identity its
+own runtime gave it and is named after its worktree when it joins, numbered
+the same way. It is a full peer that cannot prove who started it.
+
+**Every verb but describing is refused until the session has described
+itself.** The roster is read by sessions deciding whether they can touch the
+same code, and a row saying only where a session is answers them wrongly; a
+session that has run all day without saying what it is on is the ordinary
+case, not the exception. So a session says what it is on before it may list
+its peers, reach one, or take a prefix, and says it again after a rewind or a
+clear, which unsays it. One line, at the start and whenever the work changes.
 
 ## Delivery is a property of the member
 
@@ -100,10 +122,17 @@ session took deliberately, for the case observation cannot reach — an agent
 about to rewrite a package has changed none of it yet, and the moment worth
 telling anybody about is before the first write rather than after it.
 
-A claim is alive while its holder is on the roster and expires with it. There
-is no timeout to tune and no release to forget, which is what makes an observed
-claim safe to act on: the failure mode of the whole mechanism is a session that
-stopped, and a stopped session's claims go with it.
+A claim is alive while its holder is on the roster and its path is on the
+disk, and expires with either. There is no timeout to tune and no release to
+forget, which is what makes an observed claim safe to act on: the failure mode
+of the whole mechanism is a session that stopped, and a stopped session's
+claims go with it. A worktree removed from under a live session takes its
+paths with it, and a claim over one names nothing anybody could write, so the
+sweep every coordination server runs on its tick ends it on the record — a
+worktree cut again at the same path starts with no claims from the one that
+was removed. What a session asks for itself fails early instead: a lock over a
+path that does not exist is refused, and so is releasing a prefix the session
+does not hold, naming who does.
 
 Editing under somebody else's live claim is an approval question naming the
 holder, never a refusal. Two sessions in one file is sometimes exactly right,
@@ -137,6 +166,16 @@ carries a count per row, because a count is the decision — whether there is
 anything here to ask about — and `coordination holdings` carries the paths,
 because a person who wants those wants all of them at once rather than one row
 at a time.
+
+**A listing is who is here, and who left while the reader was.** The record
+keeps every session that ever joined, and a listing that showed them all would
+be a history rather than a roster: a month on, a reader would scroll past
+everyone who ever worked here to find the two who still do. So a session is
+shown the live rows and the rows that stopped since it joined — the departures
+it was here for, each saying it stopped and what it concluded — and a console,
+which has no arrival of its own, is shown the live rows and the departures of
+the last day. What left before that is on the record and reachable by id, and
+a message to it is refused with when it left.
 
 ## A rate is owed by the repository, not by each session
 
