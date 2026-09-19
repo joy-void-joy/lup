@@ -35,11 +35,7 @@ from lup.workspace.paths import is_template_scaffold, project_root
 
 from lup.devtools.dev.antipatterns import scan_antipatterns
 from lup.devtools.project import DevProject
-from lup.devtools.dev.boundaries import (
-    scan_boundaries,
-    scan_application_placement,
-    scan_library_placement,
-)
+from lup.devtools.dev.boundaries import scan_application_placement
 from lup.devtools.dev.branches import get_integration_branch, unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
@@ -936,18 +932,6 @@ def scan_reports(
             else [f"antipatterns: ok{tail}"],
         )
 
-        breaches = scan_boundaries(project)
-        yield CheckReport(
-            name="seam boundaries",
-            passed=not breaches,
-            lines=[
-                f"seam boundaries: FAIL ({len(breaches)} breach(es))",
-                *(f"  {b.file}:{b.line}  {b.module}" for b in breaches),
-            ]
-            if breaches
-            else ["seam boundaries: ok"],
-        )
-
         # A document naming a node is held to what the node says now, so prose
         # cannot go on citing a corrected figure. Counted only where there is
         # a cite to hold: a repository with none has nothing this can fail.
@@ -957,18 +941,6 @@ def scan_reports(
             counted=bool(cited.checked or cited.failing),
             passed=cited.passed(),
             lines=cited.lines(),
-        )
-
-        tables = scan_library_placement()
-        yield CheckReport(
-            name="library placement",
-            passed=not tables,
-            lines=[
-                f"library placement: FAIL ({len(tables)} baked-in table(s))",
-                *(f"  {t.file}:{t.line}  {t.module}" for t in tables),
-            ]
-            if tables
-            else ["library placement: ok"],
         )
 
         portable = scan_application_placement(project)

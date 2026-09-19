@@ -17,7 +17,7 @@ from lup.providers.roster_prompt import (
     store_artifacts,
 )
 from lup.types import ModelTier
-from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
+from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.formats.banner import (
     COMMENT_FREE,
     PROMPT_TEXT,
@@ -911,7 +911,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         diagnostics_command=source.diagnostics_command,
                         resolution_command=source.resolution_command,
                         repair_command=source.repair_command,
-                        rules=antipattern_set_for(
+                        rules=rule_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,
                             source.anti_patterns,

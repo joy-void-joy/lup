@@ -17,14 +17,13 @@ from pydantic import ValidationError
 
 import lup.devtools.dev.boundaries as boundary_scan
 from lup.devtools.project import DevProject
-from lup.harness.codescan.common import RuleSelection
+from lup.harness.codescan.common import ApplicationRoots, RuleSelection
 from lup.policy.imports import ImportBoundary
 from lup.policy.models import EditBatch, EditChange
 from lup.policy.rules import EditPolicy
 
 from lup.harness.codescan.boundaries import (
     RuleId,
-    ApplicationRoots,
     audit_boundaries,
     audit_constant_declarations,
     audit_kernel_imports,

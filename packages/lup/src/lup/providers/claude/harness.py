@@ -5,7 +5,7 @@ import shlex
 from collections.abc import Sequence
 from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
-from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
+from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.drift_prompt import drift_hook
 from lup.providers.roster_prompt import (
@@ -763,7 +763,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         diagnostics_command=source.diagnostics_command,
                         resolution_command=source.resolution_command,
                         repair_command=source.repair_command,
-                        rules=antipattern_set_for(
+                        rules=rule_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,
                             source.anti_patterns,

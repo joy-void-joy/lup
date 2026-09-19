@@ -17,7 +17,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.harness.codescan.antipatterns import AntiPatternSet
+from lup.harness.codescan.antipatterns import RuleSet
 from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
 from lup.policy.identity import AGENT_IDENTITY_ENV
@@ -85,10 +85,10 @@ def policy_kernel_modules() -> list[KernelModule]:
 
 
 def bundled_antipattern_rows(
-    rules: AntiPatternSet | None = None,
+    rules: RuleSet | None = None,
 ) -> dict[str, list[AntiPatternRow]]:
     """Compile primitive runtime rows directly from canonical rule objects."""
-    declared = rules or AntiPatternSet()
+    declared = rules or RuleSet()
     python_rows = [antipattern_row(rule) for rule in declared.python]
     typescript_rows = [antipattern_row(rule) for rule in declared.typescript]
     return {
@@ -553,7 +553,7 @@ def render_policy_data(
     diagnostics_command: list[str],
     resolution_command: list[str],
     repair_command: list[str],
-    rules: AntiPatternSet | None = None,
+    rules: RuleSet | None = None,
     import_boundaries: list[ImportBoundary] | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
