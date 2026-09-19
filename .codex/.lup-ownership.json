@@ -16,28 +16,28 @@
     {
       "path": ".codex/agents/tdd-implementer.toml",
       "category": "generated",
-      "sha256": "e11c2897843a2df45994f3e02540d26efa6e3981d6b0bb49026139c0108bafc7",
+      "sha256": "3932b5c6d628094a2fb106cd51f62a74b976ee14d4e356ac4f09f88d2b4b03c5",
       "semantic_id": "agent.tdd-implementer",
       "executable": false
     },
     {
       "path": ".codex/agents/trace-explorer.toml",
       "category": "generated",
-      "sha256": "0d59e4d3a58a6cac6c5a52b22460f7a5851b04d5357c1bd62fcb54b0b8200e21",
+      "sha256": "7cfa7def50194f761de5ed22b82e5a00453829e04a26bc843ff18ef0cee14c88",
       "semantic_id": "agent.trace-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-explorer.toml",
       "category": "generated",
-      "sha256": "ce8abe0173258a9db3b0d3aca67e435944bffaaed185018c790bdff95ed777c1",
+      "sha256": "f5887a3f048681bfb7d460cbe1f2d7d7c04faa193d8c7f07a09312f959ad1626",
       "semantic_id": "agent.version-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-reviewer.toml",
       "category": "generated",
-      "sha256": "ef6af3ffe6f63f7ac4e2b12d3a7c77a0088bb73e5515fe5df11e856e53873fe1",
+      "sha256": "ed0ec918e57a3d6af25971419307761a8ec4ed8b7e460e5f27f3bac53ff829a4",
       "semantic_id": "agent.version-reviewer",
       "executable": false
     },

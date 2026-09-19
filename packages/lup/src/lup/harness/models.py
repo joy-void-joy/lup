@@ -35,6 +35,7 @@ from lup.formats.markdown import (
     TableCell,
     escaped,
 )
+from lup.formats.toml import TomlDocument
 from lup.formats.yaml import PlainData, YamlDocument
 from lup.tools.mcp import ToolDeclaration
 from lup.policy.boundary import BoundaryCapability
@@ -1927,6 +1928,23 @@ class Artifact(BaseModel, frozen=True):
         return cls(
             path=path,
             content=banner.applied_to(path, document.text()),
+            semantic_id=semantic_id,
+            banner=banner,
+        )
+
+    @classmethod
+    def in_toml(
+        cls,
+        *,
+        path: ArtifactPath,
+        document: TomlDocument,
+        semantic_id: str,
+        banner: GeneratedBanner,
+    ) -> "Artifact":
+        """One artifact whose body is a TOML document rather than text about one."""
+        return cls.generated(
+            path=path,
+            body=document.text(),
             semantic_id=semantic_id,
             banner=banner,
         )

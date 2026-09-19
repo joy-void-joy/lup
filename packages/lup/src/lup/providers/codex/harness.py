@@ -14,6 +14,7 @@ from lup.providers.roster_prompt import departure_hook, folded, prompt_hook
 from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.formats.markdown import MarkdownDocument, Prose
+from lup.formats.toml import TomlDocument, TomlEntry, TomlScalar
 from lup.formats.yaml import YamlDocument, YamlMap, scalars
 from lup.formats.banner import (
     COMMENT_FREE,
@@ -372,21 +373,22 @@ class CodexAgentRenderer(ArtifactRenderer[Agent]):
         alias = (
             None if source.model is None else self.spellings.model_alias(source.model)
         )
-        rows = [
-            f"name = {json.dumps(source.name)}",
-            f"description = {json.dumps(source.description)}",
-            (
-                "developer_instructions = "
-                f"{json.dumps(self.prompts.render(source.prompt))}"
-            ),
-        ]
-        if alias is not None:
-            rows.append(f"model = {json.dumps(alias)}")
+        declared = {
+            "name": source.name,
+            "description": source.description,
+            "developer_instructions": self.prompts.render(source.prompt),
+            **({} if alias is None else {"model": alias}),
+        }
         return ArtifactTree(
             artifacts=[
-                Artifact.generated(
+                Artifact.in_toml(
                     path=Path(f".codex/agents/{source.name}.toml"),
-                    body="\n".join(rows),
+                    document=TomlDocument(
+                        entries=[
+                            TomlEntry(key=key, value=TomlScalar(value=value))
+                            for key, value in declared.items()
+                        ]
+                    ),
                     semantic_id=source.id,
                     banner=GeneratedBanner(
                         source=f"the portable agent declaration {source.id}",
