@@ -70,7 +70,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
                     },
                 ),
                 *deciding_parts(),
-                models.Passage(module=__name__, name="meta-2"),
+                models.Passage(module=__name__, name="first-principles"),
             ],
         ),
     )

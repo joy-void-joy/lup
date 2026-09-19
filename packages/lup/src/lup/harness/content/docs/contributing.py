@@ -37,7 +37,7 @@ def document(
             *conventions.COMMIT_TYPES.parts,
             models.Passage(
                 module=__name__,
-                name="contributing-2",
+                name="what-has-to-be-green",
                 values={
                     "rebase_skill": models.SkillInvocation(
                         plugin="lup", skill="rebase"

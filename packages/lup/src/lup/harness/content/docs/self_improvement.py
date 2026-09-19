@@ -13,6 +13,6 @@ DOCUMENT = models.PromptDocument(
     parts=[
         models.Passage(module=__name__),
         *conventions.FAILURE_ANALYSIS.parts,
-        models.Passage(module=__name__, name="self_improvement-2"),
+        models.Passage(module=__name__, name="diagnosing-failures"),
     ],
 )

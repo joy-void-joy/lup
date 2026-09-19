@@ -222,7 +222,7 @@ def document(layout: ApplicationLayout) -> models.PromptDocument:
             LIBRARY.table(),
             models.Passage(
                 module=__name__,
-                name="library-2",
+                name="what-is-left-to-place",
                 values={"value": models.code(layout.path())},
             ),
         ],

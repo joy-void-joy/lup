@@ -73,6 +73,6 @@ DOCUMENT = models.PromptDocument(
     parts=[
         models.Passage(module=__name__),
         settlement_table(),
-        models.Passage(module=__name__, name="permissions-2"),
+        models.Passage(module=__name__, name="placement"),
     ],
 )

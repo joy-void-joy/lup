@@ -83,7 +83,6 @@ def target_section(
         *([] if first else [TextPart(text="\n")]),
         models.Passage(
             module=__name__,
-            name="generated_paths-section",
             values={
                 "label": models.code(label),
                 "count": models.counted(len(artifacts)),

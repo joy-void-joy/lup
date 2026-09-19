@@ -1,1 +1,0 @@
-`lup-devtools harness codex` regenerates the artifacts and installs the digest-verified plugin copy

@@ -68,7 +68,7 @@ def acquisition(spelling: Provenance) -> list[models.PromptPart]:
     return [
         models.Passage(
             module=__name__,
-            name="provenance-2",
+            name="library-as-a-package",
             values={
                 "project_devtools": models.plain(spelling.project_devtools),
                 "celled": models.plain(celled),
@@ -83,7 +83,7 @@ def sync_baseline(spelling: Provenance) -> list[models.PromptPart]:
     return [
         models.Passage(
             module=__name__,
-            name="provenance-3",
+            name="upstream-checkpoint",
             values={
                 "update_skill": models.SkillInvocation(plugin="lup", skill="update"),
                 "project_devtools": models.plain(spelling.project_devtools),

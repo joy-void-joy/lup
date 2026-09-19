@@ -50,7 +50,7 @@ SKILL = models.Skill(
             *deciding_parts(),
             models.Passage(
                 module=__name__,
-                name="distill-2",
+                name="archaeology",
                 values={
                     "ask": models.AskUser(
                         question="which of the old project's concepts survive into the restart and which die with it, with the reason for each — and whether this restart is the only successor or one of several splitting the exploration"

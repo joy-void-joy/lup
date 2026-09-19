@@ -64,7 +64,7 @@ def document(
             agent_roster_bullets(agents),
             models.Passage(
                 module=__name__,
-                name="harness-authoring",
+                name="authoring",
                 values={
                     "harness_catalog_py": models.plain(
                         layout.path("harness", "catalog.py")

@@ -13,7 +13,7 @@ SKILL = models.Skill(
         parts=[
             models.Passage(module=__name__),
             *conventions.COMMIT_TYPES.parts,
-            models.Passage(module=__name__, name="commit-2"),
+            models.Passage(module=__name__, name="examples"),
         ],
     ),
 )

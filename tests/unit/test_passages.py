@@ -14,6 +14,8 @@ import lup.harness.models as models
 from lup.formats.markdown import ProseCode, ProseStrong
 from lup.harness.passages import (
     passage_path,
+    passage_sections,
+    passage_text,
     prose_without_logic,
     rendered,
 )
@@ -22,18 +24,60 @@ from lup.providers.harness import claude_prompt_renderer
 
 def test_a_passage_is_the_markdown_beside_its_module() -> None:
     """One file apart, so neither half of a declaration hides from the other."""
-    beside = passage_path("lup.harness.content.skills.commit", "")
+    beside = passage_path("lup.harness.content.skills.commit")
 
     assert beside.name == "commit.passage.md"
     assert beside.parent.name == "skills"
     assert beside.read_text().startswith("# Create Commits")
 
 
-def test_a_second_passage_beside_one_module_is_named() -> None:
-    """A module declaring two documents says which is which."""
-    named = passage_path("lup.harness.content.skills.commit", "commit-2")
+def test_a_module_keeps_every_passage_it_composes_in_one_file() -> None:
+    """The subject is one file, and the marker is its table of contents.
 
-    assert named.name == "commit-2.passage.md"
+    A module composing several documents marks them off rather than scattering
+    them: what its declaration places by naming nothing stands at the top, and
+    each further passage is named for what it holds.
+    """
+    beside = passage_path("lup.harness.content.skills.commit")
+    held = passage_sections(beside, beside.read_text(encoding="utf-8"))
+
+    assert [section.name for section in held] == ["", "examples"]
+    assert held[0].text.startswith("# Create Commits")
+    assert passage_text("lup.harness.content.skills.commit", "examples") == held[1].text
+    assert held[1].text.lstrip("\n").startswith("### Examples")
+
+
+def test_a_marker_inside_a_fence_divides_nothing() -> None:
+    """The division comes from the parser, so a code sample stays a sample."""
+    written = Path("somewhere.passage.md")
+    fenced = f"Shown below.\n\n```\n{'<!-- passage: sample -->'}\n```\n"
+
+    assert [section.name for section in passage_sections(written, fenced)] == [""]
+
+
+def test_a_section_that_ended_on_a_word_is_read_back_without_a_newline() -> None:
+    """A marker costs the section above it a newline, and gives it back.
+
+    Some passages end mid sentence on purpose, joined to the part that follows
+    them, so the newline a marker needs cannot be left on the section it was
+    taken from.
+    """
+    written = Path("somewhere.passage.md")
+    file = "ends on a word\n<!-- passage: after -->\nand the rest\n"
+
+    assert [section.text for section in passage_sections(written, file)] == [
+        "ends on a word",
+        "and the rest\n",
+    ]
+
+
+def test_one_name_marks_one_passage() -> None:
+    """A file naming a passage twice has no answer for which one is meant."""
+    written = Path("somewhere.passage.md")
+    twice = "open\n<!-- passage: same -->\none\n<!-- passage: same -->\ntwo\n"
+
+    with pytest.raises(ValueError, match="marks `same` twice"):
+        passage_sections(written, twice)
 
 
 def test_prose_that_holds_logic_is_refused() -> None:

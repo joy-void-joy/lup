@@ -314,7 +314,7 @@ def section(report: UpstreamReport) -> models.Passage:
     """
     return models.Passage(
         module=__name__,
-        name="upstream_reports-section",
+        name="section",
         values={
             "title": models.plain(report.title),
             "component": models.plain(report.component),

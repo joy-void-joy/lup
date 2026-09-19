@@ -77,13 +77,13 @@ def document(
             *resolver_entry,
             models.Passage(
                 module=__name__,
-                name="platform_differentiation-2",
+                name="artifact-parity",
                 values={
                     "len_skills": models.counted(len(skills)),
                     "len_agents": models.counted(len(agents)),
                 },
             ),
             *resolver_parity,
-            models.Passage(module=__name__, name="platform_differentiation-3"),
+            models.Passage(module=__name__, name="runtime-parity"),
         ],
     )

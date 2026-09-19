@@ -20,13 +20,13 @@ SETUP_THROUGH_NAMING: list[models.PromptPart] = [
 ]
 
 INNER_AGENT_BULLET: list[models.PromptPart] = [
-    models.Passage(module=__name__, name="template_sections-2"),
+    models.Passage(module=__name__, name="agent-vocabulary"),
 ]
 
 PRINCIPLES_THROUGH_PATTERN_MENU: list[models.PromptPart] = [
     models.Passage(
         module=__name__,
-        name="template_sections-3",
+        name="important-context",
         values={
             "bump_skill": models.SkillInvocation(plugin="lup", skill="bump"),
             "debug_skill": models.SkillInvocation(plugin="lup", skill="debug"),
@@ -38,7 +38,7 @@ PRINCIPLES_THROUGH_PATTERN_MENU: list[models.PromptPart] = [
 PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP: list[models.PromptPart] = [
     models.Passage(
         module=__name__,
-        name="template_sections-4",
+        name="plan-at-agent-speed",
         values={"init_skill": models.SkillInvocation(plugin="lup", skill="init")},
     ),
 ]
@@ -46,7 +46,7 @@ PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP: list[models.PromptPart] = [
 WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
     models.Passage(
         module=__name__,
-        name="template_sections-5",
+        name="worktrees",
         values={
             "relocate": models.RelocateSession(path="the absolute path step 1 prints"),
             "rebase_skill": models.SkillInvocation(plugin="lup", skill="rebase"),
@@ -55,21 +55,21 @@ WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
     ),
     *conventions.MERGE_CONFLICT_RESOLUTION.parts,
     *conventions.COMMIT_GUIDELINES.parts,
-    models.Passage(module=__name__, name="template_sections-6"),
+    models.Passage(module=__name__, name="commit-types"),
     *conventions.COMMIT_TYPES.parts,
-    models.Passage(module=__name__, name="template_sections-7"),
+    models.Passage(module=__name__, name="commit-examples"),
 ]
 
 DIRECTORY_STRUCTURE_THROUGH_TOOLS: list[models.PromptPart] = [
     models.Passage(
         module=__name__,
-        name="template_sections-8",
+        name="directory-structure",
         values={"resolve_skill": models.SkillInvocation(plugin="lup", skill="resolve")},
     ),
 ]
 
 TOOLING_INTRO: list[models.PromptPart] = [
-    models.Passage(module=__name__, name="template_sections-9"),
+    models.Passage(module=__name__, name="tooling"),
 ]
 
 POLICY_JOIN = r"""The policy classifies every shell command against the vocabulary declared in
@@ -150,7 +150,7 @@ shared canonical/bundled fixture suite.
 
 
 SELF_IMPROVEMENT_THROUGH_END: list[models.PromptPart] = [
-    models.Passage(module=__name__, name="template_sections-10"),
+    models.Passage(module=__name__, name="self-improvement-loop"),
     *conventions.FAILURE_ANALYSIS.parts,
-    models.Passage(module=__name__, name="template_sections-11"),
+    models.Passage(module=__name__, name="diagnosing-failures"),
 ]

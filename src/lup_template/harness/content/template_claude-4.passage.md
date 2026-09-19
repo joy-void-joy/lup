@@ -1,1 +1,0 @@
- `docs/orchestration.md` carries the full catalog.

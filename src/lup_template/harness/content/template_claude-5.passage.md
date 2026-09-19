@@ -1,1 +1,0 @@
-`lup-devtools harness claude` regenerates and launches the verified local plugin

@@ -1,1 +1,0 @@
-- **Codex** = the meta-agent (the Codex CLI) that modifies the codebase, runs commands, and manages the development workflow

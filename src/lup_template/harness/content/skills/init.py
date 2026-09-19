@@ -30,7 +30,7 @@ SKILL = models.Skill(
             *provenance.branch_probes(SPELLING),
             models.Passage(
                 module=__name__,
-                name="init-2",
+                name="phases",
                 values={
                     "brainstorm_skill": models.SkillInvocation(
                         plugin="lup", skill="brainstorm"
@@ -50,7 +50,7 @@ SKILL = models.Skill(
             *provenance.acquisition(SPELLING),
             models.Passage(
                 module=__name__,
-                name="init-3",
+                name="merge-the-guidance",
                 values={
                     "guidance_file_path": models.NativePath(
                         location="guidance_file", scope="every_tree"
@@ -63,7 +63,7 @@ SKILL = models.Skill(
             *provenance.sync_baseline(SPELLING),
             models.Passage(
                 module=__name__,
-                name="init-4",
+                name="verify",
                 values={
                     "ask": models.AskUser(
                         question="which rule families this domain keeps, with retiring the anti-pattern family altogether as one answer"

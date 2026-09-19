@@ -42,7 +42,6 @@ class IndexGroup(BaseModel, frozen=True):
         return [
             models.Passage(
                 module=__name__,
-                name="index-group",
                 values={"title": models.plain(self.title)},
             ),
             *([models.TextPart(text=self.blurb + "\n\n")] if self.blurb else []),

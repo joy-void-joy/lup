@@ -47,7 +47,7 @@ def skill(layout: ApplicationLayout) -> models.Skill:
                 *deciding_parts(),
                 models.Passage(
                     module=__name__,
-                    name="brainstorm-2",
+                    name="what-you-know",
                     values={
                         "runtime_docs": models.RuntimeDocs(),
                         "ask": models.AskUser(

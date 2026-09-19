@@ -48,7 +48,7 @@ SKILL = models.Skill(
             *provenance.branch_probes(SPELLING),
             models.Passage(
                 module=__name__,
-                name="install-2",
+                name="analyze-the-source",
                 values={
                     "arguments": models.ArgumentsRef(),
                     "manifest_path": models.PluginPath(
@@ -374,7 +374,7 @@ Steps 1-4, 6 and 7 repeat per selected tree; step 5 is tree-independent.
             *provenance.sync_baseline(SPELLING),
             models.Passage(
                 module=__name__,
-                name="install-3",
+                name="seams",
                 values={
                     "meta_skill": models.SkillInvocation(plugin="lup", skill="meta"),
                     "commit_skill": models.SkillInvocation(
