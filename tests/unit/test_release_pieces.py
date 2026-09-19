@@ -11,7 +11,7 @@ import datetime as dt
 
 import pytest
 
-from lup.devtools.changelog import Changelog
+from lup.devtools.changelog import Changelog, ReleaseNote, release_heading
 from lup.devtools.dev.release import (
     cleared_declarations,
     is_level,
@@ -157,3 +157,28 @@ def test_a_prose_heading_is_not_a_release() -> None:
     """A document's own headings survive rather than becoming odd versions."""
     log = Changelog.parse("# C\n\n## Notes for readers\n\n- prose\n")
     assert log.sections == []
+
+
+def test_one_writer_spells_every_heading() -> None:
+    """A bump's note and a closed section are the same line, written once.
+
+    Two writers is how a file ends up holding both spellings of the same
+    thing, and which one a document gets should not depend on which command
+    happened to write it.
+    """
+    note = ReleaseNote(version="0.3.0", date=DAY, summary="s")
+    closed = released(
+        Changelog.parse("# C\n\n## Unreleased\n\n- e\n"), "0.3.0", DAY, migrations=[]
+    )
+
+    assert note.heading() == release_heading("0.3.0", DAY)
+    assert release_heading("0.3.0", DAY) in closed.render()
+
+
+def test_what_this_module_writes_it_reads_back() -> None:
+    """The round trip the two halves are held together by."""
+    written = f"# C\n\n{release_heading('0.3.0', DAY)}\n\n- entry\n"
+    parsed = Changelog.parse(written)
+
+    assert [section.version for section in parsed.sections] == ["0.3.0"]
+    assert parsed.sections[0].date == DAY

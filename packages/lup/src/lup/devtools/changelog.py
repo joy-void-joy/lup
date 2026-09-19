@@ -39,6 +39,24 @@ Agent version history. Each version tracks a behavioral change in the agent.
 """What a changelog opens with when a bump is the one that creates it."""
 
 
+def release_heading(version: str, date: dt.date) -> str:
+    """The one line every release in a changelog is found by.
+
+    One writer, because two of them is how a file ends up holding both
+    spellings of the same thing: a release closing an open section and a bump
+    writing a note are the same heading, and which one a document gets should
+    not depend on which command wrote it.
+
+    The version is bare and the date follows a dash, which is what this
+    repository's changelog was already written in — a format that predates
+    the module and was, until the reader was widened, one this module could
+    not read at all. `ReleaseHeading.read` still accepts the parenthesised
+    ``v`` spelling, so a document written before this stays readable and only
+    its new entries are written the one way.
+    """
+    return f"## {version} — {date.isoformat()}"
+
+
 class ReleaseNote(BaseModel, frozen=True):
     """One release, as the fields a bump states rather than as markdown.
 
@@ -55,7 +73,7 @@ class ReleaseNote(BaseModel, frozen=True):
 
     def heading(self) -> str:
         """The line this release is found by, and where its date is written."""
-        return f"## v{self.version} ({self.date.isoformat()})"
+        return release_heading(self.version, self.date)
 
     def render(self) -> str:
         """This release as the markdown a changelog carries it in."""
@@ -171,7 +189,7 @@ class Changelog(BaseModel, frozen=True):
         that it happened, on the date it happened.
         """
         body = without_heading(self.unreleased)
-        text = f"## {version} — {date.isoformat()}\n\n{body}{additions}"
+        text = f"{release_heading(version, date)}\n\n{body}{additions}"
         return self.model_copy(
             update={
                 "unreleased": "",
