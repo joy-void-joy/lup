@@ -456,6 +456,24 @@ class WatchOutput(SemanticPart, frozen=True):
         return self.command
 
 
+class NestedRun(SemanticPart, frozen=True):
+    """Run this runtime once, non-interactively, over a throwaway project.
+
+    A probe kit measures what a hook receives by registering it in a
+    directory's own settings and launching the runtime there. Each runtime
+    spells that launch differently — its print mode, its approval switch —
+    so prose naming "a non-interactive run" leaves a reader to guess the
+    flags and stop at the first approval prompt nobody is there to answer.
+    """
+
+    type: Literal["nested_run"] = "nested_run"
+    prompt: PortableText
+    """The first prompt the run answers, as the reader will pass it."""
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return renderer.own.nested_run(self.prompt)
+
+
 class CommandInvocation(SemanticPart, frozen=True):
     """One `lup-devtools` command, named by its path rather than spelled out.
 
@@ -535,6 +553,7 @@ type PromptPart = Annotated[
     | RequestApproval
     | RelocateSession
     | WatchOutput
+    | NestedRun
     | CommandInvocation
     | ResolverEntry
     | ArgumentsRef,
