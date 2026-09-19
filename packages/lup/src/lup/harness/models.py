@@ -1890,22 +1890,18 @@ class Artifact(BaseModel, frozen=True):
         document: YamlDocument,
         semantic_id: str,
         banner: GeneratedBanner,
-        preamble: str = "",
     ) -> "Artifact":
         """One artifact whose body is a YAML document rather than text about one.
 
         The constructor a generator reaches for instead of formatting the
         file: what it is handed is a tree that has already been emitted and
         parsed back, so a derived value cannot arrive having ended the mapping
-        it was written into.
-
-        ``preamble`` is the document that has to open with something the
-        nodes cannot hold — a `---` separating a Markdown file's frontmatter
-        from the prose beneath it.
+        it was written into. YAML inside a Markdown file is frontmatter, which
+        :class:`lup.formats.markdown.MarkdownDocument` holds instead.
         """
         return cls.generated(
             path=path,
-            body=preamble + document.text(),
+            body=document.text(),
             semantic_id=semantic_id,
             banner=banner,
         )
