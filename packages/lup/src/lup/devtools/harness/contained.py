@@ -1658,8 +1658,10 @@ def contained_argv(
     # that cannot listen is a session without a clipboard rather than a launch
     # that fails, and the notice says which happened either way.
     copying = image.clipboard.serve()
+    nudging = image.inboxes.serve()
     handing = image.browser.serve()
     said.add(image.clipboard.notice(copying is not None))
+    said.add(image.inboxes.notice(nudging is not None))
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
@@ -1752,6 +1754,7 @@ def contained_argv(
         identity=identity,
         browser_directory=handing,
         clipboard_directory=copying,
+        inbox_directory=nudging,
         terminal=terminal.environment,
         streams=streams,
         proxy_address=reached_at,
