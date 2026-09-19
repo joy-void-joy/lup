@@ -1,7 +1,3 @@
-# lup: ignore[constant-declaration]
-# The directory names here are where every worktree of one repository meets.
-# Two processes that spelled them differently would coordinate with nobody, so
-# they are an identity of this layout rather than a choice a caller can make.
 """Where one repository's peers find each other, whichever worktree they are in.
 
 A cohort a process opens lives wherever that process put it, which is right
@@ -20,14 +16,17 @@ there for the same reason.
 Different repositories are structurally disjoint, which is the property this
 buys: there is no global registry to collide in, no daemon to elect, and no
 way for a session in one project to appear on another project's roster.
+
+The two directory names are :mod:`lup.coordination.bare.store`'s, with the
+rest of the store's layout: a shell guard interpolates them into the path it
+tests before starting an interpreter, and a guard reading somewhere nobody
+writes is a roster that silently reaches nobody.
 """
 
 from pathlib import Path
 
+from lup.coordination.bare.store import COORDINATION_DIR, STORE_DIR
 from lup.workspace.edition import shared_git_directory
-
-STORE_DIR = "lup"
-COORDINATION_DIR = "coordination"
 
 
 def coordination_root(root: Path) -> Path:

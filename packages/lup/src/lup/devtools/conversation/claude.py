@@ -231,14 +231,13 @@ class ContentBlock(Payload, frozen=True):
                 body = "\n\n".join(
                     text for block in blocks if (text := block.text_payload())
                 )
-        if isinstance(self.display_content, str):
-            displayed = self.display_content
-        elif self.display_content is not None:
-            displayed = json.dumps(
-                self.display_content, indent=2, ensure_ascii=False, default=str
-            )
-        else:
-            displayed = ""
+        match self.display_content:
+            case str() as shown:
+                displayed = shown
+            case None:
+                displayed = ""
+            case shown:
+                displayed = json.dumps(shown, indent=2, ensure_ascii=False, default=str)
         failed = "[the tool reported an error]" if self.is_error else ""
         return "\n\n".join(
             part for part in (failed, body, self.message, displayed) if part

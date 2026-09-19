@@ -130,6 +130,86 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        subjects=[
+            "PYTHON_SUFFIXES",
+            "MARKDOWN_SUFFIXES",
+            "JS_SUFFIXES",
+            "JSON_SUFFIXES",
+        ],
+        reason=(
+            "the marker scanner routes a file by one dict from suffix to scan "
+            "mode, where four parallel tuples each guarded an arm of a match "
+            "that decided on nothing the subject carried"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read `SCAN_MODES` from `lup.harness.codescan.markers` where "
+                    "one of the suffix tuples was read: its keys are the suffixes "
+                    "and its values the `ScanMode` each routes to, so the "
+                    "suffixes of one mode are the keys whose value is that mode."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "AntiPatternSet",
+            "AntiPatternSet.python",
+            "AntiPatternSet.typescript",
+            "AntiPatternSet.for_suffix",
+            "AntiPatternSet.selected",
+            "antipattern_set_for",
+        ],
+        reason=(
+            "the set holds every rule a project is judged by — the line rules, "
+            "the project rules the sweep runs, and the composition rule "
+            "generation runs — so it is named for what it holds"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import `RuleSet` from `lup.harness.codescan.antipatterns` "
+                    "where `AntiPatternSet` was imported, and `rule_set_for` where "
+                    "`antipattern_set_for` was; the fields and methods keep their "
+                    "names, and `project` and `composition` stand beside `python` "
+                    "and `typescript`."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "AntiPattern.id",
+            "AntiPattern.examples",
+            "AntiPattern.message",
+            "AntiPattern.refinement",
+            "AntiPattern.strength",
+            "AntiPattern.examples_bound_the_rule",
+            "STRUCTURAL_RULES",
+            "anti_pattern_rules",
+        ],
+        reason=(
+            "every rule is one declaration: what every rule states moved to the "
+            "`Rule` base that `AntiPattern`, `ProjectRule` and `CompositionRule` "
+            "share, and the reference derives every card from the set instead "
+            "of keeping the structural ones by hand"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "A caller constructing or reading an `AntiPattern` changes "
+                    "nothing: the fields are inherited. One that read "
+                    "`STRUCTURAL_RULES` or `anti_pattern_rules()` reads "
+                    "`all_rules()`, which derives every card. A project declaring "
+                    "a rule the sweep decides declares a `ProjectRule` from "
+                    "`lup.harness.codescan.project` beside its audit and adds it "
+                    "to its set's `project` list."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         subjects=["member_environment"],
         reason=(
             "a launcher mints a session's name beside its id, numbered against "
@@ -426,6 +506,190 @@ DECLARED = [
                     "It is declared by a function whose name is in the surface "
                     "already, so a command that goes takes its declaration "
                     "with it."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "standing",
+            "unsaid",
+            "gone",
+            "member_of",
+            "RepositoryPeers.pulsed",
+            "RepositoryPeers.rewound",
+            "RosterRecord.applied",
+            "ActorSpawned.applied",
+            "ActorJoined.applied",
+            "ActorDescribed.applied",
+            "ActorFinished.applied",
+            "TouchRecord.claim",
+            "TouchRecord.applied",
+            "PathTouched.claim",
+            "PathTouched.applied",
+            "PathContested.claim",
+            "PathContested.applied",
+            "PrefixLocked.claim",
+            "PrefixLocked.applied",
+            "PrefixReleased.claim",
+            "PrefixReleased.applied",
+            "PathVacated.claim",
+            "PathVacated.applied",
+            "stream_records",
+            "peer_members",
+            "peer_heard",
+            "peer_present",
+            "peer_name_claims",
+            "peer_addresses",
+            "peer_listing",
+            "claim_covers",
+            "peer_claims",
+        ],
+        reason=(
+            "the coordination store was folded by three hand-kept readers that "
+            "shared no import — the typed library, the prompt-time hook and the "
+            "compiled permission dispatcher — so every record the store gained "
+            "had to be taught to each separately, and one that missed a record "
+            "went on answering confidently about a store it no longer "
+            "understood; there is now one fold, `lup.coordination.bare.store`, "
+            "which every reader imports and each plugin ships"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Fold the roster with `store.members(roster_path)`, and read "
+                    "it as the pulses and resets leave it with "
+                    "`store.present(root)`, which applies both. What a record "
+                    "makes of a member is `store.applied` and is no longer a "
+                    "method on the record: `ActorJoined` and its siblings are "
+                    "writers now, and the fold takes them off disk without "
+                    "importing them."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "`RepositoryPeers.pulsed` and `.rewound` are `store.pulsed` "
+                    "and `store.rewound`; `RepositoryPeers.present()` applies "
+                    "both already and is what a caller wanted from either."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Claims fold with `store.claims(root)`, narrow to live "
+                    "holders with `store.held(root, live)`, and answer a path "
+                    "with `store.covering(root, path, live)`. `Claim.covers`, "
+                    "`.subject` and `.vacant` still answer for a typed caller, "
+                    "over that same fold."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "The dispatcher's half is gone from `lup.policy.assets."
+                    "host`: `peer_addresses` and `peer_listing` are "
+                    "`store.addresses` and `store.listing`, `claim_holders` is "
+                    "`store.claim_holders`, `record_claims` is "
+                    "`store.record_claims`, and each takes the coordination "
+                    "directory `peer_store` still resolves rather than a "
+                    "project root and a list of file names."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "PeerPolicy.roster_file",
+            "PeerPolicy.names_file",
+            "PeerPolicy.touches_file",
+            "PeerPolicy.member_kind",
+            "PeerPolicy.heartbeats_dir",
+            "PeerPolicy.stale_after_seconds",
+        ],
+        reason=(
+            "the compiled dispatcher imports the shipped fold, which owns every "
+            "file name the store is made of, so a policy restating them was the "
+            "second spelling that could drift"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Drop those six from any `PeerPolicy(...)` you build. What "
+                    "is left is what the fold cannot know: `store`, the path "
+                    "parts beneath the shared git directory; `windows_dir`, the "
+                    "dispatcher's own snapshots; `member_env`; and the five "
+                    "lines a stopped caller reads. A project that moved its "
+                    "store still says so with `store`."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["roster_artifacts", "DEPARTURE_ORIGIN", "DEPARTURE_SOURCE"],
+        reason=(
+            "a plugin carries the coordination half as one package rather than a "
+            "loose file per hook, because the two hooks and the dispatcher all "
+            "stand on the same fold"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "`roster_artifacts` is gone. `store_artifacts(plugin_root, "
+                    "semantic_id)` places the package under "
+                    "`hooks/runtime/coordination/`, and is called "
+                    "unconditionally: it takes no hook set, because the "
+                    "dispatcher imports the package whatever a project declared "
+                    "about rosters. `hook_artifacts(...)` places one event's "
+                    "guard and the entry beside the package that it runs."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "HOOKS_MANIFEST",
+            "CodexHookEvent",
+            "CODEX_HOOK_EVENTS",
+            "declared_hook_records",
+            "untrusted_hooks",
+        ],
+        reason=(
+            "which hooks a Codex home would run is the runtime's verdict over "
+            "its own records and the plugin cache those records name, so it is "
+            "asked rather than reconstructed — the hand-kept event table knew "
+            "three events while the generated manifest declares five, and the "
+            "one call that decides whether a session carries the policy raised "
+            "on the two it had never heard of"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Ask the home instead of naming its records. "
+                    "`read_hooks(home, cwd)` in `lup.providers.codex.trust` "
+                    "returns a `CodexHookReport`, and each `CodexHook` in it "
+                    "carries the `key` the record is kept under, its "
+                    "`current_hash`, `trust_status` and `is_managed` — so "
+                    "nothing composes a record name from `HOOKS_MANIFEST` and "
+                    "`CODEX_HOOK_EVENTS`, and no table has to be kept level "
+                    "with the manifest."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Replace `untrusted_hooks(home, marketplace)` with "
+                    "`policy_hooks_skipped(home, project, marketplace)` from "
+                    "`lup.providers.codex.home`, which answers the same "
+                    "question for the working directory a session opens on. "
+                    "It returns the `CodexHook`s themselves rather than record "
+                    "names, and covers a hook whose recorded digest has gone "
+                    "stale — the `modified` verdict a table of names could not "
+                    "see, and the one a regenerated plugin meets constantly."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "`CodexHookEvent` named the three events the table knew. "
+                    "Nothing narrows an event any more: `CodexHook.event_name` "
+                    "is whatever the runtime reports, so an event added to the "
+                    "manifest needs no change here."
                 ),
             ),
         ],

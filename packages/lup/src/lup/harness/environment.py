@@ -38,8 +38,6 @@ def non_interactive_environment(
     return {name: value for name, value in merged.items() if name != "VIRTUAL_ENV"}
 
 
-# lup: ignore[library-default] — each name is one a launcher decides for the
-# process it starts, listed so a caller can take them away rather than guess
 LAUNCHER_DECIDED_ENV: list[str] = [
     "LUP_CONTAINED",
     "GIT_CONFIG_COUNT",

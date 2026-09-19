@@ -233,16 +233,18 @@ class CodexAppServer:
                         "Codex app-server exited before completing the connection"
                     )
                 message = RpcMessage.model_validate_json(line)
-                if message.id is not None and message.method is None:
-                    await self.resolve_response(message)
-                elif message.id is not None and message.method is not None:
-                    asyncio.create_task(self.resolve_server_request(message))
-                elif (
-                    message.method is not None and self.notification_handler is not None
-                ):
-                    self.notification_handler(
-                        RpcNotification(method=message.method, params=message.params)
-                    )
+                match message.id, message.method:
+                    case None, None:
+                        pass
+                    case _, None:
+                        await self.resolve_response(message)
+                    case None, str() as method:
+                        if self.notification_handler is not None:
+                            self.notification_handler(
+                                RpcNotification(method=method, params=message.params)
+                            )
+                    case _:
+                        asyncio.create_task(self.resolve_server_request(message))
         except asyncio.CancelledError:
             raise
         except Exception as error:

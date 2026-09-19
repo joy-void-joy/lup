@@ -1260,9 +1260,9 @@ def uv_add_operands(
         for word in arguments:
             if expecting:
                 expecting = False
-            elif word in value_flags:
-                expecting = True
-            elif not word.startswith("-"):
+                continue
+            expecting = word in value_flags
+            if not expecting and not word.startswith("-"):
                 yield word
 
     return list(operands())

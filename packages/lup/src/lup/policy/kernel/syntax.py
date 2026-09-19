@@ -16,6 +16,7 @@ The grammar is POSIX sh with the bash forms agents actually write: `[[ ]]`,
 `$'…'`, `<(…)`, `|&`, `&>`, `;&` and `;;&`, and `function name`.
 """
 
+from collections.abc import Callable
 from typing import Literal, TypedDict
 
 from .decision import (
@@ -319,72 +320,144 @@ def syntax_error(reason: str = "shell command does not parse") -> ShellSyntaxErr
     return ShellSyntaxError(unjudged(reason))
 
 
+type DelimiterStep = Callable[[str], int]
+"""How far one character moves the depth a scan is counting: its pair, or nothing."""
+
+type DelimiterSkip = Callable[[str, int], int | None]
+"""What a depth scan steps over rather than counts, asked of one position.
+
+One past the run where a run opens there, ``position`` itself where none
+does, and ``None`` where one opens and never closes -- which is already the
+scan's answer for a group that never closes, so it travels out unchanged.
+"""
+
+
+def parenthesis_step(character: str) -> int:
+    """How far a parenthesis moves the depth a scan is counting."""
+    match character:
+        case "(":
+            return 1
+        case ")":
+            return -1
+    return 0
+
+
+def brace_step(character: str) -> int:
+    """How far a brace moves the depth a scan is counting."""
+    match character:
+        case "{":
+            return 1
+        case "}":
+            return -1
+    return 0
+
+
+def single_quoted_end(source: str, position: int) -> int | None:
+    """One past the `'` closing the literal opened at ``position``."""
+    closing = source.find("'", position + 1)
+    return None if closing == -1 else closing + 1
+
+
+def double_quoted_end(source: str, position: int) -> int | None:
+    """One past the `"` closing the run opened at ``position``, escapes honoured."""
+    length = len(source)
+    position += 1
+    while position < length and source[position] != '"':
+        position += 2 if source[position] == "\\" else 1
+    return None if position >= length else position + 1
+
+
+def no_skip(_source: str, position: int) -> int | None:
+    """Step over nothing: every character is the scan's own to count."""
+    return position
+
+
+def quoted_skip(source: str, position: int) -> int | None:
+    """Step over the quoting a `(…)` group honours, inside which nothing counts."""
+    match source[position]:
+        case "'":
+            return single_quoted_end(source, position)
+        case '"':
+            return double_quoted_end(source, position)
+        case "\\":
+            return position + 2
+    return position
+
+
+def brace_skip(source: str, position: int) -> int | None:
+    """Step over what a `${…}` does not count, a whole `$(…)` among it.
+
+    Double quotes are not stepped over, as the shell has it: a `}` written
+    inside them closes the expansion.
+    """
+    match source[position]:
+        case "\\":
+            return position + 2
+        case "'":
+            return single_quoted_end(source, position)
+        case "$" if source.startswith("$(", position):
+            end = balanced_end(source, position + 2)
+            return None if end is None else end + 1
+    return position
+
+
+def arithmetic_skip(source: str, position: int) -> int | None:
+    """Refuse what an arithmetic interior may not hold, and step over nothing.
+
+    Arithmetic evaluates, it does not run: a backtick or a `$(` inside one is
+    a command substitution wearing an expansion, and is denied rather than
+    counted.
+    """
+    if source[position] == "`" or source.startswith("$(", position):
+        raise ShellSyntaxError(
+            KernelDecision("deny", SUBSTITUTION_REASON, recovery=SUBSTITUTION_RECOVERY)
+        )
+    return position
+
+
+def delimiter_end(
+    source: str,
+    position: int,
+    step: DelimiterStep = parenthesis_step,
+    depth: int = 1,
+    skip: DelimiterSkip = no_skip,
+) -> int | None:
+    """The index of the delimiter closing a group whose interior starts here.
+
+    One walk serves every delimiter this grammar counts: ``step`` says which
+    pair moves the depth and which way, ``depth`` how deep the caller already
+    stands -- two for a form a doubled delimiter opened -- and ``skip`` which
+    runs are stepped over whole. Nothing but a closing delimiter lowers the
+    depth, so where it reaches zero is the index wanted; ``None`` where a
+    group never closes.
+    """
+    length = len(source)
+    while position < length:
+        stepped = skip(source, position)
+        if stepped is None:
+            return None
+        if stepped != position:
+            position = stepped
+            continue
+        depth += step(source[position])
+        if depth == 0:
+            return position
+        position += 1
+    return None
+
+
 def balanced_end(source: str, position: int) -> int | None:
     """The index of the `)` closing a group whose interior starts at ``position``.
 
     Quotes and escapes are honoured, so a parenthesis inside them does not
     count. ``None`` where the group never closes.
     """
-    depth = 1
-    length = len(source)
-    while position < length:
-        character = source[position]
-        if character == "'":
-            closing = source.find("'", position + 1)
-            if closing == -1:
-                return None
-            position = closing + 1
-            continue
-        if character == '"':
-            position += 1
-            while position < length and source[position] != '"':
-                position += 2 if source[position] == "\\" else 1
-            if position >= length:
-                return None
-            position += 1
-            continue
-        if character == "\\":
-            position += 2
-            continue
-        if character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-            if depth == 0:
-                return position
-        position += 1
-    return None
+    return delimiter_end(source, position, skip=quoted_skip)
 
 
 def brace_end(source: str, position: int) -> int | None:
     """The index of the `}` closing a `${` whose interior starts at ``position``."""
-    depth = 1
-    length = len(source)
-    while position < length:
-        character = source[position]
-        if character == "\\":
-            position += 2
-            continue
-        if character == "'":
-            closing = source.find("'", position + 1)
-            if closing == -1:
-                return None
-            position = closing + 1
-            continue
-        if character == "$" and source[position + 1 : position + 2] == "(":
-            end = balanced_end(source, position + 2)
-            if end is None:
-                return None
-            position = end + 1
-            continue
-        if character == "{":
-            depth += 1
-        elif character == "}":
-            depth -= 1
-            if depth == 0:
-                return position
-        position += 1
-    return None
+    return delimiter_end(source, position, step=brace_step, skip=brace_skip)
 
 
 def without_leading_tabs(line: str) -> str:
@@ -432,16 +505,16 @@ class ShellLexer:
         """Step over blanks, line continuations and a comment up to its newline."""
         source = self.source
         while self.position < len(source):
-            character = source[self.position]
-            if character in " \t\r":
-                self.position += 1
-            elif character == "\\" and self.at(1) == "\n":
-                self.position += 2
-            elif character == "#":
-                newline = source.find("\n", self.position)
-                self.position = len(source) if newline == -1 else newline
-            else:
-                return
+            match source[self.position]:
+                case " " | "\t" | "\r":
+                    self.position += 1
+                case "\\" if self.at(1) == "\n":
+                    self.position += 2
+                case "#":
+                    newline = source.find("\n", self.position)
+                    self.position = len(source) if newline == -1 else newline
+                case _:
+                    return
 
     def lex(self) -> Token:
         """Read one token from the cursor."""
@@ -500,12 +573,13 @@ class ShellLexer:
             self.position += 1
         core = source[self.position]
         self.position += 1
-        if self.at() == core:
-            self.position += 1
-            if core == "<" and self.at() in ("<", "-"):
+        match (core, self.at()):
+            case (opener, repeated) if opener == repeated:
                 self.position += 1
-        elif (core, self.at()) in ((">", "|"), ("<", ">")):
-            self.position += 1
+                if core == "<" and self.at() in ("<", "-"):
+                    self.position += 1
+            case (">", "|") | ("<", ">"):
+                self.position += 1
         if self.at() == "&":
             self.position += 1
             while self.at() and (self.at().isdigit() or self.at() == "-"):
@@ -755,23 +829,11 @@ class ShellLexer:
         """Read a `$((…))` expansion, whose interior may not run a command."""
         source = self.source
         start = self.position
-        depth = 2
-        for cursor in range(start + 3, len(source)):
-            character = source[cursor]
-            if character == "`" or source.startswith("$(", cursor):
-                raise ShellSyntaxError(
-                    KernelDecision(
-                        "deny", SUBSTITUTION_REASON, recovery=SUBSTITUTION_RECOVERY
-                    )
-                )
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-                if depth == 0:
-                    self.position = cursor + 1
-                    return part("arithmetic", source[start : cursor + 1])
-        raise syntax_error("arithmetic expansion does not parse")
+        end = delimiter_end(source, start + 3, depth=2, skip=arithmetic_skip)
+        if end is None:
+            raise syntax_error("arithmetic expansion does not parse")
+        self.position = end + 1
+        return part("arithmetic", source[start : end + 1])
 
     def parameter(self, inner: str, spelled: str) -> WordPart:
         """Read the interior of a `${…}` into its name, operator and operand."""
@@ -812,18 +874,12 @@ class ShellLexer:
     def read_arithmetic_command(self) -> str:
         """Read a `(( … ))` command's expression, the opening `((` already taken."""
         source = self.source
-        depth = 2
         start = self.position
-        for cursor in range(start, len(source)):
-            character = source[cursor]
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-                if depth == 0:
-                    self.position = cursor + 1
-                    return source[start : cursor - 1]
-        raise syntax_error("arithmetic command does not parse")
+        end = delimiter_end(source, start, depth=2)
+        if end is None:
+            raise syntax_error("arithmetic command does not parse")
+        self.position = end + 1
+        return source[start : end - 1]
 
 
 def word_text(word: Word) -> str:
@@ -923,16 +979,17 @@ class ShellParser:
         while not self.stops(self.lexer.peek(), stop_words, stop_ops):
             andor = self.andor()
             following = self.lexer.peek()
-            if following["kind"] == "op" and following["text"] in (";", "&"):
-                self.lexer.take()
-                items.append(Item(andor=andor, terminator=following["text"]))
-            elif following["kind"] == "newline":
-                self.lexer.take()
-                items.append(Item(andor=andor, terminator="\n"))
-            elif self.stops(following, stop_words, stop_ops):
-                items.append(Item(andor=andor, terminator=""))
-            else:
-                raise syntax_error()
+            match following:
+                case {"kind": "op", "text": ";" | "&" as terminator}:
+                    self.lexer.take()
+                    items.append(Item(andor=andor, terminator=terminator))
+                case {"kind": "newline"}:
+                    self.lexer.take()
+                    items.append(Item(andor=andor, terminator="\n"))
+                case _:
+                    if not self.stops(following, stop_words, stop_ops):
+                        raise syntax_error()
+                    items.append(Item(andor=andor, terminator=""))
             self.linebreak()
         self.nesting -= 1
         return Script(items=items)
@@ -1119,11 +1176,11 @@ class ShellParser:
             self.lexer.take()
             while self.lexer.peek()["kind"] == "word":
                 items.append(self.lexer.take()["word"][0])
-        following = self.lexer.peek()
-        if following["kind"] == "op" and following["text"] == ";":
-            self.lexer.take()
-        elif listed and following["kind"] != "newline":
-            raise syntax_error()
+        match self.lexer.peek():
+            case {"kind": "op", "text": ";"}:
+                self.lexer.take()
+            case {"kind": token_kind} if listed and token_kind != "newline":
+                raise syntax_error()
         self.linebreak()
         self.expect_word("do")
         body = self.nonempty(self.script(stop_words=("done",)))
@@ -1161,11 +1218,13 @@ class ShellParser:
             body = self.script(stop_words=("esac",), stop_ops=CASE_TERMINATORS)
             arms.append(Arm(patterns=patterns, body=body))
             ending = self.lexer.peek()
-            if ending["kind"] == "op" and ending["text"] in CASE_TERMINATORS:
-                self.lexer.take()
-                self.linebreak()
-            elif self.reserved(ending) != "esac":
-                raise syntax_error()
+            match ending:
+                case {"kind": "op", "text": text} if text in CASE_TERMINATORS:
+                    self.lexer.take()
+                    self.linebreak()
+                case _:
+                    if self.reserved(ending) != "esac":
+                        raise syntax_error()
         self.lexer.take()
         return command("case", words=subject["word"], arms=arms)
 

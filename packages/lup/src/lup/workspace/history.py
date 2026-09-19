@@ -523,12 +523,14 @@ def iter_trace_event_files(
     ver_dirs = [traces_path() / version] if version else version_dirs()
     for ver_dir in ver_dirs:
         logs_base = ver_dir / "logs"
-        if session_id is not None:
-            candidate = logs_base / session_id / "events.json"
-            if candidate.is_file():
-                yield candidate
-        elif logs_base.exists():
-            yield from logs_base.glob("*/events.json")
+        match session_id:
+            case str() as session:
+                candidate = logs_base / session / "events.json"
+                if candidate.is_file():
+                    yield candidate
+            case _:
+                if logs_base.exists():
+                    yield from logs_base.glob("*/events.json")
 
 
 def list_all_session_ids(version: str | None = None) -> list[str]:

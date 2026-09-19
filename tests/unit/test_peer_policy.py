@@ -1,11 +1,11 @@
 """What a native call reaching another session is judged by, end to end.
 
 Three layers, because the failure this stops is a disagreement between them:
-the kernel decides from spellings alone, the host folds those spellings off
-disk, and the roster is written by an entirely different process. A test of
-the kernel alone would pass while the fold read a format nobody writes, which
-is exactly how a redirect ends up reaching nobody — so the fold here is read
-against a roster the real writer produced.
+the kernel decides from spellings alone, the dispatcher folds those spellings
+off disk, and the roster is written by an entirely different process. A test
+of the kernel alone would pass while the fold read a format nobody writes,
+which is exactly how a redirect ends up reaching nobody — so the fold here is
+read against a roster the real writer produced.
 """
 
 import json
@@ -15,12 +15,12 @@ from pathlib import Path
 import sh
 
 from lup.channels.models import utc_now
+from lup.coordination.bare import store
 from lup.coordination.identity import member_ref, mint_member_id
+from lup.coordination.meeting import coordination_root
 from lup.coordination.policy import peer_policy
-from lup.coordination.pulse import beat
 from lup.coordination.repository import RepositoryPeers
 from lup.coordination.roster import ActorJoined, Delivery
-from lup.policy.assets.host import peer_addresses, peer_listing
 from lup.policy.kernel.peers import (
     decide_peer_listing,
     decide_peer_send,
@@ -49,16 +49,7 @@ def joined_repository(work: Path, hooks: Path) -> RepositoryPeers:
 
 def folded_addresses(work: Path) -> list[str]:
     """Every spelling the compiled hook's own fold reaches a live member at."""
-    assert DECLARED is not None
-    return peer_addresses(
-        work,
-        DECLARED["store"],
-        DECLARED["roster_file"],
-        DECLARED["names_file"],
-        DECLARED["member_kind"],
-        DECLARED["heartbeats_dir"],
-        DECLARED["stale_after_seconds"],
-    )
+    return store.addresses(coordination_root(work))
 
 
 def decide(payload: object) -> JsonObject:
@@ -188,16 +179,7 @@ def test_the_listing_says_what_carries_a_message_to_each_member(
     member = mint_member_id()
     peers.join(member, work, cli_name="feat-touches", delivery=Delivery.INBOX)
     peers.describe(member, "rewriting the touch ledger")
-    assert DECLARED is not None
-    listing = peer_listing(
-        work,
-        DECLARED["store"],
-        DECLARED["roster_file"],
-        DECLARED["names_file"],
-        DECLARED["member_kind"],
-        DECLARED["heartbeats_dir"],
-        DECLARED["stale_after_seconds"],
-    )
+    listing = store.listing(coordination_root(work))
     row = next(line for line in listing if line.startswith("feat-touches"))
     assert "rewriting the touch ledger" in row
     assert Delivery.INBOX in row
@@ -211,8 +193,7 @@ def test_a_member_whose_pulse_stopped_is_no_longer_reached_until_it_beats(
     work = tmp_path / "work"
     peers = joined_repository(work, tmp_path / "hooks")
     member = mint_member_id()
-    assert DECLARED is not None
-    long_ago = utc_now() - timedelta(seconds=DECLARED["stale_after_seconds"] + 1)
+    long_ago = utc_now() - timedelta(seconds=store.STALE_AFTER_SECONDS + 1)
     peers.cohort.roster.stream.append(
         ActorJoined(actor=member_ref(member), task="working", at=long_ago)
     )
@@ -221,7 +202,7 @@ def test_a_member_whose_pulse_stopped_is_no_longer_reached_until_it_beats(
     assert "feat-touches" not in folded_addresses(work)
     assert "user" in folded_addresses(work)
 
-    beat(peers.root, member)
+    store.beat(peers.root, member)
 
     assert "feat-touches" in folded_addresses(work)
 

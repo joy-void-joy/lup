@@ -1131,19 +1131,20 @@ class DependencyBaseBuilder:
         joined_commit: str | None = None,
     ) -> DependencyBase:
         commits = [parent_commits[parent] for parent in concern.dependencies]
-        if not commits:
-            commit = self.source.commit
-            semantic_join = False
-        elif len(commits) == 1:
-            commit = commits[0]
-            semantic_join = False
-        else:
-            if joined_commit is None:
-                raise ValueError(
-                    f"concern {concern.id!r} needs a semantic multi-parent join"
-                )
-            commit = joined_commit
-            semantic_join = True
+        match commits:
+            case []:
+                commit = self.source.commit
+                semantic_join = False
+            case [only]:
+                commit = only
+                semantic_join = False
+            case _:
+                if joined_commit is None:
+                    raise ValueError(
+                        f"concern {concern.id!r} needs a semantic multi-parent join"
+                    )
+                commit = joined_commit
+                semantic_join = True
         return DependencyBase(
             concern_id=concern.id,
             parent_concerns=concern.dependencies,

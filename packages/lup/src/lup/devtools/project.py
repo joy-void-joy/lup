@@ -13,9 +13,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.harness.codescan.boundaries import ApplicationRoots, native_import_boundaries
+from lup.harness.codescan.boundaries import native_import_boundaries
 from lup.policy.imports import ImportBoundary
-from lup.harness.codescan.common import AntiPattern, RuleSelection
+from lup.harness.codescan.common import AntiPattern, ApplicationRoots, RuleSelection
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.subapps import SubAppSelection
 from lup.harness.coverage import ModuleCoverage

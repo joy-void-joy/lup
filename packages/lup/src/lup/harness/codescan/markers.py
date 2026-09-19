@@ -101,26 +101,21 @@ COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//)")
 # or `/// lup:` is read as sitting on that opener rather than inside its prose.
 COMMENT_OPENER_RE = re.compile(r"^\s*(#+|//+)")
 
-# lup: ignore[library-default] — Python's own source suffixes
-PYTHON_SUFFIXES = {".py", ".pyi"}
-# lup: ignore[library-default] — Markdown's own suffixes
-MARKDOWN_SUFFIXES = {".md", ".markdown"}
-# Languages where `#` does not open a comment (`//` does), so a `# lup:` is
-# always string content (e.g. a Python marker quoted inside a JS template) —
-# only `//` markers count as notes there.
-# lup: ignore[library-default] — the suffixes where `#` opens no comment, a language fact
-JS_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
-# JSON has no comment syntax at all, so every marker in one is string content —
-# a note quoted inside a recorded trace, a tool message, or a config value.
-# lup: ignore[library-default] — JSON's own suffixes, a format fact
-JSON_SUFFIXES = {".json", ".jsonl"}
-
 CONTEXT_BEFORE = 2
 CONTEXT_AFTER = 25
 
 
 class ScanMode:
-    """How a file's text is searched for markers, chosen by its language."""
+    """How a file's text is searched for markers, chosen by its language.
+
+    Python source is parsed, so a marker counts only in a comment or a
+    docstring. Markdown is line-scanned with code skipped. In the JS family
+    `#` opens no comment (`//` does), so a `# lup:` there is always string
+    content — a Python marker quoted inside a template — and only `//`
+    markers count. JSON has no comment syntax at all, so every marker in one
+    is string content: a note quoted inside a recorded trace, a tool message,
+    a config value. Everything else is plain line-scanned.
+    """
 
     PYTHON = "python"
     MARKDOWN = "markdown"
@@ -129,25 +124,28 @@ class ScanMode:
     TEXT = "text"
 
 
-def scan_mode_for(path: Path) -> str:
-    """Pick the scan mode for a path from its suffix.
+# lup: ignore[library-default] — each suffix is its language's own, a fact of
+# the format rather than a choice of this library's
+SCAN_MODES = {
+    ".py": ScanMode.PYTHON,
+    ".pyi": ScanMode.PYTHON,
+    ".md": ScanMode.MARKDOWN,
+    ".markdown": ScanMode.MARKDOWN,
+    ".js": ScanMode.JS,
+    ".jsx": ScanMode.JS,
+    ".ts": ScanMode.JS,
+    ".tsx": ScanMode.JS,
+    ".mjs": ScanMode.JS,
+    ".cjs": ScanMode.JS,
+    ".json": ScanMode.JSON,
+    ".jsonl": ScanMode.JSON,
+}
+"""The scan mode each suffix routes to; a suffix absent here is plain text."""
 
-    The single source of truth for routing each tracked file: Python source is
-    parsed (comments and docstrings only), Markdown is line-scanned with code
-    skipped, JSON holds no comments so it yields none, and everything else is
-    plain line-scanned.
-    """
-    match path.suffix.lower():
-        case suffix if suffix in PYTHON_SUFFIXES:
-            return ScanMode.PYTHON
-        case suffix if suffix in MARKDOWN_SUFFIXES:
-            return ScanMode.MARKDOWN
-        case suffix if suffix in JS_SUFFIXES:
-            return ScanMode.JS
-        case suffix if suffix in JSON_SUFFIXES:
-            return ScanMode.JSON
-        case _:
-            return ScanMode.TEXT
+
+def scan_mode_for(path: Path) -> str:
+    """Pick the scan mode for a path from its suffix, the one routing every tracked file takes."""
+    return SCAN_MODES.get(path.suffix.lower(), ScanMode.TEXT)
 
 
 class NoteKind(StrEnum):
@@ -224,10 +222,10 @@ class MarkerComment(BaseModel):
         match head.group("condition"):
             case None:
                 condition = None
-            case stated if stated.strip():
+            case stated:
+                if not stated.strip():
+                    return self
                 condition = stated.strip()
-            case _:
-                return self
         return self.model_copy(
             update={
                 "kind": NoteKind.defer,

@@ -122,8 +122,6 @@ def library_modules(
     Nothing is built by this call. Every entry closes over its arguments and
     opens its subject only when a project that took the module asks for it.
     """
-    # lup: ignore[library-default] — the modules this library authors, so the
-    # table is what it ships rather than a choice made for an adopter
     return [
         ModuleEntry(spec=specs.CORE, build=lambda: core_module(layout, rules)),
         ModuleEntry(spec=specs.GIT_WORKFLOW, build=git_workflow_module),

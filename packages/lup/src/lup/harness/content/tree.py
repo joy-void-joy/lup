@@ -130,7 +130,8 @@ def top_level_entries(
             initializer = entry / "__init__.py"
             if initializer.is_file():
                 yield TopLevelEntry(name=entry.name, source=initializer)
-            elif entry.is_file() and entry.suffix == ".py":
+                continue
+            if entry.is_file() and entry.suffix == ".py":
                 yield TopLevelEntry(name=entry.stem, source=entry)
 
     return sorted(importable(), key=lambda entry: entry.name)

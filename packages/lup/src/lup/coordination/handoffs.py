@@ -127,14 +127,36 @@ class Handoff(LedgerNode, frozen=True):
     the receiver carries a stale one forward.
     """
 
+    done: bool = False
+    """Whether the receiver has finished what this carried, as they say so.
+
+    Recorded rather than inferred, for the reason a task's is: nothing else
+    in the log knows. A handoff that transferred tasks can be read from them,
+    but one carrying work too small or too shapeless to cut into tasks
+    transfers none, and reading that silence would leave it held forever --
+    by a session that has since stopped, against a receiver with nothing left
+    to answer.
+    """
+
+    def finished(self) -> bool:
+        """A handoff is done with when its receiver says so."""
+        return self.done
+
+    def completed(self) -> LedgerNode:
+        """This handoff, closed. Work crossing over is work, and it can end."""
+        return self.model_copy(update={"done": True})
+
     def standing(self, around: Surroundings) -> Standing:
         """Whether the work this carried is done, still moving, or unclaimed.
 
-        Read from the tasks it transferred rather than stored on the handoff,
-        because the handoff is a moment and the work is what continues: a
-        record saying "transferred" would go on saying it long after the
-        receiver finished, and after they stopped.
+        The receiver's own word first, then the tasks it transferred: the
+        handoff is a moment and the work is what continues, so a record
+        saying "transferred" would go on saying it long after they finished.
+        Either answer is somebody stating an outcome rather than the log
+        inferring one from silence.
         """
+        if self.done:
+            return Standing(label="done", reason=f"{self.to or 'the receiver'} says so")
         moved = [
             node
             for edge in around.outgoing

@@ -26,7 +26,7 @@ from lup.coordination.identity import (
     session_member_id,
 )
 from lup.coordination.peer_tools import create_peer_tools
-from lup.coordination.pulse import reset
+from lup.coordination.bare.store import reset
 from lup.coordination.repository import (
     PeerDepartedError,
     RepositoryPeers,
@@ -34,7 +34,7 @@ from lup.coordination.repository import (
     launched_member,
 )
 from lup.coordination.roster import ActorDescribed, Delivery
-from lup.coordination.store import coordination_root
+from lup.coordination.meeting import coordination_root
 from lup.tools.mcp import LupMcpTool, ToolResponse, response_text
 
 

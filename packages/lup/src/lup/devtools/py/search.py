@@ -7,6 +7,7 @@ import inspect
 import itertools
 import typing
 from pathlib import Path
+from types import BuiltinFunctionType, FunctionType
 
 # ---------------------------------------------------------------------------
 # py search — find symbols across packages
@@ -132,12 +133,13 @@ def scan_module_symbols(module_name: str, pattern: str) -> list[SearchMatch]:
         member = getattr(mod, name, None)
         if member is None or inspect.ismodule(member):
             return None
-        if inspect.isclass(member):
-            kind = "class"
-        elif inspect.isfunction(member) or inspect.isbuiltin(member):
-            kind = "function"
-        else:
-            kind = type(member).__name__
+        match member:
+            case type():
+                kind = "class"
+            case FunctionType() | BuiltinFunctionType():
+                kind = "function"
+            case _:
+                kind = type(member).__name__
         return SearchMatch(symbol=name, kind=kind, import_path=f"{module_name}.{name}")
 
     return [m for name in dir(mod) if (m := match_of(name)) is not None]

@@ -107,18 +107,16 @@ def source_patch_preimages(content: str) -> list[Path]:
         if not awaiting_old_header or not line.startswith("--- "):
             continue
         header = line[4:]
-        if header == "/dev/null":
-            if new_candidate is None:
-                raise ValueError("new-file source patch has no destination")
-            paths.append(new_candidate)
-        elif (
-            old_candidate is not None
-            and header.startswith("a/")
-            and old_candidate == Path(header[2:])
-        ):
-            paths.append(old_candidate)
-        else:
-            raise ValueError("source patch old-file header does not match its diff")
+        claimed = Path(header[2:]) if header.startswith("a/") else None
+        match (header, old_candidate, claimed):
+            case ("/dev/null", _, _):
+                if new_candidate is None:
+                    raise ValueError("new-file source patch has no destination")
+                paths.append(new_candidate)
+            case (_, Path() as old, Path() as named) if old == named:
+                paths.append(old)
+            case _:
+                raise ValueError("source patch old-file header does not match its diff")
         awaiting_old_header = False
         old_candidate = None
         new_candidate = None
@@ -184,7 +182,6 @@ class FilesystemCurrentTreeReader(CurrentTreeReader):
         )
         local = {path.as_posix() for path in self.local_only}
         sensitive = {path.as_posix() for path in self.sensitive_local_only}
-        artifacts: list[CurrentArtifact] = []
         if not root.exists():
             return CurrentTree(root=root, artifacts=[])
         if self.managed_paths is None:
@@ -195,61 +192,52 @@ class FilesystemCurrentTreeReader(CurrentTreeReader):
                 for relative in self.managed_paths
                 if (root / relative).is_file()
             )
-        for path in paths:
+
+        def classified(path: Path) -> CurrentArtifact:
+            """One file under the category its declarations give it.
+
+            A path resolving outside the root is sensitive and never read. Past
+            that, the sensitive list answers before any decoding, and a file
+            that is not UTF-8 is a conflict whichever list claims it.
+            """
             relative = path.relative_to(root)
-            key = relative.as_posix()
             if not path.resolve().is_relative_to(resolved_root):
-                artifacts.append(
-                    CurrentArtifact(
-                        path=relative,
-                        content="",
-                        category="sensitive_local_only",
-                        sha256="",
-                    )
+                return CurrentArtifact(
+                    path=relative,
+                    content="",
+                    category="sensitive_local_only",
+                    sha256="",
                 )
-                continue
             raw = path.read_bytes()
             digest = hashlib.sha256(raw).hexdigest()
             executable = bool(path.stat().st_mode & 0o111)
-            if key in sensitive:
-                category: OwnershipCategory = "sensitive_local_only"
-                content = ""
-            elif key in local:
-                category = "local_only"
-                try:
-                    content = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    category = "unknown_conflict"
-                    content = ""
-            elif key in owned:
-                record = owned[key]
-                try:
-                    content = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    category = "unknown_conflict"
-                    content = ""
-                else:
-                    category = (
-                        "generated"
-                        if record.sha256 == digest
-                        else "backpropagation_candidate"
-                    )
-            else:
-                category = "unknown_conflict"
-                try:
-                    content = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    content = ""
-            artifacts.append(
-                CurrentArtifact(
+
+            def artifact(category: OwnershipCategory, content: str) -> CurrentArtifact:
+                return CurrentArtifact(
                     path=relative,
                     content=content,
                     category=category,
                     sha256=digest,
                     executable=executable,
                 )
-            )
-        return CurrentTree(root=root, artifacts=artifacts)
+
+            key = relative.as_posix()
+            if key in sensitive:
+                return artifact("sensitive_local_only", "")
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                return artifact("unknown_conflict", "")
+            if key in local:
+                return artifact("local_only", content)
+            if key in owned:
+                unchanged = owned[key].sha256 == digest
+                return artifact(
+                    "generated" if unchanged else "backpropagation_candidate", content
+                )
+            return artifact("unknown_conflict", content)
+
+        return CurrentTree(root=root, artifacts=[classified(path) for path in paths])
 
 
 class DeterministicReconciler(Reconciler):

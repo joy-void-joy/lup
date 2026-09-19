@@ -75,6 +75,22 @@ class SharedBudget:
         self.directory.mkdir(parents=True, exist_ok=True)
         moments = TypeAdapter(list[float])
         now = self.clock()
+
+        def decided(inside: list[float]) -> Reservation:
+            """Take the slot where the window has room, else say how long until it has."""
+            if per_window <= 0:
+                return Reservation(
+                    taken=False, wait_seconds=self.window_seconds, inside=len(inside)
+                )
+            if len(inside) < per_window:
+                inside.append(now)
+                return Reservation(taken=True, wait_seconds=0.0, inside=len(inside))
+            return Reservation(
+                taken=False,
+                wait_seconds=max(inside[0] + self.window_seconds - now, 0.0),
+                inside=len(inside),
+            )
+
         with self.path(key).open("a+", encoding="utf-8") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
@@ -84,16 +100,7 @@ class SharedBudget:
                 inside = sorted(
                     moment for moment in held if now - moment < self.window_seconds
                 )
-                if per_window <= 0:
-                    wait = self.window_seconds
-                    taken = False
-                elif len(inside) < per_window:
-                    inside.append(now)
-                    wait = 0.0
-                    taken = True
-                else:
-                    wait = max(inside[0] + self.window_seconds - now, 0.0)
-                    taken = False
+                reservation = decided(inside)
                 handle.seek(0)
                 handle.truncate()
                 handle.write(json.dumps(inside))
@@ -101,7 +108,7 @@ class SharedBudget:
                 handle.flush()
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        return Reservation(taken=taken, wait_seconds=wait, inside=len(inside))
+        return reservation
 
     def inside(self, key: str) -> int:
         """How many requests the window currently holds for ``key``, without taking one."""

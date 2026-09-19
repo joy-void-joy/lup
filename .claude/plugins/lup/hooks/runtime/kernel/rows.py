@@ -101,6 +101,18 @@ class PathRoleRow(TypedDict):
     role: PathRoleName
 
 
+class SpawnNameRow(TypedDict):
+    """One erased decision that a spawned agent carries a name.
+
+    ``reason`` is what a spawn without one is refused with; ``recovery`` says
+    the shape a name takes, because a refusal an agent cannot act on becomes
+    a retry.
+    """
+
+    reason: str
+    recovery: str
+
+
 class AcceptanceGuardRow(TypedDict):
     """One erased decision to hold a project's acceptance tests still.
 
@@ -647,10 +659,14 @@ class EditRuleRow(TypedDict):
 class PeerPolicyRow(TypedDict):
     """Where this project's sessions find each other, and what a sender is told.
 
-    ``store``, ``roster_file`` and ``names_file`` say where the roster lives —
-    parts beneath the repository's shared git directory rather than a joined
-    path, because the dispatcher rebuilds it with the host's own separator and
-    a compiled literal carrying one platform's answers on one platform.
+    ``store`` says where the roster lives — parts beneath the repository's
+    shared git directory rather than a joined path, because the dispatcher
+    rebuilds it with the host's own separator and a compiled literal carrying
+    one platform's answers on one platform. What is *in* that directory is not
+    carried: the fold the dispatcher reads it with ships beside the dispatcher
+    and owns every file name, so a row restating them would be the second
+    spelling that can drift. ``windows_dir`` is the exception, being the one
+    place under the store nothing but the dispatcher writes or reads.
 
     ``send_reason`` says why a send was stopped and ``send_recovery`` names the
     surface reaching the same peer durably, so a sender is never only refused.
@@ -665,16 +681,10 @@ class PeerPolicyRow(TypedDict):
     """
 
     store: list[str]
-    roster_file: str
-    names_file: str
+    windows_dir: str
+    member_env: str
     send_reason: str
     send_recovery: str
     listing_note: str
-    touches_file: str
-    windows_dir: str
     claim_reason: str
     claim_recovery: str
-    member_env: str
-    member_kind: str
-    heartbeats_dir: str
-    stale_after_seconds: float

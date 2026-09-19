@@ -13,7 +13,8 @@ quietly delivering into a directory nobody writes.
 import json
 from pathlib import Path
 
-from lup.coordination.identity import MEMBER_KIND, member_ref
+from lup.coordination.bare.store import MEMBER_KIND
+from lup.coordination.identity import member_ref
 from lup.coordination.mail import DELIVERY_DIR, EVERYONE, MESSAGE_FILE
 from lup.providers.claude import peer_delivery_runtime as delivery_runtime
 

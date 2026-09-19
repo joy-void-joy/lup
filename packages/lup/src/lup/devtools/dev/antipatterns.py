@@ -36,17 +36,9 @@ from pydantic import BaseModel
 from lup.harness.codescan.antipatterns import (
     PYTHON_ANTI_PATTERNS,
     AntiPatternFinding,
-    AntiPatternSet,
+    RuleSet,
     audit_text,
     patterns_for_suffix,
-)
-from lup.harness.codescan.boundaries import (
-    audit_constant_declarations,
-    audit_path_boundaries,
-)
-from lup.harness.codescan.capabilities import (
-    audit_abstract_declarations,
-    audit_capabilities,
 )
 from lup.harness.codescan.common import (
     PACKAGE_ROOTS,
@@ -57,13 +49,11 @@ from lup.harness.codescan.common import (
     file_level_ignore,
     module_name,
 )
-from lup.harness.codescan.dispatch import audit_own_model_dispatch
-from lup.policy.kernel.edit import TYPESCRIPT_SUFFIXES
+from lup.policy.kernel.typescript import TYPESCRIPT_SUFFIXES
 from lup.harness.codescan.resolution import refute
 from lup.devtools.dev.refutations import remembered_refutations
 from lup.workspace.paths import project_root, refutation_cache_path
-from lup.harness.codescan.narrowing import audit_isinstance_chains
-from lup.harness.codescan.project import retired_suppressions
+from lup.harness.codescan.project import AuditedProject, retired_suppressions
 from lup.harness.codescan.registry import RULE_REFERENCE
 from lup.policy.kernel.edit import (
     IGNORE_RE,
@@ -168,7 +158,7 @@ def within_scope(rel: str, paths: Sequence[str] | None) -> bool:
     return any(subject.is_relative_to(scoped(path)) for path in paths)
 
 
-def declared_rules(project: DevProject) -> AntiPatternSet:
+def declared_rules(project: DevProject) -> RuleSet:
     """The rule set this project actually holds itself to, in one place.
 
     The tables this library ships plus whatever the project added, less
@@ -177,9 +167,9 @@ def declared_rules(project: DevProject) -> AntiPatternSet:
     asked about read this, because a rule the project switched off is one no
     language server should be spending a session on.
     """
-    return AntiPatternSet(
-        python=[*PYTHON_ANTI_PATTERNS, *project.anti_patterns]
-    ).selected(project.rules)
+    return RuleSet(python=[*PYTHON_ANTI_PATTERNS, *project.anti_patterns]).selected(
+        project.rules
+    )
 
 
 def scanned_files(
@@ -280,27 +270,34 @@ def scan_antipatterns(
     # every audit below waits on nothing, so the sweep reads while it waits
     # rather than after it. Only the text audit reads a refutation; the rest
     # are assembled in their own order once both halves are in.
+    # Every project rule the set holds, over the whole tree: the class index
+    # and the names a library's callers can replace are properties of the
+    # project, so a scoped sweep hands the rules everything and keeps only
+    # the findings inside its scope.
+    audited = AuditedProject(
+        sources=declaration_sources,
+        application=project.roots,
+        boundaries=project.resolved_import_boundaries(),
+    )
     with ThreadPoolExecutor(max_workers=1) as pool:
         resolving = pool.submit(resolving_refutations)
         declared = [
-            *audit_capabilities(declaration_sources),
-            *audit_abstract_declarations(declaration_sources),
-            *audit_own_model_dispatch(declaration_sources),
-            *audit_isinstance_chains(declaration_sources),
-            *audit_constant_declarations(declaration_sources, project.roots),
-        ]
-        boundary_findings = [
-            (source.path, finding)
-            for source in sources
-            for finding in audit_path_boundaries(
-                source.path,
-                source.text,
-                project.roots,
-                project.resolved_import_boundaries(),
-            )
+            finding
+            for rule in declared_rules(project).project
+            for finding in rule.audit(audited)
+            if within_scope(finding.path.as_posix(), paths)
         ]
         refuted = resolving.result()
 
+    # A bare directive a project rule reports as untyped is covering that
+    # rule's violation, so the line audit's reading of the same directive —
+    # a bare marker on a line no line rule trips — is not the dead directive
+    # it looks like from there.
+    covering = {
+        (finding.path.as_posix(), finding.line)
+        for finding in declared
+        if finding.kind == "untyped"
+    }
     results = [
         FoundAntiPattern(file=item.rel, **finding.model_dump())
         for item in scanned
@@ -310,43 +307,22 @@ def scan_antipatterns(
             refuted[item.path.as_posix()] if item.path.as_posix() in refuted else None,
             typescript=item.path.suffix.lower() in TYPESCRIPT_SUFFIXES,
         )
+        if not (
+            finding.kind == "spurious"
+            and not finding.rule_id
+            and (item.rel, finding.line) in covering
+        )
     ]
     results.extend(
         FoundAntiPattern(
             file=finding.path.as_posix(),
             kind=finding.kind,
             line=finding.line,
-            text="",
-            message=finding.message,
-            rule_id=finding.rule_id,
-        )
-        for finding in declared
-        if within_scope(finding.path.as_posix(), paths)
-    )
-    foreign_untyped = {
-        (path.as_posix(), finding.line)
-        for path, finding in boundary_findings
-        if finding.kind == "untyped"
-    }
-    results = [
-        finding
-        for finding in results
-        if not (
-            finding.kind == "spurious"
-            and not finding.rule_id
-            and (finding.file, finding.line) in foreign_untyped
-        )
-    ]
-    results.extend(
-        FoundAntiPattern(
-            file=path.as_posix(),
-            kind=finding.kind,
-            line=finding.line,
             text=finding.text,
             message=finding.message,
             rule_id=finding.rule_id,
         )
-        for path, finding in boundary_findings
+        for finding in declared
     )
     return AntiPatternScan(
         findings=[

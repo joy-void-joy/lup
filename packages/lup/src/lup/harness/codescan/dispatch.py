@@ -31,10 +31,11 @@ rule refused exactly that arm and offered a fix that could not be carried out.
 import ast
 from collections.abc import Iterator
 
-from lup.harness.codescan.common import PythonSource
+from lup.harness.codescan.common import PythonSource, RuleExample
 from lup.policy.kernel.edit import python_nodes, python_tree
 from lup.harness.codescan.project import (
     ClassSymbol,
+    ProjectRule,
     RuleFinding,
     RuleViolation,
     audit_suppressions,
@@ -199,3 +200,55 @@ def audit_own_model_dispatch(sources: list[PythonSource]) -> list[RuleFinding]:
         sources, dispatched_models(sources, symbols, models)
     )
     return audit_suppressions(sources, violations, RULE_ID)
+
+
+DISPATCH_RULE = ProjectRule(
+    id=RULE_ID,
+    family="architecture",
+    scope="Python architecture",
+    examples=[
+        RuleExample(
+            code=(
+                "from pydantic import BaseModel\n"
+                "class Part(BaseModel): ...\n"
+                "class TextPart(Part):\n"
+                "    text: str\n"
+                "class ImagePart(Part):\n"
+                "    url: str\n"
+                "def render(part: Part) -> str:\n"
+                "    if isinstance(part, TextPart):\n"
+                "        return part.text\n"
+                "    return ''"
+            ),
+            verdict="flagged",
+        ),
+        RuleExample(
+            code=(
+                "from pydantic import BaseModel\n"
+                "class Capability(BaseModel):\n"
+                "    built: bool\n"
+                "def describe(capability: Capability) -> str:\n"
+                "    match capability:\n"
+                "        case Capability(built=False):\n"
+                "            return 'pending'\n"
+                "    return 'built'"
+            ),
+            verdict="cleared",
+        ),
+    ],
+    message=(
+        "A union we declare answers through its members: the base names the "
+        "operation and each variant answers or declines it. Branching on the "
+        "variant's own type — isinstance, a case arm, an assert_never net — "
+        "leaves a filter that goes stale the moment a variant is added. "
+        "Narrowing untyped data at a boundary is the different case and is "
+        "not reported: the rule fires only on project classes that inherit "
+        "pydantic.BaseModel and have something to be dispatched over — "
+        "sibling variants under one project base, or a union they are "
+        "written into beside another model. A model with neither is one "
+        "type, and a case arm over it is a value test with no union base "
+        "for the remedy to name."
+    ),
+    audit=lambda audited: audit_own_model_dispatch(audited.sources),
+)
+"""The own-model-dispatch rule, declared beside the audit that decides it."""

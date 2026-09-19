@@ -71,6 +71,7 @@ If comparing across versions, get code-level diffs: """
             ),
             models.Delegate(
                 subagent_type="lup:version-explorer",
+                name="version-comparison",
                 prompt="Compare vX.Y.Z and vA.B.C",
             ),
             models.TextPart(

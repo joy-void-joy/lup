@@ -1,14 +1,21 @@
 """Claude-native prompt and artifact renderers."""
 
 import json
+from importlib import resources
 import shlex
 from collections.abc import Sequence
 from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
-from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
+from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.drift_prompt import drift_hook
-from lup.providers.roster_prompt import departure_hook, folded, prompt_hook
+from lup.providers.subagent_cleanup import cleanup_hooks
+from lup.providers.roster_prompt import (
+    departure_hook,
+    folded,
+    prompt_hook,
+    store_artifacts,
+)
 from lup.formats.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -93,9 +100,12 @@ class ClaudeSpellings(NativeSpellings):
             f"options plus a free-text choice: {question}"
         )
 
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+    def delegate(
+        self, subagent_type: QualifiedAgentName, prompt: str, name: str = ""
+    ) -> Instruction:
+        named = f", name={json.dumps(name)}" if name else ""
         return Instruction(
-            f"Delegate with Agent(subagent_type={json.dumps(subagent_type)}"
+            f"Delegate with Agent(subagent_type={json.dumps(subagent_type)}{named}"
             f", prompt={json.dumps(prompt)})"
         )
 
@@ -183,14 +193,33 @@ class ClaudeSpellings(NativeSpellings):
         something moves" and "tell me when it is over" without the agent
         asking again. Running the same command through `Bash` with a long
         timeout returns once, at the end, and reading a background session
-        repeatedly is the polling loop this exists to avoid.
+        repeatedly is the polling loop this exists to avoid. A watch left
+        live past the report is the other failure: the runtime keeps it, and
+        each line it emits resumes the finished reader, so the spelling says
+        when to stop it as well as when not to.
         """
         return Instruction(
-            f"Start a `Monitor` over `{command}` and leave it live. Each line "
-            "it emits arrives as an event, and the watch ends when the command "
-            "does. Do not run it through `Bash`, whose long timeout returns "
-            "once at the end, and do not read a backgrounded session on a "
-            "loop — both are polling, however patient"
+            f"Start a `Monitor` over `{command}`. Each line it emits arrives "
+            "as an event, and the watch ends when the command does. Do not run "
+            "it through `Bash`, whose long timeout returns once at the end, "
+            "and do not read a backgrounded session on a loop — both are "
+            "polling, however patient. A watch that outlives your report wakes "
+            "you after you have finished, so stop it with `TaskStop` before "
+            "reporting unless the command has exited"
+        )
+
+    def nested_run(self, prompt: str) -> Instruction:
+        """Spell the print-mode launch, which nests inside a running session.
+
+        Measured on 2.1.278: `claude -p` runs from a session's own shell with
+        no variable unset, loads the hooks in the directory's settings at
+        launch, and exits when the prompt is answered.
+        """
+        return Instruction(
+            f"Run `claude -p {json.dumps(prompt)} --permission-mode"
+            " bypassPermissions` from the kit's directory. A print-mode session"
+            " loads the hooks in that directory's settings at launch, runs"
+            " nested inside this one, and exits when the prompt is answered"
         )
 
     def read_document(self, path: str) -> Spelling:
@@ -350,16 +379,17 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
         granted = claude_granted_tools(source.tools, self.plugin)
         if granted:
             frontmatter.append("allowed-tools: " + ", ".join(granted))
-        if source.argument_hint is not None:
-            frontmatter.append(f"argument-hint: {json.dumps(source.argument_hint)}")
-        elif source.arguments:
-            arguments = "\n".join(
-                f"  - name: {argument.name}\n"
-                f"    description: {json.dumps(argument.description)}\n"
-                f"    required: {str(argument.required).lower()}"
-                for argument in source.arguments
-            )
-            frontmatter.append(f"arguments:\n{arguments}")
+        match source.argument_hint, source.arguments:
+            case str() as hint, _:
+                frontmatter.append(f"argument-hint: {json.dumps(hint)}")
+            case None, [_, *_]:
+                arguments = "\n".join(
+                    f"  - name: {argument.name}\n"
+                    f"    description: {json.dumps(argument.description)}\n"
+                    f"    required: {str(argument.required).lower()}"
+                    for argument in source.arguments
+                )
+                frontmatter.append(f"arguments:\n{arguments}")
         content = (
             "---\n" + "\n".join(frontmatter) + "\n"
             "---\n\n"
@@ -517,7 +547,15 @@ CLAUDE_DISPATCHER = DispatcherDeclaration(
     runtime_name="Claude Code",
     package="lup.providers.claude",
     managed_root_env=CLAUDE_LOGIN.config_home_env,
-    routed_tools=["Bash", "WebFetch", "Edit", "Write", "SendMessage", "ListAgents"],
+    routed_tools=[
+        "Bash",
+        "WebFetch",
+        "Edit",
+        "Write",
+        "SendMessage",
+        "ListAgents",
+        "Agent",
+    ],
     hook_events=["PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
     observed_tools=["Edit", "Write", "Bash"],
@@ -543,6 +581,41 @@ context the model can see; exit 2 would block the prompt and erase it, which
 nothing registered under it here does. The runtime's own spelling of the
 moment, so not a value a project could choose.
 """
+
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
+CLAUDE_SUBAGENT_START_EVENT = "SubagentStart"
+"""The event Claude Code fires as a subagent begins, before its first turn.
+
+Documented at https://code.claude.com/docs/en/hooks under "SubagentStart" and
+measured on 2.1.278: the hook reads `agent_id`, `agent_type`, `session_id`,
+`cwd` and `hook_event_name` on stdin, cannot block the subagent, and on exit
+0 its stdout's `hookSpecificOutput.additionalContext` is added as context the
+subagent reads. The runtime's own spelling of the moment, so not a value a
+project could choose.
+"""
+
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
+CLAUDE_SUBAGENT_STOP_EVENT = "SubagentStop"
+"""The event Claude Code fires as a subagent is about to hand back its report.
+
+Documented at https://code.claude.com/docs/en/hooks under "SubagentStop" and
+measured on 2.1.278: the hook reads `agent_id`, `agent_type`,
+`agent_transcript_path`, `stop_hook_active`, `last_assistant_message`,
+`background_tasks` and `session_crons` beside the common fields, and a
+stdout of `{"decision": "block", "reason": ...}` on exit 0 keeps the subagent
+running with the reason as its next instruction; the next stop then carries
+`stop_hook_active` true. The runtime's own spelling of the moment, so not a
+value a project could choose.
+"""
+
+CLAUDE_SUBAGENT_CLEANUP = (
+    resources.files("lup.providers.claude")
+    .joinpath("assets/subagent_cleanup.py")
+    .read_text("utf-8")
+)
+"""The host half of the subagent cleanup fold, shipped verbatim beside the kernel."""
 
 # lup: ignore[constant-declaration] — the runtime's wire spelling of its own
 # event, which no project could choose differently and still be heard
@@ -641,10 +714,22 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
             source,
             CLAUDE_EXIT_EVENT,
         )
+        # A subagent is told at its start what it arms is its own to stop,
+        # and refused once at its stop while any of it is still listed.
+        cleanup = cleanup_hooks(
+            Path(f".claude/plugins/{self.plugin_name}"),
+            "CLAUDE_PLUGIN_ROOT",
+            source,
+            CLAUDE_SUBAGENT_CLEANUP,
+            "lup.providers.claude.assets.subagent_cleanup",
+            CLAUDE_SUBAGENT_START_EVENT,
+            CLAUDE_SUBAGENT_STOP_EVENT,
+        )
         hooks = {
             "description": (
                 "Lup semantic permission policy, peer delivery, the roster's "
-                "changes at each prompt, and this session's departure as it ends"
+                "changes at each prompt, this session's departure as it ends, "
+                "and a subagent's report waiting on its background work"
             ),
             "hooks": {
                 **{
@@ -657,6 +742,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 },
                 **roster.registered,
                 **departure.registered,
+                **cleanup.registered,
             },
         }
         evidence = {"schemaVersion": 1, "policyIds": source.policy_ids}
@@ -685,6 +771,10 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 ),
                 *roster.artifacts,
                 *departure.artifacts,
+                *cleanup.artifacts,
+                *store_artifacts(
+                    Path(f".claude/plugins/{self.plugin_name}"), source.id
+                ),
                 *[
                     Artifact(
                         path=Path(
@@ -743,6 +833,9 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         acceptance_guard=guard.erased()
                         if (guard := source.acceptance_guard)
                         else None,
+                        spawn_names=names.erased()
+                        if (names := source.spawn_names)
+                        else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),
                         import_boundaries=source.resolved_import_boundaries(),
@@ -755,7 +848,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         diagnostics_command=source.diagnostics_command,
                         resolution_command=source.resolution_command,
                         repair_command=source.repair_command,
-                        rules=antipattern_set_for(
+                        rules=rule_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,
                             source.anti_patterns,

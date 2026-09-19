@@ -9,7 +9,13 @@ import pytest
 from lup.providers.claude.harness import ClaudeSpellings, claude_granted_tools
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.harness import compile_codex
-from lup.harness.codescan.portable import native_vocabulary, prose_breaches
+from lup.harness.codescan.antipatterns import COMPOSITION_RULES
+from lup.harness.codescan.common import RuleExample
+from lup.harness.codescan.portable import (
+    CompositionRule,
+    native_vocabulary,
+    prose_breaches,
+)
 from lup.harness.contracts import NativeSpellings
 from lup.policy.kernel.decision import SANDBOX_ESCALATION_RECIPE
 from lup.harness.models import PromptDocument, TextPart
@@ -220,4 +226,39 @@ def test_no_grant_survives_naming_a_served_key_the_runtime_ignores() -> None:
             assert bare not in served, (
                 f"{declaration.id} grants {tool}, which this runtime "
                 f"addresses as mcp__plugin_{plugin.name}_{bare}"
+            )
+
+
+# The composition rule carries its snippets like every other rule, so the
+# generation gate's table is covered by construction as well.
+COMPOSITION_EXAMPLE_CASES = [
+    pytest.param(rule, example, id=f"{rule.id}-{index}-{example.verdict}")
+    for rule in COMPOSITION_RULES
+    for index, example in enumerate(rule.examples)
+]
+
+
+@pytest.mark.parametrize(("rule", "example"), COMPOSITION_EXAMPLE_CASES)
+def test_each_composition_rule_answers_its_own_examples(
+    rule: CompositionRule, example: RuleExample
+) -> None:
+    """Generation says about each snippet what its rule declared it would.
+
+    The snippet stands in for the guidance of a harness whose every other
+    declaration is portable, so what the judge reports is the snippet's own.
+    """
+    judged = portable_harness().model_copy(
+        update={"guidance": PromptDocument(parts=[TextPart(text=example.code)])}
+    )
+    breaches = rule.judge(judged, RUNTIMES)
+
+    match example.verdict:
+        case "flagged":
+            assert breaches, f"generation admits {rule.id} at: {example.code}"
+        case "cleared":
+            assert breaches == [], f"generation refuses {rule.id} at: {example.code}"
+        case "refuted":
+            raise AssertionError(
+                f"{rule.id} claims a refuted example, but generation has no "
+                "second surface to take a verdict back on"
             )

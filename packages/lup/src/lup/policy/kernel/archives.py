@@ -94,9 +94,9 @@ def tar_write(
                     archive = value
                 case "--directory" if value:
                     directory = value
-                case _ if name in valued_flags and not value:
-                    return None
                 case _:
+                    if name in valued_flags and not value:
+                        return None
                     continue
             continue
         if word.startswith("-") and len(word) > 1:
