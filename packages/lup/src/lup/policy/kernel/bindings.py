@@ -371,6 +371,7 @@ def expanded_command(
             Arm(patterns=expand(arm["patterns"]), body=arm["body"])
             for arm in command["arms"]
         ],
+        directory=command["directory"],
     )
 
 
@@ -394,6 +395,7 @@ def rebuilt_lists(command: Command, rebuild: ListMapping) -> Command:
         clauses=clauses,
         body=body,
         arms=arms,
+        directory=command["directory"],
     )
 
 

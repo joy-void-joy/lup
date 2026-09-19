@@ -12,8 +12,15 @@ import posixpath
 from typing import TypedDict
 
 from .archives import archive_write
-from .bindings import bind_script, carried_words, command_lists
-from .decision import KernelDecision, unjudged
+from .bindings import (
+    bind_script,
+    carried_words,
+    command_lists,
+    mapped_commands,
+    placed_commands,
+    rebuilt_lists,
+)
+from .decision import SUBSTITUTION_SENTINEL, KernelDecision, unjudged
 from .effects import EffectEvidence, declare, verdict_for
 from .roles import spells_its_path
 from .rows import PathRoleRow, PathRuleRow, ShellRuleRow
@@ -25,6 +32,7 @@ from .syntax import (
     Word,
     WordPart,
     parse_script,
+    part,
     word_text,
 )
 from .words import (
@@ -47,15 +55,16 @@ from .words import (
 
 
 def parse_shell(command: str) -> Script | KernelDecision:
-    """One command line as a tree with its variables bound, or why it is not one.
+    """One command line as a tree, bound and placed, or why it is not one.
 
     The only way a reader here reaches a command's words, which is what makes
-    the binding pass the one every reader shares.
+    the binding pass -- and the placing pass after it, which says where each
+    command's words resolve from -- the ones every reader shares.
     """
     tree = parse_script(command)
     if isinstance(tree, KernelDecision):
         return tree
-    return bind_script(tree)
+    return place_script(bind_script(tree))
 
 
 def substitutions(words: list[Word]) -> list[Script]:
@@ -98,6 +107,167 @@ def simple_commands(script: Script) -> list[Command]:
         for inner in substitutions(carried_words(command)):
             found.extend(simple_commands(inner))
     return found
+
+
+CHDIR_VERBS = ("cd", "pushd", "popd")
+
+
+class Move(TypedDict):
+    """Where a directory builtin leaves the shell once it has run."""
+
+    directory: str | None
+    """``None`` where it landed somewhere nothing here can name."""
+
+
+def joined_directory(directory: str | None, operand: str) -> str | None:
+    """Where an operand names, read from the directory the shell stands in.
+
+    An absolute operand re-establishes a directory the walk had lost, because
+    where the shell was standing does not bear on where it lands. A tilde and
+    a substitution each name a directory only the running shell can expand,
+    and neither is guessed at.
+    """
+    if operand.startswith("~") or SUBSTITUTION_SENTINEL in operand:
+        return None
+    if posixpath.isabs(operand):
+        return posixpath.normpath(operand)
+    if directory is None:
+        return None
+    return posixpath.normpath(posixpath.join(directory, operand))
+
+
+def chdir_move(words: list[str], directory: str | None) -> Move | None:
+    """Where this segment leaves the shell, or None where it moves it nowhere.
+
+    Only the literal one-operand ``cd`` is read as a move to a named
+    directory. ``cd`` with no operand goes to a home this cannot name, ``cd -``
+    to a directory only the shell's own history holds, and ``pushd``/``popd``
+    to a stack nothing here keeps. Each of those is a move that *happened*, so
+    the honest reading is not that the shell stayed where it was but that
+    where it stands is no longer known -- which is the reading that makes a
+    path word after one unresolvable rather than resolved against the wrong
+    directory.
+    """
+    command = effective_command(words)["words"]
+    if not command or posixpath.basename(command[0]) not in CHDIR_VERBS:
+        return None
+    operands = [word for word in command[1:] if not word.startswith("-")]
+    if posixpath.basename(command[0]) != "cd" or len(operands) != 1:
+        return Move(directory=None)
+    return Move(directory=joined_directory(directory, operands[0]))
+
+
+def chdir_within(command: Command) -> bool:
+    """Whether anything a construct runs could move the shell."""
+    return any(
+        chdir_move([word_text(word) for word in inner["words"]], "") is not None
+        for script in command_lists(command)
+        for inner in simple_commands(script)
+    )
+
+
+def placed_parts(parts: list[WordPart], directory: str | None) -> list[WordPart]:
+    """Parts whose substituted commands are placed where the word stands.
+
+    A substitution runs in a shell of its own, opened where the word carrying
+    it is read -- so its commands start from this directory and whatever they
+    do to it reaches nothing outside the parentheses.
+    """
+    return [
+        part(
+            item["kind"],
+            item["text"],
+            item["name"],
+            item["operator"],
+            parts=placed_parts(item["parts"], directory),
+            script=[place_script(inner, directory) for inner in item["script"]],
+        )
+        for item in parts
+    ]
+
+
+def place_script(
+    script: Script, directory: str | None = "", standing: bool = True
+) -> Script:
+    """Every command in a list stamped with the directory the shell runs it in.
+
+    What :func:`~lup.policy.kernel.bindings.bind_script` is for variables,
+    for the one other thing a segment leaves behind it: where the shell is
+    standing. It runs once, over the tree every reader shares, so a path word
+    means the same file to the classifier and to the host readers that stat
+    it -- rather than each joining the word to a launch directory the command
+    had already left.
+
+    Both passes answer to the same structure and so read it the same way:
+    what a segment leaves stands only when nothing between it and the words
+    after it can keep it from holding. A subshell is entered at the top of a
+    list of its own, so a ``cd`` inside one stands for the rest of it and
+    reaches nothing after it; a construct that may or may not have run leaves
+    the directory unknown rather than either answer, because the words after
+    it resolve against a directory nothing here decided.
+    """
+    stands = iter([placed["standing"] for placed in placed_commands(script, standing)])
+
+    def rebuild(command: Command) -> Command:
+        nonlocal directory
+        here = next(stands)
+        within = Command(
+            kind=command["kind"],
+            words=[
+                Word(parts=placed_parts(word["parts"], directory))
+                for word in command["words"]
+            ],
+            redirects=[
+                Redirect(
+                    operator=redirect["operator"],
+                    target=[
+                        Word(parts=placed_parts(target["parts"], directory))
+                        for target in redirect["target"]
+                    ],
+                    heredoc=redirect["heredoc"],
+                )
+                for redirect in command["redirects"]
+            ],
+            name=command["name"],
+            listed=command["listed"],
+            clauses=command["clauses"],
+            body=command["body"],
+            arms=command["arms"],
+            directory=directory,
+        )
+        if command["kind"] in ("simple", "test"):
+            move = chdir_move([word_text(word) for word in command["words"]], directory)
+            if move is not None:
+                directory = move["directory"] if here else None
+            return within
+        rebuilt = rebuilt_lists(within, lambda inner: place_script(inner, directory))
+        if command["kind"] != "subshell" and chdir_within(command):
+            directory = None
+        return rebuilt
+
+    return mapped_commands(script, rebuild)
+
+
+def placed_path(word: str, directory: str | None) -> str | None:
+    """The file a segment's path operand names, spelled from the launch directory.
+
+    The one qualification every reader here shares, so a path word means the
+    same file whichever reader pulled it out of the command. An absolute word
+    already names its file; a word standing in the launch directory is left
+    untouched rather than normalized, so the everyday command's spellings --
+    and the fixtures that pin them -- stay exactly what was typed.
+
+    ``None`` where the segment's directory is unknown, which is the reading
+    that keeps a wrong resolution from being made: the word names a file, but
+    not one this can name, and a caller turns that into a question.
+    """
+    if posixpath.isabs(word):
+        return word
+    if directory is None:
+        return None
+    if not directory:
+        return word
+    return posixpath.normpath(posixpath.join(directory, word))
 
 
 def command_segments(script: Script) -> list[list[str]]:
