@@ -3,6 +3,7 @@
 import json
 import os
 import tomllib
+from datetime import UTC, datetime, timedelta
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -291,8 +292,54 @@ def pyright_environment(root: Path) -> dict[Literal["venvPath", "venv"], str]:
     return {"venvPath": str(environment.parent), "venv": environment.name}
 
 
+# lup: ignore[constant-declaration] — an identity this repository defines: the
+# name lup's own scratch file answers to, which the writer and the sweep must
+# spell alike for one to find the other
+PYRIGHT_SCRATCH = ".lup-pyright-"
+"""What this gate's generated Pyright configuration is named at the root.
+
+A prefix rather than a fixed name: concurrent checks each hold their own, and
+two runs sharing one path would have the second rewrite what the first handed
+Pyright mid-analysis.
+"""
+
+
+def sweep_pyright_scratch(root: Path, older_than: timedelta) -> list[Path]:
+    """Remove generated Pyright configurations nothing is still running against.
+
+    The configuration has to sit at the project root — Pyright resolves a
+    base's relative ``include`` and each ``executionEnvironments`` root against
+    the file that declares them, so one written elsewhere analyses a different
+    tree. Measured rather than assumed: extending this repository's own base
+    from a temporary directory analysed 1092 files and reported 60 missing
+    imports that are not missing.
+
+    Living at the root means a run that is killed rather than returned from
+    leaves its file behind — the `finally` that unlinks it never executes —
+    and they accumulate as untracked junk that every later `git status` and
+    every drift check reports. This checkout held three, the oldest eleven
+    days.
+
+    Swept by age because the alternative is worse. Several sessions check this
+    repository at once, and a sweep of *every* such file would delete a
+    configuration another session's Pyright is reading. An age no analysis
+    reaches separates the two without asking who owns what.
+    """
+    now = datetime.now(UTC)
+    stale = [
+        path
+        for path in root.glob(f"{PYRIGHT_SCRATCH}*.json")
+        if now - datetime.fromtimestamp(path.stat().st_mtime, UTC) > older_than
+    ]
+    for path in stale:
+        path.unlink(missing_ok=True)
+    return stale
+
+
 def pyright_check(
-    excluded_roots: list[str], scope: list[str] | None = None
+    excluded_roots: list[str],
+    scope: list[str] | None = None,
+    abandoned_after: timedelta = timedelta(hours=1),
 ) -> CheckReport:
     """Whether the code-bearing workspace type-checks.
 
@@ -302,8 +349,16 @@ def pyright_check(
     understood. That is what separates narrowing this from narrowing a test
     run — there is no dependency graph to reconstruct and therefore none to
     reconstruct wrongly.
+
+    ``abandoned_after`` is how long a generated configuration may go untouched
+    before this treats it as a killed run's leavings. An hour because the
+    longest analysis here is minutes and the shortest session is not, so the
+    gap is wide enough that no live run is ever inside it — and overridable
+    because it is a judgement about how long is long, which a slower tree
+    would make differently.
     """
     root = project_root()
+    sweep_pyright_scratch(root, abandoned_after)
     base = pyright_base_configuration(root)
     with NamedTemporaryFile(
         mode="w",
