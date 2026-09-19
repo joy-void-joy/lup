@@ -243,6 +243,14 @@ notes/harness/
 worktrees/
 tmp/
 .lup/
+# The gate's generated Pyright configuration. It has to sit at the root, since
+# Pyright resolves a base's relative includes against the file that declares
+# them, and `dev check` unlinks it — but a run that is killed rather than
+# returned from never reaches that line. `sweep_pyright_scratch` takes those
+# once they are old enough to be nobody's; this is what stops one being
+# committed before the sweep is due. One already was, in f289dca35, carrying
+# an absolute path to a worktree that no longer exists.
+.lup-pyright-*.json
 sync.json.local
 downstream.json.local
 # Personal harness config, one per native tree; the generated siblings are committed.
