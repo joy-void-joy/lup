@@ -41,6 +41,7 @@ from .words import (
     flag_write_targets,
     flag_write_words,
     git_apply_words,
+    global_span,
     git_restore_operands,
     opaque_argument,
     path_verb_operands,
@@ -1028,7 +1029,7 @@ def shell_flag_write_targets(command: str, rows: list[ShellRuleRow]) -> list[str
     return targets
 
 
-def shell_patch_operands(command: str) -> list[str]:
+def shell_patch_operands(command: str, rows: list[ShellRuleRow]) -> list[str]:
     """Name every patch file this command hands to something that applies one.
 
     The fourth way a command names what it writes, and the only one that names
@@ -1043,16 +1044,14 @@ def shell_patch_operands(command: str) -> list[str]:
     """
     return [
         placed
-        for placement in shell_placements(command)
-        for words in [effective_command(placement["words"])["words"]]
-        if words
-        for patch in git_apply_words(words)
-        for placed in [placed_path(patch["path"], placement["directory"])]
+        for segment in read_segments(command, rows)
+        for patch in git_apply_words(segment["words"])
+        for placed in [placed_path(patch["path"], segment["directory"])]
         if placed is not None
     ]
 
 
-def shell_path_verb_targets(command: str) -> list[str]:
+def shell_path_verb_targets(command: str, rows: list[ShellRuleRow]) -> list[str]:
     """Name every operand a path-writing verb in this command acts on.
 
     ``git restore`` is one of them: it rewrites the paths it names from the
@@ -1079,18 +1078,81 @@ def shell_path_verb_targets(command: str) -> list[str]:
     which is at the path unchanged afterwards. A command that does not parse
     yields nothing and keeps its unjudged verdict.
     """
-    targets: list[str] = []
-    for placement in shell_placements(command):
-        words = effective_command(placement["words"])["words"]
-        if not words:
-            continue
-        targets.extend(
-            placed
-            for operand in verb_path_words(words)
-            for placed in [placed_path(operand["path"], placement["directory"])]
-            if placed is not None
+    return [
+        placed
+        for segment in read_segments(command, rows)
+        for operand in verb_path_words(segment["words"])
+        for placed in [placed_path(operand["path"], segment["directory"])]
+        if placed is not None
+    ]
+
+
+def command_rows(words: list[str], rows: list[ShellRuleRow]) -> list[ShellRuleRow]:
+    """This command's own rows, which are where its globals are declared."""
+    executable = posixpath.basename(words[0])
+    return [
+        row for row in rows if row["command"] == executable and not row["subcommand"]
+    ]
+
+
+def command_directory(words: list[str], rows: list[ShellRuleRow]) -> str | None:
+    """Where this command runs its paths from, when a global of its own says so.
+
+    A second way a command reaches a directory, beside the ``cd`` before it:
+    ``git -C ../other restore src/mod.py`` restores a file in another
+    checkout, and read without this it named ``src/mod.py`` in *this* one --
+    so whether the loss was captured, and the roles the path is judged under,
+    were both answered about a file the command was never going to touch.
+
+    Only the globals a rule declares as naming a directory, which is narrower
+    than the globals that consume a word: ``--git-dir`` and ``--work-tree``
+    consume one and move no operand. Only before the subcommand, because
+    after it the spelling is somebody else's -- ``git commit -C`` reuses a
+    message.
+
+    ``""`` where the command names none, and ``None`` where it names one this
+    cannot read, because a guess there puts every path in a directory the
+    command may never have entered.
+    """
+    head = words[: global_span(words, rows)]
+    directory = ""
+    declared = [
+        flag for row in command_rows(words, rows) for flag in row["directory_flags"]
+    ]
+    for named in flag_write_words(head, declared):
+        if opaque_argument(named["path"]):
+            return None
+        directory = posixpath.join(directory, named["path"])
+    return directory
+
+
+def command_words_read(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
+    """This command with the globals a rule declares as value-carrying removed.
+
+    Every reader of a subcommand matches it where it is written -- ``git``,
+    then ``restore`` -- so one global in front of it made each of them answer
+    ``None`` about a command they do model. The row still matched, because
+    the matcher steps over these globals to find the subcommand; the readers
+    the row's verdict is then relaxed or tightened by did not, so ``git -C .
+    restore <protected path>`` reached neither the ownership gate nor the
+    index check, and was allowed where the same restore spelled without the
+    flag asked.
+
+    So they are consumed here, once, and every reader below sees the command
+    as it would have been written without them. Only the value-carrying ones:
+    a global the row asks about -- ``git -c`` -- stays exactly where it is,
+    because the question it raises is the row's to raise.
+    """
+    head = words[: global_span(words, rows)]
+    valued = [flag for row in command_rows(words, rows) for flag in row["value_flags"]]
+    consumed = [
+        position
+        for named in flag_write_words(head, valued)
+        for position in (
+            [named["at"]] if named["prefix"] else [named["at"] - 1, named["at"]]
         )
-    return targets
+    ]
+    return [word for index, word in enumerate(words) if index not in consumed]
 
 
 def path_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
@@ -1121,39 +1183,83 @@ def path_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
     ]
 
 
+class ReadSegment(TypedDict):
+    """One segment as every reader of it sees it: its words, and where they resolve.
+
+    The composition each reader would otherwise make for itself, made once:
+    the wrappers stepped over, the command's own value-carrying globals
+    consumed, and the directory those globals name joined onto the one a
+    ``cd`` left. A reader taking this cannot see a different command from the
+    classifier, which is the disagreement that let a global before a
+    subcommand blind every reader while the row matched anyway.
+    """
+
+    words: list[str]
+    directory: str | None
+
+
+def read_segments(command: str, rows: list[ShellRuleRow]) -> list[ReadSegment]:
+    """Every segment of one command line, as the readers of it see them."""
+    return [
+        ReadSegment(words=read, directory=here)
+        for placement in shell_placements(command)
+        for words in [effective_command(placement["words"])["words"]]
+        if words
+        for carried in [command_directory(words, rows)]
+        for read in [command_words_read(words, rows)]
+        for here in [
+            None
+            if carried is None
+            else placement["directory"]
+            if not carried
+            else joined_directory(placement["directory"], carried)
+        ]
+    ]
+
+
 def placed_words(
     words: list[str], directory: str | None, rows: list[ShellRuleRow]
 ) -> list[str] | None:
-    """This segment's words, with every path operand spelled from the launch root.
+    """This segment as it would read with nothing standing between its words.
 
-    The classifier matches a path word against declared roles and rules that
-    are anchored at the repository top, so a word typed after a ``cd`` has to
-    reach those rules as the file it names rather than as the file that
-    spelling names where the session started. Rewriting the words once, here,
-    is what lets every rule below read one spelling without being handed a
-    directory of its own to remember.
+    Two things stand between them, and both make a rule answer about a file
+    the command was never going to touch. A ``cd`` before the segment moves
+    where every operand resolves from; a global of the command's own —
+    ``git -C`` — moves it again, and sits where each reader of a subcommand
+    expects the subcommand. So the globals are consumed into the directory
+    and out of the words, the operands are resolved against what the two name
+    together, and every rule below reads one spelling of one command without
+    being handed a directory of its own to remember.
 
-    ``None`` where the directory is unknown and the segment names a file by
+    ``None`` where that directory is unknown *and* the segment names a file by
     it: the words name something, but nothing this can resolve, and a rule
-    matched against an unresolvable path answers about a file the command was
-    never going to touch.
+    matched against an unresolvable path answers about the wrong file. Both
+    halves are needed. A command naming no path is not made unjudgeable by an
+    unreadable directory -- ``git -C "$W" add -A`` stages whatever is in a
+    checkout nobody here can name, and staging is reversible wherever it
+    happens, so the verb behind the flag answers as it always did.
     """
     if not words:
         return words
-    named = path_words(words, rows)
+    read = command_words_read(words, rows)
+    named = path_words(read, rows)
     if not named:
-        return words
-    if directory is None:
+        return read
+    carried = command_directory(words, rows)
+    if carried is None:
         return None
-    if not directory:
-        return words
+    here = directory if not carried else joined_directory(directory, carried)
+    if here is None:
+        return None
+    if not here:
+        return read
     placed = {
         row["at"]: f"{row['prefix']}{spelled}"
         for row in named
-        for spelled in [placed_path(row["path"], directory)]
+        for spelled in [placed_path(row["path"], here)]
         if spelled is not None
     }
-    return [placed.get(index, word) for index, word in enumerate(words)]
+    return [placed.get(index, word) for index, word in enumerate(read)]
 
 
 def verb_path_words(words: list[str]) -> list[PathWord]:
@@ -1186,7 +1292,7 @@ class SedRewrite(TypedDict):
     targets: list[str]
 
 
-def shell_sed_rewrites(command: str) -> list[SedRewrite]:
+def shell_sed_rewrites(command: str, rows: list[ShellRuleRow]) -> list[SedRewrite]:
     """Name every in-place sed this command runs, with the scripts it runs.
 
     Only the screened ones. A script carrying a write or execute primitive is
@@ -1200,9 +1306,9 @@ def shell_sed_rewrites(command: str) -> list[SedRewrite]:
     earned rather than gaining a relaxation from a reading that failed.
     """
     rewrites: list[SedRewrite] = []
-    for placement in shell_placements(command):
-        words = effective_command(placement["words"])["words"]
-        if not words or posixpath.basename(words[0]) != "sed":
+    for segment in read_segments(command, rows):
+        words = segment["words"]
+        if posixpath.basename(words[0]) != "sed":
             continue
         invocation = sed_invocation(words)
         if isinstance(invocation, KernelDecision):
@@ -1212,7 +1318,7 @@ def shell_sed_rewrites(command: str) -> list[SedRewrite]:
         if not invocation["targets"]:
             continue
         placed = [
-            placed_path(target, placement["directory"])
+            placed_path(target, segment["directory"])
             for target in invocation["targets"]
         ]
         if any(target is None for target in placed):

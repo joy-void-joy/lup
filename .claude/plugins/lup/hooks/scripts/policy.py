@@ -2134,7 +2134,7 @@ def bash_decision(
     # partway through a verdict could answer from a file the first did not see.
     boundary = measured_boundary(cwd)
     inside = contained(boundary)
-    acted_on = shell_path_verb_targets(command)
+    acted_on = shell_path_verb_targets(command, SHELL_RULES)
     # The third way a command names a file it writes, after a redirection and
     # a path verb's operand. It joins the two relaxing facts below and not the
     # lease's list, because it gathers every write flag the executable has a
@@ -2515,7 +2515,7 @@ def rewritten_files(command: str, cwd: Path) -> RewriteReading:
     """
     rows: list[RewrittenFileRow] = []
     unread: list[UnreadFileRow] = []
-    for rewrite in shell_sed_rewrites(command):
+    for rewrite in shell_sed_rewrites(command, SHELL_RULES):
         for target in rewrite["targets"]:
             if any(row["target"] == target for row in rows) or any(
                 row["target"] == target for row in unread
@@ -2747,7 +2747,7 @@ def written_review(command: str, cwd: Path) -> list[str]:
     for target in [
         *shell_write_targets(command),
         *shell_flag_write_targets(command, SHELL_RULES),
-        *patch_write_targets(shell_patch_operands(command), cwd),
+        *patch_write_targets(shell_patch_operands(command, SHELL_RULES), cwd),
     ]:
         # A write whose bytes were in the command went to these gates before
         # it ran, and reporting it again tells the agent the same thing twice

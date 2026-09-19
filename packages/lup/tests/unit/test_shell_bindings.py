@@ -22,11 +22,16 @@ from lup.policy.vocabulary import default_vocabulary
 SCRATCH = [PathRoleRow(root="tmp", role="scratch")]
 
 
+VOCABULARY = erase_shell_rules(default_vocabulary())
+
+
 def test_a_rewrite_through_a_variable_names_the_file_to_every_reader() -> None:
     """The host produces the document for the target the classifier judges."""
     command = "S=src.py; sed -i 's/a/b/' $S"
-    assert shell_path_verb_targets(command) == ["src.py"]
-    assert [row["targets"] for row in shell_sed_rewrites(command)] == [["src.py"]]
+    assert shell_path_verb_targets(command, VOCABULARY) == ["src.py"]
+    assert [row["targets"] for row in shell_sed_rewrites(command, VOCABULARY)] == [
+        ["src.py"]
+    ]
 
 
 def test_a_reference_inside_a_word_expands_for_a_redirection() -> None:
@@ -44,7 +49,9 @@ def test_a_reference_inside_a_word_expands_for_a_redirection() -> None:
 def test_a_substitution_inherits_the_bindings_where_it_stands() -> None:
     """The command inside `$(…)` is expanded from the values around it."""
     command = "S=src.py; echo $(sed -i 's/a/b/' $S)"
-    assert [row["targets"] for row in shell_sed_rewrites(command)] == [["src.py"]]
+    assert [row["targets"] for row in shell_sed_rewrites(command, VOCABULARY)] == [
+        ["src.py"]
+    ]
 
 
 def test_a_rebinding_nothing_here_ran_leaves_the_reference_unexpanded() -> None:
@@ -74,12 +81,12 @@ def test_a_construct_that_assigns_nothing_leaves_the_binding_standing() -> None:
     command = (
         "S=src.py; case y in y) true;; esac; for n in 1; do :; done; sed -i 's/a/b/' $S"
     )
-    assert shell_path_verb_targets(command) == ["src.py"]
+    assert shell_path_verb_targets(command, VOCABULARY) == ["src.py"]
 
 
 def test_a_command_prefix_assignment_still_binds_nothing() -> None:
     """`VAR=x cmd $VAR` expands from the value the shell already held."""
-    assert shell_path_verb_targets("S=src.py sed -i 's/a/b/' $S") == ["$S"]
+    assert shell_path_verb_targets("S=src.py sed -i 's/a/b/' $S", VOCABULARY) == ["$S"]
     assert shell_write_targets("B=tmp/x; B=tmp/y cat > $B") == ["tmp/x"]
 
 
@@ -91,7 +98,7 @@ def test_a_reference_the_shell_never_expands_is_never_expanded() -> None:
     one the command never runs.
     """
     command = "S=src.py; sed -i 's/$S/x/' $S"
-    assert shell_sed_rewrites(command) == [
+    assert shell_sed_rewrites(command, VOCABULARY) == [
         {"scripts": ["s/$S/x/"], "targets": ["src.py"]}
     ]
     written = authored_writes("P=tmp; cat > $P/f.txt <<'EOF'\n$P\nEOF")

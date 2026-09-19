@@ -314,6 +314,9 @@ class ShellRuleRow(TypedDict):
     non-allow row (``ssh-add -l``): the row de-escalates to allow only when
     every remaining word is exactly one of the named flags, so clusters,
     ``=`` values, paths, and unresolved expansions never qualify.
+    ``directory_flags`` name the globals whose value is the directory the
+    command runs its paths from, which is a smaller set than ``value_flags``:
+    both consume a word, and only these move where an operand resolves.
     ``read_verbs`` name action-selecting flags of a command that enforces one
     action at a time (``git config --get``): a non-allow row de-escalates to
     allow when a declared verb appears among words that are all literal and
@@ -503,6 +506,7 @@ class ShellRuleRow(TypedDict):
     guarded_settings: list[str]
     bare_reads: bool
     value_flags: list[str]
+    directory_flags: list[str]
     reason: str
     recovery: str
 
@@ -537,6 +541,7 @@ type ShellRowField = Literal[
     "guarded_settings",
     "bare_reads",
     "value_flags",
+    "directory_flags",
     "reason",
     "recovery",
 ]
@@ -593,6 +598,7 @@ def shell_row_values(
         "guarded_settings": row["guarded_settings"],
         "bare_reads": row["bare_reads"],
         "value_flags": row["value_flags"],
+        "directory_flags": row["directory_flags"],
         "reason": row["reason"],
         "recovery": row["recovery"],
     }

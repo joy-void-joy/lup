@@ -22,6 +22,9 @@ from lup.policy.vocabulary import default_vocabulary
 SCRATCH = [PathRoleRow(root="tmp", role="scratch")]
 
 
+VOCABULARY = erase_shell_rules(default_vocabulary())
+
+
 def rows() -> list[ShellRuleRow]:
     """The library's offered table, which is what the contract describes."""
     return erase_shell_rules(default_vocabulary())
@@ -136,10 +139,10 @@ def test_a_program_a_command_carries_is_not_one_of_its_paths() -> None:
     was reported as a write outside the lease. The command was a read.
     """
     scripted = "sed -n '/^def one/,/^def two/p' vocabulary.py"
-    assert shell_path_verb_targets(scripted) == []
+    assert shell_path_verb_targets(scripted, VOCABULARY) == []
     assert (
         unleased_write_targets(
-            shell_path_verb_targets(scripted),
+            shell_path_verb_targets(scripted, VOCABULARY),
             {"writable_roots": ["/checkout"]},
             Path("/checkout"),
         )
@@ -159,12 +162,12 @@ def test_a_sed_that_only_prints_names_no_file_for_the_lease_to_read() -> None:
     was allowed beside it.
     """
     printed = "sed -n 1,80p /mounted/findings/verify.py"
-    assert shell_path_verb_targets(printed) == []
-    assert shell_path_verb_targets("sed -ne '1p' a.py b.py") == []
-    assert shell_path_verb_targets("sed --expression=s/a/b/ src.py") == []
+    assert shell_path_verb_targets(printed, VOCABULARY) == []
+    assert shell_path_verb_targets("sed -ne '1p' a.py b.py", VOCABULARY) == []
+    assert shell_path_verb_targets("sed --expression=s/a/b/ src.py", VOCABULARY) == []
     assert (
         unleased_write_targets(
-            shell_path_verb_targets(printed),
+            shell_path_verb_targets(printed, VOCABULARY),
             {"writable_roots": ["/checkout"]},
             Path("/checkout"),
         )
@@ -179,15 +182,24 @@ def test_the_operand_a_rewrite_does_write_is_still_named() -> None:
     not drop the file beside it -- by any of the spellings that say where the
     program came from.
     """
-    assert shell_path_verb_targets("sed -i 's/a/b/' src.py") == ["src.py"]
-    assert shell_path_verb_targets("sed -i.bak 's/a/b/' src.py") == ["src.py"]
-    assert shell_path_verb_targets("sed -i -e 's/a/b/' src.py") == ["src.py"]
-    assert shell_path_verb_targets("sed -i -ne '1p' a.py b.py") == ["a.py", "b.py"]
-    assert shell_path_verb_targets("sed -i --expression=s/a/b/ src.py") == ["src.py"]
+    assert shell_path_verb_targets("sed -i 's/a/b/' src.py", VOCABULARY) == ["src.py"]
+    assert shell_path_verb_targets("sed -i.bak 's/a/b/' src.py", VOCABULARY) == [
+        "src.py"
+    ]
+    assert shell_path_verb_targets("sed -i -e 's/a/b/' src.py", VOCABULARY) == [
+        "src.py"
+    ]
+    assert shell_path_verb_targets("sed -i -ne '1p' a.py b.py", VOCABULARY) == [
+        "a.py",
+        "b.py",
+    ]
+    assert shell_path_verb_targets("sed -i --expression=s/a/b/ src.py", VOCABULARY) == [
+        "src.py"
+    ]
     # A script file is refused before any fact about `src.py` is consulted,
     # and a refusal is not reopened by the facts -- so nothing is named, as
     # nothing is for any other command the vocabulary did not judge.
-    assert shell_path_verb_targets("sed -i -f rules.sed src.py") == []
+    assert shell_path_verb_targets("sed -i -f rules.sed src.py", VOCABULARY) == []
 
 
 def test_a_write_flag_names_its_path_by_every_spelling_that_reaches_it() -> None:

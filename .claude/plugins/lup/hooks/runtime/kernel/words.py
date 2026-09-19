@@ -22,7 +22,7 @@ from .roles import (
     path_role,
     repository_relative,
 )
-from .rows import PathRoleRow, PathRuleRow, PathWord
+from .rows import PathRoleRow, PathRuleRow, PathWord, ShellRuleRow
 
 
 class EffectiveCommand(TypedDict):
@@ -459,6 +459,33 @@ def flag_write_targets(words: list[str], write_flags: list[str]) -> list[str]:
     leaves the row's own verdict standing and a misnamed one would not.
     """
     return [named["path"] for named in flag_write_words(words, write_flags)]
+
+
+def global_span(words: list[str], rows: list[ShellRuleRow]) -> int:
+    """Where this command's global options end and its subcommand begins.
+
+    The boundary :func:`carried_subcommand` walks to, asked for the position
+    rather than for the word. A flag before it belongs to the command and a
+    flag after it to the subcommand, which is not a distinction any reader
+    can skip: ``git -C`` names a directory to run in and ``git commit -C``
+    reuses a commit message, so one spelling means two things and only the
+    boundary tells them apart.
+
+    ``len(words)`` where every word is a flag and no subcommand is named.
+    """
+    executable = posixpath.basename(words[0])
+    value_flags = [
+        flag
+        for row in rows
+        if row["command"] == executable and not row["subcommand"]
+        for flag in row["value_flags"]
+    ]
+    position = 1
+    while position < len(words):
+        if not words[position].startswith("-"):
+            return position
+        position += 2 if words[position] in value_flags else 1
+    return len(words)
 
 
 def flag_write_words(words: list[str], write_flags: list[str]) -> list[PathWord]:

@@ -16,6 +16,11 @@ from pathlib import Path
 from lup.execution.shell import git
 from lup.policy.assets.host import patch_write_targets
 from lup.policy.kernel.lex import shell_patch_operands
+from lup.policy.shell_rules import erase_shell_rules
+from lup.policy.vocabulary import default_vocabulary
+
+
+VOCABULARY = erase_shell_rules(default_vocabulary())
 
 
 def inside(root: Path) -> list[str]:
@@ -38,13 +43,17 @@ def repository(root: Path, name: str, body: str) -> None:
 
 def test_the_patch_a_command_hands_over_is_named() -> None:
     """The operand is the file to read, not the file that gets written."""
-    assert shell_patch_operands("git apply fix.patch") == ["fix.patch"]
+    assert shell_patch_operands("git apply fix.patch", VOCABULARY) == ["fix.patch"]
 
 
 def test_flags_are_not_patches() -> None:
     """A word beginning with a dash describes the application, not the input."""
-    assert shell_patch_operands("git apply -v --3way fix.patch") == ["fix.patch"]
-    assert shell_patch_operands("git apply --check -- fix.patch") == ["fix.patch"]
+    assert shell_patch_operands("git apply -v --3way fix.patch", VOCABULARY) == [
+        "fix.patch"
+    ]
+    assert shell_patch_operands("git apply --check -- fix.patch", VOCABULARY) == [
+        "fix.patch"
+    ]
 
 
 def test_a_patch_arriving_on_standard_input_names_nothing() -> None:
@@ -54,17 +63,17 @@ def test_a_patch_arriving_on_standard_input_names_nothing() -> None:
     would name the wrong file in the wrong direction -- it is read, not
     written -- so the row's own verdict answers for this form instead.
     """
-    assert shell_patch_operands("git apply < fix.patch") == []
+    assert shell_patch_operands("git apply < fix.patch", VOCABULARY) == []
 
 
 def test_a_word_that_expands_at_run_time_names_nothing() -> None:
     """What `$PATCH` is cannot be known here, so it is not claimed to be known."""
-    assert shell_patch_operands("git apply $PATCH") == []
+    assert shell_patch_operands("git apply $PATCH", VOCABULARY) == []
 
 
 def test_another_git_subcommand_is_not_applying_a_patch() -> None:
     """`git log fix.patch` reads a path; nothing about it applies anything."""
-    assert shell_patch_operands("git log fix.patch") == []
+    assert shell_patch_operands("git log fix.patch", VOCABULARY) == []
 
 
 def test_git_reads_out_the_paths_a_patch_would_write(tmp_path: Path) -> None:

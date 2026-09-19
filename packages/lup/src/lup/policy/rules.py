@@ -324,7 +324,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         # replaced.
         scripts_for = {
             target: rewrite["scripts"]
-            for rewrite in reversed(shell_sed_rewrites(event.command))
+            for rewrite in reversed(shell_sed_rewrites(event.command, self.rules))
             for target in reversed(rewrite["targets"])
         }
 
@@ -374,7 +374,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
-        acted_on = shell_path_verb_targets(event.command)
+        acted_on = shell_path_verb_targets(event.command, self.rules)
         flagged = shell_flag_write_targets(event.command, self.rules)
         # The edit gates, over the files a rewrite in place would replace. Off
         # the one edit policy this composition holds rather than a second set

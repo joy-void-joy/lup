@@ -25,20 +25,25 @@ SCRATCH = [PathRoleRow(root="tmp", role="scratch")]
 UNREADABLE = "this segment names a file from a directory a `cd` left unreadable"
 
 
+VOCABULARY = erase_shell_rules(default_vocabulary())
+
+
 def rewritten(command: str) -> list[list[str]]:
-    return [row["targets"] for row in shell_sed_rewrites(command)]
+    return [row["targets"] for row in shell_sed_rewrites(command, VOCABULARY)]
 
 
 def test_a_rewrite_after_a_cd_names_the_file_the_command_would_reach() -> None:
     """The one reader the classifier judges a rewrite with follows the shell."""
     command = "cd src && sed -i 's/a/b/' mod.py"
     assert rewritten(command) == [["src/mod.py"]]
-    assert shell_path_verb_targets(command) == ["src/mod.py"]
+    assert shell_path_verb_targets(command, VOCABULARY) == ["src/mod.py"]
 
 
 def test_a_deletion_after_a_cd_names_the_directory_it_stands_in() -> None:
     """The permissive half: `lup` at the top is not `packages/lup`."""
-    assert shell_path_verb_targets("cd packages && rm -rf lup") == ["packages/lup"]
+    assert shell_path_verb_targets("cd packages && rm -rf lup", VOCABULARY) == [
+        "packages/lup"
+    ]
 
 
 def test_a_redirection_after_a_cd_lands_under_it() -> None:
@@ -51,7 +56,9 @@ def test_a_redirection_after_a_cd_lands_under_it() -> None:
 
 def test_a_patch_and_a_write_flag_follow_the_shell_too() -> None:
     """Every route a word reaches a file by is qualified, not just an operand."""
-    assert shell_patch_operands("cd tmp && git apply fix.patch") == ["tmp/fix.patch"]
+    assert shell_patch_operands("cd tmp && git apply fix.patch", VOCABULARY) == [
+        "tmp/fix.patch"
+    ]
     assert shell_write_targets("cd tmp && cat x > y") == ["tmp/y"]
 
 
@@ -76,7 +83,9 @@ def test_a_cd_climbs_as_the_shell_would() -> None:
 def test_a_cd_nothing_here_can_read_leaves_the_words_after_it_unjudged() -> None:
     """A guess would put every later path in a directory nothing entered."""
     for move in ("cd $TARGET", "cd ~/work", "cd -", "cd", "pushd src", "popd"):
-        assert shell_path_verb_targets(f"{move} && rm -rf tmp/x") == [], move
+        assert shell_path_verb_targets(f"{move} && rm -rf tmp/x", VOCABULARY) == [], (
+            move
+        )
     # `pushd` and `popd` are themselves unclassified, so the command already
     # asks on its own terms; the `cd` spellings are the ones whose refusal has
     # to come from the directory they left behind.
