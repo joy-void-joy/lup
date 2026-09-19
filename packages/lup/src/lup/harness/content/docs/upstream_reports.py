@@ -141,6 +141,9 @@ SUBAGENT_SESSION_OUTLIVES_THREAD = UpstreamReport(
         "A subagent's unified-exec session outlives its thread, and rollout "
         "items are still recorded against the dead thread at session end"
     ),
+    # lup: ignore[native-spelling] — the event names are the evidence, quoted
+    # back to the people who chose them; a report that paraphrased them would
+    # be unverifiable by the person receiving it
     body=r"""**What happens.** A PTY session a subagent opened with `exec_command`
 keeps running after that subagent's thread has ended, and at the end of the
 parent session `codex` prints:
