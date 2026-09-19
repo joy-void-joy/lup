@@ -255,18 +255,31 @@ class IssueRow(BaseModel):
         )
 
 
-def fetch_open_issues(
+class OpenIssues(BaseModel, frozen=True):
+    """What a tracker answered, and whether it answered at all.
+
+    The two are separate because the list cannot tell them apart: a
+    repository with nothing open and a tracker that refused the credential
+    both read as no issues, and a caller acting on the second as though it
+    were the first plans from an emptiness nobody established. Measured:
+    with an expired token `dev issues` printed "0 open issue(s)" and exited
+    zero, which is what a clean tracker looks like.
+    """
+
+    reached: bool
+    issues: list[IssueEvidence] = Field(default=[])
+    why: str = ""
+    """What the tracker said when it refused, for a reader who has to fix it."""
+
+
+def read_open_issues(
     excluded: str = EXCLUDED_LABEL, limit: int = 200, repository: str = ""
-) -> list[IssueEvidence]:
-    """Every open issue a run should weigh, oldest first.
+) -> OpenIssues:
+    """Every open issue a run should weigh, oldest first, and whether they are all.
 
     Oldest first because that is the order they were found in, and a planner
     reading them in that order sees a later issue's context already
     established by the earlier one it followed from.
-
-    A tracker that cannot be reached yields nothing and says so. Intake still
-    has the tree's own notes, and a run that plans without the issues is
-    better than a run that will not start.
     """
     slug = repository or repository_slug()
     arguments = ["issue", "list", "--state", "open", "--limit", str(limit)]
@@ -276,10 +289,27 @@ def fetch_open_issues(
         rows = json.loads(gh.out(*arguments, "--json", ISSUE_FIELDS))
     except (sh.ErrorReturnCode, json.JSONDecodeError) as error:
         logger.warning("could not read open issues: %s", error)
-        return []
+        why = decode_stderr(error) if isinstance(error, sh.ErrorReturnCode) else ""
+        return OpenIssues(reached=False, why=why.strip() or str(error))
     issues = [IssueRow.model_validate(row) for row in rows]
     kept = [issue for issue in issues if not issue.excluded_by(excluded)]
-    return [issue.evidence() for issue in sorted(kept, key=lambda row: row.number)]
+    return OpenIssues(
+        reached=True,
+        issues=[issue.evidence() for issue in sorted(kept, key=lambda row: row.number)],
+    )
+
+
+def fetch_open_issues(
+    excluded: str = EXCLUDED_LABEL, limit: int = 200, repository: str = ""
+) -> list[IssueEvidence]:
+    """The issues alone, for a caller that proceeds either way.
+
+    A tracker that cannot be reached yields nothing here. Intake still has the
+    tree's own notes, and a run that plans without the issues is better than a
+    run that will not start — but a caller whose whole answer *is* the
+    tracker's reads :func:`read_open_issues` instead, and says which it got.
+    """
+    return read_open_issues(excluded, limit, repository).issues
 
 
 def comment_on_issues(

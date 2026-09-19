@@ -9,7 +9,9 @@ a round trip through a human because the two surfaces could not talk.
 from pathlib import Path
 
 import pytest
+import sh
 
+import lup.devtools.dev.issues as issues_mod
 import lup.devtools.utils as utils
 from lup.devtools.dev.issues import IssueLabel, IssueRow
 from lup.devtools.utils import slug_from_remote
@@ -116,3 +118,55 @@ def test_a_run_can_be_planned_from_issues_alone() -> None:
 def test_evidence_of_no_kind_at_all_is_refused() -> None:
     with pytest.raises(ValueError, match="at least one piece of evidence"):
         ResolveRequest(source=SourceSnapshot(branch="dev", commit="a" * 40))
+
+
+class TestATrackerThatDidNotAnswer:
+    """A refused credential and a clean tracker are not the same reading.
+
+    Measured with an expired token: `dev issues` printed "0 open issue(s) in
+    joy-void-joy/lup" and exited zero, which is exactly what a repository
+    with nothing open prints. Anything acting on that plans from an
+    emptiness nobody established.
+    """
+
+    def refusing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Make the tracker call fail the way a bad credential fails."""
+
+        class Refusing:
+            """A `gh` answering every call the way an expired token does."""
+
+            def out(self, *arguments: str) -> str:
+                raise sh.ErrorReturnCode_1(
+                    "gh issue list",
+                    b"",
+                    b"HTTP 401: Bad credentials (https://api.github.com/graphql)",
+                )
+
+        monkeypatch.setattr(issues_mod, "gh", Refusing())
+        monkeypatch.setattr(issues_mod, "repository_slug", lambda: "owner/name")
+
+    def test_an_unreachable_tracker_is_not_an_empty_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.refusing(monkeypatch)
+
+        answered = issues_mod.read_open_issues()
+
+        assert answered.reached is False
+        assert answered.issues == []
+
+    def test_what_the_tracker_said_travels_with_the_refusal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A reader who has to fix the credential is told which one refused."""
+        self.refusing(monkeypatch)
+
+        assert "401" in issues_mod.read_open_issues().why
+
+    def test_a_caller_that_proceeds_either_way_still_gets_a_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Intake plans from the tree's own notes rather than not starting."""
+        self.refusing(monkeypatch)
+
+        assert issues_mod.fetch_open_issues() == []
