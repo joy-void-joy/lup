@@ -84,15 +84,13 @@ def refuses_a_new_file(directory: Path, probe_prefix: str = ".lup-lock-probe") -
 def render_age(age: timedelta) -> str:
     """An age in its largest whole unit, for a line a human reads once."""
     seconds = int(age.total_seconds())
-    match seconds:
-        case _ if seconds < 60:
-            return f"{seconds} seconds"
-        case _ if seconds < 3600:
-            return f"{seconds // 60} minutes"
-        case _ if seconds < 86400:
-            return f"{seconds // 3600} hours"
-        case _:
-            return f"{seconds // 86400} days"
+    if seconds < 60:
+        return f"{seconds} seconds"
+    if seconds < 3600:
+        return f"{seconds // 60} minutes"
+    if seconds < 86400:
+        return f"{seconds // 3600} hours"
+    return f"{seconds // 86400} days"
 
 
 class LockObstruction(BaseModel, ABC, frozen=True):

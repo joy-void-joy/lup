@@ -346,12 +346,13 @@ def balanced_end(source: str, position: int) -> int | None:
         if character == "\\":
             position += 2
             continue
-        if character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-            if depth == 0:
-                return position
+        match character:
+            case "(":
+                depth += 1
+            case ")":
+                depth -= 1
+                if depth == 0:
+                    return position
         position += 1
     return None
 
@@ -377,12 +378,13 @@ def brace_end(source: str, position: int) -> int | None:
                 return None
             position = end + 1
             continue
-        if character == "{":
-            depth += 1
-        elif character == "}":
-            depth -= 1
-            if depth == 0:
-                return position
+        match character:
+            case "{":
+                depth += 1
+            case "}":
+                depth -= 1
+                if depth == 0:
+                    return position
         position += 1
     return None
 
@@ -432,16 +434,16 @@ class ShellLexer:
         """Step over blanks, line continuations and a comment up to its newline."""
         source = self.source
         while self.position < len(source):
-            character = source[self.position]
-            if character in " \t\r":
-                self.position += 1
-            elif character == "\\" and self.at(1) == "\n":
-                self.position += 2
-            elif character == "#":
-                newline = source.find("\n", self.position)
-                self.position = len(source) if newline == -1 else newline
-            else:
-                return
+            match source[self.position]:
+                case " " | "\t" | "\r":
+                    self.position += 1
+                case "\\" if self.at(1) == "\n":
+                    self.position += 2
+                case "#":
+                    newline = source.find("\n", self.position)
+                    self.position = len(source) if newline == -1 else newline
+                case _:
+                    return
 
     def lex(self) -> Token:
         """Read one token from the cursor."""
@@ -500,12 +502,13 @@ class ShellLexer:
             self.position += 1
         core = source[self.position]
         self.position += 1
-        if self.at() == core:
-            self.position += 1
-            if core == "<" and self.at() in ("<", "-"):
+        match (core, self.at()):
+            case (opener, repeated) if opener == repeated:
                 self.position += 1
-        elif (core, self.at()) in ((">", "|"), ("<", ">")):
-            self.position += 1
+                if core == "<" and self.at() in ("<", "-"):
+                    self.position += 1
+            case (">", "|") | ("<", ">"):
+                self.position += 1
         if self.at() == "&":
             self.position += 1
             while self.at() and (self.at().isdigit() or self.at() == "-"):
@@ -764,13 +767,14 @@ class ShellLexer:
                         "deny", SUBSTITUTION_REASON, recovery=SUBSTITUTION_RECOVERY
                     )
                 )
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-                if depth == 0:
-                    self.position = cursor + 1
-                    return part("arithmetic", source[start : cursor + 1])
+            match character:
+                case "(":
+                    depth += 1
+                case ")":
+                    depth -= 1
+                    if depth == 0:
+                        self.position = cursor + 1
+                        return part("arithmetic", source[start : cursor + 1])
         raise syntax_error("arithmetic expansion does not parse")
 
     def parameter(self, inner: str, spelled: str) -> WordPart:
@@ -816,13 +820,14 @@ class ShellLexer:
         start = self.position
         for cursor in range(start, len(source)):
             character = source[cursor]
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-                if depth == 0:
-                    self.position = cursor + 1
-                    return source[start : cursor - 1]
+            match character:
+                case "(":
+                    depth += 1
+                case ")":
+                    depth -= 1
+                    if depth == 0:
+                        self.position = cursor + 1
+                        return source[start : cursor - 1]
         raise syntax_error("arithmetic command does not parse")
 
 
@@ -923,16 +928,17 @@ class ShellParser:
         while not self.stops(self.lexer.peek(), stop_words, stop_ops):
             andor = self.andor()
             following = self.lexer.peek()
-            if following["kind"] == "op" and following["text"] in (";", "&"):
-                self.lexer.take()
-                items.append(Item(andor=andor, terminator=following["text"]))
-            elif following["kind"] == "newline":
-                self.lexer.take()
-                items.append(Item(andor=andor, terminator="\n"))
-            elif self.stops(following, stop_words, stop_ops):
-                items.append(Item(andor=andor, terminator=""))
-            else:
-                raise syntax_error()
+            match following:
+                case {"kind": "op", "text": ";" | "&" as terminator}:
+                    self.lexer.take()
+                    items.append(Item(andor=andor, terminator=terminator))
+                case {"kind": "newline"}:
+                    self.lexer.take()
+                    items.append(Item(andor=andor, terminator="\n"))
+                case _:
+                    if not self.stops(following, stop_words, stop_ops):
+                        raise syntax_error()
+                    items.append(Item(andor=andor, terminator=""))
             self.linebreak()
         self.nesting -= 1
         return Script(items=items)
@@ -1119,11 +1125,11 @@ class ShellParser:
             self.lexer.take()
             while self.lexer.peek()["kind"] == "word":
                 items.append(self.lexer.take()["word"][0])
-        following = self.lexer.peek()
-        if following["kind"] == "op" and following["text"] == ";":
-            self.lexer.take()
-        elif listed and following["kind"] != "newline":
-            raise syntax_error()
+        match self.lexer.peek():
+            case {"kind": "op", "text": ";"}:
+                self.lexer.take()
+            case {"kind": token_kind} if listed and token_kind != "newline":
+                raise syntax_error()
         self.linebreak()
         self.expect_word("do")
         body = self.nonempty(self.script(stop_words=("done",)))
@@ -1161,11 +1167,13 @@ class ShellParser:
             body = self.script(stop_words=("esac",), stop_ops=CASE_TERMINATORS)
             arms.append(Arm(patterns=patterns, body=body))
             ending = self.lexer.peek()
-            if ending["kind"] == "op" and ending["text"] in CASE_TERMINATORS:
-                self.lexer.take()
-                self.linebreak()
-            elif self.reserved(ending) != "esac":
-                raise syntax_error()
+            match ending:
+                case {"kind": "op", "text": text} if text in CASE_TERMINATORS:
+                    self.lexer.take()
+                    self.linebreak()
+                case _:
+                    if self.reserved(ending) != "esac":
+                        raise syntax_error()
         self.lexer.take()
         return command("case", words=subject["word"], arms=arms)
 

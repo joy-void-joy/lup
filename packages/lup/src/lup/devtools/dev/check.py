@@ -1148,32 +1148,37 @@ def scan_reports(
         # an adopter an unresolvable import and nothing to read.
         base = gate_base(get_integration_branch()) if spread is not None else None
         owed = undeclared_breaks(project, base) if base is not None else []
-        if spread is not None and base is None:
-            # Said rather than exited: a checkout with no base to read from
-            # is a fact about the clone, and a report that names it is what
-            # lets somebody fetch one.
-            yield CheckReport(
-                name="declared migrations",
-                counted=False,
-                lines=[
-                    "declared migrations: skipped — no base to judge from (advisory)",
-                    "  fetch the integration branch or `main` so a merge base exists",
-                ],
-            )
-        elif spread is not None:
-            yield CheckReport(
-                name="declared migrations",
-                passed=not owed,
-                lines=[
-                    f"declared migrations: FAIL ({len(owed)} gone with nothing "
-                    "to read)",
-                    *(f"  {capability.spelled()}" for capability in owed),
-                    "  declare each in `lup.devtools.dev.migrations.DECLARED`, "
-                    "with what a caller does about it",
-                ]
-                if owed
-                else ["declared migrations: ok"],
-            )
+        match (spread, base):
+            case (None, _):
+                pass
+            case (_, None):
+                # Said rather than exited: a checkout with no base to read from
+                # is a fact about the clone, and a report that names it is what
+                # lets somebody fetch one.
+                yield CheckReport(
+                    name="declared migrations",
+                    counted=False,
+                    lines=[
+                        "declared migrations: skipped — no base to judge from "
+                        "(advisory)",
+                        "  fetch the integration branch or `main` so a merge base "
+                        "exists",
+                    ],
+                )
+            case _:
+                yield CheckReport(
+                    name="declared migrations",
+                    passed=not owed,
+                    lines=[
+                        f"declared migrations: FAIL ({len(owed)} gone with nothing "
+                        "to read)",
+                        *(f"  {capability.spelled()}" for capability in owed),
+                        "  declare each in `lup.devtools.dev.migrations.DECLARED`, "
+                        "with what a caller does about it",
+                    ]
+                    if owed
+                    else ["declared migrations: ok"],
+                )
 
         # Beside parity because both ask whether the roster arrived whole, one
         # turn further out: parity reads a declaration against the trees, and

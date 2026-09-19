@@ -411,12 +411,15 @@ def create_dev_app(
             )
             return
         if antipatterns:
-            if profiled:
-                antipatterns_mod.profile(declarations.project, path)
-            elif stats:
-                antipatterns_mod.summarize(declarations.project, as_json, path)
-            else:
-                antipatterns_mod.report(declarations.project, as_json, path, fix=fix)
+            match (profiled, stats):
+                case (True, _):
+                    antipatterns_mod.profile(declarations.project, path)
+                case (False, True):
+                    antipatterns_mod.summarize(declarations.project, as_json, path)
+                case _:
+                    antipatterns_mod.report(
+                        declarations.project, as_json, path, fix=fix
+                    )
             return
         if boundaries:
             boundaries_mod.report(declarations.project, as_json)

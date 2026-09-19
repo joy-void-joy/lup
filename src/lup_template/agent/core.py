@@ -567,85 +567,88 @@ def build_session_factory(
             member=session_member_id(session_id),
         )
 
-    if not toolless and engine in ("claude", "claude-compat"):
-        from lup.orchestration.reflection import ReviewGate
+    match toolless, engine:
+        case False, "claude" | "claude-compat":
+            from lup.orchestration.reflection import ReviewGate
 
-        policy = ToolPolicy(settings)
-        realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
-        sandbox = build_session_sandbox(notes)
-        # In memory, because this path assembles the tools in the process that
-        # waits on their verdict: a flag file is what the two-process path
-        # needs and this one would only be writing to itself through a file.
-        gate = ReviewGate()
-        toolset = assembled(groups, session_needs(gate, sandbox, realtime_dir))
-        tool_servers = dict(
-            policy.get_mcp_servers(*registered(toolset, groups, policy))
-        )
-        from lup.providers.claude.runtime import SUBMISSION_TOOL
-
-        allowed_tools = policy.get_allowed_tools(
-            tool_servers,
-            # lup: ignore[frozenset-shape] — immutable policy input
-            builtin_tools=frozenset(
-                {"Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash"}
-            ),
-        )
-        # The turn-bound submission tool is registered by the adapter, not the
-        # template toolsets; without this the allowlist hook denies the very
-        # tool that finalizes the turn.
-        allowed_tools.append(SUBMISSION_TOOL)
-        hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
-        submission_gate = reflection_submission_gate(gate)
-    elif not toolless:
-        from lup.orchestration.reflection import ReviewGate
-        from lup.workspace.context import SessionContext
-
-        policy = ToolPolicy(settings)
-        realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
-        # The flag lives outside the sandbox's writable roots (workspace,
-        # /tmp) so only the host-side tool server can open the gate.
-        gate_flag = session_gate_flag(notes.session.name)
-        gate_flag.unlink(missing_ok=True)
-        gate = ReviewGate(flag_path=gate_flag)
-        submission_gate = reflection_submission_gate(gate)
-        context = SessionContext(
-            session_dir=notes.session,
-            outputs_dir=notes.output.parent,
-            gate_flag=gate.flag_path,
-            session_id=notes.session.name,
-            task_id=notes.output.parent.name,
-            realtime_dir=realtime_dir,
-        )
-        environment = {
-            **context.to_env(),
-            "AGENT_SDK": engine,
-            "AGENT_SANDBOX_ENABLED": str(settings.sandbox_enabled).lower(),
-        }
-        if (selected_model := model or settings.model) is not None:
-            environment["AGENT_MODEL"] = selected_model
-        if settings.aux_model is not None:
-            environment["AGENT_AUX_MODEL"] = settings.aux_model
-        codex_mcp_servers = {
-            name: CodexMcpServerConfig(
-                command="uv",
-                args=[
-                    "run",
-                    "lup-devtools",
-                    "agent",
-                    "serve-tools",
-                    "--server",
-                    name,
-                ],
-                env=environment,
+            policy = ToolPolicy(settings)
+            realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
+            sandbox = build_session_sandbox(notes)
+            # In memory, because this path assembles the tools in the process
+            # that waits on their verdict: a flag file is what the two-process
+            # path needs and this one would only be writing to itself through
+            # a file.
+            gate = ReviewGate()
+            toolset = assembled(groups, session_needs(gate, sandbox, realtime_dir))
+            tool_servers = dict(
+                policy.get_mcp_servers(*registered(toolset, groups, policy))
             )
-            # Which groups this session has, derived by building them rather
-            # than listed beside the builder: a server started for a group
-            # this session builds empty is a subprocess serving nothing.
-            for name in policy.filter_group_names(
-                served_names(groups, session_needs(gate, None, realtime_dir))
+            from lup.providers.claude.runtime import SUBMISSION_TOOL
+
+            allowed_tools = policy.get_allowed_tools(
+                tool_servers,
+                # lup: ignore[frozenset-shape] — immutable policy input
+                builtin_tools=frozenset(
+                    {"Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash"}
+                ),
             )
-        }
-        writable_roots = list(notes.rw)
+            # The turn-bound submission tool is registered by the adapter, not
+            # the template toolsets; without this the allowlist hook denies
+            # the very tool that finalizes the turn.
+            allowed_tools.append(SUBMISSION_TOOL)
+            hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
+            submission_gate = reflection_submission_gate(gate)
+        case False, _:
+            from lup.orchestration.reflection import ReviewGate
+            from lup.workspace.context import SessionContext
+
+            policy = ToolPolicy(settings)
+            realtime_dir = notes.session / REALTIME_DIRNAME if realtime else None
+            # The flag lives outside the sandbox's writable roots (workspace,
+            # /tmp) so only the host-side tool server can open the gate.
+            gate_flag = session_gate_flag(notes.session.name)
+            gate_flag.unlink(missing_ok=True)
+            gate = ReviewGate(flag_path=gate_flag)
+            submission_gate = reflection_submission_gate(gate)
+            context = SessionContext(
+                session_dir=notes.session,
+                outputs_dir=notes.output.parent,
+                gate_flag=gate.flag_path,
+                session_id=notes.session.name,
+                task_id=notes.output.parent.name,
+                realtime_dir=realtime_dir,
+            )
+            environment = {
+                **context.to_env(),
+                "AGENT_SDK": engine,
+                "AGENT_SANDBOX_ENABLED": str(settings.sandbox_enabled).lower(),
+            }
+            if (selected_model := model or settings.model) is not None:
+                environment["AGENT_MODEL"] = selected_model
+            if settings.aux_model is not None:
+                environment["AGENT_AUX_MODEL"] = settings.aux_model
+            codex_mcp_servers = {
+                name: CodexMcpServerConfig(
+                    command="uv",
+                    args=[
+                        "run",
+                        "lup-devtools",
+                        "agent",
+                        "serve-tools",
+                        "--server",
+                        name,
+                    ],
+                    env=environment,
+                )
+                # Which groups this session has, derived by building them
+                # rather than listed beside the builder: a server started for
+                # a group this session builds empty is a subprocess serving
+                # nothing.
+                for name in policy.filter_group_names(
+                    served_names(groups, session_needs(gate, None, realtime_dir))
+                )
+            }
+            writable_roots = list(notes.rw)
 
     resolver = (
         submission_gate_resolver(AgentOutput, submission_gate)
@@ -667,19 +670,18 @@ def build_session_factory(
         writable_roots=writable_roots,
         subagents=subagents if engine in ("claude", "claude-compat") else None,
     )
-    if sandbox is not None:
-        factory = cleaning_session_factory(factory, sandbox.stop)
-    elif (
-        not toolless
-        and settings.sandbox_enabled
-        and engine
-        in (
-            "codex",
-            "openai",
-            "openai-compat",
-        )
-    ):
-        factory = cleaning_session_factory(factory, codex_sandbox_cleanup(notes))
+    match sandbox:
+        case None:
+            if (
+                not toolless
+                and settings.sandbox_enabled
+                and engine in ("codex", "openai", "openai-compat")
+            ):
+                factory = cleaning_session_factory(
+                    factory, codex_sandbox_cleanup(notes)
+                )
+        case _:
+            factory = cleaning_session_factory(factory, sandbox.stop)
     trace_logger = TraceLogger(
         trace_path=notes.trace_log,
         title=f"Session {session_id}",

@@ -718,9 +718,9 @@ def typescript_spans(
                     index += 2
                 case "\n":
                     return index
-                case character if character == quote:
-                    return index + 1
-                case _:
+                case character:
+                    if character == quote:
+                        return index + 1
                     index += 1
         return length
 
@@ -816,14 +816,15 @@ def typescript_spans(
                 holes[-1] -= 1
                 position += 1
                 last_code, word = character, ""
-            case _ if character.isspace():
-                position += 1
-            case _ if character.isalnum() or character in "_$":
-                position += 1
-                last_code, word = character, word + character
             case _:
                 position += 1
-                last_code, word = character, ""
+                if not character.isspace():
+                    last_code = character
+                    word = (
+                        word + character
+                        if character.isalnum() or character in "_$"
+                        else ""
+                    )
     return spans
 
 
@@ -1377,10 +1378,12 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
                         | ast.AnnAssign(target=ast.Name(id=name), value=value)
                     ) if empty_collection_literal(value):
                         loops = feeding[name] if name in feeding else None
-                        if in_loop:
-                            if loops is not None:
-                                mark(value)
-                        elif loops is None or all(loops):
+                        marked = (
+                            loops is not None
+                            if in_loop
+                            else loops is None or all(loops)
+                        )
+                        if marked:
                             mark(value)
                 visit(child, in_loop or is_loop(child))
 
@@ -1872,6 +1875,76 @@ def global_statement_sites(source: str) -> list[MatchSite]:
     if tree is None:
         return []
     return sites_at({node.lineno for node in nodes_of(tree, ast.Global)})
+
+
+def chain_continuation(node: ast.If) -> ast.If | None:
+    """The `if` an `else` holds alone, which is what an `elif` parses to.
+
+    Both spellings are one tree, so a lone `if` nested in an `else` is the
+    same chain written deeper, and this reads them alike.
+    """
+    match node.orelse:
+        case [ast.If() as tail]:
+            return tail
+        case _:
+            return None
+
+
+def elif_chain_sites(source: str) -> list[MatchSite]:
+    """Lines heading an `if` whose `else` holds nothing but another `if`.
+
+    Reported at the head rather than at every arm, because the remedy is one
+    rewrite of the whole chain, and a directive keeping one stands at one line.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return []
+    branches = nodes_of(tree, ast.If)
+    continued = {
+        id(tail) for node in branches if (tail := chain_continuation(node)) is not None
+    }
+    return sites_at(
+        {
+            node.lineno
+            for node in branches
+            if id(node) not in continued and chain_continuation(node) is not None
+        }
+    )
+
+
+def irrefutable(pattern: ast.pattern) -> bool:
+    """Whether a case pattern matches every subject, binding at most a name.
+
+    `_` and a bare capture are the two spellings; an or-pattern ending in one
+    is one too, since its last alternative catches whatever the rest let by.
+    """
+    match pattern:
+        case ast.MatchAs(pattern=None):
+            return True
+        case ast.MatchAs(pattern=ast.pattern() as inner):
+            return irrefutable(inner)
+        case ast.MatchOr(patterns=[*_, last]):
+            return irrefutable(last)
+        case _:
+            return False
+
+
+def wildcard_guard_sites(source: str) -> list[MatchSite]:
+    """Lines opening a guarded `case` whose pattern matches anything.
+
+    `case _ if …` and `case name if …` bind nothing the guard could not have
+    read off the subject itself, so the arm decides on the guard alone.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return []
+    return sites_at(
+        {
+            arm.pattern.lineno
+            for arm in nodes_of(tree, ast.match_case)
+            if arm.guard is not None and irrefutable(arm.pattern)
+        }
+    )
 
 
 def all_export_sites(source: str) -> list[MatchSite]:
@@ -2660,6 +2733,10 @@ def matcher_named(name: str) -> Callable[[str], list[MatchSite]] | None:
             return bare_except_sites
         case "except_baseexception_sites":
             return except_baseexception_sites
+        case "elif_chain_sites":
+            return elif_chain_sites
+        case "wildcard_guard_sites":
+            return wildcard_guard_sites
         case "global_statement_sites":
             return global_statement_sites
         case "all_export_sites":
@@ -2723,7 +2800,8 @@ def matched_lines(source: str, rows: list[AntiPatternRow]) -> dict[str, set[int]
             continue
         if parses:
             found[row["id"]] = lines_of(matcher(source))
-        elif row["strength"] == "strong":
+            continue
+        if row["strength"] == "strong":
             found[row["id"]] = set()
     return found
 

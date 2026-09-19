@@ -101,13 +101,13 @@ def show_module(obj: object, path: str, private: bool) -> None:
         is_class = inspect.isclass(member)
         is_function = inspect.isfunction(member) or inspect.isbuiltin(member)
         if is_class or is_function:
-            origin = getattr(member, "__module__", None)
-            if isinstance(origin, str) and origin != module_name:
-                reexports.append(f"{name} (from {origin})")
-            elif is_class:
-                classes.append(name)
-            else:
-                functions.append(format_signature(member, name))
+            match (getattr(member, "__module__", None), is_class):
+                case (str() as origin, _) if origin != module_name:
+                    reexports.append(f"{name} (from {origin})")
+                case (_, True):
+                    classes.append(name)
+                case _:
+                    functions.append(format_signature(member, name))
         else:
             values.append(f"{name}: {type(member).__name__}")
 
@@ -168,20 +168,21 @@ def show_class(cls: type, schema: bool, private: bool) -> None:
         typer.echo(f"\n{doc}")
 
     is_pydantic = issubclass(cls, BaseModel)
-    if is_pydantic:
-        show_pydantic_fields(cast(type[BaseModel], cls), schema)
 
-    if not is_pydantic:
-        is_typed_dict = hasattr(cls, "__required_keys__") and hasattr(
-            cls, "__optional_keys__"
-        )
-        if is_typed_dict:
+    def show_fields() -> None:
+        if is_pydantic:
+            show_pydantic_fields(cast(type[BaseModel], cls), schema)
+            return
+        if hasattr(cls, "__required_keys__") and hasattr(cls, "__optional_keys__"):
             show_typed_dict_fields(cls)
-        elif issubclass(cls, enum.Enum):
+            return
+        if issubclass(cls, enum.Enum):
             show_enum_members(cast(type[enum.Enum], cls))
-        elif dataclasses.is_dataclass(cls):
+            return
+        if dataclasses.is_dataclass(cls):
             show_dataclass_fields(cls)
-        elif hasattr(cls, "__annotations__") and cls.__annotations__:
+            return
+        if hasattr(cls, "__annotations__") and cls.__annotations__:
             typer.echo("\nAnnotations:")
             try:
                 hints = typing.get_type_hints(cls)
@@ -196,6 +197,7 @@ def show_class(cls: type, schema: bool, private: bool) -> None:
                 else:
                     typer.echo(f"  {name}: {format_type(ann)}")
 
+    show_fields()
     show_methods_section(cls, private, exclude_pydantic=is_pydantic)
 
 
@@ -255,16 +257,19 @@ def show_enum_members(cls: type[enum.Enum]) -> None:
 def show_dataclass_fields(cls: type) -> None:
     dc_fields = dataclasses.fields(cls)
     typer.echo(f"\nFields ({len(dc_fields)}):")
-    for f in dc_fields:
-        parts = [f"  {f.name}: {format_type(f.type)}"]
-        if f.default is not dataclasses.MISSING:
-            parts.append(f" = {f.default!r}")
-        elif f.default_factory is not dataclasses.MISSING:
+
+    def default_of(field: dataclasses.Field[object]) -> str:
+        if field.default is not dataclasses.MISSING:
+            return f" = {field.default!r}"
+        if field.default_factory is not dataclasses.MISSING:
             factory_name = getattr(
-                f.default_factory, "__name__", repr(f.default_factory)
+                field.default_factory, "__name__", repr(field.default_factory)
             )
-            parts.append(f" = {factory_name}()")
-        typer.echo("".join(parts))
+            return f" = {factory_name}()"
+        return ""
+
+    for f in dc_fields:
+        typer.echo(f"  {f.name}: {format_type(f.type)}{default_of(f)}")
 
 
 def show_methods_section(
@@ -278,10 +283,12 @@ def show_methods_section(
         if exclude_pydantic and name in PYDANTIC_INTERNALS:
             continue
         member = cls.__dict__[name]
-        if isinstance(member, property):
-            properties.append(name)
-        elif callable(member):
-            methods.append(format_signature(member, name))
+        match member:
+            case property():
+                properties.append(name)
+            case _:
+                if callable(member):
+                    methods.append(format_signature(member, name))
 
     if properties:
         typer.echo(f"\nProperties ({len(properties)}):")

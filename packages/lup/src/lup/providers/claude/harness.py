@@ -355,16 +355,17 @@ class ClaudeSkillRenderer(ArtifactRenderer[Skill]):
         granted = claude_granted_tools(source.tools, self.plugin)
         if granted:
             frontmatter.append("allowed-tools: " + ", ".join(granted))
-        if source.argument_hint is not None:
-            frontmatter.append(f"argument-hint: {json.dumps(source.argument_hint)}")
-        elif source.arguments:
-            arguments = "\n".join(
-                f"  - name: {argument.name}\n"
-                f"    description: {json.dumps(argument.description)}\n"
-                f"    required: {str(argument.required).lower()}"
-                for argument in source.arguments
-            )
-            frontmatter.append(f"arguments:\n{arguments}")
+        match source.argument_hint, source.arguments:
+            case str() as hint, _:
+                frontmatter.append(f"argument-hint: {json.dumps(hint)}")
+            case None, [_, *_]:
+                arguments = "\n".join(
+                    f"  - name: {argument.name}\n"
+                    f"    description: {json.dumps(argument.description)}\n"
+                    f"    required: {str(argument.required).lower()}"
+                    for argument in source.arguments
+                )
+                frontmatter.append(f"arguments:\n{arguments}")
         content = (
             "---\n" + "\n".join(frontmatter) + "\n"
             "---\n\n"

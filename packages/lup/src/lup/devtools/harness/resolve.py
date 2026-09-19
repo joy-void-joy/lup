@@ -60,6 +60,7 @@ from lup.resolver.models import (
     ConcernProgress,
     InventoryNote,
     IssueEvidence,
+    LeaseRefresh,
     ResolveManifest,
     MaterialQuestion,
     RefreshReport,
@@ -960,16 +961,31 @@ def refresh_run(
 def describe_refresh(report: RefreshReport) -> list[str]:
     """Render a refresh the way somebody deciding whether to take it reads it."""
     base = report.base
-    if base.reason:
-        opening = f"base unchanged: {base.reason}"
-    elif not base.moved():
-        opening = f"base is current with {base.branch}"
-    else:
-        opening = (
+
+    def opening() -> str:
+        if base.reason:
+            return f"base unchanged: {base.reason}"
+        if not base.moved():
+            return f"base is current with {base.branch}"
+        return (
             f"base {'moved' if report.applied else 'would move'} onto {base.branch}: "
             f"{base.was[:12]} → {base.commit[:12]}"
         )
-    lines = [opening]
+
+    def outcome(lease: LeaseRefresh) -> str:
+        match lease:
+            case LeaseRefresh(conflicts=[_, *_] as conflicts):
+                return "conflicts on " + ", ".join(
+                    path.as_posix() for path in conflicts
+                )
+            case LeaseRefresh(applied=True):
+                return "merged"
+            case LeaseRefresh(reason=str() as reason) if reason:
+                return reason
+            case _:
+                return "merges cleanly"
+
+    lines = [opening()]
     lines.extend(f"  {path.as_posix()}" for path in base.conflicts)
     if base.conflicts:
         lines.append(
@@ -978,18 +994,7 @@ def describe_refresh(report: RefreshReport) -> list[str]:
         )
     if not base.moved():
         return lines
-    for lease in report.leases:
-        if lease.conflicts:
-            lines.append(
-                f"  {lease.concern_id}: conflicts on "
-                + ", ".join(path.as_posix() for path in lease.conflicts)
-            )
-        elif lease.applied:
-            lines.append(f"  {lease.concern_id}: merged")
-        elif lease.reason:
-            lines.append(f"  {lease.concern_id}: {lease.reason}")
-        else:
-            lines.append(f"  {lease.concern_id}: merges cleanly")
+    lines.extend(f"  {lease.concern_id}: {outcome(lease)}" for lease in report.leases)
     if not report.applied and any(not lease.conflicts for lease in report.leases):
         lines.append("Re-run with --apply to take it.")
     return lines

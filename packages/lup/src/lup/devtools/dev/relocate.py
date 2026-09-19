@@ -164,18 +164,17 @@ def module_runs(tokens: list[tokenize.TokenInfo]) -> list[ModuleRun]:
         from_seen = False
         listing = False
         for index, token in enumerate(tokens):
-            if token.type in (tokenize.NEWLINE, tokenize.NL):
-                from_seen = listing = False
-            elif listing and token.type == tokenize.OP and token.string == ",":
-                yield from run_at(index)
-            elif token.type != tokenize.NAME:
-                continue
-            elif token.string == "from":
-                from_seen = True
-                yield from run_at(index)
-            elif token.string == "import" and not from_seen:
-                listing = True
-                yield from run_at(index)
+            match (token.type, token.string):
+                case (tokenize.NEWLINE | tokenize.NL, _):
+                    from_seen = listing = False
+                case (tokenize.OP, ",") if listing:
+                    yield from run_at(index)
+                case (tokenize.NAME, "from"):
+                    from_seen = True
+                    yield from run_at(index)
+                case (tokenize.NAME, "import") if not from_seen:
+                    listing = True
+                    yield from run_at(index)
 
     return list(found())
 

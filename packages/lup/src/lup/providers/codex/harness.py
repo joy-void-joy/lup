@@ -678,13 +678,15 @@ def codex_allow_prefixes(
         )
         if earned != "allow" or row["ask_flags"] or row["sandbox"] == "inside":
             continue
-        if not row["subcommand"]:
-            if row["command"] not in gated and row["command"] not in dynamic:
-                add([row["command"]], row["sandbox"])
-        elif row["operation"]:
-            add([row["command"], row["subcommand"], row["operation"]], row["sandbox"])
-        elif f"{row['command']} {row['subcommand']}" not in operational:
-            add([row["command"], row["subcommand"]], row["sandbox"])
+        match row["subcommand"], row["operation"]:
+            case "", _:
+                if row["command"] not in gated and row["command"] not in dynamic:
+                    add([row["command"]], row["sandbox"])
+            case subcommand, "":
+                if f"{row['command']} {subcommand}" not in operational:
+                    add([row["command"], subcommand], row["sandbox"])
+            case subcommand, operation:
+                add([row["command"], subcommand, operation], row["sandbox"])
     for target in runner_targets:
         # Read on the same terms as a command row above, which it was not
         # while a target stated its verdict outright: every declared target

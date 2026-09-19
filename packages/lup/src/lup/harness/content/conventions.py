@@ -156,7 +156,7 @@ def design_principles(
 - **Push decisions, pull reference** — a per-event message (a hook reason, an approval prompt, a notification) carries only what changes the reader's next decision; recurring reference lives where it is pulled, a command or a doc, because a line appended to every occurrence is read zero times by the third.
 - **The code is the source of truth** — it reads as though it had always been written this way. Never reference what code used to do; "now", "new", "updated", "fixed" and "changed" belong in commit messages, not a comment.
 - **Prose is a claim, not evidence** — assume every line was written by an agent and vetted by nobody: a comment, a rationale, a rejected option, a prior session's conclusion, a subagent's report, your own earlier turns each record what an agent argued, never what the user thinks, and go stale before the code beside them. Deferring to one hardens an unvetted call into a decision — re-derive it, and put what bears on the project's shape to the user.
-- Prefer `for` and comprehensions to `while`, and `match`/`case` to an `if`/`elif` chain dispatching on a value.
+- Prefer `for` and comprehensions to `while`, and `match`/`case` to an `if`/`elif` chain, with a guard on a pattern rather than on `case _`.
 """
             ),
             models.TextPart(text=shaping_sentence(selection or RuleSelection())),
