@@ -1214,7 +1214,18 @@ class SpawnNames(BaseModel, frozen=True):
     such as the default agent's, which says nothing about what the subagent
     is doing. Declaring this refuses a spawn that carries no name, with a
     recovery giving the shape, so the caller passes one and the listing says
-    what each subagent is for. The runtime validates the spelling itself.
+    what each subagent is for.
+
+    It refuses a name outside the shape too, because leaving the spelling to
+    the runtime was measured to fail quietly. Claude Code 2.1.278 validates it
+    and says so — "name must start with a letter or digit and contain only
+    letters, digits, underscores, or hyphens (max 64 chars)", read out of the
+    shipped binary. Codex 0.155.1 rejects a hyphen with no hook record at all:
+    a spawn named `pty-arming-probe` produced no `PostToolUse`, and the model
+    retried as `pty_arming_probe` unprompted, having learned the shape by
+    guessing. So the default is the intersection, which is also what a name
+    written into portable guidance needs: a project running on one runtime
+    alone may widen `punctuation` to what that runtime takes.
 
     On by default, since the cost is one argument per spawn and the gain is
     every listing, message and stop naming the work rather than the type.
@@ -1226,13 +1237,30 @@ class SpawnNames(BaseModel, frozen=True):
     )
     recovery: str = (
         "pass a name beside the agent type: the task in two or three words,"
-        " letters, digits, hyphens or underscores, at most 64 characters —"
-        " it is what the listing shows and what a message or a stop addresses"
+        " starting with a letter or digit and carrying only letters, digits"
+        " and underscores, at most 64 characters — it is what the listing"
+        " shows and what a message or a stop addresses"
     )
+    misspelled: str = (
+        "a name outside that shape is rejected by one runtime or another, one"
+        " of them silently, so the spawn dies where nothing records it"
+    )
+    punctuation: str = "_"
+    """What a name may carry beside letters and digits: the intersection of
+    what every runtime this project runs on accepts, a hyphen being one
+    runtime's alone."""
+    limit: int = 64
+    """The longest name accepted, which is the shorter of the two limits."""
 
     def erased(self) -> SpawnNameRow:
         """This declaration as the kernel reads it, primitive and dependency-free."""
-        return SpawnNameRow(reason=self.reason, recovery=self.recovery)
+        return SpawnNameRow(
+            reason=self.reason,
+            recovery=self.recovery,
+            misspelled=self.misspelled,
+            punctuation=self.punctuation,
+            limit=self.limit,
+        )
 
 
 class SubagentCleanup(BaseModel, frozen=True):

@@ -102,15 +102,24 @@ class PathRoleRow(TypedDict):
 
 
 class SpawnNameRow(TypedDict):
-    """One erased decision that a spawned agent carries a name.
+    """One erased decision that a spawned agent carries a name, and how it is spelled.
 
     ``reason`` is what a spawn without one is refused with; ``recovery`` says
     the shape a name takes, because a refusal an agent cannot act on becomes
-    a retry.
+    a retry. ``misspelled`` is what a name outside that shape is refused with.
+
+    ``punctuation`` is what a name may carry beside letters and digits, and
+    ``limit`` how long it may be. Both are data rather than a check written
+    into the judgement, because which spellings are safe is a property of the
+    runtimes a project runs on, and a project running on one of them may
+    widen what a project running on several cannot.
     """
 
     reason: str
     recovery: str
+    misspelled: str
+    punctuation: str
+    limit: int
 
 
 class AcceptanceGuardRow(TypedDict):
