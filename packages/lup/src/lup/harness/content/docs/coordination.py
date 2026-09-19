@@ -283,10 +283,20 @@ no command that speaks to a running session at all — so waking returns an
 and a skill running inside a session carries it. A third outcome, that nothing
 can reach the peer, is reported rather than silently skipped.
 
-The handle a peer is addressed by is **self-reported on the roster**, because
-on one runtime it can only be: the session identifiers in its environment are
-not what peers address it by, and the address is discoverable only by asking
-the runtime from inside the session.
+The handle a peer is addressed by is **declared when it joins**, and declared
+by the adapter for the runtime that would resolve it — because what makes a
+session look is one runtime's own arrangement, and a neutral answer would be
+right for at most one of them. A launched session hands its runtime the name
+the roster answers to, so the two agree and the handle is the name already in
+every listing; renaming on either side moves one and not the other, which
+costs a wake and never a message. A session nobody launched has no such
+agreement, and one whose runtime offers no addressable name at all declares
+nothing, which is the third outcome reported rather than skipped.
+
+Declaring it is not enough to reach anybody. The wake travels whatever channel
+the runtime discovers peers over, and a contained session's is its own unless
+the launch shares one — so a handle can be perfectly correct and still name a
+session the tool cannot see.
 
 ## One fold, three readers
 

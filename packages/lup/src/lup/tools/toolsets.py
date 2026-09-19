@@ -33,6 +33,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from lup.coordination.wake import WakePath
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.orchestration.reflection import ReviewGate
@@ -85,6 +86,16 @@ class SessionNeeds(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
     member: str = ""
     """What the roster knows this session by, empty where nothing minted one."""
+
+    wake: WakePath = WakePath()
+    """What would make this session look, as its own runtime's adapter answers.
+
+    Resolved by the caller rather than here, because it is the one field whose
+    value depends on which runtime opened the session, and this model is the
+    neutral shape every builder reads. Empty is a session nothing can nudge,
+    which is the honest answer for a runtime with no such path and for one
+    nobody asked.
+    """
 
 
 def nothing_beside(needs: SessionNeeds) -> list[ServerCompanion]:
@@ -268,14 +279,16 @@ def coordination_group(name: str = "coordination") -> ToolGroup:
 
         if not needs.member:
             return []
-        return create_peer_tools(RepositoryPeers(needs.root), needs.member, needs.root)
+        return create_peer_tools(
+            RepositoryPeers(needs.root), needs.member, needs.root, wake=needs.wake
+        )
 
     def companions(needs: SessionNeeds) -> list[ServerCompanion]:
         from lup.coordination.peer_tools import RosterPulse
 
         if not needs.member:
             return []
-        return [RosterPulse(root=needs.root, member_id=needs.member)]
+        return [RosterPulse(root=needs.root, member_id=needs.member, wake=needs.wake)]
 
     return ToolGroup(name=name, tools=tools, companions=companions)
 

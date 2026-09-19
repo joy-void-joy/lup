@@ -26,6 +26,8 @@ case never reads it.
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from lup.coordination.wake import WakePath
+
 CLAUDE_SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 
 
@@ -38,3 +40,27 @@ class ClaudeSessionEnv(BaseSettings):
 def claude_session_id() -> str:
     """The session id Claude Code set for this process, or blank where it set none."""
     return ClaudeSessionEnv().session_id
+
+
+def claude_wake(cli_name: str) -> WakePath:
+    """What a peer holding the message tool addresses this session by.
+
+    The name, not either session id. ``--name`` sets what a listing reports
+    and what a send resolves, and the launcher passes the roster's own name
+    there, so a launched session is already addressable by the name it
+    answers to everywhere else -- measured off a launched session's own
+    command line and off a probe named at launch reporting itself.
+
+    *cli_name* is what the launcher gave, rather than what the roster says
+    now, because those are two names that move independently: renaming on the
+    roster leaves the runtime's own name where the launch put it. A rename on
+    the runtime's side moves it the other way and leaves this stale, which
+    costs a wake and never a message -- the mail is written before anything
+    consults a wake path, and a handle that no longer resolves is the case
+    :func:`~lup.coordination.wake.wake` is built to survive.
+
+    Blank where nothing launched this session: its addressable name is one
+    only the session itself can read, and until it reports one there is
+    nothing here to hand a caller.
+    """
+    return WakePath(runtime="claude", handle=cli_name) if cli_name else WakePath()
