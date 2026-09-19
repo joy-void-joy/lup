@@ -92,6 +92,17 @@ part of probing.
   is spent as a denial. The hook itself governs — that is what
   `tests/integration/test_codex_exec_governance.py` settled — and what is missing is the middle verdict, which
   is a Codex surface gap rather than a Lup one.
+- **`PermissionRequest` does fire somewhere, and which surface is the open
+  question.** This repository's own scoped home has journalled 48 completed
+  invocations of it — 18 answered `allow`, 30 answered `ask`, every one on a
+  shell call — so the event is not inert and the dispatcher's interactive arm
+  is reached. What the journal does not record is which surface opened the
+  session, so this does not yet separate a terminal from an app-server, and
+  the `exec` finding above still stands for `exec`. The part that matters for
+  an application is untested: whether an `ask` there, where the dispatcher
+  returns saying nothing so the runtime's own flow can proceed, reaches a
+  client that can answer it. `tests/integration/test_codex_approval_request.py`
+  is built to settle both halves and needs a signed-in host to run.
 - **A Codex home decides whether the policy runs at all, through four gates,
   and `codex doctor` reports on none of them.** The plugin has to be installed
   and enabled; `[features] hooks = true` has to reach *that* home; the project
