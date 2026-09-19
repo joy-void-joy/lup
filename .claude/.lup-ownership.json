@@ -359,7 +359,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/coordination/changes.py",
       "category": "generated",
-      "sha256": "ff5bc9cbe365323a3daa603fd939584f607e68556fb553fc8cf481fca36c8c04",
+      "sha256": "559c8db053de78aab4059d269e06a4f62c3298445fcbf665cfac6fc251114865",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -371,9 +371,16 @@
       "executable": false
     },
     {
+      "path": ".claude/plugins/lup/hooks/runtime/coordination/mail.py",
+      "category": "generated",
+      "sha256": "19f6f44945634bb3cd0e82fee24eb5c3e907a5ce03c8bf9aa90f2c33458105ca",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
       "path": ".claude/plugins/lup/hooks/runtime/coordination/store.py",
       "category": "generated",
-      "sha256": "03063b4058aa4cd339111a45f7274aa7b3af414424ccdfea2afae9052fa8de70",
+      "sha256": "9a10d863e3599d88e780b76af0ba391eb764e4a27e65251192c1a3a0c0a4d0d6",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -387,7 +394,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/coordination_delivery.py",
       "category": "generated",
-      "sha256": "2dcc12532c801ad168728a6919b97b0b6de61c0c1a564f66878f7ac9741e8248",
+      "sha256": "f12f5ea01ba8e27b329916e568af7e5a8f5fb13d024cd9c8112c2efe5e343d8c",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -562,28 +569,28 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/coordination_changes.sh",
       "category": "generated",
-      "sha256": "95d9704f3bb69f3c5d02a6d4a94d8c209b38b13b0385510624c76b0f70faa2c3",
+      "sha256": "695c975d6c41e3e8f61295d93d8fa3b80ebb30e96957c4e3ddd26fdd28cf14f2",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/coordination_delivery.sh",
       "category": "generated",
-      "sha256": "5400da7d61c6c24ca03913c29b49d62bf1e2cf596dbbdae05aaae3e3a6fd8987",
+      "sha256": "b1a72c08d148bfa80344a979825096535925f323505854e9ec423142e358bb4c",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/coordination_departure.sh",
       "category": "generated",
-      "sha256": "ad02f5a69eef0222dcbc0d38e1df1925dc9d27d2b20c3247a9542a8c2b755022",
+      "sha256": "f724c426a5eda511f1b9d7474ca7a51cbfe8ecbcafb79a22f3087988b9886e82",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "6f8c621426271e9fb056c1cdc384fef0d7c2990c99814a778fde333261430742",
+      "sha256": "cef7dc54338b0ee16a1e9faf8b1ba287246ed63b0fbe7c4992aac0df1c12b9e4",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

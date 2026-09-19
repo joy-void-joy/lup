@@ -1,102 +1,107 @@
-# lup: ignore[constant-declaration]
-# The constants here name the stream's own on-disk layout, which a writer and
-# a reader in different processes must agree on to find each other's files at
-# all — an identity of this format rather than a choice a caller can make.
-"""Saying something to a running actor, and knowing whether it was read.
+"""Saying something to a member, and saying something that stays true.
 
-A message is not a question, and the type is where that is enforced: mail
-rides a :class:`~lup.channels.stream.Stream`, which has no unsettled state
-for anything to wait on, so no amount of messaging can park a run. That split
-— questions are slots, messages are streams — is what lets a caller volunteer
+Two acts, and separating them is the whole of this module. A **message** is
+addressed and consumed: it goes in one member's inbox and leaves when that
+member reads it. A **notice** is neither: it is a fact about the population,
+read at the head of every turn by whoever is there to read it, and retracted
+by taking it down.
+
+Neither is a question. Both ride files rather than a
+:class:`~lup.channels.slot.Slot`, which has no unsettled state for anything
+to wait on, so no amount of saying things can park a run. That split —
+questions are slots, everything here is not — is what lets a caller volunteer
 information to a working actor without stalling whoever volunteered it.
 
-Delivery positions are files rather than numbers a session happens to hold.
-Two readers over one stream, each starting at whatever the head was when it
-was constructed, can only agree by luck: a message posted while a turn was in
-flight was already behind both of them, and the run reported it sent.
+**"Everyone" is resolved by the sender.** It used to be a token every reader
+matched against itself, which is what forced a delivery position per member:
+a message nobody had addressed to you could still be yours, so you had to
+remember how far you had read. It also meant a redirect reached members
+spawned *after* the stop, which is not a thing a stop can sensibly mean. Now
+a sender that means everyone asks the roster who is live and posts one file
+each, and the store holds nothing but messages with one recipient.
+
+What that would have lost — a standing fact reaching a member that arrives
+later — is what a notice is for, and a notice does it better: it is still
+there at that member's first turn, and at every turn after, because it has
+not stopped being true.
 """
 
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 
-from lup.coordination.refs import ActorRef
-from lup.channels.cursor import StreamCursors
 from lup.channels.models import Door, utc_now
-from lup.channels.stream import Stream
-
-MESSAGE_FILE = "messages.jsonl"
-DELIVERY_DIR = "delivery"
-
-EVERYONE = "*"
-"""The address every actor answers to, for one message meant for all of them.
-
-A token rather than a blank, because these are different acts and the blank
-spelled both. `to_actor` is optional on more than one door, so leaving it out
-used to broadcast: a worker's report to the humans was delivered into every
-sibling's context and consumed there, and no surface a person reads ever held
-it. An unaddressed message now reaches nobody, which is the safe direction for
-a field somebody forgot.
-
-One record rather than one per member, so an actor spawned after the broadcast
-still receives it — its cursor starts behind the record, and the record is
-still addressed to it. A fan-out at send time cannot do that, because it can
-only name the members that existed when it ran.
-"""
+from lup.coordination.bare import mail
+from lup.coordination.bare import store
+from lup.coordination.refs import ActorRef
 
 
 class ActorMessage(BaseModel, frozen=True):
-    """One thing a door told an actor. This never settles anything.
+    """One thing a door told one member. This never settles anything.
 
-    ``redirect`` separates telling an actor something from stopping it. An
-    ordinary message rides in front of the actor's next tool call and it
+    ``redirect`` separates telling a member something from stopping it. An
+    ordinary message rides in front of the member's next tool call and it
     keeps going; a redirect refuses that call and hands back the text as the
-    reason, so the actor cannot carry on with what it was doing without
-    first reading why it was stopped. Both are the same record on the same
-    stream, because an intervention belongs in order beside what it
-    interrupted.
+    reason, so the member cannot carry on with what it was doing without
+    first reading why it was stopped.
     """
 
-    run_id: str
+    id: str
     to_actor: str
     text: str
     door: Door
     sent_at: datetime
+    sender: str = ""
     in_reply_to: str = ""
     redirect: bool = False
 
 
-class ActorDelivery(BaseModel, frozen=True):
-    """What one actor has waiting, and the position that consumes exactly it.
+class StandingNotice(BaseModel, frozen=True):
+    """One fact about this population, true until somebody takes it down.
 
-    The position is carried rather than taken again at the moment of
-    delivery, because a message posted between reading and handing over
-    would otherwise be committed past without ever being read.
+    It has no recipient and is never consumed, which is what lets a member
+    that did not exist when it was posted read it at the head of its first
+    turn. A member that has read it reads it again, because it has not
+    stopped being true — and because nothing remembering otherwise is
+    exactly the bookkeeping this shape exists to do without.
+    """
+
+    id: str
+    text: str
+    door: Door
+    posted_at: datetime
+    by: str = ""
+
+
+class ActorDelivery(BaseModel, frozen=True):
+    """What one member has waiting, and what consuming it would consume.
+
+    The messages themselves are the handle: consuming is deleting the files
+    they came from, so a caller that read and then committed cannot commit
+    past something it never saw. The offset this used to carry could, which
+    is how a message posted between reading and handing over was skipped.
     """
 
     messages: list[ActorMessage]
-    through: int
 
     def redirects(self) -> list[ActorMessage]:
         return [message for message in self.messages if message.redirect]
 
 
 class MailEventBase(BaseModel, frozen=True):
-    """One thing that happened to an actor's mail, answering about itself.
+    """One thing that happened to a member's mail, answering about itself.
 
-    The arrangement the turn events already use, for the same reason: a
-    reader asks the event rather than testing which one it is holding, so a
-    third thing that can happen to a message — expired, forwarded, refused
-    by a closed door — is one class rather than an edit to every fold that
-    would otherwise have to notice it and would not.
+    A reader asks the event rather than testing which one it is holding, so a
+    third thing that can happen to a message — expired, forwarded, refused by
+    a closed door — is one class rather than an edit to every fold that would
+    otherwise have to notice it and would not.
 
-    What every kind carries is here. What separates them is whether the
-    actor took the message, which is the one fact a reader cannot infer and
-    the one the sender most needs: a sender is told a message was sent on
-    the strength of the mailbox accepting it, which is not the same as
-    anybody having read it.
+    What separates the kinds is whether the member took the message, which is
+    the one fact a reader cannot infer and the one a sender most needs: a
+    sender is told a message was sent on the strength of the inbox accepting
+    it, which is not the same as anybody having read it.
     """
 
     text: str
@@ -105,17 +110,17 @@ class MailEventBase(BaseModel, frozen=True):
 
     @property
     def delivered(self) -> bool:
-        """Whether the actor took this, or it only ever reached its queue."""
+        """Whether the member took this, or it only ever reached its inbox."""
         raise NotImplementedError
 
 
 class MessagePostedEvent(MailEventBase, frozen=True):
-    """A door volunteered something to an actor, or an actor replied.
+    """A door volunteered something to a member, or a member replied.
 
     An intervention belongs in the record beside what it interrupted. A
-    reader scrolling one actor's trace sees the moment someone redirected
-    it, in order, against what it was doing — which is the difference
-    between a trace and an audit filed somewhere else.
+    reader scrolling one member's trace sees the moment someone redirected
+    it, in order, against what it was doing — which is the difference between
+    a trace and an audit filed somewhere else.
     """
 
     type: Literal["message_posted"] = "message_posted"
@@ -128,13 +133,13 @@ class MessagePostedEvent(MailEventBase, frozen=True):
 
 
 class MessageOutstandingEvent(MailEventBase, frozen=True):
-    """A message still queued for an actor whose session is being closed.
+    """A message still in a member's inbox as its session is being closed.
 
-    Recorded because the sender was told the message was sent, and the
-    stream alone cannot say whether anyone read it. On a park this is a
-    message that will land at the head of the resumed turn; on a run that
-    ended it is one that reached nobody, and a redirect nobody read is the
-    failure of an operation somebody performed to stop something.
+    Recorded because the sender was told the message was sent, and the inbox
+    alone cannot say whether anyone read it. On a park this is a message that
+    will land at the head of the resumed turn; on a run that ended it is one
+    that reached nobody, and a redirect nobody read is the failure of an
+    operation somebody performed to stop something.
     """
 
     type: Literal["message_outstanding"] = "message_outstanding"
@@ -149,81 +154,106 @@ type MailEvent = MessagePostedEvent | MessageOutstandingEvent
 """What the actor layer itself records, which any consumer's journal admits."""
 
 
-class ActorMail:
-    """One run's message stream and everyone's position in it.
+def folded_message(message: mail.Message) -> ActorMessage:
+    """One message file, as a typed caller reads it."""
+    return ActorMessage(
+        id=store.text(message.get("id")),
+        to_actor=store.text(message.get("to")),
+        text=store.text(message.get("text")),
+        door=Door(store.text(message.get("door")) or Door.AGENT),
+        sent_at=store.spoken_at(store.text(message.get("sent_at"))) or utc_now(),
+        sender=store.text(message.get("sender")),
+        in_reply_to=store.text(message.get("in_reply_to")),
+        redirect=bool(message.get("redirect")),
+    )
 
-    Separate from the question mailbox because the two are different
-    commitments over different storage, and only this half is what an actor
-    holds open to stay reachable. A consumer wanting nothing but
-    addressability takes this and never declares a question.
+
+def folded_notice(notice: mail.Notice) -> StandingNotice:
+    """One notice file, as a typed caller reads it."""
+    return StandingNotice(
+        id=store.text(notice.get("id")),
+        text=store.text(notice.get("text")),
+        door=Door(store.text(notice.get("door")) or Door.AGENT),
+        posted_at=store.spoken_at(store.text(notice.get("posted_at"))) or utc_now(),
+        by=store.text(notice.get("by")),
+    )
+
+
+class ActorMail:
+    """Every member's inbox, and the notices standing over all of them.
+
+    Holds nothing and remembers nothing: a door posting, a console peeking and
+    a member reading all reach the same directories, so none of them has to be
+    running for the others to work.
     """
 
     def __init__(self, root: Path) -> None:
-        self.stream: Stream[ActorMessage] = Stream(
-            root / MESSAGE_FILE, TypeAdapter(ActorMessage)
-        )
-        self.cursors = StreamCursors(root / DELIVERY_DIR)
+        self.root = root
 
-    def send(self, message: ActorMessage) -> None:
-        """Tell an actor something. This never settles and never parks a run."""
-        self.stream.append(message)
+    def send(
+        self,
+        to: ActorRef,
+        text: str,
+        door: Door = Door.AGENT,
+        sender: str = "",
+        in_reply_to: str = "",
+        redirect: bool = False,
+    ) -> ActorMessage:
+        """Put one message in one member's inbox, and say what was put there."""
+        message = mail.new_message(
+            sender=sender,
+            to=to.label(),
+            body=text,
+            door=str(door),
+            in_reply_to=in_reply_to,
+            redirect=redirect,
+        )
+        mail.post(self.root, to.id, message)
+        return folded_message(message)
 
     def waiting(self, actor: ActorRef) -> ActorDelivery:
-        """Everything queued for one actor, consuming none of it.
+        """Everything in this member's inbox, consuming none of it.
 
-        From the position that actor was last *delivered* to, which is a
-        file rather than a number some session happens to hold. Starting
-        each session at the stream head instead meant a message posted while
-        the previous turn was in flight was skipped rather than queued: the
-        window a turn opened began after it, in every round, so it reached
-        nobody ever. Reading is separated from consuming so that asking what
-        an actor has waiting — which is how a sender learns whether anything
-        was read — cannot itself be what makes it disappear.
+        Reading is separated from consuming so that asking what a member has
+        waiting — which is how a sender learns whether anything was read —
+        cannot itself be what makes it disappear.
         """
-        position = self.cursors.offset(actor.conversation())
-        found = self.stream.read_from(position)
-        reaching = actor.addresses()
-
-        def addressed(message: ActorMessage) -> bool:
-            """Whether this actor is a recipient, alone or among everyone.
-
-            The broadcast is matched here rather than by putting a token in
-            every actor's own addresses, so identity stays the answer to "is
-            this me?" and a door asking which actor `*` names correctly gets
-            none.
-            """
-            return message.to_actor == EVERYONE or message.to_actor in reaching
-
         return ActorDelivery(
-            messages=[pair.item for pair in found if addressed(pair.item)],
-            through=found[-1].commit_offset if found else position,
+            messages=[
+                folded_message(message) for message in mail.waiting(self.root, actor.id)
+            ]
         )
 
-    def delivered(self, actor: ActorRef, through: int) -> None:
-        """Record that one actor has been handed everything through ``through``.
+    def delivered(self, actor: ActorRef, delivery: ActorDelivery) -> None:
+        """Record that this member has been handed exactly these messages.
 
-        The whole region rather than the last matching message, because a
-        reader filtering by actor must still skip past the ones addressed
-        elsewhere or it re-reads them on every turn.
+        By deleting them, so what was handed over is what leaves the inbox and
+        nothing between the read and the commit is consumed unseen.
         """
-        self.cursors.commit(actor.conversation(), through)
+        mail.consume(
+            self.root,
+            actor.id,
+            [mail.Message(id=message.id) for message in delivery.messages],
+        )
 
+    def standing(self) -> list[StandingNotice]:
+        """Every fact standing over this population, oldest first."""
+        return [folded_notice(notice) for notice in mail.notices(self.root)]
 
-def new_message(
-    run_id: str,
-    to_actor: str,
-    text: str,
-    door: Door,
-    in_reply_to: str = "",
-    redirect: bool = False,
-) -> ActorMessage:
-    """Build a message stamped now, so callers do not each reach for a clock."""
-    return ActorMessage(
-        run_id=run_id,
-        to_actor=to_actor,
-        text=text,
-        door=door,
-        sent_at=utc_now(),
-        in_reply_to=in_reply_to,
-        redirect=redirect,
-    )
+    def notify(
+        self, text: str, door: Door = Door.AGENT, by: str = ""
+    ) -> StandingNotice:
+        """Post one standing fact, and say what was posted.
+
+        Posting only. Telling whoever is already working is the caller's, and
+        it is a separate act: this is what makes the fact true for the members
+        that arrive next, and a message is what makes it heard by the ones
+        mid-turn now.
+        """
+        notice = mail.new_notice(body=text, door=str(door), by=by)
+        mail.post_notice(self.root, notice)
+        return folded_notice(notice)
+
+    def retract(self, notice_id: str) -> bool:
+        """Take one standing fact down, saying whether it was there to take down."""
+        return mail.retract(self.root, notice_id)

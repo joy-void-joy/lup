@@ -36,6 +36,7 @@ from lup.coordination.mail import (
     MailEvent,
     MessageOutstandingEvent,
     MessagePostedEvent,
+    StandingNotice,
 )
 from lup.coordination.refs import ActorRef
 from lup.policy.hooks import (
@@ -158,6 +159,17 @@ class ActorInbox:
         """What this conversation has queued, without consuming any of it."""
         return self.mail.waiting(self.actor)
 
+    def standing(self) -> list[StandingNotice]:
+        """Every fact standing over this population, which nothing consumes.
+
+        Read at the head of every turn rather than delivered once, because a
+        notice is state: it is true for a member that arrived after it was
+        posted, and it goes on being true for one that has already read it.
+        Nothing is committed here, and nothing has to remember having read —
+        which is what makes a resumed turn read exactly what a first one did.
+        """
+        return self.mail.standing()
+
     def commit(self, delivery: ActorDelivery) -> None:
         """Record one delivery as handed over, and resume after it next time.
 
@@ -181,7 +193,7 @@ class ActorInbox:
                     redirect=message.redirect,
                 ),
             )
-        self.mail.delivered(self.actor, delivery.through)
+        self.mail.delivered(self.actor, delivery)
 
     def take(self) -> list[ActorMessage]:
         """Take everything queued, for a caller delivering it here and now."""
@@ -363,10 +375,6 @@ class ActorSession:
             return
         collected = self.inbox.waiting()
         if not collected.messages:
-            # Nothing here for this actor, but the region held mail for
-            # others: skipping past it is what stops every turn re-reading
-            # the whole stream, and there is nothing to lose by committing.
-            self.inbox.commit(collected)
             return
         self.collected = collected
         self.pending.extend(
@@ -376,6 +384,31 @@ class ActorSession:
             else f"[{message.door}] {message.text}"
             for message in collected.messages
         )
+
+    def standing_context(self) -> list[str]:
+        """What is true for this whole population, restated at every turn head.
+
+        Ahead of the mail and ahead of the prompt, because it is the frame the
+        other two are read inside: a redirect that revises an instruction has
+        to be read after the standing facts it is revising against, and the
+        instruction after both.
+
+        Restated rather than delivered once. A notice is state, so a turn that
+        did not restate it would be a turn working from a fact it had been
+        told to forget — and the alternative, remembering which member has
+        read which notice, is per-member bookkeeping that a replay, a resume
+        or a second reader each get wrong differently.
+        """
+        if self.inbox is None:
+            return []
+        found = self.inbox.standing()
+        if not found:
+            return []
+        lines = "\n".join(
+            f"- {notice.text}" + (f" ({notice.by})" if notice.by else "")
+            for notice in found
+        )
+        return [f"Standing for everyone working here:\n{lines}"]
 
     def with_pending[T: BaseModel | None](
         self, request: TurnRequest[T]
@@ -390,9 +423,10 @@ class ActorSession:
         here leaves the position untouched, so the message heads the next
         turn instead of being consumed by one that never happened.
         """
-        if not self.pending:
+        standing = self.standing_context()
+        if not self.pending and not standing:
             return request
-        delivered = "\n\n".join([*self.pending, request.input.text])
+        delivered = "\n\n".join([*standing, *self.pending, request.input.text])
         self.pending.clear()
         if self.inbox is not None and self.collected is not None:
             self.inbox.commit(self.collected)

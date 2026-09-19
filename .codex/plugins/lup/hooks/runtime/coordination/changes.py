@@ -47,25 +47,26 @@ import sys
 from pathlib import Path
 from typing import TypedDict
 
+from .mail import Notice, notices
 from .store import (
     LOOKS_DIR,
     MEMBER_KIND,
+    Conversation,
     Held,
     Member,
     beat,
     called,
     held,
-    loaded,
     present,
-    reset,
+    revised,
     text,
 )
 
 MOVED_LINE = (
     "This conversation was rewound or cleared, so what this session's roster "
-    "row said it was doing is reset; `coordination_describe` once you know."
+    "row said it was doing is cleared; `coordination_describe` once you know."
 )
-"""The one line a prompt gets when its conversation is not the one last looked from."""
+"""The one line a prompt gets when its conversation is not the one it recorded."""
 
 
 class Seen(TypedDict):
@@ -75,18 +76,6 @@ class Seen(TypedDict):
     worktree: str
     doing: str
     holding: list[str]
-
-
-class Conversation(TypedDict):
-    """Which conversation a look was taken from: the transcript, and its roots.
-
-    Two looks from one conversation agree on both. A rewind appends a root to
-    the same transcript and a clear opens another transcript, so either
-    difference says the conversation this session's row described is gone.
-    """
-
-    transcript: str
-    roots: int
 
 
 class TranscriptEntry(TypedDict, total=False):
@@ -102,12 +91,21 @@ class Look(TypedDict):
 
     ``contested`` is keyed by the claim rather than by the peer, because a
     contested path is one fact about two sessions and a reader is told it
-    once, with every name on it.
+    once, with every name on it. ``standing`` is keyed by the notice's id
+    rather than by its text, so a fact restated in other words is a second
+    fact and a reader is told about it.
+
+    Which conversation this was taken from is deliberately not here. It is on
+    this session's own member file, where the description it qualifies is, so
+    one write says both that the row was rewound and what it is now.
     """
 
     peers: dict[str, Seen]
     contested: dict[str, list[str]]
-    conversation: Conversation
+    # lup: ignore[dict-str-payload] — keyed by the id the store mints for one
+    # notice, whose value is that notice's own words: two fields of a record
+    # this half has no type of lup's to name
+    standing: dict[str, str]
 
 
 class Folded(TypedDict):
@@ -162,18 +160,62 @@ def conversation(transcript: str) -> Conversation:
 
     Read at prompt time, so a root the runtime writes only after this hook has
     run is noticed at the next prompt. No transcript reads as no conversation,
-    which two looks then agree on.
+    which the member file then agrees with.
     """
     if not transcript:
         return Conversation(transcript="", roots=0)
     roots = sum(
         1
-        for entry in loaded(Path(transcript), TranscriptEntry)
+        for entry in turns(Path(transcript))
         if text(entry.get("type")) in ("user", "assistant")
         and text(entry.get("uuid"))
         and entry.get("parentUuid") is None
     )
     return Conversation(transcript=transcript, roots=roots)
+
+
+def turns(transcript: Path) -> list[TranscriptEntry]:
+    """Every record a runtime's transcript holds, skipping what will not read.
+
+    One JSON object per line, written by the runtime while this reads, so the
+    last line may be half a record: a line that will not parse is passed over
+    rather than raised on, and the next prompt reads it whole.
+    """
+    try:
+        lines = transcript.read_text("utf-8").splitlines()
+    except OSError:
+        return []
+    return [
+        entry for line in lines for entry in [entry_of(line)] if entry is not None
+    ]
+
+
+def entry_of(line: str) -> TranscriptEntry | None:
+    """One transcript line, or nothing where it is not a JSON object."""
+    try:
+        entry: TranscriptEntry = json.loads(line)
+    except ValueError:
+        return None
+    return entry if isinstance(entry, dict) else None
+
+
+def roots_of(spoken: Conversation) -> int:
+    """How many roots one recorded conversation carries, none where it says nothing."""
+    counted = spoken.get("roots")
+    return counted if isinstance(counted, int) else 0
+
+
+def moved(before: Conversation, now: Conversation) -> bool:
+    """Whether these two records are two conversations rather than one.
+
+    Compared field by field rather than whole, because either record may have
+    been written by a library that carries one more of them: a key this
+    reader does not know about must not read as a rewind on every prompt.
+    """
+    return (text(before.get("transcript")), roots_of(before)) != (
+        text(now.get("transcript")),
+        roots_of(now),
+    )
 
 
 def within(path: str, root: str) -> bool:
@@ -195,22 +237,26 @@ def concerns(claim: Held, checkout: str) -> bool:
     )
 
 
-def looked(root: Path, mine: str, checkout: str, transcript: str = "") -> Folded:
+def looked(root: Path, mine: str, checkout: str) -> Folded:
     """One look at the roster as this session reads it, and the fold behind it.
 
     The fold is :mod:`.store`'s, so a session the pulse has retired reads as
     finished here exactly as it does to a tool call, its claims stop being
-    reported, and a description older than that session's conversation reset
-    reads as unsaid — a peer is told the task that session is on rather than
-    what a discarded conversation said.
+    reported, and a description its own session cleared on a rewind reads as
+    unsaid — a peer is told the task that session is on rather than what a
+    discarded conversation said.
     """
     members = {
-        member["id"]: member
+        text(member.get("id")): member
         for member in present(root, mine=mine)
-        if member["kind"] == MEMBER_KIND
+        if text(member.get("kind")) == MEMBER_KIND
     }
     names = called(root)
-    live = [member_id for member_id, member in members.items() if member["running"]]
+    live = [
+        member_id
+        for member_id, member in members.items()
+        if member.get("running")
+    ]
     claims = [claim for claim in held(root, live) if concerns(claim, checkout)]
 
     def name(member_id: str) -> str:
@@ -221,29 +267,43 @@ def looked(root: Path, mine: str, checkout: str, transcript: str = "") -> Folded
         """Every session on one claim, by id, as the look keys them."""
         return [text(holder.get("id")) for holder in claim["holders"]]
 
+    def worktree_of(member: Member) -> str:
+        """Which checkout a peer is working in, by name, blank where it is nowhere."""
+        found = text(member.get("worktree"))
+        return Path(found).name if found else ""
+
     peers = {
         member_id: Seen(
             name=name(member_id),
-            worktree=Path(member["worktree"]).name if member["worktree"] else "",
-            doing=member["description"] or member["task"],
+            worktree=worktree_of(member),
+            doing=text(member.get("description")) or text(member.get("task")),
             holding=sorted(
                 claim["subject"] for claim in claims if member_id in holders(claim)
             ),
         )
         for member_id, member in members.items()
-        if member_id != mine and member["running"]
+        if member_id != mine and member.get("running")
     }
     contested = {
         claim["subject"]: [name(holder) for holder in holders(claim)]
         for claim in claims
         if len(claim["holders"]) > 1
     }
+    standing = {
+        text(notice.get("id")): stated(notice)
+        for notice in notices(root)
+        if text(notice.get("id"))
+    }
     return Folded(
-        look=Look(
-            peers=peers, contested=contested, conversation=conversation(transcript)
-        ),
+        look=Look(peers=peers, contested=contested, standing=standing),
         members=members,
     )
+
+
+def stated(notice: Notice) -> str:
+    """One standing fact as a reader is told it, with whoever posted it."""
+    by = text(notice.get("by"))
+    return text(notice.get("text")) + (f" ({by})" if by else "")
 
 
 def last_look(cursor: Path) -> Look | None:
@@ -259,7 +319,7 @@ def last_look(cursor: Path) -> Look | None:
         return Look(
             peers=stored["peers"],
             contested=stored["contested"],
-            conversation=stored["conversation"],
+            standing=stored["standing"],
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -296,9 +356,17 @@ def pointer(others: int) -> str:
 def differences(before: Look, now: Look, members: dict[str, Member]) -> list[str]:
     """A line per change between two looks, the ones that stop a write first.
 
-    Contested paths, then paths a peer holds here, then arrivals, departures
-    and redescriptions: the order a session about to write needs them in. A
-    subject reported as contested is not repeated as a holding beneath it.
+    Standing facts first, then contested paths, then paths a peer holds here,
+    then arrivals, departures and redescriptions: the order a session about to
+    write needs them in. A subject reported as contested is not repeated as a
+    holding beneath it.
+
+    A notice is reported once, when it starts standing and again when it is
+    taken down, rather than restated at every prompt. A session in this
+    repository reads one prompt after another for hours, and a fact repeated
+    at each of them is read at none of them — the member that arrives next
+    hour is told at its own first prompt, which is what a notice being state
+    rather than mail buys.
     """
 
     def held_before(member_id: str) -> list[str]:
@@ -307,8 +375,18 @@ def differences(before: Look, now: Look, members: dict[str, Member]) -> list[str
 
     def summary_of(member_id: str) -> str:
         member = members.get(member_id)
-        return member["summary"] if member else ""
+        return text(member.get("summary")) if member else ""
 
+    standing = [
+        f"standing: {said}"
+        for notice_id, said in sorted(now["standing"].items())
+        if notice_id not in before["standing"]
+    ]
+    lifted = [
+        f"no longer standing: {said}"
+        for notice_id, said in sorted(before["standing"].items())
+        if notice_id not in now["standing"]
+    ]
     contested = [
         f"contested {subject} — {', '.join(holders)}"
         for subject, holders in sorted(now["contested"].items())
@@ -342,35 +420,83 @@ def differences(before: Look, now: Look, members: dict[str, Member]) -> list[str
         if member_id in before["peers"]
         and seen["doing"] != before["peers"][member_id]["doing"]
     ]
-    return [*contested, *holding, *arrived, *departed, *redescribed]
+    return [
+        *standing,
+        *lifted,
+        *contested,
+        *holding,
+        *arrived,
+        *departed,
+        *redescribed,
+    ]
+
+
+def rewound(root: Path, mine: str, here: Conversation) -> None:
+    """Take back what a discarded conversation said, and record the one now.
+
+    One revision under this member's own lock, because the two facts belong
+    together: what this session says it is doing, and which conversation said
+    it. Written apart, a reader could meet a row describing work from a
+    conversation that no longer exists and have nothing to tell it so.
+
+    The description alone is cleared. The task, the worktree, the name and the
+    claims are facts about the session rather than about the conversation, and
+    a rewind is not a departure.
+    """
+
+    def afresh(member: Member) -> Member:
+        """This member, saying nothing about itself and belonging to *here*."""
+        settled = member.copy()
+        settled["description"] = ""
+        settled["conversation"] = here
+        return settled
+
+    revised(root, mine, afresh)
+
+
+def opened(root: Path, mine: str, here: Conversation) -> None:
+    """Record which conversation this session's row now belongs to."""
+
+    def belongs(member: Member) -> Member:
+        """This member, keeping what it says and moving which turn said it."""
+        settled = member.copy()
+        settled["conversation"] = here
+        return settled
+
+    revised(root, mine, belongs)
 
 
 def changes(root: Path, mine: str, checkout: Path, transcript: str = "") -> list[str]:
     """What this session is told at this prompt, and nothing where nothing moved.
 
-    The first look writes the baseline and answers with the pointer alone.
-    Every later look answers with the differences and advances the baseline
-    only where something differed, so a quiet roster costs no write either.
+    The first look writes the baseline and answers with the pointer and
+    whatever is standing. Every later look answers with the differences and
+    advances the baseline only where something differed, so a quiet roster
+    costs no write either.
 
-    A look from a conversation that is not the one last looked from — a rewind
-    appended a root to the transcript, or a clear opened another — stamps the
-    reset and starts over from a baseline, because what the row said and what
-    this session last saw both belong to the conversation that is gone.
+    A prompt from a conversation that is not the one this session's row
+    records — a rewind appended a root to the transcript, or a clear opened
+    another — clears what that row said and starts over from a baseline,
+    because what the row said and what this session last saw both belong to
+    the conversation that is gone.
     """
     if not mine:
         return []
-    folded = looked(root, mine, str(checkout), transcript)
+    folded = looked(root, mine, str(checkout))
     if not folded["members"]:
         return []
     beat(root, mine)
     cursor = root / LOOKS_DIR / f"{MEMBER_KIND}-{mine}.json"
     before = last_look(cursor)
     now = folded["look"]
+    here = conversation(transcript)
+    said = folded["members"].get(mine, Member()).get("conversation", Conversation())
     if before is None:
+        opened(root, mine, here)
         remember(cursor, now)
-        return [pointer(len(now["peers"]))]
-    if before["conversation"] != now["conversation"]:
-        reset(root, mine)
+        return [*sorted(now["standing"].values()), pointer(len(now["peers"]))]
+    if moved(said, here):
+        rewound(root, mine, here)
         remember(cursor, now)
         return [MOVED_LINE, pointer(len(now["peers"]))]
     lines = differences(before, now, folded["members"])

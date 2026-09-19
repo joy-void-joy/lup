@@ -13,8 +13,10 @@ and there is one place each name comes from.
 
 from pathlib import Path
 
+from lup.coordination.cohort import ActorCohort
 from lup.coordination.mailbox import PendingQuestion as SharedPendingQuestion
 from lup.coordination.mailbox import QuestionMailbox as SharedMailbox
+from lup.resolver.journal import Journal
 from lup.resolver.models import MaterialQuestion
 
 
@@ -36,3 +38,23 @@ class QuestionMailbox(SharedMailbox[MaterialQuestion]):
 
     def __init__(self, root: Path) -> None:
         super().__init__(root, MaterialQuestion)
+
+
+def run_cohort(mailbox: QuestionMailbox, run_id: str) -> ActorCohort:
+    """This run's population, over the mail and the journal the run itself writes.
+
+    Opened for reading and for steering: it lists who the run holds, resolves
+    the address a door typed, and posts what that door said. It spawns
+    nobody — the run's own process owns every session — so a console in
+    another terminal and the orchestrator reach one record rather than two.
+
+    Built here rather than at each door, because a cohort left to build its
+    own would open a second inbox beside the one every door writes, and a
+    journal on the path the run's own already holds.
+    """
+    return ActorCohort(
+        mailbox.root,
+        journal=Journal(mailbox.root),
+        mail=mailbox.mail,
+        run_id=run_id,
+    )

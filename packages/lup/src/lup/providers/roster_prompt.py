@@ -36,7 +36,7 @@ from importlib import resources
 from pathlib import Path
 
 from lup.coordination import bare
-from lup.coordination.bare.store import COORDINATION_DIR, ROSTER_FILE, STORE_DIR
+from lup.coordination.bare.store import COORDINATION_DIR, MEMBERS_DIR, STORE_DIR
 from lup.coordination.identity import MEMBER_ENV
 from lup.formats.banner import (
     REGENERATE_COMMAND,
@@ -131,10 +131,10 @@ main()
 def guard_body(event: str, entry: str) -> str:
     """A store-existence check that answers "nobody coordinates here" without Python.
 
-    The store's roster file is the whole test: a repository whose sessions
-    have never joined has no file, and a session there is told nothing rather
-    than told the roster is empty — which would cost a line on every prompt
-    of every project that never coordinates.
+    The store's members directory is the whole test: a repository whose
+    sessions have never joined has no directory, and a session there is told
+    nothing rather than told the roster is empty — which would cost a line on
+    every prompt of every project that never coordinates.
 
     What it hands over to is the entry beside the shipped package rather than
     a module of it, so the interpreter is given nothing to resolve from its
@@ -160,7 +160,7 @@ case "$shared" in
     *) shared="$PWD/$shared" ;;
 esac
 root="$shared/{STORE_DIR}/{COORDINATION_DIR}"
-[ -f "$root/{ROSTER_FILE}" ] || exit 0
+[ -d "$root/{MEMBERS_DIR}" ] || exit 0
 exec python3 "${{0%/*}}/../runtime/{entry}" "$root" "${MEMBER_ENV}" "{event}"
 """
 

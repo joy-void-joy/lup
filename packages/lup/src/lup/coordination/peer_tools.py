@@ -29,7 +29,7 @@ from lup.coordination.repository import (
     PeerView,
     RepositoryPeers,
 )
-from lup.coordination.bare.store import ROSTER_FILE
+from lup.coordination.bare.store import MEMBERS_DIR
 from lup.coordination.roster import Delivery
 from lup.tools.mcp import LupMcpTool, ServerCompanion, ToolError, lup_tool
 
@@ -50,8 +50,10 @@ class RosterPulse(ServerCompanion, frozen=True):
 
     Nothing is written where no session has ever joined: a beat or a sweep
     there would create the store, and a session that never coordinates must
-    leave no sign of having been able to. The roster file is the whole test,
-    as it is for the prompt-time guard.
+    leave no sign of having been able to. The members directory is the whole
+    test, as it is for the prompt-time guard — no member has a file there
+    until one joins, and the first join is a session's own act rather than
+    this tick's.
     """
 
     root: Path
@@ -60,9 +62,9 @@ class RosterPulse(ServerCompanion, frozen=True):
 
     async def run(self) -> None:
         peers = RepositoryPeers(self.root, pulse=self.pulse)
-        roster = peers.root / ROSTER_FILE
+        members = peers.root / MEMBERS_DIR
         while True:
-            if roster.exists():
+            if members.is_dir():
                 peers.sweep(by=member_ref(self.member_id))
                 peers.join(self.member_id, self.root, delivery=Delivery.INBOX)
                 peers.beat(self.member_id)

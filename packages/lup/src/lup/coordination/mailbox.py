@@ -6,9 +6,15 @@
 
 A question is a :class:`~lup.channels.slot.Slot`: declared once by whoever
 asks, offered to by any door, and settled exactly once. Messages ride an
-:class:`~lup.coordination.mail.ActorMail` instead, held here and delegated to, so a
-caller reads one vocabulary while the two halves keep their own storage — and
-the run parks on a slot, never on a stream.
+:class:`~lup.coordination.mail.ActorMail` instead, held here and reached
+through directly, so the run parks on a slot and never on an inbox.
+
+Reached rather than delegated to, because addressing one costs something this
+layer does not hold: a message goes to a member, and turning what a door typed
+into a member is the roster's. That resolution belongs to the population that
+has one, so every sender goes through
+:class:`~lup.coordination.cohort.ActorCohort` and a door holding this mailbox
+has no second route to somebody's inbox.
 
 Doors write ``offered``, which is correctable — a mistyped free-text answer
 can be replaced right up until it counts, and an offer may arrive before its
@@ -30,9 +36,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.coordination.mail import ActorDelivery, ActorMail, ActorMessage
+from lup.coordination.mail import ActorMail
 from lup.coordination.questions import Question, QuestionAnswer
-from lup.coordination.refs import ActorRef
 from lup.channels.models import (
     ChannelConflictError,
     ChannelCorruptionError,
@@ -230,18 +235,6 @@ class QuestionMailbox[Q: Question]:
 
     def answered_ids(self) -> list[str]:
         return [record.answer.question_id for record in self.answers()]
-
-    def send(self, message: ActorMessage) -> None:
-        """Tell an actor something. This never settles and never parks a run."""
-        self.mail.send(message)
-
-    def waiting(self, actor: ActorRef) -> ActorDelivery:
-        """Everything queued for one actor, consuming none of it."""
-        return self.mail.waiting(actor)
-
-    def delivered(self, actor: ActorRef, through: int) -> None:
-        """Record that one actor has been handed everything through ``through``."""
-        self.mail.delivered(actor, through)
 
     def park(self, request: ParkRequest) -> None:
         self.park_slot.clear()

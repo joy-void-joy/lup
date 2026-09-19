@@ -10,15 +10,8 @@ case "$shared" in
     *) shared="$PWD/$shared" ;;
 esac
 root="$shared/lup/coordination"
-mailbox="$root/messages.jsonl"
-[ -f "$mailbox" ] || exit 0
-size=$(wc -c < "$mailbox" 2>/dev/null | tr -d ' ') || exit 0
-[ -n "$size" ] || exit 0
-cursor="$root/delivery/session-$LUP_COORDINATION_MEMBER.json"
-delivered=0
-if [ -f "$cursor" ]; then
-    delivered=$(tr -dc '0-9' < "$cursor" 2>/dev/null)
-    [ -n "$delivered" ] || delivered=0
-fi
-[ "$size" -gt "$delivered" ] || exit 0
+inbox="$root/inbox/$LUP_COORDINATION_MEMBER"
+[ -d "$inbox" ] || exit 0
+set -- "$inbox"/*.json
+[ -e "$1" ] || exit 0
 exec python3 "${0%/*}/../runtime/coordination_delivery.py" "$root" "$LUP_COORDINATION_MEMBER"

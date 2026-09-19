@@ -16,7 +16,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup.coordination.mail import EVERYONE, MESSAGE_FILE
+from lup.coordination.bare.store import INBOX_DIR
 from lup.coordination.mailbox import QUESTION_DIR
 from lup.coordination.questions import QuestionAnswer
 from lup.coordination.refs import ActorRef
@@ -171,10 +171,10 @@ class MessageSubmission(BaseModel):
 
     text: str = Field(description="What to say")
     to_actor: str = Field(
-        default=EVERYONE,
+        default="",
         description=(
-            "Actor label to address; the default reaches every actor in the "
-            "run, including ones not yet started"
+            "Actor label to address. Required to say something; left empty on "
+            "a redirect it stops every actor that is working"
         ),
     )
     in_reply_to: str = Field(
@@ -187,6 +187,19 @@ class MessageSubmission(BaseModel):
             "reason, instead of letting it read alongside what it was doing"
         ),
     )
+
+
+class NoticeSubmission(BaseModel):
+    """A standing fact about this run, true until somebody takes it down.
+
+    Apart from a message rather than a flag on one, because the two are read
+    on different schedules: a message is handed over once and consumed, and
+    this is restated at the head of every turn for as long as it stands —
+    including the first turn of an actor that did not exist when it was
+    posted. There is no recipient for the same reason.
+    """
+
+    text: str = Field(description="What is true for this whole run")
 
 
 def answer_recipe(adapter: str, run_id: str, questions: list[MaterialQuestion]) -> str:
@@ -339,14 +352,18 @@ def last_activity(run_root: Path) -> float:
 
     Each question is a directory of its own, so the questions root only
     moves when one is added. Its children carry declaring, offering, and
-    settling, which is most of what a live run does.
+    settling, which is most of what a live run does. The inboxes are read the
+    same way and for the same reason: one directory per member, whose own
+    modification time moves as messages land in it and are taken out.
     """
     questions = run_root / QUESTION_DIR
+    inboxes = run_root / INBOX_DIR
     watched = [
         run_root / STATE_FILE,
-        run_root / MESSAGE_FILE,
         questions,
+        inboxes,
         *(questions.iterdir() if questions.is_dir() else []),
+        *(inboxes.iterdir() if inboxes.is_dir() else []),
     ]
     stamps = [path.stat().st_mtime for path in watched if path.exists()]
     return max(stamps) if stamps else 0.0

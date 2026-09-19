@@ -9,5 +9,5 @@ case "$shared" in
     *) shared="$PWD/$shared" ;;
 esac
 root="$shared/lup/coordination"
-[ -f "$root/roster.jsonl" ] || exit 0
+[ -d "$root/members" ] || exit 0
 exec python3 "${0%/*}/../runtime/coordination_changes.py" "$root" "$LUP_COORDINATION_MEMBER" "UserPromptSubmit"

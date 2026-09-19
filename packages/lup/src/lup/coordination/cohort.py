@@ -45,16 +45,10 @@ from uuid import uuid4
 
 from pydantic import BaseModel, TypeAdapter
 
-from lup.coordination.mail import (
-    EVERYONE,
-    ActorDelivery,
-    ActorMail,
-    new_message,
-)
+from lup.coordination.mail import ActorDelivery, ActorMail
 from lup.coordination.manifest import CohortManifest, publish_manifest
 from lup.coordination.peers import USER_KIND, join_user
 from lup.coordination.refs import ActorRef
-from lup.coordination.bare.store import ROSTER_FILE
 from lup.coordination.roster import Delivery, Roster, SpawnedActor
 from lup.coordination.sessions import (
     RECORD_ADAPTER,
@@ -245,7 +239,7 @@ class ActorCohort:
         # stream beside it would give the two halves of one conversation
         # different files to disagree in.
         self.mail = mail or ActorMail(self.root)
-        self.roster = Roster(self.root / ROSTER_FILE)
+        self.roster = Roster(self.root)
         # What makes this directory a cohort to a reader that did not open it,
         # and the address a member reaches a person on — written and joined
         # here rather than by each consumer, because three call sites
@@ -425,17 +419,39 @@ class ActorCohort:
             actor.label(), text, redirect=redirect, door=door, in_reply_to=in_reply_to
         )
 
-    def say_all(
-        self, text: str, redirect: bool = False, door: Door = Door.AGENT
-    ) -> None:
-        """Say the same thing to every agent, including ones not yet spawned.
+    def notify(self, text: str, door: Door = Door.AGENT, by: str = "") -> None:
+        """State something that is true for this whole population.
 
-        One record addressed to everyone rather than one per member. A member
-        spawned after this still receives it, because its cursor starts behind
-        the record and the record still names it — which a fan-out over the
-        roster cannot do, since it can only name who existed when it ran.
+        Two effects, because a statement has two audiences. It is posted as a
+        **notice**, which is state: every member reads it at the head of every
+        turn, including a member spawned an hour from now, and nothing
+        consumes it because it has not stopped being true. And it is sent as a
+        **message** to whoever is live, because a fact worth stating is worth
+        hearing before the turn they are in ends.
+
+        A member that arrives later gets only the notice, which is the whole
+        of what it needs: the message was the interruption, and there was
+        nothing to interrupt.
         """
-        self.post(EVERYONE, text, redirect=redirect, door=door)
+        self.mail.notify(text, door=door, by=by)
+        for member in self.live():
+            if member.running:
+                self.say(member.actor, text, door=door)
+
+    def redirect_all(self, text: str, door: Door = Door.AGENT) -> None:
+        """Stop every agent that is working, and say what to do instead.
+
+        Whoever is live, and nobody else. A redirect denies a tool call, so a
+        member that has not started has no call to deny and no reason to be
+        stopped — one spawned after this was spawned *knowing* about it, and
+        stopping it would refuse its first call with somebody else's reason.
+
+        Where the point is a standing fact rather than a stop, that is
+        :meth:`notify`, which does reach the ones that arrive next.
+        """
+        for member in self.live():
+            if member.running:
+                self.say(member.actor, text, redirect=True, door=door)
 
     def tell_user(
         self, text: str, door: Door = Door.AGENT, in_reply_to: str = ""
@@ -456,22 +472,30 @@ class ActorCohort:
         redirect: bool = False,
         door: Door = Door.AGENT,
         in_reply_to: str = "",
-    ) -> None:
+    ) -> bool:
         """Write one message to whatever address a caller already holds.
 
         The one place a message is built, so a door with a raw address string
-        and a caller with a ref reach the stream the same way.
+        and a caller with a ref reach one member's inbox the same way — and
+        the one place the address is resolved, because an inbox belongs to a
+        member and a spelling that reaches nobody has no inbox to go in.
+
+        Says whether it landed. A door that was told "sent" for an address the
+        population never heard of is a door that goes on believing somebody
+        was told something.
         """
+        member = self.reaching(to_actor)
+        if member is None:
+            return False
         self.mail.send(
-            new_message(
-                run_id=self.run_id,
-                to_actor=to_actor,
-                text=text,
-                door=door,
-                in_reply_to=in_reply_to,
-                redirect=redirect,
-            )
+            member,
+            text,
+            door=door,
+            sender=self.run_id,
+            in_reply_to=in_reply_to,
+            redirect=redirect,
         )
+        return True
 
     def heard(self) -> ActorDelivery:
         """What agents have told the user, consuming none of it."""
@@ -480,7 +504,7 @@ class ActorCohort:
     def hear(self) -> ActorDelivery:
         """Take what agents have told the user, for a door displaying it."""
         delivery = self.heard()
-        self.mail.delivered(self.user, delivery.through)
+        self.mail.delivered(self.user, delivery)
         return delivery
 
     def reaches(self, actor: ActorRef) -> bool:

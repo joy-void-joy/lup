@@ -13,6 +13,7 @@ the child project must select its own environment from its working directory.
 
 from collections.abc import Mapping
 
+from lup.coordination.identity import MEMBER_ENV, NAME_ENV
 from lup.types import EnvVars
 
 # lup: ignore[library-default] — each pair is the variable and off-value git, ssh, gh, and keyring document
@@ -43,8 +44,17 @@ def non_interactive_environment(
 LAUNCHER_DECIDED_ENV: list[str] = [
     "LUP_CONTAINED",
     "GIT_CONFIG_COUNT",
+    MEMBER_ENV,
+    NAME_ENV,
 ]
 """What a launched process is told about where it is, rather than what it does.
+
+The coordination pair is here because it is one session's own identity: a
+launcher mints the id and the name together and exports both, so a process
+that inherits them and is not that session answers to somebody else's address.
+A suite is the case that matters — every test that joins a roster without
+saying what to call the session would otherwise be named after whichever
+worktree pytest was started from, and pass on the machine that wrote it.
 
 Deliberately not ``UV_PROJECT_ENVIRONMENT``, which reads like one and is not.
 It names where this machine's toolchain is, and

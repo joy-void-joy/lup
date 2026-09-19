@@ -264,10 +264,11 @@ def hand_off(
             if holder_ref.id not in (sender.id, member.id)
         ]
         # A prefix the sender does not hold cannot be released by the sender,
-        # so a claim somebody else has is recorded as contested rather than
-        # taken away — the receiver is told, and the two settle it as usual.
+        # so a claim somebody else has is left standing rather than taken
+        # away — the receiver is told it is disputed, and the two settle it as
+        # usual. Nothing records the dispute: both holders' own files claim
+        # the path, and that is what a reader derives it from.
         if others:
-            peers.touches.contested(sender, target, rivals=others)
             disputed.append(str(target))
             continue
         peers.release(sender.id, target)

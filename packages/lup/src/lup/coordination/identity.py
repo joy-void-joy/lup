@@ -10,11 +10,17 @@ is what mail is addressed to, what a touch is attributed to, and what a
 restart reattaches by. The **name** is what a person types and reads, and a
 session may rename itself whenever what it is doing changes.
 
-Renames are journaled rather than overwritten, so a name somebody wrote down
-an hour ago still reaches the session it named. That is what the stream buys
-over a field: a roster that only held the current name would silently misroute
-every reference taken before the rename, and there is no error a sender could
-be shown, because the name they used was correct when they read it.
+A rename appends rather than overwrites: a member's own file keeps every name
+it has answered to, newest last, so a name somebody wrote down an hour ago
+still reaches the session it named. A store holding only the current one would
+silently misroute every reference taken before the rename, and there is no
+error the sender could be shown, because the name they used was correct when
+they read it. On the member rather than in a record beside it, because the two
+were only ever read together.
+
+What is left here is the vocabulary — how an id is minted, proven and
+defaulted, and how a name is chosen against the ones already taken. Reading a
+member and writing one is :mod:`lup.coordination.bare.store`'s.
 
 **A launcher declares the id; a session without one derives it.** The
 environment variable is set by the process that minted the id and can prove it,
@@ -33,18 +39,16 @@ both halves share.
 """
 
 from collections.abc import Collection
-from datetime import datetime
+
 from itertools import count
 from pathlib import Path
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
-from lup.channels.models import utc_now
-from lup.channels.stream import Stream
-from lup.coordination.bare import store
-from lup.coordination.bare.store import MEMBER_KIND, NAMES_FILE
+
+from lup.coordination.bare.store import MEMBER_KIND
 from lup.coordination.refs import ActorRef
 from lup.types import EnvVars
 
@@ -58,22 +62,6 @@ Exported beside the id for the same reason: the runtime's own chrome shows a
 name the launcher chose, and the roster has to answer to the same one, so the
 choice is made once where both can read it rather than derived twice.
 """
-
-
-class MemberNamed(BaseModel, frozen=True):
-    """One member answering to one name, from this moment until it renames.
-
-    Append-only, so the stream is the whole history of who was called what.
-    Nothing revises a record: a rename is another record, and the fold is what
-    decides which of them a reader is asking about.
-    """
-
-    id: str
-    cli_name: str
-    at: datetime
-
-
-NAME_ADAPTER: TypeAdapter[MemberNamed] = TypeAdapter(MemberNamed)
 
 
 class MemberEnv(BaseSettings):
@@ -201,82 +189,3 @@ def derived_cli_name(worktree: Path) -> str:
     either reaches that one and not the other.
     """
     return worktree.name
-
-
-class MemberNames:
-    """Every name every member has answered to, folded from the record.
-
-    Kept beside the roster rather than on it, because the two are read on
-    different schedules and one of them is history. A roster fold answers who
-    is present; this answers what a name meant, including names nothing is
-    called any more.
-
-    The fold is :mod:`lup.coordination.bare.store`'s, because a hook and the
-    permission dispatcher resolve the same names without being able to import
-    this. What is here is the writer and the vocabulary a typed caller reads.
-    """
-
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self.stream: Stream[MemberNamed] = Stream(root / NAMES_FILE, NAME_ADAPTER)
-
-    def rename(self, member_id: str, cli_name: str) -> MemberNamed:
-        """Record what this member is called from now on."""
-        record = MemberNamed(id=member_id, cli_name=cli_name, at=utc_now())
-        self.stream.append(record)
-        return record
-
-    def named(self) -> list[MemberNamed]:
-        """Every naming ever recorded, oldest first."""
-        return [
-            MemberNamed(
-                id=record["id"],
-                cli_name=record["cli_name"],
-                at=store.spoken_at(record["at"]) or utc_now(),
-            )
-            for record in store.named(self.root)
-        ]
-
-    def latest(self, member_id: str) -> MemberNamed | None:
-        """This member's newest naming, or nothing where it was never named."""
-        found = [record for record in self.named() if record.id == member_id]
-        return found[-1] if found else None
-
-    def current(self, member_id: str) -> str:
-        """What this member is called now, or nothing where it was never named."""
-        return store.called(self.root).get(member_id, "")
-
-    def resolve(self, cli_name: str, live: Collection[str] = ()) -> str:
-        """The member a name reaches: the live one that claimed it last, else the last.
-
-        A name is a handle and handles get reused, so among the sessions that
-        ever answered to one, the one somebody typing it means is the one
-        still here — and where two are, the one that claimed it most recently.
-        Only where nobody live ever held it does the last claimant of all
-        stand, so a reference written down before a rename or a departure
-        still resolves to the session it named, and the sender is told what
-        became of it rather than that the name means nothing.
-        """
-        found = [
-            record["id"]
-            for record in store.named(self.root)
-            if record["cli_name"] == cli_name
-        ]
-        present = [member_id for member_id in found if member_id in live]
-        return (present or found)[-1] if found else ""
-
-    def called(self, live: Collection[str], except_id: str = "") -> list[MemberNamed]:
-        """The current naming of every live member but one.
-
-        The names a newcomer must not take: whatever every other live session
-        currently answers to. A name a live session renamed away from is not
-        here and may be taken — the record still resolves it for anyone who
-        wrote it down, live holders first.
-        """
-        return [
-            latest
-            for member_id in live
-            if member_id != except_id
-            for latest in [self.latest(member_id)]
-            if latest is not None
-        ]

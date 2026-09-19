@@ -189,7 +189,7 @@ def create_coordination_app() -> typer.Typer:
         # since have been taken by a live one, and the label is what still
         # reaches its record.
         for member in rows:
-            name = found.names.current(member.actor.id) or member.actor.id
+            name = found.called(member.actor.id) or member.actor.id
             typer.echo(f"{name} — {member.actor.label()} — {member.error}")
         typer.echo(f"{'would retire' if dry_run else 'retired'} {len(rows)} session(s)")
 
