@@ -238,8 +238,8 @@ harness declaration are exempt, because a module holding this project's own
 judgement as data is exactly where it belongs when it imports nothing.
 
 Consequences: The row is advisory and names debt rather than failing, since
-moving a module is a change with its own review. It is the mirror of
-`library placement`, which asks whether a library module baked in a choice
+moving a module is a change with its own review. It is the mirror of the
+`library-default` rule, which asks whether a library module baked in a choice
 an adopter cannot replace; together they bound the boundary from both sides
 instead of only the one a library author notices.
 

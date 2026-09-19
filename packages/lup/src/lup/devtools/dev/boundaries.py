@@ -1,8 +1,8 @@
 """Walk repository Python files for the boundary rules in both directions.
 
-Backs ``lup-devtools dev check --boundaries`` and ``--placement`` plus their
-standalone check rows. Inward, every git-tracked ``.py`` file outside the
-sanctioned homes (the adapters package, tests) runs through
+Backs ``lup-devtools dev check --boundaries`` and ``--placement``, focused
+views of rules the anti-pattern sweep also runs. Inward, every git-tracked
+``.py`` file outside the sanctioned homes (the adapters package, tests) runs through
 :mod:`lup.harness.codescan.boundaries`; the tree is expected to hold zero breaches, and
 this is the regression guard that keeps backend dispatch from creeping back
 outside the seam. Outward, every library module is checked for data tables an

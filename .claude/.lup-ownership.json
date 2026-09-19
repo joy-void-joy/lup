@@ -618,7 +618,7 @@
     {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
-      "sha256": "c4452a0865af6338043ead998e19d14160ef63a3b9f3d4fb88723c4e11850fe8",
+      "sha256": "2d4d85da193f6e6d457febee71cc83cf78e9f802313dfdc6eeda0ae2aefed7e1",
       "semantic_id": "docs.dev-tooling-decisions",
       "executable": false
     },
@@ -681,7 +681,7 @@
     {
       "path": "docs/quality-pipeline.md",
       "category": "generated",
-      "sha256": "30b9ee36ca0d31af04a2d448409b1d5d1d274f3dd3aca4fe178fd5fc43d5c578",
+      "sha256": "93b25f46a1a30e3769268a3efeb0ccb8df378320066d10289555f49354ea2660",
       "semantic_id": "docs.quality-pipeline",
       "executable": false
     },

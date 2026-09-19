@@ -336,7 +336,7 @@ def create_dev_app(
             typer.Option(
                 "--boundaries",
                 help="Scan for native adapter imports outside composition roots "
-                "only — the lup.harness.codescan.boundaries guard the full check also runs",
+                "only — the seam rules the full check's sweep also runs",
             ),
         ] = False,
         placement: Annotated[
@@ -344,7 +344,7 @@ def create_dev_app(
             typer.Option(
                 "--placement",
                 help="List library data tables no adopter can replace only — the "
-                "lup.harness.codescan.boundaries placement guard the full check also runs",
+                "library-default rule the full check's sweep also runs",
             ),
         ] = False,
         stats: Annotated[
