@@ -130,6 +130,63 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        subjects=[
+            "AntiPatternSet",
+            "AntiPatternSet.python",
+            "AntiPatternSet.typescript",
+            "AntiPatternSet.for_suffix",
+            "AntiPatternSet.selected",
+            "antipattern_set_for",
+        ],
+        reason=(
+            "the set holds every rule a project is judged by — the line rules, "
+            "the project rules the sweep runs, and the composition rule "
+            "generation runs — so it is named for what it holds"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import `RuleSet` from `lup.harness.codescan.antipatterns` "
+                    "where `AntiPatternSet` was imported, and `rule_set_for` where "
+                    "`antipattern_set_for` was; the fields and methods keep their "
+                    "names, and `project` and `composition` stand beside `python` "
+                    "and `typescript`."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "AntiPattern.id",
+            "AntiPattern.examples",
+            "AntiPattern.message",
+            "AntiPattern.refinement",
+            "AntiPattern.strength",
+            "AntiPattern.examples_bound_the_rule",
+            "STRUCTURAL_RULES",
+            "anti_pattern_rules",
+        ],
+        reason=(
+            "every rule is one declaration: what every rule states moved to the "
+            "`Rule` base that `AntiPattern`, `ProjectRule` and `CompositionRule` "
+            "share, and the reference derives every card from the set instead "
+            "of keeping the structural ones by hand"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "A caller constructing or reading an `AntiPattern` changes "
+                    "nothing: the fields are inherited. One that read "
+                    "`STRUCTURAL_RULES` or `anti_pattern_rules()` reads "
+                    "`all_rules()`, which derives every card. A project declaring "
+                    "a rule the sweep decides declares a `ProjectRule` from "
+                    "`lup.harness.codescan.project` beside its audit and adds it "
+                    "to its set's `project` list."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         subjects=["member_environment"],
         reason=(
             "a launcher mints a session's name beside its id, numbered against "
