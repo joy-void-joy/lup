@@ -260,15 +260,15 @@ def build_symbol_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
                 property_member = has_decorator(
                     member, "property", source.module, aliases
                 )
-                if abstract and property_member:
-                    if member.name not in abstract_properties:
-                        abstract_properties.append(member.name)
-                elif abstract:
-                    if member.name not in abstract_methods:
-                        abstract_methods.append(member.name)
-                else:
-                    if member.name not in concrete_callables:
-                        concrete_callables.append(member.name)
+                match (abstract, property_member):
+                    case (True, True):
+                        bucket = abstract_properties
+                    case (True, False):
+                        bucket = abstract_methods
+                    case _:
+                        bucket = concrete_callables
+                if member.name not in bucket:
+                    bucket.append(member.name)
             bases = [
                 resolve_name(name, source.module, aliases)
                 for base in node.bases

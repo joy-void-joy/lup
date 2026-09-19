@@ -280,7 +280,9 @@ def lup_hook_output_to_claude(
             return claude_types.SyncHookJSONOutput(
                 decision="block", reason=output.reason
             )
-        case _ if output.system_message is not None:
-            return claude_types.SyncHookJSONOutput(systemMessage=output.system_message)
         case _:
+            if output.system_message is not None:
+                return claude_types.SyncHookJSONOutput(
+                    systemMessage=output.system_message
+                )
             return claude_types.SyncHookJSONOutput()

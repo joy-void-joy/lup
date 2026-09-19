@@ -9,6 +9,7 @@ beside its managing module instead (see the package docstring).
 
 import re  # lup: ignore[import-re] — prose has no parser; its shape is the rule
 from abc import ABC, abstractmethod
+from itertools import dropwhile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -755,14 +756,13 @@ class Skill(SelectableRule, frozen=True):
         names = [argument.name for argument in self.arguments]
         if len(names) != len(dict.fromkeys(names)):
             raise ValueError(f"skill {self.id!r} has duplicate argument names")
-        optional_seen = False
-        for argument in self.arguments:
-            if not argument.required:
-                optional_seen = True
-            elif optional_seen:
-                raise ValueError(
-                    f"skill {self.id!r} has a required argument after an optional one"
-                )
+        past_the_required = dropwhile(
+            lambda argument: argument.required, self.arguments
+        )
+        if any(argument.required for argument in past_the_required):
+            raise ValueError(
+                f"skill {self.id!r} has a required argument after an optional one"
+            )
         references_arguments = any(
             part.references_arguments for part in self.prompt.parts
         )

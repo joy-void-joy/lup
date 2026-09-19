@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from lup.channels.models import utc_now
 from lup.coordination.mail import ActorMessage
 from lup.coordination.repository import PeerView, RepositoryPeers
+from lup.coordination.roster import SpawnedActor
 from lup.coordination.wake import Woken, wake
 
 
@@ -164,16 +165,18 @@ class Watcher:
 
         def roster_changes() -> Iterator[WatchEvent]:
             for member_id, view in current.items():
-                before = self.known.get(member_id)
-                if before is None:
-                    if view.member.running:
+                match (self.known.get(member_id), view):
+                    case (None, PeerView(member=SpawnedActor(running=True))):
                         yield Arrived(at=now, address=view.address, doing=view.doing)
-                elif before.member.running and not view.member.running:
-                    yield Departed(
-                        at=now, address=view.address, summary=view.member.summary
-                    )
-                elif view.doing != before.doing:
-                    yield Redescribed(at=now, address=view.address, doing=view.doing)
+                    case (
+                        PeerView(member=SpawnedActor(running=True)),
+                        PeerView(member=SpawnedActor(running=False)),
+                    ):
+                        yield Departed(
+                            at=now, address=view.address, summary=view.member.summary
+                        )
+                    case (PeerView(doing=was), PeerView(doing=doing)) if was != doing:
+                        yield Redescribed(at=now, address=view.address, doing=doing)
 
         def mail_changes() -> Iterator[WatchEvent]:
             for member_id, view in current.items():

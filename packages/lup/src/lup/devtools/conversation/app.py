@@ -41,6 +41,10 @@ def browser_directory(
     profile: str | None,
 ) -> Path:
     """Resolve explicit, active, then unprofiled browser state."""
+    if profiles is None and profile is not None:
+        raise typer.BadParameter(
+            "this project declares no named profiles", param_hint="--profile"
+        )
     if profiles is not None:
         try:
             selected = profiles.state_dir(profile, f"{provider}-web")
@@ -48,10 +52,6 @@ def browser_directory(
             raise typer.BadParameter(str(error), param_hint="--profile") from error
         if selected is not None:
             return selected
-    elif profile is not None:
-        raise typer.BadParameter(
-            "this project declares no named profiles", param_hint="--profile"
-        )
     return root / ".lup" / "conversations" / f"{provider}-web"
 
 

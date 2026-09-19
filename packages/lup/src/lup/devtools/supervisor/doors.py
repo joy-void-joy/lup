@@ -102,10 +102,11 @@ def describe(view: PendingQuestionView) -> list[str]:
         lines.append("  choices: " + " | ".join(question.choices))
     if question.recommendation is not None:
         lines.append(f"  recommendation: {question.recommendation}")
-    if view.answered is not None:
-        lines.append(f"  answered: {view.answered}")
-    elif view.offer is not None:
-        lines.append(f"  offered, not yet promoted: {view.offer}")
+    match view:
+        case PendingQuestionView(answered=str() as answered):
+            lines.append(f"  answered: {answered}")
+        case PendingQuestionView(offer=str() as offer):
+            lines.append(f"  offered, not yet promoted: {offer}")
     return lines
 
 
@@ -563,7 +564,8 @@ def watch_status(
             else:
                 report_status(status)
             report_waiting(run_id)
-        elif quiet >= heartbeat:
+            continue
+        if quiet >= heartbeat:
             quiet = 0.0
             typer.echo(status_header(status))
     # Nothing is reported here. Every way this loop ends moves a field the

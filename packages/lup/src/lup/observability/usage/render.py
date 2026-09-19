@@ -188,14 +188,17 @@ def render_bar(
     actual_pos = min(int(actual_frac * bar_width), bar_width)
     linear_pos = min(int(linear_frac * bar_width), bar_width - 1)
 
+    def cell(column: int) -> Text:
+        """One column: the pace marker, the fill up to actual use, or empty room."""
+        if column == linear_pos:
+            return Text("▎", style="bright_black")
+        if column < actual_pos:
+            return Text("█", style=fill_color)
+        return Text("░", style="bright_black")
+
     out.append(" " * indent)
-    for i in range(bar_width):
-        if i == linear_pos:
-            out.append("▎", style="bright_black")
-        elif i < actual_pos:
-            out.append("█", style=fill_color)
-        else:
-            out.append("░", style="bright_black")
+    for column in range(bar_width):
+        out.append(cell(column))
     out.append("\n")
 
 
@@ -376,16 +379,31 @@ def render_daily_breakdown(
 
     budgets = rolling_budgets(weights, [day.day for day in daily], budget, today)
 
-    for index, day in enumerate(daily):
-        name = day_name(day.day)
+    def heading(day: date) -> Text:
+        """The row's weekday: marked where it is today, dim where it is still ahead."""
+        name = day_name(day)
+        if day == today:
+            return Text.assemble(
+                (f"  {name}", "bold bright_white"), (" ←  ", "bold bright_cyan")
+            )
+        if day > today:
+            return Text(f"  {name}    ", style="dim")
+        return Text(f"  {name}    ")
 
-        if day.day == today:
-            out.append(f"  {name}", style="bold bright_white")
-            out.append(" ←  ", style="bold bright_cyan")
-        elif day.day > today:
-            out.append(f"  {name}    ", style="dim")
-        else:
-            out.append(f"  {name}    ", style="")
+    def cell(column: int, fill_pos: int, pace_pos: int, fill: str, color: str) -> Text:
+        """One column of a day's bar: its pace marker, its fill, or the room left."""
+        if column == pace_pos:
+            return Text("▎", style="bright_black")
+        if column < fill_pos and column <= pace_pos:
+            return Text(fill, style=color)
+        if column < fill_pos:
+            return Text("▒", style=color)
+        if column < pace_pos:
+            return Text("░", style="bright_black")
+        return Text("░", style="black")
+
+    for index, day in enumerate(daily):
+        out.append(heading(day.day))
 
         if day.day > today:
             out.append("·" * bar_width, style="bright_black")
@@ -407,16 +425,7 @@ def render_daily_breakdown(
         fill_char = "▓" if inferred else "█"
 
         for column in range(bar_width):
-            if column == pace_pos:
-                out.append("▎", style="bright_black")
-            elif column < fill_pos and column <= pace_pos:
-                out.append(fill_char, style=color)
-            elif column < fill_pos:
-                out.append("▒", style=color)
-            elif column < pace_pos:
-                out.append("░", style="bright_black")
-            else:
-                out.append("░", style="black")
+            out.append(cell(column, fill_pos, pace_pos, fill_char, color))
 
         tok_str = fmt_tokens(day.total_tokens)
         if inferred:

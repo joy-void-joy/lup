@@ -1,5 +1,3 @@
-# lup: ignore[native-spelling]
-# The rule index necessarily documents the spellings other rules audit.
 """One index over every Lup rule for discovery and the rule reference.
 
 A rule id met in a `# lup: ignore[...]` directive, a hook denial, or an

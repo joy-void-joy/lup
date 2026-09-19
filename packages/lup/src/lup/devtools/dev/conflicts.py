@@ -164,15 +164,16 @@ def get_branch_files(state: str) -> BranchScope:
             rebase_merge = git_dir / "rebase-merge"
             rebase_apply = git_dir / "rebase-apply"
             try:
-                if rebase_merge.exists():
-                    onto = ref_file(rebase_merge / "onto")
-                    orig_head = ref_file(rebase_merge / "head")
-                elif rebase_apply.exists():
-                    onto = ref_file(rebase_apply / "onto")
-                    orig_head = ref_file(rebase_apply / "orig-head")
-                else:
-                    typer.echo("Cannot determine rebase state", err=True)
-                    raise typer.Exit(1)
+                match (rebase_merge.exists(), rebase_apply.exists()):
+                    case (True, _):
+                        onto = ref_file(rebase_merge / "onto")
+                        orig_head = ref_file(rebase_merge / "head")
+                    case (False, True):
+                        onto = ref_file(rebase_apply / "onto")
+                        orig_head = ref_file(rebase_apply / "orig-head")
+                    case _:
+                        typer.echo("Cannot determine rebase state", err=True)
+                        raise typer.Exit(1)
             except OSError as e:
                 typer.echo(f"Cannot read rebase state: {e}", err=True)
                 raise typer.Exit(1) from e

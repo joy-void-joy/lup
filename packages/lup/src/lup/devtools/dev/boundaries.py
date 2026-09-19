@@ -177,13 +177,14 @@ def scan_boundaries(project: DevProject) -> list[FoundBreach]:
 def report(project: DevProject, as_json: bool) -> None:
     """List every breach; exit non-zero when any exist."""
     found = scan_boundaries(project)
-    if as_json:
-        output_json([breach.model_dump() for breach in found])
-    elif found:
-        for breach in found:
-            typer.echo(f"{breach.file}:{breach.line}  {breach.module}")
-    else:
-        typer.echo("seam boundaries: ok")
+    match (as_json, found):
+        case (True, _):
+            output_json([breach.model_dump() for breach in found])
+        case (False, [_, *_]):
+            for breach in found:
+                typer.echo(f"{breach.file}:{breach.line}  {breach.module}")
+        case _:
+            typer.echo("seam boundaries: ok")
     if found:
         raise typer.Exit(1)
 
@@ -191,12 +192,13 @@ def report(project: DevProject, as_json: bool) -> None:
 def report_placement(as_json: bool) -> None:
     """List every baked-in library table; exit non-zero when any exist."""
     found = scan_library_placement()
-    if as_json:
-        output_json([breach.model_dump() for breach in found])
-    elif found:
-        for breach in found:
-            typer.echo(f"{breach.file}:{breach.line}  {breach.module}")
-    else:
-        typer.echo("library placement: ok")
+    match (as_json, found):
+        case (True, _):
+            output_json([breach.model_dump() for breach in found])
+        case (False, [_, *_]):
+            for breach in found:
+                typer.echo(f"{breach.file}:{breach.line}  {breach.module}")
+        case _:
+            typer.echo("library placement: ok")
     if found:
         raise typer.Exit(1)
