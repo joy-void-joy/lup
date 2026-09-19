@@ -130,6 +130,25 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        subjects=["member_environment"],
+        reason=(
+            "a launcher mints a session's name beside its id, numbered against "
+            "the live sessions of the repository so two sessions in one "
+            "worktree are reachable apart, and exports the two together"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Where `member_environment(member_id)` was exported, call "
+                    "`launched_member(root)` from `lup.coordination.repository` "
+                    "and export its `.environment()`; a caller holding an id "
+                    "and a name of its own builds a `LaunchedMember` and "
+                    "exports that."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         commit="625532040",
         subjects=["refuse_a_blocked_registration"],
         reason=(

@@ -19,7 +19,7 @@ the run; peers name themselves, and a name somebody wrote down has to go on
 working after the session behind it has moved on.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import cached_property
 from pathlib import Path
 
@@ -30,16 +30,59 @@ from lup.coordination.cohort import ActorCohort
 from lup.coordination.identity import (
     MEMBER_KIND,
     NAMES_FILE,
+    LaunchedMember,
     MemberNames,
+    NameTakenError,
     derived_cli_name,
     member_ref,
+    mint_member_id,
+    session_cli_name,
+    unique_cli_name,
 )
 from lup.coordination.mail import ActorDelivery
+from lup.coordination.peers import USER_KIND, user_peer
 from lup.coordination.pulse import Pulse, beat, heard_at, reset_at
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import Delivery, SpawnedActor
+from lup.coordination.roster import ROSTER_FILE, Delivery, Roster, SpawnedActor
 from lup.coordination.store import coordination_root
 from lup.coordination.touches import TOUCHES_FILE, Claim, Touches
+
+
+class Retention(BaseModel, frozen=True):
+    """How long a session that has stopped stays in a listing read with no arrival.
+
+    A session reading the roster is told about the departures it was here for,
+    which its own arrival bounds. A console has no arrival, so it is told about
+    the recent ones instead, and this says how recent: long enough that a
+    person coming back to a terminal finds out who left since they looked,
+    short enough that a roster read a month on is not a history of everyone.
+    """
+
+    departed_seconds: float = 86400.0
+
+    def since(self, now: datetime) -> datetime:
+        """The moment before which a departure is history rather than news."""
+        return now - timedelta(seconds=self.departed_seconds)
+
+
+class PeerDepartedError(LookupError):
+    """Raised when a message is addressed to a session that has stopped.
+
+    Raised rather than queued, because mail to a session that will never read
+    it is a message the sender goes on believing was delivered. What the row
+    says about the departure travels with it, so the surface reporting this
+    can say when the session left and what it concluded.
+    """
+
+    def __init__(self, member: SpawnedActor, cli_name: str) -> None:
+        left = member.heard.isoformat() if member.heard is not None else "unknown"
+        outcome = member.summary or member.error
+        super().__init__(
+            f"{cli_name or member.actor.id} left at {left}"
+            + (f": {outcome}" if outcome else "")
+        )
+        self.member = member
+        self.cli_name = cli_name
 
 
 class PeerView(BaseModel, frozen=True):
@@ -107,10 +150,27 @@ class RepositoryPeers:
     others to work.
     """
 
-    def __init__(self, root: Path, pulse: Pulse = Pulse()) -> None:
+    def __init__(
+        self,
+        root: Path,
+        pulse: Pulse = Pulse(),
+        retention: Retention = Retention(),
+    ) -> None:
         self.root = coordination_root(root)
         self.names = MemberNames(self.root / NAMES_FILE)
         self.pulse = pulse
+        self.retention = retention
+
+    @cached_property
+    def roster(self) -> Roster:
+        """The record of who is here, opened to read it and for nothing else.
+
+        The cohort holds the same file, but reaching the record through the
+        cohort opens it, and opening writes. Every read here goes through this
+        instead, so a launcher asking which names are taken, or a listing of a
+        repository nobody has joined, finds what is there and creates nothing.
+        """
+        return Roster(self.root / ROSTER_FILE)
 
     @cached_property
     def cohort(self) -> ActorCohort:
@@ -147,10 +207,21 @@ class RepositoryPeers:
         joined — which is what lets a hook and a tool server in one session
         each arrive without a channel between them.
 
-        The name is recorded separately and unconditionally, because renaming
-        is not arriving: a session that joined this morning and renames at noon
-        must not have that refused by the guard that stops it joining twice.
+        The name is settled here too, and settled once: a session keeps what
+        it is called across every rejoin. One given a name — by this call, or
+        by whoever launched it — answers to that; one given nothing is called
+        after its worktree, numbered where another live session already is,
+        so the address a listing prints for each of two sessions in one
+        checkout reaches that one. A chosen name a live session already
+        answers to is refused rather than numbered, because the caller meant
+        it, and the refusal comes before the arrival so a refused join leaves
+        no row behind.
         """
+        current = self.names.current(member_id)
+        taken = self.names.called(self.live_ids(), except_id=member_id)
+        holder = next((named.id for named in taken if named.cli_name == cli_name), "")
+        if cli_name and cli_name != current and holder:
+            raise NameTakenError(cli_name, holder)
         peer = member_ref(member_id)
         self.cohort.roster.joined(
             peer,
@@ -158,8 +229,15 @@ class RepositoryPeers:
             delivery=delivery,
             worktree=str(worktree),
         )
-        chosen = cli_name or derived_cli_name(worktree)
-        if self.names.current(member_id) != chosen:
+        chosen = (
+            cli_name
+            or current
+            or unique_cli_name(
+                session_cli_name() or derived_cli_name(worktree),
+                {named.cli_name for named in taken},
+            )
+        )
+        if chosen != current:
             self.names.rename(member_id, chosen)
         return peer
 
@@ -168,8 +246,13 @@ class RepositoryPeers:
 
         The old binding stays in the record, so a reference somebody wrote down
         before the rename goes on reaching this session until another one
-        claims that name.
+        claims that name. A name a live session currently answers to is
+        refused, because the roster would then print one address for two.
         """
+        taken = self.names.called(self.live_ids(), except_id=member_id)
+        holder = next((named.id for named in taken if named.cli_name == cli_name), "")
+        if holder:
+            raise NameTakenError(cli_name, holder)
         self.names.rename(member_id, cli_name)
 
     def describe(self, member_id: str, description: str) -> None:
@@ -186,17 +269,33 @@ class RepositoryPeers:
         Names are resolved first and then handed to the same fold every other
         address goes through, so a name and an id cannot reach different
         members and a spelling one surface accepts is not one the next rejects.
+        A name resolves to the live session answering to it ahead of any that
+        has stopped, so a name reused after a departure reaches the newcomer.
         """
-        resolved = self.names.resolve(spelling)
+        resolved = self.names.resolve(spelling, live=self.live_ids())
         return self.cohort.reaching(resolved or spelling)
 
-    def listing(self) -> list[PeerView]:
-        """Every session this repository holds, the ones still working first.
+    def row(self, member_id: str, now: datetime | None = None) -> SpawnedActor | None:
+        """One session as the record and the pulses say, or nothing where none stands."""
+        return next(
+            (member for member in self.present(now) if member.actor.id == member_id),
+            None,
+        )
+
+    def listing(self, since: datetime | None = None) -> list[PeerView]:
+        """The sessions here, and those that stopped since a moment the reader names.
 
         The sessions, which is one member short of the roster: the person is on
         it and is not a session. They need no listing either, being reachable
         at the same word in every repository — where a session's address is
         exactly what a reader cannot know without asking.
+
+        A session that stopped is listed only back to *since*, and says so on
+        its row. A session reading the roster names its own arrival, because
+        what left before it came is history it could never have written to;
+        a console reading with no arrival names the retention window. Naming
+        nothing lists the live rows alone, which is what a roster a month old
+        should read as: who is here, not everyone who ever was.
 
         Each row carries what its session is *holding* as well as what it says
         it is doing, because the question this listing is read to answer — is
@@ -205,6 +304,13 @@ class RepositoryPeers:
         so a listing costs the same read whatever the population.
         """
         claims = self.held()
+
+        def told(member: SpawnedActor) -> bool:
+            """Whether this row is news to a reader whose look starts at *since*."""
+            if member.running:
+                return True
+            heard = self.heard(member)
+            return since is not None and heard is not None and heard >= since
 
         def row(member: SpawnedActor) -> PeerView:
             """One session, with what it is observed to hold folded in."""
@@ -220,7 +326,11 @@ class RepositoryPeers:
                 contested=[claim.subject() for claim in held if len(claim.holders) > 1],
             )
 
-        return [row(member) for member in self.present()]
+        return [row(member) for member in self.present() if told(member)]
+
+    def recent(self, now: datetime | None = None) -> list[PeerView]:
+        """The listing a reader with no arrival of its own gets: the retention window."""
+        return self.listing(since=self.retention.since(now or utc_now()))
 
     def heard(self, member: SpawnedActor) -> datetime | None:
         """When this member was last heard from: its newest record, or a later pulse."""
@@ -267,14 +377,17 @@ class RepositoryPeers:
             return member
         return member.model_copy(update={"description": ""})
 
+    def standing(self) -> list[SpawnedActor]:
+        """Every member the record holds but the person, as the record alone says."""
+        return [
+            member for member in self.roster.live() if member.actor.kind != USER_KIND
+        ]
+
     def present(self, now: datetime | None = None) -> list[SpawnedActor]:
         """Every member as the record and the pulses together say, the live ones first."""
         moment = now or utc_now()
         return sorted(
-            (
-                self.rewound(self.pulsed(member, moment))
-                for member in self.cohort.live()
-            ),
+            (self.rewound(self.pulsed(member, moment)) for member in self.standing()),
             key=lambda member: not member.running,
         )
 
@@ -287,23 +400,35 @@ class RepositoryPeers:
         moment = now or utc_now()
         return [
             gone
-            for member in self.cohort.live()
+            for member in self.standing()
             if member.running and not (gone := self.pulsed(member, moment)).running
         ]
 
-    def sweep(self, now: datetime | None = None) -> list[SpawnedActor]:
-        """Write the finish for every session whose pulse has stopped, and say which.
+    def vacant(self) -> list[Claim]:
+        """Every live claim over a path that is no longer there to be written."""
+        return [claim for claim in self.held() if claim.vacant()]
 
-        What the read derives, made durable: a row the pulse retired is
-        retired on the record too, so a reader folding the record alone — a
-        replay, a console on another machine — agrees with one that read the
-        pulse. A session that beats again after this re-joins on its next
-        call, which the roster's own idempotence allows once the row is
-        finished.
+    def sweep(
+        self, now: datetime | None = None, by: ActorRef = user_peer()
+    ) -> list[SpawnedActor]:
+        """Retire on the record what the read derives, and say which sessions went.
+
+        A row the pulse retired is finished on the record too, so a reader
+        folding the record alone — a replay, a console on another machine —
+        agrees with one that read the pulse. A session that beats again after
+        this re-joins on its next call, which the roster's own idempotence
+        allows once the row is finished.
+
+        A claim whose path has gone is ended the same way, attributed to
+        whoever swept: a worktree removed from under a live session takes its
+        paths with it, and a claim over one would otherwise stand until that
+        session stopped, and revive if the tree were cut again.
         """
         retired = self.lapsed(now)
         for member in retired:
             self.cohort.roster.finished(member.actor, error=member.error)
+        for claim in self.vacant():
+            self.touches.vacated(by, claim)
         return retired
 
     def send(
@@ -320,10 +445,17 @@ class RepositoryPeers:
         that" is an answer a caller has to render differently on each surface —
         a tool says who is here, a console prints the roster — and a layer that
         chose for them would be choosing the wording of somebody else's error.
+
+        A member that has stopped is the other answer, and that one raises:
+        the address was right, the session is gone, and queuing for it would
+        tell the sender nothing while the message waits for nobody.
         """
         member = self.address(to)
         if member is None:
             return None
+        standing = self.row(member.id)
+        if standing is not None and not standing.running:
+            raise PeerDepartedError(standing, self.names.current(member.id))
         self.cohort.say(
             member, text, redirect=redirect, door=door, in_reply_to=in_reply_to
         )
@@ -381,6 +513,40 @@ class RepositoryPeers:
             path=str(prefix), prefix=True, holders=[member_ref(member_id)], at=utc_now()
         )
 
-    def release(self, member_id: str, prefix: Path) -> None:
-        """Give a prefix back, which does nothing unless this session held it."""
+    def holds(self, member_id: str, prefix: Path) -> bool:
+        """Whether this session took exactly this prefix and still holds it."""
+        return any(
+            claim.prefix
+            and claim.path == str(prefix)
+            and any(holder.id == member_id for holder in claim.holders)
+            for claim in self.held()
+        )
+
+    def release(self, member_id: str, prefix: Path) -> bool:
+        """Give a prefix back, saying whether this session held it to give.
+
+        Nothing is recorded for a prefix this session does not hold: a release
+        by somebody else would say nothing to the fold anyway, and a record of
+        it would be a record of nothing having happened.
+        """
+        if not self.holds(member_id, prefix):
+            return False
         self.touches.released(member_ref(member_id), prefix)
+        return True
+
+
+def launched_member(root: Path) -> LaunchedMember:
+    """The identity a launcher mints for the session it is about to open in *root*.
+
+    The id is minted; the name is the worktree's, numbered where a live session
+    of this repository is already called that, so the runtime's own chrome and
+    the roster agree on a name that reaches this session and no other. Read
+    without joining, because a launch that only generates has to leave the
+    store as it found it — the session joins for itself once it is open.
+    """
+    peers = RepositoryPeers(root)
+    taken = {named.cli_name for named in peers.names.called(peers.live_ids())}
+    return LaunchedMember(
+        member_id=mint_member_id(),
+        cli_name=unique_cli_name(derived_cli_name(root), taken),
+    )

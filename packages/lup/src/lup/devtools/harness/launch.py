@@ -37,12 +37,8 @@ from lup.providers.codex.harness_runtime import (
     PluginCacheConfig,
 )
 from lup.providers.codex.transcripts import CodexTranscripts
-from lup.coordination.identity import (
-    MEMBER_ENV,
-    derived_cli_name,
-    member_environment,
-    mint_member_id,
-)
+from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
+from lup.coordination.repository import launched_member
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
@@ -1444,6 +1440,7 @@ def session_argv(
     mounts: list[AccessibleRoot] = [],
     devices: list[Device] = [],
     authenticate: Callable[[list[str], Path], None] | None = None,
+    member: LaunchedMember | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1471,18 +1468,20 @@ def session_argv(
     """
     banner = cleared.banner
     # Minted where both runtimes pass through, so a session's coordination
-    # address is a fact about having been launched rather than about which
+    # identity is a fact about having been launched rather than about which
     # CLI was launched. Exported rather than derived because the session's
     # tool server and its hooks are separate processes with no channel
     # between them, and an id each worked out for itself would put one
-    # session on the roster twice.
+    # session on the roster twice. A launcher that already minted one, to
+    # show its name in the runtime's own chrome, hands it in so the chrome
+    # and the roster agree.
     #
-    # Overwritten rather than respected. The variable is a launcher's claim to
-    # have minted the id behind it, and an operator who happened to have it
-    # exported would otherwise hand their own roster address to every session
-    # they start — two peers answering to one id, which is the one thing the
-    # durable id exists to rule out.
-    environment.update(member_environment(mint_member_id()))
+    # Overwritten rather than respected. The variables are a launcher's claim
+    # to have minted what is behind them, and an operator who happened to
+    # have them exported would otherwise hand their own roster address to
+    # every session they start — two peers answering to one id, which is the
+    # one thing the durable id exists to rule out.
+    environment.update((member or launched_member(project_root())).environment())
 
     # Settled once and handed to everything that needs it. Resolving a
     # registration can clone it, so a second resolution would be a second
@@ -1558,6 +1557,7 @@ def session_argv(
                 else []
             ),
             MEMBER_ENV,
+            NAME_ENV,
         ],
         banner=banner,
         sentinels=sentinels,
@@ -1696,6 +1696,10 @@ def launch_claude(
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
     root = project_root()
+    # Minted here rather than where the argv is settled, because this runtime
+    # shows the name in its own chrome and the flag carrying it is built now;
+    # the same identity is handed on so the exported one agrees with it.
+    member = launched_member(root)
     named = [
         root / ".claude" / "plugins" / plugin.name,
         *companion_plugin_directories(root, plugin.name),
@@ -1713,17 +1717,19 @@ def launch_claude(
                 ),
             ),
             # What this runtime shows in its own chrome, made to agree with
-            # the name the roster answers to. The roster's name lives in
-            # `names.jsonl` and is what addressing resolves through, so this
-            # is a display detail rather than the identity — which is why
-            # Codex, whose launch takes no such flag, loses nothing by it: a
-            # peer there is addressed by exactly the same name, and renames
-            # through the same command.
+            # the name the roster answers to: the same minted name is
+            # exported for the session's tool server to join under, numbered
+            # already where a live session in this worktree has the plain
+            # one. The roster's name lives in `names.jsonl` and is what
+            # addressing resolves through, so this is a display detail rather
+            # than the identity — which is why Codex, whose launch takes no
+            # such flag, loses nothing by it: a peer there is addressed by
+            # exactly the same name, and renames through the same command.
             #
             # Ahead of `extra_args`, so a caller who named their own session
             # still wins.
             "--name",
-            derived_cli_name(root),
+            member.cli_name,
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]
@@ -1784,6 +1790,7 @@ def launch_claude(
                 cleared,
                 mounts,
                 devices,
+                member=member,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

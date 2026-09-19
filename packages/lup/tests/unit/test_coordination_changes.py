@@ -344,3 +344,23 @@ def test_the_envelope_is_the_shape_both_runtimes_read() -> None:
             "additionalContext": "one\ntwo",
         }
     }
+
+
+def test_a_claim_the_sweep_vacated_is_read_as_ended(tmp_path: Path) -> None:
+    """The copy folds the record the typed sweep writes, so a path that went
+    stops being reported without any process having to agree on a timeout.
+    """
+    peers = RepositoryPeers(tmp_path)
+    other = joined(peers, tmp_path / "mine", "reviewer")
+    changed = tmp_path / "mine" / "src" / "a.py"
+    changed.parent.mkdir(parents=True)
+    changed.write_text("value = 1\n", encoding="utf-8")
+    peers.touches.touched(member_ref(other), changed)
+    assert [
+        claim["path"] for claim in fold.held(peers.root / TOUCHES_FILE, [other])
+    ] == [str(changed)]
+
+    changed.unlink()
+    peers.sweep()
+
+    assert fold.held(peers.root / TOUCHES_FILE, [other]) == []
