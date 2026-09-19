@@ -105,8 +105,9 @@ Each tree lays the same declarations out its own way, and `docs/platform-differe
 Run `codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust "<the kit's first prompt>"` from the kit's directory. A non-interactive run loads the hooks in that directory's settings at launch and exits when the prompt is answered
 That run records the whole sequence, so no escalation marker is needed. Hand
 the user the directory and the prompt only for what print mode cannot show — a
-subagent left running in the background, a runtime this session is not signed
-in to. The recording is evidence the build keeps as a fixture.
+subagent left running in the background, a runtime whose credential a session
+is not granted and whose nested run therefore answers 401. The recording is
+evidence the build keeps as a fixture.
 
 ### A second case study
 

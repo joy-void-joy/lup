@@ -213,13 +213,22 @@ class ClaudeSpellings(NativeSpellings):
 
         Measured on 2.1.278: `claude -p` runs from a session's own shell with
         no variable unset, loads the hooks in the directory's settings at
-        launch, and exits when the prompt is answered.
+        launch, and exits when the prompt is answered. A launch also masks the
+        project's `.claude/agents`, `hooks`, `skills`, `commands` and
+        `settings.local.json` and hands the plugin over with `--plugin-dir`,
+        so a nested run that names no directory is judged by the checkout the
+        outer session opened in and never by the worktree it runs from — the
+        staleness :func:`lup.devtools.harness.resolve.lease_plugin_dir` names
+        for a lease, met here by whoever probes a gate where it is written.
         """
         return Instruction(
             f"Run `claude -p {json.dumps(prompt)} --permission-mode"
             " bypassPermissions` from the kit's directory. A print-mode session"
             " loads the hooks in that directory's settings at launch, runs"
-            " nested inside this one, and exits when the prompt is answered"
+            " nested inside this one, and exits when the prompt is answered."
+            " Its plugin is the one the outer session launched with, so a gate"
+            " written in a worktree is probed only by naming that tree too:"
+            " `--plugin-dir <the worktree>/.claude/plugins/<plugin>`"
         )
 
     def read_document(self, path: str) -> Spelling:
