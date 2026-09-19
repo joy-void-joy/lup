@@ -64,6 +64,9 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
+# A passage is prose beside the module declaring it, so every package ships
+# its Markdown: a wheel without it holds declarations and no words.
+"*" = ["*.md"]
 lup = ["py.typed"]
 "lup.providers.claude" = ["assets/*.py"]
 "lup.providers.codex" = ["assets/*.py"]

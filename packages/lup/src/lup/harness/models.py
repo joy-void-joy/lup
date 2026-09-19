@@ -36,6 +36,7 @@ from lup.formats.markdown import (
     escaped,
 )
 from lup.formats.toml import TomlDocument
+from lup.harness.passages import passage_text, rendered
 from lup.formats.yaml import PlainData, YamlDocument
 from lup.tools.mcp import ToolDeclaration
 from lup.policy.boundary import BoundaryCapability
@@ -174,6 +175,83 @@ class TextPart(SemanticPart, frozen=True):
     @property
     def text_payload(self) -> str:
         return self.text
+
+
+class InlinePart(SemanticPart, frozen=True):
+    """One derived value standing inside authored prose, escaped by its node.
+
+    What a passage names is always a part, and a value that is not one of the
+    parts already — a path, a count, a description read off a declaration —
+    becomes this. The node it holds decides the formatting and does the
+    escaping, which is the same node a table cell holds: a pipe cannot break
+    a row, a backtick cannot close a span, whichever container it lands in.
+    """
+
+    type: Literal["inline"] = "inline"
+    node: TableCell
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.node.render()
+
+
+def code(text: str) -> InlinePart:
+    """A derived value shown as code, which is most of what prose names."""
+    return InlinePart(node=CodeCell(text=text))
+
+
+def plain(text: str) -> InlinePart:
+    """A derived value shown as it reads."""
+    return InlinePart(node=PlainCell(text=text))
+
+
+def counted(total: int) -> InlinePart:
+    """A number a document quotes, as the text a reader sees."""
+    return InlinePart(node=PlainCell(text=str(total)))
+
+
+class Passage(SemanticPart, frozen=True):
+    """Prose authored as Markdown beside its module, with its values placed.
+
+    The parts around it stay parts: a table derived from declarations, an
+    invocation each runtime spells its own way, an argument reference. What
+    this carries is the words, which are prose and belong in a file that is
+    prose — and the values those words name, each entering escaped because
+    the type admits nothing that could enter otherwise.
+    """
+
+    type: Literal["passage"] = "passage"
+    module: str = Field(min_length=1)
+    """The module whose declaration this prose belongs to, spelled ``__name__``."""
+
+    name: str = ""
+    """Which passage beside that module, where it declares more than one."""
+
+    values: dict[str, "PromptPart"] = {}
+    """What the prose names, under the name it names it by.
+
+    Parts rather than text, which is the guarantee: a part spells itself —
+    escaped by its node, or in the vocabulary of the runtime reading it — so
+    there is no way to name a value that arrives as somebody's unescaped
+    string. An argument reference, a skill invocation and a path are all one
+    kind of thing here, and the prose names each the same way.
+    """
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return rendered(
+            self.module,
+            self.name,
+            {name: value.spell(renderer) for name, value in self.values.items()},
+        )
+
+    @property
+    def text_payload(self) -> str:
+        """The authored prose, which is what a reader of this document reads.
+
+        The words rather than the rendering: the portability scan is about
+        the prose somebody wrote, and what each value becomes is that value's
+        own answer, checked where the value is declared.
+        """
+        return passage_text(self.module, self.name)
 
 
 class SpellingExample(SemanticPart, frozen=True):
@@ -531,6 +609,8 @@ class ArgumentsRef(SemanticPart, frozen=True):
 
 type PromptPart = Annotated[
     TextPart
+    | Passage
+    | InlinePart
     | SpellingExample
     | MarkdownTable
     | ToolRoster
