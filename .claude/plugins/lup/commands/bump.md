@@ -1,7 +1,7 @@
 ---
-description: "Review changes since last bump and bump agent version"
+description: Review changes since last bump and bump agent version
 allowed-tools: Bash(uv run lup-devtools:*), Read, AskUserQuestion, Skill(lup:commit)
-argument-hint: "[patch|minor|major]"
+argument-hint: '[patch|minor|major]'
 ---
 
 # Version Bump

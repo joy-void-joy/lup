@@ -1,6 +1,6 @@
 ---
 name: verify-solved
-description: "Check every claimed-resolved note and stale open issue against what it actually asked"
+description: Check every claimed-resolved note and stale open issue against what it actually asked
 ---
 
 Every `# lup: solved:` marker in this repository is a claim that a note was addressed, made by whoever addressed it. You are the check on those claims, and you are the only thing that may retire one.

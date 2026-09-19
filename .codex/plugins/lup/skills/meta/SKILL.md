@@ -1,6 +1,6 @@
 ---
 name: meta
-description: "Review and modify the generated harness trees, brainstorm improvements interactively"
+description: Review and modify the generated harness trees, brainstorm improvements interactively
 ---
 
 # Meta: Harness Structure Review & Improvement

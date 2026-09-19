@@ -1,6 +1,6 @@
 ---
 name: land
-description: "Land every branch that has not reached the integration branch, and clear the ones that have"
+description: Land every branch that has not reached the integration branch, and clear the ones that have
 ---
 
 # Land Every Branch

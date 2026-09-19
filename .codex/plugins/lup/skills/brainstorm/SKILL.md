@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: "Design exploration \u2014 a new agent before init or a feature inside a project, every decision walked with the user"
+description: Design exploration — a new agent before init or a feature inside a project, every decision walked with the user
 ---
 
 # Brainstorm: Agent Design Exploration

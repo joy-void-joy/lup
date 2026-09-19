@@ -1,9 +1,9 @@
 ---
-description: "Inspect and modify the canonical semantic permission policy"
+description: Inspect and modify the canonical semantic permission policy
 allowed-tools: Read, Edit, AskUserQuestion, Bash
 arguments:
   - name: arguments
-    description: "Optional arguments supplied with the skill invocation"
+    description: Optional arguments supplied with the skill invocation
     required: false
 ---
 

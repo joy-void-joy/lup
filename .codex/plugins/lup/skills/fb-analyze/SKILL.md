@@ -1,6 +1,6 @@
 ---
 name: fb-analyze
-description: "Aggregate tool health, capability gaps, and reasoning patterns across sessions"
+description: Aggregate tool health, capability gaps, and reasoning patterns across sessions
 ---
 
 # Analyze: Tool Health & Capability Gaps

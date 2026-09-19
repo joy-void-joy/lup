@@ -1,6 +1,6 @@
 ---
 name: upstream
-description: "Fix a defect in lup itself, in a worktree of lup, and pin it until it lands"
+description: Fix a defect in lup itself, in a worktree of lup, and pin it until it lands
 ---
 
 # Fix It Upstream

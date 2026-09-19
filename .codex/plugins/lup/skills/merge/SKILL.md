@@ -1,6 +1,6 @@
 ---
 name: merge
-description: "Merge a branch or resolve existing merge conflicts"
+description: Merge a branch or resolve existing merge conflicts
 ---
 
 # Merge

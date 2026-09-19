@@ -1,7 +1,7 @@
 ---
-description: "Clean up commit history on the feature branch and open/update a PR"
+description: Clean up commit history on the feature branch and open/update a PR
 allowed-tools: Bash(uv run lup-devtools:*, git:*), Read, AskUserQuestion, Skill(lup:commit)
-argument-hint: "[target-branch]"
+argument-hint: '[target-branch]'
 ---
 
 # Rebase and PR

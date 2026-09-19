@@ -1,7 +1,7 @@
 ---
-description: "Review a session trace for workflow quality, tool usage, and improvement opportunities"
+description: Review a session trace for workflow quality, tool usage, and improvement opportunities
 allowed-tools: Read, Bash(ls:*, wc:*, sort:*, tail:*, stat:*, uv run lup-devtools:*), Agent
-argument-hint: "[session ID, file path, or pasted trace]"
+argument-hint: '[session ID, file path, or pasted trace]'
 ---
 
 # Review: Trace Workflow Analysis

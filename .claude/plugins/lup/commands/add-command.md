@@ -1,7 +1,7 @@
 ---
-description: "Create a new slash command in the lup plugin"
+description: Create a new slash command in the lup plugin
 allowed-tools: Bash(uv run lup-devtools:*), Read, Write, Edit, AskUserQuestion
-argument-hint: "[name] [description]"
+argument-hint: '[name] [description]'
 ---
 
 # Add New Command

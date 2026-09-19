@@ -1,7 +1,7 @@
 ---
-description: "Restart from an explored repo \u2014 distill its direction into a fresh design"
+description: Restart from an explored repo — distill its direction into a fresh design
 allowed-tools: Bash(git:*, ls:*, find:*, uv run lup-devtools:*), Read, Write, Edit, Agent, AskUserQuestion, Skill(lup:import)
-argument-hint: "<old-repo-path> [more-paths] <narrative of the direction found>"
+argument-hint: <old-repo-path> [more-paths] <narrative of the direction found>
 ---
 
 # Distill: Restart a Project from Its Exploration

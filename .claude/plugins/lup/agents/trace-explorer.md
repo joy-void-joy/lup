@@ -1,6 +1,6 @@
 ---
 name: trace-explorer
-description: "Investigate trace evidence without changing production files"
+description: Investigate trace evidence without changing production files
 tools: Read, Bash
 model: opus
 color: cyan

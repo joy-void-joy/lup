@@ -1,6 +1,6 @@
 ---
 name: resolve
-description: "Resolve inline feedback through isolated work"
+description: Resolve inline feedback through isolated work
 ---
 
 **What this run is about:** the arguments supplied with this skill invocation

@@ -1,6 +1,6 @@
 ---
 name: distill
-description: "Restart from an explored repo \u2014 distill its direction into a fresh design"
+description: Restart from an explored repo — distill its direction into a fresh design
 ---
 
 # Distill: Restart a Project from Its Exploration

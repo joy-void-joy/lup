@@ -1,7 +1,7 @@
 ---
-description: "Install lup plugin and scaffolding into a target repo"
+description: Install lup plugin and scaffolding into a target repo
 allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
-argument-hint: "[target-repo] [--interactive]"
+argument-hint: '[target-repo] [--interactive]'
 ---
 
 # Install Lup into Target Repo

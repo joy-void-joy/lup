@@ -13,6 +13,8 @@ from lup.providers.drift_prompt import drift_hook
 from lup.providers.roster_prompt import departure_hook, folded, prompt_hook
 from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
+from lup.formats.markdown import MarkdownDocument, Prose
+from lup.formats.yaml import YamlDocument, YamlMap, scalars
 from lup.formats.banner import (
     COMMENT_FREE,
     PROMPT_TEXT,
@@ -328,20 +330,25 @@ class CodexSkillRenderer(ArtifactRenderer[Skill]):
         self.plugin_name = plugin_name
 
     def render(self, source: Skill) -> ArtifactTree:
-        content = (
-            "---\n"
-            f"name: {source.name}\n"
-            f"description: {json.dumps(source.description)}\n"
-            "---\n\n"
-            f"{self.prompts.render(source.prompt)}"
-        )
         return ArtifactTree(
             artifacts=[
-                Artifact(
+                Artifact.in_markdown(
                     path=Path(
                         f".codex/plugins/{self.plugin_name}/skills/{source.name}/SKILL.md"
                     ),
-                    content=content,
+                    document=MarkdownDocument(
+                        frontmatter=YamlDocument(
+                            root=YamlMap(
+                                entries=scalars(
+                                    {
+                                        "name": source.name,
+                                        "description": source.description,
+                                    }
+                                )
+                            )
+                        ),
+                        blocks=[Prose(text=self.prompts.render(source.prompt))],
+                    ),
                     semantic_id=source.id,
                     banner=PROMPT_TEXT.compiled_from(source.prompt.declared_source()),
                 )

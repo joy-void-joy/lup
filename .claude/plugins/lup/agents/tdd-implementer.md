@@ -1,6 +1,6 @@
 ---
 name: tdd-implementer
-description: "Write production code against failing tests, without editing the tests"
+description: Write production code against failing tests, without editing the tests
 tools: Read, Bash, Write, Edit
 model: opus
 color: green

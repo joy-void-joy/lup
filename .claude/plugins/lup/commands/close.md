@@ -1,5 +1,5 @@
 ---
-description: "Check PR review status, merge if approved, and clean up branches"
+description: Check PR review status, merge if approved, and clean up branches
 allowed-tools: Bash(uv run lup-devtools:*), AskUserQuestion, Skill(lup:commit)
 ---
 
