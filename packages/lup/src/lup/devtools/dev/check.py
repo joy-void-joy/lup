@@ -34,6 +34,7 @@ from lup.policy.assets.host import project_environment
 from lup.policy.everyday import SESSION_SHAPES
 from lup.workspace.paths import is_template_scaffold, project_root
 
+from lup.devtools.dev.admission import admitted
 from lup.devtools.dev.antipatterns import scan_antipatterns
 from lup.devtools.project import DevProject
 from lup.devtools.dev.boundaries import scan_application_placement
@@ -1343,56 +1344,68 @@ def run_checks(
     """
     started = perf_counter()
     excluded_roots = non_code_roots(project)
-    tools: list[Callable[[], CheckReport]] = [
-        partial(ruff_format_check, fix, excluded_roots),
-        partial(ruff_lint_check, fix, excluded_roots),
-        partial(pyright_check, excluded_roots),
-        *(
-            []
-            if no_test
-            else [
-                partial(root.checked, test_workers, excluded_roots)
-                for root in test_roots
-            ]
-        ),
-    ]
-    sweeps = partial(
-        scan_reports,
-        project,
-        scope,
-        compositions,
-        repository_writers,
-        git_guards,
-        hooks_declaration,
-        node_classes=node_classes or [],
-        ledger=ledger,
-        command_surface=command_surface,
-        scaffold_source=scaffold_source,
-        spread=spread,
-    )
+    # Held across every tool rather than around the suites alone: the
+    # type checker spreads itself too, so a slot covering only pytest
+    # would divide half the machine and leave the other half contended.
+    with admitted(project_root(), test_workers) as admission:
+        tools: list[Callable[[], CheckReport]] = [
+            partial(ruff_format_check, fix, excluded_roots),
+            partial(ruff_lint_check, fix, excluded_roots),
+            partial(pyright_check, excluded_roots),
+            *(
+                []
+                if no_test
+                else [
+                    partial(root.checked, admission.workers, excluded_roots)
+                    for root in test_roots
+                ]
+            ),
+        ]
+        sweeps = partial(
+            scan_reports,
+            project,
+            scope,
+            compositions,
+            repository_writers,
+            git_guards,
+            hooks_declaration,
+            node_classes=node_classes or [],
+            ledger=ledger,
+            command_surface=command_surface,
+            scaffold_source=scaffold_source,
+            spread=spread,
+        )
 
-    if fix:
-        # `--fix` rewrites the tree, so its tools go one at a time: a
-        # formatter moving lines under a checker reading them answers about a
-        # file that is no longer there.
-        tooled = [tool() for tool in tools]
-        changed = git.lines("diff", "--name-only", _ok_code=[0])
-        if changed:
-            lint = next(report for report in tooled if report.name == "ruff check")
-            lint.lines.extend(
-                [f"  auto-fixed {len(changed)} file(s)", *(f"    {f}" for f in changed)]
-            )
-        scanned = sweeps()
-    else:
-        # Read-only, no check reads what another writes, so the gate costs its
-        # slowest rather than the sum of all of them. Each tool waits on a
-        # process of its own; the sweeps hold this thread while they do.
-        with ThreadPoolExecutor(max_workers=len(tools)) as pool:
-            running = [pool.submit(tool) for tool in tools]
+        if fix:
+            # `--fix` rewrites the tree, so its tools go one at a time: a
+            # formatter moving lines under a checker reading them answers about a
+            # file that is no longer there.
+            tooled = [tool() for tool in tools]
+            changed = git.lines("diff", "--name-only", _ok_code=[0])
+            if changed:
+                lint = next(report for report in tooled if report.name == "ruff check")
+                lint.lines.extend(
+                    [
+                        f"  auto-fixed {len(changed)} file(s)",
+                        *(f"    {f}" for f in changed),
+                    ]
+                )
             scanned = sweeps()
-            tooled = [job.result() for job in running]
+        else:
+            # Read-only, no check reads what another writes, so the gate costs its
+            # slowest rather than the sum of all of them. Each tool waits on a
+            # process of its own; the sweeps hold this thread while they do.
+            with ThreadPoolExecutor(max_workers=len(tools)) as pool:
+                running = [pool.submit(tool) for tool in tools]
+                scanned = sweeps()
+                tooled = [job.result() for job in running]
 
     reports = [*tooled, *scanned]
+    # Ahead of the reports, because it says what the numbers below were
+    # measured under: a run that took its share of a busy machine is not a
+    # run that was slow, and a reader given the timings alone reads it as one.
+    for notice in admission.said:
+        typer.echo(notice.text)
     for report in reports:
         for line in report.lines:
             typer.echo(line)
