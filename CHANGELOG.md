@@ -106,8 +106,35 @@ off the section markers rather than off a second filename. How many newlines a
 rendered document ends on moved from `sectioned` to the renderer, which is the
 one reader that sees a whole document whatever kinds of part composed it.
 
+### A peer that is idle can be woken
+
+`wake()` finishes the job itself on both runtimes rather than handing the
+caller an instruction on one of them. Every Claude session runs a private
+inbox socket, and lup passes `--messaging-socket-path` for every session it
+launches, so a member declares the handle that wakes it when it joins and a
+sender writes a frame there carrying that member's session id. A session lup
+did not launch is still reached through the runtime's own default paths.
+
+The handle is declared by the adapter for the runtime that would use it,
+because what a handle *is* differs by runtime: on Codex it is the thread
+`codex queue` takes, which nothing hands a server Codex starts, so that
+adapter declares nothing and the outcome is reported rather than skipped.
+
+A wake is always *on top of* the mail and never instead of it, so the record
+is identical on both and only the latency differs. The agent never touches the
+channel: `coordination_send` remains the one habit.
+
 ### The rest
 
+- `ledger migrate` copies a kind's journal lines and blobs into the placement
+  its mapping now declares, for a kind moved after records already exist. The
+  source lines stay: the committed journal is merged by git's union driver, so
+  a deletion there would not even be durable, and the fold already reads each
+  record once.
+- `ledger index-notes` records a closed session per directory under an
+  existing `notes/` tree, and one output per result, through the same writers
+  a live run uses — so a backfilled record is the same two records a live run
+  leaves. Idempotent by `(checkout, path)`.
 - Every parsed command carries the directory it runs in, and a segment's path
   words resolve by position rather than by value, so a relative operand after
   a `cd` is judged against the file it would reach.
