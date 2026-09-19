@@ -7,14 +7,16 @@
 Two things travel, registered only where the hook set declares the cleanup:
 a shell guard that exits without starting an interpreter where none is
 found, and the runtime's host half of the fold, shipped verbatim beside the
-kernel it imports. The guard is registered under the runtime's two subagent
-events — its start, where the fold adds the one sentence saying what the
-subagent arms is its own to stop, and its stop, where the fold refuses the
-report once while any of that work is still listed.
+kernel it imports. The guard is registered under the subagent events that
+runtime answers to — its start, where the fold adds the one sentence saying
+what the subagent arms is its own to stop, and its stop, where the fold
+refuses the report once while any of that work is still listed. A runtime
+whose leftovers resume nobody names no stop event and takes the sentence
+alone.
 
 Rendered once here rather than once per adapter, because what the adapters
-own is three things — the two events' names, the variable their plugin root
-is exported as, and the host half that reads their payload — and everything
+own is three things — the events' names, the variable their plugin root is
+exported as, and the host half that reads their payload — and everything
 else would be the same file twice.
 """
 
@@ -50,19 +52,31 @@ def cleanup_hooks(
     host: str,
     host_origin: str,
     start_event: str,
-    stop_event: str,
+    stop_event: str | None,
 ) -> PromptHook:
-    """The entries under both subagent events and the files behind them, where declared.
+    """The entries under the subagent events and the files behind them, where declared.
 
     The declaration is the hook set's own ``subagent_cleanup``: a project
     that declined it registers nothing and carries nothing. The start-time
     sentence is the declaration's to switch off on its own; the stop-time
     refusal is what the declaration is.
+
+    ``None`` for the stop event is a runtime measured not to resume a subagent
+    that has already reported, where the refusal would buy nothing and cost a
+    turn. The sentence still goes, because the work still outlives the report;
+    a runtime answering to neither registers nothing at all.
     """
     declared = source.subagent_cleanup
-    if declared is None:
+    events = (
+        []
+        if declared is None
+        else [
+            *([stop_event] if stop_event is not None else []),
+            *([start_event] if declared.notice_at_start else []),
+        ]
+    )
+    if not events:
         return PromptHook(registered={}, artifacts=[])
-    events = [stop_event, *([start_event] if declared.notice_at_start else [])]
     return PromptHook(
         registered={
             event: [{"hooks": [hook_entry(plugin_root_env, GUARD_SCRIPT)]}]

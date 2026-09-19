@@ -39,6 +39,7 @@ from kernel.subagents import (
     Armed,
     BackgroundTask,
     Child,
+    Leftover,
     leftovers,
     notice,
     refusal,
@@ -182,7 +183,14 @@ def decided(payload: Payload) -> Context | Refusal | None:
             return Context(
                 hookSpecificOutput=Pushed(
                     hookEventName="SubagentStart",
-                    additionalContext=notice("Monitor", "TaskStop"),
+                    additionalContext=notice(
+                        "a Monitor",
+                        "TaskStop",
+                        # Both measured on 2.1.278 and kept as fixtures: the
+                        # monitor survives the report, and each line it emits
+                        # resumes the subagent that reported.
+                        Leftover(resumes=True, refused=True),
+                    ),
                 )
             )
         case "SubagentStop" if not payload.get("stop_hook_active", False):
