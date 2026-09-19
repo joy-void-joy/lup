@@ -745,7 +745,8 @@ def authored_writes(command: str) -> list[AuthoredWrite]:
     write row was told the route is reviewed.
 
     Read per segment, and a segment yields nothing unless the whole of it is
-    legible: no substitution, at most one redirection target, and a content
+    legible: no substitution, at most one redirection target and that target
+    spelling the path it lands on once the bindings are applied, and a content
     shape :func:`carried_text` can state. Everything else keeps the answer it
     had.
 
@@ -792,6 +793,15 @@ def authored_writes(command: str) -> list[AuthoredWrite]:
                 # at the end, or a `2>/dev/null` beside the write would count
                 # as a second target and take the whole command out of reach.
                 if redirection_writes(operator) and not writes_to_a_stream(spelled):
+                    # A target the binding pass could not resolve names no
+                    # file, and naming none reads here exactly as naming one
+                    # that does not exist: `cat > $P` judged a create takes an
+                    # overwrite of tracked source past the size budget, the
+                    # note gate and the audit alike, and shows a reviewer a
+                    # `$P` they cannot resolve. Illegible, so the redirection
+                    # row answers it in the words it already has for a path
+                    # known only when the command runs.
+                    legible = legible and spells_its_path(spelled)
                     targets.append(spelled)
                     appends.append(">>" in operator)
             content = carried_text(words, bodies, incoming) if legible else None

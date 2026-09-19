@@ -101,6 +101,18 @@ class PathRoleRow(TypedDict):
     role: PathRoleName
 
 
+class SpawnNameRow(TypedDict):
+    """One erased decision that a spawned agent carries a name.
+
+    ``reason`` is what a spawn without one is refused with; ``recovery`` says
+    the shape a name takes, because a refusal an agent cannot act on becomes
+    a retry.
+    """
+
+    reason: str
+    recovery: str
+
+
 class AcceptanceGuardRow(TypedDict):
     """One erased decision to hold a project's acceptance tests still.
 

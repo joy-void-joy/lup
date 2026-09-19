@@ -16,6 +16,7 @@ The grammar is POSIX sh with the bash forms agents actually write: `[[ ]]`,
 `$'…'`, `<(…)`, `|&`, `&>`, `;&` and `;;&`, and `function name`.
 """
 
+from collections.abc import Callable
 from typing import Literal, TypedDict
 
 from .decision import (
@@ -327,74 +328,144 @@ def syntax_error(reason: str = "shell command does not parse") -> ShellSyntaxErr
     return ShellSyntaxError(unjudged(reason))
 
 
+type DelimiterStep = Callable[[str], int]
+"""How far one character moves the depth a scan is counting: its pair, or nothing."""
+
+type DelimiterSkip = Callable[[str, int], int | None]
+"""What a depth scan steps over rather than counts, asked of one position.
+
+One past the run where a run opens there, ``position`` itself where none
+does, and ``None`` where one opens and never closes -- which is already the
+scan's answer for a group that never closes, so it travels out unchanged.
+"""
+
+
+def parenthesis_step(character: str) -> int:
+    """How far a parenthesis moves the depth a scan is counting."""
+    match character:
+        case "(":
+            return 1
+        case ")":
+            return -1
+    return 0
+
+
+def brace_step(character: str) -> int:
+    """How far a brace moves the depth a scan is counting."""
+    match character:
+        case "{":
+            return 1
+        case "}":
+            return -1
+    return 0
+
+
+def single_quoted_end(source: str, position: int) -> int | None:
+    """One past the `'` closing the literal opened at ``position``."""
+    closing = source.find("'", position + 1)
+    return None if closing == -1 else closing + 1
+
+
+def double_quoted_end(source: str, position: int) -> int | None:
+    """One past the `"` closing the run opened at ``position``, escapes honoured."""
+    length = len(source)
+    position += 1
+    while position < length and source[position] != '"':
+        position += 2 if source[position] == "\\" else 1
+    return None if position >= length else position + 1
+
+
+def no_skip(_source: str, position: int) -> int | None:
+    """Step over nothing: every character is the scan's own to count."""
+    return position
+
+
+def quoted_skip(source: str, position: int) -> int | None:
+    """Step over the quoting a `(…)` group honours, inside which nothing counts."""
+    match source[position]:
+        case "'":
+            return single_quoted_end(source, position)
+        case '"':
+            return double_quoted_end(source, position)
+        case "\\":
+            return position + 2
+    return position
+
+
+def brace_skip(source: str, position: int) -> int | None:
+    """Step over what a `${…}` does not count, a whole `$(…)` among it.
+
+    Double quotes are not stepped over, as the shell has it: a `}` written
+    inside them closes the expansion.
+    """
+    match source[position]:
+        case "\\":
+            return position + 2
+        case "'":
+            return single_quoted_end(source, position)
+        case "$" if source.startswith("$(", position):
+            end = balanced_end(source, position + 2)
+            return None if end is None else end + 1
+    return position
+
+
+def arithmetic_skip(source: str, position: int) -> int | None:
+    """Refuse what an arithmetic interior may not hold, and step over nothing.
+
+    Arithmetic evaluates, it does not run: a backtick or a `$(` inside one is
+    a command substitution wearing an expansion, and is denied rather than
+    counted.
+    """
+    if source[position] == "`" or source.startswith("$(", position):
+        raise ShellSyntaxError(
+            KernelDecision("deny", SUBSTITUTION_REASON, recovery=SUBSTITUTION_RECOVERY)
+        )
+    return position
+
+
+def delimiter_end(
+    source: str,
+    position: int,
+    step: DelimiterStep = parenthesis_step,
+    depth: int = 1,
+    skip: DelimiterSkip = no_skip,
+) -> int | None:
+    """The index of the delimiter closing a group whose interior starts here.
+
+    One walk serves every delimiter this grammar counts: ``step`` says which
+    pair moves the depth and which way, ``depth`` how deep the caller already
+    stands -- two for a form a doubled delimiter opened -- and ``skip`` which
+    runs are stepped over whole. Nothing but a closing delimiter lowers the
+    depth, so where it reaches zero is the index wanted; ``None`` where a
+    group never closes.
+    """
+    length = len(source)
+    while position < length:
+        stepped = skip(source, position)
+        if stepped is None:
+            return None
+        if stepped != position:
+            position = stepped
+            continue
+        depth += step(source[position])
+        if depth == 0:
+            return position
+        position += 1
+    return None
+
+
 def balanced_end(source: str, position: int) -> int | None:
     """The index of the `)` closing a group whose interior starts at ``position``.
 
     Quotes and escapes are honoured, so a parenthesis inside them does not
     count. ``None`` where the group never closes.
     """
-    depth = 1
-    length = len(source)
-    while position < length:
-        character = source[position]
-        if character == "'":
-            closing = source.find("'", position + 1)
-            if closing == -1:
-                return None
-            position = closing + 1
-            continue
-        if character == '"':
-            position += 1
-            while position < length and source[position] != '"':
-                position += 2 if source[position] == "\\" else 1
-            if position >= length:
-                return None
-            position += 1
-            continue
-        if character == "\\":
-            position += 2
-            continue
-        match character:
-            case "(":
-                depth += 1
-            case ")":
-                depth -= 1
-                if depth == 0:
-                    return position
-        position += 1
-    return None
+    return delimiter_end(source, position, skip=quoted_skip)
 
 
 def brace_end(source: str, position: int) -> int | None:
     """The index of the `}` closing a `${` whose interior starts at ``position``."""
-    depth = 1
-    length = len(source)
-    while position < length:
-        character = source[position]
-        if character == "\\":
-            position += 2
-            continue
-        if character == "'":
-            closing = source.find("'", position + 1)
-            if closing == -1:
-                return None
-            position = closing + 1
-            continue
-        if character == "$" and source[position + 1 : position + 2] == "(":
-            end = balanced_end(source, position + 2)
-            if end is None:
-                return None
-            position = end + 1
-            continue
-        match character:
-            case "{":
-                depth += 1
-            case "}":
-                depth -= 1
-                if depth == 0:
-                    return position
-        position += 1
-    return None
+    return delimiter_end(source, position, step=brace_step, skip=brace_skip)
 
 
 def without_leading_tabs(line: str) -> str:
@@ -766,24 +837,11 @@ class ShellLexer:
         """Read a `$((…))` expansion, whose interior may not run a command."""
         source = self.source
         start = self.position
-        depth = 2
-        for cursor in range(start + 3, len(source)):
-            character = source[cursor]
-            if character == "`" or source.startswith("$(", cursor):
-                raise ShellSyntaxError(
-                    KernelDecision(
-                        "deny", SUBSTITUTION_REASON, recovery=SUBSTITUTION_RECOVERY
-                    )
-                )
-            match character:
-                case "(":
-                    depth += 1
-                case ")":
-                    depth -= 1
-                    if depth == 0:
-                        self.position = cursor + 1
-                        return part("arithmetic", source[start : cursor + 1])
-        raise syntax_error("arithmetic expansion does not parse")
+        end = delimiter_end(source, start + 3, depth=2, skip=arithmetic_skip)
+        if end is None:
+            raise syntax_error("arithmetic expansion does not parse")
+        self.position = end + 1
+        return part("arithmetic", source[start : end + 1])
 
     def parameter(self, inner: str, spelled: str) -> WordPart:
         """Read the interior of a `${…}` into its name, operator and operand."""
@@ -824,19 +882,12 @@ class ShellLexer:
     def read_arithmetic_command(self) -> str:
         """Read a `(( … ))` command's expression, the opening `((` already taken."""
         source = self.source
-        depth = 2
         start = self.position
-        for cursor in range(start, len(source)):
-            character = source[cursor]
-            match character:
-                case "(":
-                    depth += 1
-                case ")":
-                    depth -= 1
-                    if depth == 0:
-                        self.position = cursor + 1
-                        return source[start : cursor - 1]
-        raise syntax_error("arithmetic command does not parse")
+        end = delimiter_end(source, start, depth=2)
+        if end is None:
+            raise syntax_error("arithmetic command does not parse")
+        self.position = end + 1
+        return source[start : end - 1]
 
 
 def word_text(word: Word) -> str:

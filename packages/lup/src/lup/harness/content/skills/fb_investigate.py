@@ -35,6 +35,7 @@ For the deep pass (the 5-10 selected target sessions), read the traces directly 
                 ),
                 models.Delegate(
                     subagent_type="lup:trace-explorer",
+                    name="trace-patterns",
                     prompt="Analyze traces for sessions <ids>; report tool failures, "
                     "capability gaps, reasoning quality",
                 ),
@@ -51,6 +52,7 @@ One delegation per session, launched in parallel when investigating several:
                 ),
                 models.Delegate(
                     subagent_type="lup:trace-explorer",
+                    name="session-<session_id>",
                     prompt="Investigate session <session_id> following the per-session "
                     "steps below. Report: tool call inventory, errors with quoted output, "
                     "workflow assessment, outcome classification, counterfactuals.",

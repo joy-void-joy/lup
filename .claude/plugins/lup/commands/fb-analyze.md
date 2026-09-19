@@ -52,7 +52,7 @@ From investigation findings:
 
 ### 4. Version comparison (if relevant)
 
-If comparing across versions, get code-level diffs: Delegate with Agent(subagent_type="lup:version-explorer", prompt="Compare vX.Y.Z and vA.B.C")
+If comparing across versions, get code-level diffs: Delegate with Agent(subagent_type="lup:version-explorer", name="version-comparison", prompt="Compare vX.Y.Z and vA.B.C")
 
 ### 5. Summarize
 

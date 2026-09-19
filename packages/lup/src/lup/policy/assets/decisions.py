@@ -83,6 +83,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
+from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
@@ -107,6 +108,7 @@ from policy_data import (
     RUNNER_TARGETS,
     SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
+    SPAWN_NAMES,
 )
 
 
@@ -452,6 +454,16 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
 def peer_listing_decision() -> KernelDecision:
     """Judge one native listing of who this session can reach, which defers."""
     return decide_peer_listing(PEER_POLICY)
+
+
+def spawn_decision(name: str, values: list[str]) -> KernelDecision:
+    """Judge one native spawn by the name it carries, against what this project declared.
+
+    ``name`` is the runtime's own field for it, read by the host half that
+    knows which key that is; every string the call carries rides beside it
+    so an escalation marker in any of them is found.
+    """
+    return decide_spawn(name, values, SPAWN_NAMES)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:

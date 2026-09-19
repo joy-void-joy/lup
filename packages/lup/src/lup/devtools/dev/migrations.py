@@ -643,6 +643,82 @@ DECLARED = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "HOOKS_MANIFEST",
+            "CodexHookEvent",
+            "CODEX_HOOK_EVENTS",
+            "declared_hook_records",
+            "untrusted_hooks",
+        ],
+        reason=(
+            "which hooks a Codex home would run is the runtime's verdict over "
+            "its own records and the plugin cache those records name, so it is "
+            "asked rather than reconstructed — the hand-kept event table knew "
+            "three events while the generated manifest declares five, and the "
+            "one call that decides whether a session carries the policy raised "
+            "on the two it had never heard of"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Ask the home instead of naming its records. "
+                    "`read_hooks(home, cwd)` in `lup.providers.codex.trust` "
+                    "returns a `CodexHookReport`, and each `CodexHook` in it "
+                    "carries the `key` the record is kept under, its "
+                    "`current_hash`, `trust_status` and `is_managed` — so "
+                    "nothing composes a record name from `HOOKS_MANIFEST` and "
+                    "`CODEX_HOOK_EVENTS`, and no table has to be kept level "
+                    "with the manifest."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Replace `untrusted_hooks(home, marketplace)` with "
+                    "`policy_hooks_skipped(home, project, marketplace)` from "
+                    "`lup.providers.codex.home`, which answers the same "
+                    "question for the working directory a session opens on. "
+                    "It returns the `CodexHook`s themselves rather than record "
+                    "names, and covers a hook whose recorded digest has gone "
+                    "stale — the `modified` verdict a table of names could not "
+                    "see, and the one a regenerated plugin meets constantly."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "`CodexHookEvent` named the three events the table knew. "
+                    "Nothing narrows an event any more: `CodexHook.event_name` "
+                    "is whatever the runtime reports, so an event added to the "
+                    "manifest needs no change here."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["schema_digest_drift"],
+        reason=(
+            "one regeneration of the app-server schemas answers two questions "
+            "— whether the shapes the typed models were read from have moved, "
+            "and whether the reply hook trust is seeded from still carries the "
+            "fields it is read by — and a second invocation for the second "
+            "question could answer about a different version"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call `schema_reading(contracts)` from "
+                    "`lup.devtools.harness.doctor` where `schema_digest_drift()` "
+                    "was called. It takes the `WireContract`s the composition "
+                    "declares — `NativeHarnessComposition.wire_contracts`, empty "
+                    "for a runtime that depends on no reply by field name — and "
+                    "returns a `SchemaReading` carrying `digests` and "
+                    "`contracts`. The digests are what the old call returned; "
+                    "`findings()` renders both as the messages to print, and "
+                    "`drifted()` answers whether anything moved."
+                ),
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

@@ -27,6 +27,7 @@ from lup.formats.banner import (
     VERBATIM_COPY,
     GeneratedBanner,
 )
+from lup.harness.evidence import WireContract
 from lup.harness.materialization import (
     AtomicMaterializer,
     discard_staged_write,
@@ -132,6 +133,15 @@ class NativeHarnessComposition(BaseModel, frozen=True, arbitrary_types_allowed=T
     login: ProviderLogin
     default_config_home: Path
     clipboard_transport: ClipboardTransport = "commands"
+    wire_contracts: list[WireContract] = []
+    """Reply shapes this runtime's adapter reads fields off by name.
+
+    Carried by the composition because the field names are a provider's words
+    and this is where a provider is named. A doctor reaching across the seam
+    for them would be importing an adapter to obtain a list of strings, and
+    the strings are all the check needs: the generated schema either declares
+    them or it does not, whoever's they are.
+    """
 
 
 class HarnessGenerationConflict(RuntimeError):

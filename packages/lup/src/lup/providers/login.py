@@ -15,7 +15,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.types import EnvVars
+from lup.types import EnvVars, StringMap
 
 
 class ProviderLogin(BaseModel, frozen=True):
@@ -48,6 +48,27 @@ class ProviderLogin(BaseModel, frozen=True):
     independently of whether the previous login can still renew.
     """
 
+    ambient_home: Path
+    """Where this runtime's CLI keeps configuration when nothing selects one.
+
+    The provider's own default, held here for the reason the spellings above
+    are: a caller that has to name a concrete directory -- a mount, a probe --
+    asks the declaration instead of writing one out, and a runtime that moves
+    its default moves it in one place. Everywhere a *policy* is being decided
+    rather than a file named, ``None`` still means "inherit whatever the
+    environment selected" and this is not consulted.
+    """
+
+    editor_lockfiles: str = ""
+    """Subdirectory of the configuration home an editor rendezvous sits in.
+
+    One editor window and one CLI find each other by a lockfile here: a port
+    and a token, written by one and read by the other. Empty means this
+    runtime offers no such bridge, which is a fact about the vendor and not
+    an omission -- Codex's extension drives an app-server and spawns its own
+    core, so there is no rendezvous to bridge and nothing to mount.
+    """
+
     home_subdir: str
     """Subdirectory this runtime's configuration home takes inside a profile.
 
@@ -61,6 +82,29 @@ class ProviderLogin(BaseModel, frozen=True):
     def environment(self, home: Path) -> EnvVars:
         """The environment routing a spawned CLI at that configuration home."""
         return {self.config_home_env: str(home)}
+
+    def selected_home(self, environ: StringMap) -> Path:
+        """The home this runtime's CLI would use under that environment.
+
+        What a *sibling process* resolves, which is the question a mount
+        asks: the editor on the host and the CLI in the container are two
+        programs reading the same variable, and bridging them means naming
+        the directory the one outside is using rather than the one this
+        launch chose.
+        """
+        named = environ.get(self.config_home_env, "")
+        return Path(named) if named else self.ambient_home
+
+    def editor_rendezvous(self, environ: StringMap) -> Path | None:
+        """Where an editor on this machine keeps its lockfiles, if it can.
+
+        ``None`` where the runtime declares no bridge, so a caller that would
+        mount one asks a single question instead of testing the spelling and
+        then building the path from it.
+        """
+        if not self.editor_lockfiles:
+            return None
+        return self.selected_home(environ) / self.editor_lockfiles
 
     def credentials_path(self, home: Path) -> Path:
         """Where a completed login sits inside that configuration home."""

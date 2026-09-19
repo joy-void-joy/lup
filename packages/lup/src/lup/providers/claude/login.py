@@ -5,6 +5,8 @@ transform all need these spellings, and none of them should pull the session
 runtime in to get them.
 """
 
+from pathlib import Path
+
 from lup.providers.login import ProviderLogin
 
 # lup: ignore[constant-declaration] — the environment variable Claude Code reads
@@ -18,6 +20,8 @@ CLAUDE_LOGIN = ProviderLogin(
         '(.claudeAiOauth.refreshToken // "") != ""'
         " and .claudeAiOauth.refreshTokenExpiresAt > (now * 1000)"
     ),
+    ambient_home=Path.home() / ".claude",
+    editor_lockfiles="ide",
     home_subdir="claude-config",
 )
 """Where Claude Code stores a completed login, and how to select one.

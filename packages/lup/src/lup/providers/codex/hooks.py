@@ -19,13 +19,24 @@ approval requests are not alike:
     on exactly the text about to run. This is parity with the Claude path.
 
 ``item/fileChange/requestApproval``
-    carries an item id, a reason, and a root — and no file content at all. An
-    edit rule reads before-and-after text, so there is nothing here for one to
-    read. The request is therefore decoded as the opaque operation it is and
-    answered by whatever the policy does with an unknown tool, which for every
-    policy this library ships is a refusal. Approving it because the content
-    could not be inspected would be the one reading that turns a missing
-    capability into a silent grant.
+    carries an item id, a thread and turn id, a timestamp, an optional reason
+    and an optional ``grantRoot`` — and no path, no content, and no diff. Read
+    off ``FileChangeRequestApprovalParams`` as codex-cli 0.155.1 generates it;
+    ``grantRoot`` is the agent asking to write under a root for the rest of
+    the session, not the root of the patch. An edit rule reads before-and-after
+    text, so there is nothing here for one to read. The request is therefore
+    decoded as the opaque operation it is and answered by whatever the policy
+    does with an unknown tool, which for every policy this library ships is a
+    refusal. Approving it because the content could not be inspected would be
+    the one reading that turns a missing capability into a silent grant.
+
+That is a property of *this* boundary and not of the protocol. The legacy
+``applyPatchApproval`` carries ``fileChanges`` as a map from path to change,
+where an add or a delete carries the whole ``content`` and an update carries a
+``unified_diff`` — everything an edit rule wants — and clients are sent
+``turn/diff/updated`` besides. So the content a Codex reviewer would need is
+reachable, on boundaries this seam does not answer, and a future that judges a
+file change on its text starts there rather than from the v2 request.
 """
 
 import logging

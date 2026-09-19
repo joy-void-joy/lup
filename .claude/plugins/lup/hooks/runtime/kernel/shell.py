@@ -344,7 +344,9 @@ def decide_segment_words(
             "deny",
             f"{executable}: a bare interpreter or inline code leaves nothing"
             " behind to review",
-            recovery="Write the code to a named script file and run that.",
+            recovery="Write the code to a named script file and run it through"
+            " `uv run python <script>`; a bare interpreter is refused even"
+            " over a file.",
         )
     if executable == "git" and any("ext::" in word for word in words):
         transport = next(word for word in words if "ext::" in word)
@@ -416,7 +418,9 @@ def decide_segment_words(
             return KernelDecision(
                 "deny",
                 f"uvx {words[1]}: inline code leaves nothing behind to review",
-                recovery="Write the code to a named script file and run that.",
+                recovery="Write the code to a named script file and run it through"
+                " `uv run python <script>`; a bare interpreter is refused even"
+                " over a file.",
             )
         return unjudged("uvx command is not classified")
     if executable == "uv" and len(words) > 1:

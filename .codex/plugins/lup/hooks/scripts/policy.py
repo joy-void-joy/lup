@@ -60,6 +60,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
+from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
@@ -84,6 +85,7 @@ from policy_data import (
     RUNNER_TARGETS,
     SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
+    SPAWN_NAMES,
 )
 
 
@@ -2405,6 +2407,16 @@ def peer_listing_decision() -> KernelDecision:
     return decide_peer_listing(PEER_POLICY)
 
 
+def spawn_decision(name: str, values: list[str]) -> KernelDecision:
+    """Judge one native spawn by the name it carries, against what this project declared.
+
+    ``name`` is the runtime's own field for it, read by the host half that
+    knows which key that is; every string the call carries rides beside it
+    so an escalation marker in any of them is found.
+    """
+    return decide_spawn(name, values, SPAWN_NAMES)
+
+
 def peer_listing_attachment(cwd: Path | None) -> str:
     """This repository's roster, as a listing carries it, or nothing to carry.
 
@@ -2983,6 +2995,15 @@ def dispatch(payload, permission_request=False):
         return fetch_decision(tool_input["url"], session_directory)
     if name == "apply_patch":
         return patch_decision(tool_input["command"], session_directory, autonomous)
+    if name == "collaborationspawn_agent":
+        # Measured on 0.155.1: the spawn carries `task_name` and `message`,
+        # and the hook names the tool this way. The runtime requires the task
+        # name on the call, so this insists on the same thing Claude's half
+        # does, and defers where it is there.
+        return spawn_decision(
+            tool_input["task_name"] if "task_name" in tool_input else "",
+            [value for value in tool_input.values() if isinstance(value, str)],
+        )
     # Asked of whatever reached here rather than of a listed few, exactly as
     # the Claude half asks it: which tools are worth refusing is the
     # declaration's answer, and a runtime that shipped the table without
