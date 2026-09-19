@@ -886,9 +886,18 @@ def create_dev_app(
         except RuntimeError as refused:
             typer.echo(str(refused), err=True)
             raise typer.Exit(1) from refused
-        found = issues_mod.fetch_open_issues(excluded, repository=slug)
-        typer.echo(f"{len(found)} open issue(s) in {slug or 'this repository'}")
-        for issue in found:
+        answered = issues_mod.read_open_issues(excluded, repository=slug)
+        if not answered.reached:
+            typer.echo(
+                f"could not read the issues of {slug or 'this repository'}:"
+                f" {answered.why}",
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(
+            f"{len(answered.issues)} open issue(s) in {slug or 'this repository'}"
+        )
+        for issue in answered.issues:
             typer.echo(f"  {issue.reference()}  {issue.title}")
 
     @app.command("rules")
