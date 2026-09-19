@@ -130,6 +130,54 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        subjects=[
+            "WorkflowSpec.body",
+            "WorkflowSpec.install_step",
+            "PublishSpec.body",
+        ],
+        reason=(
+            "a generated workflow is a declared document rather than a formatted "
+            "string: the steps are `WorkflowStep` declarations and the file is a "
+            "`YamlDocument`, which is emitted and parsed back before it is "
+            "written, so a runner label or a command carrying a colon can no "
+            "longer end the mapping it lands in"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read the YAML off `spec.document().text()` where "
+                    "`spec.body()` was read, or take the whole artifact from "
+                    "`spec.artifact()` as the generator does. A project that "
+                    "appended its own step by formatting text around `body()` "
+                    "declares a `WorkflowStep` instead and overrides `steps()`; "
+                    "`install_step` is `install_steps()`, which answers with a "
+                    "list rather than a block of YAML."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["MarkdownCell", "MarkdownCell.text", "MarkdownCell.render"],
+        reason=(
+            "the base every generated Markdown leaf answers through is an "
+            "inline node rather than a table cell: the same escaping is what a "
+            "heading compiled from a catalog and a value inside a sentence "
+            "need, and a name saying `cell` said the table was the only "
+            "container there could be"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import `InlineNode` from `lup.formats.markdown` where "
+                    "`MarkdownCell` was imported; `text` and `render` are "
+                    "unchanged, and every concrete kind — `PlainCell`, "
+                    "`CodeCell`, `HtmlCodeCell`, `LinkCell` — keeps its name and "
+                    "its behaviour."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         subjects=["member_environment"],
         reason=(
             "a launcher mints a session's name beside its id, numbered against "
