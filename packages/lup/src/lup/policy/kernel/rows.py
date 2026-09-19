@@ -676,3 +676,26 @@ class PeerPolicyRow(TypedDict):
     listing_note: str
     claim_reason: str
     claim_recovery: str
+
+
+class PathWord(TypedDict):
+    """One word of a command that a reader read a path out of.
+
+    What a reader knows and used to throw away: not only *which* file a
+    command names, but which word named it and how that word spells it. Both
+    halves are needed to put a path word back after resolving it -- ``at``
+    says which word, and ``prefix`` is whatever the word carries before the
+    path, so ``--output=dist/x`` is rewritten at its value and a bare operand
+    whole.
+
+    A word, not a file. A verb that derives a path from an operand rather
+    than reading one -- ``gzip f`` authoring ``f.gz`` -- names ``f`` here and
+    nothing else, because ``f.gz`` is not in the command to be rewritten. The
+    derivation comes out right anyway: every reader takes the command's words
+    afresh, so one whose operand has been resolved derives from the resolved
+    one.
+    """
+
+    at: int
+    prefix: str
+    path: str

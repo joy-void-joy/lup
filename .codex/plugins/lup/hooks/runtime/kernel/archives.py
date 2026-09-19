@@ -24,6 +24,8 @@ import posixpath
 from pathlib import PurePosixPath
 from typing import TypedDict
 
+from .rows import PathWord
+
 # Flags that let an extraction place members outside the directory selected
 # for it, which is the one assumption the destination question rests on.
 ESCAPING_TAR_FLAGS = ("-P", "--absolute-names")
@@ -54,6 +56,14 @@ class ArchiveWrite(TypedDict):
     authored: list[str]
     consumed: list[str]
     directory: str | None
+    named: list[PathWord]
+    """Every word this verb read a path out of, for a caller that has to put
+    one back after resolving it against the directory the verb runs in.
+
+    The words, not the paths: ``gzip f`` authors ``f.gz``, which is nowhere in
+    the command, and so is named here by the ``f`` it was derived from. A
+    reader taking the resolved words afresh derives ``sub/f.gz`` from
+    ``sub/f`` without this having to carry it."""
 
 
 def tar_write(
@@ -73,12 +83,14 @@ def tar_write(
     archive: str | None = None
     directory: str | None = None
     operands: list[str] = []  # lup: ignore[empty-collection]
+    named: list[PathWord] = []  # lup: ignore[empty-collection]
     expecting: str | None = None
-    for word in words[1:]:
+    for index, word in enumerate(words[1:], start=1):
         if expecting is not None:
             archive, directory = (
                 (word, directory) if expecting == "f" else (archive, word)
             )
+            named.append(PathWord(at=index, prefix="", path=word))
             expecting = None
             continue
         if word in escaping_flags:
@@ -92,8 +104,10 @@ def tar_write(
                     mode = "c"
                 case "--file" if value:
                     archive = value
+                    named.append(PathWord(at=index, prefix=f"{name}=", path=value))
                 case "--directory" if value:
                     directory = value
+                    named.append(PathWord(at=index, prefix=f"{name}=", path=value))
                 case _:
                     if name in valued_flags and not value:
                         return None
@@ -110,6 +124,7 @@ def tar_write(
                         return None
             continue
         operands.append(word)
+        named.append(PathWord(at=index, prefix="", path=word))
     if expecting is not None:
         return None
     # The bare `tar xf a.tgz` form puts the operation letters in the first
@@ -119,10 +134,15 @@ def tar_write(
     match mode:
         case "c":
             return ArchiveWrite(
-                authored=[archive] if archive else [], consumed=[], directory=None
+                authored=[archive] if archive else [],
+                consumed=[],
+                directory=None,
+                named=named,
             )
         case "x":
-            return ArchiveWrite(authored=[], consumed=[], directory=directory)
+            return ArchiveWrite(
+                authored=[], consumed=[], directory=directory, named=named
+            )
         case _:
             return None
 
@@ -135,10 +155,12 @@ def unzip_write(words: list[str]) -> ArchiveWrite | None:
     (``-o``, ``-n``) are immaterial to a destination with nothing in it.
     """
     directory: str | None = None
+    named: list[PathWord] = []  # lup: ignore[empty-collection]
     expecting = False
-    for word in words[1:]:
+    for index, word in enumerate(words[1:], start=1):
         if expecting:
             directory = word
+            named.append(PathWord(at=index, prefix="", path=word))
             expecting = False
             continue
         if word == "-d":
@@ -150,7 +172,7 @@ def unzip_write(words: list[str]) -> ArchiveWrite | None:
             continue
     if expecting:
         return None
-    return ArchiveWrite(authored=[], consumed=[], directory=directory)
+    return ArchiveWrite(authored=[], consumed=[], directory=directory, named=named)
 
 
 def compression_write(executable: str, words: list[str]) -> ArchiveWrite | None:
@@ -167,7 +189,8 @@ def compression_write(executable: str, words: list[str]) -> ArchiveWrite | None:
     """
     authored: list[str] = []  # lup: ignore[empty-collection]
     consumed: list[str] = []  # lup: ignore[empty-collection]
-    for word in words[1:]:
+    named: list[PathWord] = []  # lup: ignore[empty-collection]
+    for index, word in enumerate(words[1:], start=1):
         if word.startswith("-") and len(word) > 1:
             if word.startswith("--") or any(
                 letter not in "fkqv" for letter in word[1:]
@@ -175,6 +198,7 @@ def compression_write(executable: str, words: list[str]) -> ArchiveWrite | None:
                 return None
             continue
         suffixed = PurePosixPath(word)
+        named.append(PathWord(at=index, prefix="", path=word))
         if executable == "gzip":
             authored.append(f"{word}.gz")
             consumed.append(word)
@@ -185,7 +209,9 @@ def compression_write(executable: str, words: list[str]) -> ArchiveWrite | None:
         consumed.append(word)
     if not consumed:
         return None
-    return ArchiveWrite(authored=authored, consumed=consumed, directory=None)
+    return ArchiveWrite(
+        authored=authored, consumed=consumed, directory=None, named=named
+    )
 
 
 def archive_write(words: list[str]) -> ArchiveWrite | None:

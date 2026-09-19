@@ -62,6 +62,7 @@ from .lex import (
     list_commands,
     parse_shell,
     parse_shell_words,
+    placed_words,
     redirection_verdict,
     simple_commands,
     substitutions,
@@ -276,7 +277,9 @@ def sed_facts(context: ShellContext) -> SedContext:
     )
 
 
-def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision:
+def decide_find_words(
+    words: list[str], context: ShellContext, directory: str | None = ""
+) -> KernelDecision:
     """Classify find, recursing into -exec payloads with {} as a path word.
 
     Expansions of ``{}`` inherit find's ``./``-prefixed paths, so the payload
@@ -310,7 +313,7 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
             ]
             if not payload:
                 return unjudged("find -exec payload is empty")
-            verdict = decide_shell_segment(payload, context)
+            verdict = decide_shell_segment(payload, context, directory)
             if verdict.effect != "allow":
                 return verdict
             position = terminator + 1
@@ -320,7 +323,9 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
     return decide_command_rows(remaining, context["rows"], write_facts(context))
 
 
-def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecision:
+def decide_segment_words(
+    words: list[str], context: ShellContext, directory: str | None = ""
+) -> KernelDecision:
     """Classify one command's words against the vocabulary and handlers.
 
     Separate from the segment above it because a verdict and a placement are
@@ -381,16 +386,16 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
     )
     if landed is not None:
         return landed
-    directory = asks_before_removing_a_directory(
+    removal = asks_before_removing_a_directory(
         words, context["path_roles"], context["directory_targets"]
     )
-    if directory is not None:
-        return directory
+    if removal is not None:
+        return removal
     if executable == "xargs":
         payload = xargs_payload(words)
         if not payload:
             return unjudged("xargs payload is not classified")
-        return decide_shell_segment(payload, context)
+        return decide_shell_segment(payload, context, directory)
     if executable == "curl":
         return decide_curl_words(
             words,
@@ -401,7 +406,7 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
     if executable == "gh" and len(words) > 1 and words[1] == "api":
         return decide_gh_api_words(words)
     if executable == "find":
-        return decide_find_words(words, context)
+        return decide_find_words(words, context, directory)
     if executable == "sed":
         return decide_sed_words(words, sed_facts(context))
     if executable in ("awk", "gawk", "mawk"):
@@ -424,8 +429,17 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
     return decide_command_rows(words, context["rows"], write_facts(context))
 
 
-def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDecision:
+def decide_shell_segment(
+    segment: list[str], context: ShellContext, directory: str | None = ""
+) -> KernelDecision:
     """Classify one parsed shell segment, letting a help probe soften the effect.
+
+    ``directory`` is where the shell stands to run it, and every path word the
+    segment names is rewritten from it before a rule is matched against one --
+    so a declared role anchored at the repository top is asked about the file
+    the command would reach rather than about that spelling at the launch
+    directory. A payload this recurses into runs where its carrier does, so it
+    is classified in the same one.
 
     Printing usage says nothing about *where* the command has to run, and the
     two are separate axes — so the probe replaces the verdict and the walk
@@ -456,6 +470,12 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
         )
     if not words:
         return unjudged("shell segment has no command")
+    placed = placed_words(words, directory, context["rows"])
+    if placed is None:
+        return unjudged(
+            "this segment names a file from a directory a `cd` left unreadable"
+        ).advising("Spell the path in full, or run the command in its own call.")
+    words = placed
     if SUBSTITUTION_SENTINEL in words[0]:
         return unjudged("a command substitution in command position is not classified")
     if any(
@@ -464,7 +484,7 @@ def decide_shell_segment(segment: list[str], context: ShellContext) -> KernelDec
         return unjudged(
             "a command substitution result could become a guarded flag"
         ).advising("Run it in its own call and splice the literal output.")
-    decision = decide_segment_words(words, context)
+    decision = decide_segment_words(words, context, directory)
     if is_help_probe(words[1:]):
         return decision.revised(
             effect="allow",
@@ -705,7 +725,7 @@ def decide_simple(
             return Walked(decisions=[extended], bindings=bindings, stopped=True)
         return Walked(decisions=[], bindings=extended, stopped=False)
     return Walked(
-        decisions=[decide_shell_segment(texts, context)],
+        decisions=[decide_shell_segment(texts, context, command["directory"])],
         bindings=bindings,
         stopped=False,
     )
