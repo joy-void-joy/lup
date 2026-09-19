@@ -84,6 +84,5 @@ def delegate(
         locked=locked,
         delivered=True,
         woken=roused.reached if roused else False,
-        instruction=roused.instruction if roused else "",
         note=roused.reason if roused else "",
     )

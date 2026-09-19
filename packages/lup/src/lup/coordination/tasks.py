@@ -170,8 +170,5 @@ class Delegation(BaseModel, frozen=True):
     woken: bool = False
     """Whether anything has actually made the holder look."""
 
-    instruction: str = ""
-    """What the caller must still do to wake it, empty where nothing is left."""
-
     note: str = ""
     """Why nobody was woken, for a target that is parked or unreachable."""

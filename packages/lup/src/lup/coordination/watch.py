@@ -98,8 +98,6 @@ class Nudged(WatchEvent, frozen=True):
     def line(self) -> str:
         if self.outcome.reached:
             return f"{self.address} woken"
-        if self.outcome.instruction:
-            return f"{self.address} not woken — {self.outcome.instruction}"
         return f"{self.address} not woken — {self.outcome.reason}"
 
 

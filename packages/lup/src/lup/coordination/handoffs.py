@@ -208,7 +208,6 @@ class Handover(BaseModel, frozen=True):
 
     delivered: bool = False
     woken: bool = False
-    instruction: str = ""
     note: str = ""
 
 
@@ -310,6 +309,5 @@ def hand_off(
         contested=disputed,
         delivered=True,
         woken=roused.reached if roused else False,
-        instruction=roused.instruction if roused else "",
         note=roused.reason if roused else "",
     )
