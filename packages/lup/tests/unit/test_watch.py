@@ -117,7 +117,7 @@ def test_nudging_wakes_a_peer_through_its_inbox_and_says_so_for_one_without(
         worktree=str(tmp_path / "claude"),
         wake=WakePath(runtime="claude", handle=str(inbox)),
     )
-    peers.names.rename(claude, "claude")
+    peers.rename(claude, "claude")
     silent = mint_member_id()
     peers.join(silent, tmp_path / "silent", cli_name="silent")
     watcher = Watcher(peers, nudge=True)

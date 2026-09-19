@@ -14,9 +14,9 @@ import pytest
 from pydantic import BaseModel
 
 from lup.coordination.cohort import ActorCohort, ActorRecipe, CohortJournal
-from lup.coordination.mail import EVERYONE
+
 from lup.coordination.refs import ActorRef
-from lup.coordination.bare.store import ROSTER_FILE
+
 from lup.coordination.roster import Delivery, Roster
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.capabilities import Session, Turn
@@ -124,12 +124,19 @@ def test_an_address_nobody_spawned_reaches_nobody(tmp_path: Path) -> None:
     assert cohort.reaching("") is None
 
 
-def test_a_broadcast_token_names_no_single_agent(tmp_path: Path) -> None:
-    """`*` is every agent, so resolving it to one would deliver to the wrong one."""
+def test_an_address_nobody_answers_to_reaches_nobody(tmp_path: Path) -> None:
+    """A spelling no member holds resolves to none, rather than to the first.
+
+    There is no token meaning every agent any more. A caller that means all of
+    them says so with a verb — `notify` for a fact that stays true, and
+    `redirect_all` for a stop — and the population is asked at the send rather
+    than matched at each read.
+    """
     cohort = ActorCohort(tmp_path)
     cohort.spawn(cohort.actor("analyst"), "position the claim")
 
-    assert cohort.reaching(EVERYONE) is None
+    assert cohort.reaching("*") is None
+    assert cohort.reaching("") is None
 
 
 def test_two_spawns_of_one_kind_are_told_apart(tmp_path: Path) -> None:
@@ -265,21 +272,57 @@ def test_the_user_is_an_address_its_agents_can_reach(tmp_path: Path) -> None:
     assert cohort.outstanding(sibling) == 0
 
 
-def test_a_broadcast_reaches_every_member_including_a_later_one(
+def test_a_notice_is_state_and_reaches_a_member_spawned_after_it(
     tmp_path: Path,
 ) -> None:
-    """One record rather than a fan-out, so a spawn made afterwards still reads it."""
+    """Two effects, because a statement has two audiences.
+
+    Whoever is working is sent it, because a fact worth stating is worth
+    hearing before the turn they are in ends; and it stands as a notice, which
+    is read at the head of every turn and never consumed, so a member spawned
+    afterwards reads it at its first. The member that arrives later gets only
+    the notice, and needs only that: the message was the interruption, and
+    there was nothing to interrupt.
+    """
     cohort = ActorCohort(tmp_path)
     early = cohort.actor("analyst")
     cohort.spawn(early, "position the claim")
 
-    cohort.say_all("the base moved under all of you")
+    cohort.notify("the base moved under all of you")
 
     late = cohort.actor("refuter")
     cohort.spawn(late, "attack it")
 
     assert cohort.outstanding(early) == 1
-    assert cohort.outstanding(late) == 1
+    assert cohort.outstanding(late) == 0
+    assert [notice.text for notice in cohort.mail.standing()] == [
+        "the base moved under all of you"
+    ]
+
+
+def test_a_redirect_stops_whoever_is_working_and_nobody_else(
+    tmp_path: Path,
+) -> None:
+    """A redirect denies a tool call, so a member with no call has none to deny.
+
+    One spawned afterwards was spawned *knowing* about the stop, and refusing
+    its first call with somebody else's reason is the bug the fan-out at send
+    closes. Where the point is a standing fact rather than a stop, that is a
+    notice.
+    """
+    cohort = ActorCohort(tmp_path)
+    early = cohort.actor("analyst")
+    cohort.spawn(early, "position the claim")
+
+    cohort.redirect_all("stop, that design was rejected")
+
+    late = cohort.actor("refuter")
+    cohort.spawn(late, "attack it")
+
+    assert cohort.outstanding(early) == 1
+    assert cohort.outstanding(late) == 0
+    assert cohort.mail.standing() == []
+    assert all(message.redirect for message in cohort.mail.waiting(early).messages)
 
 
 @pytest.mark.asyncio
@@ -409,23 +452,25 @@ async def test_a_round_records_one_start_however_often_it_is_announced(
 ) -> None:
     """Detaching work and opening its first round announce the same start.
 
-    Two records for one round leave a reader measuring how long that round
-    took with no way to say which start it ran from, so the roster keeps the
-    one and the fold stays a fold.
+    One file per member, so the second announcement finds the first standing
+    and leaves it: the arrival a reader measures a round from is the one that
+    detached the work, rather than whichever of the two wrote last.
     """
     cohort = ActorCohort(tmp_path)
     actor = cohort.actor("worker", "a-concern")
     session = HeldSession(summary="done")
 
     cohort.spawn(actor, "resolve it")
+    [detached] = [
+        member for member in cohort.roster.live() if member.actor.id == actor.id
+    ]
     await cohort.round(
         actor, turn_request(TurnInput(text="resolve it"), Finding), recipe_for(session)
     )
 
-    starts = [
-        record for record in cohort.roster.stream.read_all() if record.type == "spawned"
-    ]
-    assert len(starts) == 1
+    started = [member for member in cohort.roster.live() if member.actor.id == actor.id]
+    assert len(started) == 1
+    assert started[0].arrived == detached.arrived
 
 
 @pytest.mark.asyncio
@@ -603,7 +648,7 @@ def test_a_peer_that_joins_is_a_member_nobody_spawned(tmp_path: Path) -> None:
     inferred has to be carried: who answers for it still being there, and what
     reaches it.
     """
-    roster = Roster(tmp_path / ROSTER_FILE)
+    roster = Roster(tmp_path)
     peer = ActorRef(kind="session", id="walked-in")
 
     roster.joined(peer, task="reading the ledger", liveness="launcher")
@@ -617,7 +662,7 @@ def test_a_peer_that_joins_is_a_member_nobody_spawned(tmp_path: Path) -> None:
 
 def test_a_peer_rejoining_after_a_restart_is_the_same_member(tmp_path: Path) -> None:
     """Announcing itself twice must not offer an operator two of one session."""
-    roster = Roster(tmp_path / ROSTER_FILE)
+    roster = Roster(tmp_path)
     peer = ActorRef(kind="session", id="restarted")
 
     roster.joined(peer, task="first")
@@ -628,7 +673,7 @@ def test_a_peer_rejoining_after_a_restart_is_the_same_member(tmp_path: Path) -> 
 
 def test_a_peer_leaves_by_the_same_record_a_spawn_does(tmp_path: Path) -> None:
     """How a member went is one question however it arrived."""
-    roster = Roster(tmp_path / ROSTER_FILE)
+    roster = Roster(tmp_path)
     peer = ActorRef(kind="session", id="departed")
     roster.joined(peer, delivery=Delivery.INBOX)
 
@@ -642,7 +687,7 @@ def test_a_peer_leaves_by_the_same_record_a_spawn_does(tmp_path: Path) -> None:
 
 def test_a_spawned_member_is_reachable_through_its_own_hook(tmp_path: Path) -> None:
     """The spawned default, which is the one mode that needs nothing beside it."""
-    roster = Roster(tmp_path / ROSTER_FILE)
+    roster = Roster(tmp_path)
     roster.spawned(ActorRef(kind="worker", id="opened"), task="work")
 
     [member] = roster.live()

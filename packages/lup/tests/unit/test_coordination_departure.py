@@ -9,7 +9,12 @@ rejoin as itself.
 
 from pathlib import Path
 
-from lup.coordination.bare.store import ROSTER_FILE, depart
+from lup.coordination.bare.store import (
+    DEPARTED_DIR,
+    MEMBERS_DIR,
+    depart,
+    session_actor,
+)
 from lup.coordination.identity import mint_member_id
 from lup.coordination.repository import RepositoryPeers
 
@@ -30,7 +35,7 @@ def running(peers: RepositoryPeers, member: str) -> bool:
 def test_a_departure_ends_the_row_the_typed_reader_folds(tmp_path: Path) -> None:
     peers, member = joined(tmp_path, "mine")
 
-    assert depart(peers.root, member)
+    assert depart(peers.root, session_actor(member))
 
     assert not running(peers, member)
 
@@ -38,20 +43,21 @@ def test_a_departure_ends_the_row_the_typed_reader_folds(tmp_path: Path) -> None
 def test_a_session_that_never_joined_leaves_nothing(tmp_path: Path) -> None:
     """A finish for nobody is a line every fold ignores and a store should not carry."""
     peers, _ = joined(tmp_path, "other")
-    before = (peers.root / ROSTER_FILE).read_text("utf-8")
+    before = sorted(path.name for path in (peers.root / MEMBERS_DIR).iterdir())
 
-    assert not depart(peers.root, "nobody")
-    assert not depart(peers.root, "")
+    assert not depart(peers.root, session_actor("nobody"))
+    assert not depart(peers.root, session_actor(""))
 
-    assert (peers.root / ROSTER_FILE).read_text("utf-8") == before
+    assert sorted(path.name for path in (peers.root / MEMBERS_DIR).iterdir()) == before
+    assert not (peers.root / DEPARTED_DIR).exists()
 
 
 def test_a_departed_session_leaves_once_and_rejoins_as_itself(tmp_path: Path) -> None:
     """Idempotent on the way out, and no obstacle on the way back in."""
     peers, member = joined(tmp_path, "mine")
 
-    assert depart(peers.root, member)
-    assert not depart(peers.root, member)
+    assert depart(peers.root, session_actor(member))
+    assert not depart(peers.root, session_actor(member))
 
     peers.join(member, tmp_path / "tree", cli_name="mine")
 

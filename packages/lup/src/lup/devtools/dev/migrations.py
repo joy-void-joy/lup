@@ -815,6 +815,455 @@ DECLARED = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "Finished",
+            "Finished.actor",
+            "Finished.at",
+            "Finished.error",
+            "Finished.summary",
+            "Finished.type",
+            "HEARTBEATS_DIR",
+            "Held.digest",
+            "Look.conversation",
+            "NAMES_FILE",
+            "NameRecord",
+            "NameRecord.at",
+            "NameRecord.cli_name",
+            "NameRecord.id",
+            "Named.id",
+            "RESETS_DIR",
+            "ROSTER_FILE",
+            "RosterRecord",
+            "RosterRecord.actor",
+            "RosterRecord.at",
+            "RosterRecord.delivery",
+            "RosterRecord.description",
+            "RosterRecord.error",
+            "RosterRecord.liveness",
+            "RosterRecord.summary",
+            "RosterRecord.task",
+            "RosterRecord.type",
+            "RosterRecord.wake",
+            "RosterRecord.worktree",
+            "TOUCHES_FILE",
+            "TouchRecord",
+            "TouchRecord.actor",
+            "TouchRecord.at",
+            "TouchRecord.digest",
+            "TouchRecord.path",
+            "TouchRecord.prefix",
+            "TouchRecord.rivals",
+            "TouchRecord.type",
+            "Touched",
+            "Touched.actor",
+            "Touched.at",
+            "Touched.digest",
+            "Touched.path",
+            "Touched.rivals",
+            "Touched.type",
+            "appended",
+            "applied",
+            "arrival",
+            "beat_path",
+            "claims",
+            "heard",
+            "heard_at",
+            "name_holders",
+            "named",
+            "narrowed",
+            "reset",
+            "reset_at",
+            "reset_path",
+            "stamp",
+            "stamped_at",
+            "touch_prefix",
+            "touched_claim",
+            "vacant",
+        ],
+        reason=(
+            "the coordination store is one file per member and every relation "
+            "between members is derived at the read, so the four append-only "
+            "logs and the stamp directories beside them are gone: presence is "
+            "the member file's modification time, a claim is settled against "
+            "the path it names, a contest is two live members' files meeting, "
+            "and a name is on the member that answers to it"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read the store through `lup.coordination.bare.store`: "
+                    "`present(root)` for who is here, `held(root, live)` for "
+                    "what they hold, `called(root)` and `naming(root)` for "
+                    "what each is called, `member_of(root, id)` for one. "
+                    "Nothing folds a record any more, so `appended`, `applied`, "
+                    "`arrival`, `heard`, `named`, `narrowed` and the record "
+                    "types they folded (`RosterRecord`, `NameRecord`, "
+                    "`TouchRecord`, `Finished`, `Touched`) have no replacement "
+                    "and need none."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Write through the typed verbs, never a record: "
+                    "`Roster.joined`/`describes`/`finished`/`beat` for a "
+                    "member, and `store.revised(root, id, revise)` for a bare "
+                    "writer that must read before it writes. A member file is "
+                    "revised under its own lock, so a caller appending to a "
+                    "shared log now revises one member's file instead."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Presence is the file's modification time. `beat(root, id)` "
+                    "touches it and creates nothing, so `heard_at`, `beat_path`, "
+                    "`stamp`, `stamped_at` and `HEARTBEATS_DIR` are gone; read "
+                    "`heard` off the member instead, which `present` fills in "
+                    "from the stat it already takes."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "A rewind clears the member's own `description` and records "
+                    "the conversation it now belongs to, in one revision, so "
+                    "`reset`, `reset_at`, `reset_path` and `RESETS_DIR` are "
+                    "gone and so is `Look.conversation` — which conversation a "
+                    "row describes is on the row. The prompt fold does it; a "
+                    "caller doing it itself writes `conversation` and an empty "
+                    "`description` through `store.revised`."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "A claim carries the modification time of the path it was "
+                    "taken over rather than a digest of it, so `Held.digest` "
+                    "and `claims(root)` are gone: `standing(claim)` asks the "
+                    "filesystem, and `held(root, live)` reports only what still "
+                    "holds. `vacant`, `touch_prefix` and `touched_claim` have "
+                    "no replacement — there is nothing to vacate and no record "
+                    "to build."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "MemberNamed",
+            "MemberNamed.at",
+            "MemberNamed.cli_name",
+            "MemberNamed.id",
+            "MemberNames",
+            "MemberNames.__init__",
+            "MemberNames.called",
+            "MemberNames.current",
+            "MemberNames.latest",
+            "MemberNames.named",
+            "MemberNames.rename",
+            "MemberNames.resolve",
+            "NAME_ADAPTER",
+        ],
+        reason=(
+            "a name is on the member that answers to it, with the names it "
+            "answered to before beside it, because the two were only ever read "
+            "together and a separate log made a rename an event about a member "
+            "rather than the member changing"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call `RepositoryPeers.rename(member_id, cli_name)` for "
+                    "`MemberNames.rename`, `.called(member_id)` for "
+                    "`.current`, `.answering(cli_name)` for `.resolve`, and "
+                    "`.names_taken(except_id)` for `.called` — which now "
+                    "answers with the names live sessions hold, keyed by name. "
+                    "`store.naming(root)` is every claim any member ever made "
+                    "on a name, oldest first, for a caller that wants the "
+                    "history `MemberNames.named` gave."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "A rename takes the store's `ROSTER_LOCK`, because a name "
+                    "is the one decision made against every other member's "
+                    "file. A caller writing one itself takes that lock around "
+                    "reading what is taken and writing what it chose."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "Claim.digest",
+            "Claim.vacant",
+            "PathContested",
+            "PathContested.digest",
+            "PathContested.rivals",
+            "PathContested.type",
+            "PathTouched",
+            "PathTouched.digest",
+            "PathTouched.type",
+            "PathVacated",
+            "PathVacated.prefix",
+            "PathVacated.type",
+            "PrefixLocked",
+            "PrefixLocked.type",
+            "PrefixReleased",
+            "PrefixReleased.type",
+            "TOUCH_ADAPTER",
+            "TouchEntry",
+            "TouchRecord",
+            "TouchRecord.actor",
+            "TouchRecord.at",
+            "TouchRecord.path",
+            "Touches",
+            "Touches.__init__",
+            "Touches.claims",
+            "Touches.contested",
+            "Touches.covering",
+            "Touches.held",
+            "Touches.locked",
+            "Touches.record",
+            "Touches.released",
+            "Touches.touched",
+            "Touches.vacated",
+        ],
+        reason=(
+            "a claim is evidence rather than an assertion: it records the "
+            "modification time of the path it was taken over, so a reader "
+            "settles it with a stat instead of waiting for a record to retire "
+            "it, and a contest is derived from two members' files rather than "
+            "guessed at by whichever of them wrote"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call `RepositoryPeers.touched(member_id, *paths)` for "
+                    "`Touches.touched`, `.lock`/`.release` for "
+                    "`Touches.locked`/`.released`, and `.held()`/`.holding()` "
+                    "for `Touches.held`/`.covering`. Each writes the claim onto "
+                    "that member's own file under its own lock; there is no "
+                    "`Touches` to open and no record to append."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Nothing records a contest: `Touches.contested` and "
+                    "`PathContested` are gone, and a reader derives it from two "
+                    "live members claiming one path. A caller that named rivals "
+                    "records its own claim and lets the reader meet the other."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Nothing ends a claim either: `Touches.vacated`, "
+                    "`PathVacated`, `Claim.vacant` and `Claim.digest` are gone, "
+                    "because a path that is no longer there — or that somebody "
+                    "has written since — answers for itself at the read."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "ActorCohort.say_all",
+            "ActorDelivery.through",
+            "ActorMessage.run_id",
+            "DELIVERY_DIR",
+            "EVERYONE",
+            "MESSAGE_FILE",
+            "QuestionMailbox.delivered",
+            "QuestionMailbox.send",
+            "QuestionMailbox.waiting",
+        ],
+        reason=(
+            "mail is one file per message in one member's inbox, consumed by "
+            "deletion, and the token meaning everyone is resolved by the sender "
+            "rather than matched by every reader — which is what forced a "
+            "delivery position per member, and what made a redirect stop "
+            "workers spawned after the stop"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call `ActorMail.send(to, text, door=..., sender=..., "
+                    "in_reply_to=..., redirect=...)` with the member rather "
+                    "than building an `ActorMessage`: resolving what an "
+                    "operator typed is the roster's, through "
+                    "`ActorCohort.post(address, ...)` or "
+                    "`RepositoryPeers.send(address, ...)`. `ActorMessage` keeps "
+                    "every field but `run_id`, which is `sender`."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Commit a delivery with the delivery: "
+                    "`ActorMail.delivered(actor, delivery)` deletes exactly the "
+                    "files it was handed, so `ActorDelivery.through` and every "
+                    "offset beside it are gone, and a message posted between "
+                    "the read and the commit is no longer consumed unseen."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Say what you mean by everyone. `ActorCohort.notify(text)` "
+                    "posts a standing notice — state, read at the head of every "
+                    "turn, reaching members spawned afterwards — and also sends "
+                    "it to whoever is live; `ActorCohort.redirect_all(text)` "
+                    "stops whoever is working and nobody else. `EVERYONE` is "
+                    "gone from the store, so nothing matches it at read."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Reach a member's inbox through the cohort rather than the "
+                    "question mailbox: `QuestionMailbox.send`, `.waiting` and "
+                    "`.delivered` are gone, because addressing needs a roster "
+                    "the mailbox does not hold. `run_cohort(mailbox, run_id)` "
+                    "from `lup.resolver.mailbox` builds the cohort over that "
+                    "run's own mail and journal."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "ActorDescribed",
+            "ActorDescribed.description",
+            "ActorDescribed.type",
+            "ActorFinished",
+            "ActorFinished.error",
+            "ActorFinished.summary",
+            "ActorFinished.type",
+            "ActorJoined",
+            "ActorJoined.delivery",
+            "ActorJoined.liveness",
+            "ActorJoined.task",
+            "ActorJoined.type",
+            "ActorJoined.wake",
+            "ActorJoined.worktree",
+            "ActorSpawned",
+            "ActorSpawned.task",
+            "ActorSpawned.type",
+            "RosterRecord",
+            "RosterRecord.actor",
+            "RosterRecord.at",
+        ],
+        reason=(
+            "a member is a file rather than a fold of arrival, description and "
+            "departure records, so the records have nothing left to be: "
+            "announcing twice finds the first file standing and leaves it, "
+            "which is what the fold's idempotence was for"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Construct `Roster(directory)` rather than "
+                    "`Roster(root / ROSTER_FILE)`: it holds the store's "
+                    "directory now, not one file inside it. `joined`, "
+                    "`spawned`, `describes`, `finished` and `beat` keep their "
+                    "signatures; `Roster.stream` and the record types it "
+                    "carried are gone."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "RepositoryPeers.heard",
+            "RepositoryPeers.standing",
+            "RepositoryPeers.touches",
+            "RepositoryPeers.vacant",
+        ],
+        reason=(
+            "what a repository's peers answer is read from the files rather "
+            "than from a record beside them, so the methods that reconciled the "
+            "two have nothing to reconcile"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read `SpawnedActor.heard` for `RepositoryPeers.heard`, "
+                    "which the fold fills from the member file's own stat. "
+                    "`standing()` is gone, because there is no reading of the "
+                    "record apart from the pulse; `present()` is the one "
+                    "answer, and `lapsed()` is what a sweep would retire."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Use `RepositoryPeers.touched`/`lock`/`release`/`held` for "
+                    "what `.touches` gave, and drop `.vacant()`: a claim over a "
+                    "path that has gone stops standing at the read, so nothing "
+                    "collects them to end."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "Arrived.consumed",
+            "Arrived.messages",
+            "DELIVERY_DIR",
+            "EVERYONE",
+            "MESSAGE_FILE",
+            "Message.to_actor",
+            "committed_offset",
+            "framed",
+            "reaches",
+            "reader_name",
+        ],
+        reason=(
+            "the peer delivery reader stands on the shipped store package "
+            "instead of restating the format it reads, so it moved beside the "
+            "compiled dispatcher — the other file type-checked against the "
+            "generated tree it is shipped into — and the maildir left it with "
+            "no position to keep and no address to match"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import "
+                    "`lup.providers.claude.assets.peer_delivery_runtime` for "
+                    "`lup.providers.claude.peer_delivery_runtime`, and run the "
+                    "emitted copy under `hooks/runtime/` rather than the "
+                    "module: it names its own directory as a search path and "
+                    "imports `coordination.mail` as a sibling, which resolves "
+                    "only there."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "The inbox is the position, so `committed_offset`, "
+                    "`framed`, `Arrived` and `reader_name` are gone, and "
+                    "`reaches` with them — one directory per member means there "
+                    "is no address left to match. `deliver(root, member_id)` "
+                    "keeps its signature and its fail-open contract."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "stale_window",
+        ],
+        reason=(
+            "a claim window is this session's own before-and-after and nobody "
+            "else's reader, because a change it cannot attribute is one each "
+            "session records for itself and a reader derives the contest from"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "`close_claim_window(root, store, windows_dir, mine)` "
+                    'answers `{"paths": [...]}` and takes no '
+                    "`stale_after_seconds`: it no longer reads anybody else's "
+                    "window, so `stale_window` has nothing to judge. "
+                    "`store.record_claims(root, mine, paths)` takes the three "
+                    "arguments that are left."
+                ),
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

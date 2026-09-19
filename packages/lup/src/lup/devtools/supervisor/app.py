@@ -20,7 +20,6 @@ from fastapi.responses import StreamingResponse
 from lup.providers.harness import AdapterName
 from lup.channels.models import utc_now
 from lup.resolver.journal import Journal, JournalEntry
-from lup.coordination.mail import ActorMessage
 from lup.coordination.mailbox import (
     AnswerDoor,
     AnswerOffer,
@@ -28,7 +27,7 @@ from lup.coordination.mailbox import (
     ParkRequest,
 )
 from lup.coordination.questions import QuestionAnswer
-from lup.resolver.mailbox import QuestionMailbox
+from lup.resolver.mailbox import QuestionMailbox, run_cohort
 from lup.resolver.state import ResolverStateRepository, StateCorruptionError
 from lup.types import StringMap
 from lup.web.serve import bundle_app, serve_local_page
@@ -39,6 +38,7 @@ from lup.devtools.supervisor.projection import (
     ActorIndex,
     AnswerSubmission,
     MessageSubmission,
+    NoticeSubmission,
     ParkSubmission,
     RunIndex,
     RunSummary,
@@ -259,24 +259,74 @@ def create_supervisor(
     async def send_to_actor(
         selected: str, submission: MessageSubmission
     ) -> SupervisorState:
-        """Say something to one actor, or to all of them, without deciding.
+        """Say something to one actor, or stop all of them, without deciding.
 
         A message settles nothing, so this can never park a run — which is
-        the whole reason messages are a stream and decisions are slots. A
+        the whole reason messages ride an inbox and decisions ride slots. A
         redirect settles nothing either: it refuses one tool call and states
         why, which retargets the actor without ending the turn it is in.
+
+        Through the run's own cohort, because an address is a member and only
+        a population can say which. A redirect naming nobody stops whoever is
+        working, and a message naming nobody is refused: mail is addressed and
+        consumed, so there is no honest reading of it for a member that does
+        not exist yet.
         """
-        run_mailbox(state_root, selected).send(
-            ActorMessage(
-                run_id=selected,
-                to_actor=submission.to_actor,
-                text=submission.text,
+        cohort = run_cohort(run_mailbox(state_root, selected), selected)
+        match (submission.to_actor, submission.redirect):
+            case ("", False):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "a message needs an actor to address; to state "
+                        "something for the whole run, post a notice"
+                    ),
+                )
+            case ("", True):
+                cohort.redirect_all(submission.text, door=AnswerDoor.PAGE)
+            case (address, redirect) if not cohort.post(
+                address,
+                submission.text,
+                redirect=redirect,
                 door=AnswerDoor.PAGE,
-                sent_at=utc_now(),
                 in_reply_to=submission.in_reply_to,
-                redirect=submission.redirect,
-            )
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{address!r} names no actor this run has recorded, "
+                        "so nothing was told anything"
+                    ),
+                )
+        return read_run(state_root, selected, adapter)
+
+    @supervisor.post("/api/runs/{selected}/notices")
+    async def post_notice(
+        selected: str, submission: NoticeSubmission
+    ) -> SupervisorState:
+        """State something true for every actor, now and for whoever starts next.
+
+        A notice is state rather than mail: nothing consumes it, so it is
+        read at the head of every turn for as long as it stands, including
+        the first turn of an actor spawned an hour from now. Whoever is
+        working is also sent it as a message, because a fact worth stating is
+        worth hearing before the turn they are in ends.
+        """
+        run_cohort(run_mailbox(state_root, selected), selected).notify(
+            submission.text, door=AnswerDoor.PAGE
         )
+        return read_run(state_root, selected, adapter)
+
+    @supervisor.delete("/api/runs/{selected}/notices/{notice_id}")
+    async def retract_notice(selected: str, notice_id: str) -> SupervisorState:
+        """Take one standing fact down, so no later turn reads it."""
+        if not run_cohort(run_mailbox(state_root, selected), selected).mail.retract(
+            notice_id
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail=f"{notice_id!r} names nothing standing over {selected}",
+            )
         return read_run(state_root, selected, adapter)
 
     @supervisor.post("/api/runs/{selected}/park")

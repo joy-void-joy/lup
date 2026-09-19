@@ -855,16 +855,16 @@ def claim_window_closed(cwd: Path | None) -> None:
         cwd, PEER_POLICY["store"], PEER_POLICY["windows_dir"], mine
     )
     if directory is not None:
-        store.record_claims(directory, mine, closed["paths"], closed["rivals"])
+        store.record_claims(directory, mine, closed["paths"])
 
 
 def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
     """Attribute a change to the exact file the call named.
 
-    The tier that needs no comparison and admits no contest: the call said
-    which file, so the claim it leaves is the one record another session can
-    act on without qualification, and it settles a path an earlier comparison
-    could only guess at.
+    The tier that needs no comparison: the call said which file, so what this
+    leaves on the session's own member file is evidence of the state that
+    session left the path in, rather than of what a before-and-after could
+    narrow the writer down to.
     """
     directory = peer_directory(cwd)
     if PEER_POLICY is None or directory is None or not path_text:
@@ -873,7 +873,6 @@ def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
         directory,
         declared_identity(PEER_POLICY["member_env"]),
         [str(Path(path_text).resolve())],
-        [],
     )
 
 

@@ -64,12 +64,11 @@ def test_a_touch_is_found_by_the_path_a_write_would_land_on(tmp_path: Path) -> N
     peers = joined(work, tmp_path / "hooks")
     member = mint_member_id()
     peers.join(member, work, cli_name="feat-rewriting")
-    peers.touches.touched(
-        peers.address("feat-rewriting") or peers.join(member, work),
-        work / "src" / "a.py",
-        "abc",
-    )
-    covering = peers.holding(work / "src" / "a.py")
+    changed = work / "src" / "a.py"
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("value = 1\n", encoding="utf-8")
+    peers.touched(member, changed)
+    covering = peers.holding(changed)
     assert [holder.id for claim in covering for holder in claim.holders] == [member]
 
 
@@ -78,6 +77,7 @@ def test_a_lock_covers_everything_beneath_its_prefix(tmp_path: Path) -> None:
     peers = joined(work, tmp_path / "hooks")
     member = mint_member_id()
     peers.join(member, work, cli_name="feat-rewriting")
+    (work / "src").mkdir(parents=True, exist_ok=True)
     peers.lock(member, work / "src")
     assert peers.holding(work / "src" / "deep" / "a.py")
     assert not peers.holding(work / "other" / "a.py")
@@ -90,6 +90,7 @@ def test_a_release_by_somebody_who_never_held_it_says_nothing(tmp_path: Path) ->
     holder, stranger = mint_member_id(), mint_member_id()
     peers.join(holder, work, cli_name="feat-rewriting")
     peers.join(stranger, work, cli_name="feat-transducer")
+    (work / "src").mkdir(parents=True, exist_ok=True)
     peers.lock(holder, work / "src")
     peers.release(stranger, work / "src")
     assert peers.holding(work / "src" / "a.py")
@@ -103,6 +104,7 @@ def test_a_claim_expires_with_the_session_holding_it(tmp_path: Path) -> None:
     peers = joined(work, tmp_path / "hooks")
     member = mint_member_id()
     peers.join(member, work, cli_name="feat-rewriting")
+    (work / "src").mkdir(parents=True, exist_ok=True)
     peers.lock(member, work / "src")
     assert peers.holding(work / "src" / "a.py")
     peers.leave(member, summary="landed")
@@ -205,13 +207,15 @@ def test_a_claim_the_sweep_vacated_no_longer_asks(tmp_path: Path) -> None:
     holder, mine = mint_member_id(), mint_member_id()
     peers.join(holder, work, cli_name="feat-rewriting")
     peers.join(mine, work, cli_name="feat-transducer")
-    peers.touches.touched(peers.join(holder, work), work / "a.py", "abc")
+    peers.touched(holder, work / "a.py")
     asked = decide(edit_payload(work / "a.py", "value = 1", "value = 2", work), mine)
     assert isinstance(asked["hookSpecificOutput"], dict)
     assert asked["hookSpecificOutput"]["permissionDecision"] == "ask"
 
+    # The claim ends with the path, and the file written in its place is
+    # somebody else's state rather than this holder's: nothing is swept, and
+    # the reader asks the filesystem both times.
     (work / "a.py").unlink()
-    peers.sweep()
     (work / "a.py").write_text("value = 1\n", encoding="utf-8")
 
     decision = decide(edit_payload(work / "a.py", "value = 1", "value = 2", work), mine)

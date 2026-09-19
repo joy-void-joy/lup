@@ -1088,7 +1088,7 @@
     },
     "MessageOutstandingEvent": {
       "additionalProperties": false,
-      "description": "A message still queued for an actor whose session is being closed.\n\nRecorded because the sender was told the message was sent, and the\nstream alone cannot say whether anyone read it. On a park this is a\nmessage that will land at the head of the resumed turn; on a run that\nended it is one that reached nobody, and a redirect nobody read is the\nfailure of an operation somebody performed to stop something.",
+      "description": "A message still in a member's inbox as its session is being closed.\n\nRecorded because the sender was told the message was sent, and the inbox\nalone cannot say whether anyone read it. On a park this is a message that\nwill land at the head of the resumed turn; on a run that ended it is one\nthat reached nobody, and a redirect nobody read is the failure of an\noperation somebody performed to stop something.",
       "properties": {
         "door": {
           "title": "Door",
@@ -1121,7 +1121,7 @@
     },
     "MessagePostedEvent": {
       "additionalProperties": false,
-      "description": "A door volunteered something to an actor, or an actor replied.\n\nAn intervention belongs in the record beside what it interrupted. A\nreader scrolling one actor's trace sees the moment someone redirected\nit, in order, against what it was doing \u2014 which is the difference\nbetween a trace and an audit filed somewhere else.",
+      "description": "A door volunteered something to a member, or a member replied.\n\nAn intervention belongs in the record beside what it interrupted. A\nreader scrolling one member's trace sees the moment someone redirected\nit, in order, against what it was doing \u2014 which is the difference between\na trace and an audit filed somewhere else.",
       "properties": {
         "door": {
           "title": "Door",
@@ -1187,8 +1187,8 @@
           "type": "string"
         },
         "to_actor": {
-          "default": "*",
-          "description": "Actor label to address; the default reaches every actor in the run, including ones not yet started",
+          "default": "",
+          "description": "Actor label to address. Required to say something; left empty on a redirect it stops every actor that is working",
           "title": "To Actor",
           "type": "string"
         }

@@ -12,11 +12,11 @@ has to be cheap enough to run before *every* tool call, because the tools a
 session uses while it is only reading are the ones the policy matcher does not
 name.
 
-Two artifacts answer that. A shell guard compares the mailbox's length against
-the position this member has been delivered to and exits without starting an
-interpreter where they agree, which is almost always. Only when the mailbox
-has grown does it hand over to
-:mod:`lup.coordination.delivery_runtime`, shipped verbatim beside it.
+Two artifacts answer that. A shell guard looks for a file in this member's
+inbox and exits without starting an interpreter where there is none, which is
+almost always. Only where something is waiting does it hand over to
+:mod:`lup.providers.claude.assets.peer_delivery_runtime`, shipped verbatim
+beside the coordination package it reads the inbox through.
 
 Every name the guard needs is interpolated from the definition that owns it
 rather than written twice: a store directory renamed in one place moves the
@@ -26,8 +26,12 @@ guard with it, instead of leaving a script that reads a path nobody writes.
 from importlib import resources
 from pathlib import Path
 
-from lup.coordination.bare.store import COORDINATION_DIR, MEMBER_KIND, STORE_DIR
-from lup.coordination.mail import DELIVERY_DIR, MESSAGE_FILE
+from lup.coordination.bare.store import (
+    COORDINATION_DIR,
+    INBOX_DIR,
+    MEMBER_KIND,
+    STORE_DIR,
+)
 from lup.formats.banner import (
     REGENERATE_COMMAND,
     VERBATIM_COPY,
@@ -37,7 +41,7 @@ from lup.harness.models import Artifact
 
 RUNTIME_MODULE = "coordination_delivery.py"
 GUARD_SCRIPT = "coordination_delivery.sh"
-RUNTIME_ORIGIN = "lup.providers.claude.peer_delivery_runtime"
+RUNTIME_ORIGIN = "lup.providers.claude.assets.peer_delivery_runtime"
 """The two files a plugin carries for delivery, and where the reader comes from.
 
 Beside the policy dispatcher's own pair rather than inside it, because they
@@ -50,20 +54,28 @@ def delivery_runtime_source() -> str:
     """The reader, read from the module that owns it rather than restated here."""
     return (
         resources.files("lup.providers.claude")
-        .joinpath("peer_delivery_runtime.py")
+        .joinpath("assets/peer_delivery_runtime.py")
         .read_text("utf-8")
     )
 
 
 def guard_body() -> str:
-    """A mailbox-length check that answers "nothing waiting" without Python.
+    """An inbox listing that answers "nothing waiting" without starting Python.
 
-    Append-only is what makes length the right question: the stream only
-    grows, so a delivered position that already covers its whole length means
-    nothing has arrived since. Length rather than a modification time, because
-    two writes inside one filesystem tick leave the times equal and a guard
-    reading them would skip mail that is really there — a silent loss, where
-    the opposite mistake costs one interpreter start.
+    A maildir is its own position: a message is one file, put there by the
+    sender and deleted by this member once it has been handed over, so what is
+    waiting is exactly what is in the directory. There is nothing to compare
+    against a cursor and no way for two writes inside one filesystem tick to
+    hide each other, which is what a length check had to be careful about.
+
+    The directory is named for the conversation this session is on the roster
+    as, which is the member kind and the id together — an id alone is unique
+    only within a kind, and the guard has to look where the sender wrote.
+
+    The glob is expanded into the positional parameters and its first word
+    tested, because an unmatched glob in a POSIX shell stays literal: `[ -e ]`
+    on that word is false, which is the answer wanted, and no `ls` is started
+    to find it out.
 
     Every failure exits zero. This runs before every tool call, so a guard
     that cannot tell must let the call through: the cost of being wrong that
@@ -79,17 +91,10 @@ case "$shared" in
     *) shared="$PWD/$shared" ;;
 esac
 root="$shared/{STORE_DIR}/{COORDINATION_DIR}"
-mailbox="$root/{MESSAGE_FILE}"
-[ -f "$mailbox" ] || exit 0
-size=$(wc -c < "$mailbox" 2>/dev/null | tr -d ' ') || exit 0
-[ -n "$size" ] || exit 0
-cursor="$root/{DELIVERY_DIR}/{MEMBER_KIND}-$LUP_COORDINATION_MEMBER.json"
-delivered=0
-if [ -f "$cursor" ]; then
-    delivered=$(tr -dc '0-9' < "$cursor" 2>/dev/null)
-    [ -n "$delivered" ] || delivered=0
-fi
-[ "$size" -gt "$delivered" ] || exit 0
+inbox="$root/{INBOX_DIR}/{MEMBER_KIND}-$LUP_COORDINATION_MEMBER"
+[ -d "$inbox" ] || exit 0
+set -- "$inbox"/*.json
+[ -e "$1" ] || exit 0
 exec python3 "${{0%/*}}/../runtime/{RUNTIME_MODULE}" "$root" "$LUP_COORDINATION_MEMBER"
 """
 

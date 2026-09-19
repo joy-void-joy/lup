@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "c89ec613ff1a86a3cf82f966f2e79e281190d8e2b5087270f962c770d6728114",
+  "source_digest": "bcc6c888bba19b03280de9bb19bf2c03544b432f7ca985b2fae84149ee7fd35e",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -93,21 +93,28 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/coordination/changes.py",
       "category": "generated",
-      "sha256": "ff5bc9cbe365323a3daa603fd939584f607e68556fb553fc8cf481fca36c8c04",
+      "sha256": "18f56224f1d7a5c48b92451103df92e4eb84aaaa393cea972090f70577df7bb0",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/coordination/departure.py",
       "category": "generated",
-      "sha256": "6bbe16e1b410d906f3fb56753697b74892a3547590eb42d6c4566da4bcdcac62",
+      "sha256": "59cb72ee8f63387da2a4c1edf1b2ea609d809758871062bd14ce00db3d9055e0",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/hooks/runtime/coordination/mail.py",
+      "category": "generated",
+      "sha256": "b33719767af2bfe6a374660b3eed5b068f4ab68141372dbfd710b14a55cef983",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/coordination/store.py",
       "category": "generated",
-      "sha256": "eaac74117d2699582edf7d2b86d5162e9622931f7a9d2828086ccb99128a6409",
+      "sha256": "4ba8fae21a604fb2a34faab3d95cb17cb2f9676f8018ac00d7b7126797cdbef5",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -324,21 +331,21 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/coordination_changes.sh",
       "category": "generated",
-      "sha256": "95d9704f3bb69f3c5d02a6d4a94d8c209b38b13b0385510624c76b0f70faa2c3",
+      "sha256": "695c975d6c41e3e8f61295d93d8fa3b80ebb30e96957c4e3ddd26fdd28cf14f2",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/coordination_departure.sh",
       "category": "generated",
-      "sha256": "ad02f5a69eef0222dcbc0d38e1df1925dc9d27d2b20c3247a9542a8c2b755022",
+      "sha256": "f724c426a5eda511f1b9d7474ca7a51cbfe8ecbcafb79a22f3087988b9886e82",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "8d9cfecfe5f5ecabebfc382df22b2624cad8f9762bbb19ce2438ab62f42582ec",
+      "sha256": "9b12be65301a15a42eeab3087f4c60c138054e0e559070462d5f543191113cf7",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -632,7 +639,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "e6ea9b631eb5572b26fe9ec77787391e41797994fcc7dd7d81b182515b3dc855",
+      "sha256": "7954430ca8b893ad1634e17f7884bc4c9d77a50d878dc0f8dd4dbb4b8e999864",
       "semantic_id": "harness.guidance",
       "executable": false
     }

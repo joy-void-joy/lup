@@ -33,6 +33,9 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `coordination leave` | Record that a session has stopped, so nothing addresses it again. |
 | `coordination sweep` | Retire every session whose pulse has stopped, so nothing addresses it again. |
 | `coordination send` | Send one message to a peer, and say what will carry it there. |
+| `coordination notice` | State something true for every session, now and for whoever starts next. |
+| `coordination notices` | Everything standing over this repository, with the id that takes one down. |
+| `coordination unnotice` | Take one standing fact down, so no later prompt reads it. |
 | `coordination inbox` | Read what is queued for one session, consuming it only when asked. |
 | `coordination holdings` | List what each live session in this repository is holding. |
 | `coordination lock` | Take everything beneath a prefix, before having touched any of it. |
@@ -207,7 +210,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `resolve questions` | List a run&#x27;s questions and what each one has been answered. |
 | `resolve answer` | Offer an answer to one or more of a run&#x27;s questions. |
 | `resolve actors` | List every actor this run has recorded, and what each has not read yet. |
-| `resolve say` | Tell an actor something. It reads this and keeps going. |
+| `resolve say` | Tell one actor something. It reads this and keeps going. |
 | `resolve accept` | Accept one concern over one failing verification, on the human&#x27;s word. |
 | `resolve retire` | Retire one concern whose work was settled somewhere other than this run. |
 | `resolve redirect` | Stop an actor and put it on something else. |

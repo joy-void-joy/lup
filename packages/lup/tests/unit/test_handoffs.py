@@ -91,6 +91,7 @@ def test_a_lock_the_sender_holds_moves_with_the_work(tmp_path: Path) -> None:
     receiver = mint_member_id()
     peers.join(receiver, tmp_path / "other", cli_name="receiver")
     scope = tmp_path / "packages" / "parser"
+    scope.mkdir(parents=True)
     peers.lock(member, scope)
 
     result = hand_off(
@@ -122,6 +123,7 @@ def test_a_lock_somebody_else_holds_is_contested_rather_than_taken(
     receiver = mint_member_id()
     peers.join(receiver, tmp_path / "other", cli_name="receiver")
     scope = tmp_path / "packages" / "parser"
+    scope.mkdir(parents=True)
     peers.lock(third, scope)
 
     result = hand_off(

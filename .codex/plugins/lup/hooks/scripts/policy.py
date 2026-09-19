@@ -1997,9 +1997,10 @@ def open_claim_window(
 ) -> None:
     """Record what this session's tree looked like before a command ran.
 
-    The file's presence is the window: another session listing this directory
-    while its own command runs learns that somebody else's was open over the
-    same moment, which is the whole of what tier three needs to know.
+    This session's own file and nobody else's reader: what it holds is the
+    before half of a comparison only the process that opened it can close. A
+    command that names no target leaves this as the one evidence of what it
+    wrote, which is what the claim on this member's file is then taken from.
     """
     directory = peer_store(root, store)
     if directory is None or not mine or root is None:
@@ -2021,45 +2022,28 @@ def open_claim_window(
         return
 
 
-def stale_window(window: Path, stale_after_seconds: float) -> bool:
-    """Whether a window has been open too long to be anybody"'s live command.
-
-    A window is opened before a call and closed after it, so one left standing
-    is a call that never ran — refused at the prompt, or a session that died
-    holding it. Left counted, that session would make every change any other
-    session made afterwards read as contested, for as long as the file sat
-    there. An unreadable stamp reads as stale for the same reason.
-    """
-    try:
-        opened = json.loads(window.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return True
-    if not isinstance(opened, dict) or "at" not in opened:
-        return True
-    return datetime.now(UTC).timestamp() - opened["at"] > stale_after_seconds
-
-
 def close_claim_window(
     root: Path | None,
     store: list[str],
     windows_dir: str,
     mine: str,
-    stale_after_seconds: float = 300.0,
 ) -> dict:
-    """What changed while this session's command ran, and who else was watching.
+    """What changed while this session's command ran.
 
     ``paths`` are the files whose size or modification time differs from the
-    snapshot, plus the ones that were not in it at all. ``rivals`` are the
-    other sessions whose own windows were open across this one — the case a
-    before-and-after comparison cannot attribute, because it sees every change
-    in its window regardless of who made it.
+    snapshot, plus the ones that were not in it at all.
+
+    Nobody else's window is read. A change this comparison cannot attribute is
+    one two sessions were both positioned to have made, and each of them
+    records a claim on its own file — so the contest is what a reader derives
+    from meeting them, rather than a list of suspects one of them guessed at
+    while it could not see who wrote.
     """
-    empty = {"paths": [], "rivals": []}
+    empty = {"paths": []}
     directory = peer_store(root, store)
     if directory is None or not mine or root is None:
         return empty
-    windows = directory / windows_dir
-    opened = windows / f"{mine}.json"
+    opened = directory / windows_dir / f"{mine}.json"
     try:
         before = json.loads(opened.read_text(encoding="utf-8"))
         opened.unlink()
@@ -2069,21 +2053,12 @@ def close_claim_window(
         return empty
     entries = before["entries"]
     after = writable_snapshot(root)
-    try:
-        rivals = [
-            other.stem
-            for other in windows.glob("*.json")
-            if other.stem != mine and not stale_window(other, stale_after_seconds)
-        ]
-    except OSError:
-        rivals = []
     return {
         "paths": sorted(
             str(root / path)
             for path, stamp in after.items()
             if path not in entries or entries[path] != stamp
-        ),
-        "rivals": sorted(rivals),
+        )
     }
 
 
@@ -2823,16 +2798,16 @@ def claim_window_closed(cwd: Path | None) -> None:
         cwd, PEER_POLICY["store"], PEER_POLICY["windows_dir"], mine
     )
     if directory is not None:
-        store.record_claims(directory, mine, closed["paths"], closed["rivals"])
+        store.record_claims(directory, mine, closed["paths"])
 
 
 def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
     """Attribute a change to the exact file the call named.
 
-    The tier that needs no comparison and admits no contest: the call said
-    which file, so the claim it leaves is the one record another session can
-    act on without qualification, and it settles a path an earlier comparison
-    could only guess at.
+    The tier that needs no comparison: the call said which file, so what this
+    leaves on the session's own member file is evidence of the state that
+    session left the path in, rather than of what a before-and-after could
+    narrow the writer down to.
     """
     directory = peer_directory(cwd)
     if PEER_POLICY is None or directory is None or not path_text:
@@ -2841,7 +2816,6 @@ def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
         directory,
         declared_identity(PEER_POLICY["member_env"]),
         [str(Path(path_text).resolve())],
-        [],
     )
 
 

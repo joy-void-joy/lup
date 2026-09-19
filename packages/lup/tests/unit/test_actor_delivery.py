@@ -10,7 +10,7 @@ printed `redirected worker:research-corpus-retrieval#1`.
 
 from pathlib import Path
 
-from lup.coordination.mail import EVERYONE, ActorMail, new_message
+from lup.coordination.mail import ActorMail
 from lup.coordination.mailbox import AnswerDoor
 from lup.coordination.refs import ActorRef
 from lup.coordination.sessions import ActorInbox, create_inbox_hooks
@@ -27,9 +27,15 @@ def inbox_for(tmp_path: Path, actor: ActorRef) -> ActorInbox:
     return ActorInbox(ActorMail(tmp_path), Journal(tmp_path), actor)
 
 
-def post(tmp_path: Path, to: str, text: str, redirect: bool = False) -> None:
+def post(tmp_path: Path, to: ActorRef, text: str, redirect: bool = False) -> None:
+    """One message into one member's inbox, as a door that resolved an address does.
+
+    A member rather than a spelling, because resolving what an operator typed
+    is the roster's and happens before this: a message file sits in exactly
+    one inbox, so there is no token left for a reader to match against itself.
+    """
     ActorMail(tmp_path).send(
-        new_message("run-1", to, text, AnswerDoor.AGENT, redirect=redirect)
+        to, text, door=AnswerDoor.AGENT, sender="run-1", redirect=redirect
     )
 
 
@@ -37,7 +43,7 @@ def test_a_message_posted_before_a_reader_exists_is_still_delivered(
     tmp_path: Path,
 ) -> None:
     """The bug exactly: a reader built after the message must still see it."""
-    post(tmp_path, "worker:a-concern#1", "stop, that design was rejected")
+    post(tmp_path, worker(), "stop, that design was rejected")
 
     taken = inbox_for(tmp_path, worker()).take()
 
@@ -48,9 +54,9 @@ def test_a_new_reader_resumes_where_the_last_one_was_delivered_to(
     tmp_path: Path,
 ) -> None:
     """A resumed run reattaches to the position, not to the stream head."""
-    post(tmp_path, "worker:a-concern#1", "first")
+    post(tmp_path, worker(), "first")
     inbox_for(tmp_path, worker()).take()
-    post(tmp_path, "worker:a-concern#1", "second")
+    post(tmp_path, worker(), "second")
 
     resumed = inbox_for(tmp_path, worker(2)).take()
 
@@ -66,11 +72,11 @@ def test_the_reported_run_replayed_end_to_end(tmp_path: Path) -> None:
     console must have been able to see that neither had yet.
     """
     actor = worker()
-    post(tmp_path, "worker:a-concern#1", "superseded; stop", redirect=True)
+    post(tmp_path, worker(), "superseded; stop", redirect=True)
     interrupted = inbox_for(tmp_path, actor)
     interrupted.waiting()  # the turn that was killed before it started
 
-    post(tmp_path, "worker:a-concern#1", "still superseded", redirect=True)
+    post(tmp_path, worker(), "still superseded", redirect=True)
     resumed = inbox_for(tmp_path, worker(2))
     outstanding = resumed.waiting()
     taken = resumed.take()
@@ -89,32 +95,12 @@ def test_the_reported_run_replayed_end_to_end(tmp_path: Path) -> None:
 
 def test_reading_what_is_waiting_does_not_consume_it(tmp_path: Path) -> None:
     """Asking whether anything was read cannot be what makes it disappear."""
-    post(tmp_path, EVERYONE, "everyone stop")
+    post(tmp_path, worker(), "everyone stop")
     inbox = inbox_for(tmp_path, worker())
 
     assert [message.text for message in inbox.waiting().messages] == ["everyone stop"]
     assert [message.text for message in inbox.take()] == ["everyone stop"]
     assert inbox.waiting().messages == []
-
-
-def test_a_message_addressed_to_everyone_reaches_an_actor(tmp_path: Path) -> None:
-    """Broadcasting stays one record every actor matches, by an explicit token."""
-    post(tmp_path, EVERYONE, "the base moved")
-
-    assert [
-        message.text for message in inbox_for(tmp_path, worker()).waiting().messages
-    ] == ["the base moved"]
-
-
-def test_a_message_addressed_to_nobody_reaches_nobody(tmp_path: Path) -> None:
-    """A blank target is a target somebody left out, not a target of everyone.
-
-    It used to be the broadcast address, which put a worker's report to the
-    humans into every sibling's context and nowhere a person could read it.
-    """
-    post(tmp_path, "", "meant for whoever is watching")
-
-    assert inbox_for(tmp_path, worker()).waiting().messages == []
 
 
 def test_the_label_the_console_prints_reaches_the_actor() -> None:
@@ -132,7 +118,7 @@ def test_a_label_from_an_earlier_round_still_reaches_the_conversation(
     tmp_path: Path,
 ) -> None:
     """An operator reading `actors` a round ago named this same session."""
-    post(tmp_path, "worker:a-concern#1", "the concern was superseded")
+    post(tmp_path, worker(), "the concern was superseded")
 
     taken = inbox_for(tmp_path, worker(3)).take()
 
@@ -140,7 +126,7 @@ def test_a_label_from_an_earlier_round_still_reaches_the_conversation(
 
 
 def test_a_sibling_actor_never_takes_this_actor_s_mail(tmp_path: Path) -> None:
-    post(tmp_path, "worker:a-concern#1", "for the worker")
+    post(tmp_path, worker(), "for the worker")
     reviewer = ActorRef(kind="reviewer", id="a-concern")
 
     assert inbox_for(tmp_path, reviewer).take() == []
@@ -149,21 +135,29 @@ def test_a_sibling_actor_never_takes_this_actor_s_mail(tmp_path: Path) -> None:
     ]
 
 
-def test_a_bare_concern_id_reaches_every_actor_working_it(tmp_path: Path) -> None:
-    """Each conversation holds its own position, so each is handed one copy."""
-    post(tmp_path, "a-concern", "the file moved")
+def test_one_message_reaches_one_actor_however_many_share_its_concern(
+    tmp_path: Path,
+) -> None:
+    """A message is addressed and consumed, so there is exactly one recipient.
+
+    A spelling two members answer to is resolved by the sender against the
+    roster, which picks one of them — and a caller that meant both reaches for
+    the verb that means both. A token every reader matched against itself is
+    what forced a position per member, and what stopped a redirect meaning
+    anything a stop can sensibly mean.
+    """
+    reviewer = ActorRef(kind="reviewer", id="a-concern")
+    post(tmp_path, worker(), "the file moved")
 
     assert len(inbox_for(tmp_path, worker()).take()) == 1
-    assert (
-        len(inbox_for(tmp_path, ActorRef(kind="reviewer", id="a-concern")).take()) == 1
-    )
+    assert inbox_for(tmp_path, reviewer).take() == []
 
 
 def test_a_delivery_is_recorded_against_the_actor_that_took_it(
     tmp_path: Path,
 ) -> None:
     """Non-delivery was established from the journal's silence; so must delivery."""
-    post(tmp_path, "worker:a-concern#1", "superseded by another concern", redirect=True)
+    post(tmp_path, worker(), "superseded by another concern", redirect=True)
 
     inbox_for(tmp_path, worker(2)).take()
 
@@ -183,7 +177,7 @@ def test_a_delivery_is_recorded_against_the_actor_that_took_it(
 def test_mail_still_queued_when_a_conversation_closes_is_recorded(
     tmp_path: Path,
 ) -> None:
-    post(tmp_path, "worker:a-concern#1", "stop", redirect=True)
+    post(tmp_path, worker(), "stop", redirect=True)
 
     inbox_for(tmp_path, worker()).record_outstanding()
 
@@ -201,7 +195,7 @@ async def test_the_hook_and_the_next_turn_never_deliver_the_same_message(
     """One position, so what interrupts a turn does not also head the next."""
     inbox = inbox_for(tmp_path, worker())
     hooks = create_inbox_hooks(inbox)
-    post(tmp_path, "worker:a-concern#1", "read this now")
+    post(tmp_path, worker(), "read this now")
 
     hook = hooks.pre_tool_use[0].hook
     mid_turn = await hook(LupHookInput(event="PreToolUse", tool_name="Read"))
@@ -213,7 +207,7 @@ async def test_the_hook_and_the_next_turn_never_deliver_the_same_message(
 async def test_a_redirect_refuses_the_call_it_interrupted(tmp_path: Path) -> None:
     inbox = inbox_for(tmp_path, worker())
     hooks = create_inbox_hooks(inbox)
-    post(tmp_path, "worker:a-concern#1", "that design was rejected", redirect=True)
+    post(tmp_path, worker(), "that design was rejected", redirect=True)
 
     hook = hooks.pre_tool_use[0].hook
     mid_turn = await hook(LupHookInput(event="PreToolUse", tool_name="Write"))

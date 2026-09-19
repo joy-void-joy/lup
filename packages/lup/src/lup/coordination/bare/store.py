@@ -4,49 +4,64 @@
 # than a choice a caller can make. The typed writers import them from here
 # instead of restating them, which is what a pin over two copies could only
 # report after the fact.
-"""One fold of the coordination store, for every process that reads it.
+"""The coordination store: one file per member, and everything else derived.
 
-The store is three append-only records and a pair of stamp directories under
-one repository's shared git directory, and what anyone asks of it is a fold:
-who is here, what each is holding, what a name reaches. Three processes ask,
-and no two of them share an import — the typed library inside a session's tool
-server, the hooks a runtime spawns as bare scripts, and the compiled
-permission dispatcher. Each folded the same files for itself, so every record
-the store gained had to be taught to three readers separately, and a reader
-that missed one went on answering confidently about a store it no longer
-understood.
+The store was append-only records folded whole by every reader on every call.
+It answered who is here by replaying who had ever been here, which grew
+without bound, kept sixteen rows for two live sessions, and could not be asked
+anything the records had not been written to answer — so a claim over a path
+in a deleted worktree stood until another record retired it, and a change no
+window could attribute was recorded with a guess and a list of rivals.
 
-So the fold is written once, here, under the strictest of the three
-constraints: the standard library alone, no pydantic, no ``lup``. The library
-imports it as an ordinary module; each plugin ships this package into
-``hooks/runtime/``, where a hook imports it as a sibling and the dispatcher
-reaches it through the search path it already inserts for the kernel.
+It is state now. One file per member, written by nobody but that member's own
+processes, and every relation between members derived at the read:
 
-**It owns the layout.** Every file and directory name the store is made of is
-declared here and imported by the typed writers beside it. A rename moves
-every reader with it.
+- **presence** is the member file's modification time. The owner touches it
+  while it lives, and a file older than the window is a session that stopped
+  without saying so. Nothing folds a departure to find out.
+- **a claim** records the modification time of the path it was taken over. A
+  reader stats that path: gone means vacant, newer than recorded means
+  somebody else has written it since, and otherwise the claim stands. There is
+  no vacating record to write and no rival to guess at.
+- **a contest** is two live members' claims meeting on one path, which is a
+  fact about their two files rather than a third record about both.
+- **a name** is on the member that answers to it, with the names it answered
+  to before beside it, so a reference somebody wrote down still resolves.
 
-**Two writes ride along.** A session's ending hook appends its own departure,
-and the dispatcher appends the claim for a change it has just seen. Both run
-in a process with no typed writer to reach, and both are one record whose
-shape this module already owns — so they live beside the fold rather than
-being restated wherever a bare process happens to need one.
+What is left is bounded by the population rather than by its history: a member
+that stops takes its file to ``departed/``, and the sweep deletes that after
+the retention window.
+
+Three processes read this and no two of them share an import — the typed
+library inside a session's tool server, the hooks a runtime spawns as bare
+scripts, and the compiled permission dispatcher. So the reading is written
+once, here, under the strictest of the three constraints: the standard library
+alone, no pydantic, no ``lup``. The library imports it; each plugin ships this
+package into ``hooks/runtime/``.
+
+**Writing is the owner's.** A member file is revised under its own lock, by
+whichever of that member's processes is revising it. The lock is per member
+rather than per store, so two sessions never wait on each other, and a lock
+taken to add one claim is held for one read and one rename.
 
 **Nothing here raises.** Every reader is on a path where failing would cost
 more than not answering: a prompt, a tool call, a permission decision. An
-unreadable file reads as empty, a torn last line is skipped, and a record that
-is not an object is passed over — which is the ordinary state of a store
-another session is appending to.
+unreadable file reads as absent, a half-written one is never seen because
+every write lands by rename, and a record that is not an object is passed
+over.
 
 ``TypedDict`` throughout, and partial for every shape another process writes:
-a field the typed writer adds must not make its record unreadable here.
+a field a newer library adds must not make its file unreadable here.
 """
 
+import fcntl
 import json
+import os
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from hashlib import sha256
 from pathlib import Path
 from typing import TypedDict
+from uuid import uuid4
 
 STORE_DIR = "lup"
 COORDINATION_DIR = "coordination"
@@ -57,26 +72,41 @@ nothing anywhere would report the mismatch: both sessions work, and neither is
 on the other's roster.
 """
 
-ROSTER_FILE = "roster.jsonl"
-NAMES_FILE = "names.jsonl"
-TOUCHES_FILE = "touches.jsonl"
-"""The three records every reader folds: who is here, what they are called, and
-what they hold."""
+MEMBERS_DIR = "members"
+DEPARTED_DIR = "departed"
+"""Who is here, and who was here recently enough to still be news.
 
-HEARTBEATS_DIR = "heartbeats"
-RESETS_DIR = "resets"
-"""The two stamps a session leaves about itself, whose modification time is the
-whole of what they carry: it is still here, and the conversation its row
-described is gone."""
+Two directories rather than a flag inside one, because the question a reader
+asks is almost always "who is here", and a listing that had to open every file
+ever written to answer it is the fold this replaces.
+"""
 
-WINDOWS_DIR = "windows"
+INBOX_DIR = "inbox"
+NOTICES_DIR = "notices"
+"""What is waiting for one member, and what is true for all of them.
+
+Mail is addressed and consumed; a notice is neither. Keeping them apart is
+what lets a notice be read by a member that did not exist when it was posted,
+with no position for anybody to keep.
+"""
+
 LOOKS_DIR = "looks"
-"""The two places one process keeps its own working state under the store.
+WINDOWS_DIR = "windows"
+"""The two places one process keeps working state of its own under the store.
 
-Declared beside the rest of the layout although nothing here reads either:
-the dispatcher is the windows' only writer and reader, and the prompt fold is
-the looks'. A name the store's layout carries in one place is a name a rename
-cannot leave behind.
+Declared beside the rest of the layout although nothing here reads either: the
+dispatcher is the windows' only writer and reader, and the prompt fold is the
+looks'. A name the layout carries in one place is a name a rename cannot leave
+behind.
+"""
+
+ROSTER_LOCK = "roster.lock"
+"""Taken for a join or a rename, and for nothing else.
+
+Both decide a name against every other member's, which is the one question a
+per-member lock cannot answer. Everything else a member writes is about itself
+and is taken under its own lock, so the store-wide lock is held for as long as
+it takes to read a directory and rename one file.
 """
 
 MEMBER_KIND = "session"
@@ -88,7 +118,7 @@ spawned it says so, and the person is never finished at all.
 """
 
 STALE_AFTER_SECONDS = 120.0
-"""How long a session's silence reads as absence.
+"""How long a member's silence reads as absence.
 
 A few beats wide rather than one, so a stalled scheduler or a slow disk is not
 read as a departure; short because the roster is read to decide whether a path
@@ -96,9 +126,16 @@ is safe to write, and a dead session holding that decision open for an hour is
 the failure this closes.
 """
 
+DEPARTED_SECONDS = 18000.0
+"""How long a member that stopped stays readable before the sweep deletes it.
+
+Long enough that somebody back at a terminal finds out who left while they
+were away, short enough that the store is the population and not its history.
+"""
+
 
 class Actor(TypedDict, total=False):
-    """Whom a record attributes itself to, as every record spells it."""
+    """Whom a record attributes itself to, as every file spells it."""
 
     kind: str
     id: str
@@ -113,76 +150,63 @@ class Wake(TypedDict, total=False):
     session: str
 
 
-class RosterRecord(TypedDict, total=False):
-    """One record on the roster, as far as folding it needs to know."""
+class Named(TypedDict, total=False):
+    """One name a member answered to, and from when."""
 
-    type: str
-    actor: Actor
-    task: str
-    description: str
-    summary: str
-    error: str
-    worktree: str
-    liveness: str
-    delivery: str
-    wake: Wake
-    at: str
-
-
-class NameRecord(TypedDict, total=False):
-    """One member answering to one name, from that moment until it renames."""
-
-    id: str
     cli_name: str
     at: str
 
 
-class TouchRecord(TypedDict, total=False):
-    """One thing that happened to a claim, as far as folding it needs to know."""
+class Claiming(TypedDict):
+    """One name, the member it reaches, and when that member claimed it."""
 
-    type: str
-    actor: Actor
+    cli_name: str
+    id: str
+    at: str
+
+
+class Conversation(TypedDict, total=False):
+    """Which conversation this member's row is describing.
+
+    Carried on the member rather than stamped beside it, because what it
+    qualifies — what this member says it is doing — is on the member too. A
+    runtime that rewinds or clears keeps the process, the id and the pulse and
+    signals none of it, so the prompt fold notices the transcript's roots move
+    and clears its own description in the same write.
+    """
+
+    transcript: str
+    roots: int
+
+
+class Claim(TypedDict, total=False):
+    """One path a member holds, and the state it left that path in.
+
+    The modification time is what makes the claim answerable later. A record
+    of *having written* a file says nothing about whether it still holds — the
+    writer may be long gone, or somebody else may have written it since —
+    while a recorded time can be compared against the path as it is now.
+    """
+
     path: str
     prefix: bool
-    digest: str
-    rivals: list[Actor]
+    mtime: float
     at: str
 
 
-class Finished(TypedDict):
-    """The record that ends a row, as the typed roster serializes its own."""
+class Member(TypedDict, total=False):
+    """One member as its own file holds it, plus what the read derives.
 
-    type: str
-    actor: Actor
-    at: str
-    summary: str
-    error: str
-
-
-class Touched(TypedDict):
-    """The record that claims a path, as the typed touches serialize their own."""
-
-    type: str
-    actor: Actor
-    at: str
-    path: str
-    digest: str
-    rivals: list[Actor]
-
-
-class Member(TypedDict):
-    """One member as the roster's fold leaves it, alive or finished.
-
-    Every field the three readers between them ask for, because a fold that
-    answered one of them would leave the others folding again. What each reader
-    then renders is its own business: a console prints four of these, the
-    prompt hook diffs three, and the typed library validates the lot into its
-    own model.
+    Everything down to ``left_at`` is written; ``running`` and ``heard`` are
+    not in the file at all — they are the file's modification time, read as
+    presence. That is the whole of what replaces a departure record nobody
+    wrote: a member is here while something is touching its file.
     """
 
     kind: str
     id: str
     round: int
+    names: list[Named]
     task: str
     description: str
     summary: str
@@ -191,58 +215,46 @@ class Member(TypedDict):
     liveness: str
     delivery: str
     wake: Wake
+    conversation: Conversation
+    claims: list[Claim]
+    arrived: str
+    left_at: str
     running: bool
     heard: str
-    """When the record last spoke of this member, as its newest record spells it.
-
-    The record's own time, whichever kind of record it was. A reader deciding
-    whether a silent member is still there starts here and takes a later pulse
-    where one was written — the record alone says when a member last *said*
-    something, which is not the same question.
-    """
-
-    arrived: str
-    """When this member's present standing began: its newest arrival's own time.
-
-    Apart from ``heard`` because the two move differently, and because one
-    question needs only this: which departures happened while this member was
-    here to have written to the departed.
-    """
 
 
 class Held(TypedDict):
-    """One claim as the touch record's fold leaves it, with everyone holding it.
+    """One claim as a reader about to write asks about it, with everyone on it.
 
-    More than one holder is honest rather than broken: a change made by a shell
-    command is attributed by comparing the tree before and after, which sees
-    every change in its window regardless of who made it, so where two sessions
-    had windows open over one path both names are recorded and neither is
-    guessed at.
+    Derived across member files rather than recorded: more than one holder is
+    two live members whose own files both claim the path, which is honest
+    where a single record with a guessed author was not.
     """
 
     subject: str
     path: str
     prefix: bool
     holders: list[Actor]
-    digest: str
-    at: str
-
-
-class Named(TypedDict):
-    """One naming, as the record keeps it: who, what, and from when."""
-
-    id: str
-    cli_name: str
     at: str
 
 
 def text(value: str | None) -> str:
-    """A field as a string, blank where the record carries something else.
+    """A field as a string, blank where the file carries something else.
 
-    The record's declared type says string; the file another process wrote says
+    The declared type says string; the file another process wrote says
     whatever it says, so the value is checked rather than trusted.
     """
     return value if isinstance(value, str) else ""
+
+
+def moment(value: float | None) -> float:
+    """A field as a modification time, zero where it is not one."""
+    return value if isinstance(value, float | int) else 0.0
+
+
+def whole(value: int | None) -> int:
+    """A field as a counting number, the first where it is not one."""
+    return value if isinstance(value, int) and value >= 1 else 1
 
 
 def actor_kind(actor: Actor | None) -> str:
@@ -251,11 +263,7 @@ def actor_kind(actor: Actor | None) -> str:
 
 
 def actor_id(actor: Actor | None, kind: str = "") -> str:
-    """The id an actor object carries, blank where it is not one of *kind*.
-
-    An empty *kind* accepts any: a claim's holder is an id whatever it is,
-    while a roster fold read for sessions wants sessions and not the person.
-    """
+    """The id an actor object carries, blank where it is not one of *kind*."""
     if not isinstance(actor, dict) or (kind and actor_kind(actor) != kind):
         return ""
     return text(actor.get("id"))
@@ -263,275 +271,309 @@ def actor_id(actor: Actor | None, kind: str = "") -> str:
 
 def actor_round(actor: Actor | None) -> int:
     """Which attempt this record is about, the first where it does not say."""
-    if not isinstance(actor, dict):
-        return 1
-    held = actor.get("round")
-    return held if isinstance(held, int) and held >= 1 else 1
+    return whole(actor.get("round")) if isinstance(actor, dict) else 1
 
 
 def conversation_of(actor: Actor | None) -> str:
     """Which conversation an actor speaks through, which outlives its round.
 
-    The key the fold holds a member under, spelled as
-    :meth:`~lup.coordination.refs.ActorRef.conversation` spells it: a member
-    taken through a second round is that member further on and not a second
-    one, and a fold keyed by the printed address held two of it.
+    Spelled as :meth:`~lup.coordination.refs.ActorRef.conversation` spells it:
+    a member taken through a second round is that member further on and not a
+    second one, and anything held per conversation is keyed by this.
     """
     kind, held = actor_kind(actor), actor_id(actor)
     return f"{kind}-{held}" if kind and held else ""
 
 
-def loaded[Record](path: Path, shape: type[Record]) -> list[Record]:
-    """Every line that is a JSON object, read as *shape*, skipping the rest.
+def member_actor(member: Member) -> Actor:
+    """One member's address, as a claim or a message attributes itself to it."""
+    return Actor(
+        kind=text(member.get("kind")),
+        id=text(member.get("id")),
+        round=whole(member.get("round")),
+    )
 
-    A torn final line is the ordinary state of a store another session is
-    appending to, and a malformed one must not stop the reader seeing the
-    records around it. The shape is the caller's declaration of what the file
-    holds; nothing here checks a record against it beyond being an object.
+
+def stamped(value: datetime | None = None) -> str:
+    """This moment as every file in the store spells one."""
+    return (value or datetime.now(UTC)).isoformat()
+
+
+def spoken_at(recorded: str) -> datetime | None:
+    """A field's time as a moment, or nothing where it does not read as one."""
+    try:
+        parsed = datetime.fromisoformat(recorded)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def loaded[Record](path: Path, shape: type[Record]) -> Record | None:
+    """One file read as *shape*, or nothing where it is not a JSON object.
+
+    A file that will not parse reads as absent. Every write here lands by
+    rename, so a half-written one is never seen under its own name — what this
+    catches is a file some other tool wrote, and refusing to read the rest of
+    the store over it would be the wrong trade on every path that reads.
     """
     try:
-        lines = path.read_text("utf-8").splitlines()
-    except OSError:
-        return []
-
-    def parsed(line: str) -> Record | None:
-        try:
-            record: Record = json.loads(line)
-        except ValueError:
-            return None
-        return record if isinstance(record, dict) else None
-
-    return [record for record in map(parsed, lines) if record is not None]
+        record: Record = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) else None
 
 
-def appended[Record](path: Path, records: list[Record]) -> bool:
-    """Put these records on the end of one file, saying whether they landed.
+def published[Record](path: Path, record: Record) -> Record | None:
+    """Write one file so that no reader ever sees it half written.
 
-    One write with the append flag, which is what makes a concurrent writer
-    safe: the kernel places the whole buffer at the end of the file as it
-    stands, so two processes appending at once interleave records and never
-    halves of one.
+    Into a neighbour and renamed, which is atomic within a directory on every
+    filesystem this runs on: a reader either sees what was there before or
+    sees the whole of what replaced it. That is what lets every read here go
+    unlocked — only a writer that must first read takes the member's lock.
+
+    Hands back what landed rather than whether it did, so a caller that wants
+    the written shape has it and one that wants the verdict reads it as one.
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write("".join(f"{json.dumps(record)}\n" for record in records))
+        writing = path.with_name(f"{path.name}.{uuid4().hex[:8]}.writing")
+        writing.write_text(json.dumps(record), encoding="utf-8")
+        writing.replace(path)
+    except OSError:
+        return None
+    return record
+
+
+def listed(directory: Path, suffix: str = ".json") -> list[Path]:
+    """Every file of this kind in one directory, in name order."""
+    try:
+        return sorted(
+            path
+            for path in directory.iterdir()
+            if path.is_file() and path.name.endswith(suffix)
+        )
+    except OSError:
+        return []
+
+
+def discarded(path: Path) -> bool:
+    """Remove one file, saying whether it was there to remove."""
+    try:
+        path.unlink()
     except OSError:
         return False
     return True
 
 
-def spoken_at(recorded: str) -> datetime | None:
-    """A record's own time as a moment, or nothing where it does not read as one."""
-    try:
-        moment = datetime.fromisoformat(recorded)
-    except ValueError:
+def session_actor(member_id: str) -> Actor:
+    """The identity a repository session is a member under.
+
+    The one kind a hook can assume: a prompt fold, a departure writer and the
+    permission dispatcher each know a session id and nothing else, because the
+    runtime that spawned them is a session's.
+    """
+    return Actor(kind=MEMBER_KIND, id=member_id)
+
+
+def member_path(root: Path, member: Actor) -> Path:
+    """Where one member's own file sits while it is here.
+
+    Named for the conversation rather than the bare id, because an id is
+    unique only within a kind: a worker and a reviewer taken on over one
+    concern are two members of one id, and a single file between them would
+    let each answer for the other's presence, task and claims.
+    """
+    return root / MEMBERS_DIR / f"{conversation_of(member)}.json"
+
+
+def departed_path(root: Path, member: Actor) -> Path:
+    """Where one member's file sits once it has stopped."""
+    return root / DEPARTED_DIR / f"{conversation_of(member)}.json"
+
+
+def member_lock(root: Path, member: Actor) -> Path:
+    """The lock one member's own processes revise its file under."""
+    return root / MEMBERS_DIR / f"{conversation_of(member)}.lock"
+
+
+def read_member(path: Path, running: bool) -> Member | None:
+    """One member file, with the presence its modification time carries.
+
+    The file says what the member is; the stat says when it last said so.
+    Neither is written twice, which is what stops a row claiming to be present
+    under a process that stopped.
+    """
+    found = loaded(path, Member)
+    if found is None or not text(found.get("id")):
         return None
-    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
-
-
-def stamp(path: Path) -> None:
-    """Mark this moment on one file, creating what is missing on the way."""
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch()
+        heard = datetime.fromtimestamp(path.stat().st_mtime, UTC)
+    except OSError:
+        return None
+    settled = found.copy()
+    settled["running"] = running
+    settled["heard"] = stamped(heard)
+    return settled
+
+
+def blank_member(kind: str, member_id: str) -> Member:
+    """A member with nothing said about it yet, for a writer about to say it."""
+    return Member(
+        kind=kind,
+        id=member_id,
+        round=1,
+        names=[],
+        task="",
+        description="",
+        summary="",
+        error="",
+        worktree="",
+        liveness="",
+        delivery="",
+        wake=Wake(),
+        conversation=Conversation(transcript="", roots=0),
+        claims=[],
+        arrived=stamped(),
+        left_at="",
+        running=True,
+        heard=stamped(),
+    )
+
+
+def stored(member: Member) -> Member:
+    """This member as its file holds it, without what the read derives.
+
+    ``running`` and ``heard`` are the file's modification time. Writing them
+    into the file would give a reader two answers to one question, and the
+    written one would be the stale one.
+    """
+    settled = member.copy()
+    settled.pop("running", None)
+    settled.pop("heard", None)
+    return settled
+
+
+def write_member(root: Path, member: Member) -> bool:
+    """Put one member's file down whole, by rename."""
+    landed = published(member_path(root, member_actor(member)), stored(member))
+    return landed is not None
+
+
+def revised(
+    root: Path, member: Actor, revise: Callable[[Member], Member]
+) -> Member | None:
+    """Read this member's file, apply *revise*, and put it back, under its lock.
+
+    The one read-modify-write in the store, and the reason each member has a
+    lock of its own: a session's tool server, its prompt hook and the
+    permission dispatcher recording what a command just changed are three
+    processes revising one file, and two of them reading before either writes
+    would lose whichever wrote first.
+
+    Per member rather than per store, so one session's writes never wait on
+    another's, and the region is one read and one rename wide.
+
+    Nothing is created for a member that has no file: a revision of nobody
+    would put a row on the roster that never joined.
+    """
+    lock = member_lock(root, member)
+    try:
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        with lock.open("a", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                found = read_member(member_path(root, member), running=True)
+                if found is None:
+                    return None
+                settled = revise(found)
+                return settled if write_member(root, settled) else None
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        return None
+
+
+def beat(root: Path, member: Actor) -> None:
+    """Record that this member is here now, without rewriting what it says.
+
+    The modification time is the whole of the pulse, so a beat moves the time
+    rather than revising the file: nothing is read, nothing is locked, and a
+    beat cannot race a description being written in another process.
+
+    Nothing is created. A beat is a member saying it is still here, so one for
+    a member that never joined has nobody to be about — and a file put down by
+    a beat would be a row on the roster that says nothing about who it is.
+    """
+    try:
+        os.utime(member_path(root, member))
     except OSError:
         return
 
 
-def stamped_at(path: Path) -> datetime | None:
-    """The moment one stamp file was last marked, or nothing where there is none."""
-    try:
-        marked = path.stat().st_mtime
-    except OSError:
-        return None
-    return datetime.fromtimestamp(marked, UTC)
+def members(root: Path) -> list[Member]:
+    """Every member whose file is still under ``members/``, oldest arrival first.
 
-
-def beat_path(root: Path, member_id: str) -> Path:
-    """Where one member's pulse is kept, under the coordination store."""
-    return root / HEARTBEATS_DIR / member_id
-
-
-def beat(root: Path, member_id: str) -> None:
-    """Record that this member is here now."""
-    stamp(beat_path(root, member_id))
-
-
-def heard_at(root: Path, member_id: str) -> datetime | None:
-    """When this member last beat, or nothing where it never has."""
-    return stamped_at(beat_path(root, member_id))
-
-
-def reset_path(root: Path, member_id: str) -> Path:
-    """Where one member's conversation reset is kept, beside its pulse."""
-    return root / RESETS_DIR / member_id
-
-
-def reset(root: Path, member_id: str) -> None:
-    """Record that the conversation this member's row described is gone."""
-    stamp(reset_path(root, member_id))
-
-
-def reset_at(root: Path, member_id: str) -> datetime | None:
-    """When this member's conversation last moved, or nothing where it never has."""
-    return stamped_at(reset_path(root, member_id))
-
-
-def stale(
-    heard_moment: datetime | None,
-    now: datetime,
-    window: float = STALE_AFTER_SECONDS,
-) -> bool:
-    """Whether a silence since *heard_moment* has outlasted the window at *now*.
-
-    A member heard neither on the record nor by a beat is one no reader can
-    vouch for, which reads as absent rather than as present by default.
-
-    The window is a parameter with the store's own default, because a typed
-    caller may turn it — a test wants one it can cross — and the arithmetic
-    must still be this one, so a turned window changes how long a silence is
-    tolerated and never what tolerating it means.
+    Present on the record, which the pulse may still contradict: a session
+    killed a minute ago has a file here and a modification time that says so.
+    :func:`present` is what applies that.
     """
-    if heard_moment is None:
+    found = [
+        member
+        for path in listed(root / MEMBERS_DIR)
+        for member in [read_member(path, running=True)]
+        if member is not None
+    ]
+    return sorted(found, key=lambda member: text(member.get("arrived")))
+
+
+def departed(root: Path, now: datetime | None = None) -> list[Member]:
+    """Every member that stopped recently enough to still be worth reporting.
+
+    Bounded by the retention window here rather than by the sweep alone, so a
+    reader gets the same answer whether or not a sweep has run since.
+    """
+    since = (now or datetime.now(UTC)) - timedelta(seconds=DEPARTED_SECONDS)
+
+    def recent(member: Member) -> bool:
+        """Whether this departure is still news rather than history."""
+        left = spoken_at(text(member.get("left_at")))
+        return left is None or left >= since
+
+    return [
+        member
+        for path in listed(root / DEPARTED_DIR)
+        for member in [read_member(path, running=False)]
+        if member is not None and recent(member)
+    ]
+
+
+def stale(heard: datetime | None, now: datetime, window: float) -> bool:
+    """Whether a silence since *heard* has outlasted the window at *now*.
+
+    A member nothing can be read for is one no reader can vouch for, which
+    reads as absent rather than as present by default.
+    """
+    if heard is None:
         return True
-    return now - heard_moment > timedelta(seconds=window)
+    return now - heard > timedelta(seconds=window)
 
 
-def arrival(record: RosterRecord) -> Member:
-    """The member one arrival starts, carrying everything that arrival declared."""
-    actor = record.get("actor")
-    at = text(record.get("at"))
-    wake = record.get("wake")
-    return Member(
-        kind=actor_kind(actor),
-        id=actor_id(actor),
-        round=actor_round(actor),
-        task=text(record.get("task")),
-        description=text(record.get("description")),
-        summary="",
-        error="",
-        worktree=text(record.get("worktree")),
-        liveness=text(record.get("liveness")),
-        delivery=text(record.get("delivery")),
-        wake=wake if isinstance(wake, dict) else Wake(),
-        running=True,
-        heard=at,
-        arrived=at,
-    )
-
-
-def applied(record: RosterRecord, standing: Member | None) -> Member | None:
-    """The member as one record leaves it, or nothing where it says nothing.
-
-    A replayed arrival for a round the member has already moved past says
-    nothing about where it is now, so the standing entry survives it. A
-    description or a finish for nobody invents no member: a record arriving
-    before the join it belongs to is one every reader passes over, and so is a
-    record of a kind this fold has never heard of.
-    """
-    at = text(record.get("at"))
-    match text(record.get("type")):
-        case "spawned" | "joined":
-            if (
-                standing is not None
-                and actor_round(record.get("actor")) < standing["round"]
-            ):
-                return standing
-            return arrival(record)
-        case "described" if standing is not None:
-            described = standing.copy()
-            described["description"] = text(record.get("description"))
-            described["heard"] = at
-            return described
-        case "finished" if standing is not None:
-            finished = standing.copy()
-            finished["running"] = False
-            finished["summary"] = text(record.get("summary"))
-            finished["error"] = text(record.get("error"))
-            finished["heard"] = at
-            return finished
-        case _:
-            return standing
-
-
-def members(roster: Path) -> dict[str, Member]:
-    """Every member one roster has held, by conversation, in first-seen order.
-
-    A round advance updates the member in place rather than adding one, because
-    a worker on its second round is the agent that took its first. Finished
-    members are kept with ``running`` false rather than dropped: a departure is
-    read off the finished record, and what a session concluded is there and
-    nowhere else.
-    """
-    # lup: ignore[empty-collection] — a fold whose every step reads what the
-    # steps before it left, which is the one shape a comprehension cannot
-    # spell: a description revises the member an earlier record created
-    held: dict[str, Member] = {}
-    for record in loaded(roster, RosterRecord):
-        speaking = conversation_of(record.get("actor"))
-        if not speaking:
-            continue
-        settled = applied(record, held.get(speaking))
-        if settled is not None:
-            held[speaking] = settled
-    return held
-
-
-def heard(root: Path, member: Member) -> datetime | None:
-    """When this member was last heard from: its newest record, or a later beat."""
-    return max(
-        (
-            moment
-            for moment in (spoken_at(member["heard"]), heard_at(root, member["id"]))
-            if moment is not None
-        ),
-        default=None,
-    )
-
-
-def pulsed(
-    root: Path, member: Member, now: datetime, window: float = STALE_AFTER_SECONDS
-) -> Member:
-    """This member as its pulse leaves it: gone where the pulse has stopped.
+def pulsed(member: Member, now: datetime, window: float) -> Member:
+    """This member as its own file's modification time leaves it.
 
     Only a session answers for itself this way. A spawned agent's presence is
-    the word of the process that spawned it, which writes the finish, and the
-    person is never finished at all. A session whose record says running and
-    whose pulse says nothing within the window reads as gone, with the silence
-    named where the finish would have been — derived at the read, so beating
-    again is enough to read as back.
+    the word of the process that spawned it, and the person is never finished
+    at all, so both pass through as their files say.
     """
-    if member["kind"] != MEMBER_KIND or not member["running"]:
+    if text(member.get("kind")) != MEMBER_KIND or not member.get("running"):
         return member
-    last = heard(root, member)
-    if not stale(last, now, window):
+    heard = spoken_at(text(member.get("heard")))
+    if not stale(heard, now, window):
         return member
     gone = member.copy()
     gone["running"] = False
-    gone["error"] = f"unheard since {last.isoformat() if last else 'it joined'}"
+    gone["error"] = f"unheard since {heard.isoformat() if heard else 'it joined'}"
     return gone
-
-
-def rewound(root: Path, member: Member) -> Member:
-    """This member as its conversation leaves it: unsaid where that moved.
-
-    A rewind or a clear keeps the process, the id and the pulse, and discards
-    what the session was saying, so a description older than the reset stamp
-    is the discarded conversation's and reads as empty — derived at the read,
-    so describing again is enough to read as current. What the session holds
-    is left alone: a touch is what happened to the tree, and the tree is
-    whatever the rewind left it.
-    """
-    if member["kind"] != MEMBER_KIND or not member["description"]:
-        return member
-    moved = reset_at(root, member["id"])
-    spoken = spoken_at(member["heard"])
-    if moved is None or (spoken is not None and spoken >= moved):
-        return member
-    unsaid = member.copy()
-    unsaid["description"] = ""
-    return unsaid
 
 
 def present(
@@ -540,32 +582,46 @@ def present(
     mine: str = "",
     window: float = STALE_AFTER_SECONDS,
 ) -> list[Member]:
-    """Every member as the record, the pulses and the resets say, live ones first.
+    """Every member this store holds, live ones first, as the read leaves them.
 
-    The whole of what is derived at the read: a row whose pulse stopped is
-    gone however the record reads, and a description from a conversation that
-    was rewound is unsaid. Both are derived here rather than recorded, so a
-    session that beats again reads as back and one that describes itself again
-    reads as current, without anybody writing a correction.
+    The departed are here too, back to the retention window, because a reader
+    that arrived after somebody left still wants to know what they concluded —
+    and a sender addressing them has to be told they are gone rather than have
+    the message wait for nobody.
 
-    *mine* is the reading session's own id, which is never read as absent: the
-    reader is manifestly here, and its own beat lands after this fold rather
-    than before it — so a session folding the store at its first prompt would
-    otherwise find itself gone and drop its own claims from the live set.
+    *mine* is the reading member's own id, which is never read as absent: the
+    reader is manifestly here, and its own beat may land after this read.
+
+    A member that left and came back is here once. Its departed stub is what
+    the previous standing ended as, and reporting both would give a listing two
+    rows for one session and a sender two answers about whether it can be
+    reached.
     """
-    moment = now or datetime.now(UTC)
+    moment_now = now or datetime.now(UTC)
+    here = [
+        member if text(member.get("id")) == mine else pulsed(member, moment_now, window)
+        for member in members(root)
+    ]
+    standing = {conversation_of(member_actor(member)) for member in here}
     return sorted(
-        (
-            rewound(
-                root,
+        [
+            *here,
+            *[
                 member
-                if member["id"] == mine
-                else pulsed(root, member, moment, window),
-            )
-            for member in members(root / ROSTER_FILE).values()
-        ),
-        key=lambda member: not member["running"],
+                for member in departed(root, moment_now)
+                if conversation_of(member_actor(member)) not in standing
+            ],
+        ],
+        key=lambda member: not member.get("running"),
     )
+
+
+def member_of(root: Path, member: Actor) -> Member | None:
+    """One member, wherever its file sits, or nothing where none does."""
+    here = read_member(member_path(root, member), running=True)
+    if here is not None:
+        return here
+    return read_member(departed_path(root, member), running=False)
 
 
 def live_ids(
@@ -578,204 +634,245 @@ def live_ids(
 
     A claim is alive while its holder is, so this is the whole of the expiry
     rule: no timeout to tune, no release to forget, and the failure mode is a
-    session that stopped taking its own claims with it.
+    member that stopped taking its own claims with it.
     """
     return [
-        member["id"] for member in present(root, now, mine, window) if member["running"]
+        text(member.get("id"))
+        for member in present(root, now, mine, window)
+        if member.get("running")
     ]
 
 
-def member_actor(root: Path, member_id: str) -> Actor | None:
-    """One session's own address as the roster holds it, or nothing.
-
-    Read rather than composed. A session that never joined has no address to
-    write claims under, and inventing one here would put a holder on the record
-    that no listing shows and nothing can ask.
-    """
-    return next(
-        (
-            Actor(kind=member["kind"], id=member["id"], round=member["round"])
-            for member in members(root / ROSTER_FILE).values()
-            if member["id"] == member_id
-        ),
-        None,
-    )
-
-
-def named(root: Path) -> list[Named]:
-    """Every naming ever recorded, oldest first.
-
-    The whole history rather than the current names: a name somebody wrote down
-    before a rename goes on reaching the session it named until something else
-    claims it, and there is no error the sender could have been shown, because
-    the name they used was correct when they read it.
-    """
+def names_of(member: Member) -> list[Named]:
+    """Every name one member has answered to, oldest first."""
+    found = member.get("names")
     return [
-        Named(id=held, cli_name=calling, at=text(record.get("at")))
-        for record in loaded(root / NAMES_FILE, NameRecord)
-        for held in [text(record.get("id"))]
-        for calling in [text(record.get("cli_name"))]
-        if held and calling
+        named
+        for named in (found if isinstance(found, list) else [])
+        if isinstance(named, dict) and text(named.get("cli_name"))
     ]
+
+
+def current_name(member: Member) -> str:
+    """What this member is called now, or nothing where nothing named it."""
+    found = names_of(member)
+    return text(found[-1].get("cli_name")) if found else ""
+
+
+def renamed(member: Member, cli_name: str) -> Member:
+    """This member answering to one more name, keeping the ones before it.
+
+    Kept rather than replaced, so a reference somebody wrote down an hour ago
+    still reaches the member it named. There is no error a sender could be
+    shown for using it: the name was correct when they read it.
+    """
+    settled = member.copy()
+    settled["names"] = [*names_of(member), Named(cli_name=cli_name, at=stamped())]
+    return settled
 
 
 # lup: ignore[dict-str-payload] — keyed by member id, an identity the roster's
 # own module mints and that a half with no type of lup's cannot name
-def called(root: Path) -> dict[str, str]:
-    """What each member is called now, the latest record for an id winning."""
-    return {record["id"]: record["cli_name"] for record in named(root)}
+def called(root: Path, now: datetime | None = None) -> dict[str, str]:
+    """What each member is called now, by id."""
+    return {
+        text(member.get("id")): current_name(member)
+        for member in present(root, now)
+        if current_name(member)
+    }
 
 
-# lup: ignore[dict-str-payload] — keyed by the name somebody types, whose value
-# is the member id it reaches; neither side is a type this half can name
-def name_holders(root: Path) -> dict[str, str]:
-    """Which member each name reaches now, the newest claim on a name winning.
+def naming(root: Path, now: datetime | None = None) -> list[Claiming]:
+    """Every name any member has answered to, oldest claim first.
 
-    Newest wins by construction, the comprehension walking the record in order.
+    The whole history rather than the current names: a name somebody wrote
+    down before a rename goes on reaching the member it named until something
+    else claims it. Ordered by when each was claimed, so a reader taking the
+    last match takes the newest claim on that name.
     """
-    return {record["cli_name"]: record["id"] for record in named(root)}
+    return sorted(
+        (
+            Claiming(
+                cli_name=text(named.get("cli_name")),
+                id=text(member.get("id")),
+                at=text(named.get("at")),
+            )
+            for member in present(root, now)
+            for named in names_of(member)
+        ),
+        key=lambda claiming: claiming["at"],
+    )
 
 
 def subject_of(path: str, prefix: bool) -> str:
-    """What the fold keys a claim by, which a lock and a touch differ in.
+    """What a reader keys a claim by, which a lock and a touch differ in.
 
     A prefix and an exact path can be spelled identically and mean different
     things — locking ``src/lup`` is not touching a file of that name — so the
-    kind is part of the key rather than something a later record could silently
-    convert.
+    kind is part of the key.
     """
     return f"{'under' if prefix else 'at'} {path}"
 
 
-def covers(claim: Held, candidate: str) -> bool:
-    """Whether a path about to be written falls under this claim."""
-    if not claim["prefix"]:
-        return candidate == claim["path"]
-    return candidate == claim["path"] or candidate.startswith(claim["path"] + "/")
+def path_mtime(path: str) -> float:
+    """When the filesystem says this path was last written, zero where it is gone."""
+    try:
+        return Path(path).stat().st_mtime
+    except OSError:
+        return 0.0
 
 
-def vacant(claim: Held) -> bool:
-    """Whether the path this claim is over has gone from the filesystem.
+def standing(claim: Claim) -> bool:
+    """Whether this claim still says something about the path it names.
 
-    A worktree removed from under a session takes every path in it, and a claim
-    over one names nothing anybody could write. Asked of the filesystem rather
-    than of git, because a claim is keyed by the path and the path is what has
-    to be there.
+    Three ways it stops. The path is **gone**, and a claim over nothing names
+    nothing anybody could write. Somebody has **written it since**, which the
+    recorded time is there to notice — the claim was evidence of what this
+    member left, and what stands there now is not it. Otherwise it **holds**.
+
+    A prefix lock is exempt from the second: a directory's modification time
+    moves whenever anything inside it is created or removed, including by the
+    holder, so comparing it would retire a lock the moment it was used. A lock
+    ends when its holder leaves, when it is released, or when the prefix goes.
     """
-    return not Path(claim["path"]).exists()
+    path = text(claim.get("path"))
+    if not path:
+        return False
+    current = path_mtime(path)
+    if not current:
+        return False
+    return bool(claim.get("prefix")) or current <= moment(claim.get("mtime"))
 
 
-def touch_prefix(record: TouchRecord, kind: str) -> bool:
-    """Whether one record is about a prefix lock or about an exact path.
-
-    A vacating says which it ends, because the path it names could be either;
-    every other record is told by its own kind.
-    """
-    if kind != "vacated":
-        return kind in ("locked", "released")
-    return record.get("prefix") is True
-
-
-def touched_claim(record: TouchRecord, actor: Actor, path: str) -> Held:
-    """The claim one change leaves, with every session it could have been.
-
-    Recorded with every name rather than with a guess: a before-and-after
-    comparison sees the change and cannot see who made it, and inventing an
-    author there would put a confident wrong answer where a reader is deciding
-    whether it is safe to write.
-    """
-    rivals = record.get("rivals")
-    return Held(
-        subject=subject_of(path, False),
-        path=path,
-        prefix=False,
-        holders=[
-            actor,
-            *[
-                rival
-                for rival in (rivals if isinstance(rivals, list) else [])
-                if actor_id(rival)
-            ],
-        ],
-        digest=text(record.get("digest")),
-        at=text(record.get("at")),
-    )
-
-
-def claims(root: Path) -> list[Held]:
-    """Every claim standing on the record, whoever holds it and whether they live.
-
-    Keyed by kind as well as path, so a later record cannot silently convert a
-    lock into a touch. A release by somebody who never held the prefix says
-    nothing, which is what stops one session unlocking another's work by
-    asking; a vacating ends the claim whoever wrote it, because a path that is
-    not there is held by nobody and that is a fact of the filesystem any
-    session can check.
-    """
-    # lup: ignore[empty-collection] — a fold whose every step reads what the
-    # steps before it left: a release answers against the claim an earlier
-    # record created, which is the one shape a comprehension cannot spell
-    standing: dict[str, Held] = {}
-    for record in loaded(root / TOUCHES_FILE, TouchRecord):
-        actor = record.get("actor") or Actor()
-        path = text(record.get("path"))
-        if not actor_id(actor) or not path:
-            continue
-        kind = text(record.get("type"))
-        subject = subject_of(path, touch_prefix(record, kind))
-        match kind:
-            case "vacated":
-                standing.pop(subject, None)
-            case "touched" | "contested":
-                standing[subject] = touched_claim(record, actor, path)
-            case "locked":
-                standing[subject] = Held(
-                    subject=subject,
-                    path=path,
-                    prefix=True,
-                    holders=[actor],
-                    digest="",
-                    at=text(record.get("at")),
-                )
-            case "released" if subject in standing and actor_id(actor) in [
-                actor_id(holder) for holder in standing[subject]["holders"]
-            ]:
-                del standing[subject]
-            case _:
-                continue
-    return list(standing.values())
-
-
-def narrowed(claim: Held, live: list[str]) -> Held:
-    """This claim with only the holders still working here."""
-    remaining = claim.copy()
-    remaining["holders"] = [
-        holder for holder in claim["holders"] if actor_id(holder) in live
+def claims_of(member: Member) -> list[Claim]:
+    """Every claim one member's file holds that still stands."""
+    found = member.get("claims")
+    return [
+        claim
+        for claim in (found if isinstance(found, list) else [])
+        if isinstance(claim, dict) and standing(claim)
     ]
-    return remaining
 
 
-def held(root: Path, live: list[str]) -> list[Held]:
-    """Every claim a live session holds, holders narrowed to them, newest first.
+def held(root: Path, live: list[str], now: datetime | None = None) -> list[Held]:
+    """Every claim a live member holds, one row per path, newest first.
 
-    Expiry is the roster's rather than a timeout's. A claim outliving its
-    session would have to be released by somebody, and the somebody who would
-    have to remember is exactly the session that has stopped.
+    Two members holding one path meet here, which is the whole of how a
+    contest is found: no record says they contest, their two files do.
     """
+    # lup: ignore[empty-collection] — a fold gathering holders across files
+    # into one row per subject, which no comprehension expresses: each member
+    # contributes to a row an earlier member may already have created
+    rows: dict[str, Held] = {}
+    for member in present(root, now):
+        if text(member.get("id")) not in live:
+            continue
+        for claim in claims_of(member):
+            path = text(claim.get("path"))
+            prefix = bool(claim.get("prefix"))
+            subject = subject_of(path, prefix)
+            at = text(claim.get("at"))
+            found = rows.get(subject)
+            rows[subject] = Held(
+                subject=subject,
+                path=path,
+                prefix=prefix,
+                holders=[*(found["holders"] if found else []), member_actor(member)],
+                at=max(at, found["at"]) if found else at,
+            )
+    return sorted(rows.values(), key=lambda row: row["at"], reverse=True)
+
+
+def covers(row: Held, candidate: str) -> bool:
+    """Whether a path about to be written falls under this claim."""
+    if not row["prefix"]:
+        return candidate == row["path"]
+    return candidate == row["path"] or candidate.startswith(row["path"] + "/")
+
+
+def covering(
+    root: Path, target: Path, live: list[str], now: datetime | None = None
+) -> list[Held]:
+    """Every live claim a write to this path would land under."""
+    return [row for row in held(root, live, now) if covers(row, str(target))]
+
+
+def claim_holders(
+    root: Path, target: str, mine: str, now: datetime | None = None
+) -> list[str]:
+    """Who else, still working here, is holding the path a write would land on.
+
+    Live holders other than the asker. A claim expires with the member that
+    made it, so a departed holder is nobody to ask; and a member meeting its
+    own claim on every edit would be asked about its own work.
+    """
+    live = live_ids(root, now)
+    names = called(root, now)
     return sorted(
-        (
-            narrowed(claim, live)
-            for claim in claims(root)
-            if any(actor_id(holder) in live for holder in claim["holders"])
-        ),
-        key=lambda claim: claim["at"],
-        reverse=True,
+        {
+            names.get(holder) or holder
+            for row in covering(root, Path(target).resolve(), live, now)
+            for holder in [actor_id(found) for found in row["holders"]]
+            if holder and holder != mine
+        }
     )
 
 
-def covering(root: Path, target: Path, live: list[str]) -> list[Held]:
-    """Every live claim a write to this path would land under."""
-    return [claim for claim in held(root, live) if covers(claim, str(target))]
+def claimed(member: Member, paths: list[str], prefix: bool) -> Member:
+    """This member holding these paths as well as whatever it held already.
+
+    A path claimed again replaces its earlier claim rather than joining it:
+    what a claim carries is the state this member left the path in, and the
+    older reading is what the newer write has just made wrong.
+    """
+    at = stamped()
+    taken = [
+        Claim(path=path, prefix=prefix, mtime=path_mtime(path), at=at) for path in paths
+    ]
+    subjects = [subject_of(text(claim.get("path")), prefix) for claim in taken]
+    settled = member.copy()
+    settled["claims"] = [
+        *[
+            claim
+            for claim in claims_of(member)
+            if subject_of(text(claim.get("path")), bool(claim.get("prefix")))
+            not in subjects
+        ],
+        *taken,
+    ]
+    return settled
+
+
+def unclaimed(member: Member, prefix: Path) -> Member:
+    """This member without the lock it took over *prefix*."""
+    settled = member.copy()
+    settled["claims"] = [
+        claim
+        for claim in claims_of(member)
+        if not (bool(claim.get("prefix")) and text(claim.get("path")) == str(prefix))
+    ]
+    return settled
+
+
+def record_claims(root: Path, mine: str, paths: list[str]) -> bool:
+    """Write down what one member's call just changed, under that member's lock.
+
+    The dispatcher's write. It runs after the work has already happened, so
+    the call it belongs to cannot be undone by refusing, and a claim nobody
+    could record costs a later reader an attribution while a raised exception
+    would cost the session its ability to work.
+
+    No rival is recorded and none is guessed at. Where two sessions had
+    windows open over one path, both record a claim of their own and the
+    contest is what a reader derives from meeting them — the same answer,
+    arrived at from evidence rather than from a list of suspects.
+    """
+    if not mine or not paths:
+        return False
+    return (
+        revised(root, session_actor(mine), lambda member: claimed(member, paths, False))
+        is not None
+    )
 
 
 def addresses(root: Path, now: datetime | None = None) -> list[str]:
@@ -786,156 +883,122 @@ def addresses(root: Path, now: datetime | None = None) -> list[str]:
     check knowing only one of them would let the others through, which is the
     failure that made a redirect reach nobody.
 
-    Names are read both ways round, which is one line and the whole of a hole.
-    `name_holders` answers which member a name reaches now, so a name somebody
-    wrote down before a rename still refuses; `called` answers what a member is
-    called now, so a member that went quiet long enough to read as gone, lost
-    its name to a newcomer, and came back once the newcomer had left is still
-    refused under the name every listing prints for it. Either reading alone
-    leaves a live member a sender can type their way to unrecorded.
+    Every name a live member ever claimed, rather than only the one it answers
+    to now. A name given up in a rename goes on reaching its old holder until
+    somebody else takes it, and a member that went quiet long enough to read as
+    gone, lost its name to a newcomer, and came back once the newcomer had left
+    is still reachable under the name every listing prints for it. Both are one
+    reading here, because a claim sits on the member that made it.
 
     Live members only. A session that has left is not somewhere a durable
     message would arrive either, so redirecting a send to it would trade one
     call reaching nobody for another.
     """
     live = live_ids(root, now)
-    calling = called(root)
     return sorted(
         {
             *live,
             *[f"{MEMBER_KIND}:{member}" for member in live],
-            *[name for name, member in name_holders(root).items() if member in live],
-            *[calling[member] for member in live if calling.get(member)],
+            *[
+                claiming["cli_name"]
+                for claiming in naming(root, now)
+                if claiming["id"] in live
+            ],
         }
     )
 
 
 def listing(root: Path, now: datetime | None = None) -> list[str]:
-    """One line per live member, as somebody choosing who to reach reads it.
-
-    Four facts, because a listing naming members without saying what reaches
-    them leaves a reader to guess which of them will hear anything: who they
-    are, which checkout they are in, what they are on, and what carries a
-    message to them.
-    """
-    names = called(root)
+    """One line per live member, as somebody choosing who to reach reads it."""
 
     def described(member: Member) -> list[str]:
         """The parts one member's line is joined from, blanks included."""
+        worktree = text(member.get("worktree"))
         return [
-            names.get(member["id"]) or member["id"],
-            Path(member["worktree"]).name if member["worktree"] else "",
-            member["description"] or member["task"],
-            member["delivery"],
+            current_name(member) or text(member.get("id")),
+            Path(worktree).name if worktree else "",
+            text(member.get("description")) or text(member.get("task")),
+            text(member.get("delivery")),
         ]
 
     return [
         " — ".join(part for part in described(member) if part)
         for member in present(root, now)
-        if member["running"]
+        if member.get("running")
     ]
 
 
-def claim_holders(
-    root: Path, target: str, mine: str, now: datetime | None = None
-) -> list[str]:
-    """Who else, still working here, is holding the path a write would land on.
+def depart(root: Path, member: Actor, summary: str = "", error: str = "") -> bool:
+    """Move this member's file to the departed, saying whether one was moved.
 
-    Live holders other than the asker. A claim expires with the session that
-    made it, so a departed holder is nobody to ask; and a session meeting its
-    own claim on every edit would be asked about its own work.
+    A session's ending hook runs in a process with no typed writer to reach,
+    and a file nobody moved reads as present until the pulse retires it —
+    which is right for a session that was killed and needlessly vague for one
+    that exited.
 
-    Named where a session has a name and identified by id otherwise, because
-    this reaches somebody deciding whom to ask, and an id is what you fall back
-    on when nothing has been called anything yet.
+    A member that never joined leaves nothing: there is no file to move, and a
+    departed stub for a member that never arrived is a row no listing should
+    carry.
     """
-    live = live_ids(root, now)
-    names = called(root)
-    return sorted(
-        {
-            names.get(holder) or holder
-            for claim in covering(root, Path(target).resolve(), live)
-            for holder in [actor_id(found) for found in claim["holders"]]
-            if holder and holder != mine
-        }
-    )
-
-
-def digest_of(path: str) -> str:
-    """What one file's bytes hash to, or nothing where they cannot be read.
-
-    Carried on a claim so a later reader can tell the content a session left
-    from whatever stands there now — which is what makes a claim evidence of a
-    change rather than only an assertion that one happened.
-    """
-    try:
-        return sha256(Path(path).read_bytes()).hexdigest()
-    except OSError:
-        return ""
-
-
-def depart(root: Path, member_id: str) -> bool:
-    """End this member's row where it is standing; say whether one was written.
-
-    The first of the two bare writes. A session's ending hook runs in a process
-    with no typed writer to reach, and a row nobody ended reads as running until
-    the pulse retires it — which is right for a session that was killed and
-    needlessly vague for one that exited.
-
-    A session that never joined leaves nothing, because a finish for nobody is
-    a line every fold ignores and a store should not carry.
-    """
-    if not member_id:
+    if not actor_id(member):
         return False
-    standing = members(root / ROSTER_FILE).get(f"{MEMBER_KIND}-{member_id}")
-    if standing is None or not standing["running"]:
+    found = read_member(member_path(root, member), running=False)
+    if found is None:
         return False
-    return appended(
-        root / ROSTER_FILE,
-        [
-            Finished(
-                type="finished",
-                actor=Actor(kind=MEMBER_KIND, id=member_id),
-                at=datetime.now(UTC).isoformat(),
-                summary="",
-                error="",
-            )
-        ],
-    )
+    settled = found.copy()
+    settled["summary"] = summary or text(found.get("summary"))
+    settled["error"] = error or text(found.get("error"))
+    settled["left_at"] = stamped()
+    if published(departed_path(root, member), stored(settled)) is None:
+        return False
+    discarded(member_path(root, member))
+    discarded(member_lock(root, member))
+    return True
 
 
-def record_claims(root: Path, mine: str, paths: list[str], rivals: list[str]) -> bool:
-    """Write down what one session's call changed, and who else it could be.
+def lapsed(
+    root: Path, now: datetime | None = None, window: float = STALE_AFTER_SECONDS
+) -> list[Member]:
+    """Every member still under ``members/`` whose pulse has stopped.
 
-    The second of the two bare writes, and the dispatcher's: it runs after the
-    work has already happened, so the call it belongs to cannot be undone by
-    refusing, and a claim nobody could record costs a later reader an
-    attribution while a raised exception would cost the session its ability to
-    work.
-
-    A claim per path. Where another session had a window open across the same
-    moment, every name goes on the record instead of one being guessed at,
-    because the next reader is deciding whether it is safe to write and a
-    confident wrong author is worse than an honest pair.
+    What a sweep would move, without moving it — which is what lets a console
+    say what it is about to do before doing it. The departed are not here:
+    they have already been moved, and a sweep that reported them would report
+    the same rows on every run.
     """
-    actor = member_actor(root, mine) if mine else None
-    if actor is None or not paths:
-        return False
-    contenders = [
-        found for other in rivals for found in [member_actor(root, other)] if found
+    moment_now = now or datetime.now(UTC)
+    return [
+        gone
+        for member in members(root)
+        if not (gone := pulsed(member, moment_now, window)).get("running")
     ]
-    stamped = datetime.now(UTC).isoformat()
-    return appended(
-        root / TOUCHES_FILE,
-        [
-            Touched(
-                type="contested" if contenders else "touched",
-                actor=actor,
-                at=stamped,
-                path=path,
-                digest=digest_of(path),
-                rivals=contenders,
-            )
-            for path in paths
-        ],
-    )
+
+
+def swept(
+    root: Path, now: datetime | None = None, window: float = STALE_AFTER_SECONDS
+) -> list[Member]:
+    """Retire what the read already derives, and delete what nobody reads.
+
+    A member whose pulse stopped is moved to the departed, so a reader that
+    lists the directory agrees with one that stats the file; and a departed
+    stub older than the retention window is deleted, which is what keeps the
+    store the size of the population rather than of its history.
+
+    The window is the caller's, and the caller is a session's own tool server:
+    a sweep reading a silence for longer than the listings beside it do would
+    leave rows every reader calls gone and nothing ever moves.
+
+    A claim needs no sweeping: it stands or it does not, and the filesystem is
+    what says which.
+    """
+    moment_now = now or datetime.now(UTC)
+    retired = lapsed(root, moment_now, window)
+    for member in retired:
+        depart(root, member_actor(member), error=text(member.get("error")))
+    since = moment_now - timedelta(seconds=DEPARTED_SECONDS)
+    for path in listed(root / DEPARTED_DIR):
+        found = read_member(path, running=False)
+        left = spoken_at(text(found.get("left_at"))) if found is not None else None
+        if found is None or (left is not None and left < since):
+            discarded(path)
+    return retired

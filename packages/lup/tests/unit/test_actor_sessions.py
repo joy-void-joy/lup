@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.coordination.mail import ActorMail, new_message
+from lup.coordination.mail import ActorMail
 from lup.coordination.mailbox import AnswerDoor
 from lup.coordination.refs import ActorRef
 from lup.coordination.sessions import ActorInbox, ActorRecord, ActorSession
@@ -116,7 +116,10 @@ def mailed_session(
 
 def post(tmp_path: Path, text: str) -> None:
     ActorMail(tmp_path).send(
-        new_message("run-1", "worker:a-concern#1", text, AnswerDoor.AGENT)
+        ActorRef(kind="worker", id="a-concern"),
+        text,
+        door=AnswerDoor.AGENT,
+        sender="run-1",
     )
 
 

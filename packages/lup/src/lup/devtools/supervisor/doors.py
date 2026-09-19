@@ -16,7 +16,6 @@ from time import sleep
 import typer
 
 from lup.channels.models import local_stamp, utc_now
-from lup.resolver.journal import Journal
 from lup.resolver.models import (
     ConcernRetirement,
     ConcernStatus,
@@ -25,14 +24,13 @@ from lup.resolver.models import (
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
 from lup.resolver.status import RunStatus, run_status
 from lup.coordination.cohort import ActorCohort
-from lup.coordination.mail import EVERYONE
 from lup.coordination.mailbox import (
     AnswerDoor,
     AnswerOffer,
     MailboxConflictError,
     ParkRequest,
 )
-from lup.resolver.mailbox import QuestionMailbox
+from lup.resolver.mailbox import QuestionMailbox, run_cohort
 from lup.workspace.paths import project_root
 from lup.devtools.harness.resolve import parse_answer_flags
 from lup.devtools.supervisor.projection import PendingQuestionView
@@ -61,13 +59,7 @@ def open_cohort(run_id: str) -> ActorCohort:
     who the run holds, what each was asked, and what is queued for whom, all
     of it folded from files the run has already written.
     """
-    mailbox = open_mailbox(run_id)
-    return ActorCohort(
-        mailbox.root,
-        journal=Journal(mailbox.root),
-        mail=mailbox.mail,
-        run_id=run_id,
-    )
+    return run_cohort(open_mailbox(run_id), run_id)
 
 
 def pending_views(mailbox: QuestionMailbox) -> list[PendingQuestionView]:
@@ -120,8 +112,6 @@ def queued(run_id: str, to: str) -> list[str]:
     read it. Not a refusal: a message may legitimately be posted for a
     concern that has not started, and it waits at that actor's first turn.
     """
-    if to == EVERYONE:
-        return ["queued for every actor in this run, including ones not yet started"]
     # The population's own answer, rather than a second one assembled here.
     # Every consumer that resolved an address for itself disagreed with
     # whatever printed it, and a message sent to the spelling shown reached
@@ -260,22 +250,78 @@ def list_actors(
 def say_to_actor(
     text: str = typer.Argument(..., help="What to tell the actor"),
     run_id: str = typer.Option(..., "--run-id", help="Run whose mailbox to write"),
-    to: str = typer.Option(
-        EVERYONE,
-        "--to",
-        help="Actor label from `actors`; the default reaches every actor",
-    ),
+    to: str = typer.Option(..., "--to", help="Actor label from `actors`"),
     in_reply_to: str = typer.Option(
         "", "--in-reply-to", help="Question or message id this answers, if any"
     ),
 ) -> None:
-    """Tell an actor something. It reads this and keeps going."""
+    """Tell one actor something. It reads this and keeps going.
+
+    The recipient is required. A message is addressed and consumed, so
+    "everyone" would have to mean everyone *working* — and something worth
+    saying to a whole run is almost always a fact that stays true, which
+    `notice` states where the actors starting next hour also read it.
+    """
     # Through the cohort, which is the one place a message is built. A door
     # assembling its own reached the stream by a second route, and the two
     # had to be kept agreeing by hand about what an address means.
     open_cohort(run_id).post(to, text, door=AnswerDoor.AGENT, in_reply_to=in_reply_to)
     for line in queued(run_id, to):
         typer.echo(line)
+
+
+@app.command("notice")
+def post_notice(
+    text: str = typer.Argument(..., help="What is true for this whole run"),
+    run_id: str = typer.Option(..., "--run-id", help="Run whose store to write"),
+) -> None:
+    """State something true for every actor, now and for whoever starts next.
+
+    A notice is state rather than mail: it is read at the head of every turn
+    for as long as it stands, so an actor spawned an hour from now reads it
+    at its first. Whoever is working is also sent it as an ordinary message,
+    because a fact worth stating is worth hearing before the turn they are in
+    ends. Take it down with `unnotice` once it stops being true.
+    """
+    cohort = open_cohort(run_id)
+    cohort.notify(text, door=AnswerDoor.AGENT)
+    live = [member.address for member in cohort.live() if member.running]
+    typer.echo(
+        "standing for every actor, including ones not yet started"
+        + (f"; told now to {', '.join(live)}" if live else "; nobody is working yet")
+    )
+
+
+@app.command("notices")
+def list_notices(
+    run_id: str = typer.Option(..., "--run-id", help="Run whose store to read"),
+) -> None:
+    """Everything standing over this run, with the id that takes one down."""
+    standing = open_cohort(run_id).mail.standing()
+    if not standing:
+        typer.echo("Nothing is standing over this run.")
+        return
+    for notice in standing:
+        typer.echo(f"{notice.id} — {notice.text} [{notice.door}]")
+
+
+@app.command("unnotice")
+def retract_notice(
+    notice_id: str = typer.Argument(..., help="Notice id from `notices`"),
+    run_id: str = typer.Option(..., "--run-id", help="Run whose store to write"),
+) -> None:
+    """Take one standing fact down, so no later turn reads it.
+
+    Deleted rather than marked retracted: a notice is read as state, so what
+    is there is what is true. Nothing is re-read by the actors that already
+    saw it, which is the point — they were told while it held.
+    """
+    if not open_cohort(run_id).mail.retract(notice_id):
+        raise typer.BadParameter(
+            f"{notice_id!r} names nothing standing over {run_id}; "
+            f"run `resolve notices --run-id {run_id}`"
+        )
+    typer.echo(f"retracted {notice_id}")
 
 
 @app.command("accept")
@@ -313,9 +359,9 @@ def redirect_actor(
     text: str = typer.Argument(..., help="What the actor should do instead"),
     run_id: str = typer.Option(..., "--run-id", help="Run whose mailbox to write"),
     to: str = typer.Option(
-        EVERYONE,
+        "",
         "--to",
-        help="Actor label from `actors`; the default reaches every actor",
+        help="Actor label from `actors`; empty stops every actor that is working",
     ),
 ) -> None:
     """Stop an actor and put it on something else.
@@ -323,10 +369,26 @@ def redirect_actor(
     Where `say` rides alongside the actor's next tool call, this refuses that
     call and hands back this text as the reason — so an actor going the wrong
     way cannot take one more step down it before reading why it was stopped.
+
+    With no `--to` it stops whoever is working, and nobody else. A redirect
+    denies a tool call, so an actor that has not started has no call to deny
+    and no reason to be stopped: one spawned after this was spawned *knowing*
+    about it, and stopping it would refuse its first call with somebody
+    else's reason.
     """
-    open_cohort(run_id).post(to, text, redirect=True, door=AnswerDoor.AGENT)
-    for line in queued(run_id, to):
-        typer.echo(line)
+    cohort = open_cohort(run_id)
+    if to:
+        cohort.post(to, text, redirect=True, door=AnswerDoor.AGENT)
+        for line in queued(run_id, to):
+            typer.echo(line)
+        return
+    cohort.redirect_all(text, door=AnswerDoor.AGENT)
+    stopped = [member.address for member in cohort.live() if member.running]
+    typer.echo(
+        f"queued for {', '.join(stopped)}; it denies each one's next tool call"
+        if stopped
+        else "no actor in this run is working, so nothing was stopped"
+    )
 
 
 @app.command("park")

@@ -30,7 +30,7 @@ import sys
 from pathlib import Path
 from typing import TypedDict
 
-from .store import depart
+from .store import depart, session_actor
 
 
 class Ending(TypedDict, total=False):
@@ -54,7 +54,7 @@ def main() -> None:
     try:
         root, member = Path(sys.argv[1]), sys.argv[2]
         ending: Ending = json.load(sys.stdin)
-        depart(root, member or ending.get("session_id", ""))
+        depart(root, session_actor(member or ending.get("session_id", "")))
     except Exception:
         return
 

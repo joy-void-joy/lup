@@ -47,12 +47,17 @@ LAUNCHER_DECIDED_ENV: list[str] = [
 ]
 """What a launched process is told about where it is, rather than what it does.
 
-The coordination identity arrives by reference rather than respelled, because
-it is already declared where it is written: a second spelling here is a second
-place a variable would have to be added, and the one that was missed is
-exactly how the roster's naming tests came to measure the session running
-them. What they asked the code was which name a session with none is called
-after, and what answered was the launcher's name for whoever ran the suite.
+The coordination pair is one session's own identity: a launcher mints the id
+and the name together and exports both, so a process that inherits them and is
+not that session answers to somebody else's address. It arrives by reference
+rather than respelled, because a second spelling is a second place a variable
+has to be added, and the one that is missed is the one nobody takes away.
+
+A suite is the case that matters. A test joining a roster without saying what
+to call the session is named after whichever worktree pytest was started from
+— which is how the roster's naming tests, asking which name a session with
+none is called after, came to measure the launcher's name for whoever ran them
+and pass on the machine that wrote them.
 
 Deliberately not ``UV_PROJECT_ENVIRONMENT``, which reads like one and is not.
 It names where this machine's toolchain is, and
