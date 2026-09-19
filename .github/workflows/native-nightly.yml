@@ -10,7 +10,7 @@ on:
 
 jobs:
   evidence:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
         run: uv run lup-devtools harness doctor all --strict-evidence
 
   credentials:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       live: ${{ steps.detect.outputs.live }}
     steps:
@@ -45,7 +45,7 @@ jobs:
   native:
     needs: [evidence, credentials]
     if: ${{ always() && needs.credentials.outputs.live == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
