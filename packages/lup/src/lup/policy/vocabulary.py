@@ -2174,6 +2174,215 @@ def typescript_rule() -> list[ShellCommandRule]:
     ]
 
 
+def codex_rule() -> ShellCommandRule:
+    """Compile the codex surface: reads allow, session-reaching verbs are routed.
+
+    Declared for one verb's sake and enumerated for everything around it.
+    `codex queue --thread <id> --message <text>` reaches another session from
+    any process on this machine, leaving its text only inside whichever process
+    received it — the act `lup.policy.kernel.peers` already refuses when a
+    runtime spells it as a tool call, arriving here as a command line instead.
+    A table that refused only the tool would have redirected one spelling of
+    one act and left the other open.
+
+    The default is `runs_undeclared_program` rather than the
+    `unclassified_operation` that `git` and `gh` take, and the table's own
+    distinction is why: what falls off `gh` reaches a remote no boundary
+    covers, so containment has nothing to offer it, while a word codex does
+    not recognize is taken as the *prompt* of an interactive session on this
+    machine — which a sandbox confines. It also means a verb a later release
+    grows costs a question rather than a refusal nobody anticipated, which
+    matters more here than elsewhere: this CLI's own readers swallow a failed
+    invocation into "nothing to report".
+
+    That swallowing is the reason the bare form is guarded at all. `codex
+    notaverb` does not fail — it starts an interactive session with the typo
+    as its prompt, so the shape that looks like a mistyped read is the shape
+    that opens an agent. `allow_flags` keeps the two spellings that genuinely
+    only report — `--version` and `--help` — as reads.
+    """
+
+    def reading(names: list[str], scope: str) -> list[ShellSubcommandRule]:
+        """Verbs that render what is already there and change nothing."""
+        return [
+            ShellSubcommandRule(
+                name=name, effects=[declare("changes_nothing", scope=scope)]
+            )
+            for name in names
+        ]
+
+    def opening(names: list[str]) -> list[ShellSubcommandRule]:
+        """Verbs that start an agent, a server, or a program of their own."""
+        return [
+            ShellSubcommandRule(
+                name=name,
+                effects=[declare("runs_undeclared_program", scope=f"codex {name}")],
+                reason=f"`codex {name}` opens an agent or a server of its own",
+            )
+            for name in names
+        ]
+
+    return ShellCommandRule(
+        name="codex",
+        effects=[declare("runs_undeclared_program", scope="codex")],
+        # Every global that consumes the following word, so a value is never
+        # read as the subcommand. `--image` takes several, which this reading
+        # cannot express; it lands on the ask the bare form already carries.
+        value_flags=[
+            "-c",
+            "--config",
+            "--enable",
+            "--disable",
+            "--remote",
+            "--remote-auth-token-env",
+            "-i",
+            "--image",
+            "-m",
+            "--model",
+            "--local-provider",
+            "-p",
+            "--profile",
+            "-s",
+            "--sandbox",
+            "-C",
+            "--cd",
+            "--add-dir",
+            "-a",
+            "--ask-for-approval",
+        ],
+        allow_flags=["-V", "--version", "-h", "--help"],
+        reason=(
+            "a word codex does not recognize is taken as the prompt of an"
+            " interactive session rather than refused"
+        ),
+        recovery=("Name a verb `codex --help` lists, or say what the session is for."),
+        subcommands=[
+            *reading(["agents", "completion", "doctor", "features", "help"], "codex"),
+            *opening(
+                ["exec", "e", "review", "resume", "fork", "sandbox", "exec-server"]
+            ),
+            ShellSubcommandRule(
+                name="queue",
+                effects=[declare("changes_nothing", scope="codex queue")],
+                refuses=(
+                    "Reach the peer with coordination_send, which records what"
+                    " it carries."
+                ),
+                reason=(
+                    "queueing a message reaches another session leaving the"
+                    " text only inside whichever process received it"
+                ),
+                recovery=(
+                    "Use coordination_send, which records what it carries; the"
+                    " roster's own watcher nudges an idle Codex session through"
+                    " this verb once the record exists."
+                ),
+            ),
+            ShellSubcommandRule(
+                name="debug",
+                effects=[declare("runs_undeclared_program", scope="codex debug")],
+                reason="this codex debug tool is not one that only renders",
+                operations=[
+                    ShellOperationRule(
+                        name=name,
+                        effects=[declare("changes_nothing", scope="codex debug")],
+                    )
+                    for name in ("models", "prompt-input")
+                ],
+            ),
+            ShellSubcommandRule(
+                name="mcp",
+                effects=[declare("mutates_environment", scope="codex mcp")],
+                operations=[
+                    ShellOperationRule(
+                        name=name,
+                        effects=[declare("changes_nothing", scope="codex mcp")],
+                    )
+                    for name in ("list", "get")
+                ],
+                reason="an MCP server changes what every later session can reach",
+            ),
+            ShellSubcommandRule(
+                name="plugin",
+                effects=[declare("installs_dependency", scope="codex plugin")],
+                reason="a plugin arrives from a marketplace and runs in a session",
+                operations=[
+                    ShellOperationRule(
+                        name="list",
+                        effects=[declare("changes_nothing", scope="codex plugin")],
+                    )
+                ],
+            ),
+            ShellSubcommandRule(
+                name="app-server",
+                effects=[declare("runs_undeclared_program", scope="codex app-server")],
+                reason="the app server is the process every Codex session runs in",
+                operations=[
+                    ShellOperationRule(
+                        name=name,
+                        effects=[declare("writes_path", scope="unbounded")],
+                        write_flags=["--out"],
+                        reason="the generated schema lands wherever --out names",
+                    )
+                    for name in ("generate-ts", "generate-json-schema")
+                ],
+            ),
+            ShellSubcommandRule(
+                name="remote-control",
+                effects=[declare("reaches_host", scope="codex remote-control")],
+                reason=(
+                    "remote control lets a process off this machine drive a"
+                    " session here"
+                ),
+            ),
+            *[
+                ShellSubcommandRule(
+                    name=name,
+                    effects=[declare("mutates_environment", scope="codex")],
+                    reason="stored Codex credentials are what every session runs as",
+                )
+                for name in ("login", "logout")
+            ],
+            ShellSubcommandRule(
+                name="update",
+                effects=[declare("installs_dependency", scope="codex")],
+                reason="updating replaces the CLI every session here runs",
+            ),
+            ShellSubcommandRule(
+                name="apply",
+                effects=[declare("destroys_uncaptured", scope="boundary_wide")],
+                reason="applying a diff writes over whatever the tree holds now",
+            ),
+            ShellSubcommandRule(
+                name="a",
+                effects=[declare("destroys_uncaptured", scope="boundary_wide")],
+                reason="applying a diff writes over whatever the tree holds now",
+            ),
+            *[
+                ShellSubcommandRule(
+                    name=name,
+                    effects=[declare("destroys_uncaptured", scope="unrecoverable")],
+                    reason="a saved session is not in the object store",
+                )
+                for name in ("delete", "migrate-rollouts")
+            ],
+            *[
+                ShellSubcommandRule(
+                    name=name,
+                    effects=[declare("mutates_environment", scope="codex")],
+                    reason="which saved sessions are listed is shared state",
+                )
+                for name in ("archive", "unarchive")
+            ],
+            ShellSubcommandRule(
+                name="cloud",
+                effects=[declare("fetches", scope="undeclared")],
+                reason="cloud tasks arrive from off this machine and land here",
+            ),
+        ],
+    )
+
+
 def default_vocabulary() -> list[ShellCommandRule]:
     """Every group at its offered defaults — the batteries-included table.
 
@@ -2190,4 +2399,5 @@ def default_vocabulary() -> list[ShellCommandRule]:
         git_rule(),
         gh_rule(),
         docker_rule(),
+        codex_rule(),
     ]

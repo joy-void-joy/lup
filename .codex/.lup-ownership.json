@@ -296,7 +296,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "4144eaf687d4ca9cac0ae5f2c4ed820647d5eea9b71fb2b1bd215751d6839fd5",
+      "sha256": "7b0858b3fd9066678fee1d61a4e99d29dd08304794a098a3fd80af8356315c45",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

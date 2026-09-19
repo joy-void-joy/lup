@@ -1285,6 +1285,29 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="docker compose up", effect="ask"),
     DecisionCase(input="docker rm abc123", effect="ask"),
     DecisionCase(input="docker $verb ps", effect="ask"),
+    # Codex: `queue` reaches another session and is refused in favour of the
+    # recorded stream, which is the act `lup.policy.kernel.peers` already
+    # refuses when a runtime spells it as a tool call. Everything that only
+    # renders allows; everything that opens an agent, a server or a plugin
+    # asks; and a word the CLI does not recognize asks rather than denying,
+    # because it becomes the prompt of an interactive session a sandbox
+    # confines rather than a verb reaching a remote it does not.
+    DecisionCase(input="codex queue --thread t --message hello", effect="deny"),
+    DecisionCase(input="codex --version", effect="allow"),
+    DecisionCase(input="codex doctor", effect="allow"),
+    DecisionCase(input="codex agents", effect="allow"),
+    DecisionCase(input="codex features list", effect="allow"),
+    DecisionCase(input="codex debug models", effect="allow"),
+    DecisionCase(input="codex debug prompt-input", effect="allow"),
+    DecisionCase(input="codex plugin list", effect="allow"),
+    DecisionCase(input="codex exec hello", effect="ask"),
+    DecisionCase(input="codex app-server", effect="ask"),
+    DecisionCase(input="codex plugin add p@m --json", effect="ask"),
+    DecisionCase(input="codex remote-control start", effect="ask"),
+    DecisionCase(input="codex login", effect="ask"),
+    DecisionCase(input="codex delete some-session", effect="ask"),
+    DecisionCase(input="codex notaverb", effect="ask"),
+    DecisionCase(input="codex -m gpt-5 queue --thread t --message hi", effect="deny"),
     DecisionCase(input="ps aux", effect="allow"),
     DecisionCase(input="zcat f.gz", effect="allow"),
     DecisionCase(input="# lup: escalate: build the crate\ncargo build", effect="ask"),
