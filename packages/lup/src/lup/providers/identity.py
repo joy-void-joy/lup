@@ -14,8 +14,33 @@ to a name every session in the worktree would share.
 """
 
 from lup.coordination.wake import WakePath
-from lup.providers.claude.identity import claude_session_id, claude_wake
+from lup.providers.claude.identity import (
+    CLAUDE_INBOX_ENV,
+    CLAUDE_SESSION_ENV,
+    claude_session_id,
+    claude_wake,
+)
 from lup.providers.codex.identity import codex_session_id, codex_wake
+
+
+# lup: ignore[constant-declaration] — each member is a runtime's own spelling,
+# taken by reference from the adapter that owns it; no project could choose
+# differently and still read the value that runtime set
+RUNTIME_DECIDED_ENV: list[str] = [CLAUDE_SESSION_ENV, CLAUDE_INBOX_ENV]
+"""What a runtime tells a session's own processes about that session.
+
+Distinct from the launcher's own variables, which say where a process was
+put: these are set by the runtime for the children it starts, and a process
+reading one learns which session it belongs to. Declared at the seam because
+only the adapters know their runtime's spellings, and taken by reference for
+the reason the launcher's list is -- a second spelling is a second place a
+variable has to be added, and the one that gets missed is how a suite comes
+to measure the session running it.
+
+Codex contributes none: it documents no variable carrying a session's
+identity to a server it starts, which is the asymmetry
+:mod:`lup.providers.codex.identity` states.
+"""
 
 
 def native_session_id(runtime: str) -> str:

@@ -1,7 +1,7 @@
 # lup: ignore[constant-declaration]
-# The variable's name is Claude Code's own spelling of its session id, which
-# no project could choose differently and still read the value the runtime
-# set; it is written here and nowhere outside this adapter.
+# Each variable's name is Claude Code's own spelling, which no project could
+# choose differently and still read the value the runtime set; they are
+# written here and nowhere outside this adapter.
 """The id Claude Code gives a session, as the tool servers it starts can read it.
 
 A launcher that minted a member id exports it, and that is the strongest
@@ -29,12 +29,14 @@ from pydantic_settings import BaseSettings
 from lup.coordination.wake import WakePath
 
 CLAUDE_SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+CLAUDE_INBOX_ENV = "CLAUDE_CODE_MESSAGING_SOCKET"
 
 
 class ClaudeSessionEnv(BaseSettings):
     """The runtime's half of an unlaunched session's identity, read from the environment."""
 
     session_id: str = Field(default="", validation_alias=CLAUDE_SESSION_ENV)
+    inbox: str = Field(default="", validation_alias=CLAUDE_INBOX_ENV)
 
 
 def claude_session_id() -> str:
@@ -43,24 +45,24 @@ def claude_session_id() -> str:
 
 
 def claude_wake(cli_name: str) -> WakePath:
-    """What a peer holding the message tool addresses this session by.
+    """The path of this session's own inbox socket, which is what wakes it.
 
-    The name, not either session id. ``--name`` sets what a listing reports
-    and what a send resolves, and the launcher passes the roster's own name
-    there, so a launched session is already addressable by the name it
-    answers to everywhere else -- measured off a launched session's own
-    command line and off a probe named at launch reporting itself.
+    Read from the environment rather than derived. The session binds the
+    socket and the launcher only asks where; a path this adapter computed
+    would be a second opinion about a file exactly one process created, and
+    wrong for every session whose inbox was placed somewhere else. The
+    runtime sets this variable for the processes a session starts, which is
+    what lets a tool server report its own session's inbox without being
+    told what it is.
 
-    *cli_name* is what the launcher gave, rather than what the roster says
-    now, because those are two names that move independently: renaming on the
-    roster leaves the runtime's own name where the launch put it. A rename on
-    the runtime's side moves it the other way and leaves this stale, which
-    costs a wake and never a message -- the mail is written before anything
-    consults a wake path, and a handle that no longer resolves is the case
-    :func:`~lup.coordination.wake.wake` is built to survive.
+    *cli_name* is accepted and unused, because what wakes a Claude session is
+    a path on this filesystem rather than a name: the roster's name reaches
+    the session through a tool another session holds, and the wake does not
+    go that way.
 
-    Blank where nothing launched this session: its addressable name is one
-    only the session itself can read, and until it reports one there is
-    nothing here to hand a caller.
+    Blank where the runtime set nothing, which is the honest answer for a
+    session whose inbox this process cannot name. The mail still waits in the
+    durable record, and a sender is told nothing will nudge it.
     """
-    return WakePath(runtime="claude", handle=cli_name) if cli_name else WakePath()
+    inbox = ClaudeSessionEnv().inbox
+    return WakePath(runtime="claude", handle=inbox) if inbox else WakePath()

@@ -12,6 +12,7 @@ import pytest
 
 from lup.devtools.gitguard import TEST_IDENTITY, GuardVerdict, RepositoryWatch
 from lup.harness.environment import launcher_decided_names
+from lup.providers.identity import RUNTIME_DECIDED_ENV
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -26,7 +27,8 @@ def launcher_decisions_taken_away() -> Iterator[None]:
     found. See :func:`~lup.harness.environment.launcher_decided_names`.
     """
     with pytest.MonkeyPatch.context() as environment:
-        for name in launcher_decided_names(os.environ):
+        taken = [*launcher_decided_names(os.environ), *RUNTIME_DECIDED_ENV]
+        for name in taken:
             environment.delenv(name, raising=False)
         yield
 
