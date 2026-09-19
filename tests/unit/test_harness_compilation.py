@@ -1161,6 +1161,7 @@ an invocation could reach a reader who cannot use it."""
 
 NAMES_RATHER_THAN_PROSE = [
     "Agent.id",
+    "Delegate.name",
     "Harness.generator_version",
     "Plugin.id",
     "Plugin.version",

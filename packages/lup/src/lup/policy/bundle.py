@@ -35,6 +35,7 @@ from lup.policy.kernel.rows import (
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
+    SpawnNameRow,
     UrlScopeRow,
     runner_target_values,
     shell_row_values,
@@ -308,6 +309,21 @@ def acceptance_guard_literal(guard: AcceptanceGuardRow | None) -> str:
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
 
 
+def spawn_names_literal(row: SpawnNameRow | None) -> str:
+    """Render the declared spawn-name requirement, or the absence of one.
+
+    Spelled the way the acceptance guard is, and for the same reason: the
+    absent case has to be a Python name, not JSON's ``null``.
+    """
+    if row is None:
+        return "None"
+    entries = [
+        f'"reason": {json.dumps(row["reason"])}',
+        f'"recovery": {json.dumps(row["recovery"])}',
+    ]
+    return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
+
+
 def peer_policy_literal(redirect: PeerPolicyRow | None) -> str:
     """Render the declared roster the peer calls are judged against, or its absence.
 
@@ -542,6 +558,7 @@ def render_policy_data(
     autonomous_agent_identities: list[str],
     path_roles: list[PathRoleRow],
     acceptance_guard: AcceptanceGuardRow | None,
+    spawn_names: SpawnNameRow | None,
     shell_rules: list[ShellCommandRule],
     edit_rules: list[EditRule],
     refused_tools: list[RefusedTool],
@@ -577,6 +594,7 @@ def render_policy_data(
             "PATH_ROLES: list[PathRoleRow] = " + path_role_rows_literal(path_roles),
             "ACCEPTANCE_GUARD: AcceptanceGuardRow | None = "
             + acceptance_guard_literal(acceptance_guard),
+            "SPAWN_NAMES: SpawnNameRow | None = " + spawn_names_literal(spawn_names),
             "SHELL_RULES: list[ShellRuleRow] = "
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
             "EDIT_RULES: list[EditRuleRow] = "
@@ -624,6 +642,7 @@ def render_policy_data(
         "    RefusedToolRow,\n"
         "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"
+        "    SpawnNameRow,\n"
         "    UrlScopeRow,\n"
         ")"
         "\n\n\n" + body + "\n"

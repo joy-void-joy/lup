@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 108 artifacts
+## `claude` — 109 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -86,6 +86,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/semantics.py` | lup.policy.kernel.semantics |
 | `.claude/plugins/lup/hooks/runtime/kernel/settlement.py` | lup.policy.kernel.settlement |
 | `.claude/plugins/lup/hooks/runtime/kernel/shell.py` | lup.policy.kernel.shell |
+| `.claude/plugins/lup/hooks/runtime/kernel/spawns.py` | lup.policy.kernel.spawns |
 | `.claude/plugins/lup/hooks/runtime/kernel/syntax.py` | lup.policy.kernel.syntax |
 | `.claude/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.claude/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
@@ -121,7 +122,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 84 artifacts
+## `codex` — 85 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -160,6 +161,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/semantics.py` | lup.policy.kernel.semantics |
 | `.codex/plugins/lup/hooks/runtime/kernel/settlement.py` | lup.policy.kernel.settlement |
 | `.codex/plugins/lup/hooks/runtime/kernel/shell.py` | lup.policy.kernel.shell |
+| `.codex/plugins/lup/hooks/runtime/kernel/spawns.py` | lup.policy.kernel.spawns |
 | `.codex/plugins/lup/hooks/runtime/kernel/syntax.py` | lup.policy.kernel.syntax |
 | `.codex/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.codex/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
