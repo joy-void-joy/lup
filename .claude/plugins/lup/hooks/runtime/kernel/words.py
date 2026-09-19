@@ -117,8 +117,11 @@ def effective_command(segment: list[str]) -> EffectiveCommand:
 
     Wrappers that take values (``timeout 5``, ``nice -n 10``) consume them, so
     the returned words start at the command the shell finally executes. A bare
-    ``env`` with nothing to wrap is itself the command, and ``command -v`` asks
-    where a program is rather than running one, so it is the command too.
+    ``env`` wrapping nothing this can read is itself the command — a bare one,
+    one carrying only options or assignments, and one whose ``-S`` re-splits
+    the rest of the line by its own rules — so the segment reading decides it
+    rather than being handed a word that is not the program. ``command -v``
+    asks where a program is rather than running one, so it is the command too.
     """
     dangerous: list[str] = []
     position = 0
@@ -131,7 +134,7 @@ def effective_command(segment: list[str]) -> EffectiveCommand:
             position += 1
             continue
         executable = posixpath.basename(word)
-        if executable == "env" and position + 1 == len(segment):
+        if executable == "env" and not env_payload(segment[position:]):
             return EffectiveCommand(words=segment[position:], dangerous=dangerous)
         if executable == "command" and segment[position + 1 : position + 2] in (
             ["-v"],
@@ -139,7 +142,7 @@ def effective_command(segment: list[str]) -> EffectiveCommand:
         ):
             return EffectiveCommand(words=segment[position:], dangerous=dangerous)
         if executable in PASS_THROUGH_WORDS:
-            position += 1
+            position = wrapper_payload(segment, position + 1, executable)
             continue
         if executable == "timeout":
             position = timeout_payload(segment, position + 1)
@@ -1127,6 +1130,92 @@ def xargs_payload(words: list[str]) -> list[str]:
         # one spelling that skips its operand too.
         position += 2 if words[position] in value_options else 1
     return words[position:]
+
+
+# lup: ignore[constant-declaration] — each wrapper's own option spellings,
+# which no project could choose differently and still read what it wraps
+WRAPPER_VALUE_OPTIONS: dict[str, tuple[str, ...]] = {
+    "env": ("-u", "--unset", "-C", "--chdir"),
+    "stdbuf": ("-i", "--input", "-o", "--output", "-e", "--error"),
+    "time": ("-o", "--output", "-f", "--format"),
+    "exec": ("-a",),
+    "setsid": (),
+    "command": (),
+    "nohup": (),
+}
+"""Which of each wrapper's options take the following word as their value.
+
+Per wrapper because the grammars differ and a single list would consume a
+word one of them does not take. What is *not* enumerated is the valueless
+options: anything else beginning with `-` is skipped as one word, and where
+that reading is wrong the segment reaches a command word beginning with `-`,
+which :func:`lup.policy.kernel.shell.decide_segment_words` refuses rather than
+classifies.
+"""
+
+# lup: ignore[constant-declaration] — `env`'s own spelling of the option that
+# re-splits its remainder, which is the command's and not a choice
+ENV_SPLIT_STRING = ("-S", "--split-string")
+"""The `env` options whose operand is a command line this reading cannot split.
+
+`env -S` applies its own quoting rules to the rest of the line, so the words
+here are not the words that will run. Named rather than skipped, because a
+skip would hand the next word on as though it were the command.
+"""
+
+
+def wrapper_payload(segment: list[str], position: int, wrapper: str) -> int:
+    """Skip one wrapper's own options to the command it wraps.
+
+    Shaped like ``timeout_payload`` and ``nice_payload`` beside it, and
+    general where those are specific: a valued option consumes the next word
+    when it stands alone and consumes nothing when its value is attached
+    (``-oL``, ``--unset=NAME``), which is the one distinction a fixed skip of
+    one or two words cannot make.
+    """
+    valued = WRAPPER_VALUE_OPTIONS.get(wrapper, ())
+    while position < len(segment):
+        word = segment[position]
+        if word == "--":
+            return position + 1
+        if not word.startswith("-") or word == "-":
+            return position
+        attached = word.split("=", 1)[0]
+        if word in valued:
+            position += 2
+        elif attached in valued and attached != word:
+            position += 1
+        elif any(word.startswith(option) and word != option for option in valued):
+            position += 1
+        else:
+            position += 1
+    return position
+
+
+def env_payload(words: list[str]) -> list[str] | None:
+    """The command `env` would run, or ``None`` where that cannot be read.
+
+    Three answers rather than two, and the third is the point. A command comes
+    back to be judged; an empty list is an `env` that only reports its
+    environment; and ``None`` is this reading saying it does not know what will
+    run, which a caller has to treat as unjudged rather than as nothing to
+    judge. Collapsing the last two is how `env -i <interpreter> <script>` came
+    to be read as a command named `-i` and allowed inside the boundary.
+    """
+    if any(option in words[1:] for option in ENV_SPLIT_STRING):
+        return None
+    position = wrapper_payload(words, 1, "env")
+    rest = words[position:]
+    assigned = 0
+    while assigned < len(rest):
+        name = rest[assigned].split("=", 1)
+        if len(name) != 2 or not name[0].isidentifier():
+            break
+        assigned += 1
+    # Dropped rather than carried, because the assignments are judged where
+    # they sit: `effective_command` collects the dangerous ones, and this
+    # answers the separate question of which program they are set for.
+    return rest[assigned:]
 
 
 def refspec_effects(word: str) -> list[str]:

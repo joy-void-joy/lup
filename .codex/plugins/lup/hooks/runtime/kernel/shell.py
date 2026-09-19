@@ -43,6 +43,7 @@ from .words import (
     archive_lands_on_nothing,
     confined_to_recoverable_roots,
     refuses_generated_plugin_write,
+    env_payload,
     xargs_payload,
 )
 from .bindings import (
@@ -320,6 +321,66 @@ def decide_find_words(words: list[str], context: ShellContext) -> KernelDecision
     return decide_command_rows(remaining, context["rows"], write_facts(context))
 
 
+def decide_env_words(words: list[str], context: ShellContext) -> KernelDecision:
+    """Judge one `env` invocation by whatever it was going to run.
+
+    `env` is a command prefix wearing the shape of a report. Read as a report
+    it passed its payload through unjudged: `env rm -rf <path>` allowed where
+    the same `rm` asked, and `env -i <interpreter> <script>` was read as a
+    command named `-i` and allowed inside the boundary, where the interpreter
+    alone is refused outright.
+
+    The three answers the payload reading gives are kept apart here, because
+    two of them used to look alike. A command is judged as though `env` were
+    not there, which is what it amounts to. Nothing to run is a dump of the
+    whole environment, which is refused rather than asked: every variable the
+    launcher sets is in it, credentials among them, and the output lands in a
+    transcript that outlives the turn — a question would be answered yes on
+    the way to something else. A payload this cannot read is unjudged, which
+    is the honest answer for `-S` and for a flag no version here knows.
+    """
+    payload = env_payload(words)
+    if payload is None:
+        return KernelDecision(
+            "deny",
+            "`env -S` re-splits the rest of the line by its own quoting rules,"
+            " so what it runs cannot be read here",
+            recovery="Write the command without `-S`, so the words that run"
+            " are the words in the command line.",
+        )
+    if not payload:
+        return KernelDecision(
+            "deny",
+            "the whole environment is a credential store, and printing it"
+            " writes every secret in it into this transcript",
+            recovery="Name the variables you want: `printenv <NAME>`.",
+        )
+    return decide_shell_segment(payload, context)
+
+
+def decide_printenv_words(words: list[str]) -> KernelDecision:
+    """Judge one `printenv` by whether it says what it wants.
+
+    Named, it is an ordinary read and one of the most useful there is. Bare,
+    it is the same dump `env` refuses, reached by a second spelling — and a
+    refusal that held only one of them would have taught the habit of reaching
+    for the other.
+
+    Options are not read, only whether anything survives them, because
+    `printenv` has exactly two (`-0` and the informational pair) and none
+    changes what it selects.
+    """
+    named = [word for word in words[1:] if not word.startswith("-")]
+    if named:
+        return KernelDecision("allow", "reads the variables it names")
+    return KernelDecision(
+        "deny",
+        "the whole environment is a credential store, and printing it writes"
+        " every secret in it into this transcript",
+        recovery="Name the variables you want: `printenv <NAME>`.",
+    )
+
+
 def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecision:
     """Classify one command's words against the vocabulary and handlers.
 
@@ -330,6 +391,19 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
     meets the same reading of it.
     """
     executable = posixpath.basename(words[0])
+    # No program is spelled with a leading dash, so reaching one means a
+    # wrapper's option grammar ran out above this and the word that followed
+    # was taken for the command. Refused rather than left unclassified: an
+    # unclassified command is allowed inside the boundary, which is how five
+    # wrapper spellings each carried an interpreter this refuses outright.
+    if executable.startswith("-"):
+        return KernelDecision(
+            "deny",
+            f"{executable!r} is an option rather than a command, so what this"
+            " would run was never read",
+            recovery="Write the command without the wrapper, or name the"
+            " wrapper's options so the command after them can be read.",
+        )
     if executable in INTERPRETERS and not declares_command(executable, context["rows"]):
         if len(words) > 1 and is_trusted_script(
             words[1], context["trusted_script_roots"]
@@ -393,6 +467,10 @@ def decide_segment_words(words: list[str], context: ShellContext) -> KernelDecis
         if not payload:
             return unjudged("xargs payload is not classified")
         return decide_shell_segment(payload, context)
+    if executable == "env":
+        return decide_env_words(words, context)
+    if executable == "printenv":
+        return decide_printenv_words(words)
     if executable == "curl":
         return decide_curl_words(
             words,

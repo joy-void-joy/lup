@@ -168,8 +168,6 @@ def read_only_rules(
         "whoami",
         "hostname",
         "uname",
-        "printenv",
-        "env",
         "ps",
         "pgrep",
         "pidof",
