@@ -1701,7 +1701,11 @@ def run_resolve(
                 harness.image,
                 harness.requirements,
                 workspace,
-                config_home,
+                # No editor bridge: an actor has nobody at a keyboard, so
+                # binding the operator's rendezvous directory into its
+                # container would widen the boundary for a channel nothing
+                # on either side of it reads.
+                None,
                 credential if credential.exists() else None,
                 login,
                 program=actor_program,

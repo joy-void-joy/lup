@@ -1096,16 +1096,23 @@ USER $UID:$GID
         """
         return ["LUP_CONTAINED"]
 
-    def ide_bridge(self, config_home: Path) -> list[str]:
-        """Mount the host's IDE lockfile directory into the container's config.
+    def ide_bridge(self, rendezvous: Path) -> list[str]:
+        """Mount the host's editor lockfile directory into the container's config.
 
-        The editor extension finds a running session by reading lockfiles under
-        ``CLAUDE_CONFIG_DIR/ide``. With the CLI in a container and the editor on
-        the host, that directory is on the wrong side and ``/ide`` stops
-        working. Bridging the one directory is narrower than sharing the config
-        home, which holds the credential store.
+        A lockfile there is how an editor extension and a CLI find each other:
+        a port and a token, written by one and read by the other. With the CLI
+        in a container and the editor on the host the directory is on the wrong
+        side and the editor connection simply never happens, so the one
+        directory is bridged -- narrower than sharing the config home, which
+        holds the credential store, and read-write because the rendezvous is
+        answered from both ends.
+
+        Bound at the same name inside, because the container's CLI looks for it
+        under *its* configuration home and the name is the runtime's own. Which
+        host directory arrives here is not the launch's home and is
+        :func:`~lup.devtools.harness.contained.contained_argv`'s to say.
         """
-        return ["-v", f"{config_home / 'ide'}:{self.config_home}/ide:rw"]
+        return ["-v", f"{rendezvous}:{self.config_home}/{rendezvous.name}:rw"]
 
     def environment_mounts(self, environments: Mapping[Path, Path]) -> list[str]:
         """A container-private directory at each project root's environment name.
@@ -1164,7 +1171,7 @@ USER $UID:$GID
         credential_renewable: str = "",
         credential_fields: list[str] | None = None,
         credential: Path | None = None,
-        host_config_home: Path | None = None,
+        editor_rendezvous: Path | None = None,
         engine: ContainerEngine = Docker(),
         forge: ForgeCredential | None = None,
         granted: bool = False,
@@ -1268,7 +1275,7 @@ USER $UID:$GID
             else []
         )
         bridged = (
-            self.ide_bridge(host_config_home) if host_config_home is not None else []
+            self.ide_bridge(editor_rendezvous) if editor_rendezvous is not None else []
         )
         opening = (
             ["-v", f"{browser_directory}:{self.browser.inside}:rw"]
