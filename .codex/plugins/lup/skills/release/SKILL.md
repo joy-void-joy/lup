@@ -1,6 +1,6 @@
 ---
 name: release
-description: "Cut a release: settle the level, close the changelog, tag it"
+description: 'Cut a release: settle the level, close the changelog, tag it'
 ---
 
 # Cut a Release

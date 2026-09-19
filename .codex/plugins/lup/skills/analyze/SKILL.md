@@ -1,6 +1,6 @@
 ---
 name: analyze
-description: "Retain a ChatGPT or Claude conversation and answer from its files"
+description: Retain a ChatGPT or Claude conversation and answer from its files
 ---
 
 # Analyze a Retained Conversation

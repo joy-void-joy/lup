@@ -199,6 +199,15 @@ class BannerExemption(BaseModel, frozen=True):
         """Where this artifact came from, whether or not it can say so."""
         return self.source
 
+    def applied_to(self, path: PurePath, body: str) -> str:
+        """The body as it stands, an exemption being the absence of a banner.
+
+        Answered so a caller composing an artifact asks the union rather than
+        which member it holds — the same reason :meth:`opens` is answered
+        here and says nothing.
+        """
+        return body
+
     def compiled_from(self, source: str) -> "BannerExemption":
         """This exemption, carrying the source the compiling site knows."""
         return self.model_copy(update={"source": source})

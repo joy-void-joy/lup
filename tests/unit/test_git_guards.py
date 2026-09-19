@@ -317,7 +317,7 @@ def test_arming_a_checkout_it_cannot_write_reports_instead_of_failing(
 
 def test_the_pipeline_runs_the_command_the_hook_installs() -> None:
     """A contributor who never armed the hook meets the same command in CI."""
-    assert DRIFT_COMMAND in WorkflowSpec().body()
+    assert DRIFT_COMMAND in WorkflowSpec().document().text()
 
 
 def test_a_push_that_only_deletes_refs_stands_the_gate_down(tmp_path: Path) -> None:

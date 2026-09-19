@@ -1,7 +1,7 @@
 ---
-description: "Fix a defect in lup itself, in a worktree of lup, and pin it until it lands"
+description: Fix a defect in lup itself, in a worktree of lup, and pin it until it lands
 allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run --directory:*, uv sync:*, uv lock:*), Read, Edit, Write, AskUserQuestion, Skill(lup:commit)
-argument-hint: "<what is wrong upstream>"
+argument-hint: <what is wrong upstream>
 ---
 
 # Fix It Upstream

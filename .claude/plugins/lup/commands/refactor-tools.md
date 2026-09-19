@@ -1,5 +1,5 @@
 ---
-description: "Audit SDK agent tools and subagents \u2014 find gaps, overlaps, and refactoring opportunities"
+description: Audit SDK agent tools and subagents — find gaps, overlaps, and refactoring opportunities
 allowed-tools: Read, Bash(ls:*, uv run lup-devtools:*), Agent, WebSearch, AskUserQuestion
 ---
 

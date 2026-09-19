@@ -141,6 +141,7 @@ from lup.policy.kernel.edit import (
     lines_of,
     python_tree,
     default_factory_sites,
+    derived_interpolation_sites,
     dict_get_sites,
     empty_collection_sites,
     silent_truncation_sites,
@@ -465,6 +466,64 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "checker cannot resolve at all is refuted too, and a marker there stands. "
         "Where the literal is genuinely one key of an open dict, add "
         "`# lup: ignore[dict-get]`",
+    ),
+    AntiPattern(
+        # A value a declaration carries, spliced into the text of a file this
+        # repository generates. The per-format constructors take a document
+        # instead, which is emitted and parsed back before the file exists.
+        id="derived-interpolation",
+        pattern=re.compile(
+            r"\b(?:body|content)\s*=\s*"
+            r"(?:f[\"']|[\"'][^\"']*[\"']\s*\.\s*(?:format|join)\b)"
+        ),
+        matcher=Matcher(select=derived_interpolation_sites),
+        examples=[
+            RuleExample(
+                code='Artifact.generated(path=p, body=f"name: {skill.name}\\n", '
+                "semantic_id=i, banner=b)",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code='Artifact(path=p, content="\\n".join(rows), semantic_id=i)',
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="Artifact.in_yaml(path=p, document=document, semantic_id=i, "
+                "banner=b)",
+                verdict="cleared",
+            ),
+            # A piece fixed where it is written — a command the banner already
+            # names, an exit status — reads the same in every generated file.
+            RuleExample(
+                code='Artifact.generated(path=p, body=f"exit {REFUSAL_STATUS}\\n", '
+                "semantic_id=i, banner=b)",
+                verdict="cleared",
+            ),
+            # Whitespace is not a container: this is the whole page, ended.
+            RuleExample(
+                code='Artifact.generated(path=p, body=page + "\\n", '
+                "semantic_id=i, banner=b)",
+                verdict="cleared",
+            ),
+            # The subject is the file's body; a path is validated by the
+            # artifact itself, which refuses one escaping its root.
+            RuleExample(
+                code='Artifact(path=Path(f"agents/{name}.toml"), content=text, '
+                "semantic_id=i)",
+                verdict="cleared",
+            ),
+        ],
+        message="A value derived from a declaration enters a generated file as a "
+        "value, not spliced into its text: a colon, a newline or a quote in it ends "
+        "the container it lands in, and the file stays plausible until something "
+        "parses it. Build the body as a document and hand it to the constructor "
+        "for its format — `Artifact.in_yaml` with a `YamlDocument`, "
+        "`Artifact.in_markdown` with a `MarkdownDocument`, `Artifact.in_toml`, "
+        "`Artifact.in_json` — each emitted by a library and parsed back before the "
+        "file exists. A piece fixed where it is written, a literal or a name "
+        "spelled as a constant, is not derived and is not flagged. A format with "
+        "no document yet takes `# lup: ignore[derived-interpolation]` naming the "
+        "format",
     ),
     AntiPattern(
         id="bare-object",

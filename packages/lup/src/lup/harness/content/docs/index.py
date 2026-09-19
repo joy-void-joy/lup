@@ -33,10 +33,19 @@ class IndexGroup(BaseModel, frozen=True):
     """Prose between the heading and the table, for a group that needs it."""
 
     def parts(self) -> list[models.PromptPart]:
-        """This heading, its blurb, and its rows as a table part."""
-        blurb = f"{self.blurb}\n\n" if self.blurb else ""
+        """This heading, its blurb, and its rows as a table part.
+
+        The heading is a passage because its words come from this group's
+        declaration: a title carrying a newline would end the heading and
+        leave the rest of it standing as a paragraph nobody wrote.
+        """
         return [
-            models.TextPart(text=f"## {self.title}\n\n{blurb}"),
+            models.Passage(
+                module=__name__,
+                name="index-group",
+                values={"title": models.plain(self.title)},
+            ),
+            *([models.TextPart(text=self.blurb + "\n\n")] if self.blurb else []),
             models.MarkdownTable(
                 headers=["Page", "Answers"],
                 rows=[

@@ -2355,6 +2355,131 @@ def dict_get_sites(source: str) -> list[MatchSite]:
     return attribute_call_sites(tree, "get", keyed_lookup)
 
 
+def derived_interpolation_sites(source: str) -> list[MatchSite]:
+    """Return the lines where a generated artifact's body is interpolated.
+
+    The shape is a value spliced into text that becomes a file: an f-string, a
+    ``+`` with a string in it, a literal's ``.format`` or ``.join``, handed as
+    the ``body`` or ``content`` of an ``Artifact`` constructed directly. Each
+    is a derived value entering a container through the one route that cannot
+    check it — the per-format constructors take a document instead, which is
+    emitted and parsed back before the file exists.
+
+    A piece fixed where it is written is not derived: a literal, or a name
+    spelled as a constant — the command a banner already tells a reader to
+    type, the exit status a guard script returns. What a declaration carries
+    varies by declaration, and that is the value this is about. Nor is a
+    value with only whitespace around it inside anything: a whole rendered
+    page with its closing newline appended is still just the page.
+
+    ``cls(...)`` inside the constructors is not the route this names, and is
+    not matched: the per-format constructors are where a document becomes
+    text, which is the one place that is supposed to happen.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return []
+
+    def fixed(piece: ast.expr) -> bool:
+        """Whether a spliced piece reads the same in every generated file."""
+        match piece:
+            case ast.Constant():
+                return True
+            case ast.Name(id=name) | ast.Attribute(attr=name):
+                return name.isupper()
+            case _:
+                return False
+
+    def summands(value: ast.expr) -> list[ast.expr]:
+        """The operands of a chain of ``+``, left to right."""
+        match value:
+            case ast.BinOp(op=ast.Add(), left=left, right=right):
+                return [*summands(left), *summands(right)]
+            case _:
+                return [value]
+
+    def textual(piece: ast.expr) -> bool:
+        """Whether a piece is written text that could hold a value inside it.
+
+        Whitespace holds nothing: a rendered page with its closing newline
+        appended is the page, not a value in a container, and a separator is
+        where a container would have to be written for there to be one.
+        """
+        match piece:
+            case ast.Constant(value=str(text)):
+                return bool(text.strip())
+            case ast.JoinedStr(values=parts):
+                return any(textual(part) for part in parts)
+            case _:
+                return False
+
+    def spliced(value: ast.expr) -> bool:
+        """Whether this body splices a value that varies into written text."""
+        match value:
+            case ast.JoinedStr(values=parts):
+                return textual(value) and any(
+                    not fixed(part.value)
+                    for part in parts
+                    if isinstance(part, ast.FormattedValue)
+                )
+            case ast.BinOp(op=ast.Add()):
+                pieces = summands(value)
+                return any(textual(piece) for piece in pieces) and any(
+                    spliced(piece) or not (fixed(piece) or textual(piece))
+                    for piece in pieces
+                )
+            case ast.Call(
+                func=ast.Attribute(value=ast.Constant(value=str()), attr="format"),
+                args=args,
+                keywords=keywords,
+            ):
+                return any(
+                    not fixed(given)
+                    for given in [*args, *(keyword.value for keyword in keywords)]
+                )
+            case ast.Call(
+                func=ast.Attribute(value=ast.Constant(value=str()), attr="join"),
+                args=[joined],
+            ):
+                return not fixed(joined)
+            case _:
+                return False
+
+    def bodies(call: ast.Call) -> list[ast.expr]:
+        """The text a document is handed directly, by either route into one.
+
+        An ``Artifact`` built rather than composed through the constructor
+        for its format, and a ``TextPart`` holding prose: the first is a
+        whole file and the second a paragraph of one, and a value spliced
+        into either lands in a container nothing checked. Prose with values
+        in it is a passage, whose values are parts — so neither route has a
+        reason to take a string built at the call.
+        """
+        match call.func:
+            case ast.Name(id="Artifact") | ast.Attribute(value=ast.Name(id="Artifact")):
+                return [
+                    keyword.value
+                    for keyword in call.keywords
+                    if keyword.arg in ("body", "content")
+                ]
+            case ast.Name(id="TextPart") | ast.Attribute(attr="TextPart"):
+                return [
+                    keyword.value for keyword in call.keywords if keyword.arg == "text"
+                ]
+            case _:
+                return []
+
+    return sites_at(
+        {
+            body.lineno
+            for node in python_nodes(tree)
+            if isinstance(node, ast.Call)
+            for body in bodies(node)
+            if spliced(body)
+        }
+    )
+
+
 def empty_collection_sites(source: str) -> list[MatchSite]:
     """Return the lines seeding an empty collection a loop then fills.
 
@@ -2443,6 +2568,8 @@ def matcher_named(name: str) -> Callable[[str], list[MatchSite]] | None:
             return suppress_import_sites
         case "dataclass_sites":
             return dataclass_sites
+        case "derived_interpolation_sites":
+            return derived_interpolation_sites
         case "re_call_sites":
             return re_call_sites
         case "cast_sites":

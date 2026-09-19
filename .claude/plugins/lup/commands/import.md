@@ -1,7 +1,7 @@
 ---
-description: "Import a feature or pattern from a tracked project or local Git source"
+description: Import a feature or pattern from a tracked project or local Git source
 allowed-tools: Bash(git:*, uv run lup-devtools:*), Read, Edit, Write, AskUserQuestion, Skill(lup:commit)
-argument-hint: "<project|path|ref> [BASE..SOURCE] <scope description>"
+argument-hint: <project|path|ref> [BASE..SOURCE] <scope description>
 ---
 
 # Import from Another Git Line

@@ -1,7 +1,7 @@
 ---
-description: "Retain a ChatGPT or Claude conversation and answer from its files"
+description: Retain a ChatGPT or Claude conversation and answer from its files
 allowed-tools: Bash(uv run lup-devtools:*, git log:*, git show:*), Read, AskUserQuestion
-argument-hint: "<conversation-url> [-- <question>]"
+argument-hint: <conversation-url> [-- <question>]
 ---
 
 # Analyze a Retained Conversation

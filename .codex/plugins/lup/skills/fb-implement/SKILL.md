@@ -1,6 +1,6 @@
 ---
 name: fb-implement
-description: "Implement prioritized changes from feedback loop analysis"
+description: Implement prioritized changes from feedback loop analysis
 ---
 
 # Implement: Make Changes

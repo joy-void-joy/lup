@@ -1,6 +1,6 @@
 ---
 name: report
-description: "Write the report of everything left to implement, rewritten whole under tmp/, after a long session or after implementing a plan"
+description: Write the report of everything left to implement, rewritten whole under tmp/, after a long session or after implementing a plan
 ---
 
 # Report what is left

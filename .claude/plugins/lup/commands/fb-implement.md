@@ -1,5 +1,5 @@
 ---
-description: "Implement prioritized changes from feedback loop analysis"
+description: Implement prioritized changes from feedback loop analysis
 allowed-tools: Bash(git:*, uv run lup-devtools:*, uv run lup:*), Read, Edit, Write, AskUserQuestion, WebSearch, WebFetch
 ---
 

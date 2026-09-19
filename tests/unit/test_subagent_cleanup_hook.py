@@ -15,6 +15,13 @@ subagent's own entry, the stop that follows the refusal goes through, a task
 the subagent did not arm is not its to stop, and the start event carries the
 one sentence. The registration is asserted per event, and a project that
 declined carries nothing.
+
+``payloads-codex.jsonl`` is the same kind of recording from Codex 0.155.1,
+where the two halves of the leak came apart: the work outlives the report and
+its output resumes nobody. So that tree is asserted to register the start
+alone, and its sentence to promise no refusal — the negative is asserted
+rather than left to whoever reads the rendered text, because a promise that
+never comes true is what teaches a subagent to discount the next one.
 """
 
 import json
@@ -28,6 +35,7 @@ import sh
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.harness.models import Artifact
 from lup.policy.bundle import policy_kernel_modules
+from lup.providers.codex.harness import CODEX_SUBAGENT_START_EVENT
 from lup.providers.claude.harness import (
     CLAUDE_SUBAGENT_START_EVENT,
     CLAUDE_SUBAGENT_STOP_EVENT,
@@ -35,7 +43,7 @@ from lup.providers.claude.harness import (
 from lup.providers.roster_prompt import store_modules
 from lup.providers.subagent_cleanup import GUARD_SCRIPT, RUNTIME_ENTRY, cleanup_hooks
 from lup_template.harness.catalog import portable_harness
-from lup_template.harness.composition import claude_target
+from lup_template.harness.composition import claude_target, codex_target
 
 
 class ListedTask(TypedDict, total=False):
@@ -77,6 +85,11 @@ RECORDINGS = pytest.mark.parametrize(
 )
 
 
+CLAUDE_PLUGIN = Path(".claude/plugins/lup")
+CODEX_PLUGIN = Path(".codex/plugins/lup")
+"""Where each runtime's plugin sits, which is what picks the tree to read."""
+
+
 def fixtures() -> Path:
     """Where the recordings sit, beside this test."""
     return Path(__file__).parent / "fixtures" / "subagent_cleanup"
@@ -105,10 +118,13 @@ def shipped(
     }
 
 
-def laid_out(root: Path) -> Path:
+def laid_out(
+    root: Path,
+    target: Callable[[Path], NativeHarnessComposition] = claude_target,
+    plugin: Path = CLAUDE_PLUGIN,
+) -> Path:
     """The guard, the host half, and the packages it imports, as a plugin lays them out."""
-    artifacts = shipped(claude_target)
-    plugin = Path(".claude/plugins/lup")
+    artifacts = shipped(target)
     carried = [
         (
             Path("hooks") / "scripts" / GUARD_SCRIPT,
@@ -222,7 +238,7 @@ def test_each_subagent_event_registers_the_fold_and_refuses_nothing(
 ) -> None:
     """Under its own event, with no matcher, and with no `exit 2` beside it."""
     artifacts = shipped(claude_target)
-    plugin = Path(".claude/plugins/lup")
+    plugin = CLAUDE_PLUGIN
     hooks = json.loads(artifacts[plugin / "hooks" / "hooks.json"].content)["hooks"]
 
     [group] = [
@@ -236,6 +252,74 @@ def test_each_subagent_event_registers_the_fold_and_refuses_nothing(
     assert "exit 2" not in entry["command"]
     assert artifacts[plugin / "hooks" / "scripts" / GUARD_SCRIPT].executable
     assert plugin / "hooks" / "runtime" / RUNTIME_ENTRY in artifacts
+
+
+def test_the_other_runtime_tells_a_subagent_what_it_opened_is_its_to_close(
+    tmp_path: Path,
+) -> None:
+    """Over its own recorded start, naming the call that ends what a session runs."""
+    guard = laid_out(tmp_path / "plugin", codex_target, CODEX_PLUGIN)
+    [start] = recorded("payloads-codex.jsonl", CODEX_SUBAGENT_START_EVENT)
+
+    answer = json.loads(judged(guard, start))
+
+    pushed = answer["hookSpecificOutput"]
+    assert pushed["hookEventName"] == CODEX_SUBAGENT_START_EVENT
+    assert "write_stdin" in pushed["additionalContext"]
+    assert "decision" not in answer
+
+
+def test_the_sentence_promises_no_refusal_where_none_is_registered(
+    tmp_path: Path,
+) -> None:
+    """Measured: leftovers there resume nobody, so nothing refuses a report there.
+
+    A sentence promising a refusal that never comes is what teaches a
+    subagent to discount the next one, so the negative is asserted rather
+    than left to the reader of the rendered text.
+    """
+    guard = laid_out(tmp_path / "plugin", codex_target, CODEX_PLUGIN)
+    [start] = recorded("payloads-codex.jsonl", CODEX_SUBAGENT_START_EVENT)
+
+    said = json.loads(judged(guard, start))["hookSpecificOutput"]["additionalContext"]
+
+    assert "refused" not in said
+    assert "resumes you" not in said
+
+
+def test_the_other_runtime_registers_the_start_and_no_stop() -> None:
+    """The whole difference between the two trees, read off the registration."""
+    artifacts = shipped(codex_target)
+    hooks = json.loads(artifacts[CODEX_PLUGIN / "hooks" / "hooks.json"].content)[
+        "hooks"
+    ]
+
+    folded = {
+        event: groups
+        for event, groups in hooks.items()
+        if any(
+            GUARD_SCRIPT in entry["command"]
+            for group in groups
+            for entry in group["hooks"]
+        )
+    }
+
+    assert list(folded) == [CODEX_SUBAGENT_START_EVENT]
+
+
+def test_a_runtime_that_resumes_nobody_takes_the_sentence_alone() -> None:
+    """No stop event is how a host half says its leftovers wake no one."""
+    quiet = cleanup_hooks(
+        Path("plugin"),
+        "PLUGIN_ROOT",
+        portable_harness().declared_hooks,
+        "print()",
+        "nowhere",
+        CODEX_SUBAGENT_START_EVENT,
+        None,
+    )
+
+    assert list(quiet.registered) == [CODEX_SUBAGENT_START_EVENT]
 
 
 def test_a_project_that_declined_registers_nothing_and_carries_nothing() -> None:
