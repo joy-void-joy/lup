@@ -85,6 +85,7 @@ def row_verdict(
     checkpoint: CheckpointRequirement | None = None,
     effects: list[EffectRow] | None = None,
     arguments: list[str] | None = None,
+    asked: KernelDecision | None = None,
 ) -> KernelDecision:
     """One row's verdict, carrying every fact the row states about itself.
 
@@ -144,10 +145,16 @@ def row_verdict(
         row["sandbox"],
         checkpoint=settled,
         reviewer=row["reviewer"],
-        purpose=purpose,
+        purpose=asked.purpose if asked is not None else purpose,
         rule=row["rule"],
         evaluator="shell-vocabulary",
-        recovery=row["recovery"] if effect in ("ask", "deny") else "",
+        recovery=(
+            asked.recovery
+            if asked is not None
+            else row["recovery"]
+            if effect in ("ask", "deny")
+            else ""
+        ),
     )
 
 
@@ -337,7 +344,18 @@ def flag_write_verdict(
     if answered["effect"] == "allow":
         return row_verdict(row, "allow", "this write lands where nothing is reviewed")
     if answered["unread"]:
-        return unread_question(answered["path"])
+        # Through the row rather than beside it, so an operator-only row still
+        # denies and the sandbox, rule and reviewer the row states still
+        # travel; what this verdict knows better is the reason it asks for.
+        asked = unread_question(answered["path"])
+        return row_verdict(
+            row,
+            "ask",
+            asked.reason,
+            write_checkpoint(answered["scope"]),
+            arguments=arguments,
+            asked=asked,
+        )
     return row_verdict(
         row,
         answered["effect"],
