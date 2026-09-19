@@ -130,9 +130,12 @@ class CodexSpellings(NativeSpellings):
             f"for the answer: {question}"
         )
 
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+    def delegate(
+        self, subagent_type: QualifiedAgentName, prompt: str, name: str = ""
+    ) -> Instruction:
+        named = f", naming the task {name!r}," if name else ""
         return Instruction(
-            f"Delegate to the {subagent_type} custom agent with this task: {prompt}"
+            f"Delegate to the {subagent_type} custom agent{named} with this task: {prompt}"
         )
 
     def request_approval(self, action: str, reason: str) -> Instruction:
@@ -569,7 +572,7 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     runtime_name="Codex",
     package="lup.providers.codex",
     managed_root_env=CODEX_LOGIN.config_home_env,
-    routed_tools=["Bash", "web_fetch", "apply_patch"],
+    routed_tools=["Bash", "web_fetch", "apply_patch", "collaborationspawn_agent"],
     hook_events=["PermissionRequest", "PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
     observed_tools=["apply_patch", "Bash"],
@@ -914,6 +917,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         ],
                         acceptance_guard=guard.erased()
                         if (guard := source.acceptance_guard)
+                        else None,
+                        spawn_names=names.erased()
+                        if (names := source.spawn_names)
                         else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),

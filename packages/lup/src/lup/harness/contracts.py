@@ -203,7 +203,9 @@ class NativeSpellings(SkillInvocationRenderer, ABC):  # lup: ignore[abc-capabili
         """Instruct the runtime to put one material question to the user."""
 
     @abstractmethod
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+    def delegate(
+        self, subagent_type: QualifiedAgentName, prompt: str, name: str = ""
+    ) -> Instruction:
         """Instruct the runtime to hand one task to one of its agents."""
 
     @abstractmethod

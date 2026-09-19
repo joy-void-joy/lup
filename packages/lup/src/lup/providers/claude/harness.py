@@ -98,9 +98,12 @@ class ClaudeSpellings(NativeSpellings):
             f"options plus a free-text choice: {question}"
         )
 
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+    def delegate(
+        self, subagent_type: QualifiedAgentName, prompt: str, name: str = ""
+    ) -> Instruction:
+        named = f", name={json.dumps(name)}" if name else ""
         return Instruction(
-            f"Delegate with Agent(subagent_type={json.dumps(subagent_type)}"
+            f"Delegate with Agent(subagent_type={json.dumps(subagent_type)}{named}"
             f", prompt={json.dumps(prompt)})"
         )
 
@@ -542,7 +545,15 @@ CLAUDE_DISPATCHER = DispatcherDeclaration(
     runtime_name="Claude Code",
     package="lup.providers.claude",
     managed_root_env=CLAUDE_LOGIN.config_home_env,
-    routed_tools=["Bash", "WebFetch", "Edit", "Write", "SendMessage", "ListAgents"],
+    routed_tools=[
+        "Bash",
+        "WebFetch",
+        "Edit",
+        "Write",
+        "SendMessage",
+        "ListAgents",
+        "Agent",
+    ],
     hook_events=["PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
     observed_tools=["Edit", "Write", "Bash"],
@@ -770,6 +781,9 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                         ],
                         acceptance_guard=guard.erased()
                         if (guard := source.acceptance_guard)
+                        else None,
+                        spawn_names=names.erased()
+                        if (names := source.spawn_names)
                         else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),

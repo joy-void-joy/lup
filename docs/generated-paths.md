@@ -86,6 +86,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/semantics.py` | lup.policy.kernel.semantics |
 | `.claude/plugins/lup/hooks/runtime/kernel/settlement.py` | lup.policy.kernel.settlement |
 | `.claude/plugins/lup/hooks/runtime/kernel/shell.py` | lup.policy.kernel.shell |
+| `.claude/plugins/lup/hooks/runtime/kernel/spawns.py` | lup.policy.kernel.spawns |
 | `.claude/plugins/lup/hooks/runtime/kernel/syntax.py` | lup.policy.kernel.syntax |
 | `.claude/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.claude/plugins/lup/hooks/runtime/kernel/typescript.py` | lup.policy.kernel.typescript |
@@ -161,6 +162,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/semantics.py` | lup.policy.kernel.semantics |
 | `.codex/plugins/lup/hooks/runtime/kernel/settlement.py` | lup.policy.kernel.settlement |
 | `.codex/plugins/lup/hooks/runtime/kernel/shell.py` | lup.policy.kernel.shell |
+| `.codex/plugins/lup/hooks/runtime/kernel/spawns.py` | lup.policy.kernel.spawns |
 | `.codex/plugins/lup/hooks/runtime/kernel/syntax.py` | lup.policy.kernel.syntax |
 | `.codex/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.codex/plugins/lup/hooks/runtime/kernel/typescript.py` | lup.policy.kernel.typescript |

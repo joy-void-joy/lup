@@ -14,6 +14,7 @@ from kernel.rows import (
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
+    SpawnNameRow,
     UrlScopeRow,
 )
 
@@ -2071,6 +2072,11 @@ PATH_ROLES: list[PathRoleRow] = [
 ]
 
 ACCEPTANCE_GUARD: AcceptanceGuardRow | None = None
+
+SPAWN_NAMES: SpawnNameRow | None = {
+    "reason": "a subagent spawned without a name is listed, addressed and stopped by its type alone, which says nothing about what it is doing",
+    "recovery": "pass a name beside the agent type: the task in two or three words, letters, digits, hyphens or underscores, at most 64 characters \u2014 it is what the listing shows and what a message or a stop addresses",
+}
 
 SHELL_RULES: list[ShellRuleRow] = [
     {

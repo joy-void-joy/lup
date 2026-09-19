@@ -31,7 +31,7 @@ from lup.harness.requirements import Manifest
 from lup.formats.markdown import CodeCell, PlainCell, TableCell, escaped
 from lup.tools.mcp import ToolDeclaration
 from lup.policy.boundary import BoundaryCapability
-from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
+from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName, SpawnNameRow
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.peer_policy import PeerPolicy
@@ -398,9 +398,13 @@ class Delegate(SemanticPart, frozen=True):
     type: Literal["delegate"] = "delegate"
     subagent_type: QualifiedAgentName
     prompt: PortableText
+    name: str = ""
+    """What the spawned subagent is called, as its listing, a message and a
+    stop address it; the task in two or three words. Empty leaves the runtime
+    showing the type, which a project requiring names refuses."""
 
     def spell(self, renderer: "PromptRenderer") -> str:
-        return renderer.own.delegate(self.subagent_type, self.prompt)
+        return renderer.own.delegate(self.subagent_type, self.prompt, self.name)
 
     @property
     def named_agent(self) -> QualifiedAgentName:
@@ -1202,6 +1206,35 @@ class AcceptanceGuard(BaseModel, frozen=True):
         )
 
 
+class SpawnNames(BaseModel, frozen=True):
+    """A project's decision that every subagent it spawns is named.
+
+    A runtime lists, addresses and stops a subagent by the name it was
+    spawned with, and shows its type where none was given — a generic word
+    such as the default agent's, which says nothing about what the subagent
+    is doing. Declaring this refuses a spawn that carries no name, with a
+    recovery giving the shape, so the caller passes one and the listing says
+    what each subagent is for. The runtime validates the spelling itself.
+
+    On by default, since the cost is one argument per spawn and the gain is
+    every listing, message and stop naming the work rather than the type.
+    """
+
+    reason: str = (
+        "a subagent spawned without a name is listed, addressed and stopped"
+        " by its type alone, which says nothing about what it is doing"
+    )
+    recovery: str = (
+        "pass a name beside the agent type: the task in two or three words,"
+        " letters, digits, hyphens or underscores, at most 64 characters —"
+        " it is what the listing shows and what a message or a stop addresses"
+    )
+
+    def erased(self) -> SpawnNameRow:
+        """This declaration as the kernel reads it, primitive and dependency-free."""
+        return SpawnNameRow(reason=self.reason, recovery=self.recovery)
+
+
 class HookSandbox(BaseModel, frozen=True):
     """OS sandbox declaration compiled into native settings and launchers.
 
@@ -1364,6 +1397,14 @@ class HookSet(BaseModel, frozen=True):
             "None is a project that took no copied half from anywhere — the "
             "scaffold itself included, being the origin of every copy — and "
             "registers no hook at all"
+        ),
+    )
+    spawn_names: SpawnNames | None = Field(
+        default=SpawnNames(),
+        description=(
+            "Whether every subagent this project spawns has to carry a name: "
+            "a spawn without one is refused with the shape a name takes. None "
+            "declines, and leaves a nameless subagent listed by its type"
         ),
     )
     peer_policy: PeerPolicy | None = Field(
