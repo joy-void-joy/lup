@@ -10,6 +10,7 @@ doctor with `--strict-evidence`, turning drift into a nonzero exit so evidence
 re-probes have a schedule instead of a habit.
 """
 
+import json
 import hashlib
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as installed_package_version
 
 from pydantic import BaseModel, Field
+
+from lup.types import JsonValue
 
 
 class EvidenceEntry(BaseModel, frozen=True):
@@ -39,7 +42,7 @@ EVIDENCE_REGISTER = [
     EvidenceEntry(
         capability="claude-agent-sdk", version="0.2.152", refreshed="2026-09-15"
     ),
-    EvidenceEntry(capability="codex-cli", version="0.153.4", refreshed="2026-09-07"),
+    EvidenceEntry(capability="codex-cli", version="0.155.1", refreshed="2026-09-19"),
 ]
 
 
@@ -104,7 +107,7 @@ SCHEMA_DIGESTS = [
     ),
     SchemaDigest(
         path="v2/ThreadResumeParams.json",
-        sha256="324e96004c49de35935cade3386958431c93a4fd3997a839f9796772ea4c8072",
+        sha256="5ebc2fe61b33d85dd6dfa81acf88f632fe2bafe4aa83ff57ee58e866f14d49ac",
     ),
     SchemaDigest(
         path="DynamicToolCallParams.json",
@@ -120,6 +123,16 @@ SCHEMA_DIGESTS = [
 Dated by the ``codex-cli`` row, which is what regenerates them: a digest here
 was read out of the same CLI that row accepts, so a drift message names that
 row's reading rather than a date of its own.
+
+``v2/ThreadResumeParams.json`` is the only one of the five that moved between
+0.153.4 and 0.155.1, and it was accepted on what the digest guards rather than
+on the hash alone: ``dynamicTools`` is still absent from it and from
+``TurnStartParams``, and still present on ``ThreadStartParams`` — so the fact
+this table exists to pin, that a dynamic-tool binding can be made only where a
+thread starts, holds at the newer version. What the file gained beside that is
+resume vocabulary the adapter does not reach: ``approvalsReviewer``,
+``personality``, ``runtimeWorkspaceRoots``, ``serviceTier``, ``excludeTurns``
+and ``initialTurnsPage``.
 """
 
 
@@ -222,6 +235,103 @@ def digest_drift(
                 )
             )
     return drifts
+
+
+AGGREGATE_SCHEMA = "codex_app_server_protocol.v2.schemas.json"
+"""The one generated file carrying the whole protocol, methods included.
+
+The per-type files cover what the app-server takes as parameters. A reply
+shape reached only by its method — ``hooks/list`` is the one Lup depends on —
+appears nowhere else, so a contract check has this file or nothing.
+"""
+
+
+class WireContract(BaseModel, frozen=True):
+    """One reply shape an adapter reads fields off by name, and which fields.
+
+    The fields are the provider's words, so this is filled where a provider is
+    named and read where none is — which is what lets a neutral check ask the
+    generated schema about them without learning whose they are.
+    """
+
+    method: str
+    """What the reply answers, as the wire names it."""
+
+    fields: list[str]
+    """Every field the typed model reads, spelled as the wire spells it."""
+
+
+class ContractDrift(BaseModel, frozen=True):
+    """One wire field a typed model reads that the schema no longer declares."""
+
+    method: str
+    field: str
+
+    @property
+    def message(self) -> str:
+        return (
+            f"the regenerated protocol schema declares no {self.field!r} "
+            f"anywhere, and the typed model for {self.method} reads it; "
+            "re-read the reply shape before accepting the new CLI"
+        )
+
+
+def declared_properties(document: JsonValue) -> list[str]:
+    """Every property name anywhere in a JSON Schema document, duplicates kept.
+
+    Walked rather than searched as text. A field name is also a perfectly
+    ordinary word, so asking whether one appears in the file answers yes for a
+    schema that dropped the field and kept a sentence mentioning it — which is
+    the one reading that turns this check into a check of nothing.
+    """
+    match document:
+        case {"properties": dict(properties)}:
+            named = [*properties]
+            nested = [
+                name
+                for value in properties.values()
+                for name in declared_properties(value)
+            ]
+            siblings = [
+                name
+                for key, value in document.items()
+                if key != "properties"
+                for name in declared_properties(value)
+            ]
+            return [*named, *nested, *siblings]
+        case dict(mapping):
+            return [
+                name
+                for value in mapping.values()
+                for name in declared_properties(value)
+            ]
+        case list(items):
+            return [name for item in items for name in declared_properties(item)]
+    return []
+
+
+def contract_drift(
+    generated: Path, contracts: list[WireContract], schema: str = AGGREGATE_SCHEMA
+) -> list[ContractDrift]:
+    """Which wire fields a method's typed model reads are no longer declared.
+
+    Presence rather than a digest, because the aggregate schema carries the
+    whole protocol: a digest over it moves on every unrelated change, and a
+    check that cries drift every release is one nobody reads by the third.
+    What breaks Lup is narrower and worth failing on — a field it reads being
+    renamed away, which fails *open*, seeding trust that was never granted.
+    """
+    target = generated / schema
+    if not target.is_file():
+        return []
+    document = json.loads(target.read_text(encoding="utf-8"))
+    present = {name for name in declared_properties(document)}
+    return [
+        ContractDrift(method=contract.method, field=field)
+        for contract in contracts
+        for field in contract.fields
+        if field not in present
+    ]
 
 
 def evidence_drift(

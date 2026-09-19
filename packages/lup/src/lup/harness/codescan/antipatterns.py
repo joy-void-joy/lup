@@ -93,7 +93,6 @@ from lup.harness.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
-    TYPESCRIPT_SUFFIXES,
     namedtuple_sites,
     noqa_sites,
     pyright_ignore_sites,
@@ -149,6 +148,7 @@ from lup.policy.kernel.edit import (
     suppression_reaches,
     tuple_shape_sites,
 )
+from lup.policy.kernel.typescript import TYPESCRIPT_SUFFIXES
 
 
 MAPPING_FAMILY = TypeFamily(

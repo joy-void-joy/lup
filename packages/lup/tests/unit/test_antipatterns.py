@@ -34,8 +34,10 @@ from lup.policy.kernel.edit import (
     dict_get_sites,
     empty_collection_exempt_lines,
     lines_of,
-    masked_typescript_lines,
     slice_exempt_lines,
+)
+from lup.policy.kernel.typescript import (
+    masked_typescript_lines,
     typescript_comment_columns,
 )
 from lup.policy.kernel.rows import AntiPatternRow

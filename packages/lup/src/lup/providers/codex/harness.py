@@ -130,9 +130,12 @@ class CodexSpellings(NativeSpellings):
             f"for the answer: {question}"
         )
 
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+    def delegate(
+        self, subagent_type: QualifiedAgentName, prompt: str, name: str = ""
+    ) -> Instruction:
+        named = f", naming the task {name!r}," if name else ""
         return Instruction(
-            f"Delegate to the {subagent_type} custom agent with this task: {prompt}"
+            f"Delegate to the {subagent_type} custom agent{named} with this task: {prompt}"
         )
 
     def request_approval(self, action: str, reason: str) -> Instruction:
@@ -217,6 +220,26 @@ class CodexSpellings(NativeSpellings):
             "keystrokes. Keep the one session for as long as the command "
             "runs: re-running it starts over and loses everything it already "
             "reported"
+        )
+
+    def nested_run(self, prompt: str) -> Instruction:
+        """Spell the non-interactive launch, `codex exec`.
+
+        Read from codex-cli 0.155.1's own help rather than from a run, since a
+        contained session reaches no Codex login and a nested `codex exec`
+        answers 401, the credential sitting outside what a session is granted.
+        `exec` takes
+        the prompt as its argument, `--dangerously-bypass-approvals-and-sandbox`
+        answers every approval a hook probe would otherwise stall on, and
+        `--dangerously-bypass-hook-trust` admits a hooks file this machine has
+        not trusted, which a throwaway kit's never is.
+        """
+        return Instruction(
+            "Run `codex exec --dangerously-bypass-approvals-and-sandbox"
+            f" --dangerously-bypass-hook-trust {json.dumps(prompt)}` from the"
+            " kit's directory. A non-interactive run loads the hooks in that"
+            " directory's settings at launch and exits when the prompt is"
+            " answered"
         )
 
     def read_document(self, path: str) -> Spelling:
@@ -551,7 +574,7 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     runtime_name="Codex",
     package="lup.providers.codex",
     managed_root_env=CODEX_LOGIN.config_home_env,
-    routed_tools=["Bash", "web_fetch", "apply_patch"],
+    routed_tools=["Bash", "web_fetch", "apply_patch", "collaborationspawn_agent"],
     hook_events=["PermissionRequest", "PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
     observed_tools=["apply_patch", "Bash"],
@@ -577,9 +600,11 @@ Claude Code's: the hook reads `session_id`, `cwd`, `prompt` and
 `hook_event_name` on stdin, `matcher` is not read for this event, and on exit
 0 its stdout's `hookSpecificOutput.additionalContext` is added as context,
 under a default limit of about 2,500 tokens per hook past which it spills to
-disk. Documented and not yet measured: no Codex session is signed in on the
-machine this was written on. The runtime's own spelling of the moment, so
-not a value a project could choose.
+disk. Documented and not yet measured: a contained session reaches no Codex
+login — a nested `codex exec` answers 401, the credential sitting outside
+what a session is granted — so the run that would measure this is the
+operator's to start from a host terminal. The runtime's own spelling of the
+moment, so not a value a project could choose.
 """
 
 # lup: ignore[constant-declaration] — the runtime's wire spelling of its own
@@ -589,9 +614,11 @@ CODEX_EXIT_EVENT = "SessionEnd"
 
 Documented at https://learn.chatgpt.com/docs/hooks beside `SessionStart` and
 the tool events, with `session_id` and `cwd` on stdin as for the prompt
-event. Documented and not yet measured: no Codex session is signed in on the
-machine this was written on. The runtime's own spelling of the moment, so not
-a value a project could choose.
+event. Documented and not yet measured: a contained session reaches no Codex
+login — a nested `codex exec` answers 401, the credential sitting outside
+what a session is granted — so the run that would measure this is the
+operator's to start from a host terminal. The runtime's own spelling of the
+moment, so not a value a project could choose.
 """
 
 CODEX_PATCH_RUNTIME = (
@@ -896,6 +923,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         ],
                         acceptance_guard=guard.erased()
                         if (guard := source.acceptance_guard)
+                        else None,
+                        spawn_names=names.erased()
+                        if (names := source.spawn_names)
                         else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),

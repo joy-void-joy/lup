@@ -30,6 +30,7 @@ from lup.harness.codescan.common import RuleSelection
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.home import CodexWorktreeHomeStore
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.trust import HOOKS_LIST, hook_wire_fields
 from lup.providers.codex.harness_runtime import (
     CodexCliEvidence,
     codex_capability_probes,
@@ -40,6 +41,7 @@ from lup.devtools.harness.generate import (
     claude_generation_recipe,
     codex_generation_recipe,
 )
+from lup.harness.evidence import WireContract
 from lup.harness.models import CapabilityEvidence, PromptDocument
 from lup.providers.login import ProviderLogin
 from lup.providers.profile_tree import (
@@ -173,6 +175,10 @@ class CodexComposer(NativeComposer):
             login=CODEX_LOGIN,
             default_config_home=CodexWorktreeHomeStore().home_for(root),
             clipboard_transport="x11",
+            # The one reply whose field names Lup depends on outside a typed
+            # schema: hook trust is seeded from what `hooks/list` reports, and
+            # a rename there fails open rather than loudly.
+            wire_contracts=[WireContract(method=HOOKS_LIST, fields=hook_wire_fields())],
         )
 
 

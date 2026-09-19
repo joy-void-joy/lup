@@ -1924,6 +1924,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             autonomous_agent_identities=["resolver-worker"],
             path_roles=FIXTURE_PATH_ROLES,
             acceptance_guard=None,
+            spawn_names=None,
             shell_rules=SHELL_RULES,
             edit_rules=FIXTURE_EDIT_RULES,
             import_boundaries=native_import_boundaries(application_roots()),

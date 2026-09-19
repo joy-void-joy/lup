@@ -41,6 +41,7 @@ from decisions import (
     fetch_decision,
     refused_tool_decision,
     session_contained,
+    spawn_decision,
     written_review,
 )
 from host import (
@@ -236,6 +237,15 @@ def dispatch(payload, permission_request=False):
         return fetch_decision(tool_input["url"], session_directory)
     if name == "apply_patch":
         return patch_decision(tool_input["command"], session_directory, autonomous)
+    if name == "collaborationspawn_agent":
+        # Measured on 0.155.1: the spawn carries `task_name` and `message`,
+        # and the hook names the tool this way. The runtime requires the task
+        # name on the call, so this insists on the same thing Claude's half
+        # does, and defers where it is there.
+        return spawn_decision(
+            tool_input["task_name"] if "task_name" in tool_input else "",
+            [value for value in tool_input.values() if isinstance(value, str)],
+        )
     # Asked of whatever reached here rather than of a listed few, exactly as
     # the Claude half asks it: which tools are worth refusing is the
     # declaration's answer, and a runtime that shipped the table without

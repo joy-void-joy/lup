@@ -5,6 +5,8 @@ profile transform all need these spellings, and none of them should pull the
 session runtime in to get them.
 """
 
+from pathlib import Path
+
 from lup.providers.login import ProviderLogin
 
 # lup: ignore[constant-declaration] — the environment variable Codex reads
@@ -13,6 +15,7 @@ CODEX_HOME = "CODEX_HOME"
 CODEX_LOGIN = ProviderLogin(
     config_home_env=CODEX_HOME,
     credentials_file="auth.json",
+    ambient_home=Path.home() / ".codex",
     home_subdir="codex-home",
 )
 """Where Codex stores a completed login, and how to select one.

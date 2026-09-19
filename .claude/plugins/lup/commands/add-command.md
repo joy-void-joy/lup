@@ -87,7 +87,7 @@ After regenerating:
 1. Show the user the declaration module, and confirm the generated artifacts appeared for both harnesses
 2. Check the tree — the ownership manifest must record the new artifacts:
 
-Start a `Monitor` over `uv run lup-devtools dev check` and leave it live. Each line it emits arrives as an event, and the watch ends when the command does. Do not run it through `Bash`, whose long timeout returns once at the end, and do not read a backgrounded session on a loop — both are polling, however patient
+Start a `Monitor` over `uv run lup-devtools dev check`. Each line it emits arrives as an event, and the watch ends when the command does. Do not run it through `Bash`, whose long timeout returns once at the end, and do not read a backgrounded session on a loop — both are polling, however patient. A watch that outlives your report wakes you after you have finished, so stop it with `TaskStop` before reporting unless the command has exited
 
 3. Explain how to invoke it: `/lup:<command-name>`
 4. Ask if any adjustments are needed

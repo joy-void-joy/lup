@@ -870,7 +870,7 @@ def report_inside_requirements(
         harness.image,
         harness.requirements,
         project_root(),
-        config_home,
+        editor_rendezvous(login),
         credential if credential.exists() else None,
         login,
         streams="captured",
@@ -1339,7 +1339,7 @@ def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
 # vector, and a mode is one optional argument among them; moving it onto
 # LaunchMode would make the model answerable for starting a runtime it knows
 # nothing about, and leave a project declaring no mode with no launcher at all.
-def ambient_config_home(login: ProviderLogin, fallback: Path) -> Path:
+def ambient_config_home(login: ProviderLogin, fallback: Path | None = None) -> Path:
     """The configuration home a launch would inherit, made concrete for a mount.
 
     ``launch_home`` answers ``None`` for "inherit whatever the environment
@@ -1347,11 +1347,30 @@ def ambient_config_home(login: ProviderLogin, fallback: Path) -> Path:
     mount, which names a file rather than a policy. Resolving it here lets
     that ``None`` keep meaning what it means everywhere else instead of every
     caller inventing a default.
+
+    ``fallback`` is what answers where the environment selected nothing, and
+    it is a caller's because it is not always the provider's own default: a
+    Codex composition falls back to the *worktree-scoped* home its store
+    derives, which is a home per checkout rather than the account's. Omitting
+    it takes the runtime's declared default, which is the right answer for a
+    caller that has no home of its own in mind.
     """
     # lup: ignore[os-environ] — the process environment is the open
     # mapping this reads by definition, and absence is the answer it wants
-    named = os.environ.get(login.config_home_env)
-    return Path(named) if named else fallback
+    selected = login.selected_home(dict(os.environ))
+    return selected if fallback is None or selected != login.ambient_home else fallback
+
+
+def editor_rendezvous(login: ProviderLogin) -> Path | None:
+    """Where an editor on this machine would leave a lockfile for this runtime.
+
+    Read off the environment this launcher runs in rather than the home the
+    launch selected, because the editor is a *sibling* process: it reads the
+    same variable and knows nothing about ``--profile``. ``None`` where the
+    runtime declares no rendezvous, which is every runtime but Claude Code.
+    """
+    # lup: ignore[os-environ] — the same open mapping the editor itself reads
+    return login.editor_rendezvous(dict(os.environ))
 
 
 def settle_boundary(
@@ -1542,7 +1561,7 @@ def session_argv(
         harness.image,
         harness.requirements,
         project_root(),
-        config_home,
+        editor_rendezvous(login),
         credential if credential.exists() else None,
         login,
         inherited_environment=[
@@ -1779,9 +1798,7 @@ def launch_claude(
                 arguments,
                 composition,
                 plugin,
-                home
-                if home is not None
-                else ambient_config_home(profiles.login, Path.home() / ".claude"),
+                home if home is not None else ambient_config_home(profiles.login),
                 profiles.login,
                 sandbox,
                 environment,

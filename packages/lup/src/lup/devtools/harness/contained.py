@@ -1562,7 +1562,7 @@ def contained_argv(
     image: Image,
     manifest: Manifest,
     root: Path,
-    host_config_home: Path | None,
+    editor_rendezvous: Path | None,
     credential: Path | None,
     login: ProviderLogin,
     engine: ContainerEngine | None = None,
@@ -1605,6 +1605,23 @@ def contained_argv(
     launch asked for besides, settled by the caller the way ``accessible``
     is: the standing grants come from the same gitignored registry the
     mounts do, so a run's workers hold the devices its session did.
+
+    ``editor_rendezvous`` is where the *host's* editor keeps its session
+    lockfiles, and ``None`` asks for no bridge at all -- which is the answer
+    for a runtime that declares none, and for an actor, which has nobody at a
+    keyboard.
+
+    It is emphatically not derived from the home this launch runs under, and
+    that is the distinction the parameter exists to hold. Under ``--profile``
+    the launch's home is `.lup/profiles/<name>/`, derived from a name no
+    editor has ever heard of, so bridging it bound a directory nothing writes
+    into: the editor connection never happened and nothing said why. Measured
+    on a `--profile test` session, whose container had an empty
+    `.lup/profiles/test/claude-config/ide` mounted at its configuration home.
+    The lockfile is a rendezvous point rather than profile state -- a port and
+    a token for one editor window, holding no account and no credential -- so
+    which account a session runs under and which editor it talks to are
+    independent choices, and only the second decides this.
     """
     said = banner if banner is not None else Banner()
     if engine is not None:
@@ -1691,14 +1708,29 @@ def contained_argv(
     if banner is None:
         said.say()
     # The editor's lockfile directory, guaranteed before anything mounts it.
-    # Whichever side writes it first creates it, so on a profile no editor has
-    # ever connected to it is simply absent -- and a bind mount whose source
+    # Whichever side writes it first creates it, so where no editor has ever
+    # run it is simply absent -- and a bind mount whose source
     # does not exist is one the engine refuses the entire container for, which
     # takes the launch and every probe behind the same argv down with it.
     # Here rather than in the image declaration, which assembles argv, touches
     # no disk, and is hashed into the ownership digest.
-    if host_config_home is not None:
-        (host_config_home / "ide").mkdir(parents=True, exist_ok=True)
+    if editor_rendezvous is not None:
+        editor_rendezvous.mkdir(parents=True, exist_ok=True)
+        # Said rather than left implicit, which is the second half of the
+        # repair: a session that could reach an editor said nothing about it,
+        # so a bridge pointed at a directory nothing writes into looked
+        # exactly like a bridge that worked.
+        said.add(
+            [
+                Notice(
+                    text=(
+                        f"Editor bridge: {editor_rendezvous} → "
+                        f"{image.config_home}/{editor_rendezvous.name}"
+                    ),
+                    urgency="detail",
+                )
+            ]
+        )
     return image.session_arguments(
         tag=tag,
         checkout=root,
@@ -1712,7 +1744,7 @@ def contained_argv(
         credential_renewable=login.renewable,
         credential_fields=login.credential_fields,
         credential=credential,
-        host_config_home=host_config_home,
+        editor_rendezvous=editor_rendezvous,
         engine=client,
         forge=forge,
         granted=granted,
@@ -1802,7 +1834,7 @@ def worker_cli(
     image: Image,
     manifest: Manifest,
     lease_root: Path,
-    host_config_home: Path | None,
+    editor_rendezvous: Path | None,
     credential: Path | None,
     login: ProviderLogin,
     program: str,
@@ -1861,7 +1893,7 @@ def worker_cli(
             image,
             manifest,
             lease_root,
-            host_config_home,
+            editor_rendezvous,
             credential,
             login,
             streams="piped",

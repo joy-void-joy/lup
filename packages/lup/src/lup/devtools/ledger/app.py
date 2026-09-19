@@ -624,12 +624,17 @@ def create_ledger_app(
 
     @app.command("done")
     def done_cmd(
-        node_id: Annotated[str, typer.Argument(help="The task to close, by id")],
+        node_id: Annotated[
+            str, typer.Argument(help="The task or handoff to close, by id")
+        ],
     ) -> None:
-        """Mark one task finished, by recording it again as done.
+        """Mark one piece of work finished, by recording it again as done.
 
-        Nothing is overwritten: the task as it stood stays in the log, and the
-        reading takes the latest — so who closed it and when are both there.
+        A task its holder has finished, or a handoff its receiver has: both
+        are work, and the kinds that are records instead say so rather than
+        pretending to close. Nothing is overwritten — what it looked like
+        stays in the log and the reading takes the latest, so who closed it
+        and when are both there.
         """
         held = store()
         found = held.resolve(node_id, classes)
