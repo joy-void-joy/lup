@@ -33,6 +33,7 @@ dependencies = [
     "tomlkit>=0.15.0",
     "tqdm>=4.70.0",
     "typer>=0.21.1",
+    "tzlocal>=5.4.3",
 ]
 
 [project.optional-dependencies]

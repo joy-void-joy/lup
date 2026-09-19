@@ -28,10 +28,8 @@ Customization:
 
 import shutil
 from pathlib import Path
-from zoneinfo import ZoneInfoNotFoundError
 
 import typer
-from tzlocal import get_localzone_name
 
 from lup_template.harness.composition import profile_directory
 from lup.devtools.setup import (
@@ -44,23 +42,11 @@ from lup.devtools.setup import (
     open_browser,
     read_env_local,
 )
+from lup.harness.terminal import host_timezone
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
 
 CREDENTIALS_DIR = project_root() / "credentials"
-
-
-def detect_system_timezone() -> str:
-    """Detect the system's IANA timezone name, or "" if undetermined.
-
-    Delegates to ``tzlocal``, which reads the right source for each
-    platform (``/etc/localtime`` on Linux, the registry on Windows,
-    system preferences on macOS) instead of string-munging just one.
-    """
-    try:
-        return get_localzone_name()
-    except ZoneInfoNotFoundError:
-        return ""
 
 
 # =====================================================================
@@ -160,7 +146,7 @@ def setup_timezone() -> EnvVars:
     console.print()
 
     env = read_env_local()
-    system_tz = detect_system_timezone()
+    system_tz = host_timezone()
     current = env.get("AGENT_TIMEZONE", "")  # lup: ignore[dict-get] — open env map
     default = current or system_tz
 
