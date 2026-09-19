@@ -193,6 +193,18 @@ class SyncConfig(TypedDict):
     machine's fact, and the committed file is scaffold every adopter and
     every contributor runs from."""
 
+    difftool: NotRequired[list[str]]
+    """The program this machine opens a before/after pair in, as argv.
+
+    The two paths are appended, which is what every common difftool already
+    takes last, so a registration is the command and its flags and nothing
+    about placeholders. Empty or absent means this machine has no editor for
+    the job and a review renders in the terminal.
+
+    Gitignored for the same reason a device grant is: which editor is
+    installed is a fact about one machine, and a committed answer would open
+    a program on every adopter's that may not be there."""
+
 
 SYNC_CONFIG_ADAPTER = TypeAdapter(SyncConfig)
 PROJECT_ENTRY_ADAPTER = TypeAdapter(ProjectEntry)
@@ -534,6 +546,17 @@ def accessible_roots(
     return [
         root for project in load_projects() if (root := located(project)) is not None
     ]
+
+
+def registered_difftool() -> list[str]:
+    """The argv this machine opens a before/after pair with, empty where none.
+
+    From the local file alone, never the merged registry, for the reason a
+    device grant is: `sync.json` is committed scaffold, and an editor named
+    there would be launched on every adopter's machine by an author who has
+    never seen one of them.
+    """
+    return load_json(local_file()).get("difftool", [])
 
 
 def granted_devices(report: Callable[[str], None] = typer.echo) -> list[Device]:
