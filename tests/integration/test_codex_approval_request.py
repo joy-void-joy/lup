@@ -1,54 +1,48 @@
 """Whether a Codex session can be *asked* rather than only refused.
 
 This is the last structural difference between the two runtimes' review
-experience, and it is one unmeasured question.
+experience.
 
 A policy verdict of `ask` has nowhere to go on Codex's `PreToolUse`: the
-compiled dispatcher runs as a command hook, and that boundary carries no
-portable ask effect — so `queued_review` denies the call and sends the
+compiled dispatcher runs as a command hook, that boundary carries no portable
+ask effect, and `queued_review` spends the verdict as a denial that sends the
 operator to another terminal. Issue #180 is that dead end reported from a real
 session, where an explicitly authorized whole-file rewrite could not be
 installed because "nobody who could approve it is reachable from this
 session".
 
-Codex has a second hook event that is meant to be the interactive channel.
-`docs/native-capabilities.md` already records that it never fires under
-`codex exec`, which reports `approval: never` — so what is open is the
-*app-server* path, the one an IDE and every Lup Codex session drive. The
-generated dispatcher is already written for it: on `PermissionRequest` an
-`allow` becomes a native allow decision, and an `ask` **returns saying
-nothing**, which is the dispatcher deliberately declining to decide so the
-runtime's own approval flow can proceed. Whether anything is listening is what
-has never been measured.
+The generated plugin registers a second event for the interactive channel, and
+the dispatcher is already written for it: on `PermissionRequest` an `allow`
+becomes a native allow decision, and an `ask` **returns saying nothing** —
+the dispatcher deliberately declining so the runtime's own approval flow can
+proceed.
 
-Two arms, and neither alone settles it:
+What that flow then does splits in two:
 
-* The first asks whether the event fires here at all. A policy-allowed command
-  is put to a live session and the plugin's own evidence journal is read for a
-  `PermissionRequest` record. The journal rather than the behaviour, because a
-  command that simply ran proves nothing about which hook let it.
+* Does the event fire in a session an *application* opens? The plugin's own
+  evidence journal already answers yes for interactive CLI sessions — this
+  checkout's holds 48 completed `PermissionRequest` invocations, 18 `allow`
+  and 30 `ask`. Arm one re-asks it of the **app-server** path, which is what
+  an IDE and every Lup Codex session drive, and where the `codex exec` finding
+  (`approval: never`, so the event cannot fire) does not apply.
 
-* The second asks the question that matters. A command the policy classifies
-  `ask` is put to the same session, the dispatcher declines to decide, and the
-  arm observes whether an approval request reaches the client that opened the
-  thread. If one does, a Codex session can be asked, #180 stops being a dead
-  end, and `dev questions` becomes a fallback rather than the only surface. If
-  none does, the queue is permanently that surface and its diff rendering is
-  load-bearing.
+* When the dispatcher declines, does an approval request reach the client that
+  opened the thread? Nothing has measured this. If one arrives, a Codex session
+  can be asked, #180 stops being a dead end, and `dev questions` becomes a
+  fallback rather than the only surface. If none does, the queue is permanently
+  that surface and its diff rendering is load-bearing.
 
-Neither arm can run without a Codex login, which a contained session does not
-reach — a nested `codex exec` there answers 401, the credential sitting
-outside what a session is granted. So they carry the integration marker this
-repository deselects by default, exactly as `test_codex_hook_firing.py` does,
-and the run that settles them is the operator's to start from a host terminal
-where Codex is signed in:
+Neither arm runs without a Codex login, which a contained session does not
+reach — a nested `codex exec` there answers 401, the credential sitting outside
+what a session is granted. So they carry the integration marker this repository
+deselects by default, and the run that settles them is the operator's to start
+from a host terminal where Codex is signed in:
 
     uv run pytest tests/integration/test_codex_approval_request.py \
         -m integration -v
 
-Deselected rather than failed, which is what keeps an unmeasured question out
-of everybody else's gate. Until that run happens both arms are built and
-neither is evidence.
+Deselected rather than failed, which keeps an unmeasured question out of
+everybody else's gate.
 """
 
 import json
@@ -62,7 +56,7 @@ from lup.policy.hooks import (
     LupHookMatcher,
     LupHookOutput,
     LupHooksConfig,
-    deny_hook,
+    allow_hook,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore
 from lup.providers.codex.runtime import CodexSessionConfig, create_codex
@@ -80,10 +74,10 @@ ALLOWED = "echo lup-approval-control"
 ASKED = "chmod +x tmp/lup-approval-probe.sh"
 """Classified `ask` — "changing permissions requires approval".
 
-Inert by construction: the file it names is never created, so the worst a
-granted approval buys is a `chmod` that fails on a missing path. A probe whose
-asked-about command mattered if it ran would make a positive result expensive,
-and the answer is wanted either way.
+Inert by construction: the file it names is never created, so the most a
+granted approval buys is a `chmod` that fails on a missing path. The arm below
+*grants* what arrives, so the command being harmless is load-bearing here
+rather than incidental.
 """
 
 INSTRUCTIONS = (
@@ -105,13 +99,20 @@ class ShellAttempt(BaseModel):
 class ApprovalWatch(BaseModel):
     """Every approval request one turn caused the server to send its client.
 
-    Recorded rather than judged. What this arm measures is whether a request
-    *arrives*, and a watcher that decided on its merits would be measuring its
-    own decision instead — so every arrival is noted and every one is refused,
-    which leaves the session exactly where a denial leaves it and runs nothing.
+    Recorded and then **granted**, which is the correction that made this file
+    measure anything. It recorded and denied at first, on the reasoning that a
+    probe should grant nothing — but `CodexApprovalResponder` consults these
+    same hooks for every approval the app-server sends, so denying everything
+    starved the turn and all three arms died with `ProviderTurnError` before
+    reaching an assertion. The control failing alongside the other two is what
+    gave it away: a control that cannot pass is measuring the probe.
+
+    Granting is safe because what it grants is fixed and inert: the only two
+    commands this file puts to a session are an `echo` and a `chmod` on a path
+    that does not exist.
     """
 
-    tools: list[str] = []
+    arrivals: list[str] = []
 
     def hooks(self) -> LupHooksConfig:
         """The session hooks an arriving approval is routed through.
@@ -119,31 +120,31 @@ class ApprovalWatch(BaseModel):
         `resolve_approval` answers an app-server approval request from the
         session's own declared hooks, so registering one is how a client
         observes that a request reached it at all. A session declaring none
-        declines every request — which is the safe answer, and also an answer
+        declines every request — the safe answer, and also one
         indistinguishable from nothing having arrived.
         """
 
         async def note(event: LupHookInput) -> LupHookOutput:
-            self.tools.append(event.tool_name)
-            return deny_hook("the approval probe records and grants nothing")
+            self.arrivals.append(event.tool_name)
+            return allow_hook(reason="the approval probe records what arrives")
 
         return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=note, tag="probe")])
 
     def arrived(self) -> bool:
-        """Whether anything at all was routed here during the turn."""
-        return bool(self.tools)
+        """Whether the app-server asked this client to decide anything."""
+        return bool(self.arrivals)
 
 
-def probe_session(cwd: Path, watch: ApprovalWatch) -> CodexSessionConfig:
-    """A session whose approvals are live, which is what makes the arm possible.
+def answering_session(cwd: Path, watch: ApprovalWatch) -> CodexSessionConfig:
+    """A session whose approvals are live, which is what makes the arms possible.
 
-    ``approval_policy`` is `on-request` rather than the `never` the hook-firing
-    probe uses, and that is the whole difference between the two files: `never`
-    is the setting under which `PermissionRequest` is already known not to
-    fire, so a probe that kept it would re-measure the answer we have.
+    ``approval_policy`` is `on-request` rather than the `never` the control
+    uses, and that is the point: `never` is the setting under which the
+    interactive event is already known not to fire, so a probe keeping it
+    would re-measure the answer we have.
 
     The sandbox stays at `workspace-write` rather than being opened, because an
-    approval request is what a boundary *produces*: a session granted full
+    approval request is what a boundary *produces* — a session granted full
     access has nothing left to ask about.
     """
     return CodexSessionConfig(
@@ -156,26 +157,49 @@ def probe_session(cwd: Path, watch: ApprovalWatch) -> CodexSessionConfig:
     )
 
 
+def quiet_session(cwd: Path) -> CodexSessionConfig:
+    """The control's session: the shape already known to complete a turn.
+
+    `never` and full access, exactly as `test_codex_hook_firing.py` opens one.
+    A control exists to prove the prompt reaches the shell, so it must not also
+    be the first place a new configuration is tried — doing that is what left
+    an earlier run's three failures indistinguishable from one another.
+    """
+    return CodexSessionConfig(
+        model=PROBE_MODEL,
+        developer_instructions=INSTRUCTIONS,
+        cwd=cwd,
+        sandbox="danger-full-access",
+        approval_policy="never",
+    )
+
+
 def hook_records(cwd: Path) -> list[dict[str, str]]:
     """Every hook invocation this checkout's plugin has journalled.
 
-    Read from the scoped home's plugin data directory, which is where the
-    generated dispatcher writes `record_hook_evidence` — metadata only, so
-    nothing here carries a command or a patch.
+    Under `plugins/data/<plugin>/` inside the scoped home, where the
+    dispatcher's own `PLUGIN_DATA` points — globbed rather than composed,
+    because that directory is named for the installed plugin revision and this
+    only needs to find it. An earlier draft read the home's root and would have
+    found nothing whatever the session did. Metadata only, so nothing read here
+    carries a command or a patch.
     """
-    journal = CodexWorktreeHomeStore().home_for(cwd) / "hook-events.jsonl"
-    if not journal.is_file():
-        return []
+    home = CodexWorktreeHomeStore().home_for(cwd)
     return [
         json.loads(line)
+        for journal in home.glob("plugins/data/*/hook-events.jsonl")
         for line in journal.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
 
 
-def fired(cwd: Path, event: str) -> list[dict[str, str]]:
-    """Which journalled invocations were of one event."""
-    return [record for record in hook_records(cwd) if record.get("event_name") == event]
+def settled(cwd: Path, event: str) -> list[dict[str, str]]:
+    """Completed invocations of one event, which are the ones that decided."""
+    return [
+        record
+        for record in hook_records(cwd)
+        if record.get("event_name") == event and record.get("phase") == "completed"
+    ]
 
 
 async def ask(factory: Client, command: str) -> ShellAttempt:
@@ -195,31 +219,35 @@ async def ask(factory: Client, command: str) -> ShellAttempt:
 
 async def test_the_probe_prompt_reaches_the_shell() -> None:
     """The control. Without it, a refusal and a reluctance look the same."""
-    root = find_project_root()
-
-    observed = await ask(create_codex(probe_session(root, ApprovalWatch())), ALLOWED)
+    observed = await ask(create_codex(quiet_session(find_project_root())), ALLOWED)
 
     assert observed.ran, observed.output
     assert "lup-approval-control" in observed.output
 
 
 async def test_whether_permission_request_fires_in_an_app_server_session() -> None:
-    """Arm one: does the interactive hook event reach the plugin here at all?
+    """Arm one: does the interactive hook event reach the plugin here?
 
     The journal rather than the command's fate, because a command that ran
-    proves nothing about which hook let it run: `PreToolUse` allowing it and
-    `PermissionRequest` never firing looks exactly like both firing.
+    proves nothing about which hook let it run: `PreToolUse` allowing it while
+    `PermissionRequest` never fires looks exactly like both firing.
+
+    Counted across the turn rather than asserted absolutely, because this
+    checkout's journal already holds invocations from interactive sessions —
+    what is being asked is whether the *app-server* path adds one.
     """
     root = find_project_root()
-    before = len(fired(root, "PermissionRequest"))
+    before = len(settled(root, "PermissionRequest"))
 
-    await ask(create_codex(probe_session(root, ApprovalWatch())), ALLOWED)
+    await ask(create_codex(answering_session(root, ApprovalWatch())), ALLOWED)
 
-    assert len(fired(root, "PermissionRequest")) > before, (
+    assert len(settled(root, "PermissionRequest")) > before, (
         "No PermissionRequest reached the plugin's dispatcher during a live "
-        "app-server turn, so the interactive half of the boundary does not "
-        "fire here either — and a Codex `ask` can only ever be spent as a "
-        "denial. `dev questions` is then the permanent review surface."
+        "app-server turn, so the interactive half of the boundary fires only "
+        "for a terminal — and an `ask` in a session an application opened can "
+        "only ever be spent as a denial. `dev questions` is then permanently "
+        "the review surface. Record it against the app-server rather than the "
+        "plugin: the same journal holds invocations from interactive runs."
     )
 
 
@@ -227,26 +255,23 @@ async def test_whether_a_declined_decision_reaches_the_client_as_an_approval() -
     """Arm two, and the one that decides whether #180 has a way out.
 
     On `ask` the generated dispatcher returns saying nothing, which is it
-    declining to decide so the runtime's own approval flow can proceed. This
-    asks whether that flow then reaches whoever opened the thread.
+    declining so the runtime's own approval flow can proceed. This asks
+    whether that flow reaches whoever opened the thread.
 
     A failure here is not a defect in Lup. It is the finding that the
     dispatcher's deliberate silence has nobody listening on the other side,
-    which is worth recording as a vendor surface gap rather than worked
-    around — the fail-closed denial is the correct behaviour under it.
+    which belongs in the evidence register as a vendor surface gap — the
+    fail-closed denial is the correct behaviour under it.
     """
     root = find_project_root()
     watch = ApprovalWatch()
 
-    observed = await ask(create_codex(probe_session(root, watch)), ASKED)
+    observed = await ask(create_codex(answering_session(root, watch)), ASKED)
 
-    assert not observed.ran, (
-        "A command this project's policy classifies `ask` ran without any "
-        f"approval being recorded: {observed.output}"
-    )
     assert watch.arrived(), (
         "The dispatcher declined to decide and no approval request reached "
         "the client, so nothing was listening: a Codex session cannot be "
-        "asked, only refused. Record this against the app-server's approval "
-        f"surface rather than treating it as a Lup defect. Saw: {watch.tools}"
+        "asked, only refused. Record it against the app-server's approval "
+        "surface rather than as a Lup defect. The turn reported: "
+        f"ran={observed.ran}, {observed.output}"
     )
