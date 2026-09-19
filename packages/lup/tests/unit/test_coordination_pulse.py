@@ -15,11 +15,12 @@ from pathlib import Path
 from lup.channels.models import utc_now
 from lup.coordination.identity import member_ref, mint_member_id
 from lup.coordination.peer_tools import RosterPulse
-from lup.coordination.pulse import HEARTBEATS_DIR, Pulse, beat, heard_at, reset
+from lup.coordination.bare.store import HEARTBEATS_DIR, beat, heard_at, reset
+from lup.coordination.pulse import Pulse
 from lup.coordination.refs import ActorRef
 from lup.coordination.repository import RepositoryPeers
 from lup.coordination.roster import ActorDescribed, ActorJoined, SpawnedActor
-from lup.coordination.store import coordination_root
+from lup.coordination.meeting import coordination_root
 
 FOREVER = Pulse(stale_after_seconds=3600.0)
 """A window nothing in a test outlives, for the rows that must read as present."""

@@ -1,24 +1,33 @@
 # lup: ignore[constant-declaration]
 # The file names below are a handshake across three processes: the generator
-# writes them, the guard execs one by the other, and the shipped reader
+# writes them, the guard runs one by the other, and the shipped package
 # answers to both. A caller free to spell them differently is a caller free
 # to ship a guard that reaches nothing.
-"""What a plugin ships so the roster reaches a session at each prompt.
+"""What a plugin ships so the coordination store reaches a session at all.
 
-A session has no reason to ask who else is here at the moment a prompt
-arrives, which is the moment it most needs to know. Both runtimes fire an
-event when a prompt is submitted and read context back from it, so both
-plugins carry the same two artifacts: a shell guard that exits without
-starting an interpreter where this repository has no roster at all, and the
-fold from :mod:`lup.coordination.changes`, shipped verbatim beside it, which
-says what changed since this session's last prompt and nothing else.
+Three things travel, and only the first is unconditional. The **store
+package** is :mod:`lup.coordination.bare` copied whole into the plugin's
+``hooks/runtime/coordination/`` — the fold every reader of the store shares,
+the prompt-time hook and the departure writer that stand on it, all of it
+standard library so it resolves on the bare interpreter a runtime spawns. It
+ships whether or not this project declared a roster, because the compiled
+permission dispatcher imports it unconditionally and a dispatcher that cannot
+import refuses every call in the session.
+
+The other two are **guards**, one per event, registered only where a roster
+is declared: a shell script that exits without starting an interpreter where
+this repository's store holds nothing, and hands over to a module of the
+package where it does. A session has no reason to ask who else is here at the
+moment a prompt arrives, which is the moment it most needs to know; and a
+session that exits cleanly writes nothing, so its row would read as running
+forever. Both runtimes fire an event for each, and both read the same
+envelope back.
 
 Rendered once here rather than once per adapter, because what the adapters
 own is two words — the event's name and the variable their plugin root is
-exported as — and everything else would be the same file twice. Each adapter
-passes those two words and registers the entry under its own event.
+exported as — and everything else would be the same file twice.
 
-Every name the guard needs is interpolated from the definition that owns it:
+Every name the guards need is interpolated from the definition that owns it:
 a store directory renamed in one place moves the guard with it, instead of
 leaving a script that reads a path nobody writes.
 """
@@ -26,56 +35,113 @@ leaving a script that reads a path nobody writes.
 from importlib import resources
 from pathlib import Path
 
+from lup.coordination import bare
+from lup.coordination.bare.store import COORDINATION_DIR, ROSTER_FILE, STORE_DIR
 from lup.coordination.identity import MEMBER_ENV
-from lup.coordination.roster import ROSTER_FILE
-from lup.coordination.store import COORDINATION_DIR, STORE_DIR
 from lup.formats.banner import (
     REGENERATE_COMMAND,
     VERBATIM_COPY,
     GeneratedBanner,
 )
 from lup.harness.models import Artifact, HookSet
+from lup.policy.dispatcher import STORE_PACKAGE
 from lup.types import JsonObject
 from pydantic import BaseModel
 
-RUNTIME_MODULE = "coordination_changes.py"
+CHANGES_MODULE = "changes"
+CHANGES_ENTRY = "coordination_changes.py"
 GUARD_SCRIPT = "coordination_changes.sh"
-RUNTIME_ORIGIN = "lup.coordination.changes"
-RUNTIME_SOURCE = "changes.py"
-"""The two files a plugin carries for the roster at prompt time, and the fold's home.
+"""What the plugin carries for the roster at prompt time: a guard, the entry
+the guard runs, and the module of the shipped package that entry calls."""
 
-Beside the delivery pair rather than inside it, because they answer at
-different moments: delivery runs before every tool call and this runs once
-per prompt, and a guard that had to tell the two apart would be paying for
-the distinction on every call.
-"""
-
-DEPARTURE_MODULE = "coordination_departure.py"
+DEPARTURE_MODULE = "departure"
+DEPARTURE_ENTRY = "coordination_departure.py"
 DEPARTURE_SCRIPT = "coordination_departure.sh"
-DEPARTURE_ORIGIN = "lup.coordination.departure"
-DEPARTURE_SOURCE = "departure.py"
-"""The two files a plugin carries for the roster as a session ends, and the writer's home.
+"""The same three under the runtime's ending event, reaching the one writer
+that finishes this session's row on a clean exit."""
 
-The same guard shape under the runtime's ending event, handing over to the
-one writer the plugin ships: the record that finishes this session's row,
-which nothing else writes on a clean exit.
-"""
+STORE_ORIGIN = bare.__name__
+"""Where the shipped package is copied from, for the banner each file carries."""
 
 
-def runtime_source(module: str) -> str:
-    """A shipped runtime, read from the module that owns it rather than restated here."""
-    return resources.files("lup.coordination").joinpath(module).read_text("utf-8")
+def store_modules() -> list[Artifact]:
+    """Every module of the shipped package, read from the package that owns it.
+
+    Read rather than restated, and whole rather than module by module: the
+    package's relative imports resolve the same beneath ``runtime/`` as they
+    do in lup, which is what lets every file travel byte for byte and is the
+    same arrangement the policy kernel ships under.
+    """
+    directory = resources.files(bare)
+    return [
+        Artifact(
+            path=Path(f"{STORE_PACKAGE}/{found.name}"),
+            content=found.read_text("utf-8"),
+            semantic_id=STORE_PACKAGE,
+            banner=VERBATIM_COPY.compiled_from(f"{STORE_ORIGIN}.{found.name[:-3]}"),
+        )
+        for found in sorted(directory.iterdir(), key=lambda entry: entry.name)
+        if found.is_file() and found.name.endswith(".py")
+    ]
 
 
-def guard_body(event: str, runtime_module: str) -> str:
-    """A roster-existence check that answers "nobody coordinates here" without Python.
+def store_artifacts(plugin_root: Path, semantic_id: str) -> list[Artifact]:
+    """The shipped package, placed under one plugin's runtime directory.
+
+    Unconditional, unlike the guards: the compiled dispatcher imports this
+    package at its top level whatever a project declared about rosters, and an
+    import a bare script cannot resolve is a permission hook that raises
+    before it decides anything.
+    """
+    return [
+        module.model_copy(
+            update={
+                "path": plugin_root / "hooks" / "runtime" / module.path,
+                "semantic_id": semantic_id,
+            }
+        )
+        for module in store_modules()
+    ]
+
+
+def entry_body(module: str) -> str:
+    """The script a guard runs, which is one import and one call.
+
+    It exists to name its own directory as a search path before importing,
+    which is what the compiled dispatcher beside it does and for the same
+    reason: a hook is launched as a bare script and promised no working
+    directory, no ``PYTHONPATH`` and no interpreter environment. Running the
+    package's module directly with ``-m`` would work today and stop working
+    under any of ``-I``, ``-P`` or ``PYTHONSAFEPATH``, because all three take
+    away the one search path that form depends on — and this hook fails open,
+    so what it would cost is a roster that silently stops answering.
+    """
+    return f'''"""Entry point for {STORE_PACKAGE}.{module}, run as a bare script."""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from {STORE_PACKAGE}.{module} import main
+
+main()
+'''
+
+
+def guard_body(event: str, entry: str) -> str:
+    """A store-existence check that answers "nobody coordinates here" without Python.
 
     The store's roster file is the whole test: a repository whose sessions
     have never joined has no file, and a session there is told nothing rather
     than told the roster is empty — which would cost a line on every prompt
     of every project that never coordinates.
 
-    Every failure exits zero. A prompt is not something a broken roster may
+    What it hands over to is the entry beside the shipped package rather than
+    a module of it, so the interpreter is given nothing to resolve from its
+    environment: the entry names its own directory as the search path, the
+    way the compiled dispatcher does.
+
+    Every failure exits zero. A prompt is not something a broken store may
     stop, and neither is an exit, so a guard that cannot tell must let it
     through: the cost of being wrong that way is one prompt without the
     roster or one departure unwritten, and the cost of the other way is a
@@ -95,7 +161,7 @@ case "$shared" in
 esac
 root="$shared/{STORE_DIR}/{COORDINATION_DIR}"
 [ -f "$root/{ROSTER_FILE}" ] || exit 0
-exec python3 "${{0%/*}}/../runtime/{runtime_module}" "$root" "${MEMBER_ENV}" "{event}"
+exec python3 "${{0%/*}}/../runtime/{entry}" "$root" "${MEMBER_ENV}" "{event}"
 """
 
 
@@ -130,7 +196,7 @@ class PromptHook(BaseModel, frozen=True):
 
     Empty on both counts where the project declared no roster: a hook that
     fired for a population nobody declared would read an absent store on
-    every prompt to say nothing, and a plugin would carry two files for it.
+    every prompt to say nothing, and a plugin would carry a file for it.
     """
 
     registered: JsonObject
@@ -162,7 +228,7 @@ def folded(hooks: list[PromptHook]) -> PromptHook:
 def prompt_hook(
     plugin_root: Path, plugin_root_env: str, source: HookSet, event: str
 ) -> PromptHook:
-    """The hooks entry under *event* and the files behind it, where a roster is declared.
+    """The hooks entry under *event* and the guard behind it, where a roster is declared.
 
     The declaration is the hook set's own ``peer_policy``: a project whose
     sessions find each other on a roster is one whose sessions are told when
@@ -172,14 +238,8 @@ def prompt_hook(
         return PromptHook(registered={}, artifacts=[])
     return PromptHook(
         registered={event: [{"hooks": [hook_entry(plugin_root_env, GUARD_SCRIPT)]}]},
-        artifacts=roster_artifacts(
-            plugin_root,
-            source.id,
-            event,
-            guard_script=GUARD_SCRIPT,
-            runtime_module=RUNTIME_MODULE,
-            source_file=RUNTIME_SOURCE,
-            origin=RUNTIME_ORIGIN,
+        artifacts=hook_artifacts(
+            plugin_root, source.id, event, GUARD_SCRIPT, CHANGES_ENTRY, CHANGES_MODULE
         ),
     )
 
@@ -187,7 +247,7 @@ def prompt_hook(
 def departure_hook(
     plugin_root: Path, plugin_root_env: str, source: HookSet, event: str
 ) -> PromptHook:
-    """The hooks entry under the runtime's ending event, and the files behind it.
+    """The hooks entry under the runtime's ending event, and the guard behind it.
 
     Declared by the same ``peer_policy`` as the prompt-time hook: a session
     on a roster is one whose row has to end when it does, and a project that
@@ -199,40 +259,38 @@ def departure_hook(
         registered={
             event: [{"hooks": [hook_entry(plugin_root_env, DEPARTURE_SCRIPT)]}]
         },
-        artifacts=roster_artifacts(
+        artifacts=hook_artifacts(
             plugin_root,
             source.id,
             event,
-            guard_script=DEPARTURE_SCRIPT,
-            runtime_module=DEPARTURE_MODULE,
-            source_file=DEPARTURE_SOURCE,
-            origin=DEPARTURE_ORIGIN,
+            DEPARTURE_SCRIPT,
+            DEPARTURE_ENTRY,
+            DEPARTURE_MODULE,
         ),
     )
 
 
-def roster_artifacts(
+def hook_artifacts(
     plugin_root: Path,
     semantic_id: str,
     event: str,
     guard_script: str,
-    runtime_module: str,
-    source_file: str,
-    origin: str,
+    entry: str,
+    module: str,
 ) -> list[Artifact]:
-    """A guard and the runtime it hands over to, as one plugin carries them."""
+    """One event's guard and the entry it runs, beside the shipped package."""
     return [
         Artifact.generated(
             path=plugin_root / "hooks" / "scripts" / guard_script,
-            body=guard_body(event, runtime_module),
+            body=guard_body(event, entry),
             semantic_id=semantic_id,
             banner=GeneratedBanner(source=__name__, command=REGENERATE_COMMAND),
             executable=True,
         ),
-        Artifact(
-            path=plugin_root / "hooks" / "runtime" / runtime_module,
-            content=runtime_source(source_file),
+        Artifact.generated(
+            path=plugin_root / "hooks" / "runtime" / entry,
+            body=entry_body(module),
             semantic_id=semantic_id,
-            banner=VERBATIM_COPY.compiled_from(origin),
+            banner=GeneratedBanner(source=__name__, command=REGENERATE_COMMAND),
         ),
     ]

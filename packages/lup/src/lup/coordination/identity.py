@@ -1,7 +1,7 @@
 # lup: ignore[constant-declaration]
-# The environment name and the stream's file name are a handshake between a
-# launcher, a hook and a tool server in three different processes, so a caller
-# free to choose them is a caller free to open a session nobody can address.
+# The environment names are a handshake between a launcher, a hook and a tool
+# server in three different processes, so a caller free to choose them is a
+# caller free to open a session nobody can address.
 """Who a session is on its repository's roster, and what it is called.
 
 Two facts, deliberately separated, because they change on different schedules
@@ -43,6 +43,8 @@ from pydantic_settings import BaseSettings
 
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
+from lup.coordination.bare import store
+from lup.coordination.bare.store import MEMBER_KIND, NAMES_FILE
 from lup.coordination.refs import ActorRef
 from lup.types import EnvVars
 
@@ -56,17 +58,6 @@ Exported beside the id for the same reason: the runtime's own chrome shows a
 name the launcher chose, and the roster has to answer to the same one, so the
 choice is made once where both can read it rather than derived twice.
 """
-
-MEMBER_KIND = "session"
-"""What a repository peer is on the roster, beside spawned workers and the user.
-
-One kind for every session, rather than a kind per role. A role restricts
-tools, specialises a prompt, or separates contexts, and none of those is an
-identity — so what distinguishes two peers is what each says it is doing,
-which is its description, not a word baked into its address.
-"""
-
-NAMES_FILE = "names.jsonl"
 
 
 class MemberNamed(BaseModel, frozen=True):
@@ -219,10 +210,15 @@ class MemberNames:
     different schedules and one of them is history. A roster fold answers who
     is present; this answers what a name meant, including names nothing is
     called any more.
+
+    The fold is :mod:`lup.coordination.bare.store`'s, because a hook and the
+    permission dispatcher resolve the same names without being able to import
+    this. What is here is the writer and the vocabulary a typed caller reads.
     """
 
-    def __init__(self, path: Path) -> None:
-        self.stream: Stream[MemberNamed] = Stream(path, NAME_ADAPTER)
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.stream: Stream[MemberNamed] = Stream(root / NAMES_FILE, NAME_ADAPTER)
 
     def rename(self, member_id: str, cli_name: str) -> MemberNamed:
         """Record what this member is called from now on."""
@@ -232,7 +228,14 @@ class MemberNames:
 
     def named(self) -> list[MemberNamed]:
         """Every naming ever recorded, oldest first."""
-        return [pair.item for pair in self.stream.read_from(0)]
+        return [
+            MemberNamed(
+                id=record["id"],
+                cli_name=record["cli_name"],
+                at=store.spoken_at(record["at"]) or utc_now(),
+            )
+            for record in store.named(self.root)
+        ]
 
     def latest(self, member_id: str) -> MemberNamed | None:
         """This member's newest naming, or nothing where it was never named."""
@@ -241,8 +244,7 @@ class MemberNames:
 
     def current(self, member_id: str) -> str:
         """What this member is called now, or nothing where it was never named."""
-        latest = self.latest(member_id)
-        return latest.cli_name if latest is not None else ""
+        return store.called(self.root).get(member_id, "")
 
     def resolve(self, cli_name: str, live: Collection[str] = ()) -> str:
         """The member a name reaches: the live one that claimed it last, else the last.
@@ -255,7 +257,11 @@ class MemberNames:
         still resolves to the session it named, and the sender is told what
         became of it rather than that the name means nothing.
         """
-        found = [record.id for record in self.named() if record.cli_name == cli_name]
+        found = [
+            record["id"]
+            for record in store.named(self.root)
+            if record["cli_name"] == cli_name
+        ]
         present = [member_id for member_id in found if member_id in live]
         return (present or found)[-1] if found else ""
 

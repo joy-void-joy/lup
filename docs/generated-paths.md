@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 104 artifacts
+## `claude` — 108 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -61,9 +61,13 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/commands/verify-solved.md` | lup.harness.content.skills.verify_solved |
 | `.claude/plugins/lup/hooks/hooks.json` | hooks.lup-policy |
 | `.claude/plugins/lup/hooks/runtime/carrier_drift.py` | lup.devtools.dev.drift_fold |
-| `.claude/plugins/lup/hooks/runtime/coordination_changes.py` | lup.coordination.changes |
+| `.claude/plugins/lup/hooks/runtime/coordination/__init__.py` | lup.coordination.bare.__init__ |
+| `.claude/plugins/lup/hooks/runtime/coordination/changes.py` | lup.coordination.bare.changes |
+| `.claude/plugins/lup/hooks/runtime/coordination/departure.py` | lup.coordination.bare.departure |
+| `.claude/plugins/lup/hooks/runtime/coordination/store.py` | lup.coordination.bare.store |
+| `.claude/plugins/lup/hooks/runtime/coordination_changes.py` | lup.providers.roster_prompt |
 | `.claude/plugins/lup/hooks/runtime/coordination_delivery.py` | lup.providers.claude.peer_delivery_runtime |
-| `.claude/plugins/lup/hooks/runtime/coordination_departure.py` | lup.coordination.departure |
+| `.claude/plugins/lup/hooks/runtime/coordination_departure.py` | lup.providers.roster_prompt |
 | `.claude/plugins/lup/hooks/runtime/evidence.json` | hooks.lup-policy |
 | `.claude/plugins/lup/hooks/runtime/kernel/__init__.py` | lup.policy.kernel.__init__ |
 | `.claude/plugins/lup/hooks/runtime/kernel/archives.py` | lup.policy.kernel.archives |
@@ -117,7 +121,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 80 artifacts
+## `codex` — 84 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -132,8 +136,12 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/hooks.json` | hooks.lup-policy |
 | `.codex/plugins/lup/hooks/runtime/carrier_drift.py` | lup.devtools.dev.drift_fold |
 | `.codex/plugins/lup/hooks/runtime/codex_patch.py` | lup.providers.codex.patch |
-| `.codex/plugins/lup/hooks/runtime/coordination_changes.py` | lup.coordination.changes |
-| `.codex/plugins/lup/hooks/runtime/coordination_departure.py` | lup.coordination.departure |
+| `.codex/plugins/lup/hooks/runtime/coordination/__init__.py` | lup.coordination.bare.__init__ |
+| `.codex/plugins/lup/hooks/runtime/coordination/changes.py` | lup.coordination.bare.changes |
+| `.codex/plugins/lup/hooks/runtime/coordination/departure.py` | lup.coordination.bare.departure |
+| `.codex/plugins/lup/hooks/runtime/coordination/store.py` | lup.coordination.bare.store |
+| `.codex/plugins/lup/hooks/runtime/coordination_changes.py` | lup.providers.roster_prompt |
+| `.codex/plugins/lup/hooks/runtime/coordination_departure.py` | lup.providers.roster_prompt |
 | `.codex/plugins/lup/hooks/runtime/evidence.json` | hooks.lup-policy |
 | `.codex/plugins/lup/hooks/runtime/kernel/__init__.py` | lup.policy.kernel.__init__ |
 | `.codex/plugins/lup/hooks/runtime/kernel/archives.py` | lup.policy.kernel.archives |

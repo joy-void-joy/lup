@@ -10,7 +10,12 @@ import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.subagents import CodexModelTiers
 from lup.providers.drift_prompt import drift_hook
-from lup.providers.roster_prompt import departure_hook, folded, prompt_hook
+from lup.providers.roster_prompt import (
+    departure_hook,
+    folded,
+    prompt_hook,
+    store_artifacts,
+)
 from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.formats.banner import (
@@ -827,6 +832,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 ),
                 *roster.artifacts,
                 *departure.artifacts,
+                *store_artifacts(Path(f".codex/plugins/{self.plugin_name}"), source.id),
                 *[
                     Artifact(
                         path=Path(

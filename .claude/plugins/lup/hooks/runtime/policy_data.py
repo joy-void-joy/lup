@@ -19986,19 +19986,13 @@ REFUSED_TOOLS: list[RefusedToolRow] = [
 
 PEER_POLICY: PeerPolicyRow | None = {
     "store": ["lup", "coordination"],
-    "roster_file": "roster.jsonl",
-    "names_file": "names.jsonl",
+    "windows_dir": "windows",
+    "member_env": "LUP_COORDINATION_MEMBER",
     "send_reason": "a native send to a session on this repository's roster leaves no record any other worktree can read",
     "send_recovery": "Say it with `coordination_send` instead: it reaches the same peer, records it where every session in this clone can read it, and reports whether the peer's hook will put it in front of that peer's next tool call or it waits until they next look.",
     "listing_note": "This repository's own roster, which is a different population from the listing above: these are the sessions working in this clone, in whatever worktree, and they include peers no account-scoped listing can see. Reach any of them with `coordination_send`, which records what it carries. The person watching is always at `user`.",
-    "touches_file": "touches.jsonl",
-    "windows_dir": "windows",
     "claim_reason": "another live session has changed or locked this path",
     "claim_recovery": "Writing under a held path is how two sessions overwrite each other between merges. Ask the holder with `coordination_send` first, or go ahead if you already know what they are doing; a claim expires with the session holding it, so one still standing means that session has not stopped.",
-    "member_env": "LUP_COORDINATION_MEMBER",
-    "member_kind": "session",
-    "heartbeats_dir": "heartbeats",
-    "stale_after_seconds": 120.0,
 }
 
 AUTONOMOUS_AGENT_IDENTITIES: list[str] = [

@@ -29,7 +29,8 @@ from lup.coordination.repository import (
     PeerView,
     RepositoryPeers,
 )
-from lup.coordination.roster import ROSTER_FILE, Delivery
+from lup.coordination.bare.store import ROSTER_FILE
+from lup.coordination.roster import Delivery
 from lup.tools.mcp import LupMcpTool, ServerCompanion, ToolError, lup_tool
 
 

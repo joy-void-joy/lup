@@ -430,6 +430,139 @@ DECLARED = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "standing",
+            "unsaid",
+            "gone",
+            "member_of",
+            "RepositoryPeers.pulsed",
+            "RepositoryPeers.rewound",
+            "RosterRecord.applied",
+            "ActorSpawned.applied",
+            "ActorJoined.applied",
+            "ActorDescribed.applied",
+            "ActorFinished.applied",
+            "TouchRecord.claim",
+            "TouchRecord.applied",
+            "PathTouched.claim",
+            "PathTouched.applied",
+            "PathContested.claim",
+            "PathContested.applied",
+            "PrefixLocked.claim",
+            "PrefixLocked.applied",
+            "PrefixReleased.claim",
+            "PrefixReleased.applied",
+            "PathVacated.claim",
+            "PathVacated.applied",
+            "stream_records",
+            "peer_members",
+            "peer_heard",
+            "peer_present",
+            "peer_name_claims",
+            "peer_addresses",
+            "peer_listing",
+            "claim_covers",
+            "peer_claims",
+        ],
+        reason=(
+            "the coordination store was folded by three hand-kept readers that "
+            "shared no import — the typed library, the prompt-time hook and the "
+            "compiled permission dispatcher — so every record the store gained "
+            "had to be taught to each separately, and one that missed a record "
+            "went on answering confidently about a store it no longer "
+            "understood; there is now one fold, `lup.coordination.bare.store`, "
+            "which every reader imports and each plugin ships"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Fold the roster with `store.members(roster_path)`, and read "
+                    "it as the pulses and resets leave it with "
+                    "`store.present(root)`, which applies both. What a record "
+                    "makes of a member is `store.applied` and is no longer a "
+                    "method on the record: `ActorJoined` and its siblings are "
+                    "writers now, and the fold takes them off disk without "
+                    "importing them."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "`RepositoryPeers.pulsed` and `.rewound` are `store.pulsed` "
+                    "and `store.rewound`; `RepositoryPeers.present()` applies "
+                    "both already and is what a caller wanted from either."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "Claims fold with `store.claims(root)`, narrow to live "
+                    "holders with `store.held(root, live)`, and answer a path "
+                    "with `store.covering(root, path, live)`. `Claim.covers`, "
+                    "`.subject` and `.vacant` still answer for a typed caller, "
+                    "over that same fold."
+                ),
+            ),
+            MigrationStep(
+                instruction=(
+                    "The dispatcher's half is gone from `lup.policy.assets."
+                    "host`: `peer_addresses` and `peer_listing` are "
+                    "`store.addresses` and `store.listing`, `claim_holders` is "
+                    "`store.claim_holders`, `record_claims` is "
+                    "`store.record_claims`, and each takes the coordination "
+                    "directory `peer_store` still resolves rather than a "
+                    "project root and a list of file names."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "PeerPolicy.roster_file",
+            "PeerPolicy.names_file",
+            "PeerPolicy.touches_file",
+            "PeerPolicy.member_kind",
+            "PeerPolicy.heartbeats_dir",
+            "PeerPolicy.stale_after_seconds",
+        ],
+        reason=(
+            "the compiled dispatcher imports the shipped fold, which owns every "
+            "file name the store is made of, so a policy restating them was the "
+            "second spelling that could drift"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Drop those six from any `PeerPolicy(...)` you build. What "
+                    "is left is what the fold cannot know: `store`, the path "
+                    "parts beneath the shared git directory; `windows_dir`, the "
+                    "dispatcher's own snapshots; `member_env`; and the five "
+                    "lines a stopped caller reads. A project that moved its "
+                    "store still says so with `store`."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["roster_artifacts", "DEPARTURE_ORIGIN", "DEPARTURE_SOURCE"],
+        reason=(
+            "a plugin carries the coordination half as one package rather than a "
+            "loose file per hook, because the two hooks and the dispatcher all "
+            "stand on the same fold"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "`roster_artifacts` is gone. `store_artifacts(plugin_root, "
+                    "semantic_id)` places the package under "
+                    "`hooks/runtime/coordination/`, and is called "
+                    "unconditionally: it takes no hook set, because the "
+                    "dispatcher imports the package whatever a project declared "
+                    "about rosters. `hook_artifacts(...)` places one event's "
+                    "guard and the entry beside the package that it runs."
+                ),
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
