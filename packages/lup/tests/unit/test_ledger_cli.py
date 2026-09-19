@@ -188,6 +188,34 @@ def test_amend_records_the_node_again_validated_whole(
     assert run(cli, "amend", task.id, "--json", '{"needs": "sideways"}').exit_code != 0
 
 
+def test_done_closes_a_handoff_that_transferred_no_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Work too small to cut into tasks transfers none, so a standing read
+    from those tasks alone leaves the handoff held after its receiver has
+    answered everything — and amending cannot reach a standing, which is
+    derived rather than written.
+    """
+    cli = app(tmp_path, monkeypatch)
+    run(
+        cli,
+        "record",
+        "coordination:handoff",
+        "the parser work",
+        "--slug",
+        "crossing",
+        "--json",
+        '{"open_questions": ["whether escapes nest"], "to": "receiver"}',
+    )
+
+    assert "held" in run(cli, "show", "crossing").output
+
+    assert run(cli, "done", "crossing").exit_code == 0
+
+    assert latest(tmp_path, Handoff).done
+    assert "done" in run(cli, "show", "crossing").output
+
+
 def test_list_since_shows_what_moved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
