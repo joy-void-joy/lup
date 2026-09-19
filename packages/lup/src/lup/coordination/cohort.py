@@ -54,7 +54,8 @@ from lup.coordination.mail import (
 from lup.coordination.manifest import CohortManifest, publish_manifest
 from lup.coordination.peers import USER_KIND, join_user
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import ROSTER_FILE, Delivery, Roster, SpawnedActor
+from lup.coordination.bare.store import ROSTER_FILE
+from lup.coordination.roster import Delivery, Roster, SpawnedActor
 from lup.coordination.sessions import (
     RECORD_ADAPTER,
     ActorEvent,

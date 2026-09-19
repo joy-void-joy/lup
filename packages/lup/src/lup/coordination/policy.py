@@ -1,22 +1,20 @@
 """What the permission policy is told about this repository's sessions.
 
 The hook that judges a call runs as a bare script outside every import graph,
-so it cannot ask this package anything. What it can be handed is data, compiled
-into the plugin beside it — and what it genuinely needs is where the roster and
-the claim record live, which is this package's own layout rather than a path a
-policy could be configured with. Handing it over from here is what stops those
-directories being spelled twice: renaming the store moves the hook with it.
+so it cannot ask this package anything. What it *can* do is import the fold
+shipped beside it, :mod:`lup.coordination.bare.store`, which knows every file
+the store is made of — so what has to travel as data is only what that fold
+cannot know: where beneath the shared git directory this project put its
+store, which environment variable carries a session's proven id, and the
+prose a stopped caller reads.
 
 The prose is a default rather than a fixture. What a stopped caller should
 reach for is a judgement about the surfaces a project offers, and a project
 that renamed its own is entitled to say so without editing the library.
 """
 
-from lup.coordination.identity import MEMBER_ENV, MEMBER_KIND, NAMES_FILE
-from lup.coordination.pulse import HEARTBEATS_DIR, Pulse
-from lup.coordination.roster import ROSTER_FILE
-from lup.coordination.store import COORDINATION_DIR, STORE_DIR
-from lup.coordination.touches import TOUCHES_FILE, WINDOWS_DIR
+from lup.coordination.bare.store import COORDINATION_DIR, STORE_DIR, WINDOWS_DIR
+from lup.coordination.identity import MEMBER_ENV
 from lup.policy.peer_policy import PeerPolicy
 
 SEND_REDIRECT = (
@@ -78,22 +76,15 @@ def peer_policy(
     claim_reason: str = CLAIM_HELD,
     send_recovery: str = SEND_RECOVERY,
     claim_recovery: str = CLAIM_RECOVERY,
-    pulse: Pulse = Pulse(),
 ) -> PeerPolicy:
     """This repository's sessions, as the compiled permission hook reads them."""
     return PeerPolicy(
         store=[STORE_DIR, COORDINATION_DIR],
-        roster_file=ROSTER_FILE,
-        names_file=NAMES_FILE,
-        touches_file=TOUCHES_FILE,
         windows_dir=WINDOWS_DIR,
+        member_env=MEMBER_ENV,
         send_reason=send_reason,
         send_recovery=send_recovery,
         listing_note=listing_note,
         claim_reason=claim_reason,
         claim_recovery=claim_recovery,
-        member_env=MEMBER_ENV,
-        member_kind=MEMBER_KIND,
-        heartbeats_dir=HEARTBEATS_DIR,
-        stale_after_seconds=pulse.stale_after_seconds,
     )

@@ -1,11 +1,10 @@
 """The roster's changes reaching a session at each prompt, from inside the plugin.
 
-The fold is a verbatim copy with no import of the code that wrote what it
-reads, so what is pinned first is the spellings the two halves agree on. The
-rest is written against what a session must and must not be told: nothing on
-a quiet roster, a baseline rather than a replay on the first prompt, and the
-contested path before everything else — over a store the typed writers
-produced, so the copy is read against the record as it is really written.
+The prompt half reads the store through the same fold the typed library reads
+it through, so nothing here pins one spelling against another — what is left
+to assert is what a session must and must not be told: nothing on a quiet
+roster, a baseline rather than a replay on the first prompt, and the contested
+path before everything else, over a store the typed writers produced.
 """
 
 import json
@@ -13,24 +12,12 @@ from datetime import timedelta
 from pathlib import Path
 
 from lup.channels.models import utc_now
-from lup.coordination import changes as fold
-from lup.coordination.identity import (
-    MEMBER_KIND,
-    NAMES_FILE,
-    member_ref,
-    mint_member_id,
-)
-from lup.coordination.pulse import (
-    HEARTBEATS_DIR,
-    RESETS_DIR,
-    Pulse,
-    beat,
-    heard_at,
-    reset_at,
-)
+from lup.coordination.bare import changes as fold
+from lup.coordination.bare import store
+from lup.coordination.bare.store import MEMBER_KIND, beat, heard_at, reset_at
+from lup.coordination.identity import member_ref, mint_member_id
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import ROSTER_FILE, ActorDescribed, ActorJoined
-from lup.coordination.touches import TOUCHES_FILE
+from lup.coordination.roster import ActorDescribed, ActorJoined
 
 
 def joined(peers: RepositoryPeers, worktree: Path, name: str) -> str:
@@ -43,17 +30,6 @@ def joined(peers: RepositoryPeers, worktree: Path, name: str) -> str:
 def told(peers: RepositoryPeers, member: str, worktree: Path) -> list[str]:
     """What one prompt in *worktree* tells *member*."""
     return fold.changes(peers.root, member, worktree)
-
-
-def test_the_copy_and_its_source_spell_the_store_alike() -> None:
-    """What stands in for the import the verbatim copy cannot have."""
-    assert fold.ROSTER_FILE == ROSTER_FILE
-    assert fold.NAMES_FILE == NAMES_FILE
-    assert fold.TOUCHES_FILE == TOUCHES_FILE
-    assert fold.MEMBER_KIND == MEMBER_KIND
-    assert fold.HEARTBEATS_DIR == HEARTBEATS_DIR
-    assert fold.STALE_AFTER_SECONDS == Pulse().stale_after_seconds
-    assert fold.RESETS_DIR == RESETS_DIR
 
 
 def test_a_prompt_beats_for_the_session_it_was_submitted_from(tmp_path: Path) -> None:
@@ -71,7 +47,7 @@ def test_a_peer_the_pulse_retired_reads_as_departed(tmp_path: Path) -> None:
     peers = RepositoryPeers(tmp_path)
     me = joined(peers, tmp_path / "mine", "mine")
     other = mint_member_id()
-    long_ago = utc_now() - timedelta(seconds=fold.STALE_AFTER_SECONDS + 1)
+    long_ago = utc_now() - timedelta(seconds=store.STALE_AFTER_SECONDS + 1)
     peers.cohort.roster.stream.append(
         ActorJoined(
             actor=member_ref(other),
@@ -96,9 +72,19 @@ def test_a_peer_the_pulse_retired_reads_as_departed(tmp_path: Path) -> None:
     ]
 
 
-def test_the_copy_names_its_look_the_way_the_roster_names_the_member() -> None:
-    """The look file is `ActorRef.conversation`, derived twice and pinned once."""
-    assert f"{fold.MEMBER_KIND}-abc123" == member_ref("abc123").conversation()
+def test_the_fold_names_a_conversation_the_way_the_roster_names_it() -> None:
+    """One key, derived twice: by the shared fold, and by the typed ref.
+
+    The last spelling the two halves still derive separately. Everything else
+    the store is made of is declared once and imported, but a conversation key
+    is built from a kind and an id on both sides, and a look filed under one
+    spelling while the roster folds the other is a session whose baseline
+    never matches its own row.
+    """
+    assert (
+        store.conversation_of(store.Actor(kind=store.MEMBER_KIND, id="abc123"))
+        == member_ref("abc123").conversation()
+    )
 
 
 def test_the_first_prompt_is_a_baseline_carrying_one_pointer(tmp_path: Path) -> None:
@@ -219,7 +205,7 @@ def test_an_unreadable_look_re_baselines_rather_than_replays(tmp_path: Path) -> 
     me = joined(peers, tmp_path / "mine", "mine")
     joined(peers, tmp_path / "theirs", "reviewer")
     told(peers, me, tmp_path / "mine")
-    (peers.root / fold.LOOKS_DIR / f"{MEMBER_KIND}-{me}.json").write_text("not a look")
+    (peers.root / store.LOOKS_DIR / f"{MEMBER_KIND}-{me}.json").write_text("not a look")
 
     assert told(peers, me, tmp_path / "mine") == [
         "1 other session is working in this repository; `coordination_peers` lists it."
@@ -256,7 +242,7 @@ def test_a_session_with_no_identity_is_told_nothing(tmp_path: Path) -> None:
     joined(peers, tmp_path / "mine", "mine")
 
     assert fold.changes(peers.root, "", tmp_path / "mine") == []
-    assert not (peers.root / fold.LOOKS_DIR).exists()
+    assert not (peers.root / store.LOOKS_DIR).exists()
 
 
 def transcript(path: Path, roots: int) -> str:
@@ -328,7 +314,7 @@ def test_a_peer_whose_conversation_moved_is_told_as_on_its_task(
     said_earlier(peers, other, "reading the merge")
     told(peers, me, tmp_path / "mine")
 
-    fold.reset(peers.root, other)
+    store.reset(peers.root, other)
     moved = told(peers, me, tmp_path / "mine")
     peers.describe(other, "reading the rebase")
     spoke = told(peers, me, tmp_path / "mine")
@@ -356,11 +342,11 @@ def test_a_claim_the_sweep_vacated_is_read_as_ended(tmp_path: Path) -> None:
     changed.parent.mkdir(parents=True)
     changed.write_text("value = 1\n", encoding="utf-8")
     peers.touches.touched(member_ref(other), changed)
-    assert [
-        claim["path"] for claim in fold.held(peers.root / TOUCHES_FILE, [other])
-    ] == [str(changed)]
+    assert [claim["path"] for claim in store.held(peers.root, [other])] == [
+        str(changed)
+    ]
 
     changed.unlink()
     peers.sweep()
 
-    assert fold.held(peers.root / TOUCHES_FILE, [other]) == []
+    assert store.held(peers.root, [other]) == []

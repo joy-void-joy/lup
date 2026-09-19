@@ -8,7 +8,12 @@ from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
 from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.drift_prompt import drift_hook
-from lup.providers.roster_prompt import departure_hook, folded, prompt_hook
+from lup.providers.roster_prompt import (
+    departure_hook,
+    folded,
+    prompt_hook,
+    store_artifacts,
+)
 from lup.formats.banner import COMMENT_FREE, PROMPT_TEXT, VERBATIM_COPY
 from lup.harness.contracts import (
     ArtifactRenderer,
@@ -685,6 +690,9 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 ),
                 *roster.artifacts,
                 *departure.artifacts,
+                *store_artifacts(
+                    Path(f".claude/plugins/{self.plugin_name}"), source.id
+                ),
                 *[
                     Artifact(
                         path=Path(

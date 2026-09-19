@@ -1,8 +1,4 @@
-# lup: ignore[constant-declaration]
-# The constant here names the roster's own file, which a spawning process and
-# an outside door must spell alike to find each other's record at all — an
-# identity of this format rather than a choice a caller can make.
-"""Who a cohort holds, folded from a record rather than remembered in a dict.
+"""Who a cohort holds, written as records and read back as a fold.
 
 A registry kept in memory answers only for the process that filled it. That is
 the wrong shape for a population whose whole purpose is being reachable: the
@@ -20,11 +16,13 @@ Its own file rather than the consumer's journal, because the two are read on
 completely different schedules. A resolver journal reaches tens of megabytes in
 one run, and "which agents do you have?" is asked on every status line.
 
-The fold keys by conversation and keeps the highest round seen, which is what
-makes a second round an *advance* rather than a second member. Keyed by label,
-one agent taken through two rounds appeared twice while its session store held
-one — and the round-one ref left standing answered to none of the addresses
-the cohort was by then printing.
+**The records are here and the fold is not.** What each record means to a
+member is one question, and three processes ask it: this library, the hook a
+runtime spawns at each prompt, and the compiled permission dispatcher. Only
+this one can import pydantic, so the fold lives in
+:mod:`lup.coordination.bare.store` where all three reach it, and what stays
+here is the typed writer and the model a typed caller reads back. A record
+added here is a case added there, once, rather than three times.
 """
 
 import fcntl
@@ -37,30 +35,18 @@ from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter, computed_field
 
-from lup.coordination.refs import ActorRef
-from lup.coordination.wake import WakePath
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
-
-ROSTER_FILE = "roster.jsonl"
+from lup.coordination.bare import store
+from lup.coordination.refs import ActorRef
+from lup.coordination.wake import WakePath, declared_wake
 
 
 class RosterRecord(BaseModel, frozen=True):
-    """One thing that happened to a member, and what it makes of that member.
-
-    The fold asks each record what the member becomes rather than testing
-    which record it is holding. A reader that branched on the variant would
-    be a filter going stale the moment a third kind of thing can happen to an
-    agent — paused, adopted, handed over — and the fold is the one place that
-    would silently keep working while ignoring it.
-    """
+    """One thing that happened to a member, written down as it happened."""
 
     actor: ActorRef
     at: datetime
-
-    def applied(self, standing: "SpawnedActor | None") -> "SpawnedActor | None":
-        """The member as this record leaves it, or None where it says nothing."""
-        raise NotImplementedError
 
 
 class ActorSpawned(RosterRecord, frozen=True):
@@ -73,22 +59,6 @@ class ActorSpawned(RosterRecord, frozen=True):
 
     type: Literal["spawned"] = "spawned"
     task: str
-
-    def applied(self, standing: "SpawnedActor | None") -> "SpawnedActor | None":
-        """This agent, at the round this record starts it on.
-
-        A replayed spawn for a round the member has already moved past says
-        nothing about where it is now, so the standing entry survives it.
-        """
-        if standing is not None and self.actor.round < standing.actor.round:
-            return standing
-        return SpawnedActor(
-            actor=self.actor,
-            task=self.task,
-            running=True,
-            heard=self.at,
-            arrived=self.at,
-        )
 
 
 class Delivery(StrEnum):
@@ -115,6 +85,21 @@ class Delivery(StrEnum):
     one does not share. The file is the durable record either way — every other
     mode is a wake *on top of* this one, not an alternative to it.
     """
+
+
+def carried(spelled: str, fallback: Delivery) -> Delivery:
+    """The delivery a folded row spells, or the fallback where it spells none.
+
+    A spawned member's record carries no delivery at all — the spawner's hook
+    is what reaches it, and that is the default this falls back to. A spelling
+    no mode answers to falls back the same way rather than raising, because
+    this is read on every listing and a store written by a newer library must
+    not stop an older one reading who is here.
+    """
+    return next(
+        (mode for mode in Delivery if mode.value == spelled),
+        fallback,
+    )
 
 
 class ActorJoined(RosterRecord, frozen=True):
@@ -171,22 +156,6 @@ class ActorJoined(RosterRecord, frozen=True):
     whose tree that path is in.
     """
 
-    def applied(self, standing: "SpawnedActor | None") -> "SpawnedActor | None":
-        """This peer, present. A rejoin under a round already held says nothing."""
-        if standing is not None and self.actor.round < standing.actor.round:
-            return standing
-        return SpawnedActor(
-            actor=self.actor,
-            task=self.task,
-            running=True,
-            heard=self.at,
-            arrived=self.at,
-            liveness=self.liveness,
-            delivery=self.delivery,
-            worktree=self.worktree,
-            wake=self.wake,
-        )
-
 
 class ActorDescribed(RosterRecord, frozen=True):
     """One member saying what it is doing now, which its task cannot keep up with.
@@ -206,14 +175,6 @@ class ActorDescribed(RosterRecord, frozen=True):
     type: Literal["described"] = "described"
     description: str = ""
 
-    def applied(self, standing: "SpawnedActor | None") -> "SpawnedActor | None":
-        """The member, redescribed. A description of nobody invents no member."""
-        if standing is None:
-            return None
-        return standing.model_copy(
-            update={"description": self.description, "heard": self.at}
-        )
-
 
 class ActorFinished(RosterRecord, frozen=True):
     """One agent stopped, and what it left behind.
@@ -228,19 +189,6 @@ class ActorFinished(RosterRecord, frozen=True):
     summary: str = ""
     error: str = ""
 
-    def applied(self, standing: "SpawnedActor | None") -> "SpawnedActor | None":
-        """The member, stopped. A finish for nobody invents no member."""
-        if standing is None:
-            return None
-        return standing.model_copy(
-            update={
-                "running": False,
-                "summary": self.summary,
-                "error": self.error,
-                "heard": self.at,
-            }
-        )
-
 
 type RosterEntry = ActorSpawned | ActorJoined | ActorDescribed | ActorFinished
 """What the population record carries. Nothing here is about a turn.
@@ -251,8 +199,7 @@ record — because how a member arrived is a fact about its arrival, and how it
 went is the same question whichever way it came.
 
 What happens in between is one record too. A member redescribing itself is not
-arriving and not leaving, and the fold takes it the way it takes the other
-three: by asking the record what it makes of the member.
+arriving and not leaving, and the fold takes it beside the other three.
 """
 
 
@@ -351,10 +298,38 @@ class SpawnedActor(BaseModel, frozen=True):
         return self.actor.kind
 
 
+def folded_member(member: store.Member) -> SpawnedActor:
+    """One row of the shared fold, as a typed caller reads it.
+
+    Total rather than validating: every field is coerced to something the model
+    accepts, because this is the read path a listing, a hook and a console all
+    go through, and a record written by a newer library must leave an older one
+    still able to say who is here. What a malformed field costs is that field.
+    """
+    wake = member["wake"]
+    return SpawnedActor(
+        actor=ActorRef(kind=member["kind"], id=member["id"], round=member["round"]),
+        task=member["task"],
+        running=member["running"],
+        summary=member["summary"],
+        error=member["error"],
+        heard=store.spoken_at(member["heard"]),
+        arrived=store.spoken_at(member["arrived"]),
+        worktree=member["worktree"],
+        description=member["description"],
+        liveness=member["liveness"],
+        wake=declared_wake(
+            store.text(wake.get("runtime")), store.text(wake.get("handle"))
+        ),
+        delivery=carried(member["delivery"], Delivery.INBOX),
+    )
+
+
 class Roster:
     """Every agent one cohort has held, and whether each is still working."""
 
     def __init__(self, path: Path) -> None:
+        self.path = path
         self.stream: Stream[RosterEntry] = Stream(path, ENTRY_ADAPTER)
         self.lock_path = path.with_suffix(".lock")
         self.lock = threading.Lock()
@@ -458,7 +433,7 @@ class Roster:
         )
 
     def standing(self) -> Iterator[SpawnedActor]:
-        """Fold the record into one member per conversation, in first-seen order.
+        """The shared fold of this record, one member per conversation.
 
         A round advance updates the member in place rather than adding one,
         because a worker on its second round is the agent that took its first
@@ -466,18 +441,8 @@ class Roster:
         counted is agents, and what they want printed is the address that
         currently reaches each.
         """
-        # A fold where a later record revises what an earlier one left: neither
-        # a comprehension nor a generator expresses "replace what this key
-        # already held". Each record says what it makes of the member, so
-        # nothing here tests which record it is holding.
-        held: dict[str, SpawnedActor] = {}  # lup: ignore[empty-collection]
-        for entry in self.stream.read_all():
-            conversation = entry.actor.conversation()
-            found = held.get(conversation)
-            applied = entry.applied(found)
-            if applied is not None:
-                held[conversation] = applied
-        yield from held.values()
+        for member in store.members(self.path).values():
+            yield folded_member(member)
 
     def live(self) -> list[SpawnedActor]:
         """Every member, the ones still working first."""

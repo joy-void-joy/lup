@@ -320,19 +320,13 @@ def peer_policy_literal(redirect: PeerPolicyRow | None) -> str:
         return "None"
     entries = [
         f'"store": {json.dumps(redirect["store"])}',
-        f'"roster_file": {json.dumps(redirect["roster_file"])}',
-        f'"names_file": {json.dumps(redirect["names_file"])}',
+        f'"windows_dir": {json.dumps(redirect["windows_dir"])}',
+        f'"member_env": {json.dumps(redirect["member_env"])}',
         f'"send_reason": {json.dumps(redirect["send_reason"])}',
         f'"send_recovery": {json.dumps(redirect["send_recovery"])}',
         f'"listing_note": {json.dumps(redirect["listing_note"])}',
-        f'"touches_file": {json.dumps(redirect["touches_file"])}',
-        f'"windows_dir": {json.dumps(redirect["windows_dir"])}',
         f'"claim_reason": {json.dumps(redirect["claim_reason"])}',
         f'"claim_recovery": {json.dumps(redirect["claim_recovery"])}',
-        f'"member_env": {json.dumps(redirect["member_env"])}',
-        f'"member_kind": {json.dumps(redirect["member_kind"])}',
-        f'"heartbeats_dir": {json.dumps(redirect["heartbeats_dir"])}',
-        f'"stale_after_seconds": {json.dumps(redirect["stale_after_seconds"])}',
     ]
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
 

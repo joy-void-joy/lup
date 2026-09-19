@@ -41,13 +41,10 @@ from host import (
     managed_script_roots,
     outside_this_project,
     patch_write_targets,
-    peer_addresses,
-    peer_listing,
-    claim_holders,
+    peer_store,
     close_claim_window,
     declared_identity,
     open_claim_window,
-    record_claims,
     recoverable_write_targets,
     resolved_write_targets,
     rewritten_text,
@@ -60,6 +57,7 @@ from host import (
     worktree_path,
 )
 from kernel.decision import KernelDecision
+from coordination import store
 from kernel.edit import (
     awaits_resolution,
     decide_edit,
@@ -423,6 +421,19 @@ def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None
     return decide_tool(name, values, REFUSED_TOOLS)
 
 
+def peer_directory(cwd: Path | None) -> Path | None:
+    """Where this repository's sessions meet, or nothing where none do.
+
+    The one thing the shipped fold cannot answer for itself: which repository
+    this call is in, and where beneath its shared git directory this project
+    put its store. Everything inside that directory the fold knows, because
+    it is the same fold the store's own library reads it with.
+    """
+    if PEER_POLICY is None:
+        return None
+    return peer_store(cwd, PEER_POLICY["store"])
+
+
 def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     """Judge one native send against who this repository's roster holds.
 
@@ -432,21 +443,10 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     recipient in is that runtime's business and this half answers for all of
     them.
     """
-    if PEER_POLICY is None:
-        return decide_peer_send(values, [], None)
-    return decide_peer_send(
-        values,
-        peer_addresses(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-            PEER_POLICY["member_kind"],
-            PEER_POLICY["heartbeats_dir"],
-            PEER_POLICY["stale_after_seconds"],
-        ),
-        PEER_POLICY,
-    )
+    directory = peer_directory(cwd)
+    if directory is None:
+        return decide_peer_send(values, [], PEER_POLICY)
+    return decide_peer_send(values, store.addresses(directory), PEER_POLICY)
 
 
 def peer_listing_decision() -> KernelDecision:
@@ -462,18 +462,11 @@ def peer_listing_attachment(cwd: Path | None) -> str:
     acts on rather than a condition of the call happening — folding it into
     a reason would make it visible only where something refused.
     """
-    if PEER_POLICY is None:
+    directory = peer_directory(cwd)
+    if directory is None:
         return ""
     return peer_listing_context(
-        peer_listing(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-            PEER_POLICY["member_kind"],
-            PEER_POLICY["heartbeats_dir"],
-            PEER_POLICY["stale_after_seconds"],
-        ),
+        store.listing(directory),
         PEER_POLICY,
     )
 
@@ -792,21 +785,13 @@ def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision |
     handed over as the names they resolve to — the kernel reads no filesystem
     and decides from what it is given.
     """
-    if PEER_POLICY is None:
+    directory = peer_directory(cwd)
+    if PEER_POLICY is None or directory is None:
         return None
     return decide_foreign_claim(
         path_text,
-        claim_holders(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-            PEER_POLICY["touches_file"],
-            path_text,
-            declared_identity(PEER_POLICY["member_env"]),
-            PEER_POLICY["member_kind"],
-            PEER_POLICY["heartbeats_dir"],
-            PEER_POLICY["stale_after_seconds"],
+        store.claim_holders(
+            directory, path_text, declared_identity(PEER_POLICY["member_env"])
         ),
         PEER_POLICY,
     )
@@ -833,19 +818,13 @@ def claim_window_closed(cwd: Path | None) -> None:
     """Attribute what a command changed, contested where nothing could tell."""
     if PEER_POLICY is None:
         return
+    directory = peer_directory(cwd)
     mine = declared_identity(PEER_POLICY["member_env"])
     closed = close_claim_window(
         cwd, PEER_POLICY["store"], PEER_POLICY["windows_dir"], mine
     )
-    record_claims(
-        cwd,
-        PEER_POLICY["store"],
-        PEER_POLICY["roster_file"],
-        PEER_POLICY["touches_file"],
-        mine,
-        closed["paths"],
-        closed["rivals"],
-    )
+    if directory is not None:
+        store.record_claims(directory, mine, closed["paths"], closed["rivals"])
 
 
 def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
@@ -856,13 +835,11 @@ def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
     act on without qualification, and it settles a path an earlier comparison
     could only guess at.
     """
-    if PEER_POLICY is None or not path_text:
+    directory = peer_directory(cwd)
+    if PEER_POLICY is None or directory is None or not path_text:
         return
-    record_claims(
-        cwd,
-        PEER_POLICY["store"],
-        PEER_POLICY["roster_file"],
-        PEER_POLICY["touches_file"],
+    store.record_claims(
+        directory,
         declared_identity(PEER_POLICY["member_env"]),
         [str(Path(path_text).resolve())],
         [],

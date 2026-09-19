@@ -1,7 +1,3 @@
-# lup: ignore[constant-declaration]
-# The names here are where a hook writes what it saw and a console reads it,
-# in two processes that share no import — an identity of this layout rather
-# than a choice a caller can make.
 """What each session in this repository is holding, without anybody declaring it.
 
 Nobody says what they are working on. Asking them to is asking for the one
@@ -26,6 +22,11 @@ before and after, which sees every change in its window regardless of who made
 it — so where two sessions had windows open over one path, both names are
 recorded and neither is guessed at. The next named-path edit or explicit lock
 settles it, because both of those attribute exactly.
+
+**The records are here and the fold is not.** What a record makes of a claim
+is one question and three processes ask it, only one of which can import
+pydantic — so it is answered once in :mod:`lup.coordination.bare.store` and
+read back here as the typed shape a caller holds.
 """
 
 from datetime import datetime
@@ -36,10 +37,9 @@ from pydantic import BaseModel, TypeAdapter
 
 from lup.channels.models import utc_now
 from lup.channels.stream import Stream
+from lup.coordination.bare import store
+from lup.coordination.bare.store import TOUCHES_FILE
 from lup.coordination.refs import ActorRef
-
-TOUCHES_FILE = "touches.jsonl"
-WINDOWS_DIR = "windows"
 
 
 class Claim(BaseModel, frozen=True):
@@ -68,11 +68,23 @@ class Claim(BaseModel, frozen=True):
 
     at: datetime
 
+    def held(self) -> store.Held:
+        """This claim as the shared fold spells it, so one answer serves both."""
+        return store.Held(
+            subject=self.subject(),
+            path=self.path,
+            prefix=self.prefix,
+            holders=[
+                store.Actor(kind=holder.kind, id=holder.id, round=holder.round)
+                for holder in self.holders
+            ],
+            digest=self.digest,
+            at=self.at.isoformat(),
+        )
+
     def covers(self, candidate: str) -> bool:
         """Whether a path about to be written falls under this claim."""
-        if not self.prefix:
-            return candidate == self.path
-        return candidate == self.path or candidate.startswith(self.path + "/")
+        return store.covers(self.held(), candidate)
 
     def subject(self) -> str:
         """What the fold keys this claim by, which a lock and a touch differ in.
@@ -82,7 +94,7 @@ class Claim(BaseModel, frozen=True):
         name — so the kind is part of the key rather than something a later
         record could silently convert.
         """
-        return f"{'under' if self.prefix else 'at'} {self.path}"
+        return store.subject_of(self.path, self.prefix)
 
     def vacant(self) -> bool:
         """Whether the path this claim is over has gone from the filesystem.
@@ -92,29 +104,40 @@ class Claim(BaseModel, frozen=True):
         filesystem rather than of git, because a claim is keyed by the path
         and the path is what has to be there.
         """
-        return not Path(self.path).exists()
+        return store.vacant(self.held())
+
+
+def folded_claim(held: store.Held) -> Claim:
+    """One row of the shared fold, as a typed caller reads it.
+
+    Total rather than validating, for the reason a member is: this is the read
+    path a listing and a permission decision both go through, and a record a
+    newer library wrote must leave an older one still able to say who holds
+    what.
+    """
+    return Claim(
+        path=held["path"],
+        prefix=held["prefix"],
+        holders=[
+            ActorRef(
+                kind=store.actor_kind(holder),
+                id=store.actor_id(holder),
+                round=store.actor_round(holder),
+            )
+            for holder in held["holders"]
+            if store.actor_kind(holder) and store.actor_id(holder)
+        ],
+        digest=held["digest"],
+        at=store.spoken_at(held["at"]) or utc_now(),
+    )
 
 
 class TouchRecord(BaseModel, frozen=True):
-    """One thing that happened to a claim, and what it makes of that claim.
-
-    The fold asks each record what the claim becomes rather than testing which
-    record it is holding, the way the roster's does — so a third thing that can
-    happen to a claim answers for itself instead of being dropped by a filter
-    nobody extended.
-    """
+    """One thing that happened to a claim, written down as it happened."""
 
     actor: ActorRef
     at: datetime
     path: str
-
-    def claim(self) -> Claim:
-        """The claim this record is about, as a bare shape the fold keys by."""
-        return Claim(path=self.path, holders=[self.actor], at=self.at)
-
-    def applied(self, standing: "Claim | None") -> "Claim | None":
-        """The claim as this record leaves it, or None where it releases one."""
-        raise NotImplementedError
 
 
 class PathTouched(TouchRecord, frozen=True):
@@ -127,14 +150,6 @@ class PathTouched(TouchRecord, frozen=True):
 
     type: Literal["touched"] = "touched"
     digest: str = ""
-
-    def claim(self) -> Claim:
-        return Claim(
-            path=self.path, holders=[self.actor], digest=self.digest, at=self.at
-        )
-
-    def applied(self, standing: "Claim | None") -> "Claim | None":
-        return self.claim()
 
 
 class PathContested(TouchRecord, frozen=True):
@@ -150,17 +165,6 @@ class PathContested(TouchRecord, frozen=True):
     digest: str = ""
     rivals: list[ActorRef] = []
 
-    def claim(self) -> Claim:
-        return Claim(
-            path=self.path,
-            holders=[self.actor, *self.rivals],
-            digest=self.digest,
-            at=self.at,
-        )
-
-    def applied(self, standing: "Claim | None") -> "Claim | None":
-        return self.claim()
-
 
 class PrefixLocked(TouchRecord, frozen=True):
     """One session took a prefix deliberately, ahead of touching anything in it.
@@ -172,33 +176,18 @@ class PrefixLocked(TouchRecord, frozen=True):
 
     type: Literal["locked"] = "locked"
 
-    def claim(self) -> Claim:
-        return Claim(path=self.path, prefix=True, holders=[self.actor], at=self.at)
-
-    def applied(self, standing: "Claim | None") -> "Claim | None":
-        return self.claim()
-
 
 class PrefixReleased(TouchRecord, frozen=True):
     """One session gave a prefix back, which only a holder of it can do.
 
-    Checked here rather than at the writer, because the record is the whole
-    history and a reader replaying it has to reach the same answer as the
-    process that wrote it. A release by somebody who never held it says
+    Checked in the fold rather than at the writer, because the record is the
+    whole history and a reader replaying it has to reach the same answer as
+    the process that wrote it. A release by somebody who never held it says
     nothing, which is what leaves the claim standing rather than letting one
     session unlock another's work by asking.
     """
 
     type: Literal["released"] = "released"
-
-    def claim(self) -> Claim:
-        return Claim(path=self.path, prefix=True, holders=[self.actor], at=self.at)
-
-    def applied(self, standing: "Claim | None") -> "Claim | None":
-        if standing is None:
-            return None
-        held = [holder.id for holder in standing.holders]
-        return None if self.actor.id in held else standing
 
 
 class PathVacated(TouchRecord, frozen=True):
@@ -215,14 +204,6 @@ class PathVacated(TouchRecord, frozen=True):
     type: Literal["vacated"] = "vacated"
     prefix: bool = False
     """Which claim over the path this ends, since a lock and a touch differ."""
-
-    def claim(self) -> Claim:
-        return Claim(
-            path=self.path, prefix=self.prefix, holders=[self.actor], at=self.at
-        )
-
-    def applied(self, standing: "Claim | None") -> "Claim | None":
-        return None
 
 
 type TouchEntry = (
@@ -249,8 +230,9 @@ class Touches:
     file, so none of them has to be running for the others to answer.
     """
 
-    def __init__(self, path: Path) -> None:
-        self.stream: Stream[TouchEntry] = Stream(path, TOUCH_ADAPTER)
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.stream: Stream[TouchEntry] = Stream(root / TOUCHES_FILE, TOUCH_ADAPTER)
 
     def record(self, entry: TouchEntry) -> TouchEntry:
         """Append one thing that happened to a claim."""
@@ -293,15 +275,7 @@ class Touches:
 
     def claims(self) -> list[Claim]:
         """Every claim standing, whether or not the session holding it is alive."""
-        # lup: ignore[empty-collection] — a fold whose every step reads what the
-        # steps before it left, which is the one shape a comprehension cannot
-        # spell: a release answers against the claim an earlier record created
-        standing: dict[str, Claim | None] = {}
-        for offset in self.stream.read_from(0):
-            record = offset.item
-            subject = record.claim().subject()
-            standing[subject] = record.applied(standing.get(subject))
-        return [claim for claim in standing.values() if claim is not None]
+        return [folded_claim(held) for held in store.claims(self.root)]
 
     def held(self, live: list[str]) -> list[Claim]:
         """Every claim whose holder is still on the roster, newest first.
@@ -310,22 +284,8 @@ class Touches:
         session would have to be released by somebody, and the somebody who
         would have to remember is exactly the session that has stopped.
         """
-        return sorted(
-            (
-                claim.model_copy(
-                    update={
-                        "holders": [
-                            holder for holder in claim.holders if holder.id in live
-                        ]
-                    }
-                )
-                for claim in self.claims()
-                if any(holder.id in live for holder in claim.holders)
-            ),
-            key=lambda claim: claim.at,
-            reverse=True,
-        )
+        return [folded_claim(held) for held in store.held(self.root, live)]
 
     def covering(self, path: Path, live: list[str]) -> list[Claim]:
         """Every live claim a write to this path would land under."""
-        return [claim for claim in self.held(live) if claim.covers(str(path))]
+        return [folded_claim(held) for held in store.covering(self.root, path, live)]
