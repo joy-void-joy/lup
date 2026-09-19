@@ -78,6 +78,8 @@ def test_the_routes_serve_the_graph_one_node_and_the_kinds(tmp_path: Path) -> No
     ]
     assert graph["kinds"] == ["coordination:task"]
     assert node["node"]["id"] == first.id
+    assert node["node"]["author"] == "test:t#1"
+    assert {each["author"] for each in graph["nodes"]} == {"test:t#1"}
     assert node["edges_out"][0]["target"] == second.id
     assert [each["kind"] for each in kinds["nodes"]] == ["coordination:task"]
     assert [each["kind"] for each in kinds["edges"]] == ["coordination:blocks"]
@@ -104,6 +106,9 @@ def test_the_graph_narrows_by_standing_and_by_when_a_node_moved(tmp_path: Path) 
     held.relate(Blocks, old, fresh)
     moved = http.get("/api/graph", params={"since": marker}).json()
     assert {each["id"] for each in moved["nodes"]} == {old.id, fresh.id}
+    # Lacking keeps the node no edge of the kind runs from: the blocked one.
+    lacking = http.get("/api/graph", params={"lacking": "coordination:blocks"}).json()
+    assert [each["id"] for each in lacking["nodes"]] == [fresh.id]
     by_id = {each["id"]: each for each in moved["nodes"]}
     assert datetime.fromisoformat(by_id[old.id]["moved"]) > earlier
 

@@ -1,12 +1,16 @@
 # lup: ignore[empty-collection, import-re, re-call, set-shape]
-"""Single importable source of truth for the codebase's anti-pattern set.
+"""Single importable source of truth for the codebase's rule set.
 
-The generated hermetic edit policy denies an edit whose added lines match one
-of these patterns unless the line carries a `# lup: ignore`. Harness generation
-projects these rows into its dependency-free runtime; a test asserts that
-projection stays identical, and the `lup-devtools dev check --antipatterns`
-auditor consumes them to scan the whole tree after the fact (catching lines that slipped in past the hook and
-`# lup: ignore` markers that no longer guard anything).
+The line rules are declared here. The generated hermetic edit policy denies an
+edit whose added lines match one of them unless the line carries a
+`# lup: ignore`. Harness generation projects these rows into its
+dependency-free runtime; a test asserts that projection stays identical, and
+the `lup-devtools dev check --antipatterns` auditor consumes them to scan the
+whole tree after the fact (catching lines that slipped in past the hook and
+`# lup: ignore` markers that no longer guard anything). The project rules and
+the composition rule are declared beside the audits that decide them and
+gathered into the same :class:`RuleSet` below, so one set holds every rule a
+project is judged by, whichever surface decides it.
 
 Each rule carries a stable kebab-case ``id``. A directive names rules
 pyright-style — `# lup: ignore[dict-get]` silences only ``dict-get`` on that
@@ -43,7 +47,7 @@ this family beside the boundary, spelling, and architecture rules.
 Most messages read the same to everyone, so most of the table is a literal. A
 rule that has to name a native tool asks the runtime for the words instead:
 `pdf-extraction` reaches `NativeSpellings.read_document`, and
-:func:`antipattern_set_for` compiles the table once per plugin so a runtime
+:func:`rule_set_for` compiles the table once per plugin so a runtime
 with no such tool ships the rule without one named.
 
 Each entry pairs a stable id and a compiled regex with the message the hook and
@@ -61,13 +65,18 @@ import re
 from pydantic import BaseModel, Field
 
 from lup.harness.codescan.boundaries import (
-    CONSTANT_DECLARATION_RULE_ID,
-    LIBRARY_DEFAULT_RULE_ID,
-    NATIVE_SPELLING_RULE_ID,
-    RULE_ID as SEAM_BOUNDARY_RULE_ID,
+    ASSEMBLY_RULE,
+    CONSTANT_DECLARATION_RULE,
+    KERNEL_IMPORTS_RULE,
+    LIBRARY_DEFAULT_RULE,
+    NATIVE_SPELLING_RULE,
+    SEAM_RULE,
 )
-from lup.harness.codescan.capabilities import RULE_ID as ABC_CAPABILITY_RULE_ID
-from lup.harness.codescan.dispatch import RULE_ID as OWN_MODEL_DISPATCH_RULE_ID
+from lup.harness.codescan.capabilities import ABSTRACT_DECLARATION_RULE, CAPABILITY_RULE
+from lup.harness.codescan.dispatch import DISPATCH_RULE
+from lup.harness.codescan.narrowing import CHAIN_RULE
+from lup.harness.codescan.portable import PORTABLE_RULE, CompositionRule
+from lup.harness.codescan.project import ProjectRule
 from lup.harness.codescan.common import (
     AntiPattern,
     LineProjections,
@@ -84,7 +93,6 @@ from lup.harness.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
-    TYPESCRIPT_SUFFIXES,
     namedtuple_sites,
     noqa_sites,
     pyright_ignore_sites,
@@ -93,6 +101,8 @@ from lup.policy.kernel.edit import (
     bare_except_sites,
     except_baseexception_sites,
     global_statement_sites,
+    elif_chain_sites,
+    wildcard_guard_sites,
     model_config_sites,
     private_class_sites,
     private_function_sites,
@@ -138,6 +148,7 @@ from lup.policy.kernel.edit import (
     suppression_reaches,
     tuple_shape_sites,
 )
+from lup.policy.kernel.typescript import TYPESCRIPT_SUFFIXES
 
 
 MAPPING_FAMILY = TypeFamily(
@@ -1073,6 +1084,101 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         message="No `_` prefix on variables/constants — nothing is private "
         "(unused `_` function parameters are exempt)",
     ),
+    AntiPattern(
+        id="elif-chain",
+        pattern=re.compile(r"^\s*elif\b"),
+        matcher=Matcher(select=elif_chain_sites),
+        examples=[
+            RuleExample(
+                code='if kind == "a":\n    a()\nelif kind == "b":\n    b()',
+                verdict="flagged",
+            ),
+            # A lone `if` in an `else` is the same tree, spelled deeper.
+            RuleExample(
+                code='if kind == "a":\n    a()\nelse:\n    if kind == "b":\n        b()',
+                verdict="flagged",
+            ),
+            RuleExample(
+                code='match kind:\n    case "a":\n        a()\n    case "b":\n        b()',
+                verdict="cleared",
+            ),
+            # Two ways is a boolean, and guard clauses that return are each
+            # their own statement rather than arms of one chain.
+            RuleExample(
+                code='if kind == "a":\n    a()\nelse:\n    b()', verdict="cleared"
+            ),
+            RuleExample(
+                code=(
+                    "if seconds < 60:\n    return 's'\n"
+                    "if seconds < 3600:\n    return 'm'\nreturn 'h'"
+                ),
+                verdict="cleared",
+            ),
+        ],
+        message=(
+            "A chain of three or more ways is a `match` written long: name the "
+            "subject the arms decide on and write each arm as a pattern of it — "
+            "a literal or dotted name per value, a class pattern with the fields "
+            "it reads, a tuple of the fields, a sequence pattern over the split "
+            "line, the variant of a union — with a guard on a pattern that binds "
+            "what the guard reads. An arm with no pattern to write, an ordered "
+            "comparison among them, becomes a guard clause that returns, each "
+            "its own statement. Where the chain is the honest shape, "
+            "`# lup: ignore[elif-chain]` carries why"
+        ),
+    ),
+    AntiPattern(
+        id="wildcard-guard",
+        pattern=re.compile(r"^\s*case\s+(?:_|[A-Za-z_]\w*)\s+if\b"),
+        matcher=Matcher(select=wildcard_guard_sites),
+        examples=[
+            RuleExample(
+                code=(
+                    "match seconds:\n    case _ if seconds < 60:\n"
+                    '        return "s"\n    case _:\n        return "m"'
+                ),
+                verdict="flagged",
+            ),
+            # A bare capture binds the subject under another name and no more.
+            RuleExample(
+                code=(
+                    "match suffix:\n    case suffix if suffix in PYTHON:\n"
+                    "        return 1\n    case _:\n        return 0"
+                ),
+                verdict="flagged",
+            ),
+            # A guard on a pattern that binds what the guard reads is the
+            # honest kind, and an unguarded wildcard is the fallthrough.
+            RuleExample(
+                code=(
+                    "match lease:\n    case Lease(applied=True):\n"
+                    '        return "merged"\n'
+                    "    case Lease(reason=str() as reason) if reason:\n"
+                    '        return reason\n    case _:\n        return "clean"'
+                ),
+                verdict="cleared",
+            ),
+            RuleExample(
+                code=(
+                    "match (before, view):\n"
+                    "    case (None, PeerView(running=True)):\n        arrive()\n"
+                    "    case (PeerView(doing=was), PeerView(doing=now)) if was != now:\n"
+                    "        redescribe()"
+                ),
+                verdict="cleared",
+            ),
+        ],
+        message=(
+            "A guard on a wildcard — `case _ if …`, `case name if …` — decides on "
+            "the guard alone, which is the chain in a `match` costume. Bind what "
+            "the guard reads in the pattern instead: a class pattern with the "
+            "field, a tuple of the fields, a literal. Where no pattern exists, "
+            "write the decision as guard clauses that return; a guarded "
+            "fallthrough after real arms nests its `if` inside `case _:`. Where "
+            "the guard is the honest shape, `# lup: ignore[wildcard-guard]` "
+            "carries why"
+        ),
+    ),
 ]
 """Python rules whose message reads the same whatever runtime is shown it."""
 
@@ -1144,7 +1250,7 @@ def python_anti_patterns(
 
     The portable rows are this library's reading of the conventions rather than
     anything Python settles, so a project holding itself to a different set
-    passes its own — the same reason :class:`AntiPatternSet` takes its tables
+    passes its own — the same reason :class:`RuleSet` takes its tables
     instead of naming them.
     """
     return [*portable, pdf_extraction_rule(document_reader)]
@@ -1336,38 +1442,61 @@ TS_ANTI_PATTERNS: list[AntiPattern] = [
 # lup: ignore[library-default] — Python's own source suffixes
 PY_SUFFIXES = (".py", ".pyi")
 
-# lup: ignore[library-default] — the ids other codescan scanners own, so the set
-# follows those rules' own identities rather than any taste of this module's
-FOREIGN_RULE_IDS: frozenset[str] = frozenset(  # lup: ignore[frozenset-shape]
-    {
-        ABC_CAPABILITY_RULE_ID,
-        CONSTANT_DECLARATION_RULE_ID,
-        LIBRARY_DEFAULT_RULE_ID,
-        NATIVE_SPELLING_RULE_ID,
-        OWN_MODEL_DISPATCH_RULE_ID,
-        SEAM_BOUNDARY_RULE_ID,
-    }
-)
-"""Rule ids owned by other codescan scanners.
+PROJECT_RULES: list[ProjectRule] = [
+    CAPABILITY_RULE,
+    ABSTRACT_DECLARATION_RULE,
+    DISPATCH_RULE,
+    CHAIN_RULE,
+    SEAM_RULE,
+    ASSEMBLY_RULE,
+    NATIVE_SPELLING_RULE,
+    KERNEL_IMPORTS_RULE,
+    LIBRARY_DEFAULT_RULE,
+    CONSTANT_DECLARATION_RULE,
+]
+"""Every rule this library reads off the whole project.
 
-A typed ``# lup: ignore[...]`` naming one of these is judged by that
-scanner (the boundary scan honors its own id), so this auditor never
-reports it spurious — while an id no scanner owns still is.
+Each is declared beside the audit that decides it and gathered here once, so
+the sweep that runs them, the reference that renders them and the suite that
+checks their examples all read one list — a rule declared in its module and
+absent here would be a rule nothing runs, which is why the list is the set's
+and not the sweep's.
+"""
+
+COMPOSITION_RULES: list[CompositionRule] = [PORTABLE_RULE]
+"""Every rule this library judges the assembled harness by, at generation."""
+
+# lup: ignore[frozenset-shape] — name identity membership, read at every line
+FOREIGN_RULE_IDS: frozenset[str] = frozenset(rule.id for rule in PROJECT_RULES)
+"""Rule ids the project rules own.
+
+A typed ``# lup: ignore[...]`` naming one of these is judged by that rule's
+own audit, so this auditor never reports it spurious — while an id no rule
+owns still is. Taken off the set rather than named, so a rule declared there
+is foreign here the moment it exists.
 """
 
 
-class AntiPatternSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
-    """Which anti-patterns a project checks, by the language they read.
+class RuleSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """Every rule a project checks, by the surface that decides it.
 
-    The rules a project holds itself to are its own conventions written down,
-    so the tables this library ships are what a caller starts from rather than
-    what it is stuck with — one set reaches the edit hook, the whole-file
-    audit, and the generated rule reference together, so a project that
-    replaces it replaces all three at once.
+    ``python`` and ``typescript`` are the line rules the hermetic kernel runs
+    on every edit and the sweep runs again over each file; ``project`` the
+    rules only the sweep can run, over the whole tree at once; ``composition``
+    the rules generation runs over the assembled harness. The rules a project
+    holds itself to are its own conventions written down, so the tables this
+    library ships are what a caller starts from rather than what it is stuck
+    with — one set reaches the edit hook, the whole-file audit, and the
+    generated rule reference together, so a project that replaces it replaces
+    all three at once.
     """
 
     python: list[AntiPattern] = Field(default_factory=lambda: PYTHON_ANTI_PATTERNS)
     typescript: list[AntiPattern] = Field(default_factory=lambda: TS_ANTI_PATTERNS)
+    project: list[ProjectRule] = Field(default_factory=lambda: PROJECT_RULES)
+    composition: list[CompositionRule] = Field(
+        default_factory=lambda: COMPOSITION_RULES
+    )
 
     def for_suffix(self, suffix: str) -> list[AntiPattern] | None:
         """The table that applies to a file suffix, or None to skip it.
@@ -1382,25 +1511,27 @@ class AntiPatternSet(BaseModel, frozen=True, arbitrary_types_allowed=True):
             return self.typescript
         return None
 
-    def selected(self, selection: RuleSelection) -> "AntiPatternSet":
-        """This set with the rules a project retired taken out of both tables.
+    def selected(self, selection: RuleSelection) -> "RuleSet":
+        """This set with the rules a project retired taken out of every table.
 
         Narrowing the table rather than filtering findings afterwards is what
         keeps a retired rule from reaching any surface at all: it does not
         fire, it does not render into the compiled plugin, and a directive
         naming it is not graded against a rule that stopped existing here.
         """
-        return AntiPatternSet(
+        return RuleSet(
             python=[rule for rule in self.python if selection.keeps(rule.id)],
             typescript=[rule for rule in self.typescript if selection.keeps(rule.id)],
+            project=[rule for rule in self.project if selection.keeps(rule.id)],
+            composition=[rule for rule in self.composition if selection.keeps(rule.id)],
         )
 
 
-def antipattern_set_for(
+def rule_set_for(
     document_reader: Spelling,
     selection: RuleSelection | None = None,
     declared: list[AntiPattern] | None = None,
-) -> AntiPatternSet:
+) -> RuleSet:
     """The tables one native plugin ships, its own reader spelled into them.
 
     Generation reaches this once per runtime, so the rows compiled into a
@@ -1417,17 +1548,17 @@ def antipattern_set_for(
     from the compiled plugin rather than enforced by a hook the sweep stopped
     agreeing with.
     """
-    return AntiPatternSet(
+    return RuleSet(
         python=[*python_anti_patterns(document_reader), *(declared or [])]
     ).selected(selection or RuleSelection())
 
 
-# `AntiPatternSet.for_suffix` is the operation; this binds the default table to it.
+# `RuleSet.for_suffix` is the operation; this binds the default table to it.
 def patterns_for_suffix(
-    suffix: str, rules: AntiPatternSet | None = None
+    suffix: str, rules: RuleSet | None = None
 ) -> list[AntiPattern] | None:
     """The anti-pattern table one file suffix is checked against."""
-    return (rules or AntiPatternSet()).for_suffix(suffix)
+    return (rules or RuleSet()).for_suffix(suffix)
 
 
 def selected_lines(text: str, patterns: list[AntiPattern]) -> dict[str, set[int]]:

@@ -288,6 +288,18 @@ def create_with_workspace(name: str, no_sync: bool = False) -> None:
     )
 
 
+def holding_the_workspace(worktree_path: Path) -> Path:
+    """The declared workspace, present in the tree the way a real base holds it.
+
+    A tree cut from a base whose layout lacks the workspace has nothing to
+    restore and is left alone, which is a case of its own — so a test about
+    restoring one gives the tree the directory rather than asking the step to
+    restore a path that is not there.
+    """
+    (worktree_path / "web").mkdir(parents=True, exist_ok=True)
+    return worktree_path
+
+
 def built_environment(path: Path) -> None:
     """Stand in for `uv sync`, leaving the environment it would have built."""
     (path / ".venv").mkdir()
@@ -302,7 +314,7 @@ def test_the_bun_workspace_is_restored_beside_the_environment(
     """One flag, two toolchains: a worktree readied with its environment has
     its bun workspace restored too, and the step is read off the worktree the
     way the sync is, so a finished restore is not repeated."""
-    worktree_path = interrupted_creation(repo, tree_dir, "topic")
+    worktree_path = holding_the_workspace(interrupted_creation(repo, tree_dir, "topic"))
     monkeypatch.chdir(repo)
     restored: list[Path] = []  # lup: ignore[empty-collection] — restore record
 
@@ -350,7 +362,7 @@ def test_a_workspace_that_cannot_be_restored_leaves_the_worktree_usable(
 ) -> None:
     """The gate restores what it finds behind, so a restore the registry
     refused is said out loud and the worktree is handed over anyway."""
-    interrupted_creation(repo, tree_dir, "topic")
+    holding_the_workspace(interrupted_creation(repo, tree_dir, "topic"))
     monkeypatch.chdir(repo)
 
     def refuse(workspace: Path) -> bool:

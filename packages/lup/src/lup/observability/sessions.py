@@ -189,6 +189,19 @@ class Session(LedgerNode, frozen=True):
             return Standing(
                 label="open", reason=f"{self.runtime} session opened {self.started}"
             )
+        if not self.journal or not self.journal_digest:
+            # Amending `ended` by hand closes the record without pinning
+            # anything, and asking the tree about an empty path would answer
+            # "missing" with nothing named — a diagnostic about the amendment
+            # dressed as one about the journal.
+            return Standing(
+                label="unpinned",
+                reason=(
+                    f"ended {self.ended} with no journal digest pinned; "
+                    "`closed()` pins the journal as it is, an amendment of "
+                    "`ended` does not"
+                ),
+            )
         if around.root is None:
             return Standing(label="unchecked", reason="no working tree to read")
         return pinned(self.journal_path(), self.journal, self.journal_digest)

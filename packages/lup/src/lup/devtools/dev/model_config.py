@@ -59,6 +59,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup.devtools.dev.tracked import tracked_files
 from lup.devtools.utils import format_table, output_json
 from lup.execution.shell import git
 
@@ -211,9 +212,8 @@ def python_files() -> Iterator[Path]:
     rule that later has to report zero violations are looking at one set of
     files rather than two that happen to overlap.
     """
-    for rel in git.lines("ls-files", "--cached", "--others", "--exclude-standard"):
-        if rel.endswith((".py", ".pyi")):
-            yield Path(rel)
+    for rel in tracked_files(others=True, suffixes=(".py", ".pyi")):
+        yield Path(rel)
 
 
 def rendered_keywords(node: ast.expr, text: str) -> RenderedConfig:

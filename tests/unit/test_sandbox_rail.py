@@ -378,19 +378,22 @@ def test_paths_are_mounted_at_the_names_the_host_calls_them(
     assert mapped == {repository / "mine": (repository / "mine").as_posix()}
 
 
-def test_a_declared_human_owned_path_becomes_unwritable(repository: Path) -> None:
-    """Taken from the declaration that already exists rather than listed again."""
-    (repository / "mine" / "README.md").write_text("x", encoding="utf-8")
-    leased = lease_for(repository / "mine", human_owned=[Path("README.md")])
-    assert repository / "mine" / "README.md" in leased.read_only
-
-
-def test_a_human_owned_path_that_is_not_there_is_not_mounted(
+def test_a_human_owned_path_stays_writable_and_the_policy_asks(
     repository: Path,
 ) -> None:
-    """A bind mount of a missing source is how `bwrap` and docker both hard-fail."""
-    leased = lease_for(repository / "mine", human_owned=[Path("ABSENT.md")])
-    assert repository / "mine" / "ABSENT.md" not in leased.read_only
+    """The mount that held `README.md` refused every fast-forward touching it.
+
+    Git replaces a file by unlinking it, which a mount point refuses, so the
+    merge that landed a branch was the user's from a host terminal each time.
+    What the mount protected, the policy protects by asking, which a mount
+    cannot do.
+    """
+    readme = repository / "mine" / "README.md"
+    readme.write_text("x", encoding="utf-8")
+    leased = lease_for(repository / "mine")
+    assert readme.resolve() not in leased.read_only
+    assert leased.covers(readme)
+    assert {path.name for path in leased.read_only} == {"config", "hooks"}
 
 
 def test_siblings_are_asked_of_git_rather_than_scanned(repository: Path) -> None:
@@ -693,10 +696,9 @@ def test_a_reviewer_lease_is_the_worker_lease_with_nothing_writable(
     assert repository / "other" in reviewing.read_only
 
 
-def test_a_worker_lease_withholds_a_declared_human_owned_path(
-    repository: Path,
-) -> None:
+def test_a_worker_lease_holds_no_human_owned_path_either(repository: Path) -> None:
     owned = repository / "mine" / "CLAUDE.md"
     owned.write_text("owned\n", encoding="utf-8")
-    leased = worker_lease(repository / "mine", [Path("CLAUDE.md")])
-    assert owned in leased.read_only
+    leased = worker_lease(repository / "mine")
+    assert owned not in leased.read_only
+    assert leased.covers(owned)

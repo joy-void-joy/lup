@@ -35,12 +35,16 @@ from lup.types import SubagentSpec
 
 from lup.workspace.paths import project_root
 
+from lup.coordination.identity import session_member_id
+from lup.orchestration.reflection import ReviewGate
+from lup.tools.toolsets import SessionNeeds, assembled
+from lup.tools.toolsets import served_names as declared_served
+
 from lup_template.agent.subagents import get_subagent_specs
 from lup_template.agent.toolsets import (
     EXAMPLE_GROUP,
     NOTES_GROUP,
-    build_session_toolset,
-    tool_group_names,
+    declared_tool_groups,
 )
 from lup_template.harness.catalog import HARNESS_SESSION
 
@@ -79,7 +83,7 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
                 session.list_tools(), timeout=SUBPROCESS_TIMEOUT_SECONDS
             )
             names = {tool.name for tool in listed.tools}
-            assert names == {"review", "run_subagent"}
+            assert {"review", "run_subagent"} <= names
             # The example placeholder ships fabricated data and is served to no
             # live agent by default — matching the Claude path. It is reachable
             # only via an explicit --server example.
@@ -99,7 +103,7 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
                 ),
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
-            assert reviewed.isError is False
+            assert reviewed.is_error is False
             assert gate_flag.exists()
 
     assert (session_dir / "review.json").exists()
@@ -132,8 +136,11 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
         REALTIME_DIR_ENV: str(realtime_dir),
     }
 
-    groups = build_session_toolset(
+    declared = declared_tool_groups()
+    needs = SessionNeeds(
         session_dir=session_dir,
+        root=project_root(),
+        gate=ReviewGate(flag_path=tmp_path / "gate_flag"),
         outputs_dir=tmp_path / "outputs",
         sandbox=Sandbox(
             session_id="registry-match", shared_dir=session_dir / "sandbox_shared"
@@ -142,9 +149,13 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
         subagent_tool=create_run_subagent_tool(
             get_subagent_specs(), factory_recipe=unused_subagent_factory
         ),
-    )["groups"]
+        # The same identity the subprocess resolves from the relayed session
+        # id, so both sides build the groups that wait on one.
+        member=session_member_id("registry-match"),
+    )
+    groups = assembled(declared, needs).groups
 
-    for group in (*tool_group_names(realtime=True), EXAMPLE_GROUP):
+    for group in (*declared_served(declared, needs), EXAMPLE_GROUP):
         expected = {tool.name for tool in groups[group]}
         assert served_names(env, "--server", group) == expected
 
@@ -245,7 +256,7 @@ async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:
                 session.call_tool("sleep", {"seconds": 60}),
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
-            assert premature.isError is True
+            assert premature.is_error is True
 
             replied = await asyncio.wait_for(
                 session.call_tool(
@@ -254,7 +265,7 @@ async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:
                 ),
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
-            assert replied.isError is False
+            assert replied.is_error is False
 
             await asyncio.wait_for(
                 session.call_tool("meta", {"thought": "relay wiring test"}),
@@ -264,7 +275,7 @@ async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:
                 session.call_tool("sleep", {"seconds": 60}),
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
-            assert recorded.isError is False
+            assert recorded.is_error is False
 
     mailbox = RealtimeMailbox(realtime_dir)
     events = mailbox.read_new_events()

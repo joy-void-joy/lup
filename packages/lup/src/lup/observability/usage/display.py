@@ -106,7 +106,8 @@ class UsageDisplay:
         """Answer one invocation in whichever of the three modes it asked for."""
         if json_output:
             self.emit_json(detail)
-        elif watch and self.console.is_terminal:
+            return
+        if watch and self.console.is_terminal:
             self.watch(detail, interval)
-        else:
-            self.show(detail)
+            return
+        self.show(detail)

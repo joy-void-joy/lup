@@ -9,9 +9,15 @@ from pathlib import Path
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.subagents import CodexModelTiers
-from lup.providers.roster_prompt import prompt_hook
+from lup.providers.drift_prompt import drift_hook
+from lup.providers.roster_prompt import (
+    departure_hook,
+    folded,
+    prompt_hook,
+    store_artifacts,
+)
 from lup.types import ModelTier
-from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, antipattern_set_for
+from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.formats.banner import (
     COMMENT_FREE,
     PROMPT_TEXT,
@@ -124,9 +130,12 @@ class CodexSpellings(NativeSpellings):
             f"for the answer: {question}"
         )
 
-    def delegate(self, subagent_type: QualifiedAgentName, prompt: str) -> Instruction:
+    def delegate(
+        self, subagent_type: QualifiedAgentName, prompt: str, name: str = ""
+    ) -> Instruction:
+        named = f", naming the task {name!r}," if name else ""
         return Instruction(
-            f"Delegate to the {subagent_type} custom agent with this task: {prompt}"
+            f"Delegate to the {subagent_type} custom agent{named} with this task: {prompt}"
         )
 
     def request_approval(self, action: str, reason: str) -> Instruction:
@@ -139,11 +148,12 @@ class CodexSpellings(NativeSpellings):
 
         No third route to name: this runtime cannot move a running session, so
         the tool the other adapter refuses does not exist here. The second
-        carries its condition for the same reason it does there -- a lease
-        mounts every pre-existing sibling read-only, so addressing one by
-        absolute path reaches a filesystem refusing every write, while a
-        worktree cut after the session started is outside the lease and
-        writable. Four words here and a paragraph in `docs/contributing.md`,
+        carries its condition for the same reason it does there -- a worker's
+        lease mounts every pre-existing sibling read-only, so from a worker,
+        addressing one by absolute path reaches a filesystem refusing every
+        write, while a worktree it cut itself is outside the lease and
+        writable, and an operator's session holds every checkout writable.
+        Four words here and a paragraph in `docs/contributing.md`,
         because what this renders into is budgeted: see the note on the
         other adapter's method.
         """
@@ -210,6 +220,24 @@ class CodexSpellings(NativeSpellings):
             "keystrokes. Keep the one session for as long as the command "
             "runs: re-running it starts over and loses everything it already "
             "reported"
+        )
+
+    def nested_run(self, prompt: str) -> Instruction:
+        """Spell the non-interactive launch, `codex exec`.
+
+        Read from codex-cli 0.155.1's own help rather than from a run, since
+        no Codex session is signed in where this was written: `exec` takes
+        the prompt as its argument, `--dangerously-bypass-approvals-and-sandbox`
+        answers every approval a hook probe would otherwise stall on, and
+        `--dangerously-bypass-hook-trust` admits a hooks file this machine has
+        not trusted, which a throwaway kit's never is.
+        """
+        return Instruction(
+            "Run `codex exec --dangerously-bypass-approvals-and-sandbox"
+            f" --dangerously-bypass-hook-trust {json.dumps(prompt)}` from the"
+            " kit's directory. A non-interactive run loads the hooks in that"
+            " directory's settings at launch and exits when the prompt is"
+            " answered"
         )
 
     def read_document(self, path: str) -> Spelling:
@@ -544,7 +572,7 @@ CODEX_DISPATCHER = DispatcherDeclaration(
     runtime_name="Codex",
     package="lup.providers.codex",
     managed_root_env=CODEX_LOGIN.config_home_env,
-    routed_tools=["Bash", "web_fetch", "apply_patch"],
+    routed_tools=["Bash", "web_fetch", "apply_patch", "collaborationspawn_agent"],
     hook_events=["PermissionRequest", "PreToolUse", "PostToolUse"],
     observation_event="PostToolUse",
     observed_tools=["apply_patch", "Bash"],
@@ -573,6 +601,18 @@ under a default limit of about 2,500 tokens per hook past which it spills to
 disk. Documented and not yet measured: no Codex session is signed in on the
 machine this was written on. The runtime's own spelling of the moment, so
 not a value a project could choose.
+"""
+
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
+CODEX_EXIT_EVENT = "SessionEnd"
+"""The event Codex fires as a session ends.
+
+Documented at https://learn.chatgpt.com/docs/hooks beside `SessionStart` and
+the tool events, with `session_id` and `cwd` on stdin as for the prompt
+event. Documented and not yet measured: no Codex session is signed in on the
+machine this was written on. The runtime's own spelling of the moment, so not
+a value a project could choose.
 """
 
 CODEX_PATCH_RUNTIME = (
@@ -659,13 +699,15 @@ def codex_allow_prefixes(
         )
         if earned != "allow" or row["ask_flags"] or row["sandbox"] == "inside":
             continue
-        if not row["subcommand"]:
-            if row["command"] not in gated and row["command"] not in dynamic:
-                add([row["command"]], row["sandbox"])
-        elif row["operation"]:
-            add([row["command"], row["subcommand"], row["operation"]], row["sandbox"])
-        elif f"{row['command']} {row['subcommand']}" not in operational:
-            add([row["command"], row["subcommand"]], row["sandbox"])
+        match row["subcommand"], row["operation"]:
+            case "", _:
+                if row["command"] not in gated and row["command"] not in dynamic:
+                    add([row["command"]], row["sandbox"])
+            case subcommand, "":
+                if f"{row['command']} {subcommand}" not in operational:
+                    add([row["command"], subcommand], row["sandbox"])
+            case subcommand, operation:
+                add([row["command"], subcommand, operation], row["sandbox"])
     for target in runner_targets:
         # Read on the same terms as a command row above, which it was not
         # while a target stated its verdict outright: every declared target
@@ -737,11 +779,31 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 "hooks": [policy_hook],
             }
         ]
-        roster = prompt_hook(
+        # Two folds under the one event, kept side by side rather than merged:
+        # who else is here, and whether what this project is built on still
+        # stands at one commit. Both are context and neither can refuse, so
+        # the runtime runs whichever of them the project declared.
+        roster = folded(
+            [
+                prompt_hook(
+                    Path(f".codex/plugins/{self.plugin_name}"),
+                    "PLUGIN_ROOT",
+                    source,
+                    CODEX_PROMPT_EVENT,
+                ),
+                drift_hook(
+                    Path(f".codex/plugins/{self.plugin_name}"),
+                    "PLUGIN_ROOT",
+                    source,
+                    CODEX_PROMPT_EVENT,
+                ),
+            ]
+        )
+        departure = departure_hook(
             Path(f".codex/plugins/{self.plugin_name}"),
             "PLUGIN_ROOT",
             source,
-            CODEX_PROMPT_EVENT,
+            CODEX_EXIT_EVENT,
         )
         hooks = {
             "hooks": {
@@ -754,6 +816,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     for event in CODEX_DISPATCHER.hook_events
                 },
                 **roster.registered,
+                **departure.registered,
             }
         }
         evidence = {
@@ -791,6 +854,8 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     Path(f".codex/plugins/{self.plugin_name}"), source.id
                 ),
                 *roster.artifacts,
+                *departure.artifacts,
+                *store_artifacts(Path(f".codex/plugins/{self.plugin_name}"), source.id),
                 *[
                     Artifact(
                         path=Path(
@@ -843,13 +908,18 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         human_owned_files=[
                             path.as_posix() for path in source.human_owned_files
                         ],
-                        autonomous_agent_identities=[self.worker_identity],
+                        autonomous_agent_identities=(
+                            [self.worker_identity] if self.worker_identity else []
+                        ),
                         path_roles=[
                             PathRoleRow(root=role.root.as_posix(), role=role.role)
                             for role in source.path_roles
                         ],
                         acceptance_guard=guard.erased()
                         if (guard := source.acceptance_guard)
+                        else None,
+                        spawn_names=names.erased()
+                        if (names := source.spawn_names)
                         else None,
                         shell_rules=source.resolved_shell_rules(),
                         edit_rules=source.resolved_edit_rules(),
@@ -867,7 +937,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         diagnostics_command=source.diagnostics_command,
                         resolution_command=source.resolution_command,
                         repair_command=source.repair_command,
-                        rules=antipattern_set_for(
+                        rules=rule_set_for(
                             self.spellings.read_document(DOCUMENT_IN_HAND),
                             source.rules,
                             source.anti_patterns,

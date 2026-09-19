@@ -13,7 +13,12 @@ never a refusal, and the two combined reach the host over a refusal neither
 reaches alone.
 """
 
-from lup.policy.kernel.decision import SANDBOX_TRAPPED_REASON, KernelDecision
+from lup.policy.kernel.decision import (
+    CONTAINED_ESCAPE_NOTICE,
+    SANDBOX_ESCAPE_NOTICE,
+    SANDBOX_TRAPPED_REASON,
+    KernelDecision,
+)
 from lup.policy.kernel.escalation import EscalationRequest
 from lup.policy.kernel.semantics import CheckpointEvidence, UnjudgedAmbient
 from lup.policy.kernel.settlement import (
@@ -192,7 +197,7 @@ def test_the_legacy_bare_marker_works_and_says_it_is_an_alias() -> None:
     )
 
     assert settled.effect == "ask"
-    assert "escalate[decision]" in settled.reason
+    assert "escalate[decision]" in settled.recovery
 
 
 def test_sandbox_escalation_asks_before_an_allowed_operation_leaves() -> None:
@@ -277,6 +282,52 @@ def test_an_approved_crossing_is_answerable_by_a_person_without_a_channel() -> N
     assert (settled.effect, settled.sandbox) == ("ask", "outside")
 
 
+def test_an_approved_crossing_on_a_host_says_it_leaves_for_the_host() -> None:
+    """The sentence the question ends with names the crossing it buys.
+
+    On a host the runtime's per-call sandbox is the only boundary there is,
+    so lifting it for one call puts that call on the launcher's host, and the
+    approver is told exactly that. The settlement reaches ``ask outside``
+    either way; the placement handed to the renderer is what chooses the
+    words, which is why it is asserted after ``placed`` and not before.
+    """
+    settled = settle(
+        facts(
+            KernelDecision("allow", "fine"),
+            escalation=sandbox_escalation(),
+            host_executor=True,
+        )
+    )
+
+    placed = settled.placed(escapable=True, contained=False)
+
+    assert (placed.effect, placed.sandbox) == ("ask", "outside")
+    assert placed.reason.endswith(SANDBOX_ESCAPE_NOTICE)
+    assert CONTAINED_ESCAPE_NOTICE not in placed.reason
+
+
+def test_an_approved_crossing_inside_a_container_says_it_stays_in_the_mounts() -> None:
+    """The same settlement, the other boundary, and a different true sentence.
+
+    Contained, the per-call sandbox was never armed, so what the approval
+    lifts lifts nothing: the command runs in the same mount namespace, and a
+    path mounted read-only refuses it exactly as it would have unmarked. A
+    question promising the host here tells the approver the wrong thing at
+    the one moment they decide.
+    """
+    settled = settle(
+        contained_facts(
+            KernelDecision("allow", "fine"), escalation=sandbox_escalation()
+        )
+    )
+
+    placed = settled.placed(escapable=True, contained=True)
+
+    assert (placed.effect, placed.sandbox) == ("ask", "outside")
+    assert placed.reason.endswith(CONTAINED_ESCAPE_NOTICE)
+    assert SANDBOX_ESCAPE_NOTICE not in placed.reason
+
+
 def test_an_unprompted_crossing_with_no_channel_is_capability_blocked() -> None:
     """``allow outside`` admits no human fallback.
 
@@ -349,7 +400,7 @@ def test_a_capture_that_failed_keeps_the_question_and_says_which_it_was() -> Non
     settled = settle(facts(local_loss(), checkpoint="failed"))
 
     assert settled.effect == "ask"
-    assert "capture that would have settled this failed" in settled.reason
+    assert "snapshot that would have made this undoable failed" in settled.reason
     assert settled.visibility == "notice"
 
 
@@ -453,7 +504,7 @@ def test_a_question_no_eligible_reviewer_can_be_reached_from_does_not_run() -> N
 
     assert contained.effect == "deny"
     assert exposed.effect == "deny"
-    assert "no eligible reviewer" in exposed.reason
+    assert "nobody who could approve it is reachable" in exposed.reason
 
 
 def test_a_judged_refusal_is_not_rescued_by_a_boundary() -> None:
@@ -566,7 +617,7 @@ def test_a_question_nobody_can_answer_is_refused_and_not_carried() -> None:
 
     assert contained.effect == "deny"
     assert escalated.effect == "deny"
-    assert "no eligible reviewer" in contained.reason
+    assert "nobody who could approve it is reachable" in contained.reason
 
 
 def test_what_the_boundary_still_carries_is_only_what_nobody_judged() -> None:

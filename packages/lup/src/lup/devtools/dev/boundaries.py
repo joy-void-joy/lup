@@ -1,8 +1,8 @@
 """Walk repository Python files for the boundary rules in both directions.
 
-Backs ``lup-devtools dev check --boundaries`` and ``--placement`` plus their
-standalone check rows. Inward, every git-tracked ``.py`` file outside the
-sanctioned homes (the adapters package, tests) runs through
+Backs ``lup-devtools dev check --boundaries`` and ``--placement``, focused
+views of rules the anti-pattern sweep also runs. Inward, every git-tracked
+``.py`` file outside the sanctioned homes (the adapters package, tests) runs through
 :mod:`lup.harness.codescan.boundaries`; the tree is expected to hold zero breaches, and
 this is the regression guard that keeps backend dispatch from creeping back
 outside the seam. Outward, every library module is checked for data tables an
@@ -26,9 +26,9 @@ from lup.harness.codescan.boundaries import (
     find_library_default_breaches,
     library_placement_path_is_audited,
 )
+from lup.devtools.dev.tracked import tracked_files
 from lup.devtools.project import DevProject
 from lup.devtools.utils import output_json
-from lup.execution.shell import git
 from lup.policy.kernel.roles import path_role
 
 
@@ -47,15 +47,16 @@ class TrackedSource(BaseModel):
 
 
 def tracked_python_sources(project: DevProject | None = None) -> list[TrackedSource]:
-    """Every production Python file that exists on disk, with its text."""
-    tracked = str(
-        git("ls-files", "--cached", "--others", "--exclude-standard")
-    ).splitlines()
+    """Every production Python file that exists on disk, with its text.
+
+    Listed once each whatever the index holds: a path mid-merge sits there at
+    three stages, and is still one file on disk and one module.
+    """
+    tracked = tracked_files(others=True, suffixes=(".py",))
     return [
         TrackedSource(rel=rel, path=path, text=path.read_text(encoding="utf-8"))
         for rel in tracked
-        if (path := Path(rel)).suffix == ".py"
-        and path.exists()
+        if (path := Path(rel)).exists()
         and (project is None or path_role(rel, project.path_roles) == "production")
     ]
 
@@ -176,13 +177,14 @@ def scan_boundaries(project: DevProject) -> list[FoundBreach]:
 def report(project: DevProject, as_json: bool) -> None:
     """List every breach; exit non-zero when any exist."""
     found = scan_boundaries(project)
-    if as_json:
-        output_json([breach.model_dump() for breach in found])
-    elif found:
-        for breach in found:
-            typer.echo(f"{breach.file}:{breach.line}  {breach.module}")
-    else:
-        typer.echo("seam boundaries: ok")
+    match (as_json, found):
+        case (True, _):
+            output_json([breach.model_dump() for breach in found])
+        case (False, [_, *_]):
+            for breach in found:
+                typer.echo(f"{breach.file}:{breach.line}  {breach.module}")
+        case _:
+            typer.echo("seam boundaries: ok")
     if found:
         raise typer.Exit(1)
 
@@ -190,12 +192,13 @@ def report(project: DevProject, as_json: bool) -> None:
 def report_placement(as_json: bool) -> None:
     """List every baked-in library table; exit non-zero when any exist."""
     found = scan_library_placement()
-    if as_json:
-        output_json([breach.model_dump() for breach in found])
-    elif found:
-        for breach in found:
-            typer.echo(f"{breach.file}:{breach.line}  {breach.module}")
-    else:
-        typer.echo("library placement: ok")
+    match (as_json, found):
+        case (True, _):
+            output_json([breach.model_dump() for breach in found])
+        case (False, [_, *_]):
+            for breach in found:
+                typer.echo(f"{breach.file}:{breach.line}  {breach.module}")
+        case _:
+            typer.echo("library placement: ok")
     if found:
         raise typer.Exit(1)

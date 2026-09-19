@@ -68,7 +68,7 @@ class UnknownToolPolicy(DecisionPolicy[UnknownTool]):
             self.refused,
         )
         if refusal is not None:
-            return Decision(effect=refusal.effect, reason=refusal.reason)
+            return Decision.of(refusal)
         return Decision(effect="ask", reason=f"unclassified tool {name!r}")
 
 

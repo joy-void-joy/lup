@@ -16,7 +16,9 @@ from typing import NotRequired, TypedDict
 from .decision import KernelDecision, handed_over
 from .imports import ResolvedImportRule, resolved_import_rules
 from .roles import (
+    FOREIGN_REPOSITORY_RECOVERY,
     FOREIGN_REPOSITORY_REFERRAL,
+    GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
     is_generated_plugin_target,
     normalized_path,
@@ -32,6 +34,11 @@ from .rows import (
     PathRoleRow,
     PathRuleRow,
     ResolutionRow,
+)
+from .typescript import (
+    TYPESCRIPT_SUFFIXES,
+    masked_typescript_lines,
+    typescript_comment_columns,
 )
 
 MARKER_RE = re.compile(r"(#|//)\s*lup\s*:", re.IGNORECASE)
@@ -637,252 +644,6 @@ def python_code_lines(source: str) -> list[str]:
     return ["".join(line) for line in lines]
 
 
-# lup: ignore[library-default] — the suffixes the TypeScript-family rule table reads; the kernel carries no config
-TYPESCRIPT_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
-"""The files whose text the TypeScript-family maskers below read.
-
-The one family `lup.harness.codescan.antipatterns` checks against its
-TypeScript table: the hook deriving the language from this tuple and the
-audit from another would mask the same file two ways and judge it twice.
-"""
-
-
-class ScriptSpan(TypedDict):
-    """One run of TypeScript-family text that is not code.
-
-    ``start`` and ``end`` are character offsets into the source, half-open.
-    ``kind`` is "string" for a string, template or regex literal and
-    "comment" for a `//` or `/* */` comment.
-    """
-
-    start: int
-    end: int
-    kind: str
-
-
-def typescript_spans(
-    source: str,
-    expression_openers: str = "(,=:[!&|?{};+-*%<>~^",
-    expression_words: tuple[str, ...] = (
-        "return",
-        "typeof",
-        "case",
-        "do",
-        "else",
-        "in",
-        "of",
-        "instanceof",
-        "new",
-        "delete",
-        "void",
-        "throw",
-        "yield",
-        "await",
-    ),
-) -> list[ScriptSpan]:
-    """Every string, template, regex and comment run of TypeScript-family text.
-
-    A scan rule reads code, and in this family the prose sits where the
-    Python tokenizer cannot see it: `//` and `/* */` comments, `'`, `"` and
-    backtick literals, and the body of a regex literal. Each is returned as
-    an offset span so a masker can blank it while every line and column
-    stays where it was.
-
-    One pass, character by character. A template literal's `${ }` holes are
-    code, so the literal is cut around them, and the braces inside a hole
-    are counted so its closing brace is told from one of its own. A `/` is a
-    regex literal where an expression can start — after an operator, an
-    opening bracket, a separator, or one of the words the grammar puts before
-    an expression — and a division everywhere else, the reading every lexer
-    without a parser settles for; a `/` misread as a regex blanks the rest of
-    its line and never more. A `'` or `"` literal ends at its line, as the
-    grammar has it, so an unbalanced quote in a `.vue` template costs one
-    line rather than the file.
-    """
-    spans: list[ScriptSpan] = []
-    holes: list[int] = []
-    length = len(source)
-    # The last code character and the word it ends, which is all a `/` needs
-    # to know whether an expression can start where it stands.
-    last_code = ""
-    word = ""
-
-    def literal_end(quote: str, start: int) -> int:
-        """One past the quote closing a literal opened at `start`, or its line's end."""
-        index = start + 1
-        while index < length:
-            match source[index]:
-                case "\\":
-                    index += 2
-                case "\n":
-                    return index
-                case character if character == quote:
-                    return index + 1
-                case _:
-                    index += 1
-        return length
-
-    def regex_end(start: int) -> int:
-        """One past the flags of a regex literal opened at `start`, or its line's end."""
-        index = start + 1
-        in_class = False
-        while index < length:
-            match source[index]:
-                case "\\":
-                    index += 2
-                case "\n":
-                    return index
-                case "[":
-                    in_class = True
-                    index += 1
-                case "]":
-                    in_class = False
-                    index += 1
-                case "/" if not in_class:
-                    index += 1
-                    while index < length and source[index].isalpha():
-                        index += 1
-                    return index
-                case _:
-                    index += 1
-        return length
-
-    def template_piece(start: int) -> int:
-        """Record the template text from `start` and return where code resumes.
-
-        `start` is the opening backtick or the `}` closing a hole; the piece
-        runs to the closing backtick, taken with it, or to the `${` opening
-        the next hole, which is left to the code scan.
-        """
-        index = start + 1
-        while index < length:
-            match source[index]:
-                case "\\":
-                    index += 2
-                case "`":
-                    spans.append(ScriptSpan(start=start, end=index + 1, kind="string"))
-                    return index + 1
-                case "$" if source.startswith("${", index):
-                    spans.append(ScriptSpan(start=start, end=index, kind="string"))
-                    holes.append(0)
-                    return index + 2
-                case _:
-                    index += 1
-        spans.append(ScriptSpan(start=start, end=length, kind="string"))
-        return length
-
-    position = 0
-    while position < length:
-        character = source[position]
-        match character:
-            case "/" if source.startswith("//", position):
-                newline = source.find("\n", position)
-                end = length if newline < 0 else newline
-                spans.append(ScriptSpan(start=position, end=end, kind="comment"))
-                position = end
-            case "/" if source.startswith("/*", position):
-                close = source.find("*/", position + 2)
-                end = length if close < 0 else close + 2
-                spans.append(ScriptSpan(start=position, end=end, kind="comment"))
-                position = end
-            case "'" | '"':
-                end = literal_end(character, position)
-                spans.append(ScriptSpan(start=position, end=end, kind="string"))
-                position = end
-                last_code, word = character, ""
-            case "`":
-                position = template_piece(position)
-                last_code, word = character, ""
-            case "/" if (
-                not last_code
-                or last_code in expression_openers
-                or word in expression_words
-            ):
-                end = regex_end(position)
-                spans.append(ScriptSpan(start=position, end=end, kind="string"))
-                position = end
-                last_code, word = "/", ""
-            case "{" if holes:
-                holes[-1] += 1
-                position += 1
-                last_code, word = character, ""
-            case "}" if holes and not holes[-1]:
-                holes.pop()
-                position = template_piece(position)
-                last_code, word = "`", ""
-            case "}" if holes:
-                holes[-1] -= 1
-                position += 1
-                last_code, word = character, ""
-            case _ if character.isspace():
-                position += 1
-            case _ if character.isalnum() or character in "_$":
-                position += 1
-                last_code, word = character, word + character
-            case _:
-                position += 1
-                last_code, word = character, ""
-    return spans
-
-
-def masked_typescript_lines(source: str, comments: bool) -> list[str]:
-    """The lines of TypeScript-family text with its prose blanked, columns kept.
-
-    String, template and regex text always goes, leaving the character that
-    opened it so a rule can still see that a literal stood there; ``comments``
-    says whether `//` and `/* */` runs go too, which is the difference
-    between what a "code" rule and a "comment" rule read.
-    """
-    spans = [
-        span
-        for span in typescript_spans(source)
-        if comments or span["kind"] == "string"
-    ]
-    lines: list[str] = []
-    offset = 0
-    index = 0
-    for line in source.splitlines(keepends=True):
-        content = line.splitlines()[0]
-        chars = list(content)
-        stop = offset + len(content)
-        while index < len(spans) and spans[index]["end"] <= offset:
-            index += 1
-        cursor = index
-        while cursor < len(spans) and spans[cursor]["start"] < stop:
-            span = spans[cursor]
-            kept = 1 if span["kind"] == "string" else 0
-            first = max(span["start"] + kept, offset)
-            last = min(span["end"], stop)
-            if first < last:
-                chars[first - offset : last - offset] = [" "] * (last - first)
-            cursor += 1
-        lines.append("".join(chars))
-        offset += len(line)
-    return lines
-
-
-def typescript_comment_columns(source: str) -> dict[int, int]:
-    """Map TypeScript-family line numbers to the column a comment opens at.
-
-    The last opening on each line, because a `//` runs to the end of its
-    line and nothing opens after it: a directive is written with `//`, so
-    the column that can hold one is the last. A block comment is recorded
-    where it opens and on no later line, so a `//` written inside one is
-    comment text rather than a comment.
-    """
-    columns: dict[int, int] = {}
-    openers = [span for span in typescript_spans(source) if span["kind"] == "comment"]
-    offset = 0
-    cursor = 0
-    for number, line in enumerate(source.splitlines(keepends=True), start=1):
-        stop = offset + len(line)
-        while cursor < len(openers) and openers[cursor]["start"] < stop:
-            columns[number] = openers[cursor]["start"] - offset
-            cursor += 1
-        offset = stop
-    return columns
-
-
 class MaskedSource(TypedDict):
     """One document's lines as each rule context reads them, and where comments open.
 
@@ -904,10 +665,10 @@ def masked_source(
     """Project a document into the surfaces its rules read, by its grammar.
 
     Python is read through its tokenizer, and where a fragment will not
-    tokenize the raw lines stand in with no comment map. The TypeScript
-    family is read through :func:`typescript_spans`, which has no failure
-    case: what it cannot classify it leaves as code. Text of neither family
-    is its own projection, every rule reading the whole line.
+    tokenize the raw lines stand in with no comment map. The TypeScript family
+    is read through :func:`~lup.policy.kernel.typescript.typescript_spans`,
+    which has no failure case: what it cannot classify it leaves as code. Text
+    of neither family is its own projection, every rule reading the whole line.
     """
     if python_source:
         return MaskedSource(
@@ -1227,12 +988,12 @@ def marker_decision(
             gate="feedback-removed",
             decision=KernelDecision(
                 "deny",
-                f"{removes} — {spelled}\n"
-                "Resolving a note means replacing `# lup:` "
-                "with `# lup: solved:` and keeping its text, so the claim can be "
-                "checked against what was asked; deleting it leaves nothing to "
-                "check. Where the note was mistaken rather than answered, "
-                "withdraw it with `dev comments --withdraw file:line --reason`",
+                f"{removes} — {spelled}",
+                recovery="Resolving a note means replacing `# lup:` with"
+                " `# lup: solved:` and keeping its text, so the claim can be"
+                " checked against what was asked; deleting it leaves nothing to"
+                " check. Where the note was mistaken rather than answered,"
+                " withdraw it with `dev comments --withdraw file:line --reason`.",
             ),
         )
     # Asked of the words, as survival is for open notes: a claim is lost when
@@ -1259,11 +1020,11 @@ def marker_decision(
             gate="claim-removed",
             decision=KernelDecision(
                 "deny",
-                f"this edit removes {claims} — {spelled}\n"
-                "Only the review pass "
-                "retires one — it either confirms the claim and removes the note "
-                "(`dev comments --retire file:line`), or restores it to open "
-                "feedback (`dev comments --restore file:line`)",
+                f"this edit removes {claims} — {spelled}",
+                recovery="Only the review pass retires one: it either confirms"
+                " the claim and removes the note (`dev comments --retire"
+                " file:line`), or restores it to open feedback (`dev comments"
+                " --restore file:line`).",
             ),
         )
     added_bodies = note_bodies(is_open) - note_bodies(was_open)
@@ -1375,10 +1136,12 @@ def empty_collection_exempt_lines(source: str) -> set[int]:
                         | ast.AnnAssign(target=ast.Name(id=name), value=value)
                     ) if empty_collection_literal(value):
                         loops = feeding[name] if name in feeding else None
-                        if in_loop:
-                            if loops is not None:
-                                mark(value)
-                        elif loops is None or all(loops):
+                        marked = (
+                            loops is not None
+                            if in_loop
+                            else loops is None or all(loops)
+                        )
+                        if marked:
                             mark(value)
                 visit(child, in_loop or is_loop(child))
 
@@ -1870,6 +1633,76 @@ def global_statement_sites(source: str) -> list[MatchSite]:
     if tree is None:
         return []
     return sites_at({node.lineno for node in nodes_of(tree, ast.Global)})
+
+
+def chain_continuation(node: ast.If) -> ast.If | None:
+    """The `if` an `else` holds alone, which is what an `elif` parses to.
+
+    Both spellings are one tree, so a lone `if` nested in an `else` is the
+    same chain written deeper, and this reads them alike.
+    """
+    match node.orelse:
+        case [ast.If() as tail]:
+            return tail
+        case _:
+            return None
+
+
+def elif_chain_sites(source: str) -> list[MatchSite]:
+    """Lines heading an `if` whose `else` holds nothing but another `if`.
+
+    Reported at the head rather than at every arm, because the remedy is one
+    rewrite of the whole chain, and a directive keeping one stands at one line.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return []
+    branches = nodes_of(tree, ast.If)
+    continued = {
+        id(tail) for node in branches if (tail := chain_continuation(node)) is not None
+    }
+    return sites_at(
+        {
+            node.lineno
+            for node in branches
+            if id(node) not in continued and chain_continuation(node) is not None
+        }
+    )
+
+
+def irrefutable(pattern: ast.pattern) -> bool:
+    """Whether a case pattern matches every subject, binding at most a name.
+
+    `_` and a bare capture are the two spellings; an or-pattern ending in one
+    is one too, since its last alternative catches whatever the rest let by.
+    """
+    match pattern:
+        case ast.MatchAs(pattern=None):
+            return True
+        case ast.MatchAs(pattern=ast.pattern() as inner):
+            return irrefutable(inner)
+        case ast.MatchOr(patterns=[*_, last]):
+            return irrefutable(last)
+        case _:
+            return False
+
+
+def wildcard_guard_sites(source: str) -> list[MatchSite]:
+    """Lines opening a guarded `case` whose pattern matches anything.
+
+    `case _ if …` and `case name if …` bind nothing the guard could not have
+    read off the subject itself, so the arm decides on the guard alone.
+    """
+    tree = python_tree(source)
+    if tree is None:
+        return []
+    return sites_at(
+        {
+            arm.pattern.lineno
+            for arm in nodes_of(tree, ast.match_case)
+            if arm.guard is not None and irrefutable(arm.pattern)
+        }
+    )
 
 
 def all_export_sites(source: str) -> list[MatchSite]:
@@ -2658,6 +2491,10 @@ def matcher_named(name: str) -> Callable[[str], list[MatchSite]] | None:
             return bare_except_sites
         case "except_baseexception_sites":
             return except_baseexception_sites
+        case "elif_chain_sites":
+            return elif_chain_sites
+        case "wildcard_guard_sites":
+            return wildcard_guard_sites
         case "global_statement_sites":
             return global_statement_sites
         case "all_export_sites":
@@ -2721,7 +2558,8 @@ def matched_lines(source: str, rows: list[AntiPatternRow]) -> dict[str, set[int]
             continue
         if parses:
             found[row["id"]] = lines_of(matcher(source))
-        elif row["strength"] == "strong":
+            continue
+        if row["strength"] == "strong":
             found[row["id"]] = set()
     return found
 
@@ -3048,16 +2886,15 @@ def anti_pattern_hits(
 
 def anti_pattern_denial(number: int, row: AntiPatternRow) -> KernelDecision:
     """Deny one matched line, saying whether a directive could have helped."""
-    refusal = (
-        " (no suppression: write the replacement)"
+    placement = (
+        "No suppression is accepted: write the replacement."
         if row["strength"] == "strong"
-        else ""
+        else f"Suppress on {suppression_placement(number)}."
     )
-    placement = refusal or f" — suppress on {suppression_placement(number)}"
     return KernelDecision(
         "deny",
-        f"line {number}: {row['message']}{placement} "
-        f"(rule {row['id']} — see docs/rules.md)",
+        f"line {number}: {row['message']} (rule {row['id']})",
+        recovery=f"{placement} See docs/rules.md.",
     )
 
 
@@ -3074,8 +2911,9 @@ def withdrawn_suppression_denial(number: int, row: AntiPatternRow) -> KernelDeci
         "deny",
         f"line {number}: this edit removes the `# lup: ignore[{row['id']}]` "
         f"covering it, and the line still trips the rule: {row['message']} "
-        f"— restore the directive or clear what it was silencing "
-        f"(rule {row['id']} — see docs/rules.md)",
+        f"(rule {row['id']})",
+        recovery="Restore the directive or clear what it was silencing. See"
+        " docs/rules.md.",
     )
 
 
@@ -3129,10 +2967,11 @@ def unresolved_anti_pattern_ask(number: int, row: AntiPatternRow) -> KernelDecis
     """
     return KernelDecision(
         "ask",
-        f"line {number}: {row['message']} — this gate could not resolve what the"
-        " receiver is declared on, so it cannot tell the defect from the"
-        " shape the rule permits; approve if the receiver is typed and not a"
-        f" mapping, and `dev check` will confirm it (rule {row['id']})",
+        f"line {number} may break rule {row['id']}; approve if its receiver is"
+        " typed and not a mapping, and `dev check` will confirm it",
+        recovery=f"{row['message']} The gate could not resolve what the receiver"
+        " is declared on, so it cannot tell the defect from the shape the rule"
+        " permits.",
     )
 
 
@@ -3155,10 +2994,11 @@ def spurious_refusal(number: int, dead: list[str], live: list[str]) -> KernelDec
     return KernelDecision(
         "deny",
         f"line {number}: this suppression names {named}, which nothing it guards "
-        f"trips{instead}. Drop {named} from it: a rule that does not fire is "
-        f"silenced by nothing, and the audit reports the directive spurious. One "
-        f"written on line {number} reaches that line, and where it stands alone "
-        "the line beneath its comment block (see docs/rules.md)",
+        f"trips{instead}",
+        recovery=f"Drop {named} from it: a rule that does not fire is silenced by"
+        f" nothing, and the audit reports the directive spurious. One written on"
+        f" line {number} reaches that line, and where it stands alone the line"
+        " beneath its comment block. See docs/rules.md.",
     )
 
 
@@ -3178,9 +3018,10 @@ def antipattern_decision(
     matched against masked source (string literals and comments both
     blanked) so prose never trips it, while a "comment" rule targets comment
     directives and sees comments intact. Python is masked through its
-    tokenizer and the TypeScript family through :func:`typescript_spans`;
-    without either (a file of neither family, a Python fragment that fails
-    to tokenize) every rule scans the raw line.
+    tokenizer and the TypeScript family through
+    :func:`~lup.policy.kernel.typescript.typescript_spans`; without either (a
+    file of neither family, a Python fragment that fails to tokenize) every
+    rule scans the raw line.
 
     A declared suppression is judged before it is asked about. One naming a
     rule that nothing it guards trips is refused outright: it silences
@@ -3512,17 +3353,17 @@ def path_rule_matches(path: str, path_exists: bool, row: PathRuleRow) -> bool:
 def protected_path_reason(path: str, matched: PathRuleRow) -> str:
     """One protected-path question, naming the path and the rule it tripped.
 
-    The row's reason states the category; the path and the pattern are what
-    the evaluator matched on, and a reviewer answering from the reason alone
-    needs all three to know what they are approving. Beside
-    :func:`path_rule_matches` so the words a question uses and the match that
-    raised it come from one module, for the edit gate and the shell path
-    alike.
+    The row's reason states the category and the path is what tripped it; the
+    pattern is named only where it differs from the path, since a reviewer
+    told that ``README.md`` matched the rule ``README.md`` learned nothing
+    from the second mention. Beside :func:`path_rule_matches` so the words a
+    question uses and the match that raised it come from one module, for the
+    edit gate and the shell path alike.
     """
-    return (
-        f"{path} matches the protected-path rule {matched['value']!r}:"
-        f" {matched['reason']}"
-    )
+    reason = matched["reason"]
+    if path == matched["value"]:
+        return reason if path in reason else f"{path}: {reason}"
+    return f"{path} is under {matched['value']}: {reason}"
 
 
 PACKAGE_MARKER_FILES = ("__init__.py",)
@@ -3749,6 +3590,7 @@ def decide_edit(
             hard=True,
             rule="edit:generated-plugin",
             evaluator="edit-gate",
+            recovery=GENERATED_PLUGIN_RECOVERY,
         )
 
     # Whether this path is the file it names is prior to every gate below,
@@ -3760,9 +3602,8 @@ def decide_edit(
             "displaced-path",
             KernelDecision(
                 "ask",
-                f"{path} resolves through a symlink to {displaced['lands']}, so"
-                " the conventions this edit is judged against are not the ones"
-                " covering the file it would write",
+                f"{path} is a symlink to {displaced['lands']}, so this edit was"
+                " checked against the wrong file's rules",
                 purpose="quality_review",
             ),
         )
@@ -3783,7 +3624,10 @@ def decide_edit(
         return judged(
             "foreign-repository",
             KernelDecision(
-                "ask", FOREIGN_REPOSITORY_REFERRAL, purpose="policy_override"
+                "ask",
+                FOREIGN_REPOSITORY_REFERRAL,
+                purpose="policy_override",
+                recovery=FOREIGN_REPOSITORY_RECOVERY,
             ),
         )
 
@@ -3847,6 +3691,7 @@ def decide_edit(
                 "ask",
                 protected_path_reason(path, protected),
                 purpose="quality_review",
+                recovery=protected["recovery"],
             ),
         )
     # Feedback is feedback wherever it is left, so this gate follows the file
@@ -3895,8 +3740,7 @@ def decide_edit(
             "full-write",
             KernelDecision(
                 "ask",
-                f"full-file writes require approval — {path} arrives whole,"
-                f" {arriving} at once",
+                f"{path} is written whole, {arriving} at once",
                 purpose="quality_review",
                 reviewer="supervisor_allowed",
             ),

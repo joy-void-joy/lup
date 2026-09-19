@@ -38,9 +38,18 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Literal, NotRequired, TypedDict, cast, get_type_hints
 
-from mcp.server import Server
+from mcp.server import Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
-from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent, Tool
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ContentBlock,
+    ImageContent,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
 from pydantic import BaseModel, ValidationError
 
 from lup.types import Decorator, EnvVars, JsonObject
@@ -94,25 +103,27 @@ def mcp_response(text: str, *, is_error: bool = False) -> ToolResponse:
     return response
 
 
-class CallToolResultWithAlias(CallToolResult):
-    """CallToolResult with snake_case alias for SDK compatibility.
-
-    Some SDK query runners check ``is_error`` (snake_case) but MCP's
-    CallToolResult uses ``isError`` (camelCase). This subclass adds a
-    property alias so both work.
-    """
-
-    @property
-    def is_error(self) -> bool:
-        """Snake_case alias for isError."""
-        return self.isError
-
-
 # MCP hands an arbitrary JSON args object validated by the per-tool BaseModel.
 type LupToolHandler = Callable[[JsonObject], Awaitable[ToolResponse]]
 
 # A tool's typed implementation: a validated input model in, an output model out.
 type ToolHandler[I: BaseModel, O: BaseModel] = Callable[[I], Awaitable[O]]
+
+
+class ServerCompanion(BaseModel, frozen=True):
+    """Work a tool server keeps up beside itself for as long as it serves.
+
+    A server's lifetime is the one signal a session gives off for free: the
+    runtime starts the server when the session opens and stops it when the
+    session ends, however that ending comes — a clean exit, a kill, a
+    container stopping. A companion turns that lifetime into something other
+    processes can read. The base names the operation and each companion
+    answers it; the server neither knows nor asks what any of them does.
+    """
+
+    async def run(self) -> None:
+        """Run until cancelled, which is the server stopping."""
+        raise NotImplementedError
 
 
 class LupMcpServerConfig(BaseModel, arbitrary_types_allowed=True):
@@ -125,6 +136,7 @@ class LupMcpServerConfig(BaseModel, arbitrary_types_allowed=True):
     name: str
     server: Server
     tool_names: list[str] = []
+    companions: list[ServerCompanion] = []
 
 
 class RawStdioServerConfig(TypedDict):
@@ -176,7 +188,7 @@ def relay_recursive_agent_to_mcp(
 ) -> McpServerEntry:
     """Forward a session's remaining allowance into a stdio tool process."""
     match server:
-        case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam arm
+        case LupMcpServerConfig():
             return server
         case {"command": str(command)}:
             relayed = RawStdioServerConfig(
@@ -199,6 +211,7 @@ def create_mcp_server(
     version: str = "1.0.0",
     tools: Sequence["LupMcpTool"] | None = None,
     instructions: str | None = None,
+    companions: Sequence[ServerCompanion] | None = None,
 ) -> LupMcpServerConfig:
     """Create an in-process MCP server with proper is_error handling.
 
@@ -207,6 +220,8 @@ def create_mcp_server(
         version: Server version string.
         tools: List of LupMcpTool instances created with the @lup_tool decorator.
         instructions: Server-wide guidance returned during MCP initialization.
+        companions: What the server keeps running beside itself while it
+            serves over stdio; each is cancelled when the server stops.
 
     Returns:
         LupMcpServerConfig for adapter conversion.
@@ -214,31 +229,59 @@ def create_mcp_server(
     A server built without tools still registers its handlers and
     advertises an empty tool list — selecting an unpopulated group is a
     valid (if useless) session, not a protocol error.
+
+    The handlers are handed to the server at construction, which is the
+    low-level API's one registration path: each receives the request
+    context and the request's own typed params, and answers with the whole
+    result model rather than a bare list. The context is unused because a
+    tool's session is the process it serves from, not the request.
     """
-    server = Server(name, version=version, instructions=instructions)
     registered = list(tools or [])
     tool_map = {tool_def.name: tool_def for tool_def in registered}
 
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
+    async def list_tools(
+        _context: ServerRequestContext[object],
+        _params: PaginatedRequestParams | None,
+    ) -> ListToolsResult:
         """Return the list of available tools."""
-        return [
-            Tool(
-                name=tool_def.name,
-                description=tool_def.description,
-                inputSchema=tool_def.input_schema,
+        return ListToolsResult(
+            tools=[
+                Tool(
+                    name=tool_def.name,
+                    description=tool_def.description,
+                    input_schema=tool_def.input_schema,
+                )
+                for tool_def in registered
+            ]
+        )
+
+    async def call_tool(
+        _context: ServerRequestContext[object], params: CallToolRequestParams
+    ) -> CallToolResult:
+        """Execute a tool by name with given arguments.
+
+        Every failure crosses as an ``is_error`` result carrying its own
+        words, the unknown name and the handler that raised alike. The
+        runner would otherwise answer a raised exception with a bare
+        ``Internal server error`` so that handler internals never reach the
+        wire -- and the agent on the other end of that line is the one
+        reader who has to know what went wrong to do anything about it.
+        """
+        if params.name not in tool_map:
+            return CallToolResult(
+                content=[
+                    TextContent(type="text", text=f"Tool '{params.name}' not found")
+                ],
+                is_error=True,
             )
-            for tool_def in registered
-        ]
-
-    @server.call_tool()
-    async def call_tool(name: str, arguments: JsonObject) -> CallToolResult:
-        """Execute a tool by name with given arguments."""
-        if name not in tool_map:
-            raise ValueError(f"Tool '{name}' not found")
-
-        tool_def = tool_map[name]
-        result = await tool_def.handler(arguments)
+        try:
+            result = await tool_map[params.name].handler(dict(params.arguments or {}))
+        except Exception as failure:
+            logger.exception("tool %s raised", params.name)
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"{params.name}: {failure}")],
+                is_error=True,
+            )
 
         is_error = "is_error" in result and bool(result["is_error"])
 
@@ -252,15 +295,23 @@ def create_mcp_server(
                         content.append(TextContent(type="text", text=text))
                     case {"type": "image", "data": str(data), "mimeType": str(mime)}:
                         content.append(
-                            ImageContent(type="image", data=data, mimeType=mime)
+                            ImageContent(type="image", data=data, mime_type=mime)
                         )
 
-        return CallToolResultWithAlias(content=content, isError=is_error)
+        return CallToolResult(content=content, is_error=is_error)
 
+    server = Server(
+        name,
+        version=version,
+        instructions=instructions,
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+    )
     return LupMcpServerConfig(
         name=name,
         server=server,
         tool_names=[t.name for t in registered],
+        companions=list(companions or []),
     )
 
 
@@ -275,7 +326,7 @@ def server_tool_names(server: McpServerEntry) -> list[str]:
     introspected without connecting, so they yield an empty list.
     """
     match server:
-        case LupMcpServerConfig():  # lup: ignore[own-model-dispatch] — seam arm
+        case LupMcpServerConfig():
             return list(server.tool_names)
         case _:
             return []
@@ -301,8 +352,23 @@ def serve_stdio(config: LupMcpServerConfig) -> None:
 
     async def run() -> None:
         init_options = config.server.create_initialization_options()
-        async with stdio_server() as (read_stream, write_stream):
-            await config.server.run(read_stream, write_stream, init_options)
+        beside = [
+            asyncio.create_task(companion.run(), name=type(companion).__name__)
+            for companion in config.companions
+        ]
+        try:
+            async with stdio_server() as (read_stream, write_stream):
+                await config.server.run(read_stream, write_stream, init_options)
+        finally:
+            # The companions' lifetime is the server's: cancelled when it stops,
+            # and a companion that stopped on its own is reported rather than
+            # lost, since its silence is what a peer would have read.
+            for task in beside:
+                task.cancel()
+            outcomes = await asyncio.gather(*beside, return_exceptions=True)
+            for task, outcome in zip(beside, outcomes, strict=True):
+                if isinstance(outcome, Exception):
+                    logger.error("companion %s stopped: %s", task.get_name(), outcome)
 
     asyncio.run(run())
 

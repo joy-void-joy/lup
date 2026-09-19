@@ -59,17 +59,26 @@ Examples::
     $ uv run lup-devtools sync mark-synced my-project --at 4c6293a6
     $ uv run lup-devtools sync setup my-project /path/to/repo --synced
     $ uv run lup-devtools sync setup my-project /path/to/repo --branch main
+    $ uv run lup-devtools sync grant nvidia.com/gpu=all
+    $ uv run lup-devtools sync revoke nvidia.com/gpu=all
 """
 
 import json
 import logging
+import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Literal, Required, TypedDict, get_args
+from typing import Annotated, Literal, NotRequired, Required, TypedDict, get_args
 
 import sh
 import typer
-from pydantic import BaseModel, ConfigDict, TypeAdapter, with_config
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    TypeAdapter,
+    ValidationError,
+    with_config,
+)
 
 from lup.workspace.paths import project_root
 import lup.harness.content.docs.upstream_reports as upstream_reports
@@ -77,6 +86,13 @@ from lup.devtools.harness.preflight import reopened
 from lup.devtools.subapps import subapp
 from lup.devtools.utils import decode_stderr, format_table, short_sha
 from lup.execution.shell import git
+from lup.harness.devices import Device, registered_devices
+from lup.harness.requirements import Finding, Manifest
+from lup.harness.toolchain import (
+    container_client,
+    for_host,
+    granted_device_requirement,
+)
 from lup.policy.assets.host import launched, measured_boundary
 from lup.sandbox.rail import AccessibleRoot
 
@@ -167,6 +183,15 @@ class SyncConfig(TypedDict):
     """
 
     projects: list[ProjectEntry]
+    devices: NotRequired[list[str]]
+    """The host devices sessions on this machine are granted, by CDI name.
+
+    Read from the local file alone and written by `sync grant`. Beside the
+    mounts because it is the same kind of claim -- what a session opened here
+    reaches beyond its checkout -- and in the gitignored half for the reason
+    the ``mount`` key is written or absent: which GPU a machine holds is that
+    machine's fact, and the committed file is scaffold every adopter and
+    every contributor runs from."""
 
 
 SYNC_CONFIG_ADAPTER = TypeAdapter(SyncConfig)
@@ -246,17 +271,33 @@ def ensure_ref_symlink(name: str, target: str) -> None:
     link is re-pointed at its current path; a pre-existing non-symlink at that
     name is left untouched so we never clobber real files.
     """
-    refs_dir().mkdir(exist_ok=True)
     link = refs_dir() / name
     target_path = Path(target).resolve()
-    if link.is_symlink():
-        if link.resolve() == target_path:
-            return
-        link.unlink()
-    elif link.exists():
-        logger.warning("refs/%s exists but is not a symlink, skipping", name)
+    # A contained session holds `refs/` read-only, so a session cannot repoint
+    # what confines it -- and a link that has to move then cannot. The link is
+    # a shortcut and nothing a fetch depends on, so the sync goes on with the
+    # shortcut stale and says so, rather than aborting every command in the
+    # family before it has fetched anything.
+    try:
+        refs_dir().mkdir(exist_ok=True)
+        match (link.is_symlink(), link.exists()):
+            case (True, _):
+                if link.resolve() == target_path:
+                    return
+                link.unlink()
+            case (False, True):
+                logger.warning("refs/%s exists but is not a symlink, skipping", name)
+                return
+        link.symlink_to(target_path)
+    except OSError as error:
+        logger.warning(
+            "refs/%s could not be pointed at %s (%s); the shortcut is stale and "
+            "the sync continues without it",
+            name,
+            target_path,
+            error.strerror,
+        )
         return
-    link.symlink_to(target_path)
     logger.debug("refs/%s -> %s", name, target_path)
 
 
@@ -377,6 +418,29 @@ def clone_upstream(proj: ProjectEntry, repository: Path) -> Upstream:
     )
 
 
+def registered_upstream(proj: ProjectEntry, path: Path) -> Upstream:
+    """A registration naming a path: somebody's own checkout, read where they work.
+
+    A plain checkout is read at its HEAD, which is what they have. A bare
+    repository has no HEAD worth reading — it names whatever branch the
+    clone was made on, which for a clone kept beside its worktrees is the
+    default branch and not the one anybody links against — so it is read at
+    the branch the registration names, as that clone's *own* ref rather
+    than a remote-tracking one: the user's clone is the upstream here, and
+    what they committed on that branch is what a linked project builds on.
+    The commits are read from the worktree attached for the branch where
+    one is, and from the bare half otherwise.
+    """
+    if not bare_repository(path):
+        return Upstream(checkout=path)
+    branch = clone_branch(proj, path)
+    attached = path / "tree" / branch
+    return Upstream(
+        checkout=attached if branch and attached.is_dir() else path,
+        tip=f"refs/heads/{branch}" if branch else "HEAD",
+    )
+
+
 def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """Where this registration already is, WITHOUT cloning or fetching.
 
@@ -385,7 +449,7 @@ def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """
     path = proj.get("path", "")
     if path and Path(path).exists():
-        return Upstream(checkout=Path(path))
+        return registered_upstream(proj, Path(path))
     repository = cached_clone(proj["name"])
     return None if repository is None else clone_upstream(proj, repository)
 
@@ -470,6 +534,54 @@ def accessible_roots(
     return [
         root for project in load_projects() if (root := located(project)) is not None
     ]
+
+
+def granted_devices(report: Callable[[str], None] = typer.echo) -> list[Device]:
+    """Every host device this machine grants its sessions, as the launcher takes them.
+
+    Read from the local file alone, never the merged registry: `sync.json` is
+    committed scaffold, and a device named there would be handed to sessions
+    on every adopter's machine by an author who has never seen one of them.
+
+    A name the specification's grammar refuses is reported and left out
+    rather than failing the launch, the way a registration that cannot be
+    materialized is: this is a hand-editable file, and a launch is not where
+    a typo in it gets fixed. A grant `sync grant` wrote was validated on the
+    way in, so the report only ever names a hand edit.
+    """
+
+    def declared(name: str) -> Device | None:
+        try:
+            return Device(name=name)
+        except ValidationError:
+            report(
+                f"sync.json.local grants {name!r}, which is not a CDI device name "
+                "(vendor/class=device), so it stays ungranted"
+            )
+            return None
+
+    return [
+        device
+        for name in load_json(local_file()).get("devices", [])
+        if (device := declared(name)) is not None
+    ]
+
+
+def verified_grant(device: Device) -> Finding:
+    """Exercise one grant the way `harness requirements` will, before writing it.
+
+    The same requirement the host roster builds per grant, pointed at this
+    machine's container client the same way, so what a grant proves at the
+    moment it is made is what the roster re-proves at setup and nothing else:
+    a throwaway container started with the device and nothing more.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    aimed = for_host(
+        Manifest(requirements=[granted_device_requirement(device)]),
+        container_client(),
+        project_root(),
+    )
+    return aimed.check(dict(environ), setting_up=True)[0]
 
 
 def clone_bare(url: str, repository: Path, report: Callable[[str], None]) -> None:
@@ -612,7 +724,7 @@ def ensure_local(
     name = proj["name"]
     if path and Path(path).exists():
         ensure_ref_symlink(name, path)
-        return Upstream(checkout=Path(path))
+        return registered_upstream(proj, Path(path))
 
     url = proj.get("url", "")
     repository = cached_clone(name)
@@ -694,6 +806,27 @@ def status_cmd() -> None:
     resetting. Run ``sync fetch`` to materialize and refresh repos.
     """
     projects = load_projects()
+    granted = granted_devices()
+    if granted:
+        # Said before the projects, and whether or not any project is
+        # tracked: a grant is this machine's own claim, and a machine that
+        # granted a GPU and tracks nothing has still made it.
+        registry = registered_devices()
+        typer.echo()
+        typer.echo(
+            format_table(
+                ("Device", "Registry"),
+                [
+                    [
+                        device.name,
+                        "registered"
+                        if device.name in registry.names
+                        else "no spec names it",
+                    ]
+                    for device in granted
+                ],
+            )
+        )
 
     if not projects:
         typer.echo("No projects tracked. Check sync.json(.local) or run 'setup'.")
@@ -954,3 +1087,72 @@ def setup_project(
             typer.echo(f"  Reopen this conversation to mount it: {spelled}")
     if synced:
         typer.echo(f"  Marked as synced at {short_sha(head)}")
+
+
+@app.command("grant")
+def grant_device(
+    device: Annotated[
+        str,
+        typer.Argument(help="A CDI device name, such as nvidia.com/gpu=all"),
+    ],
+) -> None:
+    """Grant sessions on this machine a host device (writes to sync.json.local).
+
+    Verified as it is made: a throwaway container is started with the device
+    and nothing else, which proves the engine honours the CDI registry and a
+    spec on this machine resolves the name -- the two halves that pass alone
+    and fail together. Refused in the engine's own words otherwise, with what
+    registers a spec, because the fix is made once on this machine and this
+    is the moment somebody is making a claim about it.
+
+    Written to the local file alone, like a ``--mount`` registration and for
+    the same reason: which GPU a machine holds is that machine's fact, and
+    the committed file is scaffold every adopter runs from.
+    """
+    try:
+        granted = Device(name=device)
+    except ValidationError as error:
+        raise typer.BadParameter(
+            f"{device!r}: a device is named the way CDI names it, "
+            "vendor/class=device, such as nvidia.com/gpu=all"
+        ) from error
+    finding = verified_grant(granted)
+    for notice in finding.notices():
+        notice.say()
+    if not finding.working:
+        typer.echo(f"{granted.name} was not granted; see the check above.")
+        raise typer.Exit(1)
+
+    local_data = load_json(local_file())
+    names = local_data.get("devices", [])
+    if granted.name not in names:
+        local_data["devices"] = [*names, granted.name]
+        save_local(local_data)
+    typer.echo(
+        f"Granted {granted.name} to sessions on this machine — takes effect at "
+        "the next launch, which is when devices are handed over"
+    )
+    launch = launched(measured_boundary(project_root()))
+    if launch:
+        spelled = " ".join(["uv", "run", "lup-devtools", *reopened(launch)])
+        typer.echo(f"  Reopen this conversation to hold it: {spelled}")
+
+
+@app.command("revoke")
+def revoke_device(
+    device: Annotated[
+        str,
+        typer.Argument(help="A granted device's CDI name, as `sync status` lists it"),
+    ],
+) -> None:
+    """Take a device back from sessions on this machine (writes to sync.json.local)."""
+    local_data = load_json(local_file())
+    names = local_data.get("devices", [])
+    if device not in names:
+        typer.echo(
+            f"{device} is not granted on this machine; `sync status` lists what is."
+        )
+        raise typer.Exit(1)
+    local_data["devices"] = [name for name in names if name != device]
+    save_local(local_data)
+    typer.echo(f"Revoked {device}; the next launch opens without it")

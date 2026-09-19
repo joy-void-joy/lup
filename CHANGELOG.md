@@ -6,13 +6,12 @@ Breaking reorganisation of the library's top level. Thirty-four entries became
 twenty by asking of each one which of four kinds it is: a foundation that
 imports nothing else here, a subject, the one vendor boundary, or tooling.
 Every import path an adopter holds is affected, and the migration is derived
-rather than written. The surface as it stood before the move is checked in, so
-one command reads it against whatever tree is in front of it and prints the
-exact `dev relocate` invocation — 106 module pairs — that repoints a checkout:
+rather than written. Both ends of the range are read out of git, so one command
+prints the exact `dev relocate` invocation that repoints a checkout from
+whichever commit it stands at:
 
 ```sh
-uv run lup-devtools dev preserve migration \
-    --capture preservation-capture-before-hierarchy.json
+uv run lup-devtools dev migrate map c564bc01a..
 ```
 
 Derived rather than pasted here for the reason the reorganisation itself gives:
@@ -75,6 +74,29 @@ the page mentioned. Every other export in the ledger resolved to its new home.
 - Version directory names parse with `semver`, so an experiment arm's
   `+build` suffix orders with the release it came from, and `resolve_version`
   takes the counter and the word for what it counts as overridable defaults.
+
+### What this release carries no migration for
+
+A repository declares which of its subtrees it publishes nothing out of, in
+`DevProject.internal_modules`, and the preservation gate walks what is left.
+Two are declared here, and what went from them is not a break an adopter can
+meet:
+
+- **`lup_template`**, the scaffold. `dev init` copies this half into the
+  adopting repository and renames it, so its names arrive there as that
+  project's own source rather than as an import. Thirteen went, among them
+  `build_session_toolset`, the five `*_GROUP` toolsets, and the `library_*`
+  commands.
+- **`lup.policy.kernel`**, compiled into the hermetic dispatcher each
+  generated plugin runs and reached there as bare `kernel.*`. Forty-seven
+  went, nearly all of them the hand-rolled shell tokenizer — `ShellToken`,
+  `Lexeme`, `Scan`, `tokenize_shell`, `read_heredoc_bodies` — and the
+  control-flow readers beside it, replaced in place.
+
+A project that imported either subtree was reaching past what this repository
+publishes. The declaration sits in the catalog with its reasoning, so the
+judgement can be read and argued with rather than inferred from a gate that
+quietly stopped firing.
 
 ## 0.2.0 — 2026-07-23
 

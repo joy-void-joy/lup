@@ -32,7 +32,27 @@ scope that excludes sandbox-only slices
 - `$lup:import feature/ref clipboard workflow` — a ref in this
 repository, with the base resolved and frozen before inventory
 
-If no arguments provided, Ask the user directly, offering concrete options, and wait for the answer: which project, path, worktree, or ref to import from, and what scope to import
+**With no arguments this is a sweep** rather than a question: every tracked
+project is read for news, and what that finds becomes the scope. It is the
+harvest direction — this repository reading other people's commits — and it
+runs before anything below:
+
+```bash
+uv run lup-devtools sync fetch
+uv run lup-devtools sync status
+```
+
+`status` reads what is already cached, so the fetch comes first or a quiet
+answer may only mean nothing new was downloaded. Where no project has new
+commits, report that and stop. Where one or more do, read each project's
+commits with `sync log <project>` and `sync diff <project> <sha>` — the
+**complete** diff, never skimmed — build the inventory before classifying
+anything, then work through the steps below once per project with its range as
+the frozen one. Advance the checkpoint with `sync mark-synced <project>` after
+a full pass, whether or not anything was applied.
+
+Moving *this* project onto a newer version of what it was built from is the
+other direction and another skill: `$lup:update` moves every carrier at once and reads no commits.
 
 If only a source selector is provided (single word, no description), Ask the user directly, offering concrete options, and wait for the answer: what feature or scope to import from that source
 

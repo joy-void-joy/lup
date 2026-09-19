@@ -83,6 +83,32 @@ def current_branch() -> str:
     return git.out("branch", "--show-current").strip()
 
 
+def readable_ref(branch: str) -> str:
+    """The ref this checkout reads that branch through, local first, or empty.
+
+    A clone holds the branch it checked out and nothing else, and a pull
+    request's checkout stands on no branch at all, so a name that is a local
+    ref in a working checkout is only a remote-tracking one there. Both
+    answers are the same branch and the ref that answered is returned, because
+    every caller goes on to hand it to git.
+
+    It is asked of the branch under question *and* of the branch that question
+    is settled against. Asking it of one alone was the defect: a subject
+    resolved through ``origin/`` was compared with a bare integration name
+    that resolved to nothing, so `git merge-base --is-ancestor` failed on its
+    second argument and the landing verdict came back false — reported as
+    "origin/main has not reached main", which is one ref declining to have
+    reached itself.
+    """
+    for ref in (branch, f"origin/{branch}"):
+        try:
+            git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+        except sh.ErrorReturnCode:
+            continue
+        return ref
+    return ""
+
+
 class GateVerdict(BaseModel, frozen=True):
     """Whether a condition has come true, and what the tree said when asked.
 
@@ -162,13 +188,7 @@ class BranchInPlay(Gate, frozen=True):
         what the landing question needs. Returning which ref answered rather
         than that one did keeps the caller from having to guess again.
         """
-        for ref in (self.argument, f"origin/{self.argument}"):
-            try:
-                git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
-            except sh.ErrorReturnCode:
-                continue
-            return ref
-        return ""
+        return readable_ref(self.argument)
 
     def recorded(self) -> GateVerdict:
         """The verdict for a ref this checkout cannot read, from what lup kept.
@@ -210,12 +230,22 @@ class BranchInPlay(Gate, frozen=True):
         readable = self.visible()
         if not readable:
             return self.recorded()
-        if is_ancestor(readable, integration):
+        landed_in = readable_ref(integration)
+        if not landed_in:
             return GateVerdict(
-                fired=True, evidence=f"{readable} has reached {integration}"
+                fired=False,
+                evidence=(
+                    f"{readable} cannot be judged here: this checkout reads "
+                    f"{integration} through no ref, so whether anything has "
+                    "landed is a question it cannot answer"
+                ),
+            )
+        if is_ancestor(readable, landed_in):
+            return GateVerdict(
+                fired=True, evidence=f"{readable} has reached {landed_in}"
             )
         return GateVerdict(
-            fired=False, evidence=f"{readable} has not reached {integration}"
+            fired=False, evidence=f"{readable} has not reached {landed_in}"
         )
 
 

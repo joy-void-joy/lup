@@ -314,6 +314,22 @@ than forking this one.
 """
 
 
+def declared_seam(seams: list[Seam], call: str, keyword: str) -> Seam:
+    """The one seam a project declares for a call and keyword.
+
+    Every project is asked about the library's seams, so one is always there
+    to find; a project that overrode it declares the same call and keyword at
+    a different module, and that is the one to write.
+    """
+    matches = [seam for seam in seams if seam.call == call and seam.keyword == keyword]
+    if not matches:
+        raise ValueError(
+            f"this project declares no seam for {call}({keyword}=...); the "
+            "library's default is one, so a roster without it dropped one"
+        )
+    return matches[0]
+
+
 def survey(catalog: Path | None, seams: list[Seam] = DECLARED_SEAMS) -> list[str]:
     """Every seam, what it holds, and where it is written.
 
@@ -344,11 +360,15 @@ class Answers(BaseModel, frozen=True):
             self.own or self.disown or self.retire or self.keep or self.retire_all
         )
 
-    def ownership(self, catalog: Path) -> Iterator[str]:
+    def ownership(self, catalog: Path, seams: list[Seam]) -> Iterator[str]:
         """Write who owns which files, and say what changed."""
         if not self.own and not self.disown:
             return
-        site = read_seam(catalog, "HookSet", "human_owned_files").editable()
+        site = (
+            declared_seam(seams, "HookSet", "human_owned_files")
+            .read(catalog)
+            .editable()
+        )
         held = site.paths()
         updated = [
             *[path for path in held if path not in self.disown],
@@ -357,7 +377,9 @@ class Answers(BaseModel, frozen=True):
         site.rewritten_paths(updated)
         yield f"human_owned_files: {', '.join(sorted(updated)) or 'nothing'}"
 
-    def rules(self, catalog: Path, every: list[str]) -> Iterator[str]:
+    def rules(
+        self, catalog: Path, every: list[str], seams: list[Seam]
+    ) -> Iterator[str]:
         """Write which rules this project holds itself to, and say what changed.
 
         ``retire_all`` names every id the library ships rather than adding a
@@ -368,7 +390,7 @@ class Answers(BaseModel, frozen=True):
         """
         if not self.retire and not self.keep and not self.retire_all:
             return
-        site = read_seam(catalog, "RuleSelection", "retired").editable()
+        site = declared_seam(seams, "RuleSelection", "retired").read(catalog).editable()
         held = site.strings()
         asked = [*self.retire, *(every if self.retire_all else [])]
         updated = [
@@ -378,10 +400,19 @@ class Answers(BaseModel, frozen=True):
         site.rewritten_strings(updated)
         yield f"retired rules: {len(updated)} of {len(every)}"
 
-    def settled(self, catalog: Path, every: list[str]) -> list[str]:
-        """Apply what was asked, and name the regeneration that has to follow."""
+    def settled(
+        self, catalog: Path, every: list[str], seams: list[Seam] = DECLARED_SEAMS
+    ) -> list[str]:
+        """Apply what was asked, and name the regeneration that has to follow.
+
+        Written through the project's own seams rather than the library's
+        list, so a project that declared a seam somewhere other than the
+        catalog is written there: reading a seam from one file and writing it
+        into another is how a retirement reached the hooks and never the
+        guidance that teaches the rule.
+        """
         return [
-            *self.ownership(catalog),
-            *self.rules(catalog, every),
+            *self.ownership(catalog, seams),
+            *self.rules(catalog, every, seams),
             "Run `lup-devtools harness generate all` so the compiled trees agree.",
         ]

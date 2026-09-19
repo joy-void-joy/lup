@@ -143,6 +143,7 @@ async def test_amend_and_list_read_standing_fresh(tmp_path: Path) -> None:
 
     assert amended.standing == "done"
     assert [node.slug for node in done.nodes] == ["new"]
+    assert done.nodes[0].author.startswith("session:")
     assert [node.slug for node in moved.nodes] == ["new"]
     with pytest.raises(ToolError, match="ISO 8601"):
         await served["ledger_list"](ListInput(since="yesterday"))

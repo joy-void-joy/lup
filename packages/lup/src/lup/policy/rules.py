@@ -31,7 +31,6 @@ from lup.policy.assets.host import (
     foreign_repository,
     outside_this_project,
     recoverable_write_targets,
-    repository_worktrees,
     resolved_write_targets,
     rewritten_text,
     tracked_write_targets,
@@ -39,7 +38,9 @@ from lup.policy.assets.host import (
 from lup.policy.kernel.effects import STRENGTH
 from lup.policy.kernel.lex import (
     authored_writes,
-    parse_shell_words,
+    command_segments,
+    parse_shell,
+    redirection_verdict,
     shell_flag_write_targets,
     shell_path_verb_targets,
     shell_sed_rewrites,
@@ -159,11 +160,18 @@ def command_words(words: list[str]) -> list[str]:
 
 
 def parse_shell_segments(command: str) -> list[ShellSegment] | None:
-    """Expose validated segment models for compatibility consumers."""
-    segments = parse_shell_words(command)
-    if isinstance(segments, KernelDecision):
+    """Expose validated segment models for compatibility consumers.
+
+    ``None`` for a line the kernel would not read as plain segments: one that
+    does not parse, runs nothing, or carries a redirection it would stop when
+    judged with no facts about the filesystem. A consumer reading only argv
+    would otherwise wave through `echo x > .git/HEAD` as an `echo`.
+    """
+    tree = parse_shell(command)
+    if isinstance(tree, KernelDecision) or redirection_verdict(tree) is not None:
         return None
-    return [ShellSegment(words=words) for words in segments]
+    segments = command_segments(tree)
+    return [ShellSegment(words=words) for words in segments] if segments else None
 
 
 class ShellPolicy(DecisionPolicy[ShellCommand]):
@@ -408,7 +416,6 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 ),
                 directory_targets=directory_write_targets(acted_on, root),
                 empty_directories=empty_directory_targets(acted_on, root),
-                repository_worktrees=repository_worktrees(root),
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,
                 target_tables=self.target_tables,
@@ -423,6 +430,10 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 escapable=self.escapable,
                 recovered=self.recovered,
                 contained=self.contained,
+                # The same root the write readings above resolve against, so
+                # an absolute path inside the checkout reaches the declared
+                # roles that are anchored at its top.
+                checkout_root=str(root),
                 inside_placement=self.inside_placement,
                 relayed=self.relayed,
             )
@@ -466,6 +477,8 @@ class PathRule(BaseModel, frozen=True):
     kind: PathRuleKind
     value: str
     reason: str
+    recovery: str = ""
+    """What the agent does instead of writing here, where there is such a route."""
     allow_autonomous: bool = False
 
     def matches(self, path: Path) -> bool:
@@ -481,6 +494,7 @@ def path_rule_row(rule: PathRule) -> PathRuleRow:
         kind=rule.kind,
         value=rule.value,
         reason=rule.reason,
+        recovery=rule.recovery,
         allow_autonomous=rule.allow_autonomous,
     )
 
@@ -490,10 +504,8 @@ def human_owned_path_rule(path: str) -> PathRule:
     return PathRule(
         kind="exact",
         value=path,
-        reason=(
-            f"{path} is human-authored; propose changes via AskUserQuestion"
-            " instead of editing"
-        ),
+        reason=f"{path} is human-authored",
+        recovery="Propose the exact change and let the user apply it.",
     )
 
 

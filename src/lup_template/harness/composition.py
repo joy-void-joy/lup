@@ -12,7 +12,7 @@ from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.common import RuleSelection
 from lup.devtools.dev.rules import write_rule_reference
-from lup.devtools.dev.workflow import write_workflow
+from lup.devtools.dev.workflow import write_publish, write_workflow
 from lup.devtools.harness.composition import (
     ClaudeComposer,
     CodexComposer,
@@ -31,6 +31,7 @@ from lup.web.schema import write_view_schema
 from lup.providers.profiles import ProfileDirectory
 from lup.workspace.paths import project_root
 from lup_template.harness.catalog import (
+    PUBLISH,
     WORKFLOW,
     declared_hook_set,
     portable_harness,
@@ -102,6 +103,7 @@ TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target
 REPOSITORY_WIDE: list[RepositoryWriter] = [
     partial(write_rule_reference, selection=declared_hook_set().rules),
     partial(write_workflow, WORKFLOW),
+    partial(write_publish, PUBLISH),
     partial(write_generated_paths, TARGETS),
     # The schema before the bundles, because the frontend build compiles its
     # types from it: written in this order, one generation leaves both true.

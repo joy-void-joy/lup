@@ -22,6 +22,7 @@ import {
   type Call,
   type Mounted,
 } from "../testing";
+import { elements } from "./GraphPane";
 import { router } from "./router";
 
 function node(
@@ -43,6 +44,7 @@ function node(
     sound,
     text: `${title}, in full`,
     priority: 1,
+    author: "session:t#1",
     moved: "2026-09-09T10:00:00+00:00",
   };
 }
@@ -188,5 +190,17 @@ describe("the explorer", () => {
     expect(shown.root.querySelector(".rows")).toBeNull();
     expect(decodeURIComponent(window.location.hash)).toContain("view=graph");
     expect(one(shown.root, '.views a[aria-current="page"]').textContent).toBe("graph");
+  });
+});
+
+describe("the graph's elements", () => {
+  test("nest a node inside its container and drop the edge the nesting already shows", () => {
+    const drawn = elements(graph, "corpus:rests_on");
+    const alpha = drawn.find((element) => element.data["id"] === "n1");
+    expect(alpha?.data["parent"]).toBe("n2");
+    expect(drawn.some((element) => element.data["id"] === "n1->n2:corpus:rests_on")).toBe(false);
+    expect(drawn.some((element) => element.data["id"] === "n2->n3:coordination:blocks")).toBe(true);
+    const flat = elements(graph, "");
+    expect(flat.find((element) => element.data["id"] === "n1")?.data["parent"]).toBeUndefined();
   });
 });

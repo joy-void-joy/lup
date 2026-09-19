@@ -58,7 +58,10 @@ def test_an_unlisted_origin_asks_where_the_profile_keeps_it_visible() -> None:
     settled = verdict("https://elsewhere.test/page")
 
     assert settled.effect == "ask"
-    assert "outside the declared documentation scopes" in settled.reason
+    assert settled.reason == (
+        "https://elsewhere.test/page is outside every declared fetch scope"
+    )
+    assert "dev policy --kind fetch" in settled.recovery
 
 
 def test_an_unlisted_origin_defers_where_the_profile_declared_that() -> None:

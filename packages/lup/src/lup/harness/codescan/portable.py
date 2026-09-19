@@ -11,10 +11,12 @@ sentence says nothing about prose; the runtime declares the words within it
 instead, and those are checked against what it actually spells.
 """
 
+from collections.abc import Callable
 from typing import get_args
 
 from pydantic import BaseModel
 
+from lup.harness.codescan.common import ProjectRuleFamily, Rule, RuleExample
 from lup.harness.contracts import NativeSpellings
 from lup.harness.models import Harness, PluginLocation, TreeLocation
 
@@ -91,3 +93,41 @@ def prose_breaches(
         for declaration_id, text in prose
         if spelling in text
     ]
+
+
+class CompositionRule(Rule):
+    """A rule decided over the assembled harness, which only generation sees.
+
+    ``judge`` is the rule: handed the composed declaration and the runtimes
+    that render it, it returns every native spelling the prose holds. The
+    composition root refuses to render while any stands, which is the one
+    surface that can, since a description built elsewhere and folded into a
+    prompt appears in no file a scanner could read.
+    """
+
+    family: ProjectRuleFamily
+    scope: str
+    judge: Callable[[Harness, list[NativeSpellings]], list[ProseBreach]]
+
+    @property
+    def defined_in(self) -> str:
+        """The module holding the judge, which is where the rule is enforced."""
+        return self.judge.__module__
+
+
+PORTABLE_RULE = CompositionRule(
+    id=RULE_ID,
+    family="spelling",
+    scope="Portable harness declarations",
+    examples=[
+        RuleExample(code="Edit `.claude/settings.json` by hand", verdict="flagged"),
+        RuleExample(code="Edit the settings file by hand", verdict="cleared"),
+    ],
+    message=(
+        "Prose every native tree renders names no platform: the vocabulary is "
+        "whatever the adapters spell, so a location, product, or tool a runtime "
+        "can spell reaches prose through a typed part instead."
+    ),
+    judge=prose_breaches,
+)
+"""The portable-content rule, declared beside the judge that decides it."""

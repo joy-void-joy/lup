@@ -171,10 +171,11 @@ def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
         "enabled": True,
         "excludedCommands": list(hooks.sandbox.excluded_commands),
         "network": {"allowedDomains": domains},
-        "filesystem": {
-            "denyWrite": [path.as_posix() for path in hooks.human_owned_files],
-            "allowWrite": list(hooks.sandbox.writable_paths),
-        },
+        # No write denials: a human-owned path is judged by the policy, which
+        # asks and carries the author's answer, where a denial in the runtime's
+        # own sandbox refused the write outright and could put nothing to
+        # anybody.
+        "filesystem": {"allowWrite": list(hooks.sandbox.writable_paths)},
         "credentials": {
             "files": [
                 {"path": path, "mode": "deny"}

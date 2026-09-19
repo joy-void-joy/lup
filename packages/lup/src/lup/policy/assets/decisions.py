@@ -24,8 +24,11 @@ against the workspace.
 from pathlib import Path
 
 from host import (
+    approval_fingerprint,
     contained,
     defers_unjudged,
+    note_asked,
+    remembered_approval,
     delivers,
     measured_boundary,
     unleased_write_targets,
@@ -38,26 +41,23 @@ from host import (
     managed_script_roots,
     outside_this_project,
     patch_write_targets,
-    peer_addresses,
-    peer_listing,
-    claim_holders,
+    peer_store,
     close_claim_window,
     declared_identity,
     open_claim_window,
-    record_claims,
     recoverable_write_targets,
     resolved_write_targets,
     rewritten_text,
     record_deferral,
     record_question,
     committed_text,
-    repository_worktrees,
     resolved_refutations,
     tracked_write_targets,
     undo_snapshot,
     worktree_path,
 )
 from kernel.decision import KernelDecision
+from coordination import store
 from kernel.edit import (
     awaits_resolution,
     decide_edit,
@@ -83,6 +83,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
+from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
@@ -107,6 +108,7 @@ from policy_data import (
     RUNNER_TARGETS,
     SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
+    SPAWN_NAMES,
 )
 
 
@@ -119,6 +121,7 @@ def bash_decision(
     cwd: Path | None,
     relayed: bool = False,
     autonomous: bool = False,
+    park: bool = True,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -191,7 +194,6 @@ def bash_decision(
         ),
         directory_targets=directory_write_targets(acted_on, cwd),
         empty_directories=empty_directory_targets(acted_on, cwd),
-        repository_worktrees=repository_worktrees(cwd),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
@@ -227,6 +229,11 @@ def bash_decision(
         # promised is a fact about the host with no runtime variation to it,
         # so neither dispatcher is given the chance to forget it.
         contained=inside,
+        # Where this checkout sits, so an absolute spelling of a path inside
+        # it is read back to the form the declared roles are anchored at. The
+        # host's to supply for the reason it resolves symlinks: a fact about
+        # this machine, which the kernel holds none of.
+        checkout_root=str(cwd or Path.cwd()),
         # The other half of that pair, and the reason the first one alone
         # settles nothing: a container is a promise about where an operation
         # lands, and `bounded()` counts it only where the launch measured that
@@ -296,12 +303,17 @@ def bash_decision(
         verdict.effect
     ):
         verdict = authored
+    # Before the relay, because a question the author already answered for
+    # this exact call is not a question, and parking it would hand the queue
+    # one nobody needs to answer.
+    if verdict.effect == "ask":
+        verdict = remembered_or_asked(verdict, cwd, "shell", command)
     # Parked before anything is rendered, because the relay is the durable
     # record every final ask is written to and the provider's own prompt is
     # that record's renderer rather than a second authority. Written here, at
     # the one call site both runtimes pass through, so neither can reach a
     # question the queue does not hold.
-    if verdict.effect == "ask":
+    if verdict.effect == "ask" and park:
         record_question(
             cwd,
             command,
@@ -334,6 +346,19 @@ def bash_decision(
     )
 
 
+def session_contained(cwd: Path | None) -> bool:
+    """Whether this session sits inside the container its launch measured.
+
+    The fact a renderer hands ``KernelDecision.placed`` beside its own
+    ``escapable``: a runtime's per-call escape reaches the host only where no
+    container is between, and the question an approved crossing asks has to
+    say which of the two it buys. Read here, from the same ledger the verdict
+    read, so neither dispatcher spells the measurement for itself — the same
+    reason ``bash_decision`` reads ``contained`` rather than being passed it.
+    """
+    return contained(measured_boundary(cwd))
+
+
 def unconfined_by_declaration(command: str) -> bool:
     """Whether the boundary declaration takes this command out of isolation.
 
@@ -353,12 +378,39 @@ def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
     surfaces. Read here rather than passed, because this entry point is what
     a dispatcher calls and a dispatcher holds nothing but the call.
     """
-    return decide_fetch(
+    verdict = decide_fetch(
         url,
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
         "defer" if defers_unjudged(measured_boundary(root)) else "ask",
     )
+    if verdict.effect != "ask":
+        return verdict
+    return remembered_or_asked(verdict, root, "fetch", url)
+
+
+def remembered_or_asked(
+    verdict: KernelDecision, root: Path | None, kind: str, subject: str
+) -> KernelDecision:
+    """The author's earlier answer to this exact call, or the question written down.
+
+    A question answered yes once is answered the same way for the same call
+    from the same checkout. The runtime's prompt exposes its answer to no
+    hook, so the memory is read off the two events a hook does see: the call
+    was asked about, and then it ran. Exact, never a prefix -- `git push
+    --delete origin topic` approved once approves that line and nothing else,
+    and the same line from another checkout is another call. Listed by `dev
+    hooks approvals`, retired by `dev hooks forget`; a refusal is never
+    remembered, because only a question can be answered.
+    """
+    fingerprint = approval_fingerprint(kind, subject, root)
+    approved = remembered_approval(root, fingerprint)
+    if approved:
+        return verdict.revised(
+            effect="allow", reason=f"approved {approved[:10]}: {verdict.reason}"
+        )
+    note_asked(root, fingerprint, kind, subject)
+    return verdict
 
 
 def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:
@@ -371,6 +423,19 @@ def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None
     return decide_tool(name, values, REFUSED_TOOLS)
 
 
+def peer_directory(cwd: Path | None) -> Path | None:
+    """Where this repository's sessions meet, or nothing where none do.
+
+    The one thing the shipped fold cannot answer for itself: which repository
+    this call is in, and where beneath its shared git directory this project
+    put its store. Everything inside that directory the fold knows, because
+    it is the same fold the store's own library reads it with.
+    """
+    if PEER_POLICY is None:
+        return None
+    return peer_store(cwd, PEER_POLICY["store"])
+
+
 def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     """Judge one native send against who this repository's roster holds.
 
@@ -380,23 +445,25 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     recipient in is that runtime's business and this half answers for all of
     them.
     """
-    if PEER_POLICY is None:
-        return decide_peer_send(values, [], None)
-    return decide_peer_send(
-        values,
-        peer_addresses(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-        ),
-        PEER_POLICY,
-    )
+    directory = peer_directory(cwd)
+    if directory is None:
+        return decide_peer_send(values, [], PEER_POLICY)
+    return decide_peer_send(values, store.addresses(directory), PEER_POLICY)
 
 
 def peer_listing_decision() -> KernelDecision:
     """Judge one native listing of who this session can reach, which defers."""
     return decide_peer_listing(PEER_POLICY)
+
+
+def spawn_decision(name: str, values: list[str]) -> KernelDecision:
+    """Judge one native spawn by the name it carries, against what this project declared.
+
+    ``name`` is the runtime's own field for it, read by the host half that
+    knows which key that is; every string the call carries rides beside it
+    so an escalation marker in any of them is found.
+    """
+    return decide_spawn(name, values, SPAWN_NAMES)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:
@@ -407,15 +474,11 @@ def peer_listing_attachment(cwd: Path | None) -> str:
     acts on rather than a condition of the call happening — folding it into
     a reason would make it visible only where something refused.
     """
-    if PEER_POLICY is None:
+    directory = peer_directory(cwd)
+    if directory is None:
         return ""
     return peer_listing_context(
-        peer_listing(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-        ),
+        store.listing(directory),
         PEER_POLICY,
     )
 
@@ -734,18 +797,13 @@ def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision |
     handed over as the names they resolve to — the kernel reads no filesystem
     and decides from what it is given.
     """
-    if PEER_POLICY is None:
+    directory = peer_directory(cwd)
+    if PEER_POLICY is None or directory is None:
         return None
     return decide_foreign_claim(
         path_text,
-        claim_holders(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-            PEER_POLICY["touches_file"],
-            path_text,
-            declared_identity(PEER_POLICY["member_env"]),
+        store.claim_holders(
+            directory, path_text, declared_identity(PEER_POLICY["member_env"])
         ),
         PEER_POLICY,
     )
@@ -772,19 +830,13 @@ def claim_window_closed(cwd: Path | None) -> None:
     """Attribute what a command changed, contested where nothing could tell."""
     if PEER_POLICY is None:
         return
+    directory = peer_directory(cwd)
     mine = declared_identity(PEER_POLICY["member_env"])
     closed = close_claim_window(
         cwd, PEER_POLICY["store"], PEER_POLICY["windows_dir"], mine
     )
-    record_claims(
-        cwd,
-        PEER_POLICY["store"],
-        PEER_POLICY["roster_file"],
-        PEER_POLICY["touches_file"],
-        mine,
-        closed["paths"],
-        closed["rivals"],
-    )
+    if directory is not None:
+        store.record_claims(directory, mine, closed["paths"], closed["rivals"])
 
 
 def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
@@ -795,13 +847,11 @@ def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
     act on without qualification, and it settles a path an earlier comparison
     could only guess at.
     """
-    if PEER_POLICY is None or not path_text:
+    directory = peer_directory(cwd)
+    if PEER_POLICY is None or directory is None or not path_text:
         return
-    record_claims(
-        cwd,
-        PEER_POLICY["store"],
-        PEER_POLICY["roster_file"],
-        PEER_POLICY["touches_file"],
+    store.record_claims(
+        directory,
         declared_identity(PEER_POLICY["member_env"]),
         [str(Path(path_text).resolve())],
         [],

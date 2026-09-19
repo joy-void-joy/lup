@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { GraphView, NodeView } from "../generated/views";
-import { matches, narrowed } from "./narrow";
+import { grouped, matches, narrowed } from "./narrow";
 
 function node(id: string, kind: string, standing: string, moved: string): NodeView {
   return {
@@ -13,6 +13,7 @@ function node(id: string, kind: string, standing: string, moved: string): NodeVi
     standing,
     reason: "",
     sound: true,
+    author: "session:t#1",
     moved,
   };
 }
@@ -33,25 +34,25 @@ const graph: GraphView = {
 
 describe("narrowed", () => {
   test("keeps everything for an empty query", () => {
-    expect(narrowed(graph, { kind: "", standing: "", since: "" })).toEqual(graph);
+    expect(narrowed(graph, { kind: "", standing: "", since: "", lacking: "" })).toEqual(graph);
   });
 
   test("drops an edge whose far end was narrowed away", () => {
-    const claims = narrowed(graph, { kind: "corpus:claim", standing: "", since: "" });
+    const claims = narrowed(graph, { kind: "corpus:claim", standing: "", since: "", lacking: "" });
     expect(claims.nodes.map((each) => each.id)).toEqual(["a", "b"]);
     expect(claims.edges.map((each) => each.kind)).toEqual(["corpus:rests_on"]);
     expect(claims.kinds).toEqual(graph.kinds);
   });
 
   test("reads since off when each node last moved", () => {
-    const recent = narrowed(graph, { kind: "", standing: "", since: "2026-09-04T00:00:00Z" });
+    const recent = narrowed(graph, { kind: "", standing: "", since: "2026-09-04T00:00:00Z", lacking: "" });
     expect(recent.nodes.map((each) => each.id)).toEqual(["b", "c"]);
-    const unreadable = narrowed(graph, { kind: "", standing: "", since: "yesterday-ish" });
+    const unreadable = narrowed(graph, { kind: "", standing: "", since: "yesterday-ish", lacking: "" });
     expect(unreadable.nodes).toHaveLength(3);
   });
 
   test("narrows by standing", () => {
-    const refuted = narrowed(graph, { kind: "", standing: "refuted", since: "" });
+    const refuted = narrowed(graph, { kind: "", standing: "refuted", since: "", lacking: "" });
     expect(refuted.nodes.map((each) => each.id)).toEqual(["b"]);
     expect(refuted.edges).toEqual([]);
   });
@@ -66,5 +67,47 @@ describe("matches", () => {
     expect(matches(first, "supported")).toBe(true);
     expect(matches(first, "task")).toBe(false);
     expect(matches(first, "")).toBe(true);
+  });
+});
+
+describe("narrowed by lacking", () => {
+  test("keeps only the nodes from which no edge of the kind runs, reading every edge first", () => {
+    // `a` rests on `b`, so lacking `rests_on` drops `a` and keeps `b` and `c`;
+    // narrowing to claims as well hides `c` without changing what `a` lacks.
+    const ours = narrowed(graph, { kind: "", standing: "", since: "", lacking: "corpus:rests_on" });
+    expect(ours.nodes.map((each) => each.id)).toEqual(["b", "c"]);
+    expect(ours.edges.map((each) => each.kind)).toEqual(["coordination:blocks"]);
+    const claims = narrowed(graph, {
+      kind: "corpus:claim",
+      standing: "",
+      since: "",
+      lacking: "corpus:rests_on",
+    });
+    expect(claims.nodes.map((each) => each.id)).toEqual(["b"]);
+  });
+});
+
+describe("grouped", () => {
+  test("nests each source inside the target of the chosen edge kind, once, and only where shown", () => {
+    const parents = grouped(graph, "corpus:rests_on");
+    expect([...parents.entries()]).toEqual([["a", "b"]]);
+    expect(grouped(graph, "").size).toBe(0);
+    const without = { ...graph, nodes: graph.nodes.filter((node) => node.id !== "b") };
+    expect(grouped(without, "corpus:rests_on").size).toBe(0);
+  });
+
+  test("a containment that loops back is cut once, and the rest of the loop stands as a chain", () => {
+    const loop: GraphView = {
+      ...graph,
+      edges: [
+        { kind: "in", source: "a", target: "b" },
+        { kind: "in", source: "b", target: "a" },
+        { kind: "in", source: "c", target: "a" },
+      ],
+    };
+    const parents = grouped(loop, "in");
+    expect(parents.has("a")).toBe(false);
+    expect(parents.get("b")).toBe("a");
+    expect(parents.get("c")).toBe("a");
   });
 });

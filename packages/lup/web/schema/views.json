@@ -1256,6 +1256,10 @@
       "additionalProperties": false,
       "description": "One node as a reader meets it: what it is and where it stands right now.",
       "properties": {
+        "author": {
+          "title": "Author",
+          "type": "string"
+        },
         "id": {
           "title": "Id",
           "type": "string"
@@ -1313,6 +1317,7 @@
         "standing",
         "reason",
         "sound",
+        "author",
         "moved"
       ],
       "title": "NodeView",

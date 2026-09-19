@@ -252,6 +252,35 @@ def test_a_checkout_holding_neither_the_ref_nor_a_record_stays_dormant(
     assert "not in this checkout" in verdict.evidence
 
 
+def test_a_clone_with_no_local_branch_still_judges_what_landed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other CI shape: every ref is there, and none of them is local.
+
+    A pull request's checkout stands on a detached head and holds each branch
+    as a remote-tracking ref alone. The subject was already read through
+    ``origin/``; the branch it is judged against was not, so
+    `merge-base --is-ancestor` was handed a name resolving to nothing and
+    failed on its second argument. Every landing then read as "has not
+    reached" -- including the integration branch's own, one ref declining to
+    have reached itself -- so the gate could never fire on a clone.
+    """
+    origin = tmp_path / "origin"
+    scratch_repo(origin)
+    worked_on(origin, "topic")
+    git.out("-C", str(origin), "merge", "--ff-only", "topic")
+
+    clone = tmp_path / "ci"
+    git.out("clone", "--quiet", str(origin), str(clone))
+    git.out("-C", str(clone), "switch", "--quiet", "--detach", "HEAD")
+    git.out("-C", str(clone), "branch", "-D", "main")
+    monkeypatch.chdir(clone)
+
+    verdict = BranchInPlay(argument="topic").asked()
+    assert verdict.fired
+    assert "has reached" in verdict.evidence
+
+
 def test_a_name_cut_again_answers_from_its_ref_rather_than_the_old_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

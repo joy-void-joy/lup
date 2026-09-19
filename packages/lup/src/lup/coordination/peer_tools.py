@@ -16,14 +16,57 @@ be never. A sender told "sent" cannot tell those apart, so nothing here says
 "sent".
 """
 
+import asyncio
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from lup.channels.models import Door
-from lup.coordination.repository import PeerView, RepositoryPeers
+from lup.coordination.identity import NameTakenError, member_ref
+from lup.coordination.pulse import Pulse
+from lup.coordination.repository import (
+    PeerDepartedError,
+    PeerView,
+    RepositoryPeers,
+)
+from lup.coordination.bare.store import ROSTER_FILE
 from lup.coordination.roster import Delivery
-from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
+from lup.tools.mcp import LupMcpTool, ServerCompanion, ToolError, lup_tool
+
+
+class RosterPulse(ServerCompanion, frozen=True):
+    """This session's pulse, beaten for as long as its tool server serves.
+
+    The server is started when the session opens and stopped when it ends,
+    however that ending comes, so its lifetime is the session's, and a beat
+    every interval is what lets every other process read that. Each tick
+    sweeps first, so every row whose pulse stopped is retired on the record
+    by whichever session is up rather than by the one that died; then it
+    joins, which the roster's own idempotence makes free while the row is
+    standing and is what puts it back after a finish the session outlived —
+    a cleared conversation, a rewound one, a sweep that ran while this
+    server was stalled. A session that really ended writes its finish and
+    stops ticking, so that finish stands.
+
+    Nothing is written where no session has ever joined: a beat or a sweep
+    there would create the store, and a session that never coordinates must
+    leave no sign of having been able to. The roster file is the whole test,
+    as it is for the prompt-time guard.
+    """
+
+    root: Path
+    member_id: str
+    pulse: Pulse = Pulse()
+
+    async def run(self) -> None:
+        peers = RepositoryPeers(self.root, pulse=self.pulse)
+        roster = peers.root / ROSTER_FILE
+        while True:
+            if roster.exists():
+                peers.sweep(by=member_ref(self.member_id))
+                peers.join(self.member_id, self.root, delivery=Delivery.INBOX)
+                peers.beat(self.member_id)
+            await asyncio.sleep(self.pulse.interval_seconds)
 
 
 class NoInput(BaseModel):
@@ -47,6 +90,21 @@ class DescribeInput(BaseModel):
 
 class DescribeOutput(BaseModel):
     description: str
+
+
+class RenameInput(BaseModel):
+    name: str = Field(
+        description=(
+            "What this session is called from now on: what a person types to "
+            "reach it, so short and telling. The name it had goes on reaching "
+            "it too, until another session takes that name"
+        ),
+        min_length=1,
+    )
+
+
+class RenameOutput(BaseModel):
+    name: str
 
 
 class PeerSayInput(BaseModel):
@@ -137,15 +195,38 @@ def create_peer_tools(
         """
         peers.join(member_id, worktree, delivery=Delivery.INBOX)
 
+    def spoken() -> None:
+        """Refuse to act on the roster for a session that has not said what it is on.
+
+        The roster is read by sessions deciding whether they can touch the
+        same code, and a row saying only where a session is answers them
+        wrongly; a session that has run all day without describing itself
+        is the ordinary case, not the exception. So every verb that reads
+        peers or reaches them is refused until this session has described
+        itself in this conversation — a rewind or a clear unsays the
+        description, and the next such call asks for it again.
+        """
+        standing = peers.row(member_id)
+        if standing is None or not standing.description:
+            raise ToolError(
+                "say what you are working on with `coordination_describe` "
+                "first: the roster is read by sessions deciding whether they "
+                "can safely touch the same code, and your row answers them "
+                "only where you are, not what you are doing"
+            )
+
     @lup_tool(
         "List every session working in this repository, including the ones in "
-        "other worktrees, with the ones still working first. Each row is who "
-        "they are, which checkout they are in, what they are doing, what they "
-        "are holding, and what reaches them.\n\n"
+        "other worktrees, with the ones still working first, and any that "
+        "stopped since you joined, saying so. Each row is who they are, "
+        "which checkout they are in, what they are doing, what they are "
+        "holding, and what reaches them.\n\n"
         "Reach for it before starting something substantial: another session "
         "may already be on it, may hold the file you are about to rewrite, or "
         "may have settled the question you are about to re-derive. It costs "
-        "one call and the alternative is finding out at merge time.\n\n"
+        "one call and the alternative is finding out at merge time. It is "
+        "refused until you have said what you are on with "
+        "`coordination_describe`, because your row is read the same way.\n\n"
         "`doing` is what a session said about itself and may be old; "
         "`holding` is what its calls actually changed or locked, so that is "
         "the field to read before writing. Anything in `contested` is held by "
@@ -158,22 +239,51 @@ def create_peer_tools(
     )
     async def coordination_peers(_params: NoInput) -> PeerListOutput:
         present()
-        return PeerListOutput(peers=peers.listing())
+        spoken()
+        # Swept first, so the listing says what is so at this call rather
+        # than at the last tick: a claim over a path that has gone is ended
+        # now, and a session whose pulse stopped is retired now.
+        peers.sweep(by=member_ref(member_id))
+        standing = peers.row(member_id)
+        return PeerListOutput(
+            peers=peers.listing(
+                since=standing.arrived if standing is not None else None
+            )
+        )
 
     @lup_tool(
         "Say what you are working on now, so the roster tells the truth about "
-        "you. Anyone listing this repository's sessions reads it.\n\n"
-        "Call it when what you are doing changes, not once at the start: the "
-        "roster is read by somebody deciding whether they can safely touch "
-        "the same code, and a description from an hour ago answers that "
-        "question wrongly. One line is enough — what you are on, not how it "
-        "is going.",
+        "you. Anyone listing this repository's sessions reads it, and every "
+        "other coordination verb is refused until you have.\n\n"
+        "Call it at the start and again whenever what you are doing changes: "
+        "the roster is read by somebody deciding whether they can safely "
+        "touch the same code, and a description from an hour ago answers "
+        "that question wrongly. One line is enough — what you are on, not "
+        "how it is going.",
         name="coordination_describe",
     )
     async def coordination_describe(params: DescribeInput) -> DescribeOutput:
         present()
         peers.describe(member_id, params.description)
         return DescribeOutput(description=params.description)
+
+    @lup_tool(
+        "Call this session something a person would type to reach it. Your "
+        "name defaults to your worktree's, numbered where another session in "
+        "the same one got there first, and that is usually enough — rename "
+        "when a name would tell peers more than the checkout does.\n\n"
+        "A name another live session answers to is refused. The name you had "
+        "goes on reaching you until some other session takes it. Returns "
+        "{name}.",
+        name="coordination_rename",
+    )
+    async def coordination_rename(params: RenameInput) -> RenameOutput:
+        present()
+        try:
+            peers.rename(member_id, params.name)
+        except NameTakenError as taken:
+            raise ToolError(str(taken)) from taken
+        return RenameOutput(name=params.name)
 
     @lup_tool(
         "Tell another session in this repository something. Use it to hand "
@@ -191,7 +301,19 @@ def create_peer_tools(
     )
     async def coordination_send(params: PeerSayInput) -> PeerSayOutput:
         present()
-        found = peers.send(params.address, params.text, door=door)
+        spoken()
+        addressed = peers.address(params.address)
+        if addressed is not None and addressed.id == member_id:
+            raise ToolError(
+                f"{params.address!r} is this session's own address; "
+                "`coordination_peers` lists the others"
+            )
+        try:
+            found = peers.send(params.address, params.text, door=door)
+        except PeerDepartedError as departed:
+            raise ToolError(
+                f"{departed}; `coordination_peers` lists who is here"
+            ) from departed
         if found is None:
             known = ", ".join(view.address for view in peers.listing()) or "none"
             raise ToolError(
@@ -233,14 +355,22 @@ def create_peer_tools(
         "Another session about to edit under it is asked first, and told your "
         "name. It is never refused — two sessions in one tree is sometimes "
         "right — so this makes the collision visible rather than impossible.\n\n"
-        "It expires when this session does. There is nothing to remember to "
-        "release, and releasing early is `coordination_release`. Returns "
-        "{path, holders}.",
+        "It expires when this session does, or when the path does. There is "
+        "nothing to remember to release, and releasing early is "
+        "`coordination_release`. A path that does not exist is refused: a "
+        "lock covers what is there to write. Returns {path, holders}.",
         name="coordination_lock",
     )
     async def coordination_lock(params: PrefixInput) -> ClaimOutput:
         present()
-        held = peers.lock(member_id, Path(params.path).resolve())
+        spoken()
+        target = Path(params.path).resolve()
+        if not target.exists():
+            raise ToolError(
+                f"{target} does not exist; a lock covers what is there to "
+                "write, so name the directory or file you are about to change"
+            )
+        held = peers.lock(member_id, target)
         return ClaimOutput(
             path=held.path, holders=[holder.id for holder in held.holders]
         )
@@ -250,15 +380,24 @@ def create_peer_tools(
         "it when you have finished with a tree you locked and expect to keep "
         "working on other things — otherwise just stop, because a claim ends "
         "with the session holding it.\n\n"
-        "Only a holder can release: asking to release somebody else's lock "
-        "does nothing, which is what stops one session unlocking another's "
-        "work. Returns {path, holders} for what is still held there.",
+        "Only a holder can release: a prefix you do not hold is refused, "
+        "naming who does, which is what stops one session unlocking "
+        "another's work. Returns {path, holders} for what is still held "
+        "there.",
         name="coordination_release",
     )
     async def coordination_release(params: PrefixInput) -> ClaimOutput:
         present()
+        spoken()
         target = Path(params.path).resolve()
-        peers.release(member_id, target)
+        if not peers.release(member_id, target):
+            holders = [
+                holder.id for claim in peers.holding(target) for holder in claim.holders
+            ]
+            raise ToolError(
+                f"this session does not hold {target}"
+                + (f"; held by {', '.join(holders)}" if holders else "")
+            )
         remaining = peers.holding(target)
         return ClaimOutput(
             path=str(target),
@@ -268,6 +407,7 @@ def create_peer_tools(
     return [
         coordination_peers,
         coordination_describe,
+        coordination_rename,
         coordination_send,
         coordination_inbox,
         coordination_lock,

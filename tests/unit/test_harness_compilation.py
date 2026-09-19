@@ -92,6 +92,7 @@ from lup.harness.models import (
     PromptDocument,
     PromptPart,
     RelocateSession,
+    NestedRun,
     WatchOutput,
     CommandInvocation,
     RequestApproval,
@@ -139,7 +140,8 @@ from lup.policy.dispatcher import (
     stranded_breaches,
 )
 from lup.types import EnvVars
-from lup_template.agent.toolsets import EXAMPLE_GROUP, NOTES_GROUP, tool_group_names
+from lup.tools.toolsets import startup_names
+from lup_template.agent.toolsets import EXAMPLE_GROUP, NOTES_GROUP, declared_tool_groups
 from lup_template.devtools.agent.serve import (
     collect_tools_by_server,
     harness_session_context,
@@ -839,6 +841,9 @@ PART_CONTRACT: dict[str, PartExpectation] = {
     "RelocateSession": PartExpectation(
         part=RelocateSession(path="the path step 1 prints"), diverges=True
     ),
+    "NestedRun": PartExpectation(
+        part=NestedRun(prompt="reply with the single word ok"), diverges=True
+    ),
     "WatchOutput": PartExpectation(
         part=WatchOutput(command="lup-devtools resolve status --watch"),
         diverges=True,
@@ -1160,6 +1165,7 @@ an invocation could reach a reader who cannot use it."""
 
 NAMES_RATHER_THAN_PROSE = [
     "Agent.id",
+    "Delegate.name",
     "Harness.generator_version",
     "Plugin.id",
     "Plugin.version",
@@ -1844,7 +1850,7 @@ def test_generated_claude_hook_records_metadata_only_evidence(tmp_path: Path) ->
     timestamps = [record.pop("timestamp") for record in records]
     assert all(timestamp.endswith("+00:00") for timestamp in timestamps)
     detail = records[1].pop("detail")
-    assert "interpreters" in detail
+    assert "bare interpreter" in detail
     common = {"schema_version": 1, "event_name": "PreToolUse"}
     common.update(session_id="session-one", turn_id="turn-one")
     common.update(tool_use_id="tool-one", tool_name="Bash")
@@ -1927,7 +1933,7 @@ def test_generated_codex_hook_fails_closed_for_inline_code() -> None:
     )
     assert isinstance(result, sh.RunningCommand)
     assert result.exit_code == 2
-    assert b"interpreters" in result.stderr
+    assert b"bare interpreter" in result.stderr
 
 
 def test_generated_codex_pretool_accepts_a_safe_requested_escape() -> None:
@@ -2052,7 +2058,7 @@ def test_generated_codex_permission_request_preserves_assignment_guards(
     assert result.stdout == b""
 
 
-def test_generated_codex_pretool_consumes_only_its_correlated_approval(
+def test_generated_codex_pretool_never_treats_pending_requests_as_approval(
     tmp_path: Path,
 ) -> None:
     command = "gh pr merge 180"
@@ -2087,8 +2093,8 @@ def test_generated_codex_pretool_consumes_only_its_correlated_approval(
         "tool_input": {"command": command.replace("180", "181")},
     }
     assert codex_hook_result(mismatched, True, tmp_path).exit_code == 2
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 0
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 0
+    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
+    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
     assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
 
 
@@ -2106,7 +2112,7 @@ def test_generated_codex_permission_request_denies_unapproved_code() -> None:
     )
     assert isinstance(result, sh.RunningCommand)
     assert result.exit_code == 2
-    assert b"interpreters" in result.stderr
+    assert b"bare interpreter" in result.stderr
 
 
 def test_generated_codex_hook_refuses_the_declared_calls() -> None:
@@ -2237,7 +2243,7 @@ def test_generated_claude_hook_executes_the_canonical_kernel() -> None:
     assert isinstance(result, sh.RunningCommand)
     output = ClaudeHookOutput.model_validate_json(result.stdout)
     assert output.hook_specific_output.permission_decision == "deny"
-    assert "interpreters" in output.hook_specific_output.permission_decision_reason
+    assert "bare interpreter" in output.hook_specific_output.permission_decision_reason
 
 
 @pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
@@ -2272,7 +2278,7 @@ def test_generated_dispatcher_resolves_its_runtime_from_anywhere(
         case _:
             assert result.exit_code == 2
             reason = result.stderr.decode()
-    assert "interpreters" in reason
+    assert "bare interpreter" in reason
 
 
 def test_static_checking_reaches_every_shipped_dispatcher() -> None:
@@ -2964,7 +2970,9 @@ def test_project_settings_derive_sandbox_from_hook_declaration() -> None:
     filesystem = sandbox["filesystem"]
     network = sandbox["network"]
     assert isinstance(filesystem, dict) and isinstance(network, dict)
-    assert filesystem["denyWrite"] == ["README.md"]
+    # A human-owned path asks through the policy; the runtime sandbox, which
+    # can only refuse, is told nothing about it.
+    assert "denyWrite" not in filesystem
     domains = network["allowedDomains"]
     assert isinstance(domains, list)
     assert "code.claude.com" in domains
@@ -3252,7 +3260,7 @@ def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
 def test_declared_tool_servers_are_the_registry_the_backends_assemble() -> None:
     """A group added to the toolsets registry reaches a native session too."""
     servers = portable_harness().plugins[0].mcp_servers
-    assert [server.name for server in servers] == tool_group_names(realtime=False)
+    assert [server.name for server in servers] == startup_names(declared_tool_groups())
 
 
 def test_each_runtime_spells_the_project_root_a_tool_server_starts_from() -> None:
@@ -3280,7 +3288,7 @@ def test_claude_tree_offers_the_tool_servers_as_a_plugin_configuration() -> None
         if artifact.path == Path(".claude/plugins/lup/.mcp.json")
     )
     servers = json.loads(declaration.content)["mcpServers"]
-    assert sorted(servers) == sorted(tool_group_names(realtime=False))
+    assert sorted(servers) == sorted(startup_names(declared_tool_groups()))
     assert servers["notes"]["command"] == "uv"
     assert "${CLAUDE_PROJECT_DIR}" in servers["notes"]["args"]
 
@@ -3295,7 +3303,9 @@ def test_codex_tree_offers_the_tool_servers_in_its_project_config() -> None:
     )
     parsed = tomllib.loads(config.content)
     assert parsed["features"]["hooks"] is True
-    assert sorted(parsed["mcp_servers"]) == sorted(tool_group_names(realtime=False))
+    assert sorted(parsed["mcp_servers"]) == sorted(
+        startup_names(declared_tool_groups())
+    )
     assert parsed["mcp_servers"]["notes"]["command"] == "uv"
 
 
@@ -3516,10 +3526,13 @@ def test_no_declared_deadline_leaves_the_settings_env_alone() -> None:
 
 def test_a_named_session_is_what_makes_a_native_server_serve_real_tools() -> None:
     """No adapter relays a context to a natively launched server; it opens one."""
-    assert collect_tools_by_server(None).keys() == {EXAMPLE_GROUP}
     context = harness_session_context(HARNESS_SESSION)
+    groups = collect_tools_by_server(context)
+
     assert context.session_id == HARNESS_SESSION
-    assert NOTES_GROUP in collect_tools_by_server(context)
+    assert NOTES_GROUP in groups
+    # Built, and servable only by name: a live agent is handed the rest.
+    assert EXAMPLE_GROUP in groups
 
 
 def test_every_target_renders_every_declaration_the_source_names() -> None:
@@ -3631,3 +3644,24 @@ def test_a_current_repository_artifact_is_neither_rewritten_nor_announced(
     generate_targets([], [current, behind])
     assert calls == ["current:write", "behind:write"]
     assert capsys.readouterr().out.count("repository artifact ready") == 2
+
+
+def test_the_claude_watch_says_when_to_stop_it() -> None:
+    """A watch that outlives the report resumes the finished reader.
+
+    So the Claude spelling names the call that ends a watch and the moment
+    to make it, beside the advice against polling it was written for. The
+    Codex spelling describes a session that is read rather than pushed, and
+    says nothing of the kind.
+    """
+    prompt = PromptDocument(
+        parts=[WatchOutput(command="uv run lup-devtools dev check")]
+    )
+
+    claude = claude_prompt_renderer().render(prompt)
+    codex = codex_prompt_renderer().render(prompt)
+
+    assert "`Monitor`" in claude
+    assert "`TaskStop`" in claude
+    assert "before reporting" in claude
+    assert "TaskStop" not in codex

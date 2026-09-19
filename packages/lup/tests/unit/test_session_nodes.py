@@ -127,6 +127,24 @@ async def test_standing_reads_open_then_fresh_stale_and_missing(
     assert closed.standing(Surroundings()).label == "unchecked"
 
 
+async def test_a_session_closed_by_amending_ended_reads_unpinned_and_says_why(
+    tmp_lup_project: Path,
+) -> None:
+    """The console can end a session by amending `ended`; that pins nothing,
+    and the reading says so rather than reporting an unnamed path missing."""
+    store = LedgerStore(tmp_lup_project, AUTHOR)
+    notes = setup_notes("s1", recorder=recorder_at(tmp_lup_project), runtime="fake")
+    assert notes.record is not None
+
+    amended = store.amend(
+        notes.record.model_copy(update={"ended": utc_now(), "outcome": "completed"})
+    )
+    reading = store.standing(amended)
+
+    assert reading.label == "unpinned" and reading.sound
+    assert "closed()" in reading.reason and "is not in the tree" not in reading.reason
+
+
 async def test_a_session_that_raises_closes_as_failed_or_interrupted(
     tmp_lup_project: Path,
 ) -> None:

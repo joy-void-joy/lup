@@ -7,6 +7,7 @@ the declarations the policy and plugin commands explain. An application adds
 whatever else its own `dev` tree offers to the app it gets back.
 """
 
+import datetime as dt
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -21,6 +22,7 @@ import lup.devtools.dev.check as check
 import lup.devtools.dev.comments as comments
 import lup.devtools.dev.guidance as guidance
 import lup.devtools.dev.issues as issues_mod
+import lup.devtools.dev.library as library_mod
 import lup.devtools.dev.history as history
 import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
@@ -29,11 +31,18 @@ import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
 import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.questions as questions_mod
+import lup.devtools.dev.reach as reach
+import lup.devtools.dev.scaffold as scaffold_mod
+import lup.devtools.dev.update as update_mod
+import lup.devtools.dev.migrations as migrations
 import lup.devtools.dev.preservation as preservation
 import lup.devtools.dev.modules as modules
 import lup.devtools.dev.seams as seams
 import lup.devtools.dev.relocate as relocate_mod
 import lup.devtools.dev.rules as rules
+from lup.devtools.changelog import Changelog
+from lup.devtools.dev.branches import get_integration_branch
+from lup.execution.shell import git
 from lup.harness.codescan.markers import NoteKind
 from lup.harness.codescan.registry import all_rules
 import lup.devtools.py.app as py
@@ -51,6 +60,25 @@ from lup.policy.kernel.edit import SUPPRESSION_COLUMN_LIMIT
 from lup.policy.vocabulary import default_vocabulary
 from lup.workspace.paths import is_template_scaffold, project_root
 
+DryRun = Annotated[
+    bool,
+    typer.Option("--dry-run", "-n", help="Show what would change without writing"),
+]
+KeepVendored = Annotated[
+    bool,
+    typer.Option("--keep-vendored", help=f"Leave {library_mod.VENDORED_ROOT}/ on disk"),
+]
+Force = Annotated[
+    bool,
+    typer.Option("--force", help="Un-vendor even from an unrenamed template"),
+]
+"""The flags every mode change takes, spelled once beside the commands taking them.
+
+Module scope because a Typer annotation is a type expression and a name bound
+inside the factory is not one — the three commands would otherwise each restate
+the same three options.
+"""
+
 
 def create_dev_app(
     declared: Callable[[], DevDeclarations],
@@ -65,7 +93,9 @@ def create_dev_app(
     """Wire the dev command tree over what one repository declares about itself."""
     app = typer.Typer(no_args_is_help=True)
     plugin_app = typer.Typer(no_args_is_help=True)
-    preserve_app = typer.Typer(no_args_is_help=True)
+    migrate_app = typer.Typer(no_args_is_help=True)
+    library_app = typer.Typer(no_args_is_help=True)
+    scaffold_app = typer.Typer(no_args_is_help=True)
     env_app = typer.Typer(no_args_is_help=True)
     tracker_app = typer.Typer(no_args_is_help=True)
     app.add_typer(
@@ -80,9 +110,15 @@ def create_dev_app(
         help="Answer an issue here or on a declared tracker (comment, close, reopen)",
     )
     app.add_typer(
-        preserve_app,
-        name="preserve",
-        help="The capability capture a reorganisation is measured against",
+        migrate_app,
+        name="migrate",
+        help="What a range of this repository asks of a project built on it",
+    )
+    app.add_typer(library_app, name="library", help="How this project obtains lup")
+    app.add_typer(
+        scaffold_app,
+        name="scaffold",
+        help="Upstream's copied half, as a branch of this repository",
     )
     app.add_typer(
         model_config_mod.create_model_config_app(),
@@ -304,7 +340,7 @@ def create_dev_app(
             typer.Option(
                 "--boundaries",
                 help="Scan for native adapter imports outside composition roots "
-                "only — the lup.harness.codescan.boundaries guard the full check also runs",
+                "only — the seam rules the full check's sweep also runs",
             ),
         ] = False,
         placement: Annotated[
@@ -312,7 +348,7 @@ def create_dev_app(
             typer.Option(
                 "--placement",
                 help="List library data tables no adopter can replace only — the "
-                "lup.harness.codescan.boundaries placement guard the full check also runs",
+                "library-default rule the full check's sweep also runs",
             ),
         ] = False,
         stats: Annotated[
@@ -375,12 +411,15 @@ def create_dev_app(
             )
             return
         if antipatterns:
-            if profiled:
-                antipatterns_mod.profile(declarations.project, path)
-            elif stats:
-                antipatterns_mod.summarize(declarations.project, as_json, path)
-            else:
-                antipatterns_mod.report(declarations.project, as_json, path, fix=fix)
+            match (profiled, stats):
+                case (True, _):
+                    antipatterns_mod.profile(declarations.project, path)
+                case (False, True):
+                    antipatterns_mod.summarize(declarations.project, as_json, path)
+                case _:
+                    antipatterns_mod.report(
+                        declarations.project, as_json, path, fix=fix
+                    )
             return
         if boundaries:
             boundaries_mod.report(declarations.project, as_json)
@@ -401,6 +440,8 @@ def create_dev_app(
             scope=check.changed_paths(since) if since is not None else None,
             node_classes=node_classes or [],
             ledger=ledger,
+            scaffold_source=declarations.scaffold,
+            spread=declarations.spread,
         )
 
     # -- test command --
@@ -608,7 +649,7 @@ def create_dev_app(
         # retiring all of them has to name the ones already retired too, or
         # the answer would silently exclude what a previous answer dropped.
         shipped = [rule.id for rule in all_rules()]
-        for line in answers.settled(catalog, shipped):
+        for line in answers.settled(catalog, shipped, project.seams):
             typer.echo(line)
 
     @app.command("refutations")
@@ -894,6 +935,35 @@ def create_dev_app(
         project = declared().project
         modules.report(project.coverage.modules, project.modules, verbose)
 
+    @app.command("reach")
+    def reach_cmd(
+        since: Annotated[
+            str,
+            typer.Option("--since", help="How far back to read, in git's own grammar"),
+        ] = "12 months ago",
+        limit: Annotated[
+            int,
+            typer.Option("--limit", help="How many copied modules the ranking names"),
+        ] = 10,
+    ) -> None:
+        """Report how this repository's work reaches a project built on it.
+
+        The question a scaffold cannot answer about itself by reading its own
+        tree: a commit's cost to an adopter is decided by which trees it
+        touched, and nothing records that at the time. The split row is the
+        one to watch — a bump lands its library half and leaves the call site,
+        so it arrives as a breakage rather than as work anybody chose to read.
+        """
+        spread = declared().spread
+        if spread is None:
+            typer.echo(
+                "no scaffold declared: nothing here is copied into another "
+                "repository, so every commit reaches an adopter by import or "
+                "not at all"
+            )
+            return
+        reach.report(since, spread, project_root(), limit)
+
     @app.command("guidance")
     def guidance_cmd(
         by_size: Annotated[
@@ -948,85 +1018,374 @@ def create_dev_app(
         for mention in relocate_mod.surviving_mentions(roots, declared):
             typer.echo(f"still mentions a moved module: {mention}", err=True)
 
-    # -- preservation capture --
+    # -- library commands --
 
-    def walked(ctx: typer.Context) -> preservation.SurfaceCapture:
-        """The surface the tree offers right now, as this CLI can see it."""
-        return preservation.capture(preservation.operations(ctx), declared().project)
+    @library_app.command("status")
+    def library_status_cmd() -> None:
+        """Report where the lup library is resolved from."""
+        library_mod.library_status()
 
-    def against(ctx: typer.Context, capture: Path) -> preservation.Divergence:
-        """What the live tree does and does not still answer for a capture."""
+    @library_app.command("release")
+    def library_release_cmd() -> None:
+        """Ask the package index whether a release exists, and which mode that settles."""
+        library_mod.library_release()
+
+    @library_app.command("use")
+    def library_use_cmd(
+        mode: Annotated[
+            library_mod.LibraryMode,
+            typer.Argument(help="published, local, or linked"),
+        ],
+        version: Annotated[
+            str | None,
+            typer.Option(
+                "--version", help="Lower version bound for the published release"
+            ),
+        ] = None,
+        keep_vendored: KeepVendored = False,
+        force: Force = False,
+        dry_run: DryRun = False,
+    ) -> None:
+        """Resolve lup from the package index, or from the vendored copy."""
+        library_mod.use_library(mode, version, keep_vendored, force, dry_run)
+
+    @library_app.command("git")
+    def library_git_cmd(
+        url: Annotated[
+            str, typer.Option("--url", help="Repository serving the lup package")
+        ] = library_mod.REPOSITORY_URL,
+        branch: Annotated[
+            str | None, typer.Option("--branch", help="Branch to resolve lup at")
+        ] = None,
+        tag: Annotated[
+            str | None, typer.Option("--tag", help="Tag to resolve lup at")
+        ] = None,
+        rev: Annotated[
+            str | None, typer.Option("--rev", help="Commit to pin lup at")
+        ] = None,
+        keep_vendored: KeepVendored = False,
+        force: Force = False,
+        dry_run: DryRun = False,
+    ) -> None:
+        """Resolve lup from its repository, for use before a release is published."""
+        library_mod.git_library(
+            library_mod.git_source(url, branch=branch, tag=tag, rev=rev),
+            keep_vendored,
+            force,
+            dry_run,
+        )
+
+    # -- the copied half, and the update that moves every carrier --
+
+    def adopted_source() -> scaffold_mod.ScaffoldSource:
+        """This project's declared scaffold, refused where there is none.
+
+        Two ways there is none, and they are different answers. A project that
+        wrote its own modules declares no source, and nothing here applies to
+        it. The scaffold itself declares one — every copy inherits the
+        declaration — and is still the origin of all of them, which the
+        template flag is what says.
+        """
+        source = declared().scaffold
+        if source is None:
+            raise typer.BadParameter(
+                "this project declares no scaffold source, so it has no copied "
+                "half to merge: nothing upstream stamped it out"
+            )
+        if is_template_scaffold(project_root()):
+            raise typer.BadParameter(
+                "this checkout is the scaffold itself rather than a project "
+                "built on it, so there is nothing upstream of it to merge. "
+                "`dev init rename-package <project>` is what adopts it."
+            )
+        return source
+
+    @scaffold_app.command("compile")
+    def scaffold_compile_cmd(
+        commit: Annotated[
+            str, typer.Argument(help="The upstream commit to compile the scaffold at")
+        ],
+        out: Annotated[
+            Path, typer.Option("--out", help="Where to write the compiled tree")
+        ],
+        decline: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--decline",
+                help="An upstream path to leave out, beside the declared ones",
+            ),
+        ] = None,
+    ) -> None:
+        """Materialize upstream's copied half at one commit, under this name.
+
+        The pure function the update rests on, exposed so it can be looked at:
+        what an update would merge, written to a directory rather than to a
+        branch. `--decline` asks what a wider selection would produce without
+        declaring it first, which is how a project decides what to declare.
+        """
+        declared_source = adopted_source()
+        source = declared_source.model_copy(
+            update={"declined": [*declared_source.declined, *(decline or [])]}
+        )
+        built = scaffold_mod.compiled(
+            update_mod.upstream_checkout(source.project, typer.echo),
+            commit,
+            source,
+            declared().project.package,
+            out,
+        )
+        typer.echo(f"{out}: {len(built.files)} file(s) at {built.commit}")
+
+    @scaffold_app.command("adopt")
+    def scaffold_adopt_cmd(
+        base: Annotated[
+            str,
+            typer.Option(
+                "--base", help="The upstream commit this project was stamped from"
+            ),
+        ],
+    ) -> None:
+        """Root the scaffold branch, once, at the commit this project came from.
+
+        What gives git the ancestor it has been missing: after this, every
+        update is a merge against the commit this project last took rather
+        than against an unrelated history.
+        """
+        update_mod.adopted(
+            project_root(),
+            adopted_source(),
+            declared().project.package,
+            base,
+            typer.echo,
+        )
+
+    @app.command("update")
+    def update_cmd(
+        commit: Annotated[
+            str,
+            typer.Option("--commit", help="Pin every carrier at this upstream commit"),
+        ] = "",
+    ) -> None:
+        """Move the library, the native trees, and the copied half to one commit.
+
+        The pin resolves first and decides the commit; the copied half is
+        compiled at exactly that commit and merged; the trees are regenerated
+        under the library that just landed. A conflicted merge stops the run
+        and says what to resolve, because everything after it is compiled from
+        declarations the merge has not finished writing.
+        """
+        update_mod.updated(
+            project_root(),
+            adopted_source(),
+            declared().project.package,
+            commit,
+            library_mod.DISTRIBUTION,
+            typer.echo,
+        )
+
+    # -- what a range asks of a project built on this one --
+
+    def surfaces_over(spelled: str) -> preservation.Divergence:
+        """The two surfaces a ``base..head`` argument names, compared.
+
+        A head is optional and its absence means the working tree, which is
+        what a gate asks about: uncommitted work is exactly where a capability
+        goes missing before anybody notices.
+        """
+        # git's own range grammar, taken as given rather than invented here.
+        base, separator, head = spelled.partition("..")  # lup: ignore[string-split]
+        if not separator or not base:
+            raise typer.BadParameter(
+                f"expected <base>..<head>, or <base>.. for the working tree; "
+                f"got {spelled!r}"
+            )
+        project = declared().project
         return preservation.compare(
-            preservation.SurfaceCapture.read(capture), walked(ctx)
+            preservation.surface_at(base, project),
+            preservation.surface_at(head, project)
+            if head
+            else preservation.surface_now(project),
         )
 
-    @preserve_app.command("capture")
-    def preserve_capture_cmd(
-        ctx: typer.Context,
-        capture: Annotated[
-            Path, typer.Option("--capture", help="The capture to read or write")
-        ] = preservation.CAPTURE_FILE,
+    @migrate_app.command("map")
+    def migrate_map_cmd(
+        over: Annotated[
+            str, typer.Argument(help="The range to derive over, as <base>..<head>")
+        ],
     ) -> None:
-        """Record the surface this repository offers, as a checked-in fixture.
+        """Print the relocation that repoints an importer across a range.
 
-        Run before a reorganisation, and again after one whose removals were
-        deliberate: what leaves the fixture leaves it in a diff somebody
-        reads, which is the only place a dropped capability is ever noticed.
+        Derived from two surfaces rather than read from a record: every name
+        that survived somewhere else votes for the module pair it moved
+        between, so the map costs nothing to keep and cannot go stale.
         """
-        captured = walked(ctx)
-        captured.write(capture)
-        exports = sum(len(surface.declares) for surface in captured.modules)
-        typer.echo(
-            f"{capture}: {len(captured.commands)} operation(s), {exports} export(s) "
-            f"across {len(captured.modules)} module(s), at {captured.revision}"
-        )
-
-    @preserve_app.command("check")
-    def preserve_check_cmd(
-        ctx: typer.Context,
-        capture: Annotated[
-            Path, typer.Option("--capture", help="The capture to read or write")
-        ] = preservation.CAPTURE_FILE,
-        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
-    ) -> None:
-        """Resolve every captured capability against the tree as it stands.
-
-        A capability the tree no longer declares anywhere fails the run. One
-        declared somewhere else is reported and does not: a move is what a
-        reorganisation is, and telling the two apart is the whole point.
-        """
-        divergence = against(ctx, capture)
-        if as_json:
-            output_json(divergence)
-        else:
-            for capability in divergence.disappeared:
-                typer.echo(f"disappeared: {capability.spelled()}", err=True)
-            for relocation in divergence.relocated:
-                typer.echo(f"relocated:   {relocation.spelled()}")
-            for capability in divergence.arrived:
-                typer.echo(f"arrived:     {capability.spelled()}")
-        if not divergence.intact():
-            raise typer.Exit(1)
-
-    @preserve_app.command("migration")
-    def preserve_migration_cmd(
-        ctx: typer.Context,
-        capture: Annotated[
-            Path, typer.Option("--capture", help="The capture to read or write")
-        ] = preservation.CAPTURE_FILE,
-    ) -> None:
-        """Print the relocation that repoints an importer of the captured tree.
-
-        The command an adopter runs to follow this repository's move, derived
-        from the same difference that proved nothing was lost. Add `--root` to
-        aim it at the checkout being migrated.
-        """
-        moves = against(ctx, capture).module_moves()
+        moves = surfaces_over(over).module_moves()
         if not moves:
-            typer.echo("no module moved since the capture")
+            typer.echo(f"no module moved over {over}")
             return
         pairs = " ".join(f"{old}={new}" for old, new in sorted(moves.items()))
         typer.echo(f"uv run lup-devtools dev relocate {pairs}")
+
+    @migrate_app.command("pending")
+    def migrate_pending_cmd(
+        revision: Annotated[
+            str,
+            typer.Argument(help="Where the project stands, as a commit of this one"),
+        ],
+    ) -> None:
+        """What a project standing at that commit still owes, beyond the map.
+
+        The declared residue: a signature that gained parameters, a refusal
+        that split. A project already past the commit that made the break has
+        applied it, and is told nothing.
+        """
+        owed = migrations.unapplied(migrations.DECLARED, revision)
+        if not owed:
+            typer.echo(f"nothing declared since {revision}")
+            return
+        typer.echo(f"{len(owed)} migration(s) since {revision}:")
+        for line in migrations.rendered(owed):
+            typer.echo(f"  {line}")
+
+    @app.command("release")
+    def release_cmd(
+        level: Annotated[
+            str,
+            typer.Argument(help="Which part of the version moves: patch, minor, major"),
+        ],
+        dry_run: DryRun = False,
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """Cut a release: close the changelog, move the version, tag it.
+
+        One transaction over the files a release touches, because it had been
+        four prose steps in a skill and three of them had never run. What
+        stays outside is what cannot be derived — which level the release is,
+        and what the entries under `## Unreleased` say — and everything
+        downstream of those is arithmetic, carried out the same way each time.
+
+        Refused on a dirty tree and on an undeclared break, in that order. The
+        first because a release commit should hold the release and not
+        whatever somebody left lying about; the second because the gate exists
+        to stop a break shipping with no instruction, and a release is the
+        moment it would ship.
+        """
+        from lup.devtools.dev.release import (
+            ReleasePlan,
+            cleared_declarations,
+            is_level,
+            next_version,
+            published_version,
+            released,
+            with_version,
+        )
+
+        if not is_level(level):
+            typer.echo(f"{level} is not patch, minor or major", err=True)
+            raise typer.Exit(1)
+        # Only where something is about to be written. A dry run is what
+        # somebody asks *while* the tree is dirty, to see what a release would
+        # do before deciding what to do with the rest of it.
+        if not dry_run and git.out("status", "--porcelain").strip():
+            typer.echo(
+                "the working tree has uncommitted changes — a release commit "
+                "holds the release, so land or discard them first",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        declarations = declared()
+        spec = declarations.release
+        root = project_root()
+        base = migrations.gate_base(get_integration_branch())
+        undeclared = (
+            migrations.undeclared_breaks(declarations.project, base) if base else []
+        )
+        if undeclared:
+            for capability in undeclared:
+                typer.echo(f"undeclared break: {capability.spelled()}", err=True)
+            typer.echo(
+                "a release cannot carry a break with nothing to read — declare "
+                "each in `lup.devtools.dev.migrations.DECLARED`",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        manifest = root / spec.version_file
+        changelog_path = root / spec.changelog
+        previous = published_version(manifest)
+        version = next_version(previous, level)
+        today = dt.date.today()
+        pending = migrations.rendered(migrations.DECLARED)
+        log = Changelog.read(changelog_path)
+        plan = ReleasePlan(
+            previous=previous,
+            version=version,
+            date=today,
+            tag=f"{spec.tag_prefix}{version}",
+            migrations=pending,
+            breaks=len(migrations.DECLARED),
+            entries=bool(log.unreleased),
+        )
+
+        if dry_run:
+            if as_json:
+                output_json(plan)
+            else:
+                for line in plan.spelled():
+                    typer.echo(f"would release: {line}")
+            return
+
+        declared_source = Path(migrations.__file__)
+        changelog_path.write_text(released(log, version, today, pending).render())
+        manifest.write_text(with_version(manifest.read_text(), version))
+        declared_source.write_text(cleared_declarations(declared_source.read_text()))
+
+        git.add(*(str(path) for path in (changelog_path, manifest, declared_source)))
+        git.commit("-m", f"release: {previous} → {version}")
+        git.tag("-a", plan.tag, "-m", f"{spec.version_file} {version}")
+
+        if as_json:
+            output_json(plan)
+        else:
+            for line in plan.spelled():
+                typer.echo(f"released: {line}")
+            typer.echo(f"tagged {plan.tag} — pushing the tag is what publishes")
+
+    @migrate_app.command("check")
+    def migrate_check_cmd(
+        over: Annotated[
+            str,
+            typer.Option("--over", help="The range to judge, as <base>..<head>"),
+        ] = "",
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """Refuse a capability that went with no migration speaking for it.
+
+        A name declared nowhere any more is a break an adopter meets as an
+        import that stopped resolving. One that moved is not, because the map
+        is derived — so what fails here is the difference: something gone, and
+        nothing in this repository saying what to do about it.
+        """
+        from lup.devtools.dev.branches import detect_base_branch
+
+        # The branch's own base rather than a branch named here: what this
+        # change took away is measured against where it started, and creation
+        # recorded that where topology can no longer recover it.
+        divergence = surfaces_over(over or f"{detect_base_branch().merge_base}..")
+        unnamed = migrations.unnamed(divergence.disappeared, migrations.DECLARED)
+        if as_json:
+            output_json(divergence)
+        else:
+            for capability in unnamed:
+                typer.echo(f"gone, undeclared: {capability.spelled()}", err=True)
+            typer.echo(
+                f"{len(divergence.relocated)} moved, {len(divergence.arrived)} "
+                f"arrived, {len(divergence.disappeared)} gone "
+                f"({len(unnamed)} with no migration)"
+            )
+        if unnamed:
+            raise typer.Exit(1)
 
     @app.command("policy")
     def policy_cmd(

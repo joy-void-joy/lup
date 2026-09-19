@@ -9,6 +9,7 @@ beside its managing module instead (see the package docstring).
 
 import re  # lup: ignore[import-re] — prose has no parser; its shape is the rule
 from abc import ABC, abstractmethod
+from itertools import dropwhile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -30,7 +31,7 @@ from lup.harness.requirements import Manifest
 from lup.formats.markdown import CodeCell, PlainCell, TableCell, escaped
 from lup.tools.mcp import ToolDeclaration
 from lup.policy.boundary import BoundaryCapability
-from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
+from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName, SpawnNameRow
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.peer_policy import PeerPolicy
@@ -397,9 +398,13 @@ class Delegate(SemanticPart, frozen=True):
     type: Literal["delegate"] = "delegate"
     subagent_type: QualifiedAgentName
     prompt: PortableText
+    name: str = ""
+    """What the spawned subagent is called, as its listing, a message and a
+    stop address it; the task in two or three words. Empty leaves the runtime
+    showing the type, which a project requiring names refuses."""
 
     def spell(self, renderer: "PromptRenderer") -> str:
-        return renderer.own.delegate(self.subagent_type, self.prompt)
+        return renderer.own.delegate(self.subagent_type, self.prompt, self.name)
 
     @property
     def named_agent(self) -> QualifiedAgentName:
@@ -454,6 +459,24 @@ class WatchOutput(SemanticPart, frozen=True):
     @property
     def shell_command(self) -> str:
         return self.command
+
+
+class NestedRun(SemanticPart, frozen=True):
+    """Run this runtime once, non-interactively, over a throwaway project.
+
+    A probe kit measures what a hook receives by registering it in a
+    directory's own settings and launching the runtime there. Each runtime
+    spells that launch differently — its print mode, its approval switch —
+    so prose naming "a non-interactive run" leaves a reader to guess the
+    flags and stop at the first approval prompt nobody is there to answer.
+    """
+
+    type: Literal["nested_run"] = "nested_run"
+    prompt: PortableText
+    """The first prompt the run answers, as the reader will pass it."""
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return renderer.own.nested_run(self.prompt)
 
 
 class CommandInvocation(SemanticPart, frozen=True):
@@ -535,6 +558,7 @@ type PromptPart = Annotated[
     | RequestApproval
     | RelocateSession
     | WatchOutput
+    | NestedRun
     | CommandInvocation
     | ResolverEntry
     | ArgumentsRef,
@@ -755,14 +779,13 @@ class Skill(SelectableRule, frozen=True):
         names = [argument.name for argument in self.arguments]
         if len(names) != len(dict.fromkeys(names)):
             raise ValueError(f"skill {self.id!r} has duplicate argument names")
-        optional_seen = False
-        for argument in self.arguments:
-            if not argument.required:
-                optional_seen = True
-            elif optional_seen:
-                raise ValueError(
-                    f"skill {self.id!r} has a required argument after an optional one"
-                )
+        past_the_required = dropwhile(
+            lambda argument: argument.required, self.arguments
+        )
+        if any(argument.required for argument in past_the_required):
+            raise ValueError(
+                f"skill {self.id!r} has a required argument after an optional one"
+            )
         references_arguments = any(
             part.references_arguments for part in self.prompt.parts
         )
@@ -1183,6 +1206,57 @@ class AcceptanceGuard(BaseModel, frozen=True):
         )
 
 
+class SpawnNames(BaseModel, frozen=True):
+    """A project's decision that every subagent it spawns is named.
+
+    A runtime lists, addresses and stops a subagent by the name it was
+    spawned with, and shows its type where none was given — a generic word
+    such as the default agent's, which says nothing about what the subagent
+    is doing. Declaring this refuses a spawn that carries no name, with a
+    recovery giving the shape, so the caller passes one and the listing says
+    what each subagent is for. The runtime validates the spelling itself.
+
+    On by default, since the cost is one argument per spawn and the gain is
+    every listing, message and stop naming the work rather than the type.
+    """
+
+    reason: str = (
+        "a subagent spawned without a name is listed, addressed and stopped"
+        " by its type alone, which says nothing about what it is doing"
+    )
+    recovery: str = (
+        "pass a name beside the agent type: the task in two or three words,"
+        " letters, digits, hyphens or underscores, at most 64 characters —"
+        " it is what the listing shows and what a message or a stop addresses"
+    )
+
+    def erased(self) -> SpawnNameRow:
+        """This declaration as the kernel reads it, primitive and dependency-free."""
+        return SpawnNameRow(reason=self.reason, recovery=self.recovery)
+
+
+class SubagentCleanup(BaseModel, frozen=True):
+    """A project's decision that a subagent reports only after its background work stops.
+
+    Declaring one registers the fold under the runtime's subagent events: as a
+    subagent starts it is told that what it arms in the background is its own
+    to stop, and as it is about to report, while any task it started is still
+    listed, the report is refused once with a reason naming each task and the
+    call that ends it. Undeclared, a subagent's report goes through with its
+    watches running, and each line they emit resumes it — the leak this
+    exists to close.
+
+    On by default, because every project delegating to subagents that wait on
+    pushed output meets the same leak; the main agent is never gated, since
+    its own stop fires with background subagents listed and that wait is
+    wanted.
+    """
+
+    notice_at_start: bool = True
+    """Whether the subagent is told at its start; the stop-time refusal is the
+    declaration itself."""
+
+
 class HookSandbox(BaseModel, frozen=True):
     """OS sandbox declaration compiled into native settings and launchers.
 
@@ -1227,6 +1301,24 @@ class HookSandbox(BaseModel, frozen=True):
             "the rest of the boundary is stated."
         ),
     )
+
+
+class CarrierPins(BaseModel, frozen=True):
+    """What a prompt-time fold needs to ask whether the carriers still agree.
+
+    Two words rather than the whole scaffold declaration, because a fold
+    shipped into a plugin runs on a bare interpreter and can import neither
+    the declaration nor the reader that understands it. Rendered into the
+    guard that starts it, and derived from the declaration that owns them, so
+    a project that renamed its scaffold branch gets a hook naming the branch
+    it has.
+    """
+
+    branch: str
+    """Where the copied half is merged from, whose merge base carries the commit."""
+
+    distribution: str
+    """The package whose pin `uv.lock` records the other commit for."""
 
 
 class HookSet(BaseModel, frozen=True):
@@ -1316,6 +1408,35 @@ class HookSet(BaseModel, frozen=True):
             "carrying the surface to reach for instead. Whether a tool is "
             "against the point of a project is that project's judgement, so "
             "an empty list — the library's own answer — refuses nothing"
+        ),
+    )
+    carriers: CarrierPins | None = Field(
+        default=None,
+        description=(
+            "Which branch this project's copied half is merged from and which "
+            "distribution its library pin resolves, so a session is told at "
+            "prompt time when the two stand at different upstream commits. "
+            "None is a project that took no copied half from anywhere — the "
+            "scaffold itself included, being the origin of every copy — and "
+            "registers no hook at all"
+        ),
+    )
+    spawn_names: SpawnNames | None = Field(
+        default=SpawnNames(),
+        description=(
+            "Whether every subagent this project spawns has to carry a name: "
+            "a spawn without one is refused with the shape a name takes. None "
+            "declines, and leaves a nameless subagent listed by its type"
+        ),
+    )
+    subagent_cleanup: SubagentCleanup | None = Field(
+        default=SubagentCleanup(),
+        description=(
+            "Whether a subagent's report waits for the background work it "
+            "started: told at its start that what it arms is its own to stop, "
+            "and refused once at its stop while any of it is still listed. "
+            "None declines, and leaves a subagent's leftovers to whoever "
+            "notices them"
         ),
     )
     peer_policy: PeerPolicy | None = Field(
@@ -1553,7 +1674,13 @@ class Harness(BaseModel, frozen=True):
     source_evidence: dict[str, str] = {}  # lup: ignore[dict-str-payload]
     plugins: list[Plugin]
     guidance: PromptDocument
-    resolver: ResolveSpec
+    resolver: ResolveSpec | None = None
+    """How a resolver run is spelled, or nothing for a project without one.
+
+    Its three invocations are checked against the declared skills only when
+    a spec is here: a project that declined the resolver module ships no
+    worker, review or merge skill, and must not have to declare a spec
+    naming skills it does not have."""
     requirements: Manifest = Manifest()
     """The external programs this project needs, exercised before a launch.
 
@@ -1703,13 +1830,14 @@ class Harness(BaseModel, frozen=True):
             for part in prompt.parts
             if (issued := part.invocation) is not None
         ]
-        invocations.extend(
-            [
-                self.resolver.worker_skill,
-                self.resolver.review_skill,
-                self.resolver.merge_skill,
-            ]
-        )
+        if self.resolver is not None:
+            invocations.extend(
+                [
+                    self.resolver.worker_skill,
+                    self.resolver.review_skill,
+                    self.resolver.merge_skill,
+                ]
+            )
         for invocation in invocations:
             skill = skills.get((invocation.plugin, invocation.skill))
             if skill is None:

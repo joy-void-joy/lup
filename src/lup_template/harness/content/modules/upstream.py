@@ -1,16 +1,23 @@
 """Keeping a project in step with what it was built from.
 
-Two skills and the commands underneath them. ``/lup:update`` reviews every
-upstream commit since the last sync and decides what to apply here; ``import``
-pulls one feature from a tracked repository rather than rewriting it. The
-``sync`` sub-app is the read half of the first — its own docstring says so —
-which is why it belongs here rather than beside the other project commands.
+Three skills and the commands underneath them, one per direction the work
+travels. ``/lup:update`` moves every carrier of the library to one upstream
+commit and resolves what that leaves. ``/lup:import`` reads another
+repository's commits for what is worth having here, and with no arguments
+sweeps every tracked project for news. ``/lup:upstream`` goes the other way:
+a defect this project met is repaired in a worktree of the repository that
+owns it, under that repository's gate, rather than worked around here.
+
+The ``sync`` sub-app is the read half of the middle one — its own docstring
+says so — which is why it belongs here rather than beside the other project
+commands.
 
 A project with no upstream declines this and loses nothing. A project that has
 one and declines it goes on diverging from it silently, which is the failure
 this exists to make visible.
 """
 
+import lup_template.harness.content.guidance as guidance
 from lup.harness.content.docs import upstream_reports
 from lup.harness.content.docs.catalog import page
 from lup.harness.models import ContentRoster
@@ -18,13 +25,18 @@ from lup.harness.modules import Module
 from lup_template.harness.content.modules.specs import UPSTREAM
 from lup_template.harness.content.skills.import_skill import SKILL as SKILL_IMPORT
 from lup_template.harness.content.skills.update import SKILL as SKILL_UPDATE
+from lup_template.harness.content.skills.upstream_skill import SKILL as SKILL_UPSTREAM
 
 
 def module() -> Module:
     """Staying in step with upstream as one value."""
     return Module(
         spec=UPSTREAM,
-        content=ContentRoster(skills=[SKILL_IMPORT, SKILL_UPDATE]),
+        content=ContentRoster(skills=[SKILL_IMPORT, SKILL_UPDATE, SKILL_UPSTREAM]),
+        # The rule belongs to the module that owns the subject: a project with
+        # no upstream declines both, and reads no paragraph about keeping in
+        # step with something it does not have.
+        guidance=[guidance.KEEPING_IN_STEP],
         documents=[
             page(
                 "upstream_reports",

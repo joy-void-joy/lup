@@ -1,0 +1,508 @@
+# lup: ignore[empty-collection, string-split]
+# The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
+"""Shell variable bindings: which literal a name holds, and where it expands.
+
+Every reader of a command asks what its words become once the shell expands
+them, and each one answering it apart is how `S=f.py; sed -i … $S` came to be
+judged against `f.py` by the classifier and against `$S` by the host that
+produces the rewritten document -- two readings of one line, and the ask that
+fell between them. So a command's variables are resolved once, over its
+syntax tree, before any reader takes a word from it.
+
+The tree is what makes the expansion exact rather than textual. A `$S` inside
+single quotes or a quoted heredoc is not a parameter part at all, so nothing
+here can expand it; a loop, a branch, a subshell or a pipe is a node, so
+whether an assignment stands for the words after it is read off the shape
+rather than guessed from the keywords in front of a segment.
+"""
+
+import posixpath
+from collections.abc import Callable
+from typing import TypedDict
+
+from .roles import spells_its_path
+from .syntax import (
+    AndOr,
+    Arm,
+    Clause,
+    Command,
+    Item,
+    Pipeline,
+    Redirect,
+    Script,
+    Word,
+    WordPart,
+    part,
+    word_text,
+)
+from .words import effective_command
+
+
+class ShellBinding(TypedDict):
+    """One frozen variable binding: a name, and its literal value or None.
+
+    ``value`` is ``None`` where the word could not be read as a literal, which
+    is what makes the binding opaque to every later substitution.
+    """
+
+    name: str
+    value: str | None
+
+
+def bind_name(
+    bindings: tuple[ShellBinding, ...], name: str, value: str | None
+) -> tuple[ShellBinding, ...]:
+    """Rebind one name immutably, shadowing any earlier binding of it."""
+    kept = tuple(pair for pair in bindings if pair["name"] != name)
+    return (*kept, ShellBinding(name=name, value=value))
+
+
+def literal_part(item: WordPart) -> bool:
+    """Whether one word part expands to exactly its own characters."""
+    match item["kind"]:
+        case "literal" | "escaped" | "single":
+            return True
+        case "double":
+            return all(literal_part(child) for child in item["parts"])
+        case _:
+            return False
+
+
+def literal_loop_word(word: Word) -> bool:
+    """A word whose runtime expansion is exactly the text it reads as.
+
+    Quoting is what decides it: `'*.py'` is those five characters, `*.py`
+    is whatever the glob matches, and `"$f"` is whatever `f` holds.
+    """
+    return not word_text(word).startswith("/dev/fd/") and all(
+        literal_part(item) for item in word["parts"]
+    )
+
+
+def literal_value(word: str) -> bool:
+    """Whether an assigned value is a string every reference expands to whole.
+
+    A glob character is stored unexpanded by an assignment but expanded again
+    wherever the name is referenced unquoted, whitespace splits it into more
+    words than one, and a substitution sentinel or backtick is a value nobody
+    here ran. Each leaves a reference that could become a different argument
+    list, so only the rest bind.
+    """
+    return (
+        not word.startswith(("~", "/dev/fd/"))
+        and not any(character in "$*?[" or character.isspace() for character in word)
+        and spells_its_path(word)
+    )
+
+
+def pure_assignment_names(segment: list[str]) -> list[ShellBinding] | None:
+    """The bindings of an assignment-only segment."""
+    pairs: list[ShellBinding] = []
+    for word in segment:
+        name, separator, value = word.partition("=")
+        if not separator or not name.isidentifier():
+            return None
+        pairs.append(
+            ShellBinding(name=name, value=value if literal_value(value) else None)
+        )
+    return pairs
+
+
+def named_parameters(parts: list[WordPart]) -> list[str]:
+    """Every parameter these parts expand, outside any substitution in them."""
+    return [
+        name
+        for item in parts
+        for name in ([item["name"]] if item["kind"] == "param" and item["name"] else [])
+        + named_parameters(item["parts"])
+    ]
+
+
+def references(words: list[Word], name: str) -> bool:
+    """Whether any of these words still expands ``name``."""
+    return any(name in named_parameters(word["parts"]) for word in words)
+
+
+# lup: ignore[library-default] — bash's own builtins that assign a named variable
+ASSIGNING_BUILTINS = (
+    "declare",
+    "export",
+    "getopts",
+    "let",
+    "local",
+    "mapfile",
+    "printf",
+    "read",
+    "readarray",
+    "readonly",
+    "typeset",
+    "unset",
+)
+# lup: ignore[library-default] — the shell's builtins that run text as commands
+EVALUATING_BUILTINS = ("eval", "source", ".")
+
+
+def assigning_operands(words: list[str]) -> list[str]:
+    """The names a builtin could assign, read from its operands.
+
+    Over-reads on purpose: `printf -v NAME` and `getopts spec NAME` are named
+    by position, and taking every identifier-shaped operand costs only a
+    substitution that did not happen, where missing one resolves a reference
+    to a value the name no longer holds.
+    """
+    names: list[str] = []
+    for word in words[1:]:
+        name = word.partition("=")[0].removesuffix("+").partition("[")[0]
+        if name.isidentifier():
+            names.append(name)
+    return names
+
+
+def unsettled_assignments(
+    words: list[str], executable: list[str], standing: bool
+) -> list[str] | None:
+    """Names one simple command assigns that a later reference cannot rely on.
+
+    ``words`` is the command as it reads, ``executable`` what runs once
+    leading assignments and wrappers are skipped, and ``standing`` whether a
+    plain assignment here holds for every later word. ``None`` means an
+    ``eval`` or ``source`` could assign any name at all.
+    """
+    command = posixpath.basename(executable[0]) if executable else ""
+    if command in EVALUATING_BUILTINS:
+        return None
+    names: list[str] = []
+    if command in ASSIGNING_BUILTINS:
+        names.extend(assigning_operands(executable))
+    names.extend(assigning_operands(["", *[word for word in words if "+=" in word]]))
+    plain = pure_assignment_names(words)
+    if plain is not None and not standing:
+        names.extend(pair["name"] for pair in plain)
+    return names
+
+
+def defaulted_names(parts: list[WordPart]) -> list[str]:
+    """Names a ``${NAME:=value}`` or ``${NAME=value}`` expansion assigns."""
+    return [
+        name
+        for item in parts
+        for name in (
+            [item["name"]]
+            if item["kind"] == "param" and item["operator"] in (":=", "=")
+            else []
+        )
+        + defaulted_names(item["parts"])
+    ]
+
+
+def command_lists(command: Command) -> list[Script]:
+    """The lists a command runs, in the order they appear."""
+    return [
+        *(
+            script
+            for clause in command["clauses"]
+            for script in (clause["condition"], clause["body"])
+        ),
+        command["body"],
+        *(arm["body"] for arm in command["arms"]),
+    ]
+
+
+def carried_words(command: Command) -> list[Word]:
+    """Every word a command carries itself, redirection targets included."""
+    return [
+        *command["words"],
+        *(pattern for arm in command["arms"] for pattern in arm["patterns"]),
+        *(target for redirect in command["redirects"] for target in redirect["target"]),
+    ]
+
+
+class Placed(TypedDict):
+    """One command a list runs directly, and whether its assignments stand."""
+
+    command: Command
+    standing: bool
+
+
+def placed_commands(script: Script, standing: bool) -> list[Placed]:
+    """Each command a list runs directly, and whether its assignments stand.
+
+    An assignment stands when nothing between it and the words after it can
+    keep it from holding: not beside a pipe or `&`, which put it in a process
+    of its own, and not after `&&` or `||`, which may skip it.
+    """
+    return [
+        Placed(
+            command=command,
+            standing=standing
+            and item["terminator"] != "&"
+            and index == 0
+            and len(pipeline["commands"]) == 1,
+        )
+        for item in script["items"]
+        for index, pipeline in enumerate(item["andor"]["pipelines"])
+        for command in pipeline["commands"]
+    ]
+
+
+def unsettled_names(script: Script, standing: bool = True) -> list[str] | None:
+    """Every name a list assigns where the assignment may not stand.
+
+    Inside a loop, a branch, a case arm or a subshell, beside a pipe, after
+    `&&`, through a builtin or a ``${NAME:=…}`` default, what a later
+    reference expands to depends on what ran, and nothing here decides that.
+    ``None`` means an ``eval`` or ``source`` could assign any name at all.
+    What a substitution assigns stays inside it, so it is not read here.
+    """
+    names: list[str] = []
+    for placed in placed_commands(script, standing):
+        command = placed["command"]
+        names.extend(
+            name
+            for word in carried_words(command)
+            for name in defaulted_names(word["parts"])
+        )
+        if command["kind"] == "simple":
+            texts = [word_text(word) for word in command["words"]]
+            found = unsettled_assignments(
+                texts,
+                effective_command(texts)["words"],
+                placed["standing"] and not command["redirects"],
+            )
+            if found is None:
+                return None
+            names.extend(found)
+            continue
+        if command["kind"] in ("for", "select"):
+            names.append(command["name"])
+        for inner in command_lists(command):
+            found = unsettled_names(
+                inner, placed["standing"] and command["kind"] == "brace"
+            )
+            if found is None:
+                return None
+            names.extend(found)
+    return names
+
+
+ListMapping = Callable[[Script], Script]
+CommandMapping = Callable[[Command], Command]
+
+
+def expanded_parts(
+    parts: list[WordPart], bindings: tuple[ShellBinding, ...], settle: bool
+) -> list[WordPart]:
+    """Parts with every literal binding in scope expanded into them.
+
+    A substitution's command is expanded from the same bindings: bound, with
+    its own assignments settled, where ``settle`` says the whole line is being
+    bound, and substituted only where one name is being instantiated.
+    """
+    literal = {
+        binding["name"]: binding["value"]
+        for binding in bindings
+        if binding["value"] is not None
+    }
+    expanded: list[WordPart] = []
+    for item in parts:
+        value = literal.get(item["name"]) if item["kind"] == "param" else None
+        match item["kind"]:
+            case "param" if not item["operator"] and value is not None:
+                expanded.append(part("literal", value))
+            case "double" | "param":
+                expanded.append(
+                    part(
+                        item["kind"],
+                        item["text"],
+                        item["name"],
+                        item["operator"],
+                        parts=expanded_parts(item["parts"], bindings, settle),
+                    )
+                )
+            case "command" | "process":
+                expanded.append(
+                    part(
+                        item["kind"],
+                        item["text"],
+                        script=[
+                            bind_script(inner, bindings)
+                            if settle
+                            else expanded_script(inner, bindings)
+                            for inner in item["script"]
+                        ],
+                    )
+                )
+            case _:
+                expanded.append(item)
+    return expanded
+
+
+def expanded_word(
+    word: Word, bindings: tuple[ShellBinding, ...], settle: bool = False
+) -> Word:
+    """One word with every literal binding in scope expanded into it."""
+    return Word(parts=expanded_parts(word["parts"], bindings, settle))
+
+
+def expanded_command(
+    command: Command, bindings: tuple[ShellBinding, ...], settle: bool
+) -> Command:
+    """A command's own words and redirection targets expanded; its lists untouched."""
+
+    def expand(words: list[Word]) -> list[Word]:
+        return [expanded_word(word, bindings, settle) for word in words]
+
+    return Command(
+        kind=command["kind"],
+        words=expand(command["words"]),
+        redirects=[
+            Redirect(
+                operator=redirect["operator"],
+                target=expand(redirect["target"]),
+                heredoc=redirect["heredoc"],
+            )
+            for redirect in command["redirects"]
+        ],
+        name=command["name"],
+        listed=command["listed"],
+        clauses=command["clauses"],
+        body=command["body"],
+        arms=[
+            Arm(patterns=expand(arm["patterns"]), body=arm["body"])
+            for arm in command["arms"]
+        ],
+    )
+
+
+def rebuilt_lists(command: Command, rebuild: ListMapping) -> Command:
+    """A command whose lists have each been passed through ``rebuild``, in order."""
+    clauses = [
+        Clause(condition=rebuild(clause["condition"]), body=rebuild(clause["body"]))
+        for clause in command["clauses"]
+    ]
+    body = rebuild(command["body"])
+    arms = [
+        Arm(patterns=arm["patterns"], body=rebuild(arm["body"]))
+        for arm in command["arms"]
+    ]
+    return Command(
+        kind=command["kind"],
+        words=command["words"],
+        redirects=command["redirects"],
+        name=command["name"],
+        listed=command["listed"],
+        clauses=clauses,
+        body=body,
+        arms=arms,
+    )
+
+
+def mapped_commands(script: Script, mapping: CommandMapping) -> Script:
+    """A list with every command it runs directly replaced, in order."""
+    return Script(
+        items=[
+            Item(
+                andor=AndOr(
+                    pipelines=[
+                        Pipeline(
+                            commands=[
+                                mapping(command) for command in pipeline["commands"]
+                            ],
+                            operators=pipeline["operators"],
+                            negated=pipeline["negated"],
+                        )
+                        for pipeline in item["andor"]["pipelines"]
+                    ],
+                    operators=item["andor"]["operators"],
+                ),
+                terminator=item["terminator"],
+            )
+            for item in script["items"]
+        ]
+    )
+
+
+def expanded_script(script: Script, bindings: tuple[ShellBinding, ...]) -> Script:
+    """A whole list with the given bindings substituted wherever they are live.
+
+    No assignment in the list is consulted: this instantiates a loop body
+    once per literal loop word, where the word is the value by construction.
+    """
+
+    def rebuild(command: Command) -> Command:
+        return rebuilt_lists(
+            expanded_command(command, bindings, settle=False),
+            lambda inner: expanded_script(inner, bindings),
+        )
+
+    return mapped_commands(script, rebuild)
+
+
+class BoundList(TypedDict):
+    """A list with its words expanded, and the bindings standing after it."""
+
+    script: Script
+    bindings: tuple[ShellBinding, ...]
+
+
+def bound_list(
+    script: Script,
+    bindings: tuple[ShellBinding, ...],
+    unsettled: list[str],
+    standing: bool,
+) -> BoundList:
+    """Expand one list in order, letting each standing assignment rebind."""
+    stands = iter([placed["standing"] for placed in placed_commands(script, standing)])
+
+    def rebuild(command: Command) -> Command:
+        nonlocal bindings
+        here = next(stands)
+        expanded = expanded_command(command, bindings, settle=True)
+        match command["kind"]:
+            case "simple":
+                assigned = pure_assignment_names(
+                    [word_text(word) for word in expanded["words"]]
+                )
+                if here and not command["redirects"] and assigned is not None:
+                    for pair in assigned:
+                        if pair["name"] not in unsettled:
+                            bindings = bind_name(bindings, pair["name"], pair["value"])
+                return expanded
+            case "brace":
+                inner = bound_list(command["body"], bindings, unsettled, here)
+                bindings = inner["bindings"]
+                return rebuilt_lists(expanded, lambda _body: inner["script"])
+            case _:
+                scope = bindings
+                return rebuilt_lists(
+                    expanded,
+                    lambda body: bound_list(body, scope, unsettled, False)["script"],
+                )
+
+    return BoundList(script=mapped_commands(script, rebuild), bindings=bindings)
+
+
+def bind_script(script: Script, inherited: tuple[ShellBinding, ...] = ()) -> Script:
+    """Expand every literal variable binding into the words that reference it.
+
+    The one place a command's variables are resolved, and resolved before
+    anything reads a word: the classifier's walk, the redirection rows, and
+    the host readers that stat targets and produce rewritten documents all
+    take their words from the tree this returns, so none of them can
+    disagree about what `$S` names.
+
+    Only a standing assignment binds (:func:`placed_commands`). `VAR=x cmd`
+    sets `VAR` for that one command's environment, and the shell expands the
+    command's words from the value it already held. A name assigned anywhere
+    it may not stand (:func:`unsettled_names`) is left unexpanded for the
+    whole list, so a loop's second pass or an untaken branch is never judged
+    by another reading's value, and a list that can ``eval`` expands nothing.
+    A substitution inherits the bindings in scope where it stands.
+    """
+    unsettled = unsettled_names(script)
+    if unsettled is None:
+        return script
+    bindings = inherited
+    for name in unsettled:
+        bindings = bind_name(bindings, name, None)
+    return bound_list(script, bindings, unsettled, standing=True)["script"]

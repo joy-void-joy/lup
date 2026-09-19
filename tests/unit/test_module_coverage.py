@@ -26,7 +26,7 @@ from lup.harness.coverage import (
     declares,
     declaring_modules,
 )
-from lup.harness.modules import Module, ModuleSpec
+from lup.harness.modules import Adoption, Module, ModuleSelection, ModuleSpec
 from lup.workspace.paths import project_root
 from lup_template.harness.catalog import declared_coverage
 
@@ -142,6 +142,40 @@ def test_a_declaration_two_modules_claim_is_a_gap(tmp_path: Path) -> None:
     assert [gap.describe() for gap in coverage_gaps(tmp_path, coverage)] == [
         "skill or agent worked_example.skills.shared is claimed by alpha, beta"
     ]
+
+
+def test_a_declaration_the_project_rewrote_under_its_id_stays_claimed(
+    tmp_path: Path,
+) -> None:
+    """A rewrite under the library's own id hides that file from the resolved view.
+
+    The resolved module carries the project's declaration in the library's
+    place, so read alone it would report the library's file as claimed by
+    nobody — the shape this repository's own review skill takes. Both views
+    are read, and the library's file stays the module's.
+    """
+    (tmp_path / "content" / "skills").mkdir(parents=True)
+    (tmp_path / "content" / "skills" / "shared.py").write_text(
+        "SKILL = 1\n", encoding="utf-8"
+    )
+    library = skill("shared", "worked_example.skills.shared")
+    rewritten = skill("shared", "adopter.skills.shared")
+    coverage = ModuleCoverage(
+        modules=[
+            Module(spec=spec("alpha"), content=models.ContentRoster(skills=[library]))
+        ],
+        selection=ModuleSelection(
+            adoptions=[
+                Adoption(
+                    module="alpha",
+                    content=models.ContentSelection(skills=[rewritten]),
+                )
+            ]
+        ),
+        roots=[ContentRoot(directory=Path("content"), package="worked_example")],
+    )
+
+    assert coverage_gaps(tmp_path, coverage) == []
 
 
 def test_a_subapp_no_module_owns_is_a_gap(tmp_path: Path) -> None:

@@ -25,6 +25,16 @@ class DefinedSymbol(BaseModel, frozen=True):
 
     line: int
 
+    reachable: bool = True
+    """Whether an importer can name it, or only the function holding it can.
+
+    A definition inside a function body is that function's own — a command
+    wired onto an app, a helper nested in its single caller — and no importer
+    reaches it however it is spelled. The merge-loss check wants it all the
+    same, because losing one in a join is still a loss; a surface an adopter
+    holds wants only what an adopter could have held.
+    """
+
 
 def symbols_under(node: ast.AST, prefix: str, local: bool) -> list[DefinedSymbol]:
     """Every definition beneath one node, qualified by the scope it sits in."""
@@ -60,21 +70,21 @@ def symbols_of(node: ast.AST, prefix: str, local: bool) -> list[DefinedSymbol]:
         ):
             qualified = f"{prefix}{name}"
             return [
-                DefinedSymbol(name=qualified, line=line),
+                DefinedSymbol(name=qualified, line=line, reachable=not local),
                 *symbols_under(node, f"{qualified}.", True),
             ]
         case ast.ClassDef(name=name, lineno=line):
             qualified = f"{prefix}{name}"
             return [
-                DefinedSymbol(name=qualified, line=line),
-                *symbols_under(node, f"{qualified}.", False),
+                DefinedSymbol(name=qualified, line=line, reachable=not local),
+                *symbols_under(node, f"{qualified}.", local),
             ]
         case (
             ast.Assign(targets=[ast.Name(id=name)], lineno=line)
             | ast.AnnAssign(target=ast.Name(id=name), lineno=line)
             | ast.TypeAlias(name=ast.Name(id=name), lineno=line)
         ) if not local:
-            return [DefinedSymbol(name=f"{prefix}{name}", line=line)]
+            return [DefinedSymbol(name=f"{prefix}{name}", line=line, reachable=True)]
     return symbols_under(node, prefix, local)
 
 

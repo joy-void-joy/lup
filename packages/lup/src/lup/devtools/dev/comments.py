@@ -37,6 +37,7 @@ from lup.harness.codescan.markers import (
     retire_claims,
     scan_mode_for,
 )
+from lup.devtools.dev.tracked import tracked_files
 from lup.devtools.utils import decode_stderr, output_json
 from lup.execution.shell import git
 
@@ -65,7 +66,7 @@ def scan_tracked(
     :func:`lup.harness.codescan.markers.find_markers` bound to another convention.
     """
     results: list[FoundComment] = []  # lup: ignore[empty-collection] — scan fold
-    for rel in git.lines("ls-files"):
+    for rel in tracked_files():
         path = Path(rel)
         try:
             text = path.read_text(encoding="utf-8")

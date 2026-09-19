@@ -28,7 +28,7 @@ Based on the user's input above, explore the relevant sources and brainstorm sol
 | .claude/settings.json under Claude Code, .codex/config.toml under Codex | `harness/content/settings.py` and the adapter rendering each tree — the two are not parity, so read both before assuming a setting exists on either side |
 | .claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex | `harness/content/template_sections.py` plus each flavor module |
 
-Content paths above are relative to `src/lup_template/devtools/`. Every tree carries its own .claude/.lup-ownership.json recording which artifacts generation owns — consult the one for the tree you are changing whenever a path's source is not obvious.
+Content paths above are relative to `src/lup_template/`. Every tree carries its own .claude/.lup-ownership.json recording which artifacts generation owns — consult the one for the tree you are changing whenever a path's source is not obvious.
 
 Read the relevant sources based on what the user is asking about, then propose specific changes or additions and Request explicit user approval before editing any source the table names. Reason: one edit re-renders into every tree at once. Regenerate with `uv run lup-devtools harness generate all` after any accepted change.
 
@@ -101,6 +101,16 @@ Each tree lays the same declarations out its own way, and `docs/platform-differe
   so and give the recommendation the evidence now supports — a reversed
   recommendation with a measurement behind it is the turn worth taking, not
   an embarrassment to soften.
+- **A harness behaviour is measured with a probe kit, not asked about.** A
+  throwaway project under `tmp/`, with its own `git init` so this project's
+  plugin stays out of it; a hook script that appends every payload it is
+  handed to a JSONL file beside it and answers only the event under test; and
+  the kit's own `.claude/settings.json` registering it under the events in question. Run it from where you are first:
+Run `claude -p "<the kit's first prompt>" --permission-mode bypassPermissions` from the kit's directory. A print-mode session loads the hooks in that directory's settings at launch, runs nested inside this one, and exits when the prompt is answered
+That run records the whole sequence, so no escalation marker is needed. Hand
+the user the directory and the prompt only for what print mode cannot show — a
+subagent left running in the background, a runtime this session is not signed
+in to. The recording is evidence the build keeps as a fixture.
 
 ### A second case study
 

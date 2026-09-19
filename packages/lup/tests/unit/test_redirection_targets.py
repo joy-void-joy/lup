@@ -136,10 +136,35 @@ def test_a_program_a_command_carries_is_not_one_of_its_paths() -> None:
     was reported as a write outside the lease. The command was a read.
     """
     scripted = "sed -n '/^def one/,/^def two/p' vocabulary.py"
-    assert shell_path_verb_targets(scripted) == ["vocabulary.py"]
+    assert shell_path_verb_targets(scripted) == []
     assert (
         unleased_write_targets(
             shell_path_verb_targets(scripted),
+            {"writable_roots": ["/checkout"]},
+            Path("/checkout"),
+        )
+        == []
+    )
+
+
+def test_a_sed_that_only_prints_names_no_file_for_the_lease_to_read() -> None:
+    """`sed -n 1,80p file` is `cat` with an address, and its operand is read.
+
+    The operand is a path, unlike the script beside it, and naming it was
+    defended as under-naming's safe direction: two of the three questions stat
+    it, and a file that is there answers them harmlessly. The third resolves
+    it against what the launch mounted writable, and a file under a read-only
+    mount is exactly the path no writable root contains -- so a print over one
+    was reported as a write outside the lease, while `head` over the same file
+    was allowed beside it.
+    """
+    printed = "sed -n 1,80p /mounted/findings/verify.py"
+    assert shell_path_verb_targets(printed) == []
+    assert shell_path_verb_targets("sed -ne '1p' a.py b.py") == []
+    assert shell_path_verb_targets("sed --expression=s/a/b/ src.py") == []
+    assert (
+        unleased_write_targets(
+            shell_path_verb_targets(printed),
             {"writable_roots": ["/checkout"]},
             Path("/checkout"),
         )
@@ -157,10 +182,12 @@ def test_the_operand_a_rewrite_does_write_is_still_named() -> None:
     assert shell_path_verb_targets("sed -i 's/a/b/' src.py") == ["src.py"]
     assert shell_path_verb_targets("sed -i.bak 's/a/b/' src.py") == ["src.py"]
     assert shell_path_verb_targets("sed -i -e 's/a/b/' src.py") == ["src.py"]
-    assert shell_path_verb_targets("sed -ne '1p' a.py b.py") == ["a.py", "b.py"]
-    assert shell_path_verb_targets("sed --expression=s/a/b/ src.py") == ["src.py"]
-    # `-f` names the program's own file, which is read rather than written.
-    assert shell_path_verb_targets("sed -i -f rules.sed src.py") == ["src.py"]
+    assert shell_path_verb_targets("sed -i -ne '1p' a.py b.py") == ["a.py", "b.py"]
+    assert shell_path_verb_targets("sed -i --expression=s/a/b/ src.py") == ["src.py"]
+    # A script file is refused before any fact about `src.py` is consulted,
+    # and a refusal is not reopened by the facts -- so nothing is named, as
+    # nothing is for any other command the vocabulary did not judge.
+    assert shell_path_verb_targets("sed -i -f rules.sed src.py") == []
 
 
 def test_a_write_flag_names_its_path_by_every_spelling_that_reaches_it() -> None:

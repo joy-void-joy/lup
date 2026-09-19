@@ -18,7 +18,7 @@ Two kinds of delegated agent look alike and must not be conflated: the **native 
 
 ## Who Else Is Here
 
-Other sessions work in this repository, in other worktrees, started by whoever. Before starting something substantial, call `coordination_peers`. Each row carries what a session *says* it is doing and, separately, `holding` — what its calls actually changed or locked. Read `holding`: a description is only as fresh as the last time somebody wrote one. A path somebody holds is not forbidden, but say so with `coordination_send` before writing it, and call `coordination_describe` when what you are on changes, so the row peers read of you is true.
+Other sessions work in this repository, started by whoever. Before starting something substantial, `coordination_describe` what you are on, then call `coordination_peers`, which is refused until you have. Each row carries what a session *says* it is doing and, separately, `holding`, what its calls changed or locked. Read `holding`: a description is only as fresh as its last writing. A held path is not forbidden, but say so with `coordination_send` before writing it, and describe again when what you are on changes, so your row is true.
 
 ## The Gates You Will Meet
 
@@ -28,7 +28,7 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 **The permission policy** classifies every shell command, URL scope, and edit, naming what tripped and the recovery. `dev policy '<command>'` answers before you spend a turn on one; a leading `# lup: escalate[decision]: <why>` line promotes a deny or ask into an approval question carrying that reason, one-off — a recurring wall means widening the protected declaration.
 
-**The edit budget** auto-allows a change block of at most three "real" changed lines, so split large changes: imports in one edit, logic in another. A human-owned file surfaces every change as an approval — propose the exact edit and let the user apply it.
+**The edit budget** auto-allows a change block of at most three "real" changed lines, so split large changes: imports in one edit, logic in another. A human-owned file surfaces every change, edit or shell write, as an approval the author answers.
 
 **The drift check** refuses a hand-edit or hand-merge of a generated tree: take either side of a conflict, regenerate, and let the check confirm it settled.
 
@@ -48,7 +48,7 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** about the co
 
 ## Development Workflow
 
-Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools git worktree create feat-name`, then work in <the path it prints> by whichever of these you can reach: launch a session rooted there; or, already running, address its files by absolute path, where that tree is writable. `EnterWorktree` is refused, and takes a `tree/` path only as a session's first switch: entering one arms worktree isolation, whose refusals cover ordinary read-only commands for the rest of the session. Escalate it if you must, and leave with `ExitWorktree(action="keep")` — creation does not move the session, so old-checkout edits miss the branch. `docs/contributing.md` carries the branch model, the refused words a late relocation meets, and the merge loop.
+Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools git worktree create feat-name` — which does not move this session, so an old-checkout edit misses the branch. Work in the path it prints: launch a session rooted there, or edit its files by absolute path where that tree is writable. `docs/contributing.md` carries the branch model, what a late relocation costs a running session, and the merge loop.
 
 ### Merge Conflict Resolution
 
@@ -82,10 +82,10 @@ Build on `lup` and pydantic; prefer an existing PyPI library to raw HTTP or a re
 - **Structured data, not strings** — `re`, `.replace()`, `.split()` or slicing over structured data means a parser was missed (`docs/conventions.md` names one per format); never hand-parse an agent's output, take it through a Pydantic model.
 - **Placement decides the package** — would another project built on this library want it? Then it is the library's; only this application, and it stays here. Values too, not only code.
 - **Never truncate** — the container grows to fit what it holds. Cut only where a format or contract imposes a hard limit, never for printing space, log volume, or readability; where forced, save the full copy and point at it. A cut artifact looks complete: `[:200]` loses the rest with nothing said.
-- **Push decisions, pull reference** — a per-event message (a hook reason, an approval prompt, a notification) carries only what changes the reader's next decision; recurring reference lives where it is pulled, a command or a doc, because a line appended to every occurrence is read zero times by the third.
+- **Say it once, where it is looked up** — a message sent at an event (a hook reason, an approval prompt, a notification) says only what the reader needs for their next decision; what they would need again goes where they can look it up, a command or a doc, because a line repeated on every event stops being read.
 - **The code is the source of truth** — it reads as though it had always been written this way. Never reference what code used to do; "now", "new", "updated", "fixed" and "changed" belong in commit messages, not a comment.
 - **Prose is a claim, not evidence** — assume every line was written by an agent and vetted by nobody: a comment, a rationale, a rejected option, a prior session's conclusion, a subagent's report, your own earlier turns each record what an agent argued, never what the user thinks, and go stale before the code beside them. Deferring to one hardens an unvetted call into a decision — re-derive it, and put what bears on the project's shape to the user.
-- Prefer `for` and comprehensions to `while`, and `match`/`case` to an `if`/`elif` chain dispatching on a value.
+- Prefer `for` and comprehensions to `while`, and `match`/`case` to an `if`/`elif` chain, with a guard on a pattern rather than on `case _`.
 
 Some rules shape a design before any gate catches it. Know these by name while choosing a shape, not after being stopped — `docs/rules.md` states each: `own-model-dispatch`, `abc-capability`, `constant-declaration`.
 
@@ -97,9 +97,9 @@ A rule's diagnostic names the shape it refuses and not the carve-outs that are o
 
 ## Tooling
 
-`uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green. `lup` itself is the one dependency not added that way: `dev library` reads and rewrites the mode a project obtains it through, and that mode decides what upgrading means — ask `dev library status` before assuming lup's source is on disk to edit, since in three of four modes it is not.
+`uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green. `lup` itself is not added that way — `dev library status` says where it is resolved from, and whether its source is on disk to edit.
 
-An operation that genuinely needs the launcher's host is resubmitted with a leading `# lup: escalate[sandbox]: <why>` line rather than run from an unconfined session; the crossing is reviewed and dispatched once, so try inside first, since a missing path usually means the host was not needed.
+A leading `# lup: escalate[sandbox]: <why>` line asks to run one command with the per-call sandbox off. That is all it lifts: a launch's mounts hold for every process in the session, so a write to a read-only path — the shared git `config` or `hooks/` — fails approved exactly as it failed unmarked, and is the user's to run from a host terminal with the exact command. Try inside first.
 
 ### lup-devtools
 
@@ -124,6 +124,14 @@ Work outliving its tool call is launched to survive its launcher — never from 
 ## Configuration
 
 Configuration loads through pydantic-settings in `src/lup_template/agent/config.py`, the only module that reads the environment. `docs/template.md` lists the variables and how gitignored `.env.local` overrides `.env`.
+
+**A committed declaration is consumer-independent.** It holds what every machine and every downstream user of this repository shares, so no fact about *this* machine sits in one: a path, a device, a client, a login. Those go where the machine keeps them, `.env.local` for the application's settings, `sync.json.local` for what the launcher grants sessions here, a flag for one launch. A `# lup: template:` marker asks a downstream repository's authors a question about their domain, whose answer every user of that repository then shares; a question two machines running one commit would answer differently is not one.
+
+## What This Was Built From
+
+`dev update` moves all three carriers — the pin, the generated trees, the copied half — to one upstream commit, and reports the conflicts and migrations it leaves. Nothing else moves them: a hand-port diverges silently, where a merge makes the next update cheap.
+
+**A defect upstream is fixed upstream**, in a worktree at `refs/<project>` and under *that* repository's gate — this session's hooks enforce this project's policy, not the one those files answer to — with the branch pinned here until it lands. Working around it in the copied half is a decision taken for every project that meets the same defect, and the one nobody else can see.
 
 ---
 

@@ -33,17 +33,16 @@ src/lup_template/
 │   │   ├── nested.py        # Nested Agent pattern (template).
 │   │   ├── realtime.py      # Real-time MCP tools for persistent agents.
 │   │   └── reflect.py       # Reflection tool — forced self-assessment before output finalization.
-│   └── toolsets.py          # Single source of truth for the agent's MCP tool groups.
+│   └── toolsets.py          # Which tool groups this project's sessions carry.
 ├── corpus.py                # This repository's corpus: claims, what backs them, and what retired them.
 ├── devtools/                # Development and analysis CLI tools for lup.
 │   ├── agent/               # Agent introspection and interactive debugging tools.
 │   │   ├── inspect_agent.py # Agent configuration inspection: tools, schemas, prompt, subagents.
 │   │   ├── repl.py          # Interactive REPL with the agent via the SDK (continuous session).
-│   │   └── serve.py         # Tool collection and the MCP stdio tool server (``serve-tools``).
+│   │   └── serve.py         # Opening the session a tool server serves, and handing it to the library.
 │   ├── dev/                 # Dev operations: worktrees, branches, and pre-flight checks.
 │   │   ├── app.py           # What only a template adds to the `dev` tree the library already builds.
-│   │   ├── init.py          # Package renaming for downstream project initialization.
-│   │   └── library.py       # How this project obtains the ``lup`` library.
+│   │   └── init.py          # Package renaming for downstream project initialization.
 │   ├── main.py              # Root CLI app composing all devtools sub-apps.
 │   ├── setup.py             # This project's setup integrations, over the reusable wizard framework.
 │   └── subapps.py           # This application's sub-app delta: what it declines, and what only it has.
@@ -84,7 +83,9 @@ src/lup_template/
 │       │   ├── init.py      # Canonical declaration for the init skill.
 │       │   ├── install.py   # Canonical declaration for the install skill.
 │       │   ├── meta.py      # Canonical declaration for the meta skill.
-│       │   └── update.py    # Canonical declaration for the update skill.
+│       │   ├── review.py    # The review skill as this repository reviews a session: against its agent.
+│       │   ├── update.py    # Canonical declaration for the update skill.
+│       │   └── upstream_skill.py # Canonical declaration for the upstream skill.
 │       ├── template_claude.py # Canonical downstream template guidance in its Claude flavor.
 │       ├── template_codex.py # Canonical downstream template guidance in its Codex AGENTS.md flavor.
 │       └── template_sections.py # Portable downstream-template sections shared by every guidance flavor.
@@ -105,7 +106,7 @@ is the only nudge this page gives about writing one.
 | --- | --- | --- |
 | `models.py` | `AgentOutput` and `Factor`: the structured result a turn must submit. | Replacing the fields with your domain's result. The prompt's output section is generated from this schema, so it cannot drift. |
 | `prompts.py` | The system prompt composed from named sections. | Editing `PURPOSE` and `GUIDELINES`. Leave `output_format()` alone — it reads the schema. |
-| `toolsets.py` | The MCP tool groups a session gets, as one registry. | Adding a group to `build_session_toolset()` and to the `ServerGroup` literal beside it. |
+| `toolsets.py` | Which MCP tool groups a session carries, as one declaration: lup's own named, this domain's own built. | Writing a group's builder and naming it in `declared_tool_groups()` — server registration, the names a subprocess backend serves and the servers a runtime starts are all read off that list. |
 | `tools/` | The tool implementations. `example.py` is placeholder search/fetch/read/glob; `reflect.py`, `realtime.py`, and `nested.py` are working patterns. | Replacing `example.py` with your domain's tools. |
 | `subagents.py` | Portable `SubagentSpec` declarations: capabilities, exact tool grants, model tiers. | Adding specs to `ALL_SPECS`. |
 | `tool_policy.py` | Which tools are available given the configuration — a missing API key bans its tools rather than failing at call time. | Adding an exclusion for each new conditional dependency. |
@@ -275,6 +276,15 @@ project at its own path, inside the container as well as outside it, and
 defaulted — tracking a project and handing a session the keys to it are
 different claims, and `sync.json` is committed scaffold that would otherwise
 make the second one on every adopter's behalf.
+
+The same file grants host devices, for the same reason: `sync grant
+nvidia.com/gpu=all` writes the CDI name into a top-level `"devices"` list
+after starting a throwaway container with it, and every session and resolver
+worker opened on this machine is handed it from then on. Which GPU a machine
+holds is that machine's fact, so the list lives only in the local half, never
+in a committed declaration; `sync revoke` takes one back, `sync status` shows
+each grant beside whether a spec on this machine still names it, and the
+launchers take `--device <name>` for one launch.
 
 A registration that names only a URL is materialized under
 `~/.cache/lup/sync/<name>.git` in the layout one naming a local path already

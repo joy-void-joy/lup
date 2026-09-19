@@ -285,11 +285,12 @@ class SyncBaseResult(PRResult):
     sync_complaint: str = ""
     """Why the base was not refreshed, empty when it was.
 
-    A contained session reaches this by the boundary working as designed: the
-    base is a sibling worktree, mounted read-only so nothing in here can write
-    another checkout's administrative state, and a fetch that would write
-    `FETCH_HEAD` under it is refused. That is not a fault to repair, so it is
-    said plainly and carried rather than escalated.
+    A contained session reaches this by the boundary working as designed.
+    Under a worker's lease the base is a sibling worktree held read-only with
+    its administrative entry, so a fetch that would write `FETCH_HEAD` under
+    it is refused; under an operator's, a human-owned file mounted read-only
+    over the base refuses the fast-forward that would replace it. Neither is
+    a fault to repair, so it is said plainly and carried rather than escalated.
     """
 
 

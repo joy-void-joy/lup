@@ -16,7 +16,8 @@ from pydantic import BaseModel
 from lup.coordination.cohort import ActorCohort, ActorRecipe, CohortJournal
 from lup.coordination.mail import EVERYONE
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import ROSTER_FILE, Delivery, Roster
+from lup.coordination.bare.store import ROSTER_FILE
+from lup.coordination.roster import Delivery, Roster
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.capabilities import Session, Turn
 from lup.sessions.client import Client

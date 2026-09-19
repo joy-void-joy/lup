@@ -94,7 +94,7 @@ class ForeignGate(BaseModel, frozen=True):
 
         Segments are flattened rather than judged one at a time, because the
         gate is not segment-aware: it reads the argv of the whole call. A
-        command the lexer cannot read yields nothing, which is correct -- the
+        command the parser cannot read yields nothing, which is correct -- the
         policy has already refused it in its own words, and a second sentence
         about somebody else's gate would be noise on top of a verdict.
         """

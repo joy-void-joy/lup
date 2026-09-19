@@ -32,6 +32,7 @@ const columns = helper.columns([
   helper.accessor("standing", { header: "Standing" }),
   helper.accessor("priority", { header: "Priority" }),
   helper.accessor("moved", { header: "Moved" }),
+  helper.accessor("author", { header: "Recorded by" }),
 ]);
 const NO_NODES: NodeView[] = [];
 const ROW_HEIGHT = 32;
@@ -104,6 +105,9 @@ function Rows({ data }: { data: NodeView[] }) {
               <Standing label={node.standing} reason={node.reason} sound={node.sound} brief />
               <span>{node.priority}</span>
               <span className="muted">{moved(node.moved)}</span>
+              <span className="muted author" title="who recorded it, stamped by the store">
+                {node.author}
+              </span>
             </Link>
           );
         })}
@@ -116,8 +120,14 @@ export function Browse() {
   const search = browseRoute.useSearch();
   const navigate = useNavigate();
   const graph = useQuery({
-    queryKey: ["graph", search.kind, search.standing, search.since],
-    queryFn: () => loadGraph({ kind: search.kind, standing: search.standing, since: search.since }),
+    queryKey: ["graph", search.kind, search.standing, search.since, search.lacking],
+    queryFn: () =>
+      loadGraph({
+        kind: search.kind,
+        standing: search.standing,
+        since: search.since,
+        lacking: search.lacking,
+      }),
   });
   const kinds = useQuery({ queryKey: ["kinds"], queryFn: loadKinds });
   const data = useMemo(
@@ -174,6 +184,36 @@ export function Browse() {
             onChange={(event) => amend({ since: event.target.value })}
           />
         </label>
+        <label>
+          Lacking an edge
+          <select
+            value={search.lacking}
+            onChange={(event) => amend({ lacking: event.target.value })}
+            title="only nodes from which no edge of this kind runs — what was found here rather than read from somewhere"
+          >
+            <option value="">none</option>
+            {(kinds.data?.edges ?? []).map((edge) => (
+              <option key={edge.kind} value={edge.kind}>
+                {edge.kind}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Group by edge
+          <select
+            value={search.group}
+            onChange={(event) => amend({ group: event.target.value })}
+            title="in the graph view, nest each node inside the node an edge of this kind points at — messages inside their thread"
+          >
+            <option value="">none</option>
+            {(kinds.data?.edges ?? []).map((edge) => (
+              <option key={edge.kind} value={edge.kind}>
+                {edge.kind}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="views">
           <Link to="/" search={{ ...search, view: "list" }} aria-current={search.view === "list" ? "page" : undefined}>
             list
@@ -200,6 +240,7 @@ export function Browse() {
                 data.some((node) => node.id === edge.target),
             ),
           }}
+          group={search.group}
         />
       )}
       {graph.data !== undefined && search.view === "list" && <Rows data={data} />}

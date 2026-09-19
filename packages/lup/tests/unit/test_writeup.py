@@ -7,6 +7,7 @@ through; and one log renders one document, so verifying against it means
 something.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -18,11 +19,15 @@ from lup.coordination.tasks import Blocks, Task
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerNode, Standing, Surroundings
 from lup.ledger.writeup import (
+    Band,
     Listing,
     NeedsPerson,
     Placeholder,
     Prose,
     Stamp,
+    Count,
+    Tally,
+    Timeline,
     Writeup,
     WriteupError,
     render_writeup,
@@ -184,3 +189,185 @@ def test_write_writeup_writes_with_a_banner_and_check_reports_a_stale_file(
     held.record(Task, "second", slug="second")
     with pytest.raises(RuntimeError, match="stale"):
         write_writeup(writeup, CLASSES, tmp_path, check=True)
+
+
+class Happening(LedgerNode, frozen=True):
+    """A test kind dated on two clocks, the way a trace kind is."""
+
+    kind: Literal["test:happening"] = "test:happening"
+    happened: datetime | None = None
+    before: datetime | None = None
+    seen: datetime | None = None
+
+
+class Window(LedgerNode, frozen=True):
+    """A test kind framing a stretch of time, the way an incident does."""
+
+    kind: Literal["test:window"] = "test:window"
+    opens: datetime | None = None
+    closes: datetime | None = None
+
+
+def test_a_timeline_orders_by_the_named_clock_and_places_bounds_bands_and_undated_rows(
+    tmp_path: Path,
+) -> None:
+    """Event time orders the rows; a bound says `before`; the second clock is
+    shown and never ordered by; a band opens before and closes after the rows
+    at its edges; what no clock places goes last under its own heading."""
+    held = store(tmp_path)
+    classes: list[type[LedgerNode]] = [Happening, Window, Task]
+    june = datetime(2026, 6, 16, 9, 29, 53, tzinfo=UTC)
+    held.record(
+        Happening,
+        "grammar switches on",
+        slug="onset",
+        happened=june.isoformat(),
+        seen=datetime(2026, 9, 4, 15, 0, tzinfo=UTC).isoformat(),
+    )
+    held.record(
+        Happening,
+        "first link",
+        slug="first",
+        happened=datetime(2026, 5, 11, 12, 43, tzinfo=UTC).isoformat(),
+    )
+    held.record(
+        Happening,
+        "deleted page",
+        slug="deleted",
+        before=datetime(2026, 6, 19, 13, 33, 49, tzinfo=UTC).isoformat(),
+    )
+    held.record(Happening, "undated paste", slug="paste")
+    held.record(
+        Window,
+        "dsewiki-2026",
+        slug="dsewiki",
+        opens=datetime(2026, 5, 11, 12, 43, tzinfo=UTC).isoformat(),
+        closes=datetime(2026, 7, 2, tzinfo=UTC).isoformat(),
+    )
+    part = Timeline(
+        heading="Timeline",
+        of=["test:happening"],
+        moment="happened",
+        bound="before",
+        beside="seen",
+        bands=Band(of="test:window", start="opens", end="closes"),
+    )
+
+    rendered = "\n".join(part.render(held, classes))
+    rows = rows_of(part.render(held, classes))
+
+    assert rows[0].startswith(
+        "| 2026-05-11 12:43:00Z | **[dsewiki-2026](lup:dsewiki)** opens |"
+    )
+    assert rows[1].startswith("| 2026-05-11 12:43:00Z | **[first link](lup:first)** |")
+    assert rows[2].startswith(
+        "| 2026-06-16 09:29:53Z | **[grammar switches on](lup:onset)** | 2026-09-04 15:00:00Z |"
+    )
+    assert rows[3].startswith(
+        "| before 2026-06-19 13:33:49Z | **[deleted page](lup:deleted)** |"
+    )
+    assert rows[4].startswith(
+        "| 2026-07-02 00:00:00Z | **[dsewiki-2026](lup:dsewiki)** closes |"
+    )
+    assert rendered.index("### Undated") > rendered.index("closes")
+    assert rows[5].startswith("| **[undated paste](lup:paste)** |")
+    assert "| happened | What | seen | Standing | Node |" in rendered
+    assert part.kinds() == ["test:happening", "test:window"]
+
+
+def test_a_timeline_takes_the_fallback_clock_and_says_which_it_took(
+    tmp_path: Path,
+) -> None:
+    """A discovery timeline orders by when a thing was seen and falls back on
+    when it was recorded, saying so on the row."""
+    held = store(tmp_path)
+    classes: list[type[LedgerNode]] = [Happening]
+    held.record(Happening, "recorded only", slug="only")
+    part = Timeline(
+        heading="Discovery", of=["test:happening"], moment="seen", fallback="at"
+    )
+
+    [row] = rows_of(part.render(held, classes))
+    nothing = Timeline(heading="None", of=["test:window"], moment="opens").render(
+        held, classes
+    )
+
+    assert "(at) | **[recorded only](lup:only)** |" in row
+    assert "Nothing is dated." in nothing
+
+
+def test_a_listing_selects_what_lacks_an_edge_and_what_is_sound(
+    tmp_path: Path,
+) -> None:
+    """What is ours is what points at no source, and what may be cited is
+    what is sound: both read off the log, never stored."""
+    held = store(tmp_path)
+    ours = held.record(Task, "found here", slug="ours")
+    theirs = held.record(Task, "read from a source", slug="theirs")
+    source = held.record(Task, "the source", slug="source")
+    held.record(Doubt, "a doubt", slug="doubt")
+    held.relate(Blocks, theirs, source)
+
+    lacking = Listing(
+        heading="Ours", of="coordination:task", lacking="coordination:blocks"
+    )
+    having = Listing(
+        heading="Theirs", of="coordination:task", having="coordination:blocks"
+    )
+    sound = Listing(heading="Sound", sound=True)
+    unsound = Listing(heading="Unsound", sound=False)
+
+    assert [node.id for node in lacking.chosen(held, CLASSES)] == [ours.id, source.id]
+    assert [node.id for node in having.chosen(held, CLASSES)] == [theirs.id]
+    assert lacking.kinds() is None and having.kinds() is None
+    assert {node.slug for node in sound.chosen(held, CLASSES)} == {
+        "ours",
+        "theirs",
+        "source",
+    }
+    assert [node.slug for node in unsound.chosen(held, CLASSES)] == ["doubt"]
+
+
+def test_a_figure_in_a_row_is_one_line_with_its_pipes_escaped(tmp_path: Path) -> None:
+    """A paste body with newlines and a title with a pipe stay whole and keep the table a table."""
+    held = store(tmp_path)
+    held.record(Task, "a | b", text="line one\nline two | three", slug="piped")
+
+    [row] = rows_of(
+        Listing(heading="Rows", of="coordination:task").render(held, CLASSES)
+    )
+
+    assert "\n" not in row
+    assert "line one line two \\| three" in row and " — a \\| b" in row
+    # Four columns are five bare pipes; the two inside the cells are escaped.
+    assert row.count("|") - row.count("\\|") == 5
+
+
+def test_a_tally_counts_nodes_by_a_field_largest_first_and_narrows_by_standing(
+    tmp_path: Path,
+) -> None:
+    held = store(tmp_path)
+    held.record(Task, "a", holder="ann")
+    held.record(Task, "b", holder="ann")
+    held.record(Task, "c", holder="bob")
+    held.record(Task, "d")
+    done = held.record(Task, "e", holder="bob")
+    held.amend(done.completed())
+
+    every = Tally(heading="By holder", of="coordination:task", by="holder")
+    open_only = Tally(
+        heading="Open by holder", of="coordination:task", by="holder", standing="open"
+    )
+
+    assert every.counted(held, CLASSES) == [
+        Count(value="ann", count=2),
+        Count(value="bob", count=2),
+        Count(value="(none)", count=1),
+    ]
+    assert open_only.counted(held, CLASSES) == [Count(value="(none)", count=1)]
+    rendered = "\n".join(every.render(held, CLASSES))
+    assert "| holder | count |" in rendered and "| ann | 2 |" in rendered
+    assert every.kinds() == ["coordination:task"]
+    assert "Nothing recorded." in "\n".join(
+        Tally(heading="None", of="test:doubt", by="title").render(held, CLASSES)
+    )

@@ -1,25 +1,23 @@
 """The roster's changes reaching a session at each prompt, from inside the plugin.
 
-The fold is a verbatim copy with no import of the code that wrote what it
-reads, so what is pinned first is the spellings the two halves agree on. The
-rest is written against what a session must and must not be told: nothing on
-a quiet roster, a baseline rather than a replay on the first prompt, and the
-contested path before everything else — over a store the typed writers
-produced, so the copy is read against the record as it is really written.
+The prompt half reads the store through the same fold the typed library reads
+it through, so nothing here pins one spelling against another — what is left
+to assert is what a session must and must not be told: nothing on a quiet
+roster, a baseline rather than a replay on the first prompt, and the contested
+path before everything else, over a store the typed writers produced.
 """
 
+import json
+from datetime import timedelta
 from pathlib import Path
 
-from lup.coordination import changes as fold
-from lup.coordination.identity import (
-    MEMBER_KIND,
-    NAMES_FILE,
-    member_ref,
-    mint_member_id,
-)
+from lup.channels.models import utc_now
+from lup.coordination.bare import changes as fold
+from lup.coordination.bare import store
+from lup.coordination.bare.store import MEMBER_KIND, beat, heard_at, reset_at
+from lup.coordination.identity import member_ref, mint_member_id
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import ROSTER_FILE
-from lup.coordination.touches import TOUCHES_FILE
+from lup.coordination.roster import ActorDescribed, ActorJoined
 
 
 def joined(peers: RepositoryPeers, worktree: Path, name: str) -> str:
@@ -34,17 +32,59 @@ def told(peers: RepositoryPeers, member: str, worktree: Path) -> list[str]:
     return fold.changes(peers.root, member, worktree)
 
 
-def test_the_copy_and_its_source_spell_the_store_alike() -> None:
-    """What stands in for the import the verbatim copy cannot have."""
-    assert fold.ROSTER_FILE == ROSTER_FILE
-    assert fold.NAMES_FILE == NAMES_FILE
-    assert fold.TOUCHES_FILE == TOUCHES_FILE
-    assert fold.MEMBER_KIND == MEMBER_KIND
+def test_a_prompt_beats_for_the_session_it_was_submitted_from(tmp_path: Path) -> None:
+    """The hook is the pulse a session without a tool server has."""
+    peers = RepositoryPeers(tmp_path)
+    me = joined(peers, tmp_path / "mine", "mine")
+
+    told(peers, me, tmp_path / "mine")
+
+    assert heard_at(peers.root, me) is not None
 
 
-def test_the_copy_names_its_look_the_way_the_roster_names_the_member() -> None:
-    """The look file is `ActorRef.conversation`, derived twice and pinned once."""
-    assert f"{fold.MEMBER_KIND}-abc123" == member_ref("abc123").conversation()
+def test_a_peer_the_pulse_retired_reads_as_departed(tmp_path: Path) -> None:
+    """A killed session leaves the look the way one that said goodbye does."""
+    peers = RepositoryPeers(tmp_path)
+    me = joined(peers, tmp_path / "mine", "mine")
+    other = mint_member_id()
+    long_ago = utc_now() - timedelta(seconds=store.STALE_AFTER_SECONDS + 1)
+    peers.cohort.roster.stream.append(
+        ActorJoined(
+            actor=member_ref(other),
+            task=f"working in {tmp_path / 'theirs'}",
+            worktree=str(tmp_path / "theirs"),
+            at=long_ago,
+        )
+    )
+    peers.names.rename(other, "reviewer")
+    peers.touches.touched(member_ref(other), tmp_path / "mine" / "src" / "a.py")
+
+    assert told(peers, me, tmp_path / "mine") == [
+        "No other session is working in this repository; "
+        "`coordination_peers` lists whoever arrives."
+    ]
+
+    beat(peers.root, other)
+
+    assert told(peers, me, tmp_path / "mine") == [
+        f"reviewer holding at {tmp_path / 'mine' / 'src' / 'a.py'}",
+        f"reviewer arrived — theirs — working in {tmp_path / 'theirs'}",
+    ]
+
+
+def test_the_fold_names_a_conversation_the_way_the_roster_names_it() -> None:
+    """One key, derived twice: by the shared fold, and by the typed ref.
+
+    The last spelling the two halves still derive separately. Everything else
+    the store is made of is declared once and imported, but a conversation key
+    is built from a kind and an id on both sides, and a look filed under one
+    spelling while the roster folds the other is a session whose baseline
+    never matches its own row.
+    """
+    assert (
+        store.conversation_of(store.Actor(kind=store.MEMBER_KIND, id="abc123"))
+        == member_ref("abc123").conversation()
+    )
 
 
 def test_the_first_prompt_is_a_baseline_carrying_one_pointer(tmp_path: Path) -> None:
@@ -165,7 +205,7 @@ def test_an_unreadable_look_re_baselines_rather_than_replays(tmp_path: Path) -> 
     me = joined(peers, tmp_path / "mine", "mine")
     joined(peers, tmp_path / "theirs", "reviewer")
     told(peers, me, tmp_path / "mine")
-    (peers.root / fold.LOOKS_DIR / f"{MEMBER_KIND}-{me}.json").write_text("not a look")
+    (peers.root / store.LOOKS_DIR / f"{MEMBER_KIND}-{me}.json").write_text("not a look")
 
     assert told(peers, me, tmp_path / "mine") == [
         "1 other session is working in this repository; `coordination_peers` lists it."
@@ -202,7 +242,85 @@ def test_a_session_with_no_identity_is_told_nothing(tmp_path: Path) -> None:
     joined(peers, tmp_path / "mine", "mine")
 
     assert fold.changes(peers.root, "", tmp_path / "mine") == []
-    assert not (peers.root / fold.LOOKS_DIR).exists()
+    assert not (peers.root / store.LOOKS_DIR).exists()
+
+
+def transcript(path: Path, roots: int) -> str:
+    """A transcript holding this many conversation roots, a turn and a note under each.
+
+    The shape a rewind leaves in the runtime's own file: every root is a
+    prompt with no parent, and the attachments between turns parent nothing
+    a turn descends from.
+    """
+    lines = [
+        json.dumps(entry)
+        for n in range(roots)
+        for entry in (
+            {"type": "user", "uuid": f"root-{n}", "parentUuid": None},
+            {"type": "assistant", "uuid": f"turn-{n}", "parentUuid": f"root-{n}"},
+            {"type": "attachment", "uuid": f"note-{n}", "parentUuid": f"turn-{n}"},
+        )
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def said_earlier(peers: RepositoryPeers, member: str, description: str) -> None:
+    """A description written a second ago, so a stamp taken now is later than it.
+
+    A file stamp carries the kernel's coarse clock, which can trail the
+    record's clock by a tick; a real rewind is human time away from whatever
+    the row last said, and the test says so in seconds rather than racing it.
+    """
+    peers.cohort.roster.stream.append(
+        ActorDescribed(
+            actor=member_ref(member),
+            description=description,
+            at=utc_now() - timedelta(seconds=1),
+        )
+    )
+
+
+def test_a_rewind_resets_what_the_row_said_and_re_baselines(tmp_path: Path) -> None:
+    """A new root in the same transcript is the one sign a rewind leaves."""
+    peers = RepositoryPeers(tmp_path)
+    me = joined(peers, tmp_path / "mine", "mine")
+    joined(peers, tmp_path / "theirs", "reviewer")
+    said_earlier(peers, me, "the work the rewind discards")
+    log = tmp_path / "session.jsonl"
+    fold.changes(peers.root, me, tmp_path / "mine", transcript(log, roots=1))
+    assert fold.changes(peers.root, me, tmp_path / "mine", str(log)) == []
+
+    rewound = fold.changes(peers.root, me, tmp_path / "mine", transcript(log, roots=2))
+
+    assert rewound == [
+        fold.MOVED_LINE,
+        "1 other session is working in this repository; `coordination_peers` lists it.",
+    ]
+    assert reset_at(peers.root, me) is not None
+    [mine] = [row for row in peers.listing() if row.member.actor.id == me]
+    assert mine.member.description == ""
+    assert mine.member.running
+    assert fold.changes(peers.root, me, tmp_path / "mine", str(log)) == []
+
+
+def test_a_peer_whose_conversation_moved_is_told_as_on_its_task(
+    tmp_path: Path,
+) -> None:
+    """What a discarded conversation said is unsaid until the session speaks again."""
+    peers = RepositoryPeers(tmp_path)
+    me = joined(peers, tmp_path / "mine", "mine")
+    other = joined(peers, tmp_path / "theirs", "reviewer")
+    said_earlier(peers, other, "reading the merge")
+    told(peers, me, tmp_path / "mine")
+
+    store.reset(peers.root, other)
+    moved = told(peers, me, tmp_path / "mine")
+    peers.describe(other, "reading the rebase")
+    spoke = told(peers, me, tmp_path / "mine")
+
+    assert moved == [f"reviewer now: working in {tmp_path / 'theirs'}"]
+    assert spoke == ["reviewer now: reading the rebase"]
 
 
 def test_the_envelope_is_the_shape_both_runtimes_read() -> None:
@@ -212,3 +330,23 @@ def test_the_envelope_is_the_shape_both_runtimes_read() -> None:
             "additionalContext": "one\ntwo",
         }
     }
+
+
+def test_a_claim_the_sweep_vacated_is_read_as_ended(tmp_path: Path) -> None:
+    """The copy folds the record the typed sweep writes, so a path that went
+    stops being reported without any process having to agree on a timeout.
+    """
+    peers = RepositoryPeers(tmp_path)
+    other = joined(peers, tmp_path / "mine", "reviewer")
+    changed = tmp_path / "mine" / "src" / "a.py"
+    changed.parent.mkdir(parents=True)
+    changed.write_text("value = 1\n", encoding="utf-8")
+    peers.touches.touched(member_ref(other), changed)
+    assert [claim["path"] for claim in store.held(peers.root, [other])] == [
+        str(changed)
+    ]
+
+    changed.unlink()
+    peers.sweep()
+
+    assert store.held(peers.root, [other]) == []

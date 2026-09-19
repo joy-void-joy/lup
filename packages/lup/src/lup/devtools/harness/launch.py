@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
 from enum import StrEnum
@@ -19,8 +19,9 @@ from uuid import uuid4
 
 import sh
 import typer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from lup.harness.devices import Device
 from lup.providers.login import ProviderLogin
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.contained import contained_argv
@@ -36,18 +37,14 @@ from lup.providers.codex.harness_runtime import (
     PluginCacheConfig,
 )
 from lup.providers.codex.transcripts import CodexTranscripts
-from lup.coordination.identity import (
-    MEMBER_ENV,
-    derived_cli_name,
-    member_environment,
-    mint_member_id,
-)
+from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
+from lup.coordination.repository import launched_member
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
 from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.sandbox.rail import AccessibleRoot, fleet_lease
-from lup.devtools.sync import accessible_roots
+from lup.devtools.sync import accessible_roots, granted_devices
 from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import (
     Finding,
@@ -62,6 +59,7 @@ from lup.harness.toolchain import (
     codex_envelope_requirement,
     container_client,
     for_host,
+    granted_device_requirement,
     socat_requirement,
 )
 from lup.observability.audit import (
@@ -93,6 +91,7 @@ from lup.devtools.harness.drift import (
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
+    exclude_sandbox_placeholders,
     record_preflight,
     release_ledger,
     retire_mount_table,
@@ -153,6 +152,27 @@ def declared_mounts(
         *[AccessibleRoot(path=path) for path in writable],
         *[AccessibleRoot(path=path, writable=False) for path in read_only],
     ]
+
+
+def declared_devices(names: list[str]) -> list[Device]:
+    """The devices one command line asked this session to be granted.
+
+    The same shape an image declares its standing ones in, so a flag costs no
+    second path downstream. A name the specification's grammar refuses is
+    refused here in the launcher's own words, naming the flag's value, rather
+    than by the engine refusing the whole container over it.
+    """
+
+    def declared(name: str) -> Device:
+        try:
+            return Device(name=name)
+        except ValidationError as error:
+            raise typer.BadParameter(
+                f"--device {name!r}: a device is named the way CDI names it, "
+                "vendor/class=device, such as nvidia.com/gpu=all"
+            ) from error
+
+    return [declared(name) for name in names]
 
 
 @runtime_checkable
@@ -272,6 +292,15 @@ def ready_to_open(
     # rather than only on the way out, because the launch that crashed is
     # exactly the one that did not get to tidy up after itself.
     sweep_ledgers(project_root())
+    # The runtime sandbox's own leavings, taken out of `git status` before a
+    # session reads it: said only when something was added, because a line
+    # repeated on every launch is read on none.
+    excluded = exclude_sandbox_placeholders(project_root())
+    if excluded:
+        typer.echo(
+            f"excluded {len(excluded)} sandbox placeholder file(s) from git "
+            f"status: {', '.join(excluded)}"
+        )
     opening = LaunchOpening()
     typer.echo("checking the host")
     opening.findings = runtime_preflight(composition, sentinels, opening, contained)
@@ -707,8 +736,18 @@ def report_requirements(
     # the declaration is hashed into the ownership digest and a container
     # client is a fact about the machine. This is the only place the
     # exercises actually run, so it is the only place that has to know.
+    #
+    # The machine's device grants join the roster here for the same reason
+    # and from the same side: a grant is read off this machine's own file at
+    # the moment the roster runs, so a committed manifest never names a
+    # vendor's device, and a setup check still re-proves every grant.
     findings = for_host(
-        manifest,
+        Manifest(
+            requirements=[
+                *manifest.requirements,
+                *(granted_device_requirement(device) for device in granted_devices()),
+            ]
+        ),
         container_client(),
         project_root(),
         inside_sentinel=sentinels.inside,
@@ -756,6 +795,7 @@ def verify_inside(
     sentinels: LaunchSentinels = LaunchSentinels(),
     environment: EnvVars | None = None,
     in_passing: bool = False,
+    skipped: Sequence[str] = (),
 ) -> list[Finding]:
     """Exercise the image half behind an argv somebody already assembled.
 
@@ -764,6 +804,9 @@ def verify_inside(
     proxy and may build the image, so a second call would not merely be slow
     -- it would print the whole boundary notice again, which reads as the
     launch having done it twice.
+
+    ``skipped`` is what another composition over the same image already
+    exercised, by :meth:`Manifest.inside_signatures`.
     """
     if environment is None:
         environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
@@ -779,6 +822,7 @@ def verify_inside(
                 inside_sentinel=sentinels.inside,
                 host_sentinel=sentinels.host,
             ),
+            skipped,
         ),
         in_passing,
     )
@@ -791,8 +835,15 @@ def report_inside_requirements(
     login: ProviderLogin,
     sentinels: LaunchSentinels = LaunchSentinels(),
     setting_up: bool = True,
+    skipped: Sequence[str] = (),
+    banner: Banner | None = None,
 ) -> list[Finding]:
     """Exercise the image-side requirements inside the container a session opens.
+
+    ``skipped`` and ``banner`` are for a caller asking two runtimes about one
+    image: the checks the first already exercised are not paid for again, and
+    the boundary notice the argv assembly says is collected into the banner
+    rather than printed a second time.
 
     The half of the manifest that had nowhere to run. An image requirement is
     excluded from the host roster for a good reason -- a laptop without
@@ -819,17 +870,18 @@ def report_inside_requirements(
         harness.image,
         harness.requirements,
         project_root(),
-        plugin.hooks.human_owned_files if plugin.hooks is not None else [],
         config_home,
         credential if credential.exists() else None,
         login,
         streams="captured",
+        banner=banner,
         sentinels=sentinels,
-        # The same mounts a session gets, for the reason this probe assembles
-        # nothing of its own: a container built without the declared roots is
-        # a container no session opens, and a placement verified in one says
-        # nothing about the other.
+        # The same mounts and devices a session gets, for the reason this
+        # probe assembles nothing of its own: a container built without the
+        # declared roots is a container no session opens, and a placement
+        # verified in one says nothing about the other.
         accessible=accessible_roots(),
+        devices=granted_devices(),
     )
     # The same values on both sides of one call, which is the whole of what a
     # placement probe asks. Injected into the argv above and handed to the
@@ -837,7 +889,11 @@ def report_inside_requirements(
     # look for a value nothing had set and report the boundary broken on a
     # machine whose boundary was fine.
     return verify_inside(
-        harness.requirements, opening, setting_up=setting_up, sentinels=sentinels
+        harness.requirements,
+        opening,
+        setting_up=setting_up,
+        sentinels=sentinels,
+        skipped=skipped,
     )
 
 
@@ -1382,7 +1438,9 @@ def session_argv(
     sentinels: LaunchSentinels = LaunchSentinels(),
     cleared: LaunchOpening = LaunchOpening(),
     mounts: list[AccessibleRoot] = [],
+    devices: list[Device] = [],
     authenticate: Callable[[list[str], Path], None] | None = None,
+    member: LaunchedMember | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1410,18 +1468,20 @@ def session_argv(
     """
     banner = cleared.banner
     # Minted where both runtimes pass through, so a session's coordination
-    # address is a fact about having been launched rather than about which
+    # identity is a fact about having been launched rather than about which
     # CLI was launched. Exported rather than derived because the session's
     # tool server and its hooks are separate processes with no channel
     # between them, and an id each worked out for itself would put one
-    # session on the roster twice.
+    # session on the roster twice. A launcher that already minted one, to
+    # show its name in the runtime's own chrome, hands it in so the chrome
+    # and the roster agree.
     #
-    # Overwritten rather than respected. The variable is a launcher's claim to
-    # have minted the id behind it, and an operator who happened to have it
-    # exported would otherwise hand their own roster address to every session
-    # they start — two peers answering to one id, which is the one thing the
-    # durable id exists to rule out.
-    environment.update(member_environment(mint_member_id()))
+    # Overwritten rather than respected. The variables are a launcher's claim
+    # to have minted what is behind them, and an operator who happened to
+    # have them exported would otherwise hand their own roster address to
+    # every session they start — two peers answering to one id, which is the
+    # one thing the durable id exists to rule out.
+    environment.update((member or launched_member(project_root())).environment())
 
     # Settled once and handed to everything that needs it. Resolving a
     # registration can clone it, so a second resolution would be a second
@@ -1435,6 +1495,26 @@ def session_argv(
 
     accessible = [*mounts, *accessible_roots(told)]
     if not sandbox.contained():
+        # A host posture holds the host's devices already, so a flag asking
+        # for one describes a container this launch does not open. Said
+        # rather than ignored: the operator typed it expecting a grant, and
+        # silence would leave them reading a GPU that answers on the host as
+        # one the flag delivered.
+        if devices:
+            banner.add(
+                [
+                    Notice(
+                        text=(
+                            "Devices: "
+                            + ", ".join(device.name for device in devices)
+                            + " asked for; the session runs on the host, which "
+                            "holds its own devices, and --device grants one "
+                            "inside the container."
+                        ),
+                        urgency="detail",
+                    )
+                ]
+            )
         if authenticate is not None:
             authenticate([cli], config_home)
         settle_boundary(
@@ -1462,7 +1542,6 @@ def session_argv(
         harness.image,
         harness.requirements,
         project_root(),
-        plugin.hooks.human_owned_files if plugin.hooks is not None else [],
         config_home,
         credential if credential.exists() else None,
         login,
@@ -1478,10 +1557,14 @@ def session_argv(
                 else []
             ),
             MEMBER_ENV,
+            NAME_ENV,
         ],
         banner=banner,
         sentinels=sentinels,
         accessible=accessible,
+        # This launch's flags lead and the machine's standing grants follow,
+        # settled here beside the roots for the same reason they are.
+        devices=[*devices, *granted_devices(told)],
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -1581,6 +1664,7 @@ def launch_claude(
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
     mounts: list[AccessibleRoot] = [],
+    devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin."""
@@ -1612,6 +1696,10 @@ def launch_claude(
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
     root = project_root()
+    # Minted here rather than where the argv is settled, because this runtime
+    # shows the name in its own chrome and the flag carrying it is built now;
+    # the same identity is handed on so the exported one agrees with it.
+    member = launched_member(root)
     named = [
         root / ".claude" / "plugins" / plugin.name,
         *companion_plugin_directories(root, plugin.name),
@@ -1629,17 +1717,19 @@ def launch_claude(
                 ),
             ),
             # What this runtime shows in its own chrome, made to agree with
-            # the name the roster answers to. The roster's name lives in
-            # `names.jsonl` and is what addressing resolves through, so this
-            # is a display detail rather than the identity — which is why
-            # Codex, whose launch takes no such flag, loses nothing by it: a
-            # peer there is addressed by exactly the same name, and renames
-            # through the same command.
+            # the name the roster answers to: the same minted name is
+            # exported for the session's tool server to join under, numbered
+            # already where a live session in this worktree has the plain
+            # one. The roster's name lives in `names.jsonl` and is what
+            # addressing resolves through, so this is a display detail rather
+            # than the identity — which is why Codex, whose launch takes no
+            # such flag, loses nothing by it: a peer there is addressed by
+            # exactly the same name, and renames through the same command.
             #
             # Ahead of `extra_args`, so a caller who named their own session
             # still wins.
             "--name",
-            derived_cli_name(root),
+            member.cli_name,
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]
@@ -1699,6 +1789,8 @@ def launch_claude(
                 sentinels,
                 cleared,
                 mounts,
+                devices,
+                member=member,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -1742,6 +1834,7 @@ def launch_codex(
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
     mounts: list[AccessibleRoot] = [],
+    devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI."""
@@ -1847,6 +1940,7 @@ def launch_codex(
                 sentinels,
                 cleared,
                 mounts,
+                devices,
                 authenticate=authenticate,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)

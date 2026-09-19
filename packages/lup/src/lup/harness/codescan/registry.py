@@ -1,34 +1,34 @@
-# lup: ignore[native-spelling]
-# The rule index necessarily documents the spellings other rules audit.
-"""One index over every Lup rule family for discovery and the rule reference.
+"""One index over every Lup rule for discovery and the rule reference.
 
 A rule id met in a `# lup: ignore[...]` directive, a hook denial, or an
-auditor finding resolves here: every family — anti-pattern, boundary,
-spelling, architecture — is listed with its scope, diagnostic, and the module
-that defines and enforces it. `uv run lup-devtools dev rules` renders this
-registry into the checked-in `docs/rules.md` reference that deny messages
-point at, so no rule is discoverable only through the scanner that owns it.
+auditor finding resolves here: every rule the set holds — a line rule the
+kernel runs per edit, a project rule the sweep runs over the tree, a
+composition rule generation runs over the assembled harness — is projected
+into one card carrying its family, scope, diagnostic, and the module that
+enforces it. `uv run lup-devtools dev rules` renders the cards into the
+checked-in `docs/rules.md` reference that deny messages point at, so no rule
+is discoverable only through the scanner that owns it.
 
-A rule whose verdict a type oracle sharpens carries that refinement on its
-card, read off the rule's own declaration — the reference is where the two
-surfaces are reconciled: the edit hook decides on the spelling alone and the
-whole-file audit may decide otherwise once the subject is resolved.
+A card is a rendering of its declaration and is never written beside it: a
+card kept by hand describes the verdict its rule gave when somebody last
+copied it. A rule whose verdict a type oracle sharpens carries that
+refinement on its card, read off the rule's own declaration — the reference
+is where the two surfaces are reconciled: the edit hook decides on the
+spelling alone and the whole-file audit may decide otherwise once the subject
+is resolved.
 """
-
-from typing import Literal
 
 from pydantic import BaseModel
 
 import lup.harness.codescan.antipatterns as antipatterns
-import lup.harness.codescan.boundaries as boundaries
-import lup.harness.codescan.capabilities as capabilities
-import lup.harness.codescan.dispatch as dispatch
-import lup.harness.codescan.narrowing as narrowing
-import lup.harness.codescan.portable as portable
-from lup.harness.codescan.common import AntiPattern, RuleSelection, RuleStrength
-
-type RuleFamily = Literal["anti-pattern", "boundary", "spelling", "architecture"]
-
+from lup.harness.codescan.antipatterns import RuleSet
+from lup.harness.codescan.common import (
+    ExampleVerdict,
+    Rule,
+    RuleFamily,
+    RuleSelection,
+    RuleStrength,
+)
 
 # lup: ignore[constant-declaration] — one generated artifact's identity: the
 # writer and every deny message that cites it must name the same file
@@ -56,13 +56,13 @@ class RegisteredRule(BaseModel, frozen=True):
     scope: str
     example: str
     cleared: str = ""
-    """The near-miss this rule spares, where it has one written down.
+    """The near-miss this rule spares, in the rule's own words.
 
-    Empty for the structural scanners, whose cards predate the anti-patterns
-    carrying their own examples. For an anti-pattern it is the neighbouring
-    shape that keeps the same spelling and is not the defect — which is the
-    half of the rule a reader meeting a denial most needs, because it says
-    whether their site is one the gate will go on refusing.
+    The neighbouring shape that keeps the same spelling and is not the defect
+    — which is the half of the rule a reader meeting a denial most needs,
+    because it says whether their site is one the gate will go on refusing.
+    Empty only for a rule whose cleared examples all span several lines and
+    were shown flattened as the first instead.
     """
     message: str
     defined_in: str
@@ -73,229 +73,75 @@ class RegisteredRule(BaseModel, frozen=True):
     honest answer is that an exception might exist."""
 
 
-# lup: ignore[library-default] — one card per rule the library's own scanners define
-STRUCTURAL_RULES: list[RegisteredRule] = [
-    RegisteredRule(
-        id=capabilities.RULE_ID,
-        family="architecture",
-        scope="Python architecture",
-        example="class Combined(Reader, Writer): ...",
-        message=(
-            "Capability ABCs stay independently constructible and cohesive; "
-            "implementations do not inherit multiple capabilities or reusable behavior."
-        ),
-        defined_in=capabilities.__name__,
-    ),
-    RegisteredRule(
-        id=capabilities.ABSTRACT_DECLARATION_RULE_ID,
-        family="architecture",
-        scope="Python architecture",
-        example="class Part(BaseModel):  # an @abstractmethod inside, no ABC in the bases",
-        message=(
-            "A class declaring an abstract member cannot be constructed, and its "
-            "bases are where it says so. Pydantic's metaclass is an ABCMeta, so on "
-            "a model the member binds and the class turns abstract while the word "
-            "ABC never appears — leaving the fact readable only to whoever knows "
-            "that about the dependency. Name ABC among the bases: nothing changes "
-            "at runtime, and abc-capability reads the same list to tell a "
-            "capability seam from a variant union. A Protocol is exempt, being "
-            "satisfied structurally rather than by declaration."
-        ),
-        defined_in=capabilities.__name__,
-    ),
-    RegisteredRule(
-        id=dispatch.RULE_ID,
-        family="architecture",
-        scope="Python architecture",
-        example="if isinstance(part, TextPart): ...",
-        message=(
-            "A union we declare answers through its members: the base names the "
-            "operation and each variant answers or declines it. Branching on the "
-            "variant's own type — isinstance, a case arm, an assert_never net — "
-            "leaves a filter that goes stale the moment a variant is added. "
-            "Narrowing untyped data at a boundary is the different case and is "
-            "not reported: the rule fires only on project classes that inherit "
-            "pydantic.BaseModel."
-        ),
-        defined_in=dispatch.__name__,
-    ),
-    RegisteredRule(
-        id=narrowing.RULE_ID,
-        family="architecture",
-        scope="Python architecture",
-        example="if isinstance(n, ast.Name): ...\nelif isinstance(n, ast.Attribute): ...",
-        message=(
-            "Narrowing one subject again, in a later arm of the same if/elif chain, "
-            "is a dispatch in the older spelling: each arm becomes a case pattern, an "
-            "and conjunct becomes its guard, and the fallthrough becomes case _. A "
-            "single narrowing is sanctioned and stays silent, as does isinstance in "
-            "expression position, where match has no spelling at all."
-        ),
-        defined_in=narrowing.__name__,
-        strength="strong",
-    ),
-    RegisteredRule(
-        id=boundaries.RULE_ID,
-        family="boundary",
-        scope="Neutral Python modules",
-        example="from lup.providers.codex.runtime import CodexSessionConfig",
-        cleared='tools = ["Read", "WebSearch"]; runtime = "codex"',
-        message=boundaries.IMPORT_BOUNDARY_MESSAGE,
-        defined_in=boundaries.__name__,
-    ),
-    RegisteredRule(
-        id=boundaries.NATIVE_SPELLING_RULE_ID,
-        family="spelling",
-        scope="Neutral Python modules",
-        example='instruction = "$lup:commit"',
-        message=(
-            "Provider command, event, environment, and manifest spellings stay at "
-            "the native adapter boundary."
-        ),
-        defined_in=boundaries.__name__,
-    ),
-    RegisteredRule(
-        id=portable.RULE_ID,
-        family="spelling",
-        scope="Portable harness declarations",
-        example='models.TextPart(text="Edit `.claude/settings.json`")',
-        message=(
-            "Prose every native tree renders names no platform: the vocabulary is "
-            "whatever the adapters spell, so a location, product, or tool a runtime "
-            "can spell reaches prose through a typed part instead."
-        ),
-        defined_in=portable.__name__,
-    ),
-    RegisteredRule(
-        id=boundaries.LIBRARY_DEFAULT_RULE_ID,
-        family="boundary",
-        scope="Neutral library modules",
-        example='READ_ONLY_COMMANDS = ("ls", "cat", "grep")',
-        message=(
-            "A data table a library declares is a choice made for every adopter: it "
-            "reaches them as an overridable default — a parameter default, a pydantic "
-            "field default, or the sentinel a mutable default is written as — so they "
-            "replace the vocabulary instead of editing the library. Suppress only a "
-            "canonical table, whose value is fixed outside this repository."
-        ),
-        defined_in=boundaries.__name__,
-    ),
-    RegisteredRule(
-        id=boundaries.CONSTANT_DECLARATION_RULE_ID,
-        family="architecture",
-        scope="Python constants",
-        example="SNIPPET_LENGTH = 500",
-        message=(
-            "A constant is a judgement a second implementer with the same intent "
-            "could have made differently — a ceiling, a retry count, an allowlist — "
-            "frozen where no caller can replace it. It reaches them as an overridable "
-            "default instead: a parameter default, a pydantic field default, or the "
-            "sentinel a mutable default is written as. Suppress only a canonical "
-            "value — a provider's wire spelling, a language's own vocabulary, an "
-            "identity this repository defines. A constant that exists to carve "
-            "text by hand is steered to the parser rather than to a parameter, "
-            "because parametrizing it would keep the surgery."
-        ),
-        defined_in=boundaries.__name__,
-        refinement=(
-            "The library's own multi-entry tables are library-default's instead, so "
-            "the two partition every declaration and neither reaches the other's."
-        ),
-    ),
-    RegisteredRule(
-        id=boundaries.KERNEL_IMPORT_RULE_ID,
-        family="boundary",
-        scope="Policy kernel",
-        example="from pydantic import BaseModel",
-        message=(
-            "The copied hook kernel imports only its pinned standard-library allowlist."
-        ),
-        defined_in=boundaries.__name__,
-    ),
-]
-"""Project-shape rules enforced by the AST scanners, one card per rule id."""
+def showable(rule: Rule, verdict: ExampleVerdict) -> list[str]:
+    """This rule's examples of one verdict that survive a table cell.
+
+    A row is one line, and a snippet spanning several — a class body, a
+    try/except — arrives there with its newlines flattened into spaces,
+    which reads as a rendering fault rather than as code. Those examples
+    exist for the suite, which runs them whole; a rule with nothing but
+    multi-line examples of a verdict shows its first one flattened rather
+    than showing nothing at all.
+    """
+    declared = [example.code for example in rule.examples if example.verdict == verdict]
+    single = [code for code in declared if "\n" not in code]
+    return single or declared[:1]
 
 
-def anti_pattern_rules(
-    rules: antipatterns.AntiPatternSet | None = None,
-) -> list[RegisteredRule]:
-    """Project every anti-pattern rule into its registry card.
+def card(rule: Rule, family: RuleFamily, scope: str, defined_in: str) -> RegisteredRule:
+    """Project one declaration into its card, whichever surface decides it.
 
     The examples are the rule's own, which is what keeps this page from
-    drifting: the same snippets are run through the edit hook and the audit
-    by ``test_each_rule_answers_its_own_examples``, so a card showing a
-    shape either gate no longer decides that way fails the suite. Rendering
-    the regex here said nothing a reader could act on and pinned only that
-    the page had copied the pattern correctly.
+    drifting: the same snippets are run through the gates that enforce the
+    rule by the suite, so a card showing a shape a gate no longer decides
+    that way fails the suite. Every cleared example is shown rather than the
+    first, because the replacement and the neighbours that keep the same
+    spelling answer different questions — the message already says what to
+    write instead, while only these say whether the site a denial named is
+    this rule's subject at all.
     """
-    declared = rules or antipatterns.AntiPatternSet()
-
-    def showable(rule: AntiPattern, verdict: str) -> list[str]:
-        """This rule's examples of one verdict that survive a table cell.
-
-        A row is one line, and a snippet spanning several — a class body, a
-        try/except — arrives there with its newlines flattened into spaces,
-        which reads as a rendering fault rather than as code. Those examples
-        exist for the suite, which runs them whole; a rule with nothing but
-        multi-line examples of a verdict shows its first one flattened rather
-        than showing nothing at all.
-        """
-        declared = [
-            example.code for example in rule.examples if example.verdict == verdict
-        ]
-        single = [code for code in declared if "\n" not in code]
-        return single or declared[:1]
-
-    def first(rule: AntiPattern, verdict: str) -> str:
-        """The rule's own leading example of one verdict, as a reader sees it."""
-        shown = showable(rule, verdict)
-        return shown[0] if shown else ""
-
-    def spared(rule: AntiPattern) -> str:
-        """Every near-miss the rule clears, in the order it declares them.
-
-        All of them rather than the first, because the replacement and the
-        neighbours that keep the same spelling answer different questions —
-        the message already says what to write instead, while only these say
-        whether the site a denial named is this rule's subject at all.
-        """
-        return CLEARED_SEPARATOR.join(showable(rule, "cleared"))
-
-    return [
-        RegisteredRule(
-            id=rule.id,
-            family="anti-pattern",
-            scope=scope,
-            example=first(rule, "flagged"),
-            cleared=spared(rule),
-            message=rule.message,
-            defined_in=antipatterns.__name__,
-            refinement=rule.refinement,
-            strength=rule.strength,
-        )
-        for scope, scoped in (
-            ("Python", declared.python),
-            ("TypeScript", declared.typescript),
-        )
-        for rule in scoped
-    ]
+    flagged = showable(rule, "flagged")
+    return RegisteredRule(
+        id=rule.id,
+        family=family,
+        scope=scope,
+        example=flagged[0] if flagged else "",
+        cleared=CLEARED_SEPARATOR.join(showable(rule, "cleared")),
+        message=rule.message,
+        defined_in=defined_in,
+        refinement=rule.refinement,
+        strength=rule.strength,
+    )
 
 
 def all_rules(
-    rules: antipatterns.AntiPatternSet | None = None,
+    rules: RuleSet | None = None,
     selection: RuleSelection | None = None,
 ) -> list[RegisteredRule]:
-    """Every rule this repository holds itself to, structural family first.
+    """Every rule this repository holds itself to, project rules first.
 
     The reference is generated from the same selection the sweep and the
     compiled plugin read, so a rule a project retired is absent from all
     three rather than documented as enforced by a page nothing enforces.
     """
-    kept = selection or RuleSelection()
+    kept = (rules or RuleSet()).selected(selection or RuleSelection())
     return [
-        rule
-        for rule in [*STRUCTURAL_RULES, *anti_pattern_rules(rules)]
-        if kept.keeps(rule.id)
+        *(
+            card(rule, rule.family, rule.scope, rule.defined_in)
+            for rule in kept.project
+        ),
+        *(
+            card(rule, rule.family, rule.scope, rule.defined_in)
+            for rule in kept.composition
+        ),
+        *(
+            card(rule, "anti-pattern", scope, antipatterns.__name__)
+            for scope, scoped in (
+                ("Python", kept.python),
+                ("TypeScript", kept.typescript),
+            )
+            for rule in scoped
+        ),
     ]
 
 

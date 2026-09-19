@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from lup.coordination.identity import mint_member_id
 from lup.coordination.refs import ActorRef
-from lup.execution.shell import git
+from lup.devtools.dev.tracked import tracked_files
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import LedgerNode
 from lup.ledger.cite import CiteReading, read_cites
@@ -62,7 +62,7 @@ def sweep_cites(
     store = LedgerStore(root, ActorRef(kind="console", id=mint_member_id()), layout)
 
     def located() -> Iterator[Located]:
-        for rel in git.lines("ls-files", "--", "*.md"):
+        for rel in tracked_files(suffixes=(".md",)):
             try:
                 text = Path(rel).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
@@ -70,7 +70,11 @@ def sweep_cites(
             for reading in read_cites(text, store, classes):
                 yield Located(file=rel, reading=reading)
 
-    found = list(located())
+    # One fold of the log for the whole sweep: every document reads the log
+    # as it was when the sweep started, and a hundred documents cost one
+    # parse of the journal rather than a hundred.
+    with store.batch():
+        found = list(located())
     return CiteSweep(
         checked=len(found),
         failing=[item for item in found if not item.reading.holds()],

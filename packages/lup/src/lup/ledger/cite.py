@@ -116,7 +116,12 @@ class CiteReading(BaseModel, frozen=True):
 def read_cites(
     text: str, store: LedgerStore, classes: list[type[LedgerNode]]
 ) -> list[CiteReading]:
-    """Every cite in one document, each resolved and asked where it stands."""
+    """Every cite in one document, each resolved and asked where it stands.
+
+    Under one fold of the log: a generated document cites every node it
+    lists, and a memo over a trove lists tens of thousands, so each cite is
+    a lookup rather than a read of the journals.
+    """
 
     def reading(cite: Cite) -> CiteReading:
         node = store.resolve(cite.node_id, classes)
@@ -126,4 +131,9 @@ def read_cites(
             standing=store.standing(node, classes) if node is not None else None,
         )
 
-    return [reading(cite) for cite in cites_in(text)]
+    cites = cites_in(text)
+    if not cites:
+        # A document with nothing to hold to the log opens no fold of it.
+        return []
+    with store.batch():
+        return [reading(cite) for cite in cites]

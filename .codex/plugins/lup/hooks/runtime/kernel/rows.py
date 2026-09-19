@@ -54,6 +54,7 @@ class PathRuleRow(TypedDict):
     kind: PathRuleKind
     value: str
     reason: str
+    recovery: str
     allow_autonomous: bool
 
 
@@ -98,6 +99,18 @@ class PathRoleRow(TypedDict):
 
     root: str
     role: PathRoleName
+
+
+class SpawnNameRow(TypedDict):
+    """One erased decision that a spawned agent carries a name.
+
+    ``reason`` is what a spawn without one is refused with; ``recovery`` says
+    the shape a name takes, because a refusal an agent cannot act on becomes
+    a retry.
+    """
+
+    reason: str
+    recovery: str
 
 
 class AcceptanceGuardRow(TypedDict):
@@ -219,13 +232,15 @@ class RefusedToolRow(TypedDict):
 
     ``specifier`` is ``""`` when the whole tool is refused, and otherwise the
     subject that selects one of its uses — the ``artifact-design`` in
-    ``Skill(artifact-design)``. ``reason`` is the whole of what the agent is
-    told, so it names the surface to reach for and not only the refusal.
+    ``Skill(artifact-design)``. ``reason`` says what the call would have done
+    and ``recovery`` names the surface to reach for instead, so a refusal is
+    never only a refusal.
     """
 
     tool: str
     specifier: str
     reason: str
+    recovery: str
 
 
 class RunnerTargetRow(TypedDict):
@@ -253,9 +268,12 @@ class RunnerTargetRow(TypedDict):
     effects: list[EffectRow]
     refuses: str
     reason: str
+    recovery: str
 
 
-type RunnerTargetField = Literal["name", "sandbox", "effects", "refuses", "reason"]
+type RunnerTargetField = Literal[
+    "name", "sandbox", "effects", "refuses", "reason", "recovery"
+]
 """Every field one erased runner target carries.
 
 Closed and enumerable on the same terms as :data:`ShellRowField`, and for the
@@ -279,6 +297,7 @@ def runner_target_values(
         "effects": row["effects"],
         "refuses": row["refuses"],
         "reason": row["reason"],
+        "recovery": row["recovery"],
     }
 
 
@@ -459,6 +478,8 @@ class ShellRuleRow(TypedDict):
     command: str
     subcommand: str
     operation: str
+    operation_path: list[str]
+    operator_only: bool
     sandbox: SandboxPlacement
     sandbox_source: RuleLevel
     checkpoint: CheckpointRequirement
@@ -483,6 +504,7 @@ class ShellRuleRow(TypedDict):
     bare_reads: bool
     value_flags: list[str]
     reason: str
+    recovery: str
 
 
 type ShellRowField = Literal[
@@ -490,6 +512,8 @@ type ShellRowField = Literal[
     "command",
     "subcommand",
     "operation",
+    "operation_path",
+    "operator_only",
     "sandbox",
     "sandbox_source",
     "checkpoint",
@@ -514,6 +538,7 @@ type ShellRowField = Literal[
     "bare_reads",
     "value_flags",
     "reason",
+    "recovery",
 ]
 """Every field name one erased shell row carries.
 
@@ -543,6 +568,8 @@ def shell_row_values(
         "command": row["command"],
         "subcommand": row["subcommand"],
         "operation": row["operation"],
+        "operation_path": row["operation_path"],
+        "operator_only": row["operator_only"],
         "sandbox": row["sandbox"],
         "sandbox_source": row["sandbox_source"],
         "checkpoint": row["checkpoint"],
@@ -567,6 +594,7 @@ def shell_row_values(
         "bare_reads": row["bare_reads"],
         "value_flags": row["value_flags"],
         "reason": row["reason"],
+        "recovery": row["recovery"],
     }
 
 
@@ -631,13 +659,19 @@ class EditRuleRow(TypedDict):
 class PeerPolicyRow(TypedDict):
     """Where this project's sessions find each other, and what a sender is told.
 
-    ``store``, ``roster_file`` and ``names_file`` say where the roster lives —
-    parts beneath the repository's shared git directory rather than a joined
-    path, because the dispatcher rebuilds it with the host's own separator and
-    a compiled literal carrying one platform's answers on one platform.
+    ``store`` says where the roster lives — parts beneath the repository's
+    shared git directory rather than a joined path, because the dispatcher
+    rebuilds it with the host's own separator and a compiled literal carrying
+    one platform's answers on one platform. What is *in* that directory is not
+    carried: the fold the dispatcher reads it with ships beside the dispatcher
+    and owns every file name, so a row restating them would be the second
+    spelling that can drift. ``windows_dir`` is the exception, being the one
+    place under the store nothing but the dispatcher writes or reads.
 
-    ``send_reason`` is the whole of what a stopped sender is told, so it names
-    the surface reaching the same peer durably rather than only refusing.
+    ``send_reason`` says why a send was stopped and ``send_recovery`` names the
+    surface reaching the same peer durably, so a sender is never only refused.
+    ``claim_reason`` is what an approver of a write into a held path reads, and
+    ``claim_recovery`` what the writing agent can do about the holder.
     ``listing_note`` frames the roster attached to a listing that speaks for a
     wider population, so a reader can tell the two apart.
 
@@ -647,11 +681,10 @@ class PeerPolicyRow(TypedDict):
     """
 
     store: list[str]
-    roster_file: str
-    names_file: str
-    send_reason: str
-    listing_note: str
-    touches_file: str
     windows_dir: str
-    claim_reason: str
     member_env: str
+    send_reason: str
+    send_recovery: str
+    listing_note: str
+    claim_reason: str
+    claim_recovery: str

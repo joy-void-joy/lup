@@ -6,18 +6,21 @@ registers it once. That registration is the only reason `dev worktree create`
 touches the shared config at all — and a clone that has already made it never
 writes there again.
 
-Which is what the refusal in front of it has to know. Asked unconditionally,
-it denied a worktree over a write nobody was going to make, wherever the
+Which is what the report in front of it has to know. Asked unconditionally,
+it stopped a worktree over a write nobody was going to make, wherever the
 shared config was held read-only; asked about the outstanding registration,
-it stays out of the way of a registered clone and still meets an unregistered
-one up front rather than as `File exists` halfway through.
+it stays out of the way of a registered clone. And an unregistered clone that
+cannot write is told, and given its worktree anyway: the driver decides how a
+merge of the generated trees resolves, which the new checkout meets no sooner
+than every existing one of that clone does, while refusing cost the work
+itself — a documentation branch that fell back to plain `git worktree add`,
+and a resolver run that could not lease its first concern in the sandbox.
 """
 
 from pathlib import Path
 
 import pytest
 import sh
-import typer
 
 from lup.devtools.dev import worktree
 from lup.devtools.harness.launch import relocation_hint
@@ -77,40 +80,43 @@ def register(repo: Path) -> None:
     )
 
 
-def test_a_registered_clone_is_not_stopped_by_a_config_it_cannot_write(
-    repo: Path, own_config_only: None
+def test_a_registered_clone_is_not_asked_about_a_config_it_cannot_write(
+    repo: Path, own_config_only: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The refusal that used to fire regardless, over a write already made."""
+    """The report that used to fire regardless, over a write already made."""
     register(repo)
     confine(repo)
 
-    worktree.refuse_a_blocked_registration()
+    assert worktree.report_a_blocked_registration() is False
+    assert capsys.readouterr().err == ""
 
 
-def test_an_unregistered_clone_still_meets_the_diagnosis_up_front(
+def test_an_unregistered_clone_is_told_up_front_and_not_stopped(
     repo: Path, own_config_only: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The case the refusal exists for, said before anything is created."""
+    """The case the report exists for: said before anything is created, once,
+    with the host command that settles it."""
     confine(repo)
 
-    with pytest.raises(typer.Exit) as raised:
-        worktree.refuse_a_blocked_registration()
+    assert worktree.report_a_blocked_registration() is True
 
-    assert raised.value.exit_code == 1
-    assert "blocked by the sandbox" in capsys.readouterr().err
+    said = capsys.readouterr().err
+    assert "blocked by the sandbox" in said
+    assert "git merge-driver" in said
 
 
-def test_an_unregistered_clone_that_can_write_is_let_through(
-    repo: Path, own_config_only: None
+def test_an_unregistered_clone_that_can_write_hears_nothing(
+    repo: Path, own_config_only: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Nothing is refused where the write it guards would simply happen."""
-    worktree.refuse_a_blocked_registration()
+    """Nothing is said where the write it guards would simply happen."""
+    assert worktree.report_a_blocked_registration() is False
+    assert capsys.readouterr().err == ""
 
 
 def test_a_worktree_is_still_made_where_only_the_config_is_held(
     repo: Path, tree_dir: Path, own_config_only: None
 ) -> None:
-    """The whole point, end to end: creation needs no config write of its own.
+    """Creation needs no config write of its own.
 
     The base record lands in the shared `lup/` directory and the guards land
     in the hooks directory, neither of which is `config` — so a clone that
@@ -128,6 +134,34 @@ def test_a_worktree_is_still_made_where_only_the_config_is_held(
     )
 
     assert (tree_dir / "topic").is_dir()
+
+
+def test_an_unregistered_clone_that_cannot_register_still_gets_its_worktree(
+    repo: Path,
+    tree_dir: Path,
+    own_config_only: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The whole point: a missing registration is named, never a refusal.
+
+    The driver is a host's once-per-clone act. A contained session that
+    cannot make it is handed the checkout and told what the clone lacks,
+    rather than left with no checkout and the registration still missing.
+    """
+    confine(repo)
+
+    worktree.create(
+        "topic",
+        no_sync=True,
+        no_copy_data=True,
+        base_branch=None,
+        launcher=relocation_hint,
+    )
+
+    assert (tree_dir / "topic").is_dir()
+    said = capsys.readouterr()
+    assert "git merge-driver" in said.err
+    assert "Without the lup-ownership merge driver" in said.out
 
 
 def test_a_worktree_is_still_removed_where_only_the_config_is_held(

@@ -115,6 +115,8 @@ jobs:
     runs-on: {self.runner}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -141,6 +143,99 @@ def write_workflow(
     spec: WorkflowSpec, root: Path | None = None, *, check: bool = False
 ) -> Path:
     """Write or verify the generated continuous-integration workflow."""
+    return write_generated_file(
+        spec.artifact(),
+        root or project_root(),
+        WORKFLOW_COMMAND,
+        check=check,
+    )
+
+
+# lup: ignore[constant-declaration] — the directory GitHub Actions itself reads
+PUBLISH_PATH = Path(".github/workflows/publish.yml")
+
+
+class PublishSpec(BaseModel, frozen=True):
+    """What a project publishes when a release tag arrives, and from where.
+
+    Declared rather than assumed, because publishing is the one thing in this
+    module a repository can be wrong about silently: a workflow that builds
+    the wrong distribution still passes, and what it uploads is what everyone
+    installs.
+
+    Nothing here carries a credential and nothing has to. Publication is by
+    the forge's own OIDC token, exchanged for a short-lived upload token by a
+    publisher the index has been told to trust — so the secret that would
+    otherwise sit in the repository does not exist to leak, and a fork running
+    this workflow cannot publish because the trust names this repository.
+    """
+
+    package: str = ""
+    """Which workspace member to build, empty where the project is the package.
+
+    A repository whose distribution sits in a subdirectory names it, and
+    ``uv build`` is told which member to build rather than building the
+    workspace root — which is a different distribution with a different name
+    and, in the case this exists for, one nobody publishes.
+    """
+
+    environment: str = "pypi"
+    """The deployment environment the publishing job runs in.
+
+    Named because the index's trusted publisher is declared against it, and
+    because an environment is where a forge can be told to hold a release for
+    review before it uploads. A project wanting neither still names one; it
+    costs a line and gives it somewhere to put the pause later.
+    """
+
+    tags: str = "v*"
+    """Which pushed tags publish, as the forge matches them."""
+
+    runner: str = "ubuntu-latest"
+    """The label the job asks for."""
+
+    def body(self) -> str:
+        """Render the publishing workflow from these declared choices."""
+        member = f" --package {self.package}" if self.package else ""
+        return f"""name: Publish
+
+on:
+  push:
+    tags: ["{self.tags}"]
+
+jobs:
+  publish:
+    runs-on: {self.runner}
+    environment: {self.environment}
+    # What stands in for a stored token: the forge mints an identity for this
+    # run, and the index trusts it for this repository and this workflow.
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Build the distribution
+        run: uv build{member}
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+"""
+
+    def artifact(self) -> Artifact:
+        """This workflow as one artifact, gated like any other generated file."""
+        return Artifact.generated(
+            path=PUBLISH_PATH,
+            body=self.body(),
+            semantic_id="ci.publish",
+            banner=GeneratedBanner(source=__name__, command=WORKFLOW_COMMAND),
+        )
+
+
+def write_publish(
+    spec: PublishSpec, root: Path | None = None, *, check: bool = False
+) -> Path:
+    """Write or verify the generated publishing workflow."""
     return write_generated_file(
         spec.artifact(),
         root or project_root(),

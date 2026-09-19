@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.dev import antipatterns, boundaries, check
+from lup.devtools.dev import antipatterns, boundaries, check, tracked
 from lup.devtools.project import DevProject
 from lup.policy.kernel.rows import PathRoleRow
 
@@ -30,8 +30,7 @@ def data_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DevProject:
     )
     monkeypatch.chdir(tmp_path)
     listing = GitListing()
-    monkeypatch.setattr(antipatterns, "git", listing)
-    monkeypatch.setattr(boundaries, "git", listing)
+    monkeypatch.setattr(tracked, "git", listing)
     return DevProject(
         package="app",
         path_roles=[

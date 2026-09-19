@@ -298,11 +298,14 @@ class RunnerTargetRule(BaseModel, frozen=True):
     """
 
     reason: str = ""
-    """What the agent is told, which for a refusal is the whole of its value.
+    """What the target does that stopped it, as the approver of one reads it."""
+
+    recovery: str = ""
+    """What the agent is told to do instead, which for a refusal is its value.
 
     A refused target usually has a right way to reach the same end — print
     the command for a human to run, use the dry-run flag, go through the
-    review step — and the reason is the only channel that carries it.
+    review step — and this is the channel that carries it.
     """
 
     subcommands: list["ShellSubcommandRule"] = []
@@ -325,6 +328,8 @@ class ShellOperationRule(BaseModel, frozen=True):
     """One operation word under a subcommand — e.g. ``worktree remove``."""
 
     name: str
+    parents: list[str] = []
+    operator_only: bool = False
     effects: list[EffectRow] = []
     refuses: str = ""
     ask_flags: list[str] = []
@@ -335,6 +340,7 @@ class ShellOperationRule(BaseModel, frozen=True):
     reviewer: ReviewerRequirement = ROOT_REVIEWER
     effect_class: EffectClass | None = None
     reason: str = ""
+    recovery: str = ""
 
     def declared(self) -> DeclaredAxes:
         """The axes this operation states itself, leaving the rest to inherit."""
@@ -384,6 +390,7 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     reviewer: ReviewerRequirement = ROOT_REVIEWER
     effect_class: EffectClass | None = None
     reason: str = ""
+    recovery: str = ""
 
     def declared(self) -> DeclaredAxes:
         """The axes this subcommand states itself, leaving the rest to inherit."""
@@ -568,6 +575,9 @@ class ShellCommandRule(SelectableRule, frozen=True):
     reviewer: ReviewerRequirement = ROOT_REVIEWER
     effect_class: EffectClass | None = None
     reason: str = ""
+    """What the command does that stopped it, as the approver of one reads it."""
+    recovery: str = ""
+    """What the agent can do instead, where the command has a better route."""
 
     def selection_id(self) -> str:
         return self.name
@@ -594,6 +604,7 @@ def erase_runner_targets(targets: list[RunnerTargetRule]) -> list[RunnerTargetRo
             effects=list(target.effects),
             refuses=target.refuses,
             reason=target.reason,
+            recovery=target.recovery,
         )
         for target in targets
     ]
@@ -616,6 +627,7 @@ def runner_target_tables(targets: list[RunnerTargetRule]) -> list[ShellRuleRow]:
                 subcommands=target.subcommands,
                 sandbox=target.sandbox,
                 reason=target.reason,
+                recovery=target.recovery,
             )
             for target in targets
             if target.subcommands
@@ -658,10 +670,16 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
         axes = above.inherit(subcommand.declared(), "subcommand")
         operations = [
             ShellRuleRow(
-                rule=rule_id(command_name, subcommand.name, operation.name),
+                rule=rule_id(
+                    command_name,
+                    subcommand.name,
+                    ".".join([*operation.parents, operation.name]),
+                ),
                 command=command_name,
                 subcommand=subcommand.name,
                 operation=operation.name,
+                operation_path=[*operation.parents, operation.name],
+                operator_only=operation.operator_only,
                 ask_destinations=[],
                 ask_refspecs=[],
                 ask_flags=list(operation.ask_flags),
@@ -678,6 +696,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 bare_reads=False,
                 value_flags=[],
                 reason=operation.reason,
+                recovery=operation.recovery,
                 **axes.inherit(operation.declared(), "operation").row_fields(),
             )
             for operation in subcommand.operations
@@ -687,6 +706,8 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command_name,
             subcommand=subcommand.name,
             operation="",
+            operation_path=[],
+            operator_only=False,
             ask_destinations=list(subcommand.ask_destinations),
             ask_refspecs=list(subcommand.ask_refspecs),
             ask_flags=list(subcommand.ask_flags),
@@ -703,6 +724,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             bare_reads=False,
             value_flags=[],
             reason=subcommand.reason,
+            recovery=subcommand.recovery,
             **axes.row_fields(),
         )
         return [*operations, default]
@@ -714,6 +736,8 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             command=command.name,
             subcommand="",
             operation="",
+            operation_path=[],
+            operator_only=False,
             ask_destinations=[],
             ask_refspecs=[],
             ask_flags=list(command.ask_flags),
@@ -730,6 +754,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             bare_reads=command.bare_reads,
             value_flags=list(command.value_flags),
             reason=command.reason,
+            recovery=command.recovery,
             **axes.row_fields(),
         )
         nested = [

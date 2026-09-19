@@ -33,10 +33,11 @@ from lup.devtools.harness.contained import (
     retire_images,
     superseded_images,
 )
-from lup.harness.image import detected_client
+from lup.harness.image import Image, detected_client
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
+from lup.harness.notice import Banner
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.providers.profiles import ProfileDirectory
@@ -196,14 +197,26 @@ def create_harness_app(
         compositions = targets.resolve(target, project_root())
         # The two halves span the targets differently, because they answer
         # differently-scoped questions. What the image must carry is the
-        # image's own, so it is asked once per target; what the host must
-        # carry is the machine's, and asking it per target exercises one
-        # roster twice -- a container probe paid for twice, printed twice,
-        # with nothing on screen saying the second was the same question.
+        # image's own, and every runtime here composes against one image, so
+        # a check the first runtime exercised is not paid for again by the
+        # second: only what the second declares differently -- its own
+        # session probe -- runs, and the boundary notice is said once. What
+        # the host must carry is the machine's, asked once for all of them.
+        manifests = [
+            composition.recipe.source.requirements for composition in compositions
+        ]
+        exercised_before = [
+            {
+                signature
+                for manifest in manifests[:index]
+                for signature in manifest.inside_signatures(not launch_only)
+            }
+            for index in range(len(manifests))
+        ]
         findings = (
             [
                 finding
-                for composition in compositions
+                for index, composition in enumerate(compositions)
                 for finding in launch.report_inside_requirements(
                     composition,
                     composition.recipe.source.plugins[0],
@@ -212,6 +225,8 @@ def create_harness_app(
                     ),
                     composition.login,
                     setting_up=not launch_only,
+                    skipped=sorted(exercised_before[index]),
+                    banner=None if index == 0 else Banner(),
                 )
             ]
             if inside
@@ -263,18 +278,42 @@ def create_harness_app(
         no checkout tag on it; what stays is anything a checkout still points
         at, and the image this declaration would build right now.
         """
-        for composition in targets.resolve(target, project_root()):
-            source = composition.recipe.source
+
+        def pinned(image: Image) -> Image:
             # Everything resolution says goes to stderr: stdout is the
             # Dockerfile a build reads, and a progress line in the pipe is a
             # parse error inside `docker build -f -`.
             resolution = resolved_agent_clis(
-                source.image,
-                say=lambda notice: typer.echo(notice.painted(), err=True),
+                image, say=lambda notice: typer.echo(notice.painted(), err=True)
             )
             for notice in resolution.said:
                 typer.echo(notice.painted(), err=True)
-            rendered = resolution.image.dockerfile(source.requirements)
+            return resolution.image
+
+        # One resolution per distinct image declaration and one Dockerfile per
+        # distinct rendering, however many runtimes compose against them:
+        # every runtime here shares one image, so the default target rendered
+        # it once per runtime, asked the registry as often, and handed a build
+        # reading stdin two files.
+        sources = {
+            composition.recipe.source.image.model_dump_json()
+            + composition.recipe.source.requirements.model_dump_json(): (
+                composition.recipe.source
+            )
+            for composition in targets.resolve(target, project_root())
+        }
+        images = {
+            key: pinned(image)
+            for key, image in {
+                source.image.model_dump_json(): source.image
+                for source in sources.values()
+            }.items()
+        }
+        renderings = dict.fromkeys(
+            images[source.image.model_dump_json()].dockerfile(source.requirements)
+            for source in sources.values()
+        )
+        for rendered in renderings:
             if not prune:
                 typer.echo(rendered)
                 continue
@@ -438,6 +477,15 @@ def create_harness_app(
                     "write (repeatable)",
                 ),
             ] = [],
+            device: Annotated[
+                list[str],
+                typer.Option(
+                    "--device",
+                    help="Host device this session is granted, by CDI name "
+                    "such as nvidia.com/gpu=all (repeatable); for this "
+                    "launch only",
+                ),
+            ] = [],
             max_recursive_agent: Annotated[
                 int | None,
                 typer.Option(
@@ -481,6 +529,7 @@ def create_harness_app(
                 companions=companion_targets(selection.mode, "claude", allowance),
                 repository_writers=repository_writers,
                 mounts=launch.declared_mounts(mount, mount_ro),
+                devices=launch.declared_devices(device),
                 recorder=recorder_for("claude"),
             )
 
@@ -573,6 +622,15 @@ def create_harness_app(
                     "write (repeatable)",
                 ),
             ] = [],
+            device: Annotated[
+                list[str],
+                typer.Option(
+                    "--device",
+                    help="Host device this session is granted, by CDI name "
+                    "such as nvidia.com/gpu=all (repeatable); for this "
+                    "launch only",
+                ),
+            ] = [],
             max_recursive_agent: Annotated[
                 int | None,
                 typer.Option(
@@ -617,6 +675,7 @@ def create_harness_app(
                 companions=companion_targets(selection.mode, "codex", allowance),
                 repository_writers=repository_writers,
                 mounts=launch.declared_mounts(mount, mount_ro),
+                devices=launch.declared_devices(device),
                 recorder=recorder_for("codex"),
             )
 

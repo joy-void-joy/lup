@@ -1,33 +1,35 @@
 """What the permission policy is told about this repository's sessions.
 
 The hook that judges a call runs as a bare script outside every import graph,
-so it cannot ask this package anything. What it can be handed is data, compiled
-into the plugin beside it — and what it genuinely needs is where the roster and
-the claim record live, which is this package's own layout rather than a path a
-policy could be configured with. Handing it over from here is what stops those
-directories being spelled twice: renaming the store moves the hook with it.
+so it cannot ask this package anything. What it *can* do is import the fold
+shipped beside it, :mod:`lup.coordination.bare.store`, which knows every file
+the store is made of — so what has to travel as data is only what that fold
+cannot know: where beneath the shared git directory this project put its
+store, which environment variable carries a session's proven id, and the
+prose a stopped caller reads.
 
 The prose is a default rather than a fixture. What a stopped caller should
 reach for is a judgement about the surfaces a project offers, and a project
 that renamed its own is entitled to say so without editing the library.
 """
 
-from lup.coordination.identity import MEMBER_ENV, NAMES_FILE
-from lup.coordination.roster import ROSTER_FILE
-from lup.coordination.store import COORDINATION_DIR, STORE_DIR
-from lup.coordination.touches import TOUCHES_FILE, WINDOWS_DIR
+from lup.coordination.bare.store import COORDINATION_DIR, STORE_DIR, WINDOWS_DIR
+from lup.coordination.identity import MEMBER_ENV
 from lup.policy.peer_policy import PeerPolicy
 
 SEND_REDIRECT = (
-    "that address is a session on this repository's roster, and a native send"
-    " reaches it through a channel no other worktree can fold — nothing later"
-    " can read that the two of you agreed on anything. Say it with the"
-    " `coordination_send` tool instead, which reaches the same peer, records"
-    " it where every session working in this clone can read it, and tells you"
-    " whether the peer's own hook will put it in front of that peer's next"
-    " tool call or it waits in the file until they next look"
+    "a native send to a session on this repository's roster leaves no record"
+    " any other worktree can read"
 )
-"""Why the durable path is the one worth taking, for a send that would not.
+"""Why a native send to a roster member was stopped, in one line."""
+
+SEND_RECOVERY = (
+    "Say it with `coordination_send` instead: it reaches the same peer, records"
+    " it where every session in this clone can read it, and reports whether the"
+    " peer's hook will put it in front of that peer's next tool call or it waits"
+    " until they next look."
+)
+"""What the durable path buys, for a sender that would otherwise retry.
 
 Names what the other surface buys rather than only refusing, because a sender
 told no and nothing else sends the same message again through whatever it
@@ -50,16 +52,8 @@ attachment that only offered a tool would read as a correction of the listing
 it rides on.
 """
 
-CLAIM_HELD = (
-    "a live session in this repository has that path, which nobody declared —"
-    " it is there because that session's own calls changed it, or because it"
-    " took the prefix deliberately. Writing under it is how two sessions"
-    " overwrite each other between merges, and the loser finds out at merge"
-    " time. Ask the holder with `coordination_send` first, or go ahead if you"
-    " already know what they are doing. A claim expires with the session"
-    " holding it, so one still standing means that session has not stopped"
-)
-"""What an editor of a path somebody else is in is told, and what to do about it.
+CLAIM_HELD = "another live session has changed or locked this path"
+"""What the approver of a write into a path somebody else is in reads.
 
 An approval question rather than a refusal, because the answer is genuinely
 the operator's: two sessions editing one file is sometimes exactly right, and
@@ -67,21 +61,30 @@ a policy that decided otherwise would refuse ordinary work. What it must not
 be is silent — the failure this exists for is finding out at merge time.
 """
 
+CLAIM_RECOVERY = (
+    "Writing under a held path is how two sessions overwrite each other between"
+    " merges. Ask the holder with `coordination_send` first, or go ahead if you"
+    " already know what they are doing; a claim expires with the session"
+    " holding it, so one still standing means that session has not stopped."
+)
+"""What the writing agent can do about the holder, beside the question."""
+
 
 def peer_policy(
     send_reason: str = SEND_REDIRECT,
     listing_note: str = LISTING_NOTE,
     claim_reason: str = CLAIM_HELD,
+    send_recovery: str = SEND_RECOVERY,
+    claim_recovery: str = CLAIM_RECOVERY,
 ) -> PeerPolicy:
     """This repository's sessions, as the compiled permission hook reads them."""
     return PeerPolicy(
         store=[STORE_DIR, COORDINATION_DIR],
-        roster_file=ROSTER_FILE,
-        names_file=NAMES_FILE,
-        touches_file=TOUCHES_FILE,
         windows_dir=WINDOWS_DIR,
+        member_env=MEMBER_ENV,
         send_reason=send_reason,
+        send_recovery=send_recovery,
         listing_note=listing_note,
         claim_reason=claim_reason,
-        member_env=MEMBER_ENV,
+        claim_recovery=claim_recovery,
     )

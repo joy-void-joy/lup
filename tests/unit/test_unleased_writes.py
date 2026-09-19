@@ -12,6 +12,7 @@ from pathlib import Path
 
 from lup.policy.assets.host import unleased_write_targets
 from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.lex import shell_path_verb_targets
 from lup.policy.kernel.roles import (
     is_session_scratch_target,
     is_temporary_root_target,
@@ -94,6 +95,9 @@ def test_the_question_names_the_rule_and_the_path_it_is_about() -> None:
     verdict = judged("touch tmp/x", ["/repo/tree/other/tmp"])
 
     assert verdict.rule == "unleased-write"
+    # The path leads: the allow this replaced said every segment was safe,
+    # which is true and decides nothing for whoever reads the question.
+    assert verdict.reason.startswith("writes /repo/tree/other/tmp")
     assert "/repo/tree/other/tmp" in verdict.reason
 
 
@@ -105,6 +109,30 @@ def test_a_read_outside_the_lease_is_not_a_question() -> None:
     """
     assert judged("cat notes.md").effect == "allow"
     assert judged("ls tmp").effect == "allow"
+
+
+def acted_on_outside_the_lease(command: str) -> list[str]:
+    """The targets the hook hands the row: acted-on operands, resolved."""
+    return unleased_write_targets(
+        shell_path_verb_targets(command), MEASURED, Path("/repo/tree/mine")
+    )
+
+
+def test_a_sed_that_only_prints_a_file_outside_the_lease_is_a_read() -> None:
+    """`sed -n 1,80p` over a read-only mount asked, while `head` did not.
+
+    Composed the way the hook composes it -- the command's acted-on operands,
+    resolved against the lease, handed to the row -- because the row was right
+    about every target it was given, and the defect was which targets reached
+    it: a sed that prints named its file as acted on, and a file under a
+    read-only mount is exactly the path no writable root contains.
+    """
+    printed = "sed -n 1,80p /mnt/findings/verify.py"
+    rewritten = "sed -i 's/a/b/' /mnt/findings/verify.py"
+
+    assert acted_on_outside_the_lease(printed) == []
+    assert judged(printed, acted_on_outside_the_lease(printed)).effect == "allow"
+    assert acted_on_outside_the_lease(rewritten) == ["/mnt/findings/verify.py"]
 
 
 def test_a_judged_refusal_is_not_reopened_by_an_unleased_target() -> None:

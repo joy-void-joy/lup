@@ -26,6 +26,7 @@ from lup.devtools.dev.remote_auth import (
     origin_auth_complaint,
     remote_auth_refusal,
 )
+from lup.sandbox.observed import is_mount_point
 from lup.resolver.models import HeldLease
 from lup.resolver.state import live_lease_branches
 from lup.types import StringMap
@@ -342,10 +343,11 @@ def parse_worktrees() -> dict[str, str]:  # lup: ignore[dict-str-payload]
     current_path = ""
 
     for line in git.lines("worktree", "list", "--porcelain"):
-        if line.startswith("worktree "):
-            current_path = line.removeprefix("worktree ")
-        elif line.startswith("branch refs/heads/"):
-            mapping[line.removeprefix("branch refs/heads/")] = current_path
+        match line.split(maxsplit=1):
+            case ["worktree", path]:
+                current_path = path
+            case ["branch", ref] if ref.startswith("refs/heads/"):
+                mapping[ref.removeprefix("refs/heads/")] = current_path
 
     return mapping
 
@@ -1999,10 +2001,13 @@ def locked_worktrees() -> dict[str, str]:  # lup: ignore[dict-str-payload]
     current_path = ""
 
     for line in git.lines("worktree", "list", "--porcelain"):
-        if line.startswith("worktree "):
-            current_path = line.removeprefix("worktree ")
-        elif line == "locked" or line.startswith("locked "):
-            locked[current_path] = line.removeprefix("locked").strip()
+        match line.split(maxsplit=1):
+            case ["worktree", path]:
+                current_path = path
+            case ["locked"]:
+                locked[current_path] = ""
+            case ["locked", reason]:
+                locked[current_path] = reason.strip()
 
     return locked
 
@@ -2330,16 +2335,17 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
     repair, and the caller cannot be expected to know that.
 
     Prune, removal, and the branch deletion itself all take the config lock,
-    so all three fail alike where the sandbox holds it — and there the repair
-    is not a repair, because the prune it prescribes fails the same way. The
-    mount state is what says which of the two failures this is.
+    so all three fail alike where the sandbox holds it, and there the repair
+    is not a repair. That is reported by attempting the prune and letting its
+    own failure carry the diagnosis, rather than by reading the lock first:
+    the admin directories of a contained session are unwritable for the whole
+    session, so a diagnosis conditioned on them alone explains every failure
+    equally, including the ones it has nothing to do with — and it stood
+    where the repair would otherwise have run.
     """
     typer.echo(f"Failed to delete {plan.branch}: {failure}", err=True)
 
-    diagnosis = config_lock_diagnosis()
-    if diagnosis:
-        typer.echo(diagnosis, err=True)
-    elif plan.worktree is not None and not Path(plan.worktree).exists():
+    if plan.worktree is not None and not Path(plan.worktree).exists():
         try:
             git("worktree", "prune")
             typer.echo(
@@ -2351,31 +2357,80 @@ def abort_deletion(plan: DeletionPlan, completed: list[str], failure: str) -> No
                 f"Recover with `git worktree prune`: {decode_stderr(error)}",
                 err=True,
             )
+            diagnosis = config_lock_diagnosis()
+            if diagnosis:
+                typer.echo(diagnosis, err=True)
 
     typer.echo(f"Completed first: {', '.join(completed) or 'nothing'}", err=True)
     raise typer.Exit(1)
+
+
+def worktree_left_as_mount_point(path: str) -> bool:
+    """Whether git gave up the registration and only the directory's removal failed.
+
+    `git worktree remove` clears the checkout and unregisters it before the
+    final rmdir, and a directory that is a mount point in this session's
+    namespace -- every checkout a launch bind-mounted is one -- refuses that
+    last step alone, after everything before it succeeded. Measured on a land
+    sweep of twenty-eight branches: each first removal failed there, the entry
+    was gone and the directory empty, and the report said nothing had
+    completed. The mount is not a failure of the deletion; it is the host's
+    directory to drop once the container is gone, so the deletion carries on
+    to the branch and says what it left.
+
+    Asked of the mount table and of git rather than read off the error's
+    words, because both facts are what the decision rests on: a mount point
+    still registered is a failure to report, and an unregistered directory
+    that is no mount point was removed outright.
+
+    The mount half goes through :func:`~lup.sandbox.observed.is_mount_point`
+    rather than :meth:`pathlib.Path.is_mount`, which answers by device number
+    and so cannot see the same-filesystem bind every launch makes. Under that
+    probe this returned false for the very sweep the paragraph above measured,
+    and the branch it guards was never taken.
+    """
+    return is_mount_point(Path(path)) and path not in parse_worktrees().values()
 
 
 def run_deletion(plan: DeletionPlan, force: bool) -> None:
     """Carry out a plan whose preflight passed, reporting what actually ran."""
     completed: list[str] = []
 
-    if plan.stranded:
-        try:
-            git("worktree", "prune")
-            typer.echo(f"Pruned stranded worktree: {plan.worktree}")
-            completed.append("pruned worktree")
-        except sh.ErrorReturnCode as error:
-            abort_deletion(plan, completed, f"prune failed: {attributed_stderr(error)}")
-    elif plan.worktree is not None:
-        try:
-            git("worktree", "remove", *(["--force"] if force else []), plan.worktree)
-            typer.echo(f"Removed worktree: {plan.worktree}")
-            completed.append("removed worktree")
-        except sh.ErrorReturnCode as error:
-            abort_deletion(
-                plan, completed, f"worktree removal failed: {attributed_stderr(error)}"
-            )
+    match plan:
+        case DeletionPlan(stranded=True):
+            try:
+                git("worktree", "prune")
+                typer.echo(f"Pruned stranded worktree: {plan.worktree}")
+                completed.append("pruned worktree")
+            except sh.ErrorReturnCode as error:
+                abort_deletion(
+                    plan, completed, f"prune failed: {attributed_stderr(error)}"
+                )
+        case DeletionPlan(worktree=str() as worktree):
+            try:
+                git("worktree", "remove", *(["--force"] if force else []), worktree)
+                typer.echo(f"Removed worktree: {worktree}")
+                completed.append("removed worktree")
+            except sh.ErrorReturnCode as error:
+                if not worktree_left_as_mount_point(worktree):
+                    # `git worktree remove` unregisters before its final rmdir,
+                    # so the entry can be gone even where the failure is real.
+                    # Read what happened rather than what was attempted: a
+                    # report of "nothing" sends the next run looking for an
+                    # entry git no longer holds.
+                    if worktree not in parse_worktrees().values():
+                        completed.append("unregistered worktree")
+                    abort_deletion(
+                        plan,
+                        completed,
+                        f"worktree removal failed: {attributed_stderr(error)}",
+                    )
+                typer.echo(
+                    f"Unregistered worktree: {worktree} — its directory is a "
+                    "mount point of this session, so it stays, empty, for the "
+                    "host to remove once the container is gone"
+                )
+                completed.append("unregistered worktree")
 
     # A name origin alone carries has nothing here to delete, and asking git
     # to delete it anyway is what stopped the run before the push that was

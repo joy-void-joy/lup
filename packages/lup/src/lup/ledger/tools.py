@@ -278,12 +278,13 @@ def create_ledger_tools(
         except ValueError as invalid:
             raise ToolError(f"since must be ISO 8601: {invalid}") from invalid
         moved = held.moved_since(moment) if moment is not None else None
-        rows = [
-            view(held, node)
-            for node in held.all_nodes(classes)
-            if (not params.kind or node.kind == params.kind)
-            and (moved is None or node.id in moved)
-        ]
+        with held.batch():
+            rows = [
+                view(held, node)
+                for node in held.all_nodes(classes)
+                if (not params.kind or node.kind == params.kind)
+                and (moved is None or node.id in moved)
+            ]
         return ListOutput(
             nodes=[
                 row

@@ -472,9 +472,16 @@ where the declaration removed the cover it reaches whoever can answer for
 it — a reviewer, or a refusal where there is none."""
 
 FIXTURE_REFUSED_TOOLS = [
-    RefusedTool(tool="Quuxify", reason="quuxifying leaves the repository"),
     RefusedTool(
-        tool="Skill", specifier="quux-design", reason="designing quux leaves it too"
+        tool="Quuxify",
+        reason="quuxifying leaves the repository",
+        recovery="Quuxify it under tmp/ instead.",
+    ),
+    RefusedTool(
+        tool="Skill",
+        specifier="quux-design",
+        reason="designing quux leaves it too",
+        recovery="Design it under tmp/ instead.",
     ),
 ]
 """One whole-tool refusal and one narrowed to a single subject.
@@ -596,16 +603,44 @@ SHELL_POLICY_CASES = [
     ),
     # The conflict workflow is documented without `uv run`, whose manifest
     # parse is exactly what a conflicted manifest defeats, so the classifier
-    # resolves the launcher named by path. Nothing else about the toolchain is
-    # admitted that way — it bounces back naming the spelling that is.
+    # resolves the launcher named by path or bare, in the shapes a session
+    # types it: behind a `cd` into the worktree, and ahead of a pipe into a
+    # reader. Nothing else about the toolchain is admitted that way — it
+    # bounces back naming the spelling that is, and `git conflict` is the
+    # only sub-app the carve-out reaches.
+    DecisionCase(input="lup-devtools git conflict status --json", effect="allow"),
     DecisionCase(
-        input=".venv/bin/lup-devtools dev conflict status --json", effect="allow"
+        input="cd /some/worktree && lup-devtools git conflict status --json",
+        effect="allow",
     ),
     DecisionCase(
-        input=".venv/bin/lup-devtools dev conflict audit pyproject.toml", effect="allow"
+        input="lup-devtools git conflict status --json 2>&1 | head -60",
+        effect="allow",
     ),
-    DecisionCase(input=".venv/bin/lup-devtools dev conflict complete", effect="allow"),
-    DecisionCase(input="lup-devtools dev conflict list", effect="allow"),
+    DecisionCase(
+        input=".venv/bin/lup-devtools git conflict status --json", effect="allow"
+    ),
+    DecisionCase(
+        input="./.venv/bin/lup-devtools git conflict audit a.py b.py --json",
+        effect="allow",
+    ),
+    DecisionCase(
+        input=(
+            "cd /some/worktree && .venv/bin/lup-devtools git conflict status"
+            " --json 2>&1 | head -60"
+        ),
+        effect="allow",
+    ),
+    DecisionCase(input=".venv/bin/lup-devtools git conflict complete", effect="allow"),
+    DecisionCase(
+        input="uv run --directory /some/worktree lup-devtools git conflict complete",
+        effect="allow",
+    ),
+    DecisionCase(input="lup-devtools git conflict list", effect="allow"),
+    DecisionCase(
+        input=".venv/bin/lup-devtools dev conflict status --json", effect="deny"
+    ),
+    DecisionCase(input=".venv/bin/lup-devtools git pr push", effect="deny"),
     DecisionCase(input=".venv/bin/lup-devtools dev check", effect="deny"),
     DecisionCase(input=".venv/bin/lup-devtools harness generate all", effect="deny"),
     # Redirections: discards and fd duplication are stripped; file writes ask.
@@ -944,25 +979,19 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git config --file /tmp/x user.name me", effect="ask"),
     DecisionCase(input="git config $KEY value", effect="ask"),
     DecisionCase(input="git config --get $KEY", effect="ask"),
-    # Global value flags are consumed, never read as the subcommand; globals
-    # that change execution behavior or move git to another repository ask.
-    # A redirect is judged before the subcommand word is even found, so it
-    # cannot be answered by the row that would otherwise reason about this
-    # worktree — `commit` is reversible here, where the reflog lives.
-    #
-    # Where the redirect points is not part of that: a verb that only reads
-    # changes which tree is read and nothing about what the command does, and
-    # the `cd` case two lines below is the same read already allowed. Asking
-    # about the redirect and allowing the `cd` deterred nothing and cost a
-    # turn on every sibling worktree and every mounted project, both of which
-    # are addressed by absolute path.
+    # Global value flags are consumed, never read as the subcommand, and a
+    # directory redirect is only that: the verb behind it is judged by its
+    # own row in the other tree, exactly as `cd there && git <verb>` is
+    # judged by two segments. The reflog that makes a commit reversible is
+    # that tree's, and undoes it as this one's would. Globals that change
+    # how git executes or what a ref means still ask.
     DecisionCase(input="git -C /other status", effect="allow"),
     DecisionCase(input="git -C /other log --oneline", effect="allow"),
     DecisionCase(input="git -C ../sibling diff", effect="allow"),
-    DecisionCase(input="git -C /tmp/other commit -am x", effect="ask"),
+    DecisionCase(input="git -C /tmp/other commit -am x", effect="allow"),
     DecisionCase(input="git -C /tmp/o merge --abort", effect="ask"),
-    DecisionCase(input="git -C /other push", effect="ask"),
-    DecisionCase(input="git --git-dir=/tmp/x --work-tree=/tmp add .", effect="ask"),
+    DecisionCase(input="git -C /other push --delete origin x", effect="ask"),
+    DecisionCase(input="git --git-dir=/tmp/x --work-tree=/tmp add .", effect="allow"),
     DecisionCase(input="git --namespace=other push", effect="ask"),
     DecisionCase(input="git --super-prefix=x/ status", effect="ask"),
     # Reading another tree keeps its way through, as two allowed segments.
@@ -1895,6 +1924,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             autonomous_agent_identities=["resolver-worker"],
             path_roles=FIXTURE_PATH_ROLES,
             acceptance_guard=None,
+            spawn_names=None,
             shell_rules=SHELL_RULES,
             edit_rules=FIXTURE_EDIT_RULES,
             import_boundaries=native_import_boundaries(application_roots()),
@@ -2103,7 +2133,7 @@ def test_a_tool_refusal_names_what_to_reach_for_instead() -> None:
     decision = policy.decide(refused_tool_call("Quuxify", {"content": "a page"}))
 
     assert "quuxifying leaves the repository" in decision.reason
-    assert "lup: escalate:" in decision.reason
+    assert "lup: escalate:" in decision.recovery
 
 
 def test_malformed_native_fetch_urls_become_conservative_unknown_tools() -> None:
@@ -2940,7 +2970,7 @@ def test_sandbox_escape_reenters_the_lattice_the_boundary_was_answering() -> Non
         ShellCommand(command="cat x ;& rm -rf ~", unsandboxed=True)
     )
     assert unreadable.effect == "deny"
-    assert "escalate" in unreadable.reason
+    assert "escalate" in unreadable.recovery
 
 
 def test_an_operation_the_profile_cannot_place_is_refused_by_capability() -> None:
@@ -3030,7 +3060,7 @@ def test_non_interactive_denials_do_not_prescribe_escalation() -> None:
     )
     assert blocked.effect == "deny"
     assert "escalate" not in blocked.reason
-    assert "allowed vocabulary" in blocked.reason
+    assert "allowed vocabulary" in blocked.recovery
 
 
 def test_a_reviewed_worker_is_told_the_route_it_actually_has() -> None:
@@ -3050,12 +3080,12 @@ def test_a_reviewed_worker_is_told_the_route_it_actually_has() -> None:
 
     assert relayed.effect == "ask"
     assert alone.effect == "deny"
-    assert "reshape the command" in alone.reason
+    assert "Reshape the command" in alone.recovery
     assert (
         "request_allowance"
         in ShellPolicy(SHELL_RULES, interactive=False, relayed=True)
         .decide(ShellCommand(command="cat x ;& rm -rf ~"))
-        .reason
+        .recovery
     )
 
 
@@ -3092,7 +3122,7 @@ def test_edit_policy_checks_every_file_before_allowing_batch() -> None:
 
     denied = policy.decide(batch)
     assert denied.effect == "deny"
-    assert "(rule any-type — see docs/rules.md)" in denied.reason
+    assert "(rule any-type)" in denied.reason and "docs/rules.md" in denied.recovery
     protected = EditBatch(
         changes=[EditChange(path=Path("pyproject.toml"), after="version = '2'")]
     )
@@ -3325,7 +3355,7 @@ def test_only_the_dead_half_of_a_directive_is_refused() -> None:
 
     assert decision.effect == "deny"
     assert "names dict-get" in decision.reason
-    assert "Drop dict-get from it" in decision.reason
+    assert "Drop dict-get from it" in decision.recovery
 
 
 def test_a_rule_another_scanner_owns_is_not_refused_over() -> None:
@@ -3423,7 +3453,7 @@ def test_a_creation_names_the_suppressions_it_arrives_carrying() -> None:
         in decision.reason
     )
     assert policy.decide(plain).reason == (
-        "full-file writes require approval — src/new.py arrives whole, 1 line at once"
+        "src/new.py is written whole, 1 line at once"
     )
 
 
@@ -4419,7 +4449,7 @@ def test_editing_a_compiled_plugin_tree_is_refused_by_the_file_gate_too() -> Non
             python_source=True,
         )
         assert decision.effect == "deny", tree
-        assert "compiled from typed source" in decision.reason, tree
+        assert "compiled from source" in decision.reason, tree
 
 
 def test_a_note_whose_words_stay_in_the_file_was_moved_rather_than_deleted() -> None:
@@ -4463,7 +4493,7 @@ def test_a_note_whose_words_leave_the_file_is_still_a_deletion() -> None:
 
     assert decision.effect == "deny"
     assert "removes inline review feedback" in decision.reason
-    assert "dev comments --withdraw" in decision.reason
+    assert "dev comments --withdraw" in decision.recovery
 
 
 def test_moving_one_note_does_not_cover_deleting_another() -> None:
@@ -4532,7 +4562,7 @@ def test_a_frozen_restore_is_allowed_for_every_package_manager_alike() -> None:
     bare = decide_command_rows(["bun", "install"], bun_rows)
     assert bare.effect == "ask"
     assert "free to rewrite the lockfile" in bare.reason
-    assert "`--frozen-lockfile`" in bare.reason
+    assert "`--frozen-lockfile`" in bare.recovery
     added = decide_command_rows(["bun", "add", "zod"], bun_rows)
     assert added.effect == "ask" and "adding a dependency" in added.reason
 
@@ -4625,6 +4655,30 @@ def test_an_in_place_rewrite_is_judged_as_the_edit_it_performs(
     # Naming no file at all reaches no document and no gate, so the standing
     # refusal is what answers it.
     assert decided("sed -i 's/a/b/'") == "deny"
+
+
+def test_a_rewrite_named_through_a_variable_is_judged_as_the_file_it_names(
+    tmp_path: Path,
+) -> None:
+    """`S=f; sed -i … $S` produces the same document `sed -i … f` does.
+
+    The classifier expanded `$S` and the host that runs the script over a
+    copy did not, so the document came back keyed by `$S`, matched no target,
+    and the rewrite asked as though the file could not be read.
+    """
+    committed_tree(tmp_path, "notes.md")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+
+    def decided(command: str) -> str:
+        return policy.decide(ShellCommand(command=command, cwd=tmp_path)).effect
+
+    assert decided("S=notes.md; sed -i 's/body/text/' $S") == "allow"
+    assert decided("D=.; sed -i 's/body/text/' $D/notes.md") == "allow"
+    # Rebound inside a loop, the name holds whatever the last pass left, so it
+    # is judged as `S=$(…)` is rather than by the value before the loop.
+    assert decided("S=notes.md; for n in 1 2; do S=x; done; sed -i 's/a/b/' $S") == (
+        decided("S=$(date); sed -i 's/a/b/' $S")
+    )
 
 
 def test_an_in_place_rewrite_meets_the_content_gates_an_edit_meets(

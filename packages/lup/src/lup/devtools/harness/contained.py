@@ -38,6 +38,12 @@ from rich.text import Text
 
 from lup.devtools.harness.preflight import LaunchSentinels
 from lup.harness.credential import committer, fleet_rewrites
+from lup.harness.devices import (
+    Device,
+    DeviceLease,
+    lease_devices,
+    registered_devices,
+)
 from lup.harness.egress import PROXY_LABEL, SessionEgress
 from lup.harness.image import (
     ContainerEngine,
@@ -739,7 +745,12 @@ def settled(
     )
 
 
-def record_boundary(lease: Lease, egress: SessionEgress, root: Path) -> None:
+def record_boundary(
+    lease: Lease,
+    egress: SessionEgress,
+    root: Path,
+    devices: DeviceLease = DeviceLease(),
+) -> None:
     """Write down what this session is confined by, for the gate that explains it.
 
     The mount table is a launch fact and the dispatcher that has to explain a
@@ -754,6 +765,11 @@ def record_boundary(lease: Lease, egress: SessionEgress, root: Path) -> None:
     attribute a refusal to a mount that is no longer there. An uncontained
     launch writes nothing and the reader treats absence as "no boundary to
     speak of", which is exactly what it is.
+
+    The devices granted are written beside the mounts, and for the other
+    reader: a run that computed inside this container has its provenance in
+    this file, and a GPU that was withheld is the difference between a
+    result and a run that fell back to the host without saying so.
     """
     ledger = root / ".lup" / "boundary.json"
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -763,6 +779,7 @@ def record_boundary(lease: Lease, egress: SessionEgress, root: Path) -> None:
                 "read_only": sorted(lease.read_only.values()),
                 "write_refusals": list(WRITE_REFUSAL_MARKERS),
                 "allowed_hosts": sorted(item.host for item in egress.admits),
+                "devices": [device.name for device in devices.granted],
             },
             indent=2,
         )
@@ -1545,7 +1562,6 @@ def contained_argv(
     image: Image,
     manifest: Manifest,
     root: Path,
-    human_owned: list[Path],
     host_config_home: Path | None,
     credential: Path | None,
     login: ProviderLogin,
@@ -1556,6 +1572,7 @@ def contained_argv(
     inherited_environment: list[str] | None = None,
     accessible: list[AccessibleRoot] = [],
     lease: Lease | None = None,
+    devices: list[Device] = [],
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1583,6 +1600,11 @@ def contained_argv(
     operator's container and a worker's is which checkouts it may write. A
     second builder for that one difference would be a second declaration of
     everything it has in common, free to drift from this one.
+
+    ``devices`` are what this machine grants its sessions and what this
+    launch asked for besides, settled by the caller the way ``accessible``
+    is: the standing grants come from the same gitignored registry the
+    mounts do, so a run's workers hold the devices its session did.
     """
     said = banner if banner is not None else Banner()
     if engine is not None:
@@ -1624,12 +1646,18 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
-    lease = lease if lease is not None else fleet_lease(root, human_owned, accessible)
+    lease = lease if lease is not None else fleet_lease(root, accessible)
     said.add(fleet_notice(accessible))
     said.add(
         pruning_notice(hold_pruning_across([root, *(item.path for item in accessible)]))
     )
-    record_boundary(lease, image.egress, root)
+    # Resolved on the host against the registry both engines read, before any
+    # argv names a device: a name no spec answers refuses the whole container,
+    # so a device nobody registered is withheld and said here rather than
+    # handed to the engine to fail on.
+    granted_devices = lease_devices(devices, registered_devices())
+    said.add(granted_devices.notices())
+    record_boundary(lease, image.egress, root, granted_devices)
     # Read on the host and passed in, never resolved inside: the file that
     # answers "where does this remote point" is `.git/config`, which the
     # container can write, so a rewrite decided in there is a rewrite the
@@ -1698,6 +1726,7 @@ def contained_argv(
         boundary=sentinels.within(),
         inherited_environment=inherited_environment,
         environments=held_environments(root, accessible, image.project_environment),
+        devices=granted_devices.granted,
     )
 
 
@@ -1773,7 +1802,6 @@ def worker_cli(
     image: Image,
     manifest: Manifest,
     lease_root: Path,
-    human_owned: list[Path],
     host_config_home: Path | None,
     credential: Path | None,
     login: ProviderLogin,
@@ -1781,6 +1809,7 @@ def worker_cli(
     read_only: bool = False,
     sentinels: LaunchSentinels = LaunchSentinels(),
     accessible: list[AccessibleRoot] = [],
+    devices: list[Device] = [],
 ) -> Path:
     """The program to start one resolver actor as, so it runs in its own container.
 
@@ -1825,14 +1854,13 @@ def worker_cli(
     speaks a protocol over stdin, and either other state would leave its
     runtime talking to a stream nothing reads.
     """
-    lease = worker_lease(lease_root, human_owned)
+    lease = worker_lease(lease_root)
     return written_wrapper(
         wrapper,
         contained_argv(
             image,
             manifest,
             lease_root,
-            human_owned,
             host_config_home,
             credential,
             login,
@@ -1840,6 +1868,7 @@ def worker_cli(
             sentinels=sentinels,
             accessible=accessible,
             lease=demoted(lease) if read_only else lease,
+            devices=devices,
         ),
         program,
     )

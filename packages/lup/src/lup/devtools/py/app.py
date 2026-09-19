@@ -3,6 +3,7 @@
 import inspect
 from collections import defaultdict
 from pathlib import Path
+from types import ModuleType
 from typing import Annotated
 
 import typer
@@ -67,14 +68,16 @@ def info_cmd(
     typer.echo(f"  {path}")
     typer.echo(f"{'=' * 60}")
 
-    if inspect.ismodule(obj):
-        show_module(obj, path, private)
-    elif isinstance(obj, type):
-        show_class(obj, schema, private)
-    elif callable(obj):
-        show_callable_info(obj, name)
-    else:
-        show_value_info(obj)
+    match obj:
+        case ModuleType():
+            show_module(obj, path, private)
+        case type():
+            show_class(obj, schema, private)
+        case _:
+            if callable(obj):
+                show_callable_info(obj, name)
+            else:
+                show_value_info(obj)
 
     typer.echo()
 

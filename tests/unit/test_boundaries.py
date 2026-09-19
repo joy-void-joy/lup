@@ -17,15 +17,13 @@ from pydantic import ValidationError
 
 import lup.devtools.dev.boundaries as boundary_scan
 from lup.devtools.project import DevProject
-from lup.harness.codescan.common import RuleSelection
+from lup.harness.codescan.common import ApplicationRoots, RuleSelection
 from lup.policy.imports import ImportBoundary
 from lup.policy.models import EditBatch, EditChange
 from lup.policy.rules import EditPolicy
 
 from lup.harness.codescan.boundaries import (
-    CONSTANT_DECLARATION_RULE_ID,
-    LIBRARY_DEFAULT_RULE_ID,
-    ApplicationRoots,
+    RuleId,
     audit_boundaries,
     audit_constant_declarations,
     audit_kernel_imports,
@@ -108,6 +106,38 @@ def test_canonical_vocabulary_and_provider_mentions_remain_valid() -> None:
         'description = "Claude and Codex support different native facilities"\n'
     )
     assert audit_boundaries(source) == []
+
+
+def test_a_tool_group_is_named_rather_than_rebuilt() -> None:
+    """The wiring two downstream repositories hand-ported, refused at the import.
+
+    A project reaching for the constructor is a project holding its own copy
+    of what a group is made of — which is how a companion goes unstarted and a
+    signature that gained parameters lands half-way.
+    """
+    reaching = "from lup.coordination.peer_tools import create_peer_tools\n"
+
+    findings = audit_path_boundaries(
+        Path("src/lup_template/agent/toolsets.py"), reaching, application_roots()
+    )
+
+    assert [(item.rule_id, item.module) for item in findings] == [
+        (RuleId.ASSEMBLY, "lup.coordination.peer_tools")
+    ]
+
+
+def test_the_assembly_is_what_may_call_a_group_constructor() -> None:
+    """One owner, because one module turns a declaration into a session's tools."""
+    reaching = "from lup.ledger.tools import create_ledger_tools\n"
+
+    assert (
+        audit_path_boundaries(
+            Path("packages/lup/src/lup/tools/toolsets.py"),
+            reaching,
+            application_roots(),
+        )
+        == []
+    )
 
 
 def test_application_composition_uses_adapters_instead_of_sdks() -> None:
@@ -440,7 +470,7 @@ def test_a_judgement_constant_outside_the_library_is_reported() -> None:
     assert [item.kind for item in findings] == ["missing"]
     assert [item.line for item in findings] == [1]
     assert "overridable default" in findings[0].message
-    assert f"# lup: ignore[{CONSTANT_DECLARATION_RULE_ID}]" in findings[0].message
+    assert f"# lup: ignore[{RuleId.CONSTANT_DECLARATION}]" in findings[0].message
 
 
 def test_a_canonical_constant_is_cleared_by_a_reasoned_suppression() -> None:
@@ -545,12 +575,12 @@ def test_the_two_constant_rules_partition_every_declaration() -> None:
 
     assert [constant.name for constant in declared] == ["TABLE", "SCALAR", "SINGLETON"]
     assert [constant.judging_rule(library_module=True) for constant in declared] == [
-        LIBRARY_DEFAULT_RULE_ID,
-        CONSTANT_DECLARATION_RULE_ID,
-        CONSTANT_DECLARATION_RULE_ID,
+        RuleId.LIBRARY_DEFAULT,
+        RuleId.CONSTANT_DECLARATION,
+        RuleId.CONSTANT_DECLARATION,
     ]
     assert [constant.judging_rule(library_module=False) for constant in declared] == [
-        CONSTANT_DECLARATION_RULE_ID
+        RuleId.CONSTANT_DECLARATION
     ] * len(declared)
 
 

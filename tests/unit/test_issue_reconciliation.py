@@ -91,7 +91,7 @@ def test_86_a_judged_question_is_not_run_because_nobody_can_be_asked() -> None:
     )
 
     assert headless.effect == "deny"
-    assert "no eligible reviewer" in headless.reason
+    assert "nobody who could approve it is reachable" in headless.reason
 
 
 def test_137_an_unprompted_crossing_needs_a_measured_channel() -> None:

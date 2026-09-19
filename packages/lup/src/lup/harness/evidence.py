@@ -37,7 +37,7 @@ class EvidenceEntry(BaseModel, frozen=True):
 EVIDENCE_REGISTER = [
     EvidenceEntry(capability="claude-cli", version="2.1.237", refreshed="2026-08-20"),
     EvidenceEntry(
-        capability="claude-agent-sdk", version="0.2.89", refreshed="2026-08-20"
+        capability="claude-agent-sdk", version="0.2.152", refreshed="2026-09-15"
     ),
     EvidenceEntry(capability="codex-cli", version="0.153.4", refreshed="2026-09-07"),
 ]

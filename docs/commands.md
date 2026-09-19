@@ -26,16 +26,17 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 
 | Command | What it does |
 | --- | --- |
-| `coordination roster` | List every session working in this repository, the live ones first. |
+| `coordination roster` | List every session working in this repository, and the recent departures. |
 | `coordination join` | Put a session on the roster and print the id it answers to. |
 | `coordination describe` | Record what one session is doing, for whoever reads the roster next. |
 | `coordination rename` | Rename one session, leaving the old name resolving to it. |
 | `coordination leave` | Record that a session has stopped, so nothing addresses it again. |
+| `coordination sweep` | Retire every session whose pulse has stopped, so nothing addresses it again. |
 | `coordination send` | Send one message to a peer, and say what will carry it there. |
 | `coordination inbox` | Read what is queued for one session, consuming it only when asked. |
 | `coordination holdings` | List what each live session in this repository is holding. |
 | `coordination lock` | Take everything beneath a prefix, before having touched any of it. |
-| `coordination release` | Give a prefix back, which does nothing unless this session held it. |
+| `coordination release` | Give a prefix back, refusing where this session does not hold it. |
 | `coordination watch` | Stream what changes: who arrives and leaves, what they are on, what reaches them. |
 
 ## `dev`
@@ -56,8 +57,11 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
 | `dev modules` | Report which modules this project takes, and what each one&#x27;s prose costs. |
+| `dev reach` | Report how this repository&#x27;s work reaches a project built on it. |
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
 | `dev relocate` | Move a module and repoint every import of it. |
+| `dev update` | Move the library, the native trees, and the copied half to one commit. |
+| `dev release` | Cut a release: close the changelog, move the version, tag it. |
 | `dev policy` | Show what the declared permission policy decides about an input, and why. |
 | `dev vocabulary` | Show every shell form the declared vocabulary judges, and how. |
 | `dev env status` | Where this project&#x27;s environment is, and who is installed in it. |
@@ -67,9 +71,15 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev tracker close` | Close an issue, here or on a declared tracker. |
 | `dev tracker reopen` | Reopen an issue, here or on a declared tracker. |
 | `dev tracker list` | Which repositories this project may reach, and what each is for. |
-| `dev preserve capture` | Record the surface this repository offers, as a checked-in fixture. |
-| `dev preserve check` | Resolve every captured capability against the tree as it stands. |
-| `dev preserve migration` | Print the relocation that repoints an importer of the captured tree. |
+| `dev migrate map` | Print the relocation that repoints an importer across a range. |
+| `dev migrate pending` | What a project standing at that commit still owes, beyond the map. |
+| `dev migrate check` | Refuse a capability that went with no migration speaking for it. |
+| `dev library status` | Report where the lup library is resolved from. |
+| `dev library release` | Ask the package index whether a release exists, and which mode that settles. |
+| `dev library use` | Resolve lup from the package index, or from the vendored copy. |
+| `dev library git` | Resolve lup from its repository, for use before a release is published. |
+| `dev scaffold compile` | Materialize upstream&#x27;s copied half at one commit, under this name. |
+| `dev scaffold adopt` | Root the scaffold branch, once, at the commit this project came from. |
 | `dev model-config census` | Enumerate every `model_config` declaration by right-hand-side shape. |
 | `dev model-config aliases` | List every shared configuration alias, and who imports each one. |
 | `dev model-config convert` | Rewrite every assigned `model_config` as class keywords, in place. |
@@ -88,6 +98,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev hooks sweep` | Classify a list of commands at once, and exit non-zero if any is not allowed. |
 | `dev hooks roots` | List the path roles and protected roots the declaration carries. |
 | `dev hooks learn` | Review the commands the policy declined to interrupt about. |
+| `dev hooks approvals` | List the exact calls an approval is remembered for, and since when. |
+| `dev hooks forget` | Retire a remembered approval, so the next identical call asks again. |
 | `dev py info` | Inspect a Python object — adapts to modules, classes, functions, values. |
 | `dev py source` | View source code for a Python object, or a package file tree with --tree. |
 | `dev py imports` | Show what a module imports, or what imports it (--reverse). |
@@ -97,12 +109,6 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev usage codex` | Show live Codex usage with pacing bars (ChatGPT plan). |
 | `dev init rename-package` | Rename the lup Python package to a project-specific name. |
 | `dev init drop-examples` | Remove the scaffold&#x27;s demonstrations of itself, which no adopter wants. |
-| `dev library status` | Report where the lup library is resolved from. |
-| `dev library release` | Ask the package index whether a release exists, and which mode that settles. |
-| `dev library use` | Resolve lup from the package index, or from the vendored copy. |
-| `dev library git` | Resolve lup from its repository, for use before a release is published. |
-| `dev library link` | Develop against a lup checkout so library changes land in its repo. |
-| `dev library unlink` | Stop developing against a checkout and go back to the published release. |
 
 ## `feedback`
 
@@ -188,7 +194,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `ledger handoff` | Move a body of work to a peer, and say exactly what crossed. |
 | `ledger brief` | Write one handoff out for whoever is going to read it. |
 | `ledger mine` | Print one holder&#x27;s outstanding tasks, grouped by what they cost. |
-| `ledger done` | Mark one task finished, by recording it again as done. |
+| `ledger done` | Mark one piece of work finished, by recording it again as done. |
 | `ledger snapshot` | Commit the local half to a branch of its own, for a record worth keeping. |
 | `ledger explore` | Open the log in a browser, or write it as one self-contained page. |
 
@@ -250,6 +256,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `sync diff` | Show full diff for a specific commit. |
 | `sync mark-synced` | Advance the sync checkpoint to where the upstream now stands. |
 | `sync setup` | Set the local path for a project (writes to sync.json.local). |
+| `sync grant` | Grant sessions on this machine a host device (writes to sync.json.local). |
+| `sync revoke` | Take a device back from sessions on this machine (writes to sync.json.local). |
 
 ## `trace`
 

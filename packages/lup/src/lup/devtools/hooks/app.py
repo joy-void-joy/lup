@@ -24,6 +24,7 @@ import typer
 
 from pydantic import AnyHttpUrl
 
+from lup.devtools.hooks.approvals import forget, remembered
 from lup.devtools.hooks.classify import shell_decision as classify_shell
 from lup.devtools.hooks.corpus import read_corpus
 from lup.harness.enforcement import declared_path_rules, semantic_policy_for
@@ -367,5 +368,48 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         typer.echo(f"\n{len(settled)} settled by the boundary — the audit trail:")
         for item in settled:
             typer.echo(f"  {item.command}")
+
+    @app.command("approvals")
+    def approvals_command(
+        as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
+    ) -> None:
+        """List the exact calls an approval is remembered for, and since when.
+
+        A question the author answered yes to is not asked again for the
+        same exact call from the same checkout. This is that memory, read
+        back: one line per call, with the fingerprint `forget` takes.
+        """
+        held = remembered(project_root())
+        if as_json:
+            output_json([item.model_dump() for item in held])
+            return
+        if not held:
+            typer.echo(
+                "Nothing remembered — no question here was answered yes and run."
+            )
+            return
+        for item in held:
+            typer.echo(
+                f"{item.fingerprint[:12]}  {item.at[:10]}  {item.kind}  {item.subject}"
+            )
+            typer.echo(f"              from {item.cwd}")
+
+    @app.command("forget")
+    def forget_command(
+        selector: Annotated[
+            str,
+            typer.Argument(
+                help="A fingerprint prefix as `approvals` prints it, or the exact "
+                "command or URL"
+            ),
+        ],
+    ) -> None:
+        """Retire a remembered approval, so the next identical call asks again."""
+        gone = forget(project_root(), selector)
+        if not gone:
+            typer.echo(f"Nothing remembered matches {selector!r}.", err=True)
+            raise typer.Exit(1)
+        for item in gone:
+            typer.echo(f"forgotten {item.fingerprint[:12]}  {item.subject}")
 
     return app

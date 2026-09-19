@@ -8,6 +8,7 @@ the broken version too.
 
 from pathlib import Path
 
+from lup.harness.devices import Device
 from lup.harness.image import (
     Docker,
     Image,
@@ -483,15 +484,54 @@ def test_every_baked_variable_is_a_line_the_dockerfile_parser_accepts() -> None:
     green `harness generate all` and was found by a build.
     """
     baked = [
-        line.removeprefix("ENV ")
-        for line in Image().dockerfile(Manifest()).splitlines()
-        if line.startswith("ENV ")
+        pair.strip().removesuffix(" \\")
+        for line in Image().dockerfile(Manifest()).split("\n\n")
+        if line.startswith("ENV ") and "\\\n" in line
+        for pair in line.removeprefix("ENV ").splitlines()
     ]
     assert baked
     for pair in baked:
         value = pair.split("=", 1)[1]
         quoted = value.startswith('"') and value.endswith('"')
         assert quoted or not any(character.isspace() for character in value), pair
+
+
+def test_the_agent_clis_are_the_last_layer_built() -> None:
+    """A release lands most days, and every layer below an install is rebuilt.
+
+    Measured: the install sat at step 8 of 47, so a version bump re-ran the
+    thirty-nine steps after it, one of them a `chown -R` copying the whole
+    tree into a fresh layer. Last, a release costs one install; and handed
+    to the session's uid in that same layer, because a chown in a later one
+    copies every file it touches.
+    """
+    rendered = Image().dockerfile(Manifest())
+    layers = [line for line in rendered.splitlines() if line.startswith("RUN ")]
+    assert layers[-1].startswith("RUN bun add -g @anthropic-ai/claude-code")
+    install = rendered.index("RUN bun add -g @anthropic-ai/claude-code")
+    assert install > rendered.rindex("COPY <<")
+    assert install > rendered.index("useradd")
+    assert install < rendered.index("USER $UID:$GID")
+    handed = rendered[install:].split("\n\n")[0]
+    assert "chown -R $UID:$GID /opt/bun" in handed
+
+
+def test_metadata_that_changes_together_is_one_instruction_each() -> None:
+    """Both engines commit a layer per instruction, and a layer per variable
+    is a layer for nothing: one `ENV`, one `VOLUME`, one `chmod`."""
+    rendered = Image().dockerfile(Manifest())
+    lines = rendered.splitlines()
+    assert sum(line.startswith("ENV ") for line in lines) == 3
+    assert sum(line.startswith("VOLUME ") for line in lines) == 1
+    assert sum(line.startswith("RUN chmod +x") for line in lines) == 1
+    assert 'VOLUME ["/cache/uv", "/cache/bun", "/cache/ruff"]' in rendered
+
+
+def test_the_base_is_pinned_by_digest() -> None:
+    """A floating tag never appears in a diff, and a base that moved rebuilds
+    every layer above it on either engine."""
+    rendered = Image().dockerfile(Manifest())
+    assert rendered.splitlines()[1].startswith("FROM archlinux:base@sha256:")
 
 
 def test_a_terminal_session_takes_both_flags() -> None:
@@ -511,3 +551,43 @@ def test_a_piped_session_is_given_stdin_without_a_terminal() -> None:
 def test_a_captured_session_takes_neither() -> None:
     """`-it` against a pipe fails on the terminal it was promised."""
     assert stream_arguments("captured") == []
+
+
+def test_a_granted_device_is_handed_to_the_engine_beside_the_mounts() -> None:
+    """A device is the boundary widened by declaration, and reads where the mounts do.
+
+    The declaration and the grant are different lists: what reaches the engine
+    is what the host's registry answered for, so the argv takes the grant.
+    """
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={Path("/home/u/repo"): "/home/u/repo"},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        devices=[Device(name="nvidia.com/gpu=all")],
+    )
+    granted = started.index("--device")
+
+    assert started[granted + 1] == "nvidia.com/gpu=all"
+    assert granted > started.index("/home/u/repo:/home/u/repo:rw")
+    assert granted < started.index("lup-agent:x")
+
+
+def test_a_session_granted_no_device_asks_the_engine_for_none() -> None:
+    """Nothing is handed over that the lease did not grant, however it was asked for."""
+    started = Image().session_arguments(
+        tag="lup-agent:x",
+        checkout=Path("/home/u/repo"),
+        uid=1000,
+        gid=1000,
+        writable={Path("/home/u/repo"): "/home/u/repo"},
+        read_only={},
+        state_volume="lup-cfg-x",
+        config_home_env="CLAUDE_CONFIG_DIR",
+    )
+
+    assert "--device" not in started

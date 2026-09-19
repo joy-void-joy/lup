@@ -2,11 +2,25 @@
 
 import lup.harness.content.conventions as conventions
 import lup.harness.models as models
+from lup.devtools.subapps import SubAppSpec
 from lup.harness.content.application import ApplicationLayout
 
 
-def document(layout: ApplicationLayout) -> models.PromptDocument:
-    """The contribution guide, naming this project's own half by its own name."""
+def document(
+    layout: ApplicationLayout, subapps: list[SubAppSpec]
+) -> models.PromptDocument:
+    """The contribution guide, naming this project's own half by its own name.
+
+    Takes the served sub-apps because its first fenced block instructs the
+    setup wizard, whose module a project may decline: the line renders only
+    where ``setup`` is among what the CLI serves, so the block never tells a
+    reader to run a command their checkout does not have.
+    """
+    setup = (
+        "uv run lup-devtools setup                  # interactive: keys, integrations\n"
+        if any(spec.name == "setup" for spec in subapps)
+        else ""
+    )
     return models.PromptDocument(
         source=__name__,
         parts=[
@@ -23,8 +37,7 @@ change once you know where it goes.
 
 ```bash
 uv sync                                    # both workspace packages
-uv run lup-devtools setup                  # interactive: keys, integrations
-uv run lup-devtools dev check --changed     # ruff + pyright on what you changed
+{setup}uv run lup-devtools dev check --changed     # ruff + pyright on what you changed
 uv run lup-devtools dev test <paths>       # while iterating: only these files
 uv run lup-devtools dev check              # the local pre-flight bar
 ```
@@ -189,6 +202,26 @@ For a folder one session needs without a standing registration, the launchers
 take `--mount <dir>` and `--mount-ro <dir>` (repeatable): the same lease, the
 same widening in every posture, lasting exactly one launch.
 
+A host device — a GPU — is granted on the same terms and from the same file.
+`sync grant nvidia.com/gpu=all` writes the name into `sync.json.local` after
+starting a throwaway container with it, so a grant nobody's engine can honour
+is refused where it is made; `sync revoke` takes it back, `sync status` shows
+each grant beside whether a spec still names it, and the launchers take
+`--device <name>` (repeatable) for one launch. The name is the Container
+Device Interface's, `vendor/class=device`; the nodes under `/dev` and the
+driver libraries beside them are the registered spec's to inject, so nothing
+here enumerates either, and nothing committed names one: which GPU a machine
+holds is that machine's fact. Every launch reads `/etc/cdi` and
+`/var/run/cdi` on the host, hands the engine what a spec there names, and
+withholds the rest with one line, because `/var/run/cdi` empties at boot and
+a driver update regenerates a spec. A spec is written by the vendor's
+toolkit — `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` for
+NVIDIA — and Docker reads the registry from 28.3 (an older daemon needs
+`"features": {{"cdi": true}}`; podman always has). What was granted is written
+to `.lup/boundary.json` beside the mount table, so a run's provenance says
+which devices its container held, and `harness requirements` re-exercises
+every grant it finds.
+
 A registration naming only a URL is mounted on the same terms, because it is
 materialized into the same shape: a full bare clone under
 `~/.cache/lup/sync/<name>.git` with a worktree attached at `tree/<branch>`,
@@ -230,10 +263,12 @@ stacking a branch means a launch or absolute paths either way.
 A session launched already rooted in the worktree is never isolated and
 keeps all of them, which is why the workflow asks for a launch. Staying put
 and editing through absolute paths works too, but only into a worktree that
-is writable: a contained session mounts every sibling that already existed
-when it started read-only, so that route reaches a filesystem refusing every
-write, while one cut afterwards is outside the lease and takes edits
-normally. Measured against Claude Code
+is writable, and which those are is the lease's to say (`lup.sandbox.rail`):
+an operator's contained session holds every checkout of its repository
+writable, so that route reaches any sibling; a resolver worker's lease holds
+every sibling that existed when the worker started read-only, so there the
+route reaches a filesystem refusing every write, and only a worktree the
+worker cut itself takes edits. The isolation is measured against Claude Code
 2.1.237; `docs/native-capabilities.md` carries the evidence.
 
 Commit early, commit often, and keep commits atomic — if the message needs an

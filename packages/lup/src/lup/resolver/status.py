@@ -384,13 +384,11 @@ def phase_progress(state: ResolveState, run_dir: Path) -> PhaseProgress | None:
     That is the figure a reader planning around "how long until this run is
     done" actually wants, which is why it is the one drawn.
     """
-    match state.phase:
-        case ResolvePhase.VERIFICATION:
-            return recheck_bar(state, run_dir)
-        case phase if phase.settling():
-            return worker_bar(state.tally())
-        case _:
-            return join_bar(state.join_progress, run_dir)
+    if state.phase == ResolvePhase.VERIFICATION:
+        return recheck_bar(state, run_dir)
+    if state.phase.settling():
+        return worker_bar(state.tally())
+    return join_bar(state.join_progress, run_dir)
 
 
 def worker_bar(tally: RunTally) -> PhaseProgress | None:
@@ -427,13 +425,11 @@ def tally_bar(tally: RunTally) -> PhaseProgress | None:
     alone returns nothing rather than a bar measured on the wrong thing: the
     re-check counts records under a desk, which is not in here.
     """
-    match tally.phase:
-        case phase if phase.settling():
-            return worker_bar(tally)
-        case ResolvePhase.INTEGRATION:
-            return join_tally_bar(tally)
-        case _:
-            return None
+    if tally.phase.settling():
+        return worker_bar(tally)
+    if tally.phase == ResolvePhase.INTEGRATION:
+        return join_tally_bar(tally)
+    return None
 
 
 def join_tally_bar(tally: RunTally) -> PhaseProgress | None:

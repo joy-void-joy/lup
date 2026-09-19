@@ -35,12 +35,8 @@ from lup.workspace.paths import is_template_scaffold, project_root
 
 from lup.devtools.dev.antipatterns import scan_antipatterns
 from lup.devtools.project import DevProject
-from lup.devtools.dev.boundaries import (
-    scan_boundaries,
-    scan_application_placement,
-    scan_library_placement,
-)
-from lup.devtools.dev.branches import unlanded_siblings
+from lup.devtools.dev.boundaries import scan_application_placement
+from lup.devtools.dev.branches import get_integration_branch, unlanded_siblings
 from lup.devtools.dev.git_guards import GitGuard, read_hooks
 from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
 from lup.devtools.dev.cites import sweep_cites
@@ -51,7 +47,11 @@ from lup.ledger.models import LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.devtools.dev.environment import foreign_installs
 from lup.devtools.dev.gates import sweep_all
+from lup.devtools.dev.migrations import gate_base, undeclared_breaks
 from lup.devtools.dev.records import branches_awaiting_adoption, record_location
+from lup.devtools.dev.reach import Spread
+from lup.devtools.dev.scaffold import ScaffoldSource
+from lup.devtools.dev.update import drift as carrier_drift
 from lup.devtools.harness.drift import (
     RepositoryWriter,
     inspect_drift,
@@ -874,6 +874,8 @@ def scan_reports(
     node_classes: list[type[LedgerNode]] | None = None,
     ledger: LedgerLayout = LedgerLayout(),
     command_surface: Callable[[], CommandSurface] | None = None,
+    scaffold_source: ScaffoldSource | None = None,
+    spread: Spread | None = None,
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them."""
 
@@ -930,18 +932,6 @@ def scan_reports(
             else [f"antipatterns: ok{tail}"],
         )
 
-        breaches = scan_boundaries(project)
-        yield CheckReport(
-            name="seam boundaries",
-            passed=not breaches,
-            lines=[
-                f"seam boundaries: FAIL ({len(breaches)} breach(es))",
-                *(f"  {b.file}:{b.line}  {b.module}" for b in breaches),
-            ]
-            if breaches
-            else ["seam boundaries: ok"],
-        )
-
         # A document naming a node is held to what the node says now, so prose
         # cannot go on citing a corrected figure. Counted only where there is
         # a cite to hold: a repository with none has nothing this can fail.
@@ -951,18 +941,6 @@ def scan_reports(
             counted=bool(cited.checked or cited.failing),
             passed=cited.passed(),
             lines=cited.lines(),
-        )
-
-        tables = scan_library_placement()
-        yield CheckReport(
-            name="library placement",
-            passed=not tables,
-            lines=[
-                f"library placement: FAIL ({len(tables)} baked-in table(s))",
-                *(f"  {t.file}:{t.line}  {t.module}" for t in tables),
-            ]
-            if tables
-            else ["library placement: ok"],
         )
 
         portable = scan_application_placement(project)
@@ -1139,6 +1117,69 @@ def scan_reports(
             else [f"harness drift: FAIL ({len(drift.stale_trees)} tree(s))"],
         )
 
+        # The same question one carrier further out: that row asks whether the
+        # trees match the declarations in this checkout, and this asks whether
+        # the three carriers that brought the checkout here stand at one
+        # upstream commit. Advisory, because both commits are ones this project
+        # moved deliberately, and because the row is read most often during an
+        # update a conflict interrupted — refusing then would bury the
+        # conflicts the gate was run to read.
+        carriers = (
+            carrier_drift(project_root(), scaffold_source)
+            if scaffold_source is not None and not is_template_scaffold(project_root())
+            else None
+        )
+        if carriers is not None and not carriers.settled():
+            yield CheckReport(
+                name="carrier drift",
+                counted=False,
+                lines=[
+                    f"carrier drift: {carriers.spelled()} (advisory)",
+                    "  `dev update` moves every carrier to one upstream commit",
+                ],
+            )
+
+        # The other direction on the same subject: that row is what this
+        # checkout owes its upstream, and this is what it owes the projects
+        # built on it. Asked only where one of those exists, because what
+        # makes a vanished name a broken import is somebody holding it.
+        # Gating rather than advisory — the commit that takes a capability is
+        # the one place that knows why, and a break landing without that leaves
+        # an adopter an unresolvable import and nothing to read.
+        base = gate_base(get_integration_branch()) if spread is not None else None
+        owed = undeclared_breaks(project, base) if base is not None else []
+        match (spread, base):
+            case (None, _):
+                pass
+            case (_, None):
+                # Said rather than exited: a checkout with no base to read from
+                # is a fact about the clone, and a report that names it is what
+                # lets somebody fetch one.
+                yield CheckReport(
+                    name="declared migrations",
+                    counted=False,
+                    lines=[
+                        "declared migrations: skipped — no base to judge from "
+                        "(advisory)",
+                        "  fetch the integration branch or `main` so a merge base "
+                        "exists",
+                    ],
+                )
+            case _:
+                yield CheckReport(
+                    name="declared migrations",
+                    passed=not owed,
+                    lines=[
+                        f"declared migrations: FAIL ({len(owed)} gone with nothing "
+                        "to read)",
+                        *(f"  {capability.spelled()}" for capability in owed),
+                        "  declare each in `lup.devtools.dev.migrations.DECLARED`, "
+                        "with what a caller does about it",
+                    ]
+                    if owed
+                    else ["declared migrations: ok"],
+                )
+
         # Beside parity because both ask whether the roster arrived whole, one
         # turn further out: parity reads a declaration against the trees, and
         # this reads the checkout against the modules that were meant to
@@ -1234,6 +1275,8 @@ def run_checks(
     test_workers: int = TEST_WORKERS,
     node_classes: list[type[LedgerNode]] | None = None,
     ledger: LedgerLayout = LedgerLayout(),
+    scaffold_source: ScaffoldSource | None = None,
+    spread: Spread | None = None,
 ) -> None:
     """Run ruff format, ruff check, pyright, pytest, and this gate's own sweeps.
 
@@ -1267,6 +1310,8 @@ def run_checks(
         node_classes=node_classes or [],
         ledger=ledger,
         command_surface=command_surface,
+        scaffold_source=scaffold_source,
+        spread=spread,
     )
 
     if fix:

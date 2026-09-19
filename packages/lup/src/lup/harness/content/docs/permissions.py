@@ -547,6 +547,36 @@ inherit whatever the operator had exported. A hook script is spawned by the
 runtime with the runtime's environment, so an agent exporting the variable
 inside a shell tool call never reaches the dispatcher that judges it.
 
+## Native hook review queue
+
+A runtime that cannot turn a pre-tool policy question into a native prompt
+parks the exact call in `.lup/questions.jsonl`. The refusal names its review
+id and the commands to inspect, approve, or reject it. Codex uses this
+fallback: its pre-tool event runs before native approval, and a pending
+native permission event is not evidence that anyone approved the call.
+
+The operator runs `uv run lup-devtools dev questions show <id>` from the
+indicated checkout, then `uv run lup-devtools dev questions answer <id>
+--as operator` or `uv run lup-devtools dev questions reject <id> --as
+operator` outside the agent session. Queue answer operations are declared
+`operator_only` in the shell vocabulary; an escalation cannot grant the
+requester authority to answer itself. Nested command paths are declared
+with `ShellOperationRule.parents`, and the deepest matching path decides.
+
+Approval releases one exact retry in the same session and directory.
+The hook re-runs policy, compares the payload and patch preimages, then
+claims the approval exclusively before allowing execution. A changed file
+or payload requires another review. Rejection leaves the operation stopped.
+A crash after claiming approval does not make it reusable. Native sandbox
+restrictions still apply; queue approval does not change execution placement.
+
+Native patches are decoded into file transitions before review. A standalone
+shell `apply_patch` with a single-quoted argument or a quoted heredoc reaches
+the same edit gates. Relative paths resolve against the hook payload's
+working directory. Add-file operations replacing existing files are judged
+as overwrites. Compound shell commands are never reduced to only their patch.
+
+
 ## Two markers change a decision
 
 The guidance spells both; this is what each one does.
@@ -564,6 +594,15 @@ The guidance spells both; this is what each one does.
   the only route from an overrideable refusal to the host, because the
   decision half has already made it a question by the time the placement
   moves.
+
+  The question says which *there* it buys, from the placement the launch
+  measured rather than from the marker: on a host, that the call leaves for
+  the host, outside the only boundary there is; inside a container, that it
+  runs with the per-call sandbox off and still inside the container's
+  mounts, where a path mounted read-only stays read-only. A contained launch
+  never arms the per-call sandbox, so the escape lifts no mount, and a
+  write the mount table refuses fails approved exactly as it fails unmarked
+  — the exact command is then the user's to run from a host terminal.
 
   The bare `lup: escalate: <why>` keeps working as decision escalation and
   says it is an alias, because a migration that breaks every marker at once
@@ -585,6 +624,42 @@ The guidance spells both; this is what each one does.
 Each rule id is shown in the deny message that cites it, and indexed in
 [rules.md](rules.md).
 
+## What a question says
+
+A verdict carries two texts for two readers, and the contract is that
+neither borrows from the other. The `reason` is read by whoever approves,
+who answers yes or no and can act on nothing else, so it is one sentence of
+at most two hundred characters that leads with the operands the decision
+turns on — the packages a `--with` installs, the path a write lands on, the
+host a fetch reaches — and states the one fact that stopped it. A compound
+command that trips several rules lists each survivor after the first, one
+per line, because the answer is one decision over the whole operation. The
+`recovery` is read by the agent, on a refusal or a question nobody can be
+shown, and says what to change; it is where every instruction goes, and an
+instruction found in a reason is a defect
+`packages/lup/tests/unit/test_reason_voice.py` refuses. Neither carries
+reference. A scope table, a rule index, the marker grammar: each is the same
+on every occurrence and read on none, so a question names where it is
+pulled from — `dev policy`, this page — rather than repeating it.
+
+## An answer is remembered
+
+A question the author answered yes to is not asked again for the same exact
+call: the same command or URL, from the same checkout. The runtime's prompt
+exposes its answer to no hook, so the memory is read off the two events a
+hook does see — the call was asked about, and then it ran — and it is keyed
+on the input the tool actually ran with, so a call changed on the way
+through is a different call. Exact, never a prefix: `git push --delete
+origin topic` approved once approves that line and nothing else, and the
+same line from another checkout is another call. An edit is not remembered,
+because its exact call includes the document it replaces, which the first
+application changed. A refusal is never remembered, since only a question can
+be answered. The memory is `.lup/hooks/approvals.jsonl` beside the checkout;
+`dev hooks approvals` lists it, and `dev hooks forget <prefix or exact
+call>` retires one, after which the next identical call asks again. `dev
+policy` reads the declaration and not this memory, and says so under a
+question.
+
 ## Asking before spending a turn on it
 
 A denial is the ordinary way to learn a verdict, and it costs a turn. Three
@@ -593,6 +668,7 @@ rather than a reading of this page:
 
 ```bash
 uv run lup-devtools dev policy '<the command as you would run it>'
+uv run lup-devtools dev policy --kind fetch '<the URL>'
 uv run lup-devtools dev vocabulary --provenance
 uv run lup-devtools dev hooks sweep
 ```
@@ -600,7 +676,9 @@ uv run lup-devtools dev hooks sweep
 `dev policy` prints the decision and the sentence explaining it — the same
 sentence the hook would have shown — for a shell command, and takes the same
 lattice through the same segments, so a pipeline or a `$(...)` answers as it
-actually would. `dev vocabulary` prints every shell form the vocabulary
+actually would. With `--kind fetch` it reads a URL against the declared
+scopes and lists every one of them beneath the verdict, which is where the
+question a fetch outside them raises sends its reader. `dev vocabulary` prints every shell form the vocabulary
 judges and where each rule came from, which is the one to reach for when the
 question is "what *would* be allowed here" rather than "is this".
 

@@ -31,6 +31,9 @@ CORE = ModuleSpec(
         "the permission policy, with the reference pages behind them."
     ),
     default_on=True,
+    # The debug skill reads a session's trace, and the hooks skill ends at
+    # regenerating the trees: one command tree each, owned elsewhere.
+    requires=["observability", "meta"],
     subapps=["dev"],
     tool_groups=["codeintel"],
 )
@@ -39,10 +42,13 @@ GIT_WORKFLOW = ModuleSpec(
     id="git-workflow",
     title="Git workflow",
     summary=(
-        "Committing, rebasing, merging, and landing a branch, and the page "
-        "that says what has to be green before one does."
+        "Committing, rebasing, merging, and landing a branch, and the pages "
+        "that say what has to be green before one does."
     ),
     default_on=True,
+    # Landing and rebasing end at regenerating the trees a merge left behind
+    # their source, which is meta's command tree.
+    requires=["meta"],
     subapps=["git"],
 )
 
@@ -77,6 +83,8 @@ VERSION = ModuleSpec(
         "gather the evidence and review the proposal independently."
     ),
     default_on=True,
+    # The reviewer reads the traces of the version under review.
+    requires=["observability"],
     subapps=["version"],
 )
 
@@ -116,8 +124,14 @@ SETUP = ModuleSpec(
 CONVERSATION = ModuleSpec(
     id="conversation",
     title="Conversation",
-    summary="Retaining authenticated AI conversations for later reading.",
+    summary=(
+        "Retaining authenticated AI conversations for later reading, and the "
+        "skill that answers from one."
+    ),
     default_on=True,
+    # Retention drives a browser the operator signed in through `setup
+    # conversation`, which is where the skill sends them when it is missing.
+    requires=["setup"],
     subapps=["conversation"],
 )
 
@@ -128,6 +142,8 @@ FEEDBACK_LOOP = ModuleSpec(
         "Turning an observed agent failure into a durable capability change: "
         "the fb- phases, the review pass, and the trace explorer."
     ),
+    # Every phase reads traces, and the status phase reads them per version.
+    requires=["observability", "version"],
     subapps=["feedback"],
 )
 

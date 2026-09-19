@@ -35,12 +35,16 @@ WRITE_REFUSAL_MARKERS: tuple[str, ...] = (
     "Read-only file system",
     "Permission denied",
     "Operation not permitted",
+    "Device or resource busy",
 )
 """How a kernel says a write was refused, in the words a caller will see.
 
 A default rather than a constant: these are what Linux and the tools above it
 say, and a project on another platform -- or one whose toolchain wraps them --
-has different words for the same event. Never sufficient alone; the topology
+has different words for the same event. The last is what a bind-mounted
+*file* answers: a mount point cannot be unlinked, so a tool that replaces a
+file by renaming over it -- git, every editor that writes atomically --
+reports the mount as busy rather than read-only. Never sufficient alone; the topology
 has to agree before anything is claimed.
 """
 
@@ -155,6 +159,10 @@ def candidate_paths(failure: str) -> list[str]:
     token that merely looks like a path and is under no mount contributes
     nothing, so over-collecting costs a lookup and never a wrong claim.
     """
+    # lup: defer: git names a path relative to the checkout -- "unable to
+    # unlink old 'README.md': Device or resource busy" -- which this filter
+    # never reaches; anchoring it needs the session's directory here and in the
+    # compiled twin in lup.policy.assets.host
     return [
         stripped
         for word in failure.split()

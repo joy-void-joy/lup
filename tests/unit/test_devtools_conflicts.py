@@ -206,7 +206,7 @@ def test_uv_cannot_start_once_the_manifest_is_what_conflicts(
         sh.Command("uv")(
             "run",
             "lup-devtools",
-            "dev",
+            "git",
             "conflict",
             "status",
             _cwd=str(conflicted_manifest_repo),
@@ -277,7 +277,7 @@ def test_conflict_workflow_does_not_import_the_project_application(
     )
 
     output = documented_launcher(
-        "dev",
+        "git",
         "conflict",
         "status",
         "--json",

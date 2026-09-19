@@ -361,33 +361,35 @@ class TurnRunner:
             f"{assignment.rendered_skill_invocation}\n\n"
             f"Assignment:\n{assignment.model_dump_json(indent=2)}"
         )
-        if round_number > 1:
-            # The assignment rides along rather than being assumed
-            # remembered. This session is usually the one that produced the
-            # work under review, but a resumed run opens a fresh one, and a
-            # worker handed only "did not pass" with no concern and no
-            # criteria has nothing to revise against.
-            prompt = (
-                f"Round {round_number}. Your submitted work was reviewed and did "
-                "not pass. Revise it in the same worktree and submit an updated "
-                "report — this is a revision, not a fresh start, and the "
-                "assignment below is the one you already worked.\n\n"
-                f"Review feedback:\n{feedback}\n\n"
-                f"Assignment:\n{assignment.model_dump_json(indent=2)}"
-            )
-        elif holds_prior_work:
-            # A lease whose branch already carries commits is a re-entry that
-            # lost its round record, not a fresh concern. Two workers reported
-            # spending a whole turn re-deriving a verification an earlier
-            # session had already done, because a re-lease and a rejection
-            # arrive as byte-identical assignments.
-            prompt = (
-                "Round 1, re-entered. This lease's branch already carries "
-                "committed work for this concern from an earlier session, and no "
-                "review of it survived. Read what is there before you change "
-                "anything: if it already satisfies the criteria, submit it as it "
-                "stands and say so rather than redoing it.\n\n" + prompt
-            )
+        match round_number > 1, holds_prior_work:
+            case True, _:
+                # The assignment rides along rather than being assumed
+                # remembered. This session is usually the one that produced
+                # the work under review, but a resumed run opens a fresh one,
+                # and a worker handed only "did not pass" with no concern and
+                # no criteria has nothing to revise against.
+                prompt = (
+                    f"Round {round_number}. Your submitted work was reviewed and "
+                    "did not pass. Revise it in the same worktree and submit an "
+                    "updated report — this is a revision, not a fresh start, and "
+                    "the assignment below is the one you already worked.\n\n"
+                    f"Review feedback:\n{feedback}\n\n"
+                    f"Assignment:\n{assignment.model_dump_json(indent=2)}"
+                )
+            case _, True:
+                # A lease whose branch already carries commits is a re-entry
+                # that lost its round record, not a fresh concern. Two workers
+                # reported spending a whole turn re-deriving a verification an
+                # earlier session had already done, because a re-lease and a
+                # rejection arrive as byte-identical assignments.
+                prompt = (
+                    "Round 1, re-entered. This lease's branch already carries "
+                    "committed work for this concern from an earlier session, "
+                    "and no review of it survived. Read what is there before you "
+                    "change anything: if it already satisfies the criteria, "
+                    "submit it as it stands and say so rather than redoing "
+                    "it.\n\n" + prompt
+                )
         result = await self.actors.round(
             ActorRef(kind="worker", id=assignment.concern.id, round=round_number),
             turn_request(TurnInput(text=prompt), WorkerReport),

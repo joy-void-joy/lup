@@ -55,6 +55,15 @@ including tools for sessions running on the host. Add `--inside` to check
 the container, or `--inside --launch-only` to run just its startup checks.
 Full container checks include a test model turn.
 
+A host device — a GPU — is never in the manifest, because a manifest is
+committed and which GPU a machine holds is that machine's fact. `sync grant
+<name>` records it in the machine's `sync.json.local`, and the host checks
+build one requirement per grant they find there: a throwaway container
+started with the device, at setup rather than every launch since it costs a
+container start. A launch reads the host's CDI registry itself and withholds,
+with one line, any grant no spec there names.
+[contributing.md](contributing.md) carries how a device is granted.
+
 The target selector also chooses its login layout and configuration home:
 `claude` honors `CLAUDE_CONFIG_DIR`, falling back to the personal `.claude`
 directory; `codex` honors `CODEX_HOME`, falling back to the launcher's worktree
@@ -122,7 +131,7 @@ Canonical sources live in `lup.harness.content`
 (adapter renderers and the policy bundle).
 
 Three things that map states and the reason for each. The
-18 modules under `hooks/runtime/kernel/` are a verbatim
+23 modules under `hooks/runtime/kernel/` are a verbatim
 copy of `lup/policy/kernel/`, kept byte-identical so it can be diffed against
 the canonical package. The ownership manifests are written by
 `lup.harness.ownership` from the generation result rather than compiled from a
@@ -241,11 +250,13 @@ owns the subject, then regenerate.
 - /lup:rebase — Clean up commit history on the feature branch and open/update a PR
 - /lup:refactor — Rewrite a file or folder from scratch while respecting coding conventions
 - /lup:refactor-tools — Audit SDK agent tools and subagents — find gaps, overlaps, and refactoring opportunities
+- /lup:release — Cut a release: settle the level, close the changelog, tag it
 - /lup:report — Write the report of everything left to implement, rewritten whole under tmp/, after a long session or after implementing a plan
 - /lup:resolve — Resolve inline feedback through isolated work
 - /lup:resolve-reviewer — Review one resolver concern against its acceptance criteria
 - /lup:review — Review a session trace for workflow quality, tool usage, and improvement opportunities
-- /lup:update — Upgrade the lup dependency, then review upstream commits and apply improvements
+- /lup:update — Move every carrier of lup to one upstream commit, and resolve what it leaves
+- /lup:upstream — Fix a defect in lup itself, in a worktree of lup, and pin it until it lands
 - /lup:verify-solved — Check every claimed-resolved note and stale open issue against what it actually asked
 
 **Agents:**

@@ -43,11 +43,16 @@ from decisions import (
     placed_document,
     placed_edit_text,
     refused_tool_decision,
+    session_contained,
+    spawn_decision,
     written_review,
 )
 from host import (
+    approval_fingerprint,
+    approval_subject,
     declared_identity,
     file_diagnostics,
+    note_ran,
     publish_edition,
     read_document,
     record_hook_evidence,
@@ -294,6 +299,14 @@ def dispatch(payload):
         # wider than one repository, so the roster rides alongside as context
         # rather than as a verdict that could take the answer away.
         return peer_listing_decision()
+    if name == "Agent":
+        # A spawn is judged by the one thing that makes its subagent legible
+        # and addressable: the name it carries. The runtime validates the
+        # spelling; this only insists there is one.
+        return spawn_decision(
+            tool_input["name"] if "name" in tool_input else "",
+            [value for value in tool_input.values() if isinstance(value, str)],
+        )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them
     # here would be this file holding a second, narrower copy of it. The
@@ -337,7 +350,12 @@ def rendered(decision, payload, placed, attached):
     tool, so for the shell tool the object arrives whole and the sandbox is
     chosen from it. What remains outside this file's reach is the session
     itself: a host that forbids unsandboxed commands ignores the flag, and
-    the call runs confined with the verdict unchanged.
+    the call runs confined with the verdict unchanged. A contained launch
+    never arms the per-call sandbox at all, so there the flag lifts nothing
+    and the call runs in the container's own mount namespace — which is why
+    the sentence an approved crossing adds to its question is chosen by the
+    placement the launch measured, handed to the kernel beside `escapable`,
+    and never by this runtime.
 
     The rewrite replaces the arguments rather than merging into them, so the
     whole input is carried through. A deferral is placed nowhere, which is
@@ -362,7 +380,13 @@ def rendered(decision, payload, placed, attached):
     reviewed request spelled `# lup: escalate[sandbox]:`, and a native flag the
     agent set for itself is not that request.
     """
-    settled = decision.placed(escapable=True)
+    settled = decision.placed(
+        escapable=True, contained=session_contained(session_root(payload))
+    )
+    # The prompt is the approver's, so a question's recovery rides beside it
+    # as the agent's context; a refusal reaches only the agent and says both.
+    beside = settled.recovery if settled.effect == "ask" else ""
+    context = "\n\n".join(text for text in (attached, beside) if text)
 
     def carried(result):
         """The same answer, with whatever context rides beside the verdict.
@@ -373,7 +397,7 @@ def rendered(decision, payload, placed, attached):
         needs to carry it. An empty attachment adds no key, so a call with
         nothing to say returns exactly what it returned before.
         """
-        if not attached:
+        if not context:
             return result
         specific = (
             result["hookSpecificOutput"]
@@ -382,7 +406,7 @@ def rendered(decision, payload, placed, attached):
         )
         return {
             **result,
-            "hookSpecificOutput": {**specific, "additionalContext": attached},
+            "hookSpecificOutput": {**specific, "additionalContext": context},
         }
 
     if settled.effect == "defer":
@@ -390,7 +414,9 @@ def rendered(decision, payload, placed, attached):
     answer = {
         "hookEventName": "PreToolUse",
         "permissionDecision": settled.effect,
-        "permissionDecisionReason": settled.reason,
+        "permissionDecisionReason": (
+            settled.addressed() if settled.effect == "deny" else settled.reason
+        ),
     }
 
     def surfaced(result):
@@ -413,6 +439,22 @@ def rendered(decision, payload, placed, attached):
             }
         }
     )
+
+
+def remembered_run(payload):
+    """A call that was asked about and then ran was answered yes: write it down.
+
+    Read off the input the tool actually ran with rather than the one that
+    was judged, so a call somebody changed on the way through is a different
+    call and approves nothing.
+    """
+    name = payload["tool_name"] if "tool_name" in payload else ""
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    subject = approval_subject(name, tool_input)
+    if subject is None:
+        return
+    root = session_root(payload)
+    note_ran(root, approval_fingerprint(subject["kind"], subject["text"], root))
 
 
 def observe(payload):
@@ -468,6 +510,7 @@ def main():
         # nothing left to permit, and the conservative ask below would be an
         # approval prompt for work already done.
         if event == "PostToolUse":
+            remembered_run(payload)
             found = observe(payload)
             # Structured feedback reaches the agent beside the completed tool.
             # A file diagnostic is a successful check, so it exits normally.

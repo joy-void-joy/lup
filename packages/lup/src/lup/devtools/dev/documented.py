@@ -31,7 +31,7 @@ from collections.abc import Callable
 
 from pydantic import BaseModel
 
-from lup.execution.shell import git
+from lup.devtools.dev.tracked import tracked_files
 
 # lup: ignore[re-call] — see the module note: recognizing the toolchain's name
 # in prose, not parsing a structured format
@@ -105,7 +105,7 @@ def written_commands() -> list[WrittenCommand]:
 
     return [
         mention
-        for file in git.lines("ls-files", "*.py", "*.md")
+        for file in tracked_files(suffixes=(".py", ".md"))
         if "tests/" not in file
         for mention in mentions(file)
     ]

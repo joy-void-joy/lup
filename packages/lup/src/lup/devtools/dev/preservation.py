@@ -1,4 +1,4 @@
-"""Record what a repository's surface holds, so a refactor cannot lose part of it.
+"""What a repository's surface holds, at any revision, so a range cannot lose part of it.
 
 A reorganisation that moves modules is judged by a claim nothing reads the
 tree to check: *no capability disappeared*. The claim is made once, in a plan,
@@ -7,84 +7,67 @@ went missing looks exactly like one that moved, because both leave the old
 import path unresolvable. So the assumption survives review by being
 unfalsifiable rather than by being true.
 
-A capture makes it falsifiable. The surface is captured before the move as a
-checked-in fixture; afterwards the same walk runs against the live tree and
-every captured identity is resolved against it. One that resolves nowhere has
-disappeared, and that is the failure. One that resolves somewhere other than
-where it was captured has moved, and that is not — it is the migration map,
-which is the second thing the capture is for: an adopter's imports are
-repointed from the same difference that proves nothing was lost.
+Two surfaces make it falsifiable. Every name one revision declared is resolved
+against a later one: a name that resolves nowhere has disappeared, and that is
+the failure; a name that resolves somewhere else has moved, and that is not —
+it is the migration map, which is the second thing this is for, since an
+adopter's imports are repointed from the same difference that proves nothing
+was lost.
 
-Identity is chosen so a move does not read as a loss. A command's identity is
-the path a reader types, because that is what a caller depends on and what a
-rename genuinely changes. An export's identity is its qualified name, because
-the module holding it is exactly what a reorganisation is entitled to change
-and the class holding it is not. Location rides along as evidence rather than
-as identity: a name the live tree still declares anywhere has survived, so it
-is reported as a move and never as a loss. Where a name several modules share
-— ``logger``, ``app`` — moves with one of them, the move is recorded but casts
+Both surfaces are *read*, never imported. A name's declaration is in its
+module's text, and a revision worth comparing against is one this process
+could not import anyway: every name would resolve to the code already loaded
+here, under the layout the range was about to change. Reading also makes the
+question free of storage — git holds every revision, so a checked-in fixture
+would be a copy of what the repository already has, going stale against it.
+
+Identity is the declared name, because that is what a caller depends on; the
+module holding it is exactly what a reorganisation is entitled to change.
+Location rides along as evidence rather than as identity, so a name the later
+surface declares anywhere has survived. Where a name several modules share —
+``logger``, ``app`` — moves with one of them, the move is recorded but casts
 no vote in the migration map, whose pairs are drawn only from the names that
 landed in exactly one place.
-
-Deliberate removal is not a defeat for this. Deduplicating two spellings of
-one thing drops a capability on purpose, and the way to record that is to
-capture again: the entry leaves the fixture in a diff a reviewer reads, rather
-than leaving the tree in a diff nobody does.
 
 Only what a published root can import is walked. A generated plugin tree is
 derived from the typed catalog that emits it, and a test names what it tests,
 so neither is a surface an adopter can hold — counting them would grow the
-capture by half and make every regeneration read as a capability change.
+walk by half and make every regeneration read as a capability change.
+
+A command is not walked separately: it is declared by a function whose name is
+in this surface already, so a command that goes takes its own declaration with
+it. Walking the composed CLI would mean importing a revision, which is the one
+thing that cannot be done from here.
 """
 
-import json
+import tempfile
 from collections.abc import Iterable, Iterator, Set as AbstractSet
-from enum import StrEnum
 from itertools import groupby
 from pathlib import Path
 
-import typer
 from pydantic import BaseModel
 
+from lup.devtools.dev.model_config import materialize_revision
 from lup.harness.codescan.common import PACKAGE_ROOTS, module_name
 from lup.harness.codescan.symbols import defined_symbols
 from lup.devtools.dev.boundaries import TrackedSource, tracked_python_sources
-from lup.devtools.dev.commands import CommandEntry
 from lup.devtools.dev.relocate import name_parts
 from lup.devtools.project import DevProject
 from lup.execution.shell import git
 
-CAPTURE_FILE = Path("preservation-capture.json")
-"""Where a capture lands by default, relative to the checkout it describes.
-
-A default rather than a fixed location: an adopter keeping its fixtures
-somewhere else passes a path, and every entry point here takes one.
-"""
-
-
-class CapabilityKind(StrEnum):
-    """What sort of thing one capture entry promises stays reachable."""
-
-    COMMAND = "command"
-    EXPORT = "export"
-
 
 class Capability(BaseModel, frozen=True):
-    """One thing the repository offers, and where it offered it from."""
-
-    kind: CapabilityKind
+    """One name the repository offers, and the module it offered it from."""
 
     identity: str
-    """What a caller depends on: the typed command path, or the qualified name."""
+    """What a caller depends on: the name, wherever it is declared."""
 
     location: str
-    """The module declaring it — empty for a command, whose path is its home."""
+    """The module declaring it."""
 
     def spelled(self) -> str:
-        """This entry as one line, for a reader comparing two captures."""
-        return f"{self.kind} {self.identity}" + (
-            f" ({self.location})" if self.location else ""
-        )
+        """This entry as one line, for a reader comparing two surfaces."""
+        return f"{self.identity} ({self.location})"
 
 
 class ModuleSurface(BaseModel, frozen=True):
@@ -108,31 +91,13 @@ class SurfaceCapture(BaseModel, frozen=True):
     roots: list[str]
     """The import roots walked, named so a later capture covers the same tree."""
 
-    commands: list[str]
-    """Every operation the composed CLI answered to, as a reader types it."""
-
     modules: list[ModuleSurface]
-
-    @classmethod
-    def read(cls, path: Path = CAPTURE_FILE) -> "SurfaceCapture":
-        """Load a capture from disk."""
-        return cls.model_validate_json(path.read_text(encoding="utf-8"))
-
-    def write(self, path: Path = CAPTURE_FILE) -> None:
-        """Persist this capture, formatted so a diff reads line by line."""
-        path.write_text(
-            json.dumps(self.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8"
-        )
 
     def capabilities(self) -> Iterator[Capability]:
         """Every entry this capture holds, flattened to one shape."""
-        for command in self.commands:
-            yield Capability(kind=CapabilityKind.COMMAND, identity=command, location="")
         for surface in self.modules:
             for name in surface.declares:
-                yield Capability(
-                    kind=CapabilityKind.EXPORT, identity=name, location=surface.module
-                )
+                yield Capability(identity=name, location=surface.module)
 
     def homes(self) -> dict[str, list[str]]:
         """Each export identity this capture holds, and the modules declaring it."""
@@ -209,8 +174,24 @@ def walked_roots(
     return {*roots, project.package}
 
 
+def offers_a_surface(parts: list[str], internal: Iterable[str]) -> bool:
+    """Whether a name declared in this module is one anybody could import.
+
+    A declared prefix says no, and says it for the whole subtree beneath it:
+    :attr:`~lup.devtools.project.DevProject.internal_modules` carries what
+    this repository publishes nothing out of. Compared as the segments both
+    names parse to, so ``lup.policy.kernel`` reaches ``lup.policy.kernel.lex``
+    without also reaching a ``lup.policy.kernels`` that a test on the text
+    would have swallowed.
+    """
+    prefixes = [parsed for entry in internal if (parsed := name_parts(entry))]
+    return not any(parts[: len(prefix)] == prefix for prefix in prefixes)
+
+
 def surfaces(
-    sources: Iterable[TrackedSource], roots: AbstractSet[str]
+    sources: Iterable[TrackedSource],
+    roots: AbstractSet[str],
+    internal: Iterable[str] = (),
 ) -> Iterator[ModuleSurface]:
     """Every walked module one of ``roots`` can import, and what it declares.
 
@@ -219,47 +200,84 @@ def surfaces(
     not a capability whatever else it is. A path no import statement could
     spell at all — a generated tree under a dot directory — parses to no
     names and is left out by the same test.
+
+    ``internal`` is that same judgement made by declaration rather than by
+    layout: a module an importer can reach by name, out of a subtree this
+    repository publishes nothing from. Empty walks everything, which is what
+    a repository that declared nothing means.
     """
     for source in sources:
         module = module_name(source.path, roots)
         parts = name_parts(module)
-        if parts is not None and parts[0] in roots:
+        if (
+            parts is not None
+            and parts[0] in roots
+            and offers_a_surface(parts, internal)
+        ):
             yield ModuleSurface(
                 module=module,
-                declares=[symbol.name for symbol in defined_symbols(source.text)],
+                declares=[
+                    symbol.name
+                    for symbol in defined_symbols(source.text)
+                    if symbol.reachable
+                ],
             )
 
 
-def operations(context: typer.Context) -> Iterator[CommandEntry]:
-    """Every operation the CLI this command is running under answers to.
+def revision_sources(revision: str, roots: AbstractSet[str]) -> list[TrackedSource]:
+    """Every Python file one revision held under the walked roots.
 
-    Taken from the context rather than from an imported app, for the reason
-    the command reference takes its app as an argument: the composed CLI is a
-    root nothing imports, and naming one here would pick a single project's.
-    A command already running under that root can see the whole of it.
+    Out of git rather than a checkout, and read rather than imported: what a
+    module declares is in its text, and a revision old enough to be worth
+    comparing against is one this process could not import anyway — every
+    name would resolve to the code already loaded here, under the layout the
+    range was about to change.
+
+    Extracted whole rather than blob by blob. Asking git for one file at a
+    time is a subprocess per module, which is thirteen seconds for this
+    repository and rising; one archive is one subprocess whatever the tree
+    grows to, and the gate reads it on every run.
     """
-    yield from CommandEntry.beneath(context.find_root().command, [])
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        materialize_revision(revision, root)
+        return [
+            TrackedSource(
+                rel=path.relative_to(root).as_posix(),
+                path=path,
+                text=path.read_text(encoding="utf-8"),
+            )
+            for path in sorted(root.rglob("*.py"))
+            if not any(part.startswith(".") for part in path.relative_to(root).parts)
+            and roots & {*path.relative_to(root).parts}
+        ]
 
 
-def capture(
-    commands: Iterable[CommandEntry],
-    project: DevProject,
-    sources: Iterable[TrackedSource] | None = None,
-) -> SurfaceCapture:
-    """Walk the live tree into a capture, at the revision it is standing on.
-
-    The operations arrive already walked rather than as an app to walk. The
-    composed CLI is a root nothing imports, and the command that captures is
-    itself inside it — so the caller, which is running under that root, hands
-    over what it can already see.
-    """
+def surface_at(revision: str, project: DevProject) -> SurfaceCapture:
+    """The surface one revision offered, read out of git without a checkout."""
     roots = walked_roots(project)
-    walked = tracked_python_sources(project) if sources is None else list(sources)
     return SurfaceCapture(
-        revision=str(git("rev-parse", "HEAD")).strip(),
+        revision=revision,
         roots=sorted(roots),
-        commands=[entry.spelled() for entry in commands],
-        modules=sorted(surfaces(walked, roots), key=lambda one: one.module),
+        modules=sorted(
+            surfaces(
+                revision_sources(revision, roots), roots, project.internal_modules
+            ),
+            key=lambda one: one.module,
+        ),
+    )
+
+
+def surface_now(project: DevProject) -> SurfaceCapture:
+    """The surface the working tree offers, uncommitted work included."""
+    roots = walked_roots(project)
+    return SurfaceCapture(
+        revision=git.out("rev-parse", "HEAD"),
+        roots=sorted(roots),
+        modules=sorted(
+            surfaces(tracked_python_sources(project), roots, project.internal_modules),
+            key=lambda one: one.module,
+        ),
     )
 
 
@@ -272,16 +290,11 @@ def compare(captured: SurfaceCapture, live: SurfaceCapture) -> Divergence:
     the migration map.
     """
     homes = live.homes()
-    commands = {*live.commands}
     held = {*captured.capabilities()}
 
     def answers(capability: Capability) -> list[str]:
-        """Where the live tree answers for this capability, if anywhere."""
-        match capability.kind:
-            case CapabilityKind.COMMAND:
-                return [capability.identity] if capability.identity in commands else []
-            case CapabilityKind.EXPORT:
-                return homes.get(capability.identity, [])
+        """Which modules the later surface declares this name in, if any."""
+        return homes.get(capability.identity, [])
 
     return Divergence(
         disappeared=[

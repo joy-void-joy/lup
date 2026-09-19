@@ -35,6 +35,7 @@ from lup.policy.vocabulary import (
     bun_rule,
     git_rule,
     runner_target_rules,
+    review_queue_rules,
     typescript_rule,
 )
 from lup.seams import Selection
@@ -57,10 +58,13 @@ def lup_devtools_rule() -> ShellCommandRule:
     bounces back naming the spelling that is admitted, which is what an agent
     reaching past `uv` for no reason should be told.
 
-    The one operation it admits carries the placement `RUNNER_TARGETS` gives
-    the same toolchain reached through `uv`: a merge repair rewrites the git
-    configuration behind a worktree, which a confined session cannot do, and a
-    verdict that depended on which spelling reached it would be two policies.
+    The one operation it admits sits under `git`, the sub-app the wired CLI
+    mounts it in and the spelling the merge skill, the command reference and
+    the conflicted-manifest notice all name; the console script's import-safe
+    dispatch answers the same words. It states no placement of its own, so it
+    carries the one `RUNNER_TARGETS` gives the same toolchain reached through
+    `uv`: a verdict that depended on which spelling reached it would be two
+    policies.
     """
     reach_through_uv = (
         "reach this toolchain through `uv run lup-devtools`, which guarantees"
@@ -77,15 +81,16 @@ def lup_devtools_rule() -> ShellCommandRule:
         effects=[declare("runs_declared_target", scope="lup-devtools")],
         refuses=reach_through_uv,
         subcommands=[
+            *review_queue_rules(),
             ShellSubcommandRule(
-                name="dev",
+                name="git",
                 operations=[
                     # The documented exception, which clears the refusal it
                     # would otherwise inherit rather than restating the grant.
                     ShellOperationRule(name="conflict", refuses="")
                 ],
                 reason=reach_through_uv,
-            )
+            ),
         ],
         reason=reach_through_uv,
     )

@@ -26,6 +26,8 @@ from lup.devtools.clipboard import copy_to_clipboard
 from lup.execution.shell import git
 from lup.devtools.utils import (
     attributed_stderr,
+    clear_stale_config_locks,
+    config_lock_diagnosis,
     decode_stderr,
     format_table,
     refuse_blocked_config_writes,
@@ -152,23 +154,44 @@ def merge_driver_registered(root: Path | None = None) -> bool:
     )
 
 
-def refuse_a_blocked_registration(root: Path | None = None) -> None:
-    """Stop before a merge-driver registration that cannot take its lock.
+def report_a_blocked_registration(root: Path | None = None) -> bool:
+    """Name a merge-driver registration this clone cannot make, without stopping.
 
     Registering the driver is the one config write left in making a worktree,
     and it is a once-per-clone one: git resolves a driver name from config
     alone, so no repository can ship it and the clone that first cut a
-    worktree registered it for every worktree after.
+    worktree registered it for every worktree after. A clone that already
+    resolves the driver writes nothing here and is not asked about it.
 
-    Which makes the refusal conditional on the write being outstanding. A
-    clone that already resolves the driver writes nothing here, and refusing
-    it regardless denied a worktree over a write nobody was going to make —
-    while a clone that has never registered still meets the diagnosis up
-    front rather than as `File exists` against a half-created worktree.
+    A clone that cannot -- the shared `config` is held read-only in every
+    contained session, and the registration is a host's act -- is told so and
+    given the worktree anyway. Refusing it protected nothing: the driver
+    decides how a *merge* of the generated trees resolves, which a worktree
+    cut without it meets no sooner than every worktree of this clone already
+    does, and what the refusal cost was the work itself, measured twice over
+    -- a documentation branch that fell back to plain `git worktree add`, and
+    a resolver run that could not lease its first concern inside the sandbox.
+    Where the write would simply happen, nothing is said.
+
+    Answers whether the registration is blocked, which the setup step reads
+    so the worktree is handed over usable rather than reported unfinished.
     """
     if merge_driver_registered(root):
-        return
-    refuse_blocked_config_writes(root)
+        return False
+    for cleared in clear_stale_config_locks(root):
+        typer.echo(cleared)
+    diagnosis = config_lock_diagnosis(root)
+    if not diagnosis:
+        return False
+    typer.echo(diagnosis, err=True)
+    typer.echo(
+        f"The {OWNERSHIP_MERGE_DRIVER} merge driver stays unregistered for this "
+        "clone, so a merge touching the generated trees resolves as a plain "
+        "three-way merge until it is. Register it once from a host terminal: "
+        "`uv run lup-devtools git merge-driver`.",
+        err=True,
+    )
+    return True
 
 
 def report_a_blocked_arming(
@@ -241,7 +264,15 @@ class SetupStep(BaseModel, ABC, frozen=True):
 
 
 class MergeDriver(SetupStep, frozen=True):
-    """The merge driver ``.gitattributes`` names, registered for this clone."""
+    """The merge driver ``.gitattributes`` names, registered for this clone.
+
+    ``blocked`` is what :func:`report_a_blocked_registration` found: a shared
+    config this session cannot write. The step then neither tries the write
+    nor fails the worktree over it -- the registration is the host's act, and
+    the checkout is usable without it.
+    """
+
+    blocked: bool = False
 
     def label(self) -> str:
         return f"the {OWNERSHIP_MERGE_DRIVER} merge driver"
@@ -250,7 +281,11 @@ class MergeDriver(SetupStep, frozen=True):
         return merge_driver_registered()
 
     def run(self) -> None:
-        register_merge_driver()
+        if not self.blocked:
+            register_merge_driver()
+
+    def required(self) -> bool:
+        return not self.blocked
 
 
 class ArmedGitGuards(SetupStep, frozen=True):
@@ -492,6 +527,12 @@ class RestoredWorkspace(SetupStep, frozen=True):
     the cache lacks: the gate restores whatever it finds behind, so a worktree
     without this step is one to work in, where one without its environment
     is not.
+
+    A workspace the new tree does not hold is nothing to restore rather than
+    something behind. The list comes from the project the command was *run
+    in*, and ``--base`` cuts from any branch, so a tree whose layout differs
+    — one obtaining the library as a link where the other vendors it — is
+    asked to restore a directory it has no copy of.
     """
 
     worktree: Path
@@ -502,7 +543,8 @@ class RestoredWorkspace(SetupStep, frozen=True):
         return f"the restored bun workspace ({self.workspace})"
 
     def satisfied(self) -> bool:
-        return not dependencies_behind(self.worktree / self.workspace)
+        held = self.worktree / self.workspace
+        return not held.is_dir() or not dependencies_behind(held)
 
     def run(self) -> None:
         typer.echo(f"Running bun install --frozen-lockfile in {self.workspace}...")
@@ -571,12 +613,13 @@ def register_worktree(name: str, worktree_path: Path, base_branch: str | None) -
         typer.echo(f"New branch: {name}")
 
     try:
-        if already_exists:
-            git("worktree", "add", str(worktree_path), name)
-        elif base_branch:
-            git("worktree", "add", str(worktree_path), "-b", name, base_branch)
-        else:
-            git("worktree", "add", str(worktree_path), "-b", name)
+        match (already_exists, base_branch):
+            case (True, _):
+                git("worktree", "add", str(worktree_path), name)
+            case (False, str() as base) if base:
+                git("worktree", "add", str(worktree_path), "-b", name, base)
+            case _:
+                git("worktree", "add", str(worktree_path), "-b", name)
     except sh.ErrorReturnCode as e:
         typer.echo(f"Error creating worktree: {decode_stderr(e)}", err=True)
         raise typer.Exit(1)
@@ -608,7 +651,7 @@ def create(
     is given its remote by the first push that carries something, which is
     `git pr push` and which the pre-push guard judges.
     """
-    refuse_a_blocked_registration()
+    registration_blocked = report_a_blocked_registration()
     report_a_blocked_arming(guards)
     current_dir = Path.cwd()
 
@@ -662,7 +705,7 @@ def create(
 
     def setup() -> Iterator[SetupStep]:
         """Everything that has to hold before this worktree can be used."""
-        yield MergeDriver()
+        yield MergeDriver(blocked=registration_blocked)
         yield ArmedGitGuards(guards=guards, worktree=worktree_path)
         if not no_record:
             yield recorded
@@ -747,16 +790,17 @@ def list_worktrees() -> None:
                 entries.append(current)
                 current = WorktreeEntry()
             continue
-        if line.startswith("worktree "):
-            current.path = line.removeprefix("worktree ")
-        elif line.startswith("HEAD "):
-            current.head = short_sha(line.removeprefix("HEAD "))
-        elif line.startswith("branch "):
-            current.branch = line.removeprefix("branch ").removeprefix("refs/heads/")
-        elif line == "bare":
-            current.bare = True
-        elif line == "prunable":
-            current.prunable = True
+        match line.split(maxsplit=1):
+            case ["worktree", path]:
+                current.path = path
+            case ["HEAD", sha]:
+                current.head = short_sha(sha)
+            case ["branch", ref]:
+                current.branch = ref.removeprefix("refs/heads/")
+            case ["bare"]:
+                current.bare = True
+            case ["prunable", *_]:
+                current.prunable = True
 
     if current.path:
         entries.append(current)

@@ -35,7 +35,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.devtools.subapps import SubAppSpec
-from lup.harness.modules import Module
+from lup.harness.modules import Module, ModuleSelection
 
 
 class ContentFamily(BaseModel, frozen=True):
@@ -124,12 +124,25 @@ class ModuleCoverage(BaseModel, frozen=True):
     """
 
     modules: list[Module] = []
-    """Every module in the roster, built — not the adopted subset.
+    """Every module in the roster, built as it declares itself — not the adopted subset.
 
     A module a project declined still owns its declarations, and one that owns
     none is exactly what this looks for, so narrowing first would hide the
     failure. Building them all costs the imports the roster reaches, which is a
     cost only this gate pays and only while it runs.
+    """
+
+    selection: ModuleSelection = ModuleSelection()
+    """What this project changed about each module, applied beside it.
+
+    A claim is read from both views of a module — as it declares itself and as
+    the project resolved it — because each hides a declaration the other shows.
+    A skill the project added to a module it did not write reaches the plugin
+    only through the selection, so the unresolved module would report it owned
+    by nobody; a skill the project rewrote under the library's own id replaces
+    the library's declaration in the resolved module, so that module alone
+    would report the library's file as unclaimed. Both are one module's
+    subject, and both are claimed by it.
     """
 
     roots: list[ContentRoot] = []
@@ -188,7 +201,21 @@ def declaring_modules(
     ]
 
 
-def content_claims(modules: list[Module]) -> list[Claim]:
+def both_views(modules: list[Module], selection: ModuleSelection) -> list[Module]:
+    """Each module as it declares itself and as this project resolved it.
+
+    Two views per module because a claim can live in either alone: an
+    addition under a new id only in the resolved one, and a library
+    declaration the project rewrote under the same id only in the declared
+    one. A module the project said nothing about resolves to itself, so the
+    second view repeats the first and claims nothing new.
+    """
+    return [view for module in modules for view in (module, selection.resolved(module))]
+
+
+def content_claims(
+    modules: list[Module], selection: ModuleSelection = ModuleSelection()
+) -> list[Claim]:
     """Which module claims which skill or agent module.
 
     Every prompt carries the module it was written in, so ownership is read off
@@ -197,7 +224,7 @@ def content_claims(modules: list[Module]) -> list[Claim]:
     """
     return [
         Claim(declaration=prompt.declared_source(), module=module.spec.id)
-        for module in modules
+        for module in both_views(modules, selection)
         for prompt in (
             *(skill.prompt for skill in module.content.skills),
             *(agent.prompt for agent in module.content.agents),
@@ -205,7 +232,9 @@ def content_claims(modules: list[Module]) -> list[Claim]:
     ]
 
 
-def page_claims(modules: list[Module]) -> list[Claim]:
+def page_claims(
+    modules: list[Module], selection: ModuleSelection = ModuleSelection()
+) -> list[Claim]:
     """Which module publishes which page module, without rendering a page.
 
     A page entry carries where it is declared for exactly this reason: knowing
@@ -213,7 +242,7 @@ def page_claims(modules: list[Module]) -> list[Claim]:
     """
     return [
         Claim(declaration=entry.source, module=module.spec.id)
-        for module in modules
+        for module in both_views(modules, selection)
         for entry in module.documents
     ]
 
@@ -271,9 +300,9 @@ def coverage_gaps(root: Path, coverage: ModuleCoverage) -> list[CoverageGap]:
         *gaps(
             "skill or agent",
             [name for name in declared if name not in pages],
-            content_claims(coverage.modules),
+            content_claims(coverage.modules, coverage.selection),
         ),
-        *gaps("page", pages, page_claims(coverage.modules)),
+        *gaps("page", pages, page_claims(coverage.modules, coverage.selection)),
         *gaps(
             "sub-app",
             [spec.name for spec in coverage.subapps],

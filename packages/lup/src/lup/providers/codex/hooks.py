@@ -178,7 +178,10 @@ class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=Tru
             item for item in outputs if item.decision in ("deny", "block", "ask")
         ]
         for item in refused:
-            logger.info("declining %s: %s", method, item.reason)
+            # A question declined here is turned back to the agent, so the
+            # recovery that rode beside it belongs in the record too.
+            told = [text for text in (item.reason, item.additional_context) if text]
+            logger.info("declining %s: %s", method, "\n".join(told))
         return DECLINE if refused else ACCEPT
 
 

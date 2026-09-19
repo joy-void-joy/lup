@@ -51,6 +51,8 @@ This shows tools, subagents, model, and prompt info. For deeper inspection, read
 - **Tools**: `src/lup_template/agent/tools/`
 - **Core wiring**: `src/lup_template/agent/core.py` — the factory, the wrapper layers around it, and the `effort` and `autonomy` the turn asked for
 
+Beneath the agent sits the harness every session runs under — the always-loaded guidance in `src/lup_template/harness/content/guidance.py`, the roster in `docs/harness.md`, the policy in `src/lup_template/harness/catalog.py` — which is the baseline for a session that ran no agent at all.
+
 This is the baseline for evaluating whether the agent used its capabilities well.
 
 ### 3. Analyze the conversation flow

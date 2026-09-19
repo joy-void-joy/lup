@@ -21,6 +21,7 @@ it is for shell rules.
 from pathlib import Path
 
 from lup.devtools.clipboard import clipboard_probes
+from lup.harness.devices import Device
 from lup.harness.image import ContainerEngine, Docker, detected_client
 from lup.harness.requirements import (
     Advisory,
@@ -277,6 +278,54 @@ def same_path_mount_requirement(
         absence=LostCapability(capability="mounting worktrees in worker containers"),
         recovery="Check the mount error above and the container service's access to the checkout.",
         install=install,
+    )
+
+
+def granted_device_requirement(
+    device: Device,
+    image: str = "docker.io/library/busybox:latest",
+) -> Requirement:
+    """A device this machine grants its sessions, exercised by handing it to a container.
+
+    Built from the machine's own grant rather than declared in a manifest,
+    and that placement is the whole of it: a manifest is committed and shared
+    by every machine and every downstream user of the repository, and which
+    GPU one of them holds is that machine's alone. `sync grant` builds this
+    as it writes the grant, and `harness requirements` builds one per grant
+    it finds, so a committed roster never names a vendor's device.
+
+    The exercise starts a throwaway container with the device and nothing
+    else. That is vendor-neutral proof of the two halves that pass alone and
+    fail together: a spec can be registered on a host whose engine does not
+    honour the registry, and an engine can honour it on a host with no spec
+    for the name. Whether the driver inside answers a vendor's tool is the
+    project's to ask in its own words, once the device is there.
+
+    Checked at setup rather than every launch because it starts a container:
+    a launch reads the registry itself and withholds a device it cannot
+    grant, so what this adds is worth one container start when a grant is
+    made and not before every session. Carried by the client for the reason
+    the container requirement is: which engine starts the probe is a fact
+    about the machine.
+    """
+    return Requirement(
+        capability=f"device {device.name}",
+        by_client=True,
+        purpose="what sessions on this machine were granted, held to the registry they read",
+        where="host",
+        checked="setup",
+        exercise=Run(
+            command=["docker", "run", "--rm", *device.arguments(), image, "true"]
+        ),
+        absence=LostCapability(
+            capability=f"{device.name} inside contained sessions and workers"
+        ),
+        recovery=(
+            "Register the device with its vendor's toolkit -- for NVIDIA, "
+            "`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` -- "
+            "and check the engine reads the registry: Docker does from 28.3, "
+            'an older daemon needs `"features": {"cdi": true}`, podman always has.'
+        ),
     )
 
 
@@ -1077,10 +1126,21 @@ def question_relay_requirement(
     )
 
 
+def preflight_namespace() -> str:
+    """Where the checkpoint-store probe writes its ref: a namespace of its own.
+
+    Beside the undo log rather than inside it, so a probe never reads as a
+    snapshot, and a function for the reason the undo namespace is one: the
+    guard that watches a checkout for refs a suite moved imports it from
+    here, so the writer and the reader cannot end up naming two places.
+    """
+    return "refs/lup/preflight"
+
+
 def checkpoint_store_requirement(
     where: Side = "host",
     install: list[Package] = [],
-    namespace: str = "refs/lup/preflight",
+    namespace: str = preflight_namespace(),
 ) -> Requirement:
     """Whether the store a recovery-backed permission rests on accepts a write.
 

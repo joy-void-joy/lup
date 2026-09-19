@@ -1,5 +1,5 @@
 {
-  "description": "Lup semantic permission policy, peer delivery, and the roster's changes at each prompt",
+  "description": "Lup semantic permission policy, peer delivery, the roster's changes at each prompt, this session's departure as it ends, and a subagent's report waiting on its background work",
   "hooks": {
     "PostToolUse": [
       {
@@ -22,7 +22,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash|WebFetch|Edit|Write|SendMessage|ListAgents|Artifact|Skill|EnterWorktree"
+        "matcher": "Bash|WebFetch|Edit|Write|SendMessage|ListAgents|Agent|Artifact|Skill|EnterWorktree"
       },
       {
         "hooks": [
@@ -35,11 +35,53 @@
         "matcher": ""
       }
     ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/coordination_departure.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/subagent_cleanup.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/subagent_cleanup.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/coordination_changes.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/carrier_drift.sh\" || exit 0",
             "timeout": 10,
             "type": "command"
           }

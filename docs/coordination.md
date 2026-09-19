@@ -58,19 +58,41 @@ started them and a listing of spawns should not claim otherwise.
 
 Two facts, deliberately separate. The **id** is minted once and never moves:
 mail is addressed to it, and a restart reattaches by it. The **name** is what
-a person types, and a session renames itself whenever what it is doing
-changes. Renames are journaled rather than overwritten, so a name somebody
-wrote down an hour ago still reaches the session it named until something else
-claims it — there is no error a sender could be shown, because the name they
-used was correct when they read it.
+a person types, and a session renames itself whenever a name would tell its
+peers more than its checkout does. Renames are journaled rather than
+overwritten, so a name somebody wrote down an hour ago still reaches the
+session it named until something else claims it — there is no error a sender
+could be shown, because the name they used was correct when they read it.
 
-A launcher exports the id as `LUP_COORDINATION_MEMBER` and can prove it, the
-way `LUP_AGENT_IDENTITY` is proven: a hook is spawned by the runtime CLI with
-the CLI's own environment, so an agent exporting this inside a shell call
-cannot reach the hook that reads it. A bare session in a worktree has the
-plugin and no launcher, so it falls back to the identity its own runtime gave
-it and registers under a name derived from its worktree. It is a full peer
-that cannot prove who started it.
+**A name reaches one live session.** A session is called after its worktree,
+and two sessions in one worktree want the same name, so the second is
+numbered — `dev`, then `dev-2` — against whatever the live sessions are called
+when it joins. A name chosen deliberately, by rename or by a launch, is
+refused rather than numbered where a live session already answers to it,
+because the caller meant it. Resolution runs the other way round: a name
+reaches the live session that claimed it most recently, and only where none is
+live does it reach the last claimant of all, so that a message to a session
+that has stopped is refused with when it left and what it concluded rather
+than queued for nobody. A message to one's own address is refused too.
+
+A launcher mints both halves and exports them as `LUP_COORDINATION_MEMBER` and
+`LUP_COORDINATION_NAME`, and can prove them, the way `LUP_AGENT_IDENTITY` is
+proven: a hook is spawned by the runtime CLI with the CLI's own environment, so
+an agent exporting these inside a shell call cannot reach the hook that reads
+them. The name is minted by the launcher rather than at the join because the
+runtime's own chrome shows it, and a chrome saying `dev` over a roster
+answering to `dev-2` would be two names for one session. A bare session in a
+worktree has the plugin and no launcher, so it falls back to the identity its
+own runtime gave it and is named after its worktree when it joins, numbered
+the same way. It is a full peer that cannot prove who started it.
+
+**Every verb but describing is refused until the session has described
+itself.** The roster is read by sessions deciding whether they can touch the
+same code, and a row saying only where a session is answers them wrongly; a
+session that has run all day without saying what it is on is the ordinary
+case, not the exception. So a session says what it is on before it may list
+its peers, reach one, or take a prefix, and says it again after a rewind or a
+clear, which unsays it. One line, at the start and whenever the work changes.
 
 ## Delivery is a property of the member
 
@@ -100,10 +122,17 @@ session took deliberately, for the case observation cannot reach — an agent
 about to rewrite a package has changed none of it yet, and the moment worth
 telling anybody about is before the first write rather than after it.
 
-A claim is alive while its holder is on the roster and expires with it. There
-is no timeout to tune and no release to forget, which is what makes an observed
-claim safe to act on: the failure mode of the whole mechanism is a session that
-stopped, and a stopped session's claims go with it.
+A claim is alive while its holder is on the roster and its path is on the
+disk, and expires with either. There is no timeout to tune and no release to
+forget, which is what makes an observed claim safe to act on: the failure mode
+of the whole mechanism is a session that stopped, and a stopped session's
+claims go with it. A worktree removed from under a live session takes its
+paths with it, and a claim over one names nothing anybody could write, so the
+sweep every coordination server runs on its tick ends it on the record — a
+worktree cut again at the same path starts with no claims from the one that
+was removed. What a session asks for itself fails early instead: a lock over a
+path that does not exist is refused, and so is releasing a prefix the session
+does not hold, naming who does.
 
 Editing under somebody else's live claim is an approval question naming the
 holder, never a refusal. Two sessions in one file is sometimes exactly right,
@@ -137,6 +166,33 @@ carries a count per row, because a count is the decision — whether there is
 anything here to ask about — and `coordination holdings` carries the paths,
 because a person who wants those wants all of them at once rather than one row
 at a time.
+
+**A listing is who is here, and who left while the reader was.** The record
+keeps every session that ever joined, and a listing that showed them all would
+be a history rather than a roster: a month on, a reader would scroll past
+everyone who ever worked here to find the two who still do. So a session is
+shown the live rows and the rows that stopped since it joined — the departures
+it was here for, each saying it stopped and what it concluded — and a console,
+which has no arrival of its own, is shown the live rows and the departures of
+the last day. What left before that is on the record and reachable by id, and
+a message to it is refused with when it left.
+
+## A rate is owed by the repository, not by each session
+
+A session spacing its own requests is polite on its own and three of them
+are not: the repository this grew out of got a host to block it with three
+sessions each keeping to the rate the operator asked for. So the budget a
+host or an account is owed is counted where every session of one repository
+meets — `SharedBudget` in `lup.execution.resilience.budget` keeps one file
+per key under a directory the caller names, the coordination directory
+being the obvious one, holding the moments of the requests still inside the
+window. A reservation reads, prunes and appends under an exclusive lock and
+returns either a slot or how long until the oldest request leaves the
+window; `slot` sleeps that long outside the lock and asks again, because a
+slot promised to a waiting process is not a slot held. A budget of zero is
+never granted, which is the honest answer to a surface that must not be
+requested at all. The per-loop `Throttle` stays what it is: spacing inside
+one process, which the shared budget does not replace but sums over.
 
 ## Work that outlives the session that found it
 
@@ -226,6 +282,43 @@ on one runtime it can only be: the session identifiers in its environment are
 not what peers address it by, and the address is discoverable only by asking
 the runtime from inside the session.
 
+## One fold, three readers
+
+Three processes read this store and no two of them share an import. The typed
+library runs inside a session's tool server and has all of `lup`. The hooks a
+runtime fires — before a prompt, as a session ends — are bare scripts spawned
+with no working directory, no `PYTHONPATH` and no virtual environment. The
+compiled permission dispatcher is a third, under the same constraint.
+
+Each of them once folded the store for itself, so every record the store
+gained had to be taught to three readers separately — and a reader that missed
+one went on answering confidently about a store it no longer understood. The
+fold is written once instead, in `lup.coordination.bare`, under the strictest
+of the three constraints: the standard library alone, no pydantic, no `lup`.
+The library imports it as an ordinary module; each plugin carries the package
+whole beneath `hooks/runtime/coordination/`, the way the policy kernel is
+carried, so its relative imports resolve there exactly as they do here and
+every file travels byte for byte.
+
+It owns the layout too. Every file name, stamp directory and staleness window
+the store is made of is declared in that one module and imported by the typed
+writers beside it, so a rename moves every reader with it rather than leaving
+a test to report the mismatch afterwards.
+
+**The package travels whether or not a project declared a roster.** The
+dispatcher imports it at its top level, and a plugin carrying the dispatcher
+without the package would be a permission hook that raises before deciding
+anything — which refuses every call in the session rather than one of them.
+What is conditional is the two guards, which a project declining `peer_policy`
+never registers.
+
+Each guard hands over to a small entry beside the package rather than to a
+module of it, and that entry names its own directory as the search path before
+importing — the shape the compiled dispatcher already uses. A hook leaning on
+the interpreter's own path would keep working until something passed `-I`,
+`-P` or `PYTHONSAFEPATH`, and because these hooks fail open it would not break
+loudly: the roster would simply stop answering.
+
 ## Watching the repository
 
 Everything here is an append-only file, and nothing pushes: a session folds
@@ -258,6 +351,21 @@ prompt of a session is a baseline rather than a replay, and gets one line
 saying how many others are here and where the listing is. A quiet roster costs
 no context at all, and a broken one costs the prompt nothing, because the hook
 fails open.
+
+The same hook beats for the session, which is the pulse its row is present
+by: a running row nothing has heard from within the window reads as gone, and
+a sweep retires it. And it is where a rewind is noticed. A runtime that
+rewinds or clears a conversation keeps the process, the session id and the
+tool server, and signals none of it — so the row would go on saying what the
+discarded conversation was doing, under a pulse the same server keeps beating.
+The fold reads the transcript the prompt names and counts its conversation
+roots; a root that was not there at the last prompt, or a transcript that is
+another file, means the conversation moved. It stamps a reset beside the
+session's pulse and starts over from a baseline, and every reader — the
+listing, this fold — treats a description older than that stamp as unsaid
+until the session describes itself again. What the session holds is left
+alone: a touch is what happened to the tree, and the tree is whatever the
+rewind left it.
 
 What does not reach a session this way: the roster itself, which
 `coordination_peers` lists whenever asked; mail, which the delivery hook puts

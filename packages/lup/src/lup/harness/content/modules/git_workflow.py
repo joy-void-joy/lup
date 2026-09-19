@@ -9,10 +9,15 @@ It is the module most reached into. The resolver names ``skill.merge`` from
 here, which is why the resolver declares it in ``requires`` — the reference
 resolves either way, but an operator who declined this is owed the answer in
 the vocabulary they decided in.
+
+Two pages, because two questions arrive with a change: how to get set up and
+where a change belongs, and which check catches what before it lands. The
+second names this module's own hook installer, which is why it is here rather
+than among core's reference pages.
 """
 
 import lup.harness.content.conventions as conventions
-from lup.harness.content.docs import contributing
+from lup.harness.content.docs import contributing, quality_pipeline
 from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import GIT_WORKFLOW
 from lup.harness.content.skills.close import SKILL as SKILL_CLOSE
@@ -29,7 +34,9 @@ def module() -> Module:
 
     Nothing here needs the project's layout: every skill is a constant, none
     of their prose naming a path inside the reading project's package, and the
-    one page that does takes it from the document context instead.
+    one page that does takes it from the document context instead. The same
+    page takes the served sub-apps, because its first fenced block instructs
+    the setup wizard only where a project serves one.
     """
     return Module(
         spec=GIT_WORKFLOW,
@@ -50,7 +57,12 @@ def module() -> Module:
             page(
                 "contributing",
                 "contributing.md",
-                lambda context: contributing.document(context.layout),
-            )
+                lambda context: contributing.document(context.layout, context.subapps),
+            ),
+            page(
+                "quality_pipeline",
+                "quality-pipeline.md",
+                lambda _: quality_pipeline.DOCUMENT,
+            ),
         ],
     )

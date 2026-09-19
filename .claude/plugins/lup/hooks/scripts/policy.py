@@ -32,7 +32,9 @@ from datetime import UTC, datetime, timedelta
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
+from typing import Literal
 from urllib.parse import urlsplit
+from coordination import store
 from kernel.edit import (
     awaits_resolution,
     decide_edit,
@@ -58,6 +60,7 @@ from kernel.lex import (
     shell_write_targets,
 )
 from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
+from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
 from kernel.shell import decide_shell, sandbox_excluded
@@ -82,6 +85,7 @@ from policy_data import (
     RUNNER_TARGETS,
     SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
+    SPAWN_NAMES,
 )
 
 
@@ -345,6 +349,100 @@ def script_run_nudge(
     )
 
 
+def review_hook_call(
+    root: Path,
+    session: str,
+    tool: str,
+    arguments: str,
+    preconditions: str,
+    reason: str,
+    rule: str,
+    purpose: str,
+    reviewer: str,
+) -> dict[Literal["state", "id", "reason"], str]:
+    """Park a native call or spend its explicit, single-use reviewer answer."""
+    if not session:
+        return {
+            "state": "unavailable",
+            "id": "",
+            "reason": "the hook carries no session_id",
+        }
+    payload = json.loads(arguments)
+    before = json.loads(preconditions)
+    material = json.dumps(
+        [session, str(root), tool, payload, before, reason, rule, purpose, reviewer],
+        sort_keys=True,
+    )
+    fingerprint = sha256(material.encode()).hexdigest()
+    log = root / ".lup/questions.jsonl"
+
+    def recorded():
+        if not log.exists():
+            return
+        for line in log.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            yield json.loads(line)
+
+    entries = {entry["id"]: entry for entry in recorded()}
+    matches = [
+        entry
+        for entry in entries.values()
+        if entry["fingerprint"] == fingerprint
+        and "resumption" in entry
+        and entry["resumption"] == "native_retry"
+    ]
+    entry = matches[-1] if matches else None
+    if entry is not None and entry["state"] == "approved":
+        answer = entry["answer"]
+        if not answer or not answer["approved"] or answer["principal"] == session:
+            raise ValueError("hook approval has no independent affirmative answer")
+        if answer["receipt"] != "recorded":
+            raise ValueError("a native permission request is not a recorded approval")
+        claim = root / ".lup/review-claims" / entry["id"]
+        claim.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with claim.open("x", encoding="utf-8") as handle:
+                handle.write(fingerprint)
+        except FileExistsError:
+            entry = None
+        else:
+            entry["state"] = "dispatched"
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+            return {"state": "approved", "id": entry["id"], "reason": ""}
+    if entry is not None and entry["state"] in ("pending", "rejected"):
+        return {"state": entry["state"], "id": entry["id"], "reason": entry["reason"]}
+    identifier = os.urandom(16).hex()
+    entry = {
+        "id": identifier,
+        "fingerprint": fingerprint,
+        "reason": reason,
+        "rule": rule,
+        "purpose": purpose or None,
+        "requirement": reviewer,
+        "eligible": [],
+        "chain_resolved": False,
+        "state": "pending",
+        "created": datetime.now(UTC).isoformat(),
+        "preconditions": before,
+        "resumption": "native_retry",
+        "operation": {
+            "id": identifier,
+            "session": session,
+            "requester": session,
+            "tool": tool,
+            "payload": payload,
+            "cwd": str(root),
+            "worktree": str(root),
+        },
+    }
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    return {"state": "pending", "id": identifier, "reason": reason}
+
+
 def record_question(
     root: Path | None,
     command: str,
@@ -507,6 +605,153 @@ def record_deferral(
     except OSError:
         return ""
     return entry
+
+
+def approvals_log(root: Path) -> Path:
+    """Where the answers a question received are remembered, beside the checkout.
+
+    Append-only, for the reason the question relay is: the failure this
+    survives is a crash between two writes, and a file rewritten in place has
+    a window where it is neither the old record nor the new one. The latest
+    line for a fingerprint is its state, so forgetting is one more line rather
+    than an erasure. A function rather than a constant because the compiled
+    dispatcher carries this half's functions and nothing beside them.
+    """
+    return root / ".lup/hooks/approvals.jsonl"
+
+
+def approval_fingerprint(kind: str, subject: str, root: Path | None) -> str:
+    """One exact call as the memory keys it: what it does, and from where.
+
+    The kind and the text are the whole of what was judged -- a command, a
+    URL -- and the checkout it runs from is the third term, because the same
+    command means something else in another tree. What is deliberately left
+    out is the session: an answer is the author's, and the author is the same
+    person in the next session.
+    """
+    material = json.dumps([kind, subject, str(root) if root else ""], sort_keys=True)
+    return sha256(material.encode()).hexdigest()
+
+
+def approval_subject(
+    tool: str, tool_input: dict
+) -> dict[Literal["kind", "text"], str] | None:
+    """What one call did, as the memory keys it, for the tools it remembers.
+
+    A shell command and a fetch, under either runtime's name for them. An
+    edit is left out on purpose: its exact call includes the document it
+    replaces, which its first application changed, so a repeat is never the
+    same call and a memory of it would answer nothing.
+    """
+    if tool == "Bash" and "command" in tool_input:
+        return {"kind": "shell", "text": str(tool_input["command"])}
+    if tool in ("WebFetch", "web_fetch") and "url" in tool_input:
+        return {"kind": "fetch", "text": str(tool_input["url"])}
+    return None
+
+
+def approval_states(root: Path | None) -> dict[str, dict]:
+    """The latest line per fingerprint, which is that call's standing."""
+    if root is None:
+        return {}
+    path = approvals_log(root)
+
+    def entries():
+        try:
+            lines = (
+                path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+            )
+        except OSError:
+            return
+        for line in lines:
+            try:
+                held = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(held, dict) and "fingerprint" in held and "state" in held:
+                yield held
+
+    return {str(held["fingerprint"]): held for held in entries()}
+
+
+def noted_approval(root: Path | None, entry: dict) -> bool:
+    """Append one line, silent about a checkout that cannot be written."""
+    if root is None:
+        return False
+    path = approvals_log(root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as sink:
+            sink.write(json.dumps(entry, sort_keys=True) + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def remembered_approval(root: Path | None, fingerprint: str) -> str:
+    """When this exact call was answered yes, or ``""`` where it never was.
+
+    Forgetting is a later line, so a call retired with `dev hooks forget`
+    answers as one nobody ever approved.
+    """
+    latest = approval_states(root)
+    if fingerprint not in latest or latest[fingerprint]["state"] != "approved":
+        return ""
+    return str(latest[fingerprint]["at"])
+
+
+def note_asked(root: Path | None, fingerprint: str, kind: str, subject: str) -> None:
+    """Write down that this call was put to somebody, once per standing.
+
+    What makes the later observation an answer: a call that ran without ever
+    having been asked about was permitted by a rule, and remembering it would
+    be remembering nothing anybody decided.
+    """
+    latest = approval_states(root)
+    if fingerprint in latest and latest[fingerprint]["state"] == "asked":
+        return
+    noted_approval(
+        root,
+        {
+            "fingerprint": fingerprint,
+            "state": "asked",
+            "kind": kind,
+            "subject": subject,
+            "cwd": str(root) if root else "",
+            "at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def note_ran(root: Path | None, fingerprint: str) -> str:
+    """A call that was asked about and then ran was answered yes: remember it.
+
+    The runtime exposes the answer to no hook, so the answer is read off the
+    two events a hook does see. Only a standing question becomes an approval:
+    a call already remembered stays as it was, and one never asked about is
+    left alone.
+    """
+    latest = approval_states(root)
+    if fingerprint not in latest or latest[fingerprint]["state"] != "asked":
+        return ""
+    when = datetime.now(UTC).isoformat()
+    noted_approval(root, {**latest[fingerprint], "state": "approved", "at": when})
+    return when
+
+
+def forget_approval(root: Path | None, fingerprint: str) -> bool:
+    """Retire one remembered approval, so the next identical call asks again."""
+    latest = approval_states(root)
+    if fingerprint not in latest or latest[fingerprint]["state"] != "approved":
+        return False
+    return noted_approval(
+        root,
+        {
+            **latest[fingerprint],
+            "state": "forgotten",
+            "at": datetime.now(UTC).isoformat(),
+        },
+    )
 
 
 def managed_script_roots(root: Path | None) -> list[str]:
@@ -1539,35 +1784,6 @@ def tracked_write_targets(targets: list[str], root: Path | None = None) -> list[
     ]
 
 
-def repository_worktrees(root: Path | None = None) -> list[str]:
-    """Every checkout of the repository this session is in, as absolute paths.
-
-    Resolved here rather than in the kernel because the kernel is pure: it
-    holds `posixpath` and `re` and reaches no filesystem, so a question about
-    what git considers one repository cannot be asked from inside it. This is
-    the same arrangement every other host fact in this module uses -- the
-    reading is taken out here and threaded in as data.
-
-    Which is also why the first version of the `-C` guard tested a path
-    *prefix* and got it wrong: containment is all a pure evaluator can do
-    alone, and it read every absolute path as outside. Asked of git, the
-    question is one of identity instead, and a sibling worktree answers yes
-    wherever it happens to sit on disk.
-
-    An empty list wherever git cannot answer, which leaves every redirect
-    asking exactly as it does now. That is the safe direction: the cost of an
-    unanswerable question is one approval, and the cost of guessing yes is a
-    redirect into a repository nobody here vouched for.
-    """
-    where = Path.cwd() if root is None else root
-    listed = git_answers(["worktree", "list", "--porcelain"], where)
-    return [
-        str(Path(line.removeprefix("worktree ")).resolve())
-        for line in listed or []
-        if line.startswith("worktree ")
-    ]
-
-
 def unleased_write_targets(
     targets: list[str], measured: dict[str, list[str]], root: Path | None = None
 ) -> list[str]:
@@ -1714,247 +1930,6 @@ def peer_store(root: Path | None, store: list[str]) -> Path | None:
     return Path(shared).joinpath(*store)
 
 
-def stream_records(path: Path) -> list[dict]:
-    """Every legible JSON object an append-only record holds, oldest first.
-
-    A line that does not parse is skipped rather than raised on. These files
-    are appended to by other sessions while this one reads them, so a torn
-    final line is the ordinary state of a healthy store — and a reader that
-    failed on it would stop judging peer calls for the duration of somebody
-    else's write.
-    """
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-
-    def legible():
-        """Each line that is a JSON object, skipping whatever is not one."""
-        for line in raw.splitlines():
-            try:
-                loaded = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(loaded, dict):
-                yield loaded
-
-    return list(legible())
-
-
-def peer_members(directory: Path, roster_file: str) -> list[dict]:
-    """Every member the roster still holds, folded from its own record.
-
-    Keyed by kind and id rather than by the printed address, because a member
-    taken through a second round is that member further on and not a second
-    one — which is what the roster's own fold says, and a reader answering
-    differently would show one session twice.
-
-    A record about nobody standing is dropped rather than inventing a member,
-    so a description or a finish arriving before its join says nothing.
-    """
-    # lup: ignore[empty-collection] — a fold whose every step reads what the
-    # steps before it left, which is the one shape a comprehension has no
-    # spelling for: a description updates a member an earlier record created
-    standing: dict = {}
-    for record in stream_records(directory / roster_file):
-        actor = record["actor"] if "actor" in record else {}
-        if not isinstance(actor, dict) or "id" not in actor or "kind" not in actor:
-            continue
-        held = f"{actor['kind']}-{actor['id']}"
-        match record["type"] if "type" in record else "":
-            case "spawned" | "joined":
-                standing[held] = {**record, "running": True}
-            case "described" | "finished" if held in standing:
-                standing[held] = {
-                    **standing[held],
-                    **record,
-                    "running": record["type"] != "finished",
-                }
-            case _:
-                continue
-    return [member for member in standing.values() if member["running"]]
-
-
-def peer_name_claims(directory: Path, names_file: str) -> dict:
-    """Which member each name reaches now, the newest claim on a name winning.
-
-    Every name ever recorded rather than only the current ones: a name
-    somebody wrote down before a rename goes on reaching the session it named
-    until something else claims it, which is what the record is kept
-    append-only for. A sender typing the older name is typing what was correct
-    when they read it, and there is no error they could have been shown.
-
-    Newest wins by construction — a later record for one name replaces the
-    earlier entry as the comprehension walks the stream in order.
-    """
-    return {
-        record["cli_name"]: record["id"]
-        for record in stream_records(directory / names_file)
-        if "cli_name" in record and "id" in record
-    }
-
-
-def peer_addresses(
-    root: Path | None, store: list[str], roster_file: str, names_file: str
-) -> list[str]:
-    """Every spelling that currently reaches a live member of this roster.
-
-    Ids, the kind-qualified label a door prints, and whatever each member is
-    called now, because a sender types whichever of those it last read — a
-    check knowing only one of them would let the others through, which is the
-    failure that made a redirect reach nobody.
-
-    Live members only. A session that has left is not somewhere a durable
-    message would arrive either, so redirecting a send to it would trade one
-    call reaching nobody for another.
-    """
-    directory = peer_store(root, store)
-    if directory is None:
-        return []
-    members = peer_members(directory, roster_file)
-    live = [member["actor"]["id"] for member in members]
-    return sorted(
-        {
-            *live,
-            *[
-                f"{member['actor']['kind']}:{member['actor']['id']}"
-                for member in members
-            ],
-            *[
-                name
-                for name, held in peer_name_claims(directory, names_file).items()
-                if held in live
-            ],
-        }
-    )
-
-
-def peer_listing(
-    root: Path | None, store: list[str], roster_file: str, names_file: str
-) -> list[str]:
-    """One line per live member, as somebody choosing who to reach reads it.
-
-    The same four facts a console prints — who, which checkout they are in,
-    what they are on, and what carries a message to them — because a listing
-    naming members without saying what reaches them leaves a reader to guess
-    which of them will hear anything.
-    """
-    directory = peer_store(root, store)
-    if directory is None:
-        return []
-    names = peer_name_claims(directory, names_file)
-
-    def described(member: dict) -> list[str]:
-        """The parts one member's line is joined from, blanks included."""
-        actor = member["actor"]
-        called = [name for name, held in names.items() if held == actor["id"]]
-        worktree = member["worktree"] if "worktree" in member else ""
-        saying = member["description"] if "description" in member else ""
-        return [
-            called[-1] if called else actor["id"],
-            Path(worktree).name if worktree else "",
-            saying or (member["task"] if "task" in member else ""),
-            member["delivery"] if "delivery" in member else "",
-        ]
-
-    return [
-        " — ".join(part for part in described(member) if part)
-        for member in peer_members(directory, roster_file)
-    ]
-
-
-def claim_covers(claim: dict, candidate: str) -> bool:
-    """Whether a path about to be written falls under one standing claim."""
-    held = claim["path"]
-    if not claim["prefix"]:
-        return candidate == held
-    return candidate == held or candidate.startswith(held + "/")
-
-
-def peer_claims(directory: Path, touches_file: str) -> list[dict]:
-    """Every claim standing on the record, alive or not, folded in order.
-
-    Keyed by the kind as well as the path, because locking a directory and
-    touching a file of that name are different claims and a later record must
-    not silently convert one into the other.
-    """
-    # lup: ignore[empty-collection] — a fold whose every step reads what the
-    # steps before it left: a release answers against the claim an earlier
-    # record created, which is the one shape a comprehension cannot spell
-    standing: dict = {}
-    for record in stream_records(directory / touches_file):
-        actor = record["actor"] if "actor" in record else {}
-        path = record["path"] if "path" in record else ""
-        if not isinstance(actor, dict) or "id" not in actor or not path:
-            continue
-        kind = record["type"] if "type" in record else ""
-        subject = f"{'under' if kind in ('locked', 'released') else 'at'} {path}"
-        match kind:
-            case "touched" | "contested":
-                rivals = record["rivals"] if "rivals" in record else []
-                standing[subject] = {
-                    "path": path,
-                    "prefix": False,
-                    "holders": [
-                        actor,
-                        *[rival for rival in rivals if isinstance(rival, dict)],
-                    ],
-                }
-            case "locked":
-                standing[subject] = {"path": path, "prefix": True, "holders": [actor]}
-            case "released" if subject in standing:
-                if actor["id"] in [
-                    holder["id"] for holder in standing[subject]["holders"]
-                ]:
-                    del standing[subject]
-            case _:
-                continue
-    return list(standing.values())
-
-
-def claim_holders(
-    root: Path | None,
-    store: list[str],
-    roster_file: str,
-    names_file: str,
-    touches_file: str,
-    path_text: str,
-    mine: str,
-) -> list[str]:
-    """Who else, still working here, is holding the path a write would land on.
-
-    Live holders other than the asker. A claim expires with the session that
-    made it, so a departed holder is nobody to ask; and a session meeting its
-    own claim on every edit would be asked about its own work.
-
-    Named where a session has a name and identified by id otherwise, because
-    this reaches somebody deciding whom to ask, and an id is what you fall
-    back on when nothing has been called anything yet.
-    """
-    directory = peer_store(root, store)
-    if directory is None:
-        return []
-    live = [member["actor"]["id"] for member in peer_members(directory, roster_file)]
-    names = peer_name_claims(directory, names_file)
-    target = str(Path(path_text).resolve())
-    holding = [
-        holder["id"]
-        for claim in peer_claims(directory, touches_file)
-        if claim_covers(claim, target)
-        for holder in claim["holders"]
-        if holder["id"] in live and holder["id"] != mine
-    ]
-    return sorted(
-        {
-            next(
-                (name for name, held in names.items() if held == member),
-                member,
-            )
-            for member in holding
-        }
-    )
-
-
 def writable_snapshot(root: Path) -> dict:
     """What every file Git reports as moved looks like right now, by size and time.
 
@@ -2088,91 +2063,6 @@ def close_claim_window(
     }
 
 
-def file_digest(path_text: str) -> str:
-    """What one file's bytes hash to, or nothing where they cannot be read.
-
-    Carried on the claim so a later reader can tell the content this session
-    left from whatever stands there now — which is what makes a claim evidence
-    of a change rather than only an assertion that one happened.
-    """
-    try:
-        return sha256(Path(path_text).read_bytes()).hexdigest()
-    except OSError:
-        return ""
-
-
-def member_actor(directory: Path, roster_file: str, member: str) -> dict | None:
-    """This session's own address as the roster holds it, or nothing.
-
-    Read rather than composed. A session that never joined has no address to
-    write claims under, and inventing one here would put a holder on the
-    record that no listing shows and nothing can ask.
-    """
-    return next(
-        (
-            found["actor"]
-            for found in peer_members(directory, roster_file)
-            if found["actor"]["id"] == member
-        ),
-        None,
-    )
-
-
-def record_claims(
-    root: Path | None,
-    store: list[str],
-    roster_file: str,
-    touches_file: str,
-    mine: str,
-    paths: list[str],
-    rivals: list[str],
-) -> None:
-    """Write down what this session's call changed, and who else it could be.
-
-    A claim per path. Where another session had a window open across the same
-    moment, every name goes on the record instead of one being guessed at: a
-    before-and-after comparison sees the change and cannot see who made it,
-    and a confident wrong author is worse than an honest pair, because the
-    next reader is deciding whether it is safe to write.
-
-    Silent on every failure. This runs after the work has already happened, so
-    the call it belongs to cannot be undone by refusing — and a claim nobody
-    could record costs a later reader an attribution, while a raised exception
-    here costs the session its ability to work.
-    """
-    directory = peer_store(root, store)
-    if directory is None or not mine or not paths:
-        return
-    actor = member_actor(directory, roster_file, mine)
-    if actor is None:
-        return
-    contenders = [
-        found
-        for other in rivals
-        for found in [member_actor(directory, roster_file, other)]
-        if found is not None
-    ]
-    stamped = datetime.now(UTC).isoformat()
-    lines = [
-        json.dumps(
-            {
-                "type": "contested" if contenders else "touched",
-                "actor": actor,
-                "at": stamped,
-                "path": path,
-                "digest": file_digest(path),
-                "rivals": contenders,
-            }
-        )
-        for path in paths
-    ]
-    try:
-        with (directory / touches_file).open("a", encoding="utf-8") as record:
-            record.write("".join(f"{line}\n" for line in lines))
-    except OSError:
-        return
-
-
 def bash_decision(
     command: str,
     managed_root: Path | None,
@@ -2182,6 +2072,7 @@ def bash_decision(
     cwd: Path | None,
     relayed: bool = False,
     autonomous: bool = False,
+    park: bool = True,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -2254,7 +2145,6 @@ def bash_decision(
         ),
         directory_targets=directory_write_targets(acted_on, cwd),
         empty_directories=empty_directory_targets(acted_on, cwd),
-        repository_worktrees=repository_worktrees(cwd),
         recoverable_target_limit=RECOVERABLE_TARGET_LIMIT,
         runner_targets=RUNNER_TARGETS,
         target_tables=RUNNER_TARGET_TABLES,
@@ -2290,6 +2180,11 @@ def bash_decision(
         # promised is a fact about the host with no runtime variation to it,
         # so neither dispatcher is given the chance to forget it.
         contained=inside,
+        # Where this checkout sits, so an absolute spelling of a path inside
+        # it is read back to the form the declared roles are anchored at. The
+        # host's to supply for the reason it resolves symlinks: a fact about
+        # this machine, which the kernel holds none of.
+        checkout_root=str(cwd or Path.cwd()),
         # The other half of that pair, and the reason the first one alone
         # settles nothing: a container is a promise about where an operation
         # lands, and `bounded()` counts it only where the launch measured that
@@ -2359,12 +2254,17 @@ def bash_decision(
         verdict.effect
     ):
         verdict = authored
+    # Before the relay, because a question the author already answered for
+    # this exact call is not a question, and parking it would hand the queue
+    # one nobody needs to answer.
+    if verdict.effect == "ask":
+        verdict = remembered_or_asked(verdict, cwd, "shell", command)
     # Parked before anything is rendered, because the relay is the durable
     # record every final ask is written to and the provider's own prompt is
     # that record's renderer rather than a second authority. Written here, at
     # the one call site both runtimes pass through, so neither can reach a
     # question the queue does not hold.
-    if verdict.effect == "ask":
+    if verdict.effect == "ask" and park:
         record_question(
             cwd,
             command,
@@ -2397,6 +2297,19 @@ def bash_decision(
     )
 
 
+def session_contained(cwd: Path | None) -> bool:
+    """Whether this session sits inside the container its launch measured.
+
+    The fact a renderer hands ``KernelDecision.placed`` beside its own
+    ``escapable``: a runtime's per-call escape reaches the host only where no
+    container is between, and the question an approved crossing asks has to
+    say which of the two it buys. Read here, from the same ledger the verdict
+    read, so neither dispatcher spells the measurement for itself — the same
+    reason ``bash_decision`` reads ``contained`` rather than being passed it.
+    """
+    return contained(measured_boundary(cwd))
+
+
 def unconfined_by_declaration(command: str) -> bool:
     """Whether the boundary declaration takes this command out of isolation.
 
@@ -2416,12 +2329,39 @@ def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
     surfaces. Read here rather than passed, because this entry point is what
     a dispatcher calls and a dispatcher holds nothing but the call.
     """
-    return decide_fetch(
+    verdict = decide_fetch(
         url,
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
         "defer" if defers_unjudged(measured_boundary(root)) else "ask",
     )
+    if verdict.effect != "ask":
+        return verdict
+    return remembered_or_asked(verdict, root, "fetch", url)
+
+
+def remembered_or_asked(
+    verdict: KernelDecision, root: Path | None, kind: str, subject: str
+) -> KernelDecision:
+    """The author's earlier answer to this exact call, or the question written down.
+
+    A question answered yes once is answered the same way for the same call
+    from the same checkout. The runtime's prompt exposes its answer to no
+    hook, so the memory is read off the two events a hook does see: the call
+    was asked about, and then it ran. Exact, never a prefix -- `git push
+    --delete origin topic` approved once approves that line and nothing else,
+    and the same line from another checkout is another call. Listed by `dev
+    hooks approvals`, retired by `dev hooks forget`; a refusal is never
+    remembered, because only a question can be answered.
+    """
+    fingerprint = approval_fingerprint(kind, subject, root)
+    approved = remembered_approval(root, fingerprint)
+    if approved:
+        return verdict.revised(
+            effect="allow", reason=f"approved {approved[:10]}: {verdict.reason}"
+        )
+    note_asked(root, fingerprint, kind, subject)
+    return verdict
 
 
 def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:
@@ -2434,6 +2374,19 @@ def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None
     return decide_tool(name, values, REFUSED_TOOLS)
 
 
+def peer_directory(cwd: Path | None) -> Path | None:
+    """Where this repository's sessions meet, or nothing where none do.
+
+    The one thing the shipped fold cannot answer for itself: which repository
+    this call is in, and where beneath its shared git directory this project
+    put its store. Everything inside that directory the fold knows, because
+    it is the same fold the store's own library reads it with.
+    """
+    if PEER_POLICY is None:
+        return None
+    return peer_store(cwd, PEER_POLICY["store"])
+
+
 def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     """Judge one native send against who this repository's roster holds.
 
@@ -2443,23 +2396,25 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     recipient in is that runtime's business and this half answers for all of
     them.
     """
-    if PEER_POLICY is None:
-        return decide_peer_send(values, [], None)
-    return decide_peer_send(
-        values,
-        peer_addresses(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-        ),
-        PEER_POLICY,
-    )
+    directory = peer_directory(cwd)
+    if directory is None:
+        return decide_peer_send(values, [], PEER_POLICY)
+    return decide_peer_send(values, store.addresses(directory), PEER_POLICY)
 
 
 def peer_listing_decision() -> KernelDecision:
     """Judge one native listing of who this session can reach, which defers."""
     return decide_peer_listing(PEER_POLICY)
+
+
+def spawn_decision(name: str, values: list[str]) -> KernelDecision:
+    """Judge one native spawn by the name it carries, against what this project declared.
+
+    ``name`` is the runtime's own field for it, read by the host half that
+    knows which key that is; every string the call carries rides beside it
+    so an escalation marker in any of them is found.
+    """
+    return decide_spawn(name, values, SPAWN_NAMES)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:
@@ -2470,15 +2425,11 @@ def peer_listing_attachment(cwd: Path | None) -> str:
     acts on rather than a condition of the call happening — folding it into
     a reason would make it visible only where something refused.
     """
-    if PEER_POLICY is None:
+    directory = peer_directory(cwd)
+    if directory is None:
         return ""
     return peer_listing_context(
-        peer_listing(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-        ),
+        store.listing(directory),
         PEER_POLICY,
     )
 
@@ -2797,18 +2748,13 @@ def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision |
     handed over as the names they resolve to — the kernel reads no filesystem
     and decides from what it is given.
     """
-    if PEER_POLICY is None:
+    directory = peer_directory(cwd)
+    if PEER_POLICY is None or directory is None:
         return None
     return decide_foreign_claim(
         path_text,
-        claim_holders(
-            cwd,
-            PEER_POLICY["store"],
-            PEER_POLICY["roster_file"],
-            PEER_POLICY["names_file"],
-            PEER_POLICY["touches_file"],
-            path_text,
-            declared_identity(PEER_POLICY["member_env"]),
+        store.claim_holders(
+            directory, path_text, declared_identity(PEER_POLICY["member_env"])
         ),
         PEER_POLICY,
     )
@@ -2835,19 +2781,13 @@ def claim_window_closed(cwd: Path | None) -> None:
     """Attribute what a command changed, contested where nothing could tell."""
     if PEER_POLICY is None:
         return
+    directory = peer_directory(cwd)
     mine = declared_identity(PEER_POLICY["member_env"])
     closed = close_claim_window(
         cwd, PEER_POLICY["store"], PEER_POLICY["windows_dir"], mine
     )
-    record_claims(
-        cwd,
-        PEER_POLICY["store"],
-        PEER_POLICY["roster_file"],
-        PEER_POLICY["touches_file"],
-        mine,
-        closed["paths"],
-        closed["rivals"],
-    )
+    if directory is not None:
+        store.record_claims(directory, mine, closed["paths"], closed["rivals"])
 
 
 def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
@@ -2858,13 +2798,11 @@ def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
     act on without qualification, and it settles a path an earlier comparison
     could only guess at.
     """
-    if PEER_POLICY is None or not path_text:
+    directory = peer_directory(cwd)
+    if PEER_POLICY is None or directory is None or not path_text:
         return
-    record_claims(
-        cwd,
-        PEER_POLICY["store"],
-        PEER_POLICY["roster_file"],
-        PEER_POLICY["touches_file"],
+    store.record_claims(
+        directory,
         declared_identity(PEER_POLICY["member_env"]),
         [str(Path(path_text).resolve())],
         [],
@@ -3114,6 +3052,14 @@ def dispatch(payload):
         # wider than one repository, so the roster rides alongside as context
         # rather than as a verdict that could take the answer away.
         return peer_listing_decision()
+    if name == "Agent":
+        # A spawn is judged by the one thing that makes its subagent legible
+        # and addressable: the name it carries. The runtime validates the
+        # spelling; this only insists there is one.
+        return spawn_decision(
+            tool_input["name"] if "name" in tool_input else "",
+            [value for value in tool_input.values() if isinstance(value, str)],
+        )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them
     # here would be this file holding a second, narrower copy of it. The
@@ -3157,7 +3103,12 @@ def rendered(decision, payload, placed, attached):
     tool, so for the shell tool the object arrives whole and the sandbox is
     chosen from it. What remains outside this file's reach is the session
     itself: a host that forbids unsandboxed commands ignores the flag, and
-    the call runs confined with the verdict unchanged.
+    the call runs confined with the verdict unchanged. A contained launch
+    never arms the per-call sandbox at all, so there the flag lifts nothing
+    and the call runs in the container's own mount namespace — which is why
+    the sentence an approved crossing adds to its question is chosen by the
+    placement the launch measured, handed to the kernel beside `escapable`,
+    and never by this runtime.
 
     The rewrite replaces the arguments rather than merging into them, so the
     whole input is carried through. A deferral is placed nowhere, which is
@@ -3182,7 +3133,13 @@ def rendered(decision, payload, placed, attached):
     reviewed request spelled `# lup: escalate[sandbox]:`, and a native flag the
     agent set for itself is not that request.
     """
-    settled = decision.placed(escapable=True)
+    settled = decision.placed(
+        escapable=True, contained=session_contained(session_root(payload))
+    )
+    # The prompt is the approver's, so a question's recovery rides beside it
+    # as the agent's context; a refusal reaches only the agent and says both.
+    beside = settled.recovery if settled.effect == "ask" else ""
+    context = "\n\n".join(text for text in (attached, beside) if text)
 
     def carried(result):
         """The same answer, with whatever context rides beside the verdict.
@@ -3193,7 +3150,7 @@ def rendered(decision, payload, placed, attached):
         needs to carry it. An empty attachment adds no key, so a call with
         nothing to say returns exactly what it returned before.
         """
-        if not attached:
+        if not context:
             return result
         specific = (
             result["hookSpecificOutput"]
@@ -3202,7 +3159,7 @@ def rendered(decision, payload, placed, attached):
         )
         return {
             **result,
-            "hookSpecificOutput": {**specific, "additionalContext": attached},
+            "hookSpecificOutput": {**specific, "additionalContext": context},
         }
 
     if settled.effect == "defer":
@@ -3210,7 +3167,9 @@ def rendered(decision, payload, placed, attached):
     answer = {
         "hookEventName": "PreToolUse",
         "permissionDecision": settled.effect,
-        "permissionDecisionReason": settled.reason,
+        "permissionDecisionReason": (
+            settled.addressed() if settled.effect == "deny" else settled.reason
+        ),
     }
 
     def surfaced(result):
@@ -3233,6 +3192,22 @@ def rendered(decision, payload, placed, attached):
             }
         }
     )
+
+
+def remembered_run(payload):
+    """A call that was asked about and then ran was answered yes: write it down.
+
+    Read off the input the tool actually ran with rather than the one that
+    was judged, so a call somebody changed on the way through is a different
+    call and approves nothing.
+    """
+    name = payload["tool_name"] if "tool_name" in payload else ""
+    tool_input = payload["tool_input"] if "tool_input" in payload else {}
+    subject = approval_subject(name, tool_input)
+    if subject is None:
+        return
+    root = session_root(payload)
+    note_ran(root, approval_fingerprint(subject["kind"], subject["text"], root))
 
 
 def observe(payload):
@@ -3288,6 +3263,7 @@ def main():
         # nothing left to permit, and the conservative ask below would be an
         # approval prompt for work already done.
         if event == "PostToolUse":
+            remembered_run(payload)
             found = observe(payload)
             # Structured feedback reaches the agent beside the completed tool.
             # A file diagnostic is a successful check, so it exits normally.

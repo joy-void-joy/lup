@@ -5,7 +5,7 @@
 // reads. Pure functions, so `bun test` holds them to the server's semantics.
 import type { GraphView, NodeView } from "../generated/views";
 
-export type GraphQuery = { kind: string; standing: string; since: string };
+export type GraphQuery = { kind: string; standing: string; since: string; lacking: string };
 
 /** A moment as milliseconds, or null where the spelling is empty or unreadable. */
 function moment(spelling: string): number | null {
@@ -14,14 +14,20 @@ function moment(spelling: string): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-/** The graph narrowed as `api/graph` narrows it: kind, standing, moved since. */
+/** The graph narrowed as `api/graph` narrows it: kind, standing, moved since, lacking an edge kind. */
 export function narrowed(graph: GraphView, query: GraphQuery): GraphView {
   const since = moment(query.since);
+  // Read off every edge before any node is dropped, so a far end the
+  // narrowing hides still counts as the edge it is.
+  const pointing = new Set(
+    graph.edges.filter((edge) => query.lacking !== "" && edge.kind === query.lacking).map((edge) => edge.source),
+  );
   const nodes = graph.nodes.filter(
     (node) =>
       (query.kind === "" || node.kind === query.kind) &&
       (query.standing === "" || node.standing === query.standing) &&
-      (since === null || Date.parse(node.moved) > since),
+      (since === null || Date.parse(node.moved) > since) &&
+      !pointing.has(node.id),
   );
   const shown = new Set(nodes.map((node) => node.id));
   return {
@@ -31,6 +37,41 @@ export function narrowed(graph: GraphView, query: GraphQuery): GraphView {
     // never draws a line to a node it is not showing.
     edges: graph.edges.filter((edge) => shown.has(edge.source) && shown.has(edge.target)),
   };
+}
+
+/**
+ * Which node each node sits inside, following edges of one kind from source
+ * to target: a message inside its thread, a thread inside its incident. One
+ * parent per node — the first edge of the kind wins — and only a parent the
+ * graph still shows, because a container the narrowing dropped is not one
+ * the canvas can draw.
+ */
+export function grouped(graph: GraphView, kind: string): Map<string, string> {
+  const parents = new Map<string, string>();
+  if (kind === "") return parents;
+  const shown = new Set(graph.nodes.map((node) => node.id));
+  for (const edge of graph.edges) {
+    if (edge.kind !== kind || parents.has(edge.source) || !shown.has(edge.target)) continue;
+    if (edge.source === edge.target) continue;
+    parents.set(edge.source, edge.target);
+  }
+  // A container inside one of its own members would loop the layout, so
+  // the first containment met whose ancestry comes back round is dropped
+  // and the rest of the loop stands as a chain: every node is then inside
+  // at most one, and none is inside itself.
+  for (const child of [...parents.keys()]) {
+    const seen = new Set<string>([child]);
+    let cursor = parents.get(child);
+    while (cursor !== undefined) {
+      if (seen.has(cursor)) {
+        parents.delete(child);
+        break;
+      }
+      seen.add(cursor);
+      cursor = parents.get(cursor);
+    }
+  }
+  return parents;
 }
 
 /** Whether a node answers a search — one of its readable fields carries the words. */

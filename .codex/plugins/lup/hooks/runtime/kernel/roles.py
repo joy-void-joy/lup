@@ -26,20 +26,28 @@ from .rows import PathRoleKind, PathRoleName, PathRoleRow, DisplacedTargetRow
 GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 GENERATED_PLUGIN_REFUSAL = (
-    "a native plugin tree is compiled from typed source, and the running"
-    " runtime already loaded it — edit the policy source, run"
-    " `lup-devtools harness generate all`, then ask the user to restart"
-    " claude or codex so the change takes effect"
+    "this edits a generated plugin tree, which is compiled from source and"
+    " already loaded"
+)
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+GENERATED_PLUGIN_RECOVERY = (
+    "Edit the policy source, run `lup-devtools harness generate all`, then ask"
+    " the user to restart claude or codex so the change takes effect."
 )
 
 
 # lup: ignore[constant-declaration] — the words this gate says, in a kernel
 # compiled hermetically into a bare dispatcher that takes no arguments
 FOREIGN_REPOSITORY_REFERRAL = (
-    "this file belongs to a different repository, whose conventions, size"
-    " budget and gates are its own — this project's rule checker has nothing"
-    " to say about it and is not applying any of them. Edit it as that"
-    " repository would want it, not as this one would"
+    "this file belongs to a different repository, which this project's rules"
+    " do not cover"
+)
+# lup: ignore[constant-declaration] — the words this gate says, in a kernel
+# compiled hermetically into a bare dispatcher that takes no arguments
+FOREIGN_REPOSITORY_RECOVERY = (
+    "That repository's conventions, size budget and gates are its own, and"
+    " this project's rule checker is not applying any of them. Edit it as that"
+    " repository would want it, not as this one would."
 )
 """What a foreign-repository edit is told, in place of a convention refusal.
 
@@ -99,6 +107,44 @@ def is_generated_plugin_target(word: str) -> bool:
         for parts in [root.split("/") for root in GENERATED_PLUGIN_ROOTS]
         for index in range(len(segments))
     )
+
+
+def repository_relative(word: str, checkout: str) -> str:
+    """This path as the declarations spell it, where it names a file inside.
+
+    Every reading below is lexical, and every declared root is anchored at the
+    repository top, so a role reaches a path only when the path is spelled
+    relative to that top. An absolute spelling of the very same file therefore
+    matches nothing -- ``tmp/run.log`` is scratch by declaration and
+    ``/home/you/project/tmp/run.log`` is not, though they name one file and
+    one write.
+
+    That gap is not hypothetical here: a session that cannot move between
+    worktrees is told to reach another checkout by absolute path, which is the
+    spelling no declaration can see.
+
+    Rewriting is arithmetic on the segments rather than a resolution, so this
+    stays a reading of the spelling and makes no filesystem call: what the
+    host resolved is a separate fact, and ``..`` is normalized before the
+    prefix is taken so nothing climbs out of the checkout and back in under a
+    root it was never given.
+
+    ``checkout`` is empty wherever the caller has no root in hand, and then a
+    path is returned untouched -- the conservative answer this had before any
+    root was passed, rather than a rewrite against a root that was guessed.
+    """
+    if not checkout or "$" in word:
+        return word
+    normalized = posixpath.normpath(word)
+    if not normalized.startswith("/"):
+        return word
+    top = posixpath.normpath(checkout)
+    if normalized == top:
+        return "."
+    prefix = top if top.endswith("/") else f"{top}/"
+    if not normalized.startswith(prefix):
+        return word
+    return normalized[len(prefix) :]
 
 
 def is_session_scratch_target(word: str) -> bool:

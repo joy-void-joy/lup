@@ -30,6 +30,9 @@ function Detail({ detail }: { detail: NodeDetail }) {
           {detail.node.slug !== "" && <code className="slug">{detail.node.slug}</code>}
           <code className="id">{detail.node.id}</code>
           <span className="muted">moved {detail.node.moved}</span>
+          <span className="muted author" title="who recorded it, stamped by the store">
+            recorded by {detail.node.author}
+          </span>
         </p>
         <h1 className={detail.node.sound ? "" : "unsound"}>{detail.node.title}</h1>
         <Standing label={detail.node.standing} reason={detail.node.reason} sound={detail.node.sound} />

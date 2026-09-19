@@ -35,7 +35,7 @@ from lup.coordination.cohort import ActorCohort, CohortEntry
 from lup.coordination.mail import MailEventBase
 from lup.coordination.refs import ActorRef
 from lup.coordination.roster import SpawnedActor
-from lup.sessions.events import TurnMessage
+from lup.sessions.events import ToolRefusal, TurnMessage
 from lup.types import JsonObject
 
 type ProgressKind = Literal[
@@ -196,24 +196,25 @@ def progress_lines(entries: Sequence[CohortEntry], chars: int) -> list[ProgressL
         if message.role not in ("assistant", "tool"):
             return
         for block in message.blocks:
-            if (name := block.tool_call_name) is not None:
-                if (identifier := block.invoked_call_id) is not None:
-                    invoked[identifier] = name
-                yield stamped(
-                    entry,
-                    "called",
-                    arguments(block.tool_arguments or {}, chars),
-                    tool=name,
-                )
-            elif (refused := block.refusal) is not None:
-                yield stamped(
-                    entry,
-                    "refused",
-                    brief(refused.detail, chars),
-                    tool=invoked.get(refused.call_id, ""),
-                )
-            elif (said := block.text_payload) is not None:
-                yield stamped(entry, "said", brief(said, chars))
+            match (block.tool_call_name, block.refusal, block.text_payload):
+                case (str() as name, _, _):
+                    if (identifier := block.invoked_call_id) is not None:
+                        invoked[identifier] = name
+                    yield stamped(
+                        entry,
+                        "called",
+                        arguments(block.tool_arguments or {}, chars),
+                        tool=name,
+                    )
+                case (_, ToolRefusal() as refused, _):
+                    yield stamped(
+                        entry,
+                        "refused",
+                        brief(refused.detail, chars),
+                        tool=invoked.get(refused.call_id, ""),
+                    )
+                case (_, _, str() as said):
+                    yield stamped(entry, "said", brief(said, chars))
 
     def lines(entry: CohortEntry) -> Iterator[ProgressLine]:
         """Whatever one record says happened, as lines stamped with its place.
@@ -232,7 +233,6 @@ def progress_lines(entries: Sequence[CohortEntry], chars: int) -> list[ProgressL
             # either family rides the accessor its family already answers, and
             # a third family fails to type-check right here, because the
             # capture below would no longer carry `completed_message`.
-            # lup: ignore[own-model-dispatch] — separates the families, not their members
             case MailEventBase() as mail:
                 yield stamped(
                     entry, mail_kind(mail), brief(mail.text, chars), door=mail.door

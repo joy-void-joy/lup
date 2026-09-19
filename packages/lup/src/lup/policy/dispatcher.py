@@ -71,6 +71,23 @@ RUNTIME_MEMBER = "policy_dispatcher"
 """The half one adapter owns: its own words, and nothing another repeats."""
 
 KERNEL_PACKAGE = "kernel"
+
+STORE_PACKAGE = "coordination"
+"""The coordination store's own fold, shipped beside the kernel and imported.
+
+Beside the kernel because it is the same arrangement for the same reason: a
+package of standard-library modules copied into ``runtime/`` whose relative
+imports resolve there exactly as they do in lup, so a dispatcher deciding
+whether another session already holds a path folds the store through the code
+the store's own library folds it through.
+
+Imported rather than spliced, and unconditionally so — which is why the
+plugin carries it whether or not this project declared a roster. A dispatcher
+whose import was conditional on a declaration would be a dispatcher that
+raises where the declaration is absent, and a hook that raises refuses every
+call in the session.
+"""
+
 # lup: ignore[library-default] — the stdlib a compiled dispatcher actually imports; widening it is the hazard the pin exists to prevent
 DISPATCHER_STDLIB = (
     "json",
@@ -82,6 +99,7 @@ DISPATCHER_STDLIB = (
     "hashlib",
     "csv",
     "urllib.parse",
+    "typing",
 )
 """The standard library a compiled dispatcher may reach.
 
@@ -459,6 +477,8 @@ def resolvable(module: str, declaration: DispatcherDeclaration) -> bool:
         or module == SHARED_MEMBER
         or module == KERNEL_PACKAGE
         or module.startswith(f"{KERNEL_PACKAGE}.")
+        or module == STORE_PACKAGE
+        or module.startswith(f"{STORE_PACKAGE}.")
         or module in declaration.runtime_modules
     )
 

@@ -5,30 +5,43 @@ import { useEffect, useRef } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import cytoscape from "cytoscape";
 import type { GraphView } from "../generated/views";
+import { grouped } from "./narrow";
 
-function elements(graph: GraphView): cytoscape.ElementDefinition[] {
+/**
+ * The graph as cytoscape draws it. A grouping edge kind nests each source
+ * inside its target as a compound node — messages inside their thread — and
+ * is not drawn as a line, since the nesting already shows it.
+ */
+export function elements(graph: GraphView, group: string): cytoscape.ElementDefinition[] {
+  const parents = grouped(graph, group);
   return [
-    ...graph.nodes.map((node) => ({
-      data: {
-        id: node.id,
-        label: node.slug !== "" ? node.slug : node.title,
-        kind: node.kind,
-        standing: node.standing,
-        sound: node.sound ? "yes" : "no",
-      },
-    })),
-    ...graph.edges.map((edge) => ({
-      data: {
-        id: `${edge.source}->${edge.target}:${edge.kind}`,
-        source: edge.source,
-        target: edge.target,
-        kind: edge.kind,
-      },
-    })),
+    ...graph.nodes.map((node) => {
+      const parent = parents.get(node.id);
+      return {
+        data: {
+          id: node.id,
+          label: node.slug !== "" ? node.slug : node.title,
+          kind: node.kind,
+          standing: node.standing,
+          sound: node.sound ? "yes" : "no",
+          ...(parent !== undefined ? { parent } : {}),
+        },
+      };
+    }),
+    ...graph.edges
+      .filter((edge) => !(edge.kind === group && parents.get(edge.source) === edge.target))
+      .map((edge) => ({
+        data: {
+          id: `${edge.source}->${edge.target}:${edge.kind}`,
+          source: edge.source,
+          target: edge.target,
+          kind: edge.kind,
+        },
+      })),
   ];
 }
 
-export function GraphPane({ graph }: { graph: GraphView }) {
+export function GraphPane({ graph, group = "" }: { graph: GraphView; group?: string }) {
   const container = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
@@ -36,8 +49,20 @@ export function GraphPane({ graph }: { graph: GraphView }) {
     if (container.current === null) return;
     const cy = cytoscape({
       container: container.current,
-      elements: elements(graph),
+      elements: elements(graph, group),
       style: [
+        {
+          selector: ":parent",
+          style: {
+            "background-opacity": 0.08,
+            "border-width": 1,
+            "border-color": "#a0aec0",
+            "text-valign": "top",
+            "text-halign": "center",
+            "font-size": "11px",
+            padding: "12px",
+          },
+        },
         {
           selector: "node",
           style: {
@@ -72,7 +97,7 @@ export function GraphPane({ graph }: { graph: GraphView }) {
     return () => {
       cy.destroy();
     };
-  }, [graph, navigate]);
+  }, [graph, group, navigate]);
 
   return <div ref={container} className="graph" />;
 }

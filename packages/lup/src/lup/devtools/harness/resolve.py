@@ -60,6 +60,7 @@ from lup.resolver.models import (
     ConcernProgress,
     InventoryNote,
     IssueEvidence,
+    LeaseRefresh,
     ResolveManifest,
     MaterialQuestion,
     RefreshReport,
@@ -105,11 +106,11 @@ from lup.devtools.harness.contained import (
     worker_wrapper_path,
 )
 from lup.devtools.harness.generate import NativeHarnessComposition
-from lup.devtools.sync import accessible_roots
+from lup.devtools.sync import accessible_roots, granted_devices
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.devtools.supervisor.page import SUPERVISOR_PORT
-from lup.devtools.dev.worktree import refuse_a_blocked_registration
+from lup.devtools.dev.worktree import report_a_blocked_registration
 from lup.devtools.supervisor.projection import answer_recipe as rerun_recipe
 from lup.devtools.supervisor.projection import PendingQuestionView, question_views
 
@@ -960,16 +961,31 @@ def refresh_run(
 def describe_refresh(report: RefreshReport) -> list[str]:
     """Render a refresh the way somebody deciding whether to take it reads it."""
     base = report.base
-    if base.reason:
-        opening = f"base unchanged: {base.reason}"
-    elif not base.moved():
-        opening = f"base is current with {base.branch}"
-    else:
-        opening = (
+
+    def opening() -> str:
+        if base.reason:
+            return f"base unchanged: {base.reason}"
+        if not base.moved():
+            return f"base is current with {base.branch}"
+        return (
             f"base {'moved' if report.applied else 'would move'} onto {base.branch}: "
             f"{base.was[:12]} → {base.commit[:12]}"
         )
-    lines = [opening]
+
+    def outcome(lease: LeaseRefresh) -> str:
+        match lease:
+            case LeaseRefresh(conflicts=[_, *_] as conflicts):
+                return "conflicts on " + ", ".join(
+                    path.as_posix() for path in conflicts
+                )
+            case LeaseRefresh(applied=True):
+                return "merged"
+            case LeaseRefresh(reason=str() as reason) if reason:
+                return reason
+            case _:
+                return "merges cleanly"
+
+    lines = [opening()]
     lines.extend(f"  {path.as_posix()}" for path in base.conflicts)
     if base.conflicts:
         lines.append(
@@ -978,18 +994,7 @@ def describe_refresh(report: RefreshReport) -> list[str]:
         )
     if not base.moved():
         return lines
-    for lease in report.leases:
-        if lease.conflicts:
-            lines.append(
-                f"  {lease.concern_id}: conflicts on "
-                + ", ".join(path.as_posix() for path in lease.conflicts)
-            )
-        elif lease.applied:
-            lines.append(f"  {lease.concern_id}: merged")
-        elif lease.reason:
-            lines.append(f"  {lease.concern_id}: {lease.reason}")
-        else:
-            lines.append(f"  {lease.concern_id}: merges cleanly")
+    lines.extend(f"  {lease.concern_id}: {outcome(lease)}" for lease in report.leases)
     if not report.applied and any(not lease.conflicts for lease in report.leases):
         lines.append("Re-run with --apply to take it.")
     return lines
@@ -1438,6 +1443,12 @@ def run_resolve(
     # the composition that was actually resolved.
     adapter = composition.recipe.label
     harness = composition.recipe.source
+    if harness.resolver is None:
+        raise typer.BadParameter(
+            "this project declined the resolver module, so it declares no "
+            "resolver to run: take the module back in `DECLINED` and regenerate"
+        )
+    resolver_spec = harness.resolver
     plugin = harness.plugins[0]
     root = project_root()
     launcher = LocalProcessLauncher()
@@ -1478,15 +1489,15 @@ def run_resolve(
             require_fresh_base(probe_base_freshness(launcher, root))
     # A run leases a worktree per concern, and leasing one registers the merge
     # driver where the clone has none — so a confinement that owns
-    # `config.lock` would stop this run at its first lease, however many
-    # concerns it planned, with a bare `File exists` that names nothing about
-    # a sandbox. Said once here instead, before anything is planned or leased,
+    # `config.lock` would meet that at its first lease, however many concerns
+    # it planned, with a bare `File exists` that names nothing about a
+    # sandbox. Said once here instead, before anything is planned or leased,
     # and only where that registration is still outstanding: a clone that
     # already resolves the driver leases every worktree without writing config
-    # at all. Aborting takes no lease, so it is the one path that still runs
-    # confined whatever the answer.
+    # at all, and one that cannot register leases them unregistered, which is
+    # the state every worktree of that clone was already in.
     if abort_reason is None:
-        refuse_a_blocked_registration(root)
+        report_a_blocked_registration(root)
 
     async def execute() -> None:
         from lup.providers.claude.runtime import (
@@ -1559,7 +1570,7 @@ def run_resolve(
         # that stayed silent would inherit an operator's exported identity.
         worker_environment = {
             **session_environment,
-            **agent_identity_environment(harness.resolver.worker_identity),
+            **agent_identity_environment(resolver_spec.worker_identity),
         }
         reviewer_environment = {
             **session_environment,
@@ -1647,7 +1658,7 @@ def run_resolve(
         # fact about the machine rather than about any concern, and discovering
         # it per worker would turn one environmental refusal into an exception
         # group of concern failures after the run had already taken its leases.
-        contained_actors = harness.resolver.contain_actors
+        contained_actors = resolver_spec.contain_actors
         if contained_actors:
             absence = engine_absence()
             if absence is not None:
@@ -1690,13 +1701,13 @@ def run_resolve(
                 harness.image,
                 harness.requirements,
                 workspace,
-                plugin.hooks.human_owned_files if plugin.hooks is not None else [],
                 config_home,
                 credential if credential.exists() else None,
                 login,
                 program=actor_program,
                 read_only=read_only,
                 accessible=accessible_roots(),
+                devices=granted_devices(),
             )
 
         def toolchain_writable_paths() -> list[Path]:
@@ -2036,7 +2047,7 @@ def run_resolve(
                     "all",
                 ],
             ),
-            harness.resolver,
+            resolver_spec,
             worker_factory,
             reviewer_factory,
             composition.invocation_renderer,

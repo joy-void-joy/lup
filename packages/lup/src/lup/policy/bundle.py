@@ -17,12 +17,12 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.harness.codescan.antipatterns import AntiPatternSet
+from lup.harness.codescan.antipatterns import RuleSet
 from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
 from lup.policy.identity import AGENT_IDENTITY_ENV
 import lup.policy.kernel as kernel
-from lup.policy.kernel.edit import TYPESCRIPT_SUFFIXES
+from lup.policy.kernel.typescript import TYPESCRIPT_SUFFIXES
 from lup.policy.kernel.effects import EffectRow, effect_row_values
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
@@ -35,6 +35,7 @@ from lup.policy.kernel.rows import (
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
+    SpawnNameRow,
     UrlScopeRow,
     runner_target_values,
     shell_row_values,
@@ -85,10 +86,10 @@ def policy_kernel_modules() -> list[KernelModule]:
 
 
 def bundled_antipattern_rows(
-    rules: AntiPatternSet | None = None,
+    rules: RuleSet | None = None,
 ) -> dict[str, list[AntiPatternRow]]:
     """Compile primitive runtime rows directly from canonical rule objects."""
-    declared = rules or AntiPatternSet()
+    declared = rules or RuleSet()
     python_rows = [antipattern_row(rule) for rule in declared.python]
     typescript_rows = [antipattern_row(rule) for rule in declared.typescript]
     return {
@@ -128,6 +129,7 @@ def runtime_path_rule(root: str) -> PathRuleRow:
                 kind="contains_part",
                 value=root,
                 reason="scratch path requires approval",
+                recovery="",
                 allow_autonomous=False,
             )
         case _:
@@ -135,6 +137,7 @@ def runtime_path_rule(root: str) -> PathRuleRow:
                 kind="subtree",
                 value=root,
                 reason="protected path requires approval",
+                recovery="",
                 allow_autonomous=True,
             )
 
@@ -150,12 +153,14 @@ def runtime_path_rules(
             kind="name_prefix",
             value=".env",
             reason="protected path requires approval",
+            recovery="",
             allow_autonomous=False,
         ),
         PathRuleRow(
             kind="new_devtools",
             value="src",
             reason="new devtools module requires approval",
+            recovery="",
             allow_autonomous=False,
         ),
     ]
@@ -198,6 +203,7 @@ def path_rule_rows_literal(rows: list[PathRuleRow]) -> str:
                 f'"kind": {json.dumps(row["kind"])}',
                 f'"value": {json.dumps(row["value"])}',
                 f'"reason": {json.dumps(row["reason"])}',
+                f'"recovery": {json.dumps(row["recovery"])}',
                 f'"allow_autonomous": {row["allow_autonomous"]}',
             ]
             for row in rows
@@ -257,6 +263,13 @@ def antipattern_rows_literal(rows: dict[str, list[AntiPatternRow]]) -> str:
 
     lines = ["{"]
     for suffix, patterns in sorted(rows.items()):
+        # An empty list is written closed on one line: opened and closed on
+        # two, it is the one shape ruff rewrites, and a generated file that
+        # reformats is a drift failure on a file nobody edits. A project that
+        # retired the whole anti-pattern family renders every suffix this way.
+        if not patterns:
+            lines.append(f"    {python_literal(suffix)}: [],")
+            continue
         lines.append(f"    {python_literal(suffix)}: [")
         for row in patterns:
             fields = "\n".join(row_fields(row))
@@ -296,6 +309,21 @@ def acceptance_guard_literal(guard: AcceptanceGuardRow | None) -> str:
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
 
 
+def spawn_names_literal(row: SpawnNameRow | None) -> str:
+    """Render the declared spawn-name requirement, or the absence of one.
+
+    Spelled the way the acceptance guard is, and for the same reason: the
+    absent case has to be a Python name, not JSON's ``null``.
+    """
+    if row is None:
+        return "None"
+    entries = [
+        f'"reason": {json.dumps(row["reason"])}',
+        f'"recovery": {json.dumps(row["recovery"])}',
+    ]
+    return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
+
+
 def peer_policy_literal(redirect: PeerPolicyRow | None) -> str:
     """Render the declared roster the peer calls are judged against, or its absence.
 
@@ -308,14 +336,13 @@ def peer_policy_literal(redirect: PeerPolicyRow | None) -> str:
         return "None"
     entries = [
         f'"store": {json.dumps(redirect["store"])}',
-        f'"roster_file": {json.dumps(redirect["roster_file"])}',
-        f'"names_file": {json.dumps(redirect["names_file"])}',
-        f'"send_reason": {json.dumps(redirect["send_reason"])}',
-        f'"listing_note": {json.dumps(redirect["listing_note"])}',
-        f'"touches_file": {json.dumps(redirect["touches_file"])}',
         f'"windows_dir": {json.dumps(redirect["windows_dir"])}',
-        f'"claim_reason": {json.dumps(redirect["claim_reason"])}',
         f'"member_env": {json.dumps(redirect["member_env"])}',
+        f'"send_reason": {json.dumps(redirect["send_reason"])}',
+        f'"send_recovery": {json.dumps(redirect["send_recovery"])}',
+        f'"listing_note": {json.dumps(redirect["listing_note"])}',
+        f'"claim_reason": {json.dumps(redirect["claim_reason"])}',
+        f'"claim_recovery": {json.dumps(redirect["claim_recovery"])}',
     ]
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
 
@@ -328,6 +355,7 @@ def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
                 f'"tool": {json.dumps(row["tool"])}',
                 f'"specifier": {json.dumps(row["specifier"])}',
                 f'"reason": {json.dumps(row["reason"])}',
+                f'"recovery": {json.dumps(row["recovery"])}',
             ]
             for row in rows
         ]
@@ -530,6 +558,7 @@ def render_policy_data(
     autonomous_agent_identities: list[str],
     path_roles: list[PathRoleRow],
     acceptance_guard: AcceptanceGuardRow | None,
+    spawn_names: SpawnNameRow | None,
     shell_rules: list[ShellCommandRule],
     edit_rules: list[EditRule],
     refused_tools: list[RefusedTool],
@@ -541,7 +570,7 @@ def render_policy_data(
     diagnostics_command: list[str],
     resolution_command: list[str],
     repair_command: list[str],
-    rules: AntiPatternSet | None = None,
+    rules: RuleSet | None = None,
     import_boundaries: list[ImportBoundary] | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
@@ -565,6 +594,7 @@ def render_policy_data(
             "PATH_ROLES: list[PathRoleRow] = " + path_role_rows_literal(path_roles),
             "ACCEPTANCE_GUARD: AcceptanceGuardRow | None = "
             + acceptance_guard_literal(acceptance_guard),
+            "SPAWN_NAMES: SpawnNameRow | None = " + spawn_names_literal(spawn_names),
             "SHELL_RULES: list[ShellRuleRow] = "
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
             "EDIT_RULES: list[EditRuleRow] = "
@@ -612,6 +642,7 @@ def render_policy_data(
         "    RefusedToolRow,\n"
         "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"
+        "    SpawnNameRow,\n"
         "    UrlScopeRow,\n"
         ")"
         "\n\n\n" + body + "\n"

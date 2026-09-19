@@ -282,6 +282,11 @@ class Decision(BaseModel, frozen=True):
 
     effect: DecisionEffect
     reason: str = ""
+    """What stopped the call, as the approver reads it. See
+    :attr:`~lup.policy.kernel.decision.KernelDecision.reason`."""
+    recovery: str = ""
+    """What the agent can do instead. See
+    :attr:`~lup.policy.kernel.decision.KernelDecision.recovery`."""
     sandbox: SandboxPlacement = "ambient"
     checkpoint: CheckpointRequirement = "unrecoverable"
     """What capture would put back what this operation destroys locally."""
@@ -338,13 +343,19 @@ class Decision(BaseModel, frozen=True):
         """
         return KernelDecision(info.data["effect"], sandbox=sandbox).sandbox
 
-    def placed(self, escapable: bool) -> "Decision":
-        """This verdict as a runtime that can, or cannot, place a call sees it."""
-        kernel = self.as_kernel().placed(escapable)
+    def placed(self, escapable: bool, contained: bool = False) -> "Decision":
+        """This verdict as a runtime that can, or cannot, place a call sees it.
+
+        ``contained`` is the session's measured placement, which decides what
+        an approved crossing is described as; see
+        :meth:`~lup.policy.kernel.decision.KernelDecision.placed`.
+        """
+        kernel = self.as_kernel().placed(escapable, contained=contained)
         return self.model_copy(
             update={
                 "effect": kernel.effect,
                 "reason": kernel.reason,
+                "recovery": kernel.recovery,
                 "sandbox": kernel.sandbox,
             }
         )
@@ -363,6 +374,7 @@ class Decision(BaseModel, frozen=True):
         return cls(
             effect=decision.effect,
             reason=decision.reason,
+            recovery=decision.recovery,
             sandbox=decision.sandbox,
             checkpoint=decision.checkpoint,
             reviewer=decision.reviewer,
@@ -402,6 +414,7 @@ class Decision(BaseModel, frozen=True):
             evaluator=self.evaluator,
             hard=self.hard,
             findings=tuple(finding.as_kernel() for finding in self.findings),
+            recovery=self.recovery,
         )
 
 

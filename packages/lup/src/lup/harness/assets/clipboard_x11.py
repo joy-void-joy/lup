@@ -280,15 +280,17 @@ class SelectionBridge:
                     else:
                         self.copy_received()
             case X.PropertyNotify:
-                if received.state == X.PropertyDelete:
-                    self.advance(received)
-                elif (
-                    self.reading_owner
-                    and self.reading_incremental
-                    and received.window.id == self.window.id
-                    and received.atom == self.incoming
-                ):
-                    self.copy_received()
+                match received.state:
+                    case X.PropertyDelete:
+                        self.advance(received)
+                    case _:
+                        if (
+                            self.reading_owner
+                            and self.reading_incremental
+                            and received.window.id == self.window.id
+                            and received.atom == self.incoming
+                        ):
+                            self.copy_received()
 
     def run(self):
         for _ in iter(int, 1):

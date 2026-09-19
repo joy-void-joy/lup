@@ -47,22 +47,13 @@ REDUNDANT_SANDBOX = " — this was already placed on the host"
 # lup: ignore[constant-declaration] — a row's own wording
 ESCALATED_PREFIX = "escalated ({reason}): "
 # lup: ignore[constant-declaration] — a row's own wording
-CONTAINED_READ = (
-    " — settled inside the containment boundary rather than asked: every"
-    " effect it can have is confined there"
-)
+CONTAINED_READ = " — run inside the containment boundary, which confines it"
 # lup: ignore[constant-declaration] — a row's own wording
-RECOVERED_LOSS = " — settled rather than asked: {held}"
+RECOVERED_LOSS = " — allowed without asking: {held}"
 # lup: ignore[constant-declaration] — a row's own wording
-CHECKPOINT_FAILED = (
-    " — the capture that would have settled this failed, so the loss it was"
-    " going to cover is unprotected and the question stands"
-)
+CHECKPOINT_FAILED = " — the snapshot that would have made this undoable failed"
 # lup: ignore[constant-declaration] — a row's own wording
-NO_REVIEWER = (
-    " — no eligible reviewer is reachable from this session, so the question"
-    " cannot be put to anybody"
-)
+NO_REVIEWER = ", and nobody who could approve it is reachable from this session"
 
 
 class SettlementFacts:
@@ -207,7 +198,7 @@ class HardProhibition(SettlementRule):
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
         if facts.decision.effect == "deny" and facts.decision.hard:
-            return facts.decision.revised(reason=facts.decision.reason + facts.hint)
+            return facts.decision.advising(facts.hint)
         return None
 
 
@@ -265,12 +256,12 @@ class SandboxEscalation(SettlementRule):
         prefix = ESCALATED_PREFIX.format(reason=facts.escalation.reason)
         return decision.revised(
             effect="ask",
-            reason=prefix + decision.reason + facts.escalation.notice(),
+            reason=prefix + decision.reason,
             sandbox="outside",
             escalated=facts.escalation.reason,
             purpose=decision.purpose or "policy_override",
             abstention=None,
-        )
+        ).advising(facts.escalation.notice())
 
 
 class DecisionEscalation(SettlementRule):
@@ -299,18 +290,18 @@ class DecisionEscalation(SettlementRule):
         notice = facts.escalation.notice()
         if decision.effect == "allow":
             return decision.revised(
-                reason=decision.reason + REDUNDANT_DECISION + notice,
+                reason=decision.reason + REDUNDANT_DECISION,
                 visibility="notice",
-            )
+            ).advising(notice)
         prefix = ESCALATED_PREFIX.format(reason=facts.escalation.reason)
         return decision.revised(
             effect="ask",
-            reason=prefix + decision.reason + notice,
+            reason=prefix + decision.reason,
             escalated=facts.escalation.reason,
             purpose=decision.purpose or "policy_override",
             cause=None,
             abstention=None,
-        )
+        ).advising(notice)
 
 
 class TrappedPlacement(SettlementRule):
@@ -349,7 +340,8 @@ class UnleasedWrite(SettlementRule):
     """A write the measured boundary does not cover, wherever the session sits.
 
     The lease is what a launch actually mounted writable, and it is a snapshot:
-    the read-only overlays a contained launch punches over its siblings are
+    the read-only overlays a launch punches -- a worker's over its siblings,
+    any session's over `config`, `hooks/` and the human-owned paths -- are
     enumerated when the container starts, and a container's mount namespace is
     fixed from then on. So a worktree cut *after* that gets the writable base
     with no overlay over it, and a mount table cannot close that -- there is no
@@ -395,13 +387,21 @@ class UnleasedWrite(SettlementRule):
         ]
         if not reported or facts.decision.effect not in ("allow", "defer"):
             return None
+        # The write leads. The verdict this replaces said "every segment is
+        # declared safe", which is true and beside the point: what the
+        # approver decides on is the path, so the path is the first thing
+        # read. A deferral's own reason stays, since "nobody judged this"
+        # is a second fact the same approval answers.
+        written = (
+            f"writes {', '.join(reported)}, which this launch did not mount"
+            " writable and nothing captured"
+        )
         return facts.decision.revised(
             effect="ask",
             reason=(
-                f"{facts.decision.reason}. This writes to "
-                f"{', '.join(reported)}, which the boundary this launch "
-                "measured does not cover — so nothing here confines the write "
-                "and no capture of this session holds what it replaces"
+                written
+                if facts.decision.effect == "allow"
+                else f"{facts.decision.reason}; {written}"
             ),
             purpose="unrecovered_local_mutation",
             # Named, because the verdict this replaces was reached by the
@@ -445,12 +445,13 @@ class DisplacedWrite(SettlementRule):
         spelled = ", ".join(
             f"{row['path']} → {row['lands']}" for row in facts.displaced
         )
+        written = f"writes through a symlink that lands elsewhere: {spelled}"
         return facts.decision.revised(
             effect="ask",
             reason=(
-                f"{facts.decision.reason}. This resolves through a symlink and"
-                f" lands elsewhere: {spelled} — so the role its spelling"
-                " claims is not the role of the file it would replace"
+                written
+                if facts.decision.effect == "allow"
+                else f"{facts.decision.reason}; {written}"
             ),
             purpose="unrecovered_local_mutation",
             rule=self.id,
@@ -563,9 +564,9 @@ class UnreachableReviewer(SettlementRule):
         if facts.decision.effect == "ask" and not facts.reviewable:
             return facts.decision.revised(
                 effect="deny",
-                reason=facts.decision.reason + NO_REVIEWER + facts.hint,
+                reason=facts.decision.reason + NO_REVIEWER,
                 cause="deliberate",
-            )
+            ).advising(facts.hint)
         return None
 
 
@@ -661,10 +662,9 @@ class Unreadable(SettlementRule):
             return None
         return facts.decision.revised(
             effect="deny",
-            reason=facts.decision.reason + facts.hint,
             cause="unreadable",
             abstention=None,
-        )
+        ).advising(facts.hint)
 
 
 class JudgedRefusal(SettlementRule):
@@ -681,9 +681,8 @@ class JudgedRefusal(SettlementRule):
         if facts.decision.effect != "deny":
             return None
         return facts.decision.revised(
-            reason=facts.decision.reason + facts.hint,
             cause=facts.decision.cause or "deliberate",
-        )
+        ).advising(facts.hint)
 
 
 class Standing(SettlementRule):

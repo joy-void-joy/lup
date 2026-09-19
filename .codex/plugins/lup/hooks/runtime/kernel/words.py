@@ -16,9 +16,11 @@ from .decision import (
 )
 from .edit import path_rule_matches, protected_path_reason
 from .roles import (
+    GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
     is_generated_plugin_target,
     path_role,
+    repository_relative,
 )
 from .rows import PathRoleRow, PathRuleRow
 
@@ -233,47 +235,6 @@ SCRATCH_VERB_FLAGS = {
 }
 
 
-class OperandGrammar(TypedDict):
-    """How a command that carries a program tells its paths from its program.
-
-    The verbs above take paths and nothing else, so their operands are
-    whatever is not a flag. A command handed a program does not work that way:
-    `sed -n '/^def x/,/^def y/p' file.py` names one path and one script, and
-    reading both as paths is reading a script as a path.
-
-    That mattered because the reading feeds three questions and only two of
-    them stat anything. Whether a target is a directory and whether it is an
-    empty one both skip a path that is not on disk, so a script fell out
-    harmlessly; whether a target sits under a writable root resolves the
-    string and asks -- and a sed address script *begins with a slash*, so it
-    resolved to an absolute path no root contains and was reported as a write
-    outside the lease. `sed -n '/^def x/,/^def y/p' file.py` asked for
-    approval, naming the script as the file it was about to write.
-    """
-
-    script_flags: str
-    """Short options that supply the program, so no operand carries it."""
-    script_options: list[str]
-    """Long spellings of the same, matched before any ``=`` value."""
-    value_flags: str
-    """Short options that consume the following word, program or otherwise."""
-
-
-# lup: ignore[constant-declaration] — each command's own documented grammar, fixed by what the utility parses rather than by anybody's judgement
-PROGRAM_CARRYING_COMMANDS = {
-    "sed": OperandGrammar(
-        script_flags="ef", script_options=["expression", "file"], value_flags="efl"
-    )
-}
-"""Commands whose first operand is a program unless an option supplied one.
-
-One entry, and a table rather than a branch because the fact is about `sed`
-rather than about this function: what is declared is where the paths start,
-and a second command with the same shape is a row instead of a second `if`
-that has to be found and read to know it is the same shape.
-"""
-
-
 def leaves_the_checkout(path_text: str) -> bool:
     """Whether this spelling reaches somewhere the checkout does not cover.
 
@@ -294,7 +255,64 @@ def leaves_the_checkout(path_text: str) -> bool:
     return path_text == ".." or path_text.startswith("../")
 
 
-def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
+# lup: ignore[library-default] — git's own directory contents, a vocabulary
+# fixed outside this repository rather than a choice made for an adopter
+GIT_ADMIN_ENTRIES = (
+    "HEAD",
+    "ORIG_HEAD",
+    "FETCH_HEAD",
+    "MERGE_HEAD",
+    "COMMIT_EDITMSG",
+    "config",
+    "description",
+    "index",
+    "packed-refs",
+    "shallow",
+    "branches",
+    "hooks",
+    "info",
+    "logs",
+    "modules",
+    "objects",
+    "refs",
+    "worktrees",
+)
+"""What git itself keeps at the top of a repository directory.
+
+The discriminator between the repository and whatever else is stored beside
+it: everything here is git's, and a name that is not is somebody else's.
+"""
+
+
+def reaches_git_administration(path_text: str) -> bool:
+    """Whether this spelling reaches git's own content inside a repository.
+
+    A ``.git`` segment alone does not say so. A bare repository is a directory
+    *named* ``<name>.git``, and a layout that keeps its checkouts inside it --
+    which `lup.devtools.layout` is, placing every sibling worktree under
+    ``tree/`` -- puts ordinary source under a segment ending in ``.git``. So
+    the segment test on its own grades every file of every checkout as the
+    repository, and in that layout no absolute path to source can be spelled
+    that does not.
+
+    What separates them is the segment after it, because git's top-level
+    contents are a closed vocabulary: ``config`` and ``hooks`` and
+    ``worktrees`` are the repository, and ``tree`` and ``trace-archive`` are
+    things a layout put beside it. A path that stops at the segment is the
+    directory itself and counts as reaching it.
+    """
+    segments = path_text.split("/")
+    for index, segment in enumerate(segments):
+        if not segment.endswith(".git"):
+            continue
+        beneath = segments[index + 1 :]
+        return not beneath or beneath[0] in GIT_ADMIN_ENTRIES
+    return False
+
+
+def write_scope(
+    path_text: str, path_roles: list[PathRoleRow], checkout: str = ""
+) -> str:
     """Which tree a write's target is in, as :class:`WritesPath` names them.
 
     One reading for every spelling of a write, which is the whole point: a
@@ -320,19 +338,56 @@ def write_scope(path_text: str, path_roles: list[PathRoleRow]) -> str:
     shared administrative directory writable on purpose. A hook written there
     runs on the operator's next Git command, outside whatever granted it.
 
+    Which segment follows decides it, through
+    :func:`reaches_git_administration`, because the same layout that puts the
+    administrative directory on an absolute path puts every checkout there
+    too: under a bare ``repo.git`` the worktrees are ``repo.git/tree/<name>``,
+    so a segment test alone grades all of their source as the repository and
+    leaves no absolute spelling of a source file that is not ``protected``.
+
     A declared role is read before either spelling, because a role is somebody
     saying where a path belongs and a spelling is only this reading guessing.
     The session scratchpad is the case that settles it: it is absolute, so the
     escape test would call it outside, and it is declared scratch, which is
     what it is.
+
+    ``checkout`` is where this repository sits, and every reading below runs
+    on the spelling :func:`repository_relative` returns for it, because the
+    declared roots are anchored at the repository top and reach no absolute
+    spelling of the same file. Without it ``tmp/run.log`` is scratch and
+    ``/home/you/project/tmp/run.log`` is production, for one file and one
+    write. It is a fact about the machine rather than about this repository,
+    so it arrives from the host per call and is never declared; empty is the
+    honest answer where the caller has none, and leaves the reading exactly as
+    it was.
     """
-    if path_role(path_text, path_roles) == "scratch":
+    spelled = repository_relative(path_text, checkout)
+    if path_role(spelled, path_roles) == "scratch":
         return "scratch"
-    if any(segment.endswith(".git") for segment in path_text.split("/")):
+    if reaches_git_administration(spelled):
         return "protected"
-    if leaves_the_checkout(path_text):
+    if leaves_the_checkout(spelled):
         return "outside"
     return "production"
+
+
+# lup: ignore[library-default] — the scope vocabulary this repository defines,
+# spelled once; `WritesPath.scopes` is the same closed set
+SCOPE_PHRASES = {
+    "scratch": "a scratch path",
+    "production": "a production path",
+    "protected": "a protected path",
+    "outside": "an outside path",
+    "unbounded": "an unbounded path",
+}
+"""How a reason line names each scope, written out rather than assembled.
+
+One entry per member of the same closed set :attr:`WritesPath.scopes` holds,
+so a scope added there has a spelling here or has none at all. Assembling the
+phrase instead means deciding the article from the word, which is a rule about
+English -- "an hour" against "a university" -- standing in for a table of five
+entries that were known when the vocabulary was written.
+"""
 
 
 def write_checkpoint(scope: str) -> CheckpointRequirement:
@@ -412,38 +467,6 @@ def flag_write_targets(words: list[str], write_flags: list[str]) -> list[str]:
             continue
         following = word in write_flags
     return targets
-
-
-def program_carrying_operands(words: list[str], grammar: OperandGrammar) -> list[str]:
-    """The words this command names paths with, by its declared grammar.
-
-    Over-naming is safe for the questions that stat what they are handed and
-    unsafe for the one that does not, so this under-names instead: an option
-    whose value is unknown takes the following word with it, and the leading
-    operand is a path only once something else has supplied the program.
-    """
-    operands: list[str] = []
-    supplied = not grammar["script_flags"]
-    skipping = False
-    for word in words[1:]:
-        if skipping:
-            skipping = False
-            continue
-        if word.startswith("--") and len(word) > 2:
-            if word[2:].split("=", 1)[0] in grammar["script_options"]:
-                supplied = True
-            continue
-        if word.startswith("-") and len(word) > 1:
-            letters = word[1:]
-            if any(letter in grammar["script_flags"] for letter in letters):
-                supplied = True
-            skipping = letters[-1] in grammar["value_flags"]
-            continue
-        if not supplied:
-            supplied = True
-            continue
-        operands.append(word)
-    return operands
 
 
 def is_trusted_script(word: str, roots: list[str]) -> bool:
@@ -665,7 +688,9 @@ def refuses_generated_plugin_target(word: str) -> KernelDecision | None:
     """
     if not is_generated_plugin_target(word):
         return None
-    return KernelDecision("deny", GENERATED_PLUGIN_REFUSAL)
+    return KernelDecision(
+        "deny", GENERATED_PLUGIN_REFUSAL, recovery=GENERATED_PLUGIN_RECOVERY
+    )
 
 
 def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
@@ -760,8 +785,7 @@ def asks_before_removing_a_directory(
     # the paths settled `rm -rf /etc/ssl` as "captured and restorable".
     return KernelDecision(
         "ask",
-        f"{taken} {directory} requires approval: nothing in the command"
-        f" bounds what {what}",
+        f"{taken} {directory}, and nothing in the command bounds what {what}",
         checkpoint=(
             "unrecoverable"
             if any(
@@ -798,7 +822,11 @@ def protected_write_target(
             None,
         )
         if matched is not None:
-            return KernelDecision("ask", protected_path_reason(word, matched))
+            return KernelDecision(
+                "ask",
+                protected_path_reason(word, matched),
+                recovery=matched["recovery"],
+            )
     return None
 
 
@@ -964,10 +992,8 @@ def dangerous_assignment_reason(verb: str, names: list[str]) -> str:
     """
     spelled = ", ".join(names)
     variables = f"variables {spelled}" if len(names) > 1 else f"variable {spelled}"
-    subject = "they" if len(names) > 1 else "it"
     return (
-        f"{verb} the security-sensitive {variables} requires approval"
-        f" — {subject} can redirect how commands execute"
+        f"{verb} the security-sensitive {variables}, which can change how commands run"
     )
 
 
@@ -1097,13 +1123,9 @@ def xargs_payload(words: list[str]) -> list[str]:
     value_options = ("-I", "-i", "-n", "-d", "-P", "-s", "-L", "-a", "-E", "-e")
     position = 1
     while position < len(words) and words[position].startswith("-"):
-        option = words[position]
-        if "=" in option or (len(option) > 2 and not option.startswith("--")):
-            position += 1
-        elif option in value_options:
-            position += 2
-        else:
-            position += 1
+        # A value option is two characters and carries no `=`, so it is the
+        # one spelling that skips its operand too.
+        position += 2 if words[position] in value_options else 1
     return words[position:]
 
 
@@ -1371,7 +1393,9 @@ def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
                 continue
             if name == "--file":
                 return KernelDecision(
-                    "deny", "sed script files are not screened — inline the script"
+                    "deny",
+                    "a sed script file is run without anything reading it",
+                    recovery="Inline the script.",
                 )
             if name == "--sandbox" and not separator:
                 sandbox = True
@@ -1395,7 +1419,9 @@ def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
                 flags = flags[: flags.index("i")]
             if "f" in flags:
                 return KernelDecision(
-                    "deny", "sed script files are not screened — inline the script"
+                    "deny",
+                    "a sed script file is run without anything reading it",
+                    recovery="Inline the script.",
                 )
             if flags.endswith("e"):
                 script_expected = True
@@ -1415,3 +1441,40 @@ def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
         in_place=in_place,
         screened=sandbox or all(safe_sed_script(script) for script in scripts),
     )
+
+
+def sed_rewrite_operands(words: list[str]) -> list[str] | None:
+    """The files an in-place sed replaces, or ``None`` where the line is no sed.
+
+    One of the readers a path-writing verb's operands are named by, and like
+    :func:`git_restore_operands` it recognises its own command: what a
+    utility does with its operands is a fact about that utility, so the
+    reader that knows the utility is the one that says whether a line is it.
+
+    A sed without ``-i`` is ``cat`` with an address: what sits at its operand
+    is the same afterwards, so the operand is a path the command reads and
+    not one it acts on. Naming it anyway was defended as the safe direction,
+    because two of the three questions asked of an acted-on path stat it and
+    a file that is there answers them harmlessly -- but the third resolves it
+    against what the launch mounted writable, and a file under a read-only
+    mount is exactly the path no writable root contains. So
+    ``sed -n 1,80p /mounted/verify.py`` was reported as a write outside the
+    lease and asked, while ``head -80`` over the same file was allowed.
+
+    Read through :func:`sed_invocation` rather than by a grammar of its own,
+    on the terms that function states: a second reader of which files a
+    rewrite touches parts company with the first the moment one of them
+    learns a flag the other has not, and this one had never learned ``-i``.
+
+    A call the reader refuses names nothing. The classifier returns that same
+    refusal before any fact about the file is consulted, and a refusal is not
+    reopened by anything the facts could say -- which is also what every
+    other unclassified command names, so a sed nobody judged is treated as
+    one.
+    """
+    if posixpath.basename(words[0]) != "sed":
+        return None
+    invocation = sed_invocation(words)
+    if isinstance(invocation, KernelDecision):
+        return []
+    return invocation["targets"] if invocation["in_place"] else []

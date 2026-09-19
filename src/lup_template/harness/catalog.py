@@ -19,6 +19,7 @@ from pathlib import Path
 from pydantic import AnyHttpUrl
 
 from lup.harness.models import (
+    CarrierPins,
     Harness,
     HookPathRole,
     HookSandbox,
@@ -34,15 +35,19 @@ from lup.harness.models import (
 )
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.codex.harness import CodexSpellings
+from lup.harness.codescan.common import ApplicationRoots
 from lup.harness.codescan.boundaries import (
-    ApplicationRoots,
     generated_tree_paths,
     native_import_boundaries,
 )
-from lup.harness.codescan.common import RuleSelection
+from lup.harness.content.modules.specs import RESOLVER
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
+from lup.devtools.dev.library import DISTRIBUTION, VENDORED_ROOT
+from lup.devtools.dev.release import ReleaseSpec
+from lup.devtools.dev.reach import Spread
+from lup.devtools.dev.scaffold import ScaffoldSource
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
-from lup.devtools.dev.workflow import FrontendSpec, WorkflowSpec
+from lup.devtools.dev.workflow import FrontendSpec, PublishSpec, WorkflowSpec
 from lup.devtools.project import DevProject, Tracker
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
@@ -54,7 +59,8 @@ from lup.workspace.paths import (
     project_root,
     read_project_name,
 )
-from lup_template.agent.toolsets import tool_group_names
+from lup.tools.toolsets import startup_names
+from lup_template.agent.toolsets import declared_tool_groups
 from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
 from lup.harness.coverage import ContentRoot, ModuleCoverage
 from lup_template.devtools.subapps import APPLICATION_ROSTER
@@ -63,6 +69,7 @@ from lup_template.harness.content.catalog import (
     GUIDANCE,
     LAYOUT,
     MODULE_SELECTION,
+    RULES,
     SKILLS,
     SUBAPP_SELECTION,
     TOOL_GROUPS,
@@ -129,13 +136,15 @@ Each is a requirement the boundary cannot express any other way, and the
 count is the point: an exclusion is not a widened rule but a removed one, so
 the list stays as short as the toolchain's actual incompatibilities."""
 
-ARTIFACT_REFUSAL = (
-    "publishing a page leaves the repository, and this project already owns"
-    " surfaces that do not — run `uv run lup-devtools dev report` for everything"
-    " left to implement, or the report skill to write it whole to a file named"
-    " for the work, under tmp/"
+ARTIFACT_REFUSAL = "publishing a page puts this work outside the repository"
+"""Why an artifact is the wrong reflex here, as the approver of one reads it."""
+
+ARTIFACT_RECOVERY = (
+    "Run `uv run lup-devtools dev report` for everything left to implement, or"
+    " the report skill to write it whole to a file named for the work, under"
+    " tmp/."
 )
-"""Why an artifact is the wrong reflex here, and what answers the same need.
+"""What answers the same need inside the repository.
 
 The redirect is the point rather than the refusal, exactly as the
 generated-tree refusal names the source to edit instead of only saying no. A
@@ -145,14 +154,17 @@ every later session, scan, and gate can reach.
 """
 
 WORKTREE_ENTRY_REFUSAL = (
-    "entering a worktree with this tool arms Claude Code's worktree isolation"
-    " for the rest of the session, which then refuses eval, source, fc, coproc,"
-    " trap, enable, mapfile, readarray, hash, bind, complete, compgen, alias and"
-    " let in any argv position — including in read-only commands with no git in"
-    " them, so `grep -c hash file.py` stops working. Measured: the tool call is"
-    " what arms it, not where the session is. `git worktree create` already made"
-    " the tree — launch a session rooted in it, or address its files by absolute"
-    " path from here"
+    "entering a worktree this way makes Claude Code refuse ordinary shell words"
+    " such as hash, alias and let for the rest of the session"
+)
+
+WORKTREE_ENTRY_RECOVERY = (
+    "The tool call arms worktree isolation wherever the session is, and it then"
+    " refuses eval, source, fc, coproc, trap, enable, mapfile, readarray, hash,"
+    " bind, complete, compgen, alias and let in any argv position, even in"
+    " read-only commands, so `grep -c hash file.py` stops working."
+    " `git worktree create` already made the tree: launch a session rooted in"
+    " it, or address its files by absolute path from here."
 )
 """Why the tool that moves a session into a worktree is the wrong way in.
 
@@ -169,9 +181,18 @@ may still have a reason to.
 """
 
 REFUSED_TOOLS = [
-    RefusedTool(tool="Artifact", reason=ARTIFACT_REFUSAL),
-    RefusedTool(tool="Skill", specifier="artifact-design", reason=ARTIFACT_REFUSAL),
-    RefusedTool(tool="EnterWorktree", reason=WORKTREE_ENTRY_REFUSAL),
+    RefusedTool(tool="Artifact", reason=ARTIFACT_REFUSAL, recovery=ARTIFACT_RECOVERY),
+    RefusedTool(
+        tool="Skill",
+        specifier="artifact-design",
+        reason=ARTIFACT_REFUSAL,
+        recovery=ARTIFACT_RECOVERY,
+    ),
+    RefusedTool(
+        tool="EnterWorktree",
+        reason=WORKTREE_ENTRY_REFUSAL,
+        recovery=WORKTREE_ENTRY_RECOVERY,
+    ),
 ]
 """The calls this project has decided against, each naming what to reach for.
 
@@ -187,7 +208,11 @@ HARNESS_SESSION = "harness"
 """The session a natively launched tool server opens for itself.
 
 One name per worktree, shared by every group's process, so the tools of one
-native session write where the next one will find them."""
+native session write where the next one will find them. It names where a
+session's notes go and is no identity: what the roster knows a session by is
+the launcher's id, or the id its runtime gave the process, which
+:mod:`lup.providers.identity` asks the adapter for — never this word, which
+every session of one worktree would share."""
 
 
 def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer]:
@@ -230,7 +255,12 @@ def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer
             ],
             startup_timeout_seconds=startup_deadline_seconds,
         )
-        for name in tool_group_names(realtime=False)
+        # What a runtime starts when a session opens, read off the same
+        # declaration the session's own assembly reads — and declared rather
+        # than built, since this list is rendered into a native tree and one
+        # that depended on what the generating machine had installed would
+        # make two checkouts' plugins differ.
+        for name in startup_names(declared_tool_groups())
     ]
 
 
@@ -271,6 +301,63 @@ def declared_test_roots() -> list[TestRoot]:
     ]
 
 
+def declared_spread() -> Spread:
+    """Which of this repository's trees reach a project built on it, and how.
+
+    lup is two things at once and an adopter receives them by two different
+    mechanisms: `packages/lup/` arrives as a dependency, while `src/` and
+    `tests/` are stamped out once at initialization and owned from then on.
+    Naming both here is what lets `dev reach` say which mechanism carried each
+    commit — the only fact about the cost of this scaffold that no file in
+    either tree records.
+
+    The generated prefixes are the ones the seam guard already resolves, taken
+    from there rather than restated: a tree is generated because a recipe
+    writes it, and a second list saying so would be the drift this measures.
+    """
+    return Spread(
+        library=["packages/lup/"],
+        copied=["src/", "tests/"],
+        generated=application_roots().generated,
+    )
+
+
+def declared_release() -> ReleaseSpec:
+    """Which files a release moves here, and what its tag is called.
+
+    The distribution this repository publishes sits under ``packages/``, not
+    at the root. The root manifest is ``lup-template``, the scaffold, whose
+    version belongs to whoever adopts it and is never a release's to move —
+    and ``[tool.lup] agent_version`` beside it is not a release number at all,
+    it names the directory a project's traces are kept under. Three version
+    numbers, one of which ships, so the one that ships is named.
+
+    A project stamped out of this tree publishes itself from its own root and
+    inherits nothing here: the library's default already describes that, and
+    this override is a fact about lup's own layout.
+    """
+    return ReleaseSpec(version_file=f"{VENDORED_ROOT}/pyproject.toml")
+
+
+def declared_scaffold() -> ScaffoldSource:
+    """Where this project's copied half comes from, and what of it it took.
+
+    Inherited rather than written at initialization: a project stamped out of
+    this tree receives this declaration with the rest of the copied half, and
+    it is already true of it — the registration `sync.json` ships names the
+    repository it was stamped from, and the roots are the ones the stamp
+    copied. What it says of *this* checkout is that this is the scaffold
+    itself, which `dev update` refuses on the strength of the template flag
+    rather than of anything said here: the origin of every copy has nothing
+    upstream to merge from.
+
+    A project that declines part of the scaffold says so here, spelling the
+    paths as upstream spells them, and every later update leaves them out
+    instead of offering them again.
+    """
+    return ScaffoldSource(project="lup")
+
+
 WORKFLOW = WorkflowSpec(
     branches=["main", "dev"],
     frontend=FrontendSpec(workspace="packages/lup/web", bun_version="1.3.14"),
@@ -279,6 +366,14 @@ WORKFLOW = WorkflowSpec(
 carries what has landed, so both deserve a run of their own. The frontend
 workspace is the library's, installed first because `dev check` rebuilds the
 bundles it compares against what is committed."""
+
+
+PUBLISH = PublishSpec(package=DISTRIBUTION)
+"""What a release tag publishes here: the library, not the scaffold.
+
+The workspace root is `lup-template`, which nobody installs — so the member
+is named, and `uv build` is told which of the two distributions in this
+repository is the one that ships."""
 
 
 NATIVE_RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
@@ -344,15 +439,16 @@ def application_roots(plugin_names: list[str] | None = None) -> ApplicationRoots
 def declared_coverage() -> ModuleCoverage:
     """Everything this checkout declares, for the sweep that asks who claims it.
 
-    Every module is built and every one is *resolved*, but none is filtered.
-    The three are separate answers and the sweep needs exactly this pairing: a
-    module nobody took still owns its declarations, so filtering would hide the
-    failure by removing the module that was meant to answer for it — while a
-    skill this project added to a module it did not write reaches the plugin
-    through the selection, so leaving the roster unresolved would report that
-    skill as owned by nobody when it is owned by the module it was added to.
-    Building them all costs this gate the imports the roster reaches, and costs
-    nothing anywhere else.
+    Every module is built and none is filtered, and the selection travels
+    beside them rather than being applied first. The three are separate
+    answers and the sweep needs exactly this pairing: a module nobody took
+    still owns its declarations, so filtering would hide the failure by
+    removing the module that was meant to answer for it — while what this
+    project changed about a module is read in both directions, since a skill
+    added under a new id is visible only once the selection is applied and a
+    skill rewritten under the library's id hides the library's own file once
+    it is. Building them all costs this gate the imports the roster reaches,
+    and costs nothing anywhere else.
 
     Only the index is the composition's own. Its subject is what every other
     module contributed, so no module can see enough to declare it; everything
@@ -362,7 +458,8 @@ def declared_coverage() -> ModuleCoverage:
     census: each renders from a registry, the wired CLI, or the compiled trees.
     """
     return ModuleCoverage(
-        modules=[MODULE_SELECTION.resolved(entry.build()) for entry in entries()],
+        modules=[entry.build() for entry in entries()],
+        selection=MODULE_SELECTION,
         roots=[
             ContentRoot(
                 directory=Path("packages/lup/src/lup/harness/content"),
@@ -394,8 +491,28 @@ def dev_project() -> DevProject:
     plugin actually decline.
     """
     hooks = declared_hook_set()
+    package = Path(__file__).resolve().parents[1].name
     return DevProject(
-        package=Path(__file__).resolve().parents[1].name,
+        package=package,
+        # What the preservation gate judges is what an adopter could have
+        # imported, and two subtrees here are reachable by name without
+        # anybody being able to hold one.
+        internal_modules=[
+            # The scaffold. `dev init` copies this half into the adopting
+            # repository and renames it, so its names never reach anybody as
+            # an import: they arrive as the adopter's own source, under the
+            # adopter's own package, theirs to edit. An instruction about one
+            # would say to repoint an import nobody was able to write.
+            package,
+            # The permission kernel, compiled into the hermetic dispatcher
+            # every generated plugin runs. The generated copy is already left
+            # out of the walk; this is the source it is projected from, and
+            # the dispatcher reaches it as bare `kernel.*` rather than through
+            # this package at all. What went from it is a hand-rolled shell
+            # tokenizer and the control-flow readers beside it, replaced in
+            # place, which is the freedom not publishing them is for.
+            "lup.policy.kernel",
+        ],
         roots=application_roots(),
         rules=hooks.rules,
         import_boundaries=hooks.import_boundaries,
@@ -433,7 +550,15 @@ def dev_project() -> DevProject:
         # because that is the call it is a keyword of — so the seam names the
         # module, and the library's list stays free of this layout.
         seams=[
-            *DECLARED_SEAMS,
+            # The library's seams, less the rule selection, which this project
+            # declares beside the guidance that teaches it rather than here.
+            *[seam for seam in DECLARED_SEAMS if seam.keyword != "retired"],
+            Seam(
+                call="RuleSelection",
+                keyword="retired",
+                summary="library scan rules this project does not hold itself to",
+                module=Path("src/lup_template/harness/content/catalog.py"),
+            ),
             Seam(
                 call="Image",
                 keyword="tooling",
@@ -469,14 +594,17 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         hooks=HookSet(
             id="hooks.lup-policy",
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],
-            # lup: template: which of the library's scan rules this domain holds
-            # itself to. Spelled empty rather than left to the default, because
-            # a default nobody was shown is not a decision — and a repository
-            # that settled a convention differently is not defective there. Name
-            # the few it drops with `dev seams --retire <rule-id>`, or drop the
-            # family outright with `--retire-all`, which is one answer here
-            # instead of thirty retirements one denial at a time.
-            rules=RuleSelection(retired=[]),
+            # Derived from the scaffold this project declares rather than
+            # spelled again: the branch a session is told about at prompt time
+            # is the branch `dev update` merges, and two spellings of it are
+            # how a fold ends up watching a branch nothing advances.
+            carriers=CarrierPins(
+                branch=declared_scaffold().branch, distribution=DISTRIBUTION
+            ),
+            # The one selection, declared where the guidance reads it too, so
+            # the hooks enforcing a rule and the section teaching it cannot
+            # disagree; `dev seams --retire` edits it there.
+            rules=RULES,
             import_boundaries=native_import_boundaries(
                 application_roots([plugin_name])
             ),
@@ -755,11 +883,17 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         image=agent_image(),
         plugins=[plugin],
         guidance=GUIDANCE,
-        resolver=ResolveSpec(
-            id="resolver.lup",
-            worker_identity="resolver-worker",
-            worker_skill=SkillInvocation(plugin="lup", skill="implementer"),
-            review_skill=SkillInvocation(plugin="lup", skill="resolve-reviewer"),
-            merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+        # A project that declined the resolver module has no worker, review
+        # or merge skill for a spec to name, so it declares none.
+        resolver=(
+            ResolveSpec(
+                id="resolver.lup",
+                worker_identity="resolver-worker",
+                worker_skill=SkillInvocation(plugin="lup", skill="implementer"),
+                review_skill=SkillInvocation(plugin="lup", skill="resolve-reviewer"),
+                merge_skill=SkillInvocation(plugin="lup", skill="merge"),
+            )
+            if MODULE_SELECTION.takes(RESOLVER)
+            else None
         ),
     )

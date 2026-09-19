@@ -176,6 +176,10 @@ class PersistentQuestion(BaseModel, frozen=True):
     id: str
     operation: Operation
     fingerprint: str
+    preconditions: dict[Path, str | None] = {}
+    """File preimages bound to a native hook review, rechecked before dispatch."""
+    resumption: Literal["coordinator", "native_retry"] = "coordinator"
+    """Whether the coordinator dispatches or a native hook checks an exact retry."""
     reason: str
     rule: str = ""
     purpose: ReviewPurpose | None = None

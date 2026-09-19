@@ -108,6 +108,8 @@ def show(root: Path, question: str, as_json: bool) -> None:
     if entry.checkpoint_failure:
         typer.echo(f"  capture     failed: {entry.checkpoint_failure}")
     typer.echo(f"  payload     {entry.operation.payload}")
+    for path, before in entry.preconditions.items():
+        typer.echo(f"  preimage {path}\n{before if before is not None else '(absent)'}")
     if entry.answer is not None:
         typer.echo(
             f"  answered    {'yes' if entry.answer.approved else 'no'}"
@@ -137,6 +139,11 @@ def answer(
         f"{settled.id}: {verb[settled.state] if settled.state in verb else settled.state}"
     )
     if settled.state == "approved":
+        if settled.resumption == "native_retry":
+            typer.echo(
+                "Retry the exact tool call; its preimages are rechecked and approval is spent once."
+            )
+            return
         typer.echo(
             "the coordinator revalidates and resumes it — the requester does"
             " not reissue it, and this approval is spent once"

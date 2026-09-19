@@ -25,6 +25,8 @@ What this repository's coordination ledger still holds to do: the tasks not yet 
 
 ## Open handoffs
 
-No handoff is open.
+| # | What | Standing | Node |
+| --- | --- | --- | --- |
+|  | **[Containment is the cause, and the wake mechanism is intact — both demonstrated rather than argued. Two Claude sessions inside one container, sharing one /tmp/cc-socks, discover each other (ListAgents listed the second as &#x27;longprobe [88d4e9] · interactive · busy&#x27;), a native SendMessage to it returned success, and the peer dropped its own work and answered the message. The five peers on this repository&#x27;s roster are unreachable for exactly one reason: each runs in its own container, where /tmp is the container&#x27;s own overlay, so each session&#x27;s socket directory holds only its own socket. Nothing about wake() or the runtime broke; visibility did, when contained launches became the posture on 2026-08-25 (fa3cc672b, hardened ae7ccdad7 and c35a99051). Two earlier conclusions in this record were wrong and are corrected below: the policy stop is not structural, and a same-container probe that saw nobody was blind in one direction only. What is left is three decisions, which are the user&#x27;s: whether to declare a host bridge for the socket directory and how, whether to declare the handle at join, and what shape the policy carve-out takes.](lup:916989542a4c)** — Native SendMessage as the wake for an idle Claude peer: why it never carries today, and what would make it | held | `916989542a4c` |
 
-Generated from this repository's ledger: 4 node(s), 0 edge(s); 4 coordination:task; 0 coordination:handoff; newest record 2026-09-10T11:17:58.785054+00:00. Regenerate with `uv run lup-devtools ledger writeup`.
+Generated from this repository's ledger: 6 node(s), 0 edge(s); 4 coordination:task; 2 coordination:handoff; newest record 2026-09-19T15:00:52.019040+00:00. Regenerate with `uv run lup-devtools ledger writeup`.

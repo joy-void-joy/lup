@@ -17,20 +17,27 @@ bare, or guarding nothing at all.
 """
 
 import ast
-from collections.abc import Set as AbstractSet
+from collections.abc import Callable, Set as AbstractSet
 from functools import cache
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
 
+import lup
 from lup.harness.codescan.common import (
+    NO_APPLICATION,
+    ApplicationRoots,
+    ProjectRuleFamily,
     PythonContext,
     PythonSource,
+    Rule,
     RuleStrength,
     file_level_ignore,
     ignore_rule_ids,
+    module_name,
 )
+from lup.policy.imports import ImportBoundary
 from lup.policy.kernel.edit import (
     IGNORE_RE,
     python_tree,
@@ -81,6 +88,10 @@ class RuleFinding(BaseModel, frozen=True):
     line: int
     message: str
     rule_id: str
+    text: str = ""
+    """The line the finding is about, where the rule kept it, so a report
+    shows the site under the verdict; empty where a rule reports a
+    declaration by its position alone."""
 
 
 class Directive(BaseModel, frozen=True):
@@ -90,6 +101,46 @@ class Directive(BaseModel, frozen=True):
     line: int
     rule_ids: set[str] | None
     file_level: bool = False
+
+
+class AuditedProject(BaseModel, arbitrary_types_allowed=True):
+    """Everything a rule read off the whole project is handed at once.
+
+    ``sources`` is every production Python module, the whole tree rather than
+    the files a caller is answerable for, because a class index or the names a
+    library's callers can replace are properties of the project and a verdict
+    scoped to a subset would differ from the sweep's. ``application`` is what
+    the repository declared about itself — where it composes natively, what
+    it generates — and ``boundaries`` the import ownership it holds, or
+    ``None`` for the library's own.
+    """
+
+    sources: list[PythonSource]
+    application: ApplicationRoots = NO_APPLICATION
+    boundaries: list[ImportBoundary] | None = None
+
+
+class ProjectRule(Rule):
+    """A rule decided over the whole project, which only the sweep can run.
+
+    ``audit`` is the rule: handed the project, it returns every missing,
+    untyped and spurious suppression verdict under this rule's id, the same
+    three kinds the line rules report, so one report holds both. The sweep
+    runs every project rule the set holds, so declaring one is what wires it
+    in — there is no list of calls to be missing from.
+
+    ``family`` and ``scope`` are what the reference card shows; a line rule
+    derives both from the table it sits in, a project rule says them.
+    """
+
+    family: ProjectRuleFamily
+    scope: str
+    audit: Callable[[AuditedProject], list[RuleFinding]]
+
+    @property
+    def defined_in(self) -> str:
+        """The module holding the audit, which is where the rule is enforced."""
+        return self.audit.__module__
 
 
 def dotted_name(node: ast.expr) -> str | None:
@@ -209,15 +260,15 @@ def build_symbol_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
                 property_member = has_decorator(
                     member, "property", source.module, aliases
                 )
-                if abstract and property_member:
-                    if member.name not in abstract_properties:
-                        abstract_properties.append(member.name)
-                elif abstract:
-                    if member.name not in abstract_methods:
-                        abstract_methods.append(member.name)
-                else:
-                    if member.name not in concrete_callables:
-                        concrete_callables.append(member.name)
+                match (abstract, property_member):
+                    case (True, True):
+                        bucket = abstract_properties
+                    case (True, False):
+                        bucket = abstract_methods
+                    case _:
+                        bucket = concrete_callables
+                if member.name not in bucket:
+                    bucket.append(member.name)
             bases = [
                 resolve_name(name, source.module, aliases)
                 for base in node.bases
@@ -237,6 +288,60 @@ def build_symbol_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
                 member_lines=member_lines,
             )
     return symbols
+
+
+@cache
+def installed_library_sources() -> list[PythonSource]:
+    """Every module of the installed ``lup`` package, read once per process.
+
+    A project built on this library declares classes over its models -- a
+    ledger kind over ``LedgerNode``, a part over ``PromptPart`` -- and a rule
+    that resolves bases through the project's own files alone sees the
+    library's class as a name that resolves to nothing. Measured downstream:
+    a kind declared as ``class KnowledgeItem(LedgerNode, ABC)`` was reported
+    as a capability inheriting reusable behaviour, because the one base that
+    made it a variant union was outside the index. The library's sources are
+    what say what its classes are, so they are read beside the project's.
+
+    Read from wherever the package is installed -- an editable checkout or a
+    wheel -- and cached, because three rules index the same tree in one run
+    and the tree does not move during it.
+    """
+    root = Path(lup.__file__).resolve().parent
+    return [
+        PythonSource(
+            path=file,
+            module=module_name(Path(root.name) / file.relative_to(root)),
+            text=file.read_text(encoding="utf-8"),
+        )
+        for file in sorted(root.rglob("*.py"))
+        if "__pycache__" not in file.parts
+    ]
+
+
+@cache
+def library_index() -> dict[str, ClassSymbol]:
+    """The installed library's class index, built once per process.
+
+    Three rules index the same tree on every scan, and a project's test suite
+    scans hundreds of times; parsing three hundred modules for each would
+    cost more than the rules themselves.
+    """
+    return build_symbol_index(installed_library_sources())
+
+
+def project_index(sources: list[PythonSource]) -> dict[str, ClassSymbol]:
+    """The class index a project rule resolves through: the library's, then its own.
+
+    The project's symbols are laid over the library's, keyed by qualified
+    name, which is the whole difference between this repository and one built
+    on it: here every library module is also a scanned source and its own
+    reading wins, there the library arrives from its installation and fills
+    in what the project's files cannot say. Rules report only over the
+    sources they were handed; what the library contributes is resolution,
+    never a finding about the library.
+    """
+    return {**library_index(), **build_symbol_index(sources)}
 
 
 def descendants_of(symbols: dict[str, ClassSymbol], ancestors: set[str]) -> set[str]:

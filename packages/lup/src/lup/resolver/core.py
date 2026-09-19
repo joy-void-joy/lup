@@ -50,6 +50,7 @@ from lup.resolver.models import (
     ConcernStatus,
     ConcernOutcome,
     IntegrationRecord,
+    JoinProgress,
     MaterialQuestion,
     QuestionBatch,
     RecheckRuling,
@@ -660,21 +661,23 @@ class ResolverCore:
             )
             if persisted != current
         ]
-        if moved == ["configuration"] and self.adopt_config:
-            state = self.adopted()
-        elif moved:
-            # Naming neither what moved nor the way out left one recovery to
-            # guess at, and the run holding the most answers is the one that
-            # hits this: parking exposes a defect, and fixing the defect is
-            # what moves the configuration under the parked run.
-            raise ResolverInvariantError(
-                f"resolver run {state.run_id!r} was persisted under a different "
-                + " and ".join(moved)
-                + self.composition_delta(state)
-                + "; resume it from the same tree and gate, adopt the move with "
-                "--adopt-config once it reads as compatible, or abort it with "
-                "--abort <reason> to start a run that matches"
-            )
+        match moved, self.adopt_config:
+            case ["configuration"], True:
+                state = self.adopted()
+            case [_, *_], _:
+                # Naming neither what moved nor the way out left one recovery
+                # to guess at, and the run holding the most answers is the one
+                # that hits this: parking exposes a defect, and fixing the
+                # defect is what moves the configuration under the parked run.
+                raise ResolverInvariantError(
+                    f"resolver run {state.run_id!r} was persisted under a "
+                    "different "
+                    + " and ".join(moved)
+                    + self.composition_delta(state)
+                    + "; resume it from the same tree and gate, adopt the move "
+                    "with --adopt-config once it reads as compatible, or abort "
+                    "it with --abort <reason> to start a run that matches"
+                )
         if state.phase == ResolvePhase.ABORTED:
             raise ResolverInvariantError(
                 f"resolver run {state.run_id!r} was aborted: {state.abort_reason}"
@@ -926,146 +929,163 @@ class ResolverCore:
         retired = {item.concern_id for item in state.retirements}
         completed_ids = {outcome.concern_id for outcome in outcomes} | retired
         builder = DependencyBaseBuilder(state.root_base())
-        if state.integration is None:
-            for batch in graph.topological_batches():
-                selected = [
-                    item
-                    for item in batch
-                    if item.id in approved_ids and item.id not in completed_ids
-                ]
-                runnable = [
-                    concern
-                    for concern in selected
-                    if all(
-                        parent in commits or parent in retired
-                        for parent in concern.dependencies
-                    )
-                ]
-                unmet = "a dependency did not produce a verified commit"
-                for blocked in selected:
-                    if blocked in runnable:
-                        continue
-                    await self.run_state.settle_concern(
-                        ConcernOutcome(
-                            concern_id=blocked.id,
-                            branch=lease_by_concern[blocked.id].branch,
-                            failure=unmet,
-                        ),
-                        ConcernStatus.FAILED,
-                        unmet,
-                    )
-                    completed_ids.add(blocked.id)
+        match state.integration:
+            case None:
+                for batch in graph.topological_batches():
+                    selected = [
+                        item
+                        for item in batch
+                        if item.id in approved_ids and item.id not in completed_ids
+                    ]
+                    runnable = [
+                        concern
+                        for concern in selected
+                        if all(
+                            parent in commits or parent in retired
+                            for parent in concern.dependencies
+                        )
+                    ]
+                    unmet = "a dependency did not produce a verified commit"
+                    for blocked in selected:
+                        if blocked in runnable:
+                            continue
+                        await self.run_state.settle_concern(
+                            ConcernOutcome(
+                                concern_id=blocked.id,
+                                branch=lease_by_concern[blocked.id].branch,
+                                failure=unmet,
+                            ),
+                            ConcernStatus.FAILED,
+                            unmet,
+                        )
+                        completed_ids.add(blocked.id)
 
-                # Capped rather than gathered wholesale. A concern still
-                # waiting on the cap has started nothing and recorded
-                # nothing, so an interruption leaves it exactly as the lease
-                # phase left it and the next batch selects it again — which
-                # is what makes a cut wave resumable rather than lost.
-                #
-                # The population's own wave rather than one assembled here.
-                # How many agents run at once, which of them are running, and
-                # what a close reaches are three facts about the population,
-                # and a phase that fanned out for itself answered the last
-                # two differently from the roster every door reads.
-                runnable_by_id = {concern.id: concern for concern in runnable}
+                    # Capped rather than gathered wholesale. A concern still
+                    # waiting on the cap has started nothing and recorded
+                    # nothing, so an interruption leaves it exactly as the
+                    # lease phase left it and the next batch selects it again
+                    # — which is what makes a cut wave resumable rather than
+                    # lost.
+                    #
+                    # The population's own wave rather than one assembled
+                    # here. How many agents run at once, which of them are
+                    # running, and what a close reaches are three facts about
+                    # the population, and a phase that fanned out for itself
+                    # answered the last two differently from the roster every
+                    # door reads.
+                    runnable_by_id = {concern.id: concern for concern in runnable}
 
-                async def execute_for(opened: ActorRef) -> ConcernExecution:
-                    """This address's concern, carried through its whole work."""
-                    return await self.executor.execute_concern(
-                        runnable_by_id[opened.id],
-                        lease_by_concern[opened.id],
-                        commits,
-                        builder,
+                    async def execute_for(opened: ActorRef) -> ConcernExecution:
+                        """This address's concern, carried through its whole work."""
+                        return await self.executor.execute_concern(
+                            runnable_by_id[opened.id],
+                            lease_by_concern[opened.id],
+                            commits,
+                            builder,
+                        )
+
+                    results = await self.actors.work_all(
+                        execute_for,
+                        [
+                            ActorRef(kind="worker", id=concern.id)
+                            for concern in runnable
+                        ],
                     )
+                    failures = [
+                        result
+                        for result in results
+                        if isinstance(result, BaseException)
+                    ]
+                    executions = [
+                        result
+                        for result in results
+                        if not isinstance(result, BaseException)
+                    ]
+                    for execution in executions:
+                        if (
+                            execution.outcome.verified
+                            and execution.outcome.commit is not None
+                        ):
+                            commits[execution.outcome.concern_id] = (
+                                execution.outcome.commit
+                            )
+                        completed_ids.add(execution.outcome.concern_id)
+                    # Every outcome above was persisted beside its own
+                    # terminal transition, so the batch reads the record back
+                    # rather than keeping a second copy that an interruption
+                    # could contradict.
+                    state = self.require_state()
+                    outcomes = list(state.outcomes)
+                    bases = list(state.bases)
+                    state = state.model_copy(
+                        update={"phase": ResolvePhase.WORKERS, "bases": bases}
+                    )
+                    self.persist(state)
+                    self.repository.write_agent_round(state)
+                    if failures:
+                        errors = [
+                            failure
+                            for failure in failures
+                            if isinstance(failure, Exception)
+                        ]
+                        if len(errors) != len(failures):
+                            raise ResolverInvariantError(
+                                "parallel concern execution was cancelled"
+                            )
+                        # A host fault reaches every concern in the batch at
+                        # once, so it decides the batch even when only some
+                        # of them had reached the provider. Nothing here is
+                        # worth asking a human about until the host works
+                        # again, which is why this outranks a park rather
+                        # than joining it.
+                        faults = [
+                            error
+                            for error in errors
+                            if isinstance(error, ResolverEnvironmentFault)
+                        ]
+                        if faults:
+                            raise merge_faults(faults)
+                        parked = [
+                            error
+                            for error in errors
+                            if isinstance(error, ResolverAwaitingAnswers)
+                        ]
+                        if parked and len(parked) == len(errors):
+                            raise merge_parked(parked)
+                        # A drain reaches every concern in the batch the same
+                        # way a host fault does, and says as little about any
+                        # of them: an operator asked, and each one stopped
+                        # where stopping was free.
+                        drained = [
+                            error
+                            for error in errors
+                            if isinstance(error, ResolverDrained)
+                        ]
+                        if drained and len(drained) == len(errors):
+                            raise merge_drained(drained)
+                        raise ExceptionGroup("parallel concern failures", errors)
+                    if (request := self.questions.draining()) is not None:
+                        # The other junction the issue names. Concerns already
+                        # settled keep their outcomes; what does not happen is
+                        # the next batch being started.
+                        raise ResolverDrained(request.reason, [])
 
-                results = await self.actors.work_all(
-                    execute_for,
-                    [ActorRef(kind="worker", id=concern.id) for concern in runnable],
-                )
-                failures = [
-                    result for result in results if isinstance(result, BaseException)
-                ]
-                executions = [
-                    result
-                    for result in results
-                    if not isinstance(result, BaseException)
-                ]
-                for execution in executions:
-                    if (
-                        execution.outcome.verified
-                        and execution.outcome.commit is not None
-                    ):
-                        commits[execution.outcome.concern_id] = execution.outcome.commit
-                    completed_ids.add(execution.outcome.concern_id)
-                # Every outcome above was persisted beside its own terminal
-                # transition, so the batch reads the record back rather than
-                # keeping a second copy that an interruption could contradict.
                 state = self.require_state()
-                outcomes = list(state.outcomes)
-                bases = list(state.bases)
                 state = state.model_copy(
-                    update={"phase": ResolvePhase.WORKERS, "bases": bases}
+                    update={"phase": ResolvePhase.DEPENDENCY_BASES}
                 )
                 self.persist(state)
-                self.repository.write_agent_round(state)
-                if failures:
-                    errors = [
-                        failure
-                        for failure in failures
-                        if isinstance(failure, Exception)
-                    ]
-                    if len(errors) != len(failures):
-                        raise ResolverInvariantError(
-                            "parallel concern execution was cancelled"
-                        )
-                    # A host fault reaches every concern in the batch at
-                    # once, so it decides the batch even when only some of
-                    # them had reached the provider. Nothing here is worth
-                    # asking a human about until the host works again, which
-                    # is why this outranks a park rather than joining it.
-                    faults = [
-                        error
-                        for error in errors
-                        if isinstance(error, ResolverEnvironmentFault)
-                    ]
-                    if faults:
-                        raise merge_faults(faults)
-                    parked = [
-                        error
-                        for error in errors
-                        if isinstance(error, ResolverAwaitingAnswers)
-                    ]
-                    if parked and len(parked) == len(errors):
-                        raise merge_parked(parked)
-                    # A drain reaches every concern in the batch the same way
-                    # a host fault does, and says as little about any of
-                    # them: an operator asked, and each one stopped where
-                    # stopping was free.
-                    drained = [
-                        error for error in errors if isinstance(error, ResolverDrained)
-                    ]
-                    if drained and len(drained) == len(errors):
-                        raise merge_drained(drained)
-                    raise ExceptionGroup("parallel concern failures", errors)
-                if (request := self.questions.draining()) is not None:
-                    # The other junction the issue names. Concerns already
-                    # settled keep their outcomes; what does not happen is
-                    # the next batch being started.
-                    raise ResolverDrained(request.reason, [])
-
-            state = self.require_state()
-            state = state.model_copy(update={"phase": ResolvePhase.DEPENDENCY_BASES})
-            self.persist(state)
-            state = state.model_copy(update={"phase": ResolvePhase.REVIEW})
-            self.persist(state)
-            await self.approve_assembly(state, outcomes)
-            state = await self.integrate(state, outcomes)
-        elif state.integration is None or not state.integration.completed:
-            # A resumed run re-enters integration until the record says it
-            # finished. `completed` is written once verification passes, which
-            # is the last mechanical fact the run produces — the judgement on
-            # top of it belongs to whoever opens the journal afterwards.
-            state = await self.integrate(state, outcomes)
+                state = state.model_copy(update={"phase": ResolvePhase.REVIEW})
+                self.persist(state)
+                await self.approve_assembly(state, outcomes)
+                state = await self.integrate(state, outcomes)
+            case IntegrationRecord(completed=False):
+                # A resumed run re-enters integration until the record says
+                # it finished. `completed` is written once verification
+                # passes, which is the last mechanical fact the run produces
+                # — the judgement on top of it belongs to whoever opens the
+                # journal afterwards.
+                state = await self.integrate(state, outcomes)
         self.land_nested(state)
         return self.manifest(self.release(state))
 
@@ -1102,19 +1122,13 @@ class ResolverCore:
                 # last join it recorded, so the joins already built survive
                 # and only the interrupted merge and its index are discarded;
                 # one that never started expects the source commit.
-                if (
-                    state.integration is not None
-                    and state.integration.commit is not None
-                ):
-                    recorded = True
-                    expected = state.integration.commit
-                elif state.join_progress is not None:
-                    recorded = True
-                    expected = state.join_progress.commit
-                else:
-                    recorded = False
-                    expected = state.root_base().commit
-                self.restore_worktree(lease, expected, recorded)
+                match state.integration, state.join_progress:
+                    case IntegrationRecord(commit=str() as commit), _:
+                        self.restore_worktree(lease, commit, True)
+                    case _, JoinProgress(commit=commit):
+                        self.restore_worktree(lease, commit, True)
+                    case _:
+                        self.restore_worktree(lease, state.root_base().commit, False)
                 continue
             outcome = (
                 outcomes[lease.concern_id] if lease.concern_id in outcomes else None

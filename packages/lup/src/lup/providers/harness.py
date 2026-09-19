@@ -19,7 +19,7 @@ from lup.providers.codex.harness import (
     CodexSkillRenderer,
     CodexSpellings,
 )
-from lup.harness.codescan.portable import prose_breaches
+from lup.harness.codescan.portable import PORTABLE_RULE
 from lup.harness.contracts import NativeSpellings
 from lup.harness.prompts import SpelledPromptRenderer
 from lup.harness.models import (
@@ -113,7 +113,7 @@ def reject_native_prose(source: Harness) -> None:
     Composition is the only place that sees the assembled text, so a
     description built elsewhere and folded into a prompt is judged here too.
     """
-    breaches = prose_breaches(source, [ClaudeSpellings(), CodexSpellings()])
+    breaches = PORTABLE_RULE.judge(source, [ClaudeSpellings(), CodexSpellings()])
     if breaches:
         named = ", ".join(
             f"{breach.declaration_id} names {breach.spelling!r}"
@@ -123,6 +123,16 @@ def reject_native_prose(source: Harness) -> None:
             "prose every tree renders must name no platform; a typed part "
             f"spells these for each runtime instead: {named}"
         )
+
+
+def worker_identity_of(source: Harness) -> str:
+    """The identity a resolver worker declares, or nothing where none is declared.
+
+    A project that declined the resolver module has no worker session, so the
+    policy it compiles grants autonomy to nobody: the renderers read the empty
+    spelling as an empty list rather than as a session called "".
+    """
+    return source.resolver.worker_identity if source.resolver is not None else ""
 
 
 def compile_claude(source: Harness) -> ArtifactTree:
@@ -145,9 +155,7 @@ def compile_claude(source: Harness) -> ArtifactTree:
         artifacts.extend(mcp_renderer.render(plugin).artifacts)
         if plugin.hooks is not None:
             artifacts.extend(
-                ClaudeHookRenderer(
-                    plugin.name, source.resolver.worker_identity, spellings
-                )
+                ClaudeHookRenderer(plugin.name, worker_identity_of(source), spellings)
                 .render(plugin.hooks)
                 .artifacts
             )
@@ -201,9 +209,7 @@ def compile_codex(source: Harness) -> ArtifactTree:
         artifacts.extend(manifest_renderer.render(plugin).artifacts)
         if plugin.hooks is not None:
             artifacts.extend(
-                CodexHookRenderer(
-                    plugin.name, source.resolver.worker_identity, spellings
-                )
+                CodexHookRenderer(plugin.name, worker_identity_of(source), spellings)
                 .render(plugin.hooks)
                 .artifacts
             )

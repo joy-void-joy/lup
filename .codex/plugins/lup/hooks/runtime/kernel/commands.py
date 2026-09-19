@@ -34,7 +34,6 @@ from .effects import (
     EffectRow,
     declare,
     declared_verdict,
-    member_for,
     purpose_of,
     verdict_for,
 )
@@ -61,11 +60,19 @@ from .semantics import UnjudgedAmbient
 
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
 IN_PLACE_SED_REFUSAL = (
-    "in-place sed bypasses every gate an edit is judged by — the anti-pattern"
-    " table, the review-note gate, the size gate, and the protected paths. For"
-    " a rename across many sites, `rename_symbol` resolves scopes an"
+    "in-place sed names no file, so what it rewrites cannot be checked"
+)
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+IN_PLACE_SED_RECOVERY = (
+    "For a rename across many sites, `rename_symbol` resolves scopes an"
     " exact-string substitution cannot tell apart; otherwise make the change"
-    " through the edit tool, which is what those gates read"
+    " with a file edit, which the edit gates read."
+)
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+UNREAD_SED_RECOVERY = (
+    "The edit gates judge the file a rewrite would produce, and it could not be"
+    " produced here. Make the change with a file edit, which carries its own"
+    " content."
 )
 
 
@@ -114,6 +121,15 @@ def row_verdict(
     is now about, rather than leaving it read off the operation nobody asked
     about.
     """
+    if row["operator_only"]:
+        return KernelDecision(
+            "deny",
+            row["reason"],
+            hard=True,
+            rule=row["rule"],
+            evaluator="shell-vocabulary",
+            recovery=row["recovery"],
+        )
     settled = row["checkpoint"] if checkpoint is None else checkpoint
     declared = row["effects"] if effects is None else effects
     purpose = purpose_of(declared, EffectEvidence()) if effect == "ask" else None
@@ -129,6 +145,7 @@ def row_verdict(
         purpose=purpose,
         rule=row["rule"],
         evaluator="shell-vocabulary",
+        recovery=row["recovery"] if effect in ("ask", "deny") else "",
     )
 
 
@@ -153,15 +170,14 @@ class WriteFacts(TypedDict):
     anything confines the write is the whole of the answer.
     """
 
-    worktrees: list[str]
-    """Every checkout git calls part of this repository, measured on the host.
+    checkout_root: str
+    """Where this repository sits, for reading an absolute path back against.
 
-    Read by the `-C` guard below, and measured rather than derived for exactly
-    the reason that sank the first version of it: this module is pure, so the
-    only test it can make alone is a path prefix, and a prefix read every
-    absolute spelling as outside. Asked of git on the host and handed down
-    here, the question becomes one of identity, which a sibling worktree
-    answers wherever it happens to sit on disk.
+    The declared roles are anchored at the repository top, so an absolute
+    spelling reaches none of them and one file gets two answers depending on
+    how a caller happened to name it. A machine's own path rather than
+    anything this repository declares, so it crosses from the host per call;
+    empty leaves every reading exactly as it was.
     """
 
 
@@ -216,7 +232,7 @@ def no_write_facts() -> WriteFacts:
         path_roles=[],
         path_rules=[],
         contained=False,
-        worktrees=[],
+        checkout_root="",
     )
 
 
@@ -263,7 +279,7 @@ def flag_write_verdict(
         """
         known = facts["existing"]
         existing = known is None or target in known
-        scope = write_scope(target, facts["path_roles"])
+        scope = write_scope(target, facts["path_roles"], facts["checkout_root"])
         return WriteAnswer(
             effect=verdict_for(
                 [
@@ -350,7 +366,10 @@ def verb_loss_scope(
     if targets is None:
         return None
     if any(
-        write_checkpoint(write_scope(target, facts["path_roles"])) == "unrecoverable"
+        write_checkpoint(
+            write_scope(target, facts["path_roles"], facts["checkout_root"])
+        )
+        == "unrecoverable"
         for target in targets
     ):
         return "unrecoverable"
@@ -591,9 +610,8 @@ def apply_command_row(
             return row_verdict(
                 row,
                 "ask",
-                f"{named} names the destination by {form} rather than by a"
-                " remote this repository holds — sending work there requires"
-                " approval",
+                f"{named} sends work to a {form} rather than to a remote this"
+                " repository holds",
             )
     if stated == "allow" and row["ask_refspecs"] and not probing:
         # No opacity test of its own: a row declaring refspec effects declares
@@ -643,93 +661,10 @@ class Subcommand(TypedDict):
     remainder: list[str]
 
 
-def redirected_verb_only_reads(
-    arguments: list[str],
-    value_flags: list[str],
-    rows: list[ShellRuleRow],
-) -> bool:
-    """Whether a directory redirect leads to a verb that only reads.
-
-    The guard on `-C` exists because the verb behind it is answered by a row
-    reasoning about *this* worktree: ``git -C /elsewhere commit`` reads as
-    reversible on the strength of a reflog that is somewhere else. That
-    premise is about mutation. A verb that only reads has no reflog in it to
-    be somebody else's, so the redirect changes which tree is read and
-    nothing about what the command does.
-
-    Where the redirect *points* is deliberately not asked, where a first
-    version required it to stay inside the checkout. The argument for asking
-    was that ``git -C /elsewhere log`` is an outside read, which a row
-    declaring one `project` scope for its verb cannot raise. What refutes it
-    is that no other spelling of the same read raises it either: ``cd
-    /elsewhere && git log`` is two allowed segments and ``cat
-    /elsewhere/file`` is an allowed read, both measured. So the question
-    deterred nothing and cost a turn every time, and its own text said as
-    much -- it named `cd` into that tree as the way through. A question
-    whose remedy is the unguarded spelling of the same act is friction
-    wearing a boundary's clothes.
-
-    Which leaves it costing most exactly where reading elsewhere is the
-    work: a sibling worktree, and a project the sync registry mounts for a
-    session to commit in. Both are addressed by absolute path, and the test
-    it used read every absolute path as outside.
-
-    The verb is judged by its own declared effects rather than by a list of
-    names kept here. A list would be a second statement of what `git log`
-    does, free to disagree with the table that already says it, and wrong
-    the first time a verb is reclassified.
-
-    Read as "observes", not as "allowed", and the difference is the whole
-    correctness of this: a commit is allowed for being reversible, so a first
-    version asking the verdict let ``git -C elsewhere commit`` through -- the
-    one case the guard was written for, and the one this still holds.
-    """
-    position = 0
-    while position < len(arguments):
-        word = arguments[position]
-        if not word.startswith("-"):
-            named = [row for row in rows if row["subcommand"] == word]
-            return bool(named) and all(
-                member_for(effect["kind"]).observes
-                for row in named
-                for effect in row["effects"]
-            )
-        position += 2 if word in value_flags else 1
-    return False
-
-
-def redirect_stays_in_this_repository(value: str, worktrees: list[str]) -> bool:
-    """Whether a directory redirect lands in a checkout of this same repository.
-
-    The `-C` guard exists because the verb behind it is answered by a row
-    reasoning about *this* worktree: `git -C /elsewhere commit` reads as
-    reversible on the strength of a reflog somewhere else. Inside this
-    repository that premise is satisfied rather than dodged -- linked worktrees
-    share one object store and one reflog, so the reversibility the row asserts
-    is the reflog that is actually there.
-
-    Compared against what git called a worktree rather than against a prefix of
-    this directory, which is the distinction the first version of this missed.
-    Worktrees of one repository sit wherever somebody put them, so a
-    containment test read every absolute spelling as outside and cost a turn on
-    exactly the case where reaching another checkout is the work.
-
-    An unresolvable or relative value answers no. A redirect this cannot settle
-    keeps its question, which is the direction that costs an approval rather
-    than a boundary.
-    """
-    if opaque_argument(value) or not posixpath.isabs(value):
-        return False
-    resolved = posixpath.normpath(value)
-    return any(resolved == worktree for worktree in worktrees)
-
-
 def split_subcommand(
     executable: str,
     arguments: list[str],
     default: ShellRuleRow | None,
-    rows: list[ShellRuleRow] = [],
-    worktrees: list[str] = [],
 ) -> Subcommand | KernelDecision:
     """Find the subcommand word, honoring global value-taking and guarded flags.
 
@@ -738,9 +673,14 @@ def split_subcommand(
     command declared it runs, and a question that dropped the placement would
     approve one thing and perform another.
 
-    A guarded global that also takes a value is one that moves the command to
-    another tree, so the question names the way through: running the same verb
-    from inside that tree is judged on its own and needs no redirect.
+    A global that only moves the command to another directory is a value flag
+    and nothing more: the parser steps over its argument and the verb behind
+    it is judged by its own row, exactly as ``cd there && git <verb>`` is
+    judged by two segments. ``git -C /elsewhere commit`` was once a question
+    on the ground that the reflog which makes a commit reversible is in the
+    other tree -- and it is, and it is that tree's reflog, which undoes the
+    commit exactly as this one's would. Every other spelling of the same act
+    was allowed, so the question deterred nothing and cost a turn each time.
 
     A guarded global whose value is a *setting* is judged by the setting, the
     way `git config` is judged by the key it writes. `git -c core.pager=x`
@@ -769,39 +709,10 @@ def split_subcommand(
             ):
                 position += named["words"]
                 continue
-            if flag_matches(word, value_flags):
-                # Asked before the question is raised rather than after it is
-                # answered, because the answer here was the whole verdict: the
-                # flag returned before the subcommand word had been read, so
-                # `git -C . log` was a question about a redirect to nowhere in
-                # front of a verb that reads. The guard stands for everything
-                # else, and the redirect it names still applies.
-                following = arguments[position + 2 :]
-                if redirected_verb_only_reads(following, value_flags, rows):
-                    position += 2
-                    continue
-                # A redirect that stays inside this repository leaves the
-                # guard's own premise intact: what it protects is a row
-                # reasoning about this worktree's reflog, and every checkout of
-                # one repository shares that reflog. The verb behind it is
-                # judged exactly as it would be here, which is what the guard
-                # was asking to be sure of.
-                if position + 1 < len(arguments) and (
-                    redirect_stays_in_this_repository(
-                        arguments[position + 1], worktrees
-                    )
-                ):
-                    position += 2
-                    continue
-            redirect = (
-                " — or cd into that tree and run it there"
-                if flag_matches(word, value_flags)
-                else ""
-            )
             return row_verdict(
                 default,
                 "ask",
-                f"{executable} global flag {word} requires approval{redirect}",
+                f"{executable} global flag {word} changes how the command runs",
             )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])
@@ -854,9 +765,7 @@ def decide_command_rows(
             next(row for row in matches if not row["subcommand"]), arguments, measured
         )
     default = next((row for row in matches if not row["subcommand"]), None)
-    split = split_subcommand(
-        executable, arguments, default, matches, measured["worktrees"]
-    )
+    split = split_subcommand(executable, arguments, default)
     if isinstance(split, KernelDecision):
         return split
     subword = split["word"]
@@ -867,10 +776,17 @@ def decide_command_rows(
             return unlisted(f"{executable} {subword} is not classified")
         return apply_command_row(default, arguments, measured)
     if any(row["operation"] for row in subrows):
-        opword = next((word for word in remainder if not word.startswith("-")), "")
-        oprows = [row for row in subrows if opword and row["operation"] == opword]
+        operands = [word for word in remainder if not word.startswith("-")]
+        opword = next(iter(operands), "")
+        oprows = [
+            row
+            for row in subrows
+            if row["operation_path"]
+            and operands[: len(row["operation_path"])] == row["operation_path"]
+        ]
         if oprows:
-            return apply_command_row(oprows[0], remainder, measured)
+            matched = max(oprows, key=lambda row: len(row["operation_path"]))
+            return apply_command_row(matched, remainder, measured)
         subdefault = next((row for row in subrows if not row["operation"]), None)
         if subdefault is not None:
             return apply_command_row(subdefault, remainder, measured)
@@ -915,18 +831,19 @@ def decide_sed_words(words: list[str], context: "SedContext") -> KernelDecision:
     if not invocation["in_place"]:
         return KernelDecision("allow", "read-only sed script")
     if not invocation["targets"]:
-        return KernelDecision("deny", IN_PLACE_SED_REFUSAL)
+        return KernelDecision(
+            "deny", IN_PLACE_SED_REFUSAL, recovery=IN_PLACE_SED_RECOVERY
+        )
     documents = {row["target"]: row for row in context["rewritten_documents"]}
     verdicts = [
         rewrite_verdict(target, documents[target], context)
         if target in documents
         else KernelDecision(
             "ask",
-            f"sed would rewrite {target} in place and nothing read the result:"
-            " the edit gates judge the file this would produce, and that file"
-            " could not be produced. Make the change through the edit tool,"
-            " which carries its own content",
+            f"sed would rewrite {target} in place, and the result could not be"
+            " read to check it",
             purpose="quality_review",
+            recovery=UNREAD_SED_RECOVERY,
         )
         for target in invocation["targets"]
     ]
@@ -977,8 +894,8 @@ def rewrite_verdict(
         return verdict
     return KernelDecision(
         verdict.effect,
-        f"sed would rewrite {target} in place, and the edit gates refuse what"
-        f" it would produce: {verdict.reason}",
+        f"sed would rewrite {target} in place: {verdict.reason}",
+        recovery=verdict.recovery,
         checkpoint=verdict.checkpoint,
         purpose=verdict.purpose,
         rule=verdict.rule,
@@ -1167,9 +1084,7 @@ def decide_curl_words(
     if expect_value or expect_method:
         return unjudged("curl option has no value")
     if method not in ("GET", "HEAD"):
-        return KernelDecision(
-            "ask", f"curl {method} can change remote state — requires approval"
-        )
+        return KernelDecision("ask", f"curl {method} can change remote state")
     if not urls:
         return unjudged("curl has no URL")
     for url in urls:
@@ -1257,7 +1172,7 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
     if method.upper() not in GH_API_READ_METHODS:
         return KernelDecision(
             "ask",
-            f"gh api {method} can change remote state — requires approval",
+            f"gh api {method} can change remote state",
             purpose="external_consequence",
             rule="shell:gh.api",
             evaluator="gh-api-screen",
@@ -1300,6 +1215,57 @@ uv's; that they answer the install question is the judgement
 :func:`frozen_restore` states, so a project reading the flags differently
 names a different set here.
 """
+
+
+UV_ADD_VALUE_FLAGS = (
+    "--package",
+    "--group",
+    "--optional",
+    "--extra",
+    "--index",
+    "--default-index",
+    "--index-url",
+    "--extra-index-url",
+    "--find-links",
+    "-f",
+    "--branch",
+    "--tag",
+    "--rev",
+    "--python",
+    "-p",
+    "--constraint",
+    "-c",
+    "--bounds",
+    "--script",
+    "--project",
+    "--directory",
+    "--marker",
+    "-m",
+)
+"""The `uv add` options whose next word is a value rather than a package.
+
+uv's own spellings: what a question names as installed is every other operand,
+so an option that takes a value has to be stepped over or its value is read as
+a package. A project spelling more of them names a longer set here.
+"""
+
+
+def uv_add_operands(
+    arguments: list[str], value_flags: tuple[str, ...] = UV_ADD_VALUE_FLAGS
+) -> list[str]:
+    """The packages a `uv add` names, which is what its question is about."""
+
+    def operands():
+        expecting = False
+        for word in arguments:
+            if expecting:
+                expecting = False
+                continue
+            expecting = word in value_flags
+            if not expecting and not word.startswith("-"):
+                yield word
+
+    return list(operands())
 
 
 def uv_package_source(
@@ -1364,6 +1330,7 @@ def declared_target_decision(
             if stated == "ask"
             else None
         ),
+        recovery=declared["recovery"] if stated in ("ask", "deny") else "",
     )
 
 
@@ -1422,9 +1389,26 @@ def decide_uv(
         pinned = frozen_restore(words[2:], list(frozen), list(UV_FOREIGN_SOURCE_FLAGS))
         if pinned is not None:
             return pinned
-    if subcommand in ("add", "sync"):
+    # Named in the question: which packages `add` fetches, and that `sync`
+    # resolves the whole declaration anew, which is what the pinned spelling
+    # the recovery names does not. "Installing a package" said neither.
+    if subcommand == "add":
+        named = uv_add_operands(words[2:])
         return KernelDecision(
-            "ask", "installing a package fetches and runs its build code"
+            "ask",
+            f"uv add fetches and runs the build code of {', '.join(named)}"
+            if named
+            else f"uv add fetches and runs the build code of what it adds — `{' '.join(words)}`",
+        )
+    if subcommand == "sync":
+        return KernelDecision(
+            "ask",
+            "uv sync resolves every dependency anew and runs each package's build"
+            f" code — `{' '.join(words)}`",
+            recovery=(
+                "`uv sync --frozen` or `--locked` installs what the lockfile already"
+                " pins by hash, and is allowed."
+            ),
         )
     if subcommand in ("remove", "lock"):
         redirect = uv_package_source(words[2:])
@@ -1432,7 +1416,7 @@ def decide_uv(
             return KernelDecision(
                 "ask",
                 f"{redirect} takes packages from somewhere this project does not"
-                " declare — requires approval",
+                " declare",
             )
         return KernelDecision("allow", "writes what this project already declares")
     if subcommand == "cache":
@@ -1471,22 +1455,24 @@ def decide_uv(
             subject = "uv run -c" if run_command == "-c" else f"uv run {run_command} -c"
             return KernelDecision(
                 "deny",
-                f"{subject}: inline code is not allowed — a named script"
-                " file can be reviewed and run again",
+                f"{subject}: inline code leaves nothing behind to review",
+                recovery="Write it to a named script file, which can be reviewed"
+                " and run again.",
             )
         if module_root is not None and declared_root is None:
             return KernelDecision(
                 "deny",
                 f"uv run -m: `{module_root}` is not a module root this project"
-                " declares — name a script file instead, or declare the root"
-                " as a runner target",
+                " declares",
+                recovery="Name a script file instead, or declare the root as a"
+                " runner target.",
             )
         if interpreted and not named:
             return KernelDecision(
                 "deny",
-                f"the bare interpreter uv run {run_command}: an interpreter with"
-                " nothing to run leaves nothing behind to read — name a script"
-                " file",
+                f"the bare interpreter uv run {run_command} runs whatever it is"
+                " fed, and leaves nothing behind to review",
+                recovery="Name a script file.",
             )
         # Between the refusal above and the target's own verdict below, which
         # is where the lattice would put it anyway: a deny outranks an ask,
@@ -1499,14 +1485,21 @@ def decide_uv(
         # interpreter branch answered and returned first. Then measured
         # sitting above the refusal, which was worse:
         # `uv run --with X python -c 'code'` softened from deny to ask.
-        risky = ("--with", "--with-editable", "--with-requirements", "--env-file")
-        if any(
-            word == option or word.startswith(option + "=")
-            for word in words[2:]
+        risky = ["--with", "--with-editable", "--with-requirements", "--env-file"]
+        # Named in the question, because what is being installed is the whole
+        # of what an approver weighs: "external code" told them a source was
+        # involved and nothing about which one.
+        fetched = [
+            f"{option} {carried['value']}"
+            for position, word in enumerate(words[2:], start=2)
             for option in risky
-        ):
+            if (carried := carried_setting(word, [option], words[position + 1 :]))[
+                "value"
+            ]
+        ]
+        if fetched:
             return KernelDecision(
-                "ask", "uv run --with fetches and executes external code"
+                "ask", f"uv run fetches and runs external code: {' '.join(fetched)}"
             )
         # Above the interpreter's own allow, because `python -m examples.x`
         # reaches both and the module root is the more specific statement:

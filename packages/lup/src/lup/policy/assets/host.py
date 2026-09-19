@@ -26,6 +26,7 @@ from datetime import UTC, datetime, timedelta
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 
@@ -289,6 +290,100 @@ def script_run_nudge(
     )
 
 
+def review_hook_call(
+    root: Path,
+    session: str,
+    tool: str,
+    arguments: str,
+    preconditions: str,
+    reason: str,
+    rule: str,
+    purpose: str,
+    reviewer: str,
+) -> dict[Literal["state", "id", "reason"], str]:
+    """Park a native call or spend its explicit, single-use reviewer answer."""
+    if not session:
+        return {
+            "state": "unavailable",
+            "id": "",
+            "reason": "the hook carries no session_id",
+        }
+    payload = json.loads(arguments)
+    before = json.loads(preconditions)
+    material = json.dumps(
+        [session, str(root), tool, payload, before, reason, rule, purpose, reviewer],
+        sort_keys=True,
+    )
+    fingerprint = sha256(material.encode()).hexdigest()
+    log = root / ".lup/questions.jsonl"
+
+    def recorded():
+        if not log.exists():
+            return
+        for line in log.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            yield json.loads(line)
+
+    entries = {entry["id"]: entry for entry in recorded()}
+    matches = [
+        entry
+        for entry in entries.values()
+        if entry["fingerprint"] == fingerprint
+        and "resumption" in entry
+        and entry["resumption"] == "native_retry"
+    ]
+    entry = matches[-1] if matches else None
+    if entry is not None and entry["state"] == "approved":
+        answer = entry["answer"]
+        if not answer or not answer["approved"] or answer["principal"] == session:
+            raise ValueError("hook approval has no independent affirmative answer")
+        if answer["receipt"] != "recorded":
+            raise ValueError("a native permission request is not a recorded approval")
+        claim = root / ".lup/review-claims" / entry["id"]
+        claim.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with claim.open("x", encoding="utf-8") as handle:
+                handle.write(fingerprint)
+        except FileExistsError:
+            entry = None
+        else:
+            entry["state"] = "dispatched"
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+            return {"state": "approved", "id": entry["id"], "reason": ""}
+    if entry is not None and entry["state"] in ("pending", "rejected"):
+        return {"state": entry["state"], "id": entry["id"], "reason": entry["reason"]}
+    identifier = os.urandom(16).hex()
+    entry = {
+        "id": identifier,
+        "fingerprint": fingerprint,
+        "reason": reason,
+        "rule": rule,
+        "purpose": purpose or None,
+        "requirement": reviewer,
+        "eligible": [],
+        "chain_resolved": False,
+        "state": "pending",
+        "created": datetime.now(UTC).isoformat(),
+        "preconditions": before,
+        "resumption": "native_retry",
+        "operation": {
+            "id": identifier,
+            "session": session,
+            "requester": session,
+            "tool": tool,
+            "payload": payload,
+            "cwd": str(root),
+            "worktree": str(root),
+        },
+    }
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    return {"state": "pending", "id": identifier, "reason": reason}
+
+
 def record_question(
     root: Path | None,
     command: str,
@@ -451,6 +546,153 @@ def record_deferral(
     except OSError:
         return ""
     return entry
+
+
+def approvals_log(root: Path) -> Path:
+    """Where the answers a question received are remembered, beside the checkout.
+
+    Append-only, for the reason the question relay is: the failure this
+    survives is a crash between two writes, and a file rewritten in place has
+    a window where it is neither the old record nor the new one. The latest
+    line for a fingerprint is its state, so forgetting is one more line rather
+    than an erasure. A function rather than a constant because the compiled
+    dispatcher carries this half's functions and nothing beside them.
+    """
+    return root / ".lup/hooks/approvals.jsonl"
+
+
+def approval_fingerprint(kind: str, subject: str, root: Path | None) -> str:
+    """One exact call as the memory keys it: what it does, and from where.
+
+    The kind and the text are the whole of what was judged -- a command, a
+    URL -- and the checkout it runs from is the third term, because the same
+    command means something else in another tree. What is deliberately left
+    out is the session: an answer is the author's, and the author is the same
+    person in the next session.
+    """
+    material = json.dumps([kind, subject, str(root) if root else ""], sort_keys=True)
+    return sha256(material.encode()).hexdigest()
+
+
+def approval_subject(
+    tool: str, tool_input: dict
+) -> dict[Literal["kind", "text"], str] | None:
+    """What one call did, as the memory keys it, for the tools it remembers.
+
+    A shell command and a fetch, under either runtime's name for them. An
+    edit is left out on purpose: its exact call includes the document it
+    replaces, which its first application changed, so a repeat is never the
+    same call and a memory of it would answer nothing.
+    """
+    if tool == "Bash" and "command" in tool_input:
+        return {"kind": "shell", "text": str(tool_input["command"])}
+    if tool in ("WebFetch", "web_fetch") and "url" in tool_input:
+        return {"kind": "fetch", "text": str(tool_input["url"])}
+    return None
+
+
+def approval_states(root: Path | None) -> dict[str, dict]:
+    """The latest line per fingerprint, which is that call's standing."""
+    if root is None:
+        return {}
+    path = approvals_log(root)
+
+    def entries():
+        try:
+            lines = (
+                path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+            )
+        except OSError:
+            return
+        for line in lines:
+            try:
+                held = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(held, dict) and "fingerprint" in held and "state" in held:
+                yield held
+
+    return {str(held["fingerprint"]): held for held in entries()}
+
+
+def noted_approval(root: Path | None, entry: dict) -> bool:
+    """Append one line, silent about a checkout that cannot be written."""
+    if root is None:
+        return False
+    path = approvals_log(root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as sink:
+            sink.write(json.dumps(entry, sort_keys=True) + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def remembered_approval(root: Path | None, fingerprint: str) -> str:
+    """When this exact call was answered yes, or ``""`` where it never was.
+
+    Forgetting is a later line, so a call retired with `dev hooks forget`
+    answers as one nobody ever approved.
+    """
+    latest = approval_states(root)
+    if fingerprint not in latest or latest[fingerprint]["state"] != "approved":
+        return ""
+    return str(latest[fingerprint]["at"])
+
+
+def note_asked(root: Path | None, fingerprint: str, kind: str, subject: str) -> None:
+    """Write down that this call was put to somebody, once per standing.
+
+    What makes the later observation an answer: a call that ran without ever
+    having been asked about was permitted by a rule, and remembering it would
+    be remembering nothing anybody decided.
+    """
+    latest = approval_states(root)
+    if fingerprint in latest and latest[fingerprint]["state"] == "asked":
+        return
+    noted_approval(
+        root,
+        {
+            "fingerprint": fingerprint,
+            "state": "asked",
+            "kind": kind,
+            "subject": subject,
+            "cwd": str(root) if root else "",
+            "at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def note_ran(root: Path | None, fingerprint: str) -> str:
+    """A call that was asked about and then ran was answered yes: remember it.
+
+    The runtime exposes the answer to no hook, so the answer is read off the
+    two events a hook does see. Only a standing question becomes an approval:
+    a call already remembered stays as it was, and one never asked about is
+    left alone.
+    """
+    latest = approval_states(root)
+    if fingerprint not in latest or latest[fingerprint]["state"] != "asked":
+        return ""
+    when = datetime.now(UTC).isoformat()
+    noted_approval(root, {**latest[fingerprint], "state": "approved", "at": when})
+    return when
+
+
+def forget_approval(root: Path | None, fingerprint: str) -> bool:
+    """Retire one remembered approval, so the next identical call asks again."""
+    latest = approval_states(root)
+    if fingerprint not in latest or latest[fingerprint]["state"] != "approved":
+        return False
+    return noted_approval(
+        root,
+        {
+            **latest[fingerprint],
+            "state": "forgotten",
+            "at": datetime.now(UTC).isoformat(),
+        },
+    )
 
 
 def managed_script_roots(root: Path | None) -> list[str]:
@@ -1483,35 +1725,6 @@ def tracked_write_targets(targets: list[str], root: Path | None = None) -> list[
     ]
 
 
-def repository_worktrees(root: Path | None = None) -> list[str]:
-    """Every checkout of the repository this session is in, as absolute paths.
-
-    Resolved here rather than in the kernel because the kernel is pure: it
-    holds `posixpath` and `re` and reaches no filesystem, so a question about
-    what git considers one repository cannot be asked from inside it. This is
-    the same arrangement every other host fact in this module uses -- the
-    reading is taken out here and threaded in as data.
-
-    Which is also why the first version of the `-C` guard tested a path
-    *prefix* and got it wrong: containment is all a pure evaluator can do
-    alone, and it read every absolute path as outside. Asked of git, the
-    question is one of identity instead, and a sibling worktree answers yes
-    wherever it happens to sit on disk.
-
-    An empty list wherever git cannot answer, which leaves every redirect
-    asking exactly as it does now. That is the safe direction: the cost of an
-    unanswerable question is one approval, and the cost of guessing yes is a
-    redirect into a repository nobody here vouched for.
-    """
-    where = Path.cwd() if root is None else root
-    listed = git_answers(["worktree", "list", "--porcelain"], where)
-    return [
-        str(Path(line.removeprefix("worktree ")).resolve())
-        for line in listed or []
-        if line.startswith("worktree ")
-    ]
-
-
 def unleased_write_targets(
     targets: list[str], measured: dict[str, list[str]], root: Path | None = None
 ) -> list[str]:
@@ -1658,247 +1871,6 @@ def peer_store(root: Path | None, store: list[str]) -> Path | None:
     return Path(shared).joinpath(*store)
 
 
-def stream_records(path: Path) -> list[dict]:
-    """Every legible JSON object an append-only record holds, oldest first.
-
-    A line that does not parse is skipped rather than raised on. These files
-    are appended to by other sessions while this one reads them, so a torn
-    final line is the ordinary state of a healthy store — and a reader that
-    failed on it would stop judging peer calls for the duration of somebody
-    else's write.
-    """
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-
-    def legible():
-        """Each line that is a JSON object, skipping whatever is not one."""
-        for line in raw.splitlines():
-            try:
-                loaded = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(loaded, dict):
-                yield loaded
-
-    return list(legible())
-
-
-def peer_members(directory: Path, roster_file: str) -> list[dict]:
-    """Every member the roster still holds, folded from its own record.
-
-    Keyed by kind and id rather than by the printed address, because a member
-    taken through a second round is that member further on and not a second
-    one — which is what the roster's own fold says, and a reader answering
-    differently would show one session twice.
-
-    A record about nobody standing is dropped rather than inventing a member,
-    so a description or a finish arriving before its join says nothing.
-    """
-    # lup: ignore[empty-collection] — a fold whose every step reads what the
-    # steps before it left, which is the one shape a comprehension has no
-    # spelling for: a description updates a member an earlier record created
-    standing: dict = {}
-    for record in stream_records(directory / roster_file):
-        actor = record["actor"] if "actor" in record else {}
-        if not isinstance(actor, dict) or "id" not in actor or "kind" not in actor:
-            continue
-        held = f"{actor['kind']}-{actor['id']}"
-        match record["type"] if "type" in record else "":
-            case "spawned" | "joined":
-                standing[held] = {**record, "running": True}
-            case "described" | "finished" if held in standing:
-                standing[held] = {
-                    **standing[held],
-                    **record,
-                    "running": record["type"] != "finished",
-                }
-            case _:
-                continue
-    return [member for member in standing.values() if member["running"]]
-
-
-def peer_name_claims(directory: Path, names_file: str) -> dict:
-    """Which member each name reaches now, the newest claim on a name winning.
-
-    Every name ever recorded rather than only the current ones: a name
-    somebody wrote down before a rename goes on reaching the session it named
-    until something else claims it, which is what the record is kept
-    append-only for. A sender typing the older name is typing what was correct
-    when they read it, and there is no error they could have been shown.
-
-    Newest wins by construction — a later record for one name replaces the
-    earlier entry as the comprehension walks the stream in order.
-    """
-    return {
-        record["cli_name"]: record["id"]
-        for record in stream_records(directory / names_file)
-        if "cli_name" in record and "id" in record
-    }
-
-
-def peer_addresses(
-    root: Path | None, store: list[str], roster_file: str, names_file: str
-) -> list[str]:
-    """Every spelling that currently reaches a live member of this roster.
-
-    Ids, the kind-qualified label a door prints, and whatever each member is
-    called now, because a sender types whichever of those it last read — a
-    check knowing only one of them would let the others through, which is the
-    failure that made a redirect reach nobody.
-
-    Live members only. A session that has left is not somewhere a durable
-    message would arrive either, so redirecting a send to it would trade one
-    call reaching nobody for another.
-    """
-    directory = peer_store(root, store)
-    if directory is None:
-        return []
-    members = peer_members(directory, roster_file)
-    live = [member["actor"]["id"] for member in members]
-    return sorted(
-        {
-            *live,
-            *[
-                f"{member['actor']['kind']}:{member['actor']['id']}"
-                for member in members
-            ],
-            *[
-                name
-                for name, held in peer_name_claims(directory, names_file).items()
-                if held in live
-            ],
-        }
-    )
-
-
-def peer_listing(
-    root: Path | None, store: list[str], roster_file: str, names_file: str
-) -> list[str]:
-    """One line per live member, as somebody choosing who to reach reads it.
-
-    The same four facts a console prints — who, which checkout they are in,
-    what they are on, and what carries a message to them — because a listing
-    naming members without saying what reaches them leaves a reader to guess
-    which of them will hear anything.
-    """
-    directory = peer_store(root, store)
-    if directory is None:
-        return []
-    names = peer_name_claims(directory, names_file)
-
-    def described(member: dict) -> list[str]:
-        """The parts one member's line is joined from, blanks included."""
-        actor = member["actor"]
-        called = [name for name, held in names.items() if held == actor["id"]]
-        worktree = member["worktree"] if "worktree" in member else ""
-        saying = member["description"] if "description" in member else ""
-        return [
-            called[-1] if called else actor["id"],
-            Path(worktree).name if worktree else "",
-            saying or (member["task"] if "task" in member else ""),
-            member["delivery"] if "delivery" in member else "",
-        ]
-
-    return [
-        " — ".join(part for part in described(member) if part)
-        for member in peer_members(directory, roster_file)
-    ]
-
-
-def claim_covers(claim: dict, candidate: str) -> bool:
-    """Whether a path about to be written falls under one standing claim."""
-    held = claim["path"]
-    if not claim["prefix"]:
-        return candidate == held
-    return candidate == held or candidate.startswith(held + "/")
-
-
-def peer_claims(directory: Path, touches_file: str) -> list[dict]:
-    """Every claim standing on the record, alive or not, folded in order.
-
-    Keyed by the kind as well as the path, because locking a directory and
-    touching a file of that name are different claims and a later record must
-    not silently convert one into the other.
-    """
-    # lup: ignore[empty-collection] — a fold whose every step reads what the
-    # steps before it left: a release answers against the claim an earlier
-    # record created, which is the one shape a comprehension cannot spell
-    standing: dict = {}
-    for record in stream_records(directory / touches_file):
-        actor = record["actor"] if "actor" in record else {}
-        path = record["path"] if "path" in record else ""
-        if not isinstance(actor, dict) or "id" not in actor or not path:
-            continue
-        kind = record["type"] if "type" in record else ""
-        subject = f"{'under' if kind in ('locked', 'released') else 'at'} {path}"
-        match kind:
-            case "touched" | "contested":
-                rivals = record["rivals"] if "rivals" in record else []
-                standing[subject] = {
-                    "path": path,
-                    "prefix": False,
-                    "holders": [
-                        actor,
-                        *[rival for rival in rivals if isinstance(rival, dict)],
-                    ],
-                }
-            case "locked":
-                standing[subject] = {"path": path, "prefix": True, "holders": [actor]}
-            case "released" if subject in standing:
-                if actor["id"] in [
-                    holder["id"] for holder in standing[subject]["holders"]
-                ]:
-                    del standing[subject]
-            case _:
-                continue
-    return list(standing.values())
-
-
-def claim_holders(
-    root: Path | None,
-    store: list[str],
-    roster_file: str,
-    names_file: str,
-    touches_file: str,
-    path_text: str,
-    mine: str,
-) -> list[str]:
-    """Who else, still working here, is holding the path a write would land on.
-
-    Live holders other than the asker. A claim expires with the session that
-    made it, so a departed holder is nobody to ask; and a session meeting its
-    own claim on every edit would be asked about its own work.
-
-    Named where a session has a name and identified by id otherwise, because
-    this reaches somebody deciding whom to ask, and an id is what you fall
-    back on when nothing has been called anything yet.
-    """
-    directory = peer_store(root, store)
-    if directory is None:
-        return []
-    live = [member["actor"]["id"] for member in peer_members(directory, roster_file)]
-    names = peer_name_claims(directory, names_file)
-    target = str(Path(path_text).resolve())
-    holding = [
-        holder["id"]
-        for claim in peer_claims(directory, touches_file)
-        if claim_covers(claim, target)
-        for holder in claim["holders"]
-        if holder["id"] in live and holder["id"] != mine
-    ]
-    return sorted(
-        {
-            next(
-                (name for name, held in names.items() if held == member),
-                member,
-            )
-            for member in holding
-        }
-    )
-
-
 def writable_snapshot(root: Path) -> dict:
     """What every file Git reports as moved looks like right now, by size and time.
 
@@ -2030,88 +2002,3 @@ def close_claim_window(
         ),
         "rivals": sorted(rivals),
     }
-
-
-def file_digest(path_text: str) -> str:
-    """What one file's bytes hash to, or nothing where they cannot be read.
-
-    Carried on the claim so a later reader can tell the content this session
-    left from whatever stands there now — which is what makes a claim evidence
-    of a change rather than only an assertion that one happened.
-    """
-    try:
-        return sha256(Path(path_text).read_bytes()).hexdigest()
-    except OSError:
-        return ""
-
-
-def member_actor(directory: Path, roster_file: str, member: str) -> dict | None:
-    """This session's own address as the roster holds it, or nothing.
-
-    Read rather than composed. A session that never joined has no address to
-    write claims under, and inventing one here would put a holder on the
-    record that no listing shows and nothing can ask.
-    """
-    return next(
-        (
-            found["actor"]
-            for found in peer_members(directory, roster_file)
-            if found["actor"]["id"] == member
-        ),
-        None,
-    )
-
-
-def record_claims(
-    root: Path | None,
-    store: list[str],
-    roster_file: str,
-    touches_file: str,
-    mine: str,
-    paths: list[str],
-    rivals: list[str],
-) -> None:
-    """Write down what this session's call changed, and who else it could be.
-
-    A claim per path. Where another session had a window open across the same
-    moment, every name goes on the record instead of one being guessed at: a
-    before-and-after comparison sees the change and cannot see who made it,
-    and a confident wrong author is worse than an honest pair, because the
-    next reader is deciding whether it is safe to write.
-
-    Silent on every failure. This runs after the work has already happened, so
-    the call it belongs to cannot be undone by refusing — and a claim nobody
-    could record costs a later reader an attribution, while a raised exception
-    here costs the session its ability to work.
-    """
-    directory = peer_store(root, store)
-    if directory is None or not mine or not paths:
-        return
-    actor = member_actor(directory, roster_file, mine)
-    if actor is None:
-        return
-    contenders = [
-        found
-        for other in rivals
-        for found in [member_actor(directory, roster_file, other)]
-        if found is not None
-    ]
-    stamped = datetime.now(UTC).isoformat()
-    lines = [
-        json.dumps(
-            {
-                "type": "contested" if contenders else "touched",
-                "actor": actor,
-                "at": stamped,
-                "path": path,
-                "digest": file_digest(path),
-                "rivals": contenders,
-            }
-        )
-        for path in paths
-    ]
-    try:
-        with (directory / touches_file).open("a", encoding="utf-8") as record:
-            record.write("".join(f"{line}\n" for line in lines))
-    except OSError:
-        return
