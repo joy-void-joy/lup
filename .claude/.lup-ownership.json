@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "bbab8c6b541acaeef2ea71459d010b159d32ee07ddcdbef150c7642b9f0ffe3d",
+  "source_digest": "51fa642b7775dfa06294634e643641cf64f73c701c93af58c45ae6bd641296e6",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "9e9386dfe5bd0f71138f1e5cd85603271afebbe0a71dbb7625182a5f0b58ccf7",
+      "sha256": "efa464cbaab39dc9b6b38f7e079f15145e49443ecda487698ffcafd68104be8f",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -352,7 +352,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/coordination_changes.py",
       "category": "generated",
-      "sha256": "c0b7a2d5c2018140dc9ac6d7a1acdd76154c139b55cfa0eb1a44062339c6683b",
+      "sha256": "3a795a88bf14195db62a83854489c44f61b1046188c0e13c412790ae90892272",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -555,7 +555,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "6f793be47a3d0ca61d3d60c944450e21edf6379f87bd960ff2c77ac662643248",
+      "sha256": "5681827f239a384451d3d830ccd3875bb37261f4b567b98f0c739c1a1f7924dc",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -611,7 +611,7 @@
     {
       "path": "docs/coordination.md",
       "category": "generated",
-      "sha256": "1f38f8374e77f9277da90cde246fb387dca2ee3fb3eec3fce0ca66d6cd36e21b",
+      "sha256": "62e075e8ee7692483844da57bcd448c9638a8c6d4813b8ad63474fc549243d10",
       "semantic_id": "docs.coordination",
       "executable": false
     },
