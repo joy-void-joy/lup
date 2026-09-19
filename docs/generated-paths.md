@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 103 artifacts
+## `claude` — 104 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -51,6 +51,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/commands/rebase.md` | lup.harness.content.skills.rebase |
 | `.claude/plugins/lup/commands/refactor-tools.md` | lup.harness.content.skills.refactor_tools |
 | `.claude/plugins/lup/commands/refactor.md` | lup.harness.content.skills.refactor |
+| `.claude/plugins/lup/commands/release.md` | lup.harness.content.skills.release |
 | `.claude/plugins/lup/commands/report.md` | lup.harness.content.skills.report |
 | `.claude/plugins/lup/commands/resolve-reviewer.md` | lup.harness.content.skills.resolve_reviewer |
 | `.claude/plugins/lup/commands/resolve.md` | lup.harness.content.skills.resolve |
@@ -116,7 +117,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 79 artifacts
+## `codex` — 80 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -190,6 +191,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/skills/rebase/SKILL.md` | lup.harness.content.skills.rebase |
 | `.codex/plugins/lup/skills/refactor-tools/SKILL.md` | lup.harness.content.skills.refactor_tools |
 | `.codex/plugins/lup/skills/refactor/SKILL.md` | lup.harness.content.skills.refactor |
+| `.codex/plugins/lup/skills/release/SKILL.md` | lup.harness.content.skills.release |
 | `.codex/plugins/lup/skills/report/SKILL.md` | lup.harness.content.skills.report |
 | `.codex/plugins/lup/skills/resolve-reviewer/SKILL.md` | lup.harness.content.skills.resolve_reviewer |
 | `.codex/plugins/lup/skills/resolve/SKILL.md` | lup.harness.content.skills.resolve |

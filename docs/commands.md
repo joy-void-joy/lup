@@ -61,6 +61,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
 | `dev relocate` | Move a module and repoint every import of it. |
 | `dev update` | Move the library, the native trees, and the copied half to one commit. |
+| `dev release` | Cut a release: close the changelog, move the version, tag it. |
 | `dev policy` | Show what the declared permission policy decides about an input, and why. |
 | `dev vocabulary` | Show every shell form the declared vocabulary judges, and how. |
 | `dev env status` | Where this project&#x27;s environment is, and who is installed in it. |
