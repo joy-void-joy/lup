@@ -569,6 +569,19 @@ class ShellCommandRule(SelectableRule, frozen=True):
     `ssh-add` with nothing after it adds the default key.
     """
     value_flags: list[str] = []
+    directory_flags: list[str] = []
+    """Flags whose value is the directory this command runs its paths from.
+
+    Not every flag that consumes a word: `git -C <dir>` runs git as though it
+    had been started there, so every path operand beside it resolves from
+    there, while `--git-dir` names a repository and `--work-tree` a tree
+    neither of which moves where an operand is read. Both consume a word, and
+    only one of them answers this, so the two are declared apart.
+
+    Read where a `cd` is read, and joined onto it: a command carrying one
+    inside a segment that already moved runs in the directory the two name
+    together.
+    """
     subcommands: list[ShellSubcommandRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
     checkpoint: CheckpointRequirement = ROOT_CHECKPOINT
@@ -695,6 +708,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 guarded_settings=[],
                 bare_reads=False,
                 value_flags=[],
+                directory_flags=[],
                 reason=operation.reason,
                 recovery=operation.recovery,
                 **axes.inherit(operation.declared(), "operation").row_fields(),
@@ -723,6 +737,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             guarded_settings=[],
             bare_reads=False,
             value_flags=[],
+            directory_flags=[],
             reason=subcommand.reason,
             recovery=subcommand.recovery,
             **axes.row_fields(),
@@ -753,6 +768,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             guarded_settings=list(command.guarded_settings),
             bare_reads=command.bare_reads,
             value_flags=list(command.value_flags),
+            directory_flags=list(command.directory_flags),
             reason=command.reason,
             recovery=command.recovery,
             **axes.row_fields(),

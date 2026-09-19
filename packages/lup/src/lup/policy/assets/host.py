@@ -1587,7 +1587,9 @@ def undo_snapshot(
     return reference
 
 
-def rewritten_text(scripts: list[str], target: str, root: Path) -> str | None:
+def rewritten_text(
+    scripts: list[str], target: str, root: Path
+) -> dict[Literal["text", "cause"], str | None]:
     """What one file would hold after these scripts, without touching the file.
 
     sed is run over the file and its output captured, which is the same
@@ -1596,18 +1598,29 @@ def rewritten_text(scripts: list[str], target: str, root: Path) -> str | None:
     leaves the result on standard output and the file as it was. A command
     still about to be refused has therefore changed nothing by being judged.
 
-    ``None`` wherever the answer is not established — the path is not a
-    regular file, sed is missing, sed itself rejected the script, or the
-    output is not text this can read. Each of those means nothing read what
-    would land, and the caller turns that into a question rather than a grant.
+    Both keys always stand and exactly one is filled: ``text`` is the
+    after-document, ``cause`` is what stopped one being produced.
+
+    A cause rather than a bare absence, because each of the four sends the
+    writer somewhere different: nothing stands at the path, something stands
+    there that a rewrite cannot replace, sed would not run the script, or what
+    came back is not text this can read. One sentence covering all four told a
+    writer who typed a wrong path the same thing it told one who aimed ``-i``
+    at a directory, and offered a recovery that fitted neither.
+
+    The cause crosses as the word this half read rather than as the
+    classifier's own literal, which this half may not name -- the arrangement
+    a checker's verdicts already cross by, and the kernel narrows it.
 
     The scripts are passed as ``-e`` expressions and the file as an operand
     after ``--``, so a filename beginning with a dash stays a filename and a
     script is never re-read as one.
     """
     landed = root / target
+    if not landed.exists():
+        return {"text": None, "cause": "missing"}
     if not landed.is_file():
-        return None
+        return {"text": None, "cause": "irregular"}
     expressions = [word for script in scripts for word in ("-e", script)]
     try:
         finished = subprocess.run(
@@ -1617,9 +1630,13 @@ def rewritten_text(scripts: list[str], target: str, root: Path) -> str | None:
             text=True,
             check=False,
         )
-    except (OSError, ValueError, UnicodeDecodeError):
-        return None
-    return finished.stdout if finished.returncode == 0 else None
+    except UnicodeDecodeError:
+        return {"text": None, "cause": "unreadable"}
+    except (OSError, ValueError):
+        return {"text": None, "cause": "refused"}
+    if finished.returncode:
+        return {"text": None, "cause": "refused"}
+    return {"text": finished.stdout, "cause": None}
 
 
 def recoverable_write_targets(

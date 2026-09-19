@@ -1504,7 +1504,12 @@ def git_rule(
     # program that pager names is reachable only through `-c` or `git config`,
     # which ask. Gating it would spend a question on the flag rather than on
     # what the flag could reach.
-    directory_flags = ["-C", "--git-dir", "--work-tree"]
+    # Three globals consume the word after them, and one of the three moves
+    # where an operand resolves: `-C` runs git as though it had been started
+    # in that directory, while `--git-dir` names a repository and
+    # `--work-tree` a tree, neither of which changes what a relative pathspec
+    # is read against. Two lists, because they answer two questions.
+    valued_flags = ["-C", "--git-dir", "--work-tree"]
     return ShellCommandRule(
         name="git",
         effects=[declare("unclassified_operation", scope="git")],
@@ -1522,7 +1527,8 @@ def git_rule(
             "--super-prefix",
             "--namespace",
         ],
-        value_flags=directory_flags,
+        value_flags=valued_flags,
+        directory_flags=["-C"],
         # The two globals that set a setting, judged by the same keys the
         # `config` verb is judged by — one statement about which settings hand
         # over execution or a destination, answering both spellings. Only

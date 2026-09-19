@@ -146,6 +146,13 @@ class Command(TypedDict):
     clauses: list[Clause]
     body: "Script"
     arms: list[Arm]
+    directory: str | None
+    """Where the shell stands when it runs this, spelled from the launch
+    directory and filled in by the placing pass in ``lex.py``. The empty
+    string is the launch directory itself; ``None`` is a walk that lost
+    track of where a ``cd`` left the shell, which makes every path word here
+    unresolvable rather than resolved against a directory the command never
+    ran in."""
 
 
 class Pipeline(TypedDict):
@@ -312,6 +319,7 @@ def command(
         clauses=clauses or [],
         body=body or empty_script(),
         arms=arms or [],
+        directory="",
     )
 
 

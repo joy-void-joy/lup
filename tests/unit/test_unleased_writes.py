@@ -27,6 +27,9 @@ MEASURED = {"writable_roots": ["/repo/tree/mine", "/repo/.git"]}
 SCRATCH = [PathRoleRow(root="tmp", role="scratch")]
 
 
+VOCABULARY = erase_shell_rules(default_vocabulary())
+
+
 def rows() -> list[ShellRuleRow]:
     """The offered vocabulary, which is what the contract describes."""
     return erase_shell_rules(default_vocabulary())
@@ -114,7 +117,7 @@ def test_a_read_outside_the_lease_is_not_a_question() -> None:
 def acted_on_outside_the_lease(command: str) -> list[str]:
     """The targets the hook hands the row: acted-on operands, resolved."""
     return unleased_write_targets(
-        shell_path_verb_targets(command), MEASURED, Path("/repo/tree/mine")
+        shell_path_verb_targets(command, VOCABULARY), MEASURED, Path("/repo/tree/mine")
     )
 
 

@@ -22,7 +22,7 @@ from .roles import (
     path_role,
     repository_relative,
 )
-from .rows import PathRoleRow, PathRuleRow
+from .rows import PathRoleRow, PathRuleRow, PathWord, ShellRuleRow
 
 
 class EffectiveCommand(TypedDict):
@@ -37,9 +37,15 @@ class EffectiveCommand(TypedDict):
 
 
 class VerbOperands(TypedDict):
-    """A path verb's operands, and whether every flag among them was inert."""
+    """A path verb's operands, and whether every flag among them was inert.
+
+    ``named`` is the same operands with the word each was read from, for a
+    caller that has to put one back after resolving it; ``operands`` is what
+    it reads as, for the callers that only ask which files.
+    """
 
     operands: list[str]
+    named: list[PathWord]
     inert: bool
 
 
@@ -498,21 +504,59 @@ def flag_write_targets(words: list[str], write_flags: list[str]) -> list[str]:
     guess -- what reads this uses it to relax a row, so an unnamed target
     leaves the row's own verdict standing and a misnamed one would not.
     """
-    targets: list[str] = []
+    return [named["path"] for named in flag_write_words(words, write_flags)]
+
+
+def global_span(words: list[str], rows: list[ShellRuleRow]) -> int:
+    """Where this command's global options end and its subcommand begins.
+
+    The boundary :func:`carried_subcommand` walks to, asked for the position
+    rather than for the word. A flag before it belongs to the command and a
+    flag after it to the subcommand, which is not a distinction any reader
+    can skip: ``git -C`` names a directory to run in and ``git commit -C``
+    reuses a commit message, so one spelling means two things and only the
+    boundary tells them apart.
+
+    ``len(words)`` where every word is a flag and no subcommand is named.
+    """
+    executable = posixpath.basename(words[0])
+    value_flags = [
+        flag
+        for row in rows
+        if row["command"] == executable and not row["subcommand"]
+        for flag in row["value_flags"]
+    ]
+    position = 1
+    while position < len(words):
+        if not words[position].startswith("-"):
+            return position
+        position += 2 if words[position] in value_flags else 1
+    return len(words)
+
+
+def flag_write_words(words: list[str], write_flags: list[str]) -> list[PathWord]:
+    """Which words those paths were read out of, and how each spells its path.
+
+    The positional reading :func:`flag_write_targets` is the path list of.
+    Both spellings of a value are here because both have to be put back once a
+    path is resolved against the directory its command runs in: a following
+    word is replaced whole, an attached one keeps its ``--output=`` in front.
+    """
+    named: list[PathWord] = []
     following = False
-    for word in words[1:]:
+    for index, word in enumerate(words[1:], start=1):
         if following:
             following = False
             if not word.startswith("-"):
-                targets.append(word)
+                named.append(PathWord(at=index, prefix="", path=word))
             continue
         name, sign, value = word.partition("=")
         if sign and name in write_flags:
             if value:
-                targets.append(value)
+                named.append(PathWord(at=index, prefix=f"{name}=", path=value))
             continue
         following = word in write_flags
-    return targets
+    return named
 
 
 def is_trusted_script(word: str, roots: list[str]) -> bool:
@@ -538,9 +582,9 @@ def path_verb_operands(words: list[str]) -> VerbOperands:
     operand rather than trust their positions.
     """
     allowed = SCRATCH_VERB_FLAGS[posixpath.basename(words[0])]
-    operands: list[str] = []
+    named: list[PathWord] = []
     inert = True
-    for word in words[1:]:
+    for index, word in enumerate(words[1:], start=1):
         if word == "--":
             continue
         if word.startswith("-") and len(word) > 1:
@@ -549,8 +593,10 @@ def path_verb_operands(words: list[str]) -> VerbOperands:
             ):
                 inert = False
             continue
-        operands.append(word)
-    return VerbOperands(operands=operands, inert=inert)
+        named.append(PathWord(at=index, prefix="", path=word))
+    return VerbOperands(
+        operands=[operand["path"] for operand in named], named=named, inert=inert
+    )
 
 
 class RestoreOperands(TypedDict):
@@ -562,6 +608,9 @@ class RestoreOperands(TypedDict):
 
     source: str | None
     paths: list[str]
+    named: list[PathWord]
+    """The same paths with the word each was read from, for a caller that has
+    to put one back after resolving it against the restore's directory."""
 
 
 def git_restore_operands(words: list[str]) -> RestoreOperands | None:
@@ -575,7 +624,7 @@ def git_restore_operands(words: list[str]) -> RestoreOperands | None:
     if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "restore":
         return None
     source: str | None = None
-    paths: list[str] = []
+    named: list[PathWord] = []
     position = 2
     while position < len(words):
         word = words[position]
@@ -592,13 +641,14 @@ def git_restore_operands(words: list[str]) -> RestoreOperands | None:
             continue
         if word.startswith("-"):
             return None
-        paths.append(word)
+        named.append(PathWord(at=position, prefix="", path=word))
         position += 1
+    paths = [path["path"] for path in named]
     if not paths or (source is not None and source.startswith("-")):
         return None
     if opaque_argument(source or "") or any(opaque_argument(word) for word in paths):
         return None
-    return RestoreOperands(source=source, paths=paths)
+    return RestoreOperands(source=source, paths=paths, named=named)
 
 
 def git_apply_patches(words: list[str]) -> list[str]:
@@ -620,11 +670,19 @@ def git_apply_patches(words: list[str]) -> list[str]:
     rejects whatever is not a patch, so a flag value swept up by mistake
     yields no targets rather than a target nobody writes.
     """
+    return [named["path"] for named in git_apply_words(words)]
+
+
+def git_apply_words(words: list[str]) -> list[PathWord]:
+    """Which words those patch files were read out of.
+
+    The positional reading :func:`git_apply_patches` is the file list of.
+    """
     if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "apply":
         return []
     return [
-        word
-        for word in words[2:]
+        PathWord(at=index, prefix="", path=word)
+        for index, word in enumerate(words[2:], start=2)
         if not word.startswith("-") and word != "--" and not opaque_argument(word)
     ]
 
@@ -1483,6 +1541,10 @@ class SedInvocation(TypedDict):
 
     scripts: list[str]
     targets: list[str]
+    named: list[PathWord]
+    """The same files with the word each was read from, for a caller that has
+    to put one back after resolving it against the rewrite's directory."""
+
     in_place: bool
     screened: bool
     """Whether every script only reads its input and writes standard output.
@@ -1503,12 +1565,12 @@ def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
     empty parse a caller could mistake for a harmless call.
     """
     scripts: list[str] = []
-    positional: list[str] = []
+    positional: list[PathWord] = []
     script_expected = False
     script_from_options = False
     sandbox = False
     in_place = False
-    for word in words[1:]:
+    for index, word in enumerate(words[1:], start=1):
         if script_expected:
             scripts.append(word)
             script_expected = False
@@ -1557,14 +1619,15 @@ def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
             if any(flag not in SED_SAFE_SHORT_FLAGS for flag in flags):
                 return unjudged(f"sed option {word!r} is not classified")
             continue
-        positional.append(word)
+        positional.append(PathWord(at=index, prefix="", path=word))
     if script_expected:
         return unjudged("sed expression flag has no script")
     if not script_from_options and positional:
-        scripts.append(positional.pop(0))
+        scripts.append(positional.pop(0)["path"])
     return SedInvocation(
         scripts=scripts,
-        targets=positional,
+        targets=[target["path"] for target in positional],
+        named=positional,
         in_place=in_place,
         screened=sandbox or all(safe_sed_script(script) for script in scripts),
     )
@@ -1599,9 +1662,18 @@ def sed_rewrite_operands(words: list[str]) -> list[str] | None:
     other unclassified command names, so a sed nobody judged is treated as
     one.
     """
+    named = sed_rewrite_words(words)
+    return None if named is None else [target["path"] for target in named]
+
+
+def sed_rewrite_words(words: list[str]) -> list[PathWord] | None:
+    """Which words those files were read out of.
+
+    The positional reading :func:`sed_rewrite_operands` is the file list of.
+    """
     if posixpath.basename(words[0]) != "sed":
         return None
     invocation = sed_invocation(words)
     if isinstance(invocation, KernelDecision):
         return []
-    return invocation["targets"] if invocation["in_place"] else []
+    return invocation["named"] if invocation["in_place"] else []

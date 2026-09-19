@@ -82,7 +82,14 @@ from kernel.lex import (
     shell_sed_rewrites,
     shell_write_targets,
 )
-from kernel.rows import DisplacedTargetRow, ResolutionRow, RewrittenFileRow
+from kernel.rows import (
+    DisplacedTargetRow,
+    ResolutionRow,
+    RewriteReading,
+    RewrittenFileRow,
+    UnreadFileRow,
+    unread_cause,
+)
 from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
@@ -159,7 +166,7 @@ def bash_decision(
     # partway through a verdict could answer from a file the first did not see.
     boundary = measured_boundary(cwd)
     inside = contained(boundary)
-    acted_on = shell_path_verb_targets(command)
+    acted_on = shell_path_verb_targets(command, SHELL_RULES)
     # The third way a command names a file it writes, after a redirection and
     # a path verb's operand. It joins the two relaxing facts below and not the
     # lease's list, because it gathers every write flag the executable has a
@@ -173,6 +180,9 @@ def bash_decision(
     # exist yet, and a refused command is snapshotted too -- one ref for a
     # state the tree was already in, which dedup collapses.
     reference = undo_snapshot(cwd, command)
+    # Both halves of one reading: the documents a rewrite would leave, and why
+    # the rest left none. Computed together so a target reaches exactly one.
+    reading = rewritten_files(command, cwd or Path.cwd())
     verdict = decide_shell(
         command,
         SHELL_RULES,
@@ -209,7 +219,8 @@ def bash_decision(
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
-        rewritten_documents=rewritten_files(command, cwd or Path.cwd()),
+        rewritten_documents=reading["documents"],
+        unread_documents=reading["unread"],
         interactive=interactive,
         # A reviewed worker is non-interactive and not therefore alone: it
         # holds a mailbox reaching the human supervising its run, and a
@@ -516,7 +527,7 @@ def resolution_of(
     return ResolutionRow(refuted=reply["refuted"], unresolved=reply["unresolved"])
 
 
-def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
+def rewritten_files(command: str, cwd: Path) -> RewriteReading:
     """What every in-place rewrite in this command would leave behind.
 
     The kernel names which files a screened rewrite would replace and this
@@ -525,26 +536,34 @@ def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
     two questions are different, and only this one is the question the edit
     gates ask.
 
-    A file that could not be produced yields no row, and the classifier turns
-    that absence into a question. So a rewrite is never granted on a reading
-    that failed — which is what makes it safe for a composition to reach this
-    late, or not at all.
+    A file that could not be produced yields a reason instead of a document,
+    and the classifier says which reason. A rewrite is never granted on a
+    reading that failed — which is what makes it safe for a composition to
+    reach this late, or not at all.
 
     Each row is deduplicated by target, because one file named twice is one
     file, and the second reading would run the script over the same bytes to
     reach the same answer.
     """
     rows: list[RewrittenFileRow] = []
-    for rewrite in shell_sed_rewrites(command):
+    unread: list[UnreadFileRow] = []
+    for rewrite in shell_sed_rewrites(command, SHELL_RULES):
         for target in rewrite["targets"]:
-            if any(row["target"] == target for row in rows):
+            if any(row["target"] == target for row in rows) or any(
+                row["target"] == target for row in unread
+            ):
                 continue
-            after = rewritten_text(rewrite["scripts"], target, cwd)
+            attempt = rewritten_text(rewrite["scripts"], target, cwd)
+            after = attempt["text"]
             if after is None:
+                unread.append(
+                    UnreadFileRow(target=target, cause=unread_cause(attempt["cause"]))
+                )
                 continue
             try:
                 before = (cwd / target).read_text()
             except (OSError, ValueError, UnicodeDecodeError):
+                unread.append(UnreadFileRow(target=target, cause="unreadable"))
                 continue
             path_text = worktree_path(target)
             suffix = Path(path_text).suffix.lower()
@@ -575,7 +594,7 @@ def rewritten_files(command: str, cwd: Path) -> list[RewrittenFileRow]:
                     ),
                 )
             )
-    return rows
+    return RewriteReading(documents=rows, unread=unread)
 
 
 def edit_decision(
@@ -760,7 +779,7 @@ def written_review(command: str, cwd: Path) -> list[str]:
     for target in [
         *shell_write_targets(command),
         *shell_flag_write_targets(command, SHELL_RULES),
-        *patch_write_targets(shell_patch_operands(command), cwd),
+        *patch_write_targets(shell_patch_operands(command, SHELL_RULES), cwd),
     ]:
         # A write whose bytes were in the command went to these gates before
         # it ran, and reporting it again tells the agent the same thing twice
