@@ -34,8 +34,8 @@ from lup.policy.kernel.edit import (
     docstring_lines as python_docstring_lines,
     masked_source,
     python_comment_columns,
-    typescript_comment_columns,
 )
+from lup.policy.kernel.typescript import typescript_comment_columns
 
 type RuleStrength = Literal["soft", "strong"]
 """Whether a rule admits a reasoned exception, or admits none.

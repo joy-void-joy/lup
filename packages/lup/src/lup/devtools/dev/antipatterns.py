@@ -49,7 +49,7 @@ from lup.harness.codescan.common import (
     file_level_ignore,
     module_name,
 )
-from lup.policy.kernel.edit import TYPESCRIPT_SUFFIXES
+from lup.policy.kernel.typescript import TYPESCRIPT_SUFFIXES
 from lup.harness.codescan.resolution import refute
 from lup.devtools.dev.refutations import remembered_refutations
 from lup.workspace.paths import project_root, refutation_cache_path

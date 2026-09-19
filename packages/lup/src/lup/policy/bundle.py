@@ -22,7 +22,7 @@ from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
 from lup.policy.identity import AGENT_IDENTITY_ENV
 import lup.policy.kernel as kernel
-from lup.policy.kernel.edit import TYPESCRIPT_SUFFIXES
+from lup.policy.kernel.typescript import TYPESCRIPT_SUFFIXES
 from lup.policy.kernel.effects import EffectRow, effect_row_values
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,

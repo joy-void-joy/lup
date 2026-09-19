@@ -443,7 +443,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "85fed4f6fcfc1ba21c48fb81525a3b8671ee0b40b6168399aa1febdc124220f1",
+      "sha256": "35a2228cce07c807e3c9298eee8dc53a936373012390fec5d355a273ca73839d",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -535,6 +535,13 @@
       "path": ".claude/plugins/lup/hooks/runtime/kernel/tools.py",
       "category": "generated",
       "sha256": "57b023d5d779b7350dafd62803d358411f3a90eb9a2c0c5df72c7d1cbff885fb",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/typescript.py",
+      "category": "generated",
+      "sha256": "7108d7cea67d7d252b4e49f908a7bf1631d8444d08d6b2771eb8afa442d0fcb1",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -660,7 +667,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "fd19144b9a28ef88485b04bf45e3dcad2b31c480728995d580fd0a84babcb473",
+      "sha256": "056774815386558932924bb04e6f4cd665dd00c1c0cbf8e0be6b4d5f0666da59",
       "semantic_id": "docs.harness",
       "executable": false
     },
