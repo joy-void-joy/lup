@@ -132,14 +132,17 @@ class TestATrackerThatDidNotAnswer:
     def refusing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Make the tracker call fail the way a bad credential fails."""
 
-        def refused(*arguments: str) -> str:
-            raise sh.ErrorReturnCode_1(
-                "gh issue list",
-                b"",
-                b"HTTP 401: Bad credentials (https://api.github.com/graphql)",
-            )
+        class Refusing:
+            """A `gh` answering every call the way an expired token does."""
 
-        monkeypatch.setattr(issues_mod.gh, "out", refused)
+            def out(self, *arguments: str) -> str:
+                raise sh.ErrorReturnCode_1(
+                    "gh issue list",
+                    b"",
+                    b"HTTP 401: Bad credentials (https://api.github.com/graphql)",
+                )
+
+        monkeypatch.setattr(issues_mod, "gh", Refusing())
         monkeypatch.setattr(issues_mod, "repository_slug", lambda: "owner/name")
 
     def test_an_unreachable_tracker_is_not_an_empty_one(
