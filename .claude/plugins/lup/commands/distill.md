@@ -127,15 +127,21 @@ architecture forks earn their turn.
   recommendation with a measurement behind it is the turn worth taking, not
   an embarrassment to soften.
 - **A harness behaviour is measured with a probe kit, not asked about.** A
-  throwaway project under `tmp/`, with its own `git init` so this project's
-  plugin stays out of it; a hook script that appends every payload it is
+  throwaway project under `tmp/`, with its own `git init`, which keeps this
+  project's plugin out of the kit only where a plugin arrives per launch —
+  where a runtime installs plugins into its own home instead, every session
+  on the machine runs under them whatever directory it starts in, and the
+  kit is governed by the policy it was built to sit outside. Check a command
+  the kit will issue with `dev policy` before writing it down; a hook script
+  that appends every payload it is
   handed to a JSONL file beside it and answers only the event under test; and
   the kit's own `.claude/settings.json` registering it under the events in question. Run it from where you are first:
-Run `claude -p "<the kit's first prompt>" --permission-mode bypassPermissions` from the kit's directory. A print-mode session loads the hooks in that directory's settings at launch, runs nested inside this one, and exits when the prompt is answered
+Run `claude -p "<the kit's first prompt>" --permission-mode bypassPermissions` from the kit's directory. A print-mode session loads the hooks in that directory's settings at launch, runs nested inside this one, and exits when the prompt is answered. Its plugin is the one the outer session launched with, so a gate written in a worktree is probed only by naming that tree too: `--plugin-dir <the worktree>/.claude/plugins/<plugin>`
 That run records the whole sequence, so no escalation marker is needed. Hand
 the user the directory and the prompt only for what print mode cannot show — a
-subagent left running in the background, a runtime this session is not signed
-in to. The recording is evidence the build keeps as a fixture.
+subagent left running in the background, a runtime whose credential a session
+is not granted and whose nested run therefore answers 401. The recording is
+evidence the build keeps as a fixture.
 
 ### A second case study
 
