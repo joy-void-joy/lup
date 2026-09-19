@@ -225,6 +225,61 @@ def create_coordination_app() -> typer.Typer:
         carries = peers().cohort.delivery(found)
         typer.echo(f"queued for {found.label()}, carried by {carries}")
 
+    @app.command("notice")
+    def notice_cmd(
+        text: Annotated[
+            str, typer.Argument(help="What is true for everyone working here")
+        ],
+        by: Annotated[
+            str, typer.Option("--by", help="Who is stating it, where it matters")
+        ] = "",
+    ) -> None:
+        """State something true for every session, now and for whoever starts next.
+
+        A notice is state rather than mail: every session reads it at the head
+        of a prompt for as long as it stands, so one opened tomorrow is told at
+        its first. Whoever is working is sent it now as well, because a fact
+        worth stating is worth hearing before the turn they are in ends.
+
+        Take it down with `unnotice` once it stops being true — what is there
+        is what is true, so a notice nobody retracted goes on being read.
+        """
+        found = peers()
+        found.notify(text, door=Door.CONSOLE, by=by)
+        told = [view.address for view in found.listing()]
+        typer.echo(
+            "standing for every session, including ones not yet started"
+            + (f"; told now to {', '.join(told)}" if told else "; nobody is here yet")
+        )
+
+    @app.command("notices")
+    def notices_cmd() -> None:
+        """Everything standing over this repository, with the id that takes one down."""
+        standing = peers().cohort.mail.standing()
+        if not standing:
+            typer.echo("Nothing is standing over this repository.")
+            return
+        for notice in standing:
+            said = notice.text + (f" ({notice.by})" if notice.by else "")
+            typer.echo(f"{notice.id} — {said} [{notice.door}]")
+
+    @app.command("unnotice")
+    def unnotice_cmd(
+        notice_id: Annotated[str, typer.Argument(help="Notice id from `notices`")],
+    ) -> None:
+        """Take one standing fact down, so no later prompt reads it.
+
+        Deleted rather than marked retracted: a notice is read as state, so
+        what is there is what is true. The sessions already told keep what they
+        were told, which is right — it held while they were told it.
+        """
+        if not peers().cohort.mail.retract(notice_id):
+            raise typer.BadParameter(
+                f"{notice_id!r} names nothing standing over this repository; "
+                "`dev coordination notices` lists what does"
+            )
+        typer.echo(f"retracted {notice_id}")
+
     @app.command("inbox")
     def inbox_cmd(
         member_id: Annotated[
