@@ -393,6 +393,49 @@ entries that were known when the vocabulary was written.
 """
 
 
+def unread_over_tracked(
+    scope: str, carried: bool, existing: bool, tracked: bool
+) -> bool:
+    """Whether this write replaces reviewed content with content nobody read.
+
+    Four readings, and every one of them has to hold. The scope keeps scratch
+    and everything beyond the checkout out of it. ``carried`` is whether the
+    command holds its own bytes, which sends the write to the content gates
+    instead and is the case this must not answer twice. ``existing`` and
+    ``tracked`` are what makes the content reviewed: a create replaces
+    nothing, and a file Git never held has no reviewed version being
+    replaced -- yesterday's log rewritten in place is the ordinary work it
+    always was.
+
+    Asked of the path rather than of the spelling that named it, because
+    ``sort -o src.py f`` and ``sort f > src.py`` land the same bytes at the
+    same path. That parity is the whole reason this is one function two
+    callers read rather than a check written twice.
+    """
+    return scope == "production" and not carried and existing and tracked
+
+
+def unread_question(path: str) -> KernelDecision:
+    """The question such a write puts, and the two ways past it.
+
+    Asking rather than refusing is the concession to the premise underneath:
+    nothing can read this content in advance, and refusing on that ground
+    would fall on exactly the writes for which that is unavoidable.
+    """
+    return KernelDecision(
+        "ask",
+        f"{path} is replaced with content only running the command produces,"
+        " so nothing reads it before it lands",
+        checkpoint=write_checkpoint("production"),
+        purpose="quality_review",
+        recovery=(
+            "write into a scratch path and move the result in once it has been"
+            " read, or carry the content in the command so the edit gates read"
+            " it as they would an Edit"
+        ),
+    )
+
+
 def write_checkpoint(scope: str) -> CheckpointRequirement:
     """Which capture would put back what a write to this scope replaced.
 

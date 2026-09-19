@@ -1029,6 +1029,7 @@ def classify_shell(
             recoverable_targets,
             contained,
             checkout_root,
+            tracked_targets,
         )
         return joined_decision(
             [
@@ -1045,6 +1046,7 @@ def classify_shell(
         recoverable_targets,
         contained,
         checkout_root,
+        tracked_targets,
     )
     if redirected is not None:
         return redirected
