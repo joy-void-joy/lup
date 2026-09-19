@@ -272,8 +272,22 @@ literal data, and `curl` is read-screened within the declared fetch scopes.
 
 A redirection is answered by its path, and the reason is that a command
 produces its output by running: before the fact there is nothing for the
-content gates to read, so `dev render > docs/api.md` is judged on where it
-lands and reviewed against the file *afterwards*.
+content gates to read. What the path settles is who gets asked. Into scratch
+or beyond the checkout it is the ordinary work it was; into this repository's
+own tree it **asks**, because the same bytes arriving through an `Edit` or an
+`echo` would have been read by the content gates and these never will be. So
+`dev render > docs/api.md` puts one question, and its recovery names the two
+ways past it: redirect into a scratch path and move the result in once it has
+been read, or carry the content in the command.
+
+Asking rather than refusing is the whole concession to the premise. Nothing
+can read this write in advance, and refusing on that ground would refuse the
+only writes for which that is unavoidable — so a human is asked instead, and
+`git apply`'s unreviewed route keeps being the one that denies. Measured
+before this: `date +%s >> <a tracked module>` appended to reviewed source,
+allowed and unprompted, while `echo x > <the same path>` was read by the
+content gates — one file, one write, two answers, decided by which spelling
+carried its bytes.
 
 That premise is false for `cat > f <<'EOF'` and `echo x > f`, where the bytes
 are sitting in the command. Those go to the same gates an `Edit` goes to —
