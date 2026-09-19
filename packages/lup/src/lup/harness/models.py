@@ -10,7 +10,7 @@ beside its managing module instead (see the package docstring).
 import re  # lup: ignore[import-re] — prose has no parser; its shape is the rule
 from abc import ABC, abstractmethod
 from json import dumps
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import (
@@ -29,6 +29,8 @@ from lup.formats.banner import ArtifactBanner, GeneratedBanner
 from lup.harness.image import Image
 from lup.harness.requirements import Manifest
 from lup.formats.markdown import (
+    ProseCell,
+    ProseCode,
     CodeCell,
     MarkdownDocument,
     PlainCell,
@@ -134,6 +136,18 @@ class SemanticPart(BaseModel, ABC, frozen=True):
         return None
 
     @property
+    def carried(self) -> list["PromptPart"]:
+        """The parts this one holds inside itself, if it holds any.
+
+        A passage names values, and a value is a part: an invocation it
+        issues, a plugin path it spells, an argument reference it reaches.
+        Every walk that asks a document's parts a question has to reach those
+        too, or a skill's own invocation becomes invisible by being written
+        inside a sentence rather than beside one.
+        """
+        return []
+
+    @property
     def invocation(self) -> "SkillInvocation | None":
         """The skill invocation this part issues, if it issues one."""
         return None
@@ -194,19 +208,61 @@ class InlinePart(SemanticPart, frozen=True):
         return self.node.render()
 
 
-def code(text: str) -> InlinePart:
-    """A derived value shown as code, which is most of what prose names."""
-    return InlinePart(node=CodeCell(text=text))
+def code(text: str | PurePath) -> InlinePart:
+    """A derived value shown as code, which is most of what prose names.
+
+    A path is taken as the path it is rather than as a string somebody
+    spelled, because that is what the declarations carrying one hold.
+    """
+    return InlinePart(node=ProseCode(text=str(text)))
 
 
-def plain(text: str) -> InlinePart:
+def plain(text: str | PurePath) -> InlinePart:
     """A derived value shown as it reads."""
-    return InlinePart(node=PlainCell(text=text))
+    return InlinePart(node=ProseCell(text=str(text)))
 
 
 def counted(total: int) -> InlinePart:
     """A number a document quotes, as the text a reader sees."""
-    return InlinePart(node=PlainCell(text=str(total)))
+    return InlinePart(node=ProseCell(text=str(total)))
+
+
+class BulletItem(BaseModel, frozen=True):
+    """One bullet of a derived list: what it names, and what it says of it.
+
+    The lead is a node rather than a string because a roster shows what it
+    names in whatever form the roster is about — a topic strong, an agent as
+    the code its name is — and each of those is a node that already knows how
+    to escape itself.
+    """
+
+    lead: TableCell
+    text: str
+
+    def render(self) -> str:
+        """This bullet's line, both halves escaped where they enter it."""
+        return f"- {self.lead.render()} — {ProseCell(text=self.text).render()}\n"
+
+
+class BulletList(SemanticPart, frozen=True):
+    """A list derived from declarations, one bullet per line.
+
+    What a cell is for a value inside a sentence, this is for a roster: a
+    list of topics, of skills, of whatever a declaration enumerates, laid out
+    once here with every item escaped on the way in. An inline node cannot
+    serve, holding one line by construction — right for a value in a
+    sentence, wrong for a list that is several.
+    """
+
+    type: Literal["bullets"] = "bullets"
+    items: list[BulletItem]
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return self.text_payload
+
+    @property
+    def text_payload(self) -> str:
+        return "".join(item.render() for item in self.items)
 
 
 class Passage(SemanticPart, frozen=True):
@@ -242,6 +298,10 @@ class Passage(SemanticPart, frozen=True):
             self.name,
             {name: value.spell(renderer) for name, value in self.values.items()},
         )
+
+    @property
+    def carried(self) -> list["PromptPart"]:
+        return list(self.values.values())
 
     @property
     def text_payload(self) -> str:
@@ -611,6 +671,7 @@ type PromptPart = Annotated[
     TextPart
     | Passage
     | InlinePart
+    | BulletList
     | SpellingExample
     | MarkdownTable
     | ToolRoster
@@ -648,9 +709,21 @@ class PromptDocument(BaseModel, frozen=True):
             raise ValueError("a document rendered to its own artifact needs a source")
         return self.source
 
+    def walked(self) -> list[PromptPart]:
+        """Every part this document holds, the ones inside a passage included.
+
+        What a walk asks a part is asked of the values a passage names too: a
+        skill invoked inside a sentence is invoked, and a plugin named there
+        is named. Reading order, so a report listing what a document does
+        lists it the way the document reads.
+        """
+        return [found for part in self.parts for found in [part, *part.carried]]
+
     def prose(self) -> list[str]:
         """Every literal prose payload this document carries, in reading order."""
-        return [text for part in self.parts if (text := part.text_payload) is not None]
+        return [
+            text for part in self.walked() if (text := part.text_payload) is not None
+        ]
 
     def text_size(self) -> int:
         """Lower bound on what this document costs a session, in UTF-8 bytes.
@@ -853,7 +926,7 @@ class Skill(SelectableRule, frozen=True):
                     f"skill {self.id!r} has a required argument after an optional one"
                 )
         references_arguments = any(
-            part.references_arguments for part in self.prompt.parts
+            part.references_arguments for part in self.prompt.walked()
         )
         if bool(self.arguments) != references_arguments:
             raise ValueError(
@@ -877,7 +950,7 @@ class Skill(SelectableRule, frozen=True):
         granted = [
             read for grant in self.tools if (read := BashGrant.read(grant)) is not None
         ]
-        for part in self.prompt.parts:
+        for part in self.prompt.walked():
             command = part.shell_command
             if command is None:
                 continue
@@ -1824,7 +1897,7 @@ class Harness(BaseModel, frozen=True):
         invocations = [
             issued
             for prompt in prompts
-            for part in prompt.parts
+            for part in prompt.walked()
             if (issued := part.invocation) is not None
         ]
         if self.resolver is not None:
@@ -1876,7 +1949,7 @@ class Harness(BaseModel, frozen=True):
             for plugin in self.plugins
             for agent in plugin.agents
         ]
-        parts = [part for prompt in prompts for part in prompt.parts]
+        parts = [part for prompt in prompts for part in prompt.walked()]
         unknown_plugins = [
             named
             for part in parts

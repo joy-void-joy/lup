@@ -28,8 +28,17 @@ from jinja2 import Environment, StrictUndefined
 
 from lup.types import StringMap
 
-PASSAGE_SUFFIX = ".md"
-"""What a passage file is named: its module's own stem, as Markdown."""
+# lup: ignore[constant-declaration] — the pairing this repository defines
+# between a declaration and the prose beside it
+PASSAGE_SUFFIX = ".passage.md"
+"""How a passage file is named: its module's own stem, then this.
+
+Markdown's extension last, so an editor highlights it as the Markdown it is
+and the sweeps that read prose by suffix — the written-command check, the
+review-marker scan — keep reaching it now that the words live here rather
+than in the module. `passage` before it, because the file is a template with
+values still to place and not the finished page.
+"""
 
 
 @cache
@@ -57,22 +66,17 @@ def passage_path(module: str, name: str) -> Path:
     if spec is None or spec.origin is None:
         raise ValueError(f"no module {module} to read a passage beside")
     beside = Path(spec.origin)
-    if not name:
-        return beside.with_suffix(PASSAGE_SUFFIX)
-    return beside.parent / f"{name}{PASSAGE_SUFFIX}"
+    return beside.parent / f"{name or beside.stem}{PASSAGE_SUFFIX}"
 
 
-@cache
-def passage_text(module: str, name: str = "") -> str:
-    """The Markdown authored for one declaration, refused where it holds logic.
+def prose_without_logic(path: Path, text: str) -> str:
+    """This prose, refused where it holds a statement or a comment tag.
 
-    A statement or a comment tag would make the prose a program: what it says
-    would depend on state no type checker reads and no reviewer sees rendered.
-    Both are refused here rather than by a scan elsewhere, because this is the
-    one place every passage passes through.
+    Either would make the passage a program: what the document says would
+    depend on state no type checker reads and no reviewer sees rendered.
+    Refused where the file is read rather than by a scan somewhere else,
+    because this is the one place every passage passes through.
     """
-    path = passage_path(module, name)
-    text = path.read_text(encoding="utf-8")
     for tag in ("{%", "{#"):
         if tag in text:
             raise ValueError(
@@ -81,6 +85,13 @@ def passage_text(module: str, name: str = "") -> str:
                 "declaration in Python saying which one is read"
             )
     return text
+
+
+@cache
+def passage_text(module: str, name: str = "") -> str:
+    """The Markdown authored for one declaration, read once and held."""
+    path = passage_path(module, name)
+    return prose_without_logic(path, path.read_text(encoding="utf-8"))
 
 
 def rendered(module: str, name: str, values: StringMap) -> str:

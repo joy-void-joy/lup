@@ -59,6 +59,19 @@ def escaped(value: str) -> str:
     return contained(html.escape(value))
 
 
+def inlined(value: str) -> str:
+    """Generated text made safe to stand inside a line of prose.
+
+    The line is the container here, and a newline is the whole of what ends
+    one: a value carrying it turns the rest of a sentence into a new block,
+    or a heading into a heading and a paragraph after it. Nothing else is
+    neutralized, because outside a table nothing else has to be — a pipe is a
+    pipe, and a reader of the file should be shown the characters the value
+    holds rather than the entities a cell would have needed.
+    """
+    return value.translate(str.maketrans({"\n": " ", "\r": " "}))
+
+
 class InlineNode(BaseModel, ABC, frozen=True):
     """One derived value inside a generated document, as it is displayed.
 
@@ -125,8 +138,54 @@ class LinkCell(InlineNode, frozen=True):
         return f"[{escaped(self.text)}]({contained(self.target)})"
 
 
+class ProseCell(InlineNode, frozen=True):
+    """A value standing in a line of prose, shown as it reads.
+
+    The prose counterpart of :class:`PlainCell`, and the difference is the
+    container rather than the formatting: a cell's destination decodes an
+    entity and a paragraph's reader does not, so escaping an apostrophe here
+    would put `&#x27;` in front of whoever reads the file.
+    """
+
+    type: Literal["prose"] = "prose"
+
+    def render(self) -> str:
+        return inlined(self.text)
+
+
+class ProseCode(InlineNode, frozen=True):
+    """A value shown as code inside a line of prose.
+
+    A path, a command, a module name — the everyday derived value, and the
+    reason :class:`CodeCell` is not it: a cell escapes a pipe for the row it
+    sits in, which inside a code span is shown to the reader as the backslash
+    it is.
+    """
+
+    type: Literal["prose_code"] = "prose_code"
+
+    def render(self) -> str:
+        return f"`{inlined(self.text)}`"
+
+
+class ProseStrong(InlineNode, frozen=True):
+    """A value a line of prose leads with, shown strong."""
+
+    type: Literal["prose_strong"] = "prose_strong"
+
+    def render(self) -> str:
+        return f"**{inlined(self.text)}**"
+
+
 type TableCell = Annotated[
-    PlainCell | CodeCell | HtmlCodeCell | LinkCell, Discriminator("type")
+    PlainCell
+    | CodeCell
+    | HtmlCodeCell
+    | LinkCell
+    | ProseCell
+    | ProseCode
+    | ProseStrong,
+    Discriminator("type"),
 ]
 """Any inline node a generated document holds, parseable back from its render."""
 

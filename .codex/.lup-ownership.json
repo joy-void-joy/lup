@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "51fa642b7775dfa06294634e643641cf64f73c701c93af58c45ae6bd641296e6",
+  "source_digest": "ce6cb5bd4b5cbe93d6395d3408853d700b78e08503ef5c856c33764277c9ad96",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -142,7 +142,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "065a699b845732d1c0adcbd0087bc29dc8465db44e9b5c9a7af5395fc6008307",
+      "sha256": "aea28f1b59862ef4af2d407066a5d46856cd65ae20ffc60703bcdb8c970de34d",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

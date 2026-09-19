@@ -14,6 +14,7 @@ to see both halves and only the composing project has them.
 """
 
 import lup.harness.models as models
+from lup.formats.markdown import ProseCode
 
 
 def skill_roster_parts(
@@ -30,14 +31,23 @@ def skill_roster_parts(
         for part in (
             models.TextPart(text="- "),
             models.SkillInvocation(plugin=plugin, skill=skill.name),
-            models.TextPart(text=f" — {skill.description}\n"),
+            models.TextPart(text=" — "),
+            models.plain(skill.description),
+            models.TextPart(text="\n"),
         )
     ]
 
 
-def agent_roster_text(agents: list[models.Agent]) -> str:
-    """Format an agent roster as Markdown bullet lines."""
-    return "".join(
-        f"- `{agent.name}` — {agent.description}\n"
-        for agent in sorted(agents, key=lambda agent: agent.name)
+def agent_roster_bullets(agents: list[models.Agent]) -> models.BulletList:
+    """Format an agent roster as one derived list of bullets.
+
+    A list rather than joined text, for the reason every roster here is one:
+    the names and descriptions come from declarations, and a description
+    carrying a newline would otherwise end the bullet it was written into.
+    """
+    return models.BulletList(
+        items=[
+            models.BulletItem(lead=ProseCode(text=agent.name), text=agent.description)
+            for agent in sorted(agents, key=lambda agent: agent.name)
+        ]
     )

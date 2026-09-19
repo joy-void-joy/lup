@@ -270,15 +270,15 @@ owns the subject, then regenerate.
 
 ### Add a skill
 
-Create one module beneath `content/skills/` — the library's half when the
+Create two files beneath `content/skills/` — the library's half when the
 skill automates work inside a project, this repository's when its subject is
-standing one up. The declaration is ordinary typed Python and the prompt
-stays readable prose:
+standing one up. The declaration is typed Python; the prose is Markdown
+beside it, named for the module and read as its passage:
 
 ```python
 """The project-triage skill."""
 
-from lup.harness.models import Argument, ArgumentsRef, PromptDocument, Skill, TextPart
+from lup.harness.models import Argument, ArgumentsRef, Passage, PromptDocument, Skill
 
 SKILL = Skill(
     id="skill.triage",
@@ -292,19 +292,29 @@ SKILL = Skill(
         )
     ],
     prompt=PromptDocument(
-        parts=[
-            TextPart(
-                text="""Read the report, inspect the relevant boundary, and return the
-most likely failure class with one concrete next check.
-
-Report:
-"""
-            ),
-            ArgumentsRef(),
-        ]
+        parts=[Passage(module=__name__, values={"report": ArgumentsRef()})]
     ),
 )
 ```
+
+Beside it, `triage.passage.md`:
+
+```markdown
+Read the report, inspect the relevant boundary, and return the
+most likely failure class with one concrete next check.
+
+Report:
+{{ report }}
+```
+
+A passage names values and nothing else. A statement tag (`{%`)
+or a comment tag (`{#`) is refused where the file is read, so
+prose varying by more than a value is two passages, or a declaration in
+Python that says which one is read. Every value is a part — an
+`ArgumentsRef`, a `SkillInvocation`, a path through `code()` or `plain()` —
+so it enters escaped, and a description carrying a backtick cannot close the
+span it lands in. A name the values never carried fails generation rather
+than rendering as a blank.
 
 Import it into the module whose subject it serves, under `content/modules/`,
 and name it in that module's `ContentRoster`. That is the whole registration:
@@ -320,7 +330,7 @@ Then run the authoring loop:
 ```bash
 uv run lup-devtools harness generate all
 uv run lup-devtools harness check all
-uv run ruff check packages/lup/src/lup {layout.directory()}
+uv run ruff check packages/lup/src/lup src/lup_template/
 uv run pyright
 uv run pytest tests/unit/test_harness_compilation.py -q
 ```
@@ -345,16 +355,16 @@ leaving a link that resolves to nothing.
 ### Change the fetch allowlist
 
 The application-owned `HookSet` is constructed by `portable_harness()` in
-`{layout.path("harness", "catalog.py")}`. Add the narrowest origin and
+`src/lup_template/harness/catalog.py`. Add the narrowest origin and
 path prefix that supports the workflow:
 
 ```python
 allowed_fetch=[
     HookUrlScope.model_validate(
-        {{
+        {
             "origin": "https://docs.example.com",
             "path_prefix": "/agent-api/",
-        }}
+        }
     ),
 ]
 ```

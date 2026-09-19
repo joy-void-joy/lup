@@ -130,6 +130,29 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED = [
     Migration(
+        subjects=["agent_roster_text", "topic_bullets", "UpstreamReport.section"],
+        reason=(
+            "a roster and a report section are a list and a document rather "
+            "than joined text: each is parts now, so a name or a description "
+            "carrying a newline cannot end the bullet or the heading it was "
+            "written into"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Compose the parts instead of the string: "
+                    "`agent_roster_bullets(agents)` from "
+                    "`lup.harness.content.catalog` answers with a `BulletList`, "
+                    "and a report's section is `section(report)` from "
+                    "`lup.harness.content.docs.upstream_reports`, a `Passage`. "
+                    "Where the text itself was wanted, `part.text_payload` "
+                    "reads it back. `topic_bullets` has no replacement: its one "
+                    "caller builds a `BulletList` from `REPORT_TOPICS`."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         subjects=[
             "WorkflowSpec.body",
             "WorkflowSpec.install_step",

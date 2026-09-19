@@ -1,0 +1,1 @@
+- **Claude** = the meta-agent (Claude Code) that modifies the codebase, runs commands, and manages the development workflow

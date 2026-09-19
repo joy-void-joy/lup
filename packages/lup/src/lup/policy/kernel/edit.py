@@ -2615,13 +2615,25 @@ def derived_interpolation_sites(source: str) -> list[MatchSite]:
                 return False
 
     def bodies(call: ast.Call) -> list[ast.expr]:
-        """The text an ``Artifact`` built directly is handed as its file."""
+        """The text a document is handed directly, by either route into one.
+
+        An ``Artifact`` built rather than composed through the constructor
+        for its format, and a ``TextPart`` holding prose: the first is a
+        whole file and the second a paragraph of one, and a value spliced
+        into either lands in a container nothing checked. Prose with values
+        in it is a passage, whose values are parts — so neither route has a
+        reason to take a string built at the call.
+        """
         match call.func:
             case ast.Name(id="Artifact") | ast.Attribute(value=ast.Name(id="Artifact")):
                 return [
                     keyword.value
                     for keyword in call.keywords
                     if keyword.arg in ("body", "content")
+                ]
+            case ast.Name(id="TextPart") | ast.Attribute(attr="TextPart"):
+                return [
+                    keyword.value for keyword in call.keywords if keyword.arg == "text"
                 ]
             case _:
                 return []
