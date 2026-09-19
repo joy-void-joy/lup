@@ -443,7 +443,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/delegation.py",
       "category": "generated",
-      "sha256": "738262373beaab10112d16000a05d16d1e7aa4dcac926963268ba8648615e799",
+      "sha256": "eeb3d468eca167d51edf9f759c13c6f774913a85bb64143047d17271dcfd4658",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -569,7 +569,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "e78b18e18dd498477e2a4f1d040519e6c440f4fe00456a4ad353d78907adcae1",
+      "sha256": "a82ab86460a18a2f0eeec0015447125fb21a0943272ee6656ca16c2aaf2a20df",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

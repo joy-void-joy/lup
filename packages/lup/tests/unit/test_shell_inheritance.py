@@ -35,6 +35,16 @@ ALLOWED_UNDER_A_RESTRICTIVE_PARENT = (
     # denies or asks. Each is where an omission would be read as inheritance
     # and flip the verdict, so each states its own effect and this pins that
     # the whole set still allows.
+    #
+    # The codex verbs that only render. Their parent asks, because a word the
+    # CLI does not recognize becomes the prompt of an interactive session
+    # rather than an error, so inheriting it would put a question on every
+    # reading of the model catalog or the plugin list.
+    "codex agents",
+    "codex completion",
+    "codex doctor",
+    "codex features",
+    "codex help",
     "git status",
     "git rev-parse",
     "git ls-files",

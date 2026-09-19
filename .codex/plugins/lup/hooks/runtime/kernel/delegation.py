@@ -26,9 +26,6 @@ as a session rather than dispatched inside one, *is* the owner of what it
 checks, and gates itself exactly as a session does.
 """
 
-# lup: ignore[library-default] — this toolchain's own command spellings,
-# offered the way the shell vocabulary offers its words: a default a project
-# replaces rather than a table it inherits
 VERIFICATION_GATE = "`uv run lup-devtools dev check`"
 VERIFICATION_SCOPED = "`uv run lup-devtools dev check --changed`"
 VERIFICATION_RECORD = "your report"

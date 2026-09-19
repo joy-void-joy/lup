@@ -1132,8 +1132,8 @@ def xargs_payload(words: list[str]) -> list[str]:
     return words[position:]
 
 
-# lup: ignore[constant-declaration] — each wrapper's own option spellings,
-# which no project could choose differently and still read what it wraps
+# lup: ignore[library-default] — each wrapper's own option spellings, which
+# no project could choose differently and still read the command it wraps
 WRAPPER_VALUE_OPTIONS: dict[str, tuple[str, ...]] = {
     "env": ("-u", "--unset", "-C", "--chdir"),
     "stdbuf": ("-i", "--input", "-o", "--output", "-e", "--error"),
@@ -1153,7 +1153,7 @@ which :func:`lup.policy.kernel.shell.decide_segment_words` refuses rather than
 classifies.
 """
 
-# lup: ignore[constant-declaration] — `env`'s own spelling of the option that
+# lup: ignore[library-default] — `env`'s own spelling of the option that
 # re-splits its remainder, which is the command's and not a choice
 ENV_SPLIT_STRING = ("-S", "--split-string")
 """The `env` options whose operand is a command line this reading cannot split.
@@ -1178,17 +1178,12 @@ def wrapper_payload(segment: list[str], position: int, wrapper: str) -> int:
         word = segment[position]
         if word == "--":
             return position + 1
-        if not word.startswith("-") or word == "-":
+        if word == "-" or not word.startswith("-"):
             return position
-        attached = word.split("=", 1)[0]
-        if word in valued:
-            position += 2
-        elif attached in valued and attached != word:
-            position += 1
-        elif any(word.startswith(option) and word != option for option in valued):
-            position += 1
-        else:
-            position += 1
+        # Alone, a valued option's operand is the next word. Attached —
+        # `-oL`, `--unset=NAME` — it is inside this word, as it is for every
+        # other flag, so the two cases differ only in how far to step.
+        position += 2 if word in valued else 1
     return position
 
 

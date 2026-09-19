@@ -37,6 +37,9 @@ from pydantic import BaseModel
 from lup.harness.notice import Notice
 from lup.workspace.edition import shared_git_directory
 
+# lup: ignore[constant-declaration] — an identity this repository defines: the
+# directory a run takes its slot in, which every session must spell alike for
+# any of them to see that another is holding one
 SLOT_DIRECTORY = "lup-gate-slots"
 """Where this clone's slots live, beneath the shared git directory.
 
@@ -53,6 +56,9 @@ waits, which is the case this is least worried about: five gates at once was
 never anybody's plan.
 """
 
+# lup: ignore[constant-declaration] — not a judgement but where the library's
+# own `parallel_arguments` stops spelling parallel: below two it runs the suite
+# behind a single interpreter, which is slower than the contention avoided
 MINIMUM_WORKERS = 2
 """The narrowest a divided suite is allowed to get.
 
