@@ -19,6 +19,16 @@ from lup.devtools.dev.git_guards import CHECK_COMMAND, DRIFT_COMMAND
 from lup.formats.banner import GeneratedBanner
 from lup.harness.materialization import write_generated_file
 from lup.formats.banner import REGENERATE_COMMAND
+from lup.formats.yaml import (
+    ScalarValue,
+    YamlDocument,
+    YamlEntry,
+    YamlFlow,
+    YamlList,
+    YamlMap,
+    YamlScalar,
+    scalars,
+)
 from lup.harness.models import Artifact
 from lup.workspace.paths import project_root
 
@@ -27,6 +37,40 @@ WORKFLOW_PATH = Path(".github/workflows/quality.yml")
 WORKFLOW_COMMAND = REGENERATE_COMMAND
 """What the gate runs to rebuild every tree, taken from the command the banners
 already tell a reader to type so the two cannot name different things."""
+
+
+class WorkflowStep(BaseModel, frozen=True):
+    """One step of a generated job, in the keys the forge reads it by.
+
+    Declared rather than written, so a value that reaches a step — a command,
+    a workspace path, a version a project pinned — enters the document as a
+    value and cannot be the thing that ends the mapping it lands in. A field
+    left empty writes no key at all, which is what tells `uses` and `run`
+    apart without a second kind of step.
+    """
+
+    name: str = ""
+    uses: str = ""
+    settings: dict[str, ScalarValue] = {}
+    """What the action is configured with, written as the `with:` it reads."""
+
+    run: str = ""
+    working_directory: str = ""
+
+    def node(self) -> YamlMap:
+        """This step as the mapping one dash of the job's sequence holds."""
+        configured = [
+            YamlEntry(key="with", value=YamlMap(entries=scalars(self.settings)))
+        ]
+        return YamlMap(
+            entries=[
+                *scalars({"name": self.name, "uses": self.uses}),
+                *(configured if self.settings else []),
+                *scalars(
+                    {"run": self.run, "working-directory": self.working_directory}
+                ),
+            ]
+        )
 
 
 class FrontendSpec(BaseModel, frozen=True):
@@ -79,61 +123,111 @@ class WorkflowSpec(BaseModel, frozen=True):
     needs nothing carries no apt call it would have to read past.
     """
 
-    def install_step(self) -> str:
+    def install_steps(self) -> list[WorkflowStep]:
         """The apt step, or nothing where the project declares no package."""
         if not self.system_packages:
-            return ""
-        return f"""      - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y {
-            " ".join(self.system_packages)
-        }
-"""
+            return []
+        installed = " ".join(self.system_packages)
+        return [
+            WorkflowStep(
+                name="System packages",
+                run=f"sudo apt-get update && sudo apt-get install -y {installed}",
+            )
+        ]
 
-    def frontend_steps(self) -> str:
+    def frontend_steps(self) -> list[WorkflowStep]:
         """The bun steps, or nothing where the project declares no workspace."""
         if self.frontend is None:
-            return ""
-        return f"""      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: {self.frontend.bun_version}
-      - name: Frontend dependencies
-        run: bun install --frozen-lockfile
-        working-directory: {self.frontend.workspace}
-"""
+            return []
+        return [
+            WorkflowStep(
+                uses="oven-sh/setup-bun@v2",
+                settings={"bun-version": self.frontend.bun_version},
+            ),
+            WorkflowStep(
+                name="Frontend dependencies",
+                run="bun install --frozen-lockfile",
+                working_directory=self.frontend.workspace,
+            ),
+        ]
 
-    def body(self) -> str:
-        """Render the workflow YAML from these declared choices."""
-        return f"""name: Quality
+    def steps(self) -> list[WorkflowStep]:
+        """Every step of the one job, in the order the runner takes them."""
+        return [
+            WorkflowStep(uses="actions/checkout@v4", settings={"fetch-depth": 0}),
+            WorkflowStep(uses="astral-sh/setup-uv@v6", settings={"enable-cache": True}),
+            *self.install_steps(),
+            *self.frontend_steps(),
+            WorkflowStep(run=f"uv sync {' '.join(self.sync_flags)}"),
+            WorkflowStep(
+                name="Merge driver", run="uv run lup-devtools git merge-driver"
+            ),
+            WorkflowStep(name="Generated artifact drift", run=DRIFT_COMMAND),
+            WorkflowStep(name="Quality gate", run=CHECK_COMMAND),
+        ]
 
-on:
-  pull_request:
-  push:
-    branches: [{", ".join(self.branches)}]
-
-jobs:
-  check:
-    runs-on: {self.runner}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-{self.install_step()}{self.frontend_steps()}      - run: uv sync {" ".join(self.sync_flags)}
-      - name: Merge driver
-        run: uv run lup-devtools git merge-driver
-      - name: Generated artifact drift
-        run: {DRIFT_COMMAND}
-      - name: Quality gate
-        run: {CHECK_COMMAND}
-"""
+    def document(self) -> YamlDocument:
+        """The workflow as the document these declared choices compile to."""
+        return YamlDocument(
+            root=YamlMap(
+                entries=[
+                    YamlEntry(key="name", value=YamlScalar(value="Quality")),
+                    YamlEntry(
+                        key="on",
+                        spaced=True,
+                        value=YamlMap(
+                            entries=[
+                                YamlEntry(
+                                    key="pull_request", value=YamlScalar(value=None)
+                                ),
+                                YamlEntry(
+                                    key="push",
+                                    value=YamlMap(
+                                        entries=[
+                                            YamlEntry(
+                                                key="branches",
+                                                value=YamlFlow(items=self.branches),
+                                            )
+                                        ]
+                                    ),
+                                ),
+                            ]
+                        ),
+                    ),
+                    YamlEntry(
+                        key="jobs",
+                        spaced=True,
+                        value=YamlMap(
+                            entries=[
+                                YamlEntry(
+                                    key="check",
+                                    value=YamlMap(
+                                        entries=[
+                                            *scalars({"runs-on": self.runner}),
+                                            YamlEntry(
+                                                key="steps",
+                                                value=YamlList(
+                                                    items=[
+                                                        step.node()
+                                                        for step in self.steps()
+                                                    ]
+                                                ),
+                                            ),
+                                        ]
+                                    ),
+                                )
+                            ]
+                        ),
+                    ),
+                ]
+            )
+        )
 
     def artifact(self) -> Artifact:
         """This workflow as one artifact, gated like any other generated file."""
-        return Artifact.generated(
+        return Artifact.in_yaml(
             path=WORKFLOW_PATH,
-            body=self.body(),
+            document=self.document(),
             semantic_id="ci.quality",
             banner=GeneratedBanner(source=__name__, command=WORKFLOW_COMMAND),
         )
@@ -194,39 +288,97 @@ class PublishSpec(BaseModel, frozen=True):
     runner: str = "ubuntu-latest"
     """The label the job asks for."""
 
-    def body(self) -> str:
-        """Render the publishing workflow from these declared choices."""
+    def steps(self) -> list[WorkflowStep]:
+        """Every step of the publishing job, in the order the runner takes them."""
         member = f" --package {self.package}" if self.package else ""
-        return f"""name: Publish
+        return [
+            WorkflowStep(uses="actions/checkout@v4"),
+            WorkflowStep(uses="astral-sh/setup-uv@v6", settings={"enable-cache": True}),
+            WorkflowStep(name="Build the distribution", run=f"uv build{member}"),
+            WorkflowStep(
+                name="Publish to PyPI", uses="pypa/gh-action-pypi-publish@release/v1"
+            ),
+        ]
 
-on:
-  push:
-    tags: ["{self.tags}"]
-
-jobs:
-  publish:
-    runs-on: {self.runner}
-    environment: {self.environment}
-    # What stands in for a stored token: the forge mints an identity for this
-    # run, and the index trusts it for this repository and this workflow.
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - name: Build the distribution
-        run: uv build{member}
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-"""
+    def document(self) -> YamlDocument:
+        """The publishing workflow as the document these choices compile to."""
+        return YamlDocument(
+            root=YamlMap(
+                entries=[
+                    YamlEntry(key="name", value=YamlScalar(value="Publish")),
+                    YamlEntry(
+                        key="on",
+                        spaced=True,
+                        value=YamlMap(
+                            entries=[
+                                YamlEntry(
+                                    key="push",
+                                    value=YamlMap(
+                                        entries=[
+                                            YamlEntry(
+                                                key="tags",
+                                                value=YamlFlow(items=[self.tags]),
+                                            )
+                                        ]
+                                    ),
+                                )
+                            ]
+                        ),
+                    ),
+                    YamlEntry(
+                        key="jobs",
+                        spaced=True,
+                        value=YamlMap(
+                            entries=[
+                                YamlEntry(
+                                    key="publish",
+                                    value=YamlMap(
+                                        entries=[
+                                            *scalars(
+                                                {
+                                                    "runs-on": self.runner,
+                                                    "environment": self.environment,
+                                                }
+                                            ),
+                                            YamlEntry(
+                                                key="permissions",
+                                                comment=(
+                                                    "What stands in for a stored"
+                                                    " token: the forge mints an"
+                                                    " identity for this\nrun, and the"
+                                                    " index trusts it for this"
+                                                    " repository and this workflow."
+                                                ),
+                                                value=YamlMap(
+                                                    entries=scalars(
+                                                        {"id-token": "write"}
+                                                    )
+                                                ),
+                                            ),
+                                            YamlEntry(
+                                                key="steps",
+                                                value=YamlList(
+                                                    items=[
+                                                        step.node()
+                                                        for step in self.steps()
+                                                    ]
+                                                ),
+                                            ),
+                                        ]
+                                    ),
+                                )
+                            ]
+                        ),
+                    ),
+                ]
+            )
+        )
 
     def artifact(self) -> Artifact:
         """This workflow as one artifact, gated like any other generated file."""
-        return Artifact.generated(
+        return Artifact.in_yaml(
             path=PUBLISH_PATH,
-            body=self.body(),
+            document=self.document(),
             semantic_id="ci.publish",
             banner=GeneratedBanner(source=__name__, command=WORKFLOW_COMMAND),
         )

@@ -3,9 +3,9 @@
 
 name: Publish
 
-on:
+'on':
   push:
-    tags: ["v*"]
+    tags: [v*]
 
 jobs:
   publish:
