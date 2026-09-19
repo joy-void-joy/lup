@@ -21,6 +21,7 @@ from lup.coordination.watch import (
     Nudged,
     Redescribed,
     Watcher,
+    nudge_text,
 )
 from lup.coordination.watcher import watcher_pipeline
 from lup.runs.pipeline import RunRequest
@@ -163,3 +164,27 @@ def test_the_run_lands_when_the_roster_is_empty(tmp_path: Path) -> None:
     summary = pipeline.execute(RunRequest(directory=tmp_path / "run"))
 
     assert summary.landed == 1
+
+
+def test_a_nudge_carries_every_fresh_message_rather_than_the_newest(
+    tmp_path: Path,
+) -> None:
+    """A wake arrives as a turn, so what it does not carry costs the peer one.
+
+    Two messages posted between looks are equally new to a peer that has read
+    neither. Handing over the last would leave the first readable only to
+    somebody who thought to fold their inbox — which is the habit an idle peer
+    does not have and the whole reason it is being nudged.
+    """
+    peers = RepositoryPeers(tmp_path)
+    member = mint_member_id()
+    peers.join(member, tmp_path / "tree", cli_name="reader")
+    peers.send("reader", "the first thing")
+    peers.send("reader", "the second thing")
+    fresh = peers.waiting(member).messages
+
+    carried = nudge_text(fresh)
+
+    assert "the first thing" in carried
+    assert "the second thing" in carried
+    assert "coordination_inbox" in carried
