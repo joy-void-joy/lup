@@ -288,6 +288,43 @@ on one runtime it can only be: the session identifiers in its environment are
 not what peers address it by, and the address is discoverable only by asking
 the runtime from inside the session.
 
+## One fold, three readers
+
+Three processes read this store and no two of them share an import. The typed
+library runs inside a session's tool server and has all of `lup`. The hooks a
+runtime fires — before a prompt, as a session ends — are bare scripts spawned
+with no working directory, no `PYTHONPATH` and no virtual environment. The
+compiled permission dispatcher is a third, under the same constraint.
+
+Each of them once folded the store for itself, so every record the store
+gained had to be taught to three readers separately — and a reader that missed
+one went on answering confidently about a store it no longer understood. The
+fold is written once instead, in `lup.coordination.bare`, under the strictest
+of the three constraints: the standard library alone, no pydantic, no `lup`.
+The library imports it as an ordinary module; each plugin carries the package
+whole beneath `hooks/runtime/coordination/`, the way the policy kernel is
+carried, so its relative imports resolve there exactly as they do here and
+every file travels byte for byte.
+
+It owns the layout too. Every file name, stamp directory and staleness window
+the store is made of is declared in that one module and imported by the typed
+writers beside it, so a rename moves every reader with it rather than leaving
+a test to report the mismatch afterwards.
+
+**The package travels whether or not a project declared a roster.** The
+dispatcher imports it at its top level, and a plugin carrying the dispatcher
+without the package would be a permission hook that raises before deciding
+anything — which refuses every call in the session rather than one of them.
+What is conditional is the two guards, which a project declining `peer_policy`
+never registers.
+
+Each guard hands over to a small entry beside the package rather than to a
+module of it, and that entry names its own directory as the search path before
+importing — the shape the compiled dispatcher already uses. A hook leaning on
+the interpreter's own path would keep working until something passed `-I`,
+`-P` or `PYTHONSAFEPATH`, and because these hooks fail open it would not break
+loudly: the roster would simply stop answering.
+
 ## Watching the repository
 
 Everything here is an append-only file, and nothing pushes: a session folds
