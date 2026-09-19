@@ -17,20 +17,28 @@ becomes a native allow decision, and an `ask` **returns saying nothing** —
 the dispatcher deliberately declining so the runtime's own approval flow can
 proceed.
 
-What that flow then does splits in two:
+Both halves are now measured, on codex-cli 0.155.1, and both answered no:
 
-* Does the event fire in a session an *application* opens? The plugin's own
-  evidence journal already answers yes for interactive CLI sessions — this
-  checkout's holds 48 completed `PermissionRequest` invocations, 18 `allow`
-  and 30 `ask`. Arm one re-asks it of the **app-server** path, which is what
-  an IDE and every Lup Codex session drive, and where the `codex exec` finding
-  (`approval: never`, so the event cannot fire) does not apply.
+* **The event does not fire in a session an application opens.** A live
+  app-server turn under `approval_policy='on-request'` added nothing to the
+  plugin's journal — 48 completed `PermissionRequest` records before, 48
+  after. The 48 it already held came from elsewhere, so the event reaches a
+  terminal and not this path.
 
-* When the dispatcher declines, does an approval request reach the client that
-  opened the thread? Nothing has measured this. If one arrives, a Codex session
-  can be asked, #180 stops being a dead end, and `dev questions` becomes a
-  fallback rather than the only surface. If none does, the queue is permanently
-  that surface and its diff rendering is load-bearing.
+* **Nothing reaches the client when the dispatcher declines.** The shell call
+  was refused by `PreToolUse`, `queued_review` parked it, and the turn came
+  back carrying the queue's own recovery text. No approval request arrived for
+  the session's hooks to answer.
+
+So a Codex session an application opens cannot be asked, only refused. #180 has
+no native way out, the fail-closed denial is correct rather than a workaround,
+and `dev questions` is Codex's review surface rather than its fallback — which
+is what makes that surface's diff rendering load-bearing.
+
+Both arms are `xfail(strict=True)` rather than deleted or inverted. Deleting
+them would lose the measurement; inverting them would assert a vendor gap as
+though it were a contract. Strict xfail says what was true when it was read and
+fails the day it stops being true, which is the only day anyone needs to know.
 
 Neither arm runs without a Codex login, which a contained session does not
 reach — a nested `codex exec` there answers 401, the credential sitting outside
@@ -238,6 +246,18 @@ async def test_the_probe_prompt_reaches_the_shell() -> None:
     assert "lup-approval-control" in observed.output
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Measured on codex-cli 0.155.1 and answered no. A live app-server turn "
+        "with `approval_policy='on-request'` added nothing to the plugin's "
+        "journal: 48 completed PermissionRequest records before, 48 after. The "
+        "48 it already held came from somewhere else, so the event fires for a "
+        "terminal and not for a session an application opens. Strict, because "
+        "the day this passes is the day Codex grew the channel and this file "
+        "should say so loudly rather than quietly agreeing."
+    ),
+)
 async def test_whether_permission_request_fires_in_an_app_server_session() -> None:
     """Arm one: does the interactive hook event reach the plugin here?
 
@@ -264,17 +284,31 @@ async def test_whether_permission_request_fires_in_an_app_server_session() -> No
     )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Measured on codex-cli 0.155.1 and answered no, which settles #180 "
+        "against a native way out. Nothing reached the client: the shell call "
+        "was refused by PreToolUse with `changing permissions requires "
+        "approval`, `queued_review` parked it, and the turn came back carrying "
+        "the queue's own recovery text. No approval request arrived for the "
+        "session's hooks to answer, so the dispatcher's deliberate silence on "
+        "`ask` has nobody listening on the other side. The fail-closed denial "
+        "is therefore correct rather than a workaround, and `dev questions` is "
+        "Codex's review surface rather than its fallback. Strict, so a vendor "
+        "that grows the channel is heard immediately."
+    ),
+)
 async def test_whether_a_declined_decision_reaches_the_client_as_an_approval() -> None:
-    """Arm two, and the one that decides whether #180 has a way out.
+    """Arm two, and the one that decided whether #180 has a way out.
 
     On `ask` the generated dispatcher returns saying nothing, which is it
     declining so the runtime's own approval flow can proceed. This asks
     whether that flow reaches whoever opened the thread.
 
-    A failure here is not a defect in Lup. It is the finding that the
-    dispatcher's deliberate silence has nobody listening on the other side,
-    which belongs in the evidence register as a vendor surface gap — the
-    fail-closed denial is the correct behaviour under it.
+    A failure here is not a defect in Lup, and the measured failure was not.
+    What it found is that nothing is listening, which is a fact about the
+    app-server's approval surface and is recorded as one.
     """
     root = find_project_root()
     watch = ApprovalWatch()

@@ -92,17 +92,27 @@ part of probing.
   is spent as a denial. The hook itself governs — that is what
   `tests/integration/test_codex_exec_governance.py` settled — and what is missing is the middle verdict, which
   is a Codex surface gap rather than a Lup one.
-- **`PermissionRequest` does fire somewhere, and which surface is the open
-  question.** This repository's own scoped home has journalled 48 completed
-  invocations of it — 18 answered `allow`, 30 answered `ask`, every one on a
-  shell call — so the event is not inert and the dispatcher's interactive arm
-  is reached. What the journal does not record is which surface opened the
-  session, so this does not yet separate a terminal from an app-server, and
-  the `exec` finding above still stands for `exec`. The part that matters for
-  an application is untested: whether an `ask` there, where the dispatcher
-  returns saying nothing so the runtime's own flow can proceed, reaches a
-  client that can answer it. `tests/integration/test_codex_approval_request.py`
-  is built to settle both halves and needs a signed-in host to run.
+- **A session an application opens cannot be asked, only refused — measured on
+  Codex CLI 0.155.1, both halves, by `tests/integration/test_codex_approval_request.py`.**
+  `PermissionRequest` does not fire there: a live app-server turn under
+  `approval_policy='on-request'` added nothing to the plugin's journal, 48
+  completed records before and 48 after, and the 48 it already held came from a
+  surface that is not this one. Nor does anything reach the client when the
+  dispatcher declines: the shell call was refused by `PreToolUse`,
+  `queued_review` parked it, and the turn returned the queue's own recovery
+  text with no approval request for the session's hooks to answer.
+
+  Three things follow, and they are the reason this row is worth its length.
+  The `exec` finding above is not a property of `exec`: the middle verdict is
+  missing from every surface Lup can open, so an `ask` is spent as a denial
+  wherever an application is the one asking. The fail-closed denial is
+  therefore correct rather than a workaround. And `dev questions` is Codex's
+  review surface rather than its fallback, which is what makes that surface's
+  diff rendering load-bearing instead of a convenience. Issue #180 is this gap
+  met from a real session, and it has no native answer.
+
+  Both arms stay in the suite as `xfail(strict=True)`, so the day a vendor
+  grows the channel they pass and the suite says so.
 - **Reasoning effort is a per-model vocabulary, and the seeded home holds one
   chosen for a different model.** A scoped home is seeded from the operator's
   own configuration, so it carries their `model_reasoning_effort` beside their
