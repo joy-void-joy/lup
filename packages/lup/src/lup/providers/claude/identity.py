@@ -1,7 +1,7 @@
 # lup: ignore[constant-declaration]
-# The variable's name is Claude Code's own spelling of its session id, which
-# no project could choose differently and still read the value the runtime
-# set; it is written here and nowhere outside this adapter.
+# Each variable's name is Claude Code's own spelling, which no project could
+# choose differently and still read the value the runtime set; they are
+# written here and nowhere outside this adapter.
 """The id Claude Code gives a session, as the tool servers it starts can read it.
 
 A launcher that minted a member id exports it, and that is the strongest
@@ -26,15 +26,43 @@ case never reads it.
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from lup.coordination.wake import WakePath
+
 CLAUDE_SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+CLAUDE_INBOX_ENV = "CLAUDE_CODE_MESSAGING_SOCKET"
 
 
 class ClaudeSessionEnv(BaseSettings):
     """The runtime's half of an unlaunched session's identity, read from the environment."""
 
     session_id: str = Field(default="", validation_alias=CLAUDE_SESSION_ENV)
+    inbox: str = Field(default="", validation_alias=CLAUDE_INBOX_ENV)
 
 
 def claude_session_id() -> str:
     """The session id Claude Code set for this process, or blank where it set none."""
     return ClaudeSessionEnv().session_id
+
+
+def claude_wake(cli_name: str) -> WakePath:
+    """The path of this session's own inbox socket, which is what wakes it.
+
+    Read from the environment rather than derived. The session binds the
+    socket and the launcher only asks where; a path this adapter computed
+    would be a second opinion about a file exactly one process created, and
+    wrong for every session whose inbox was placed somewhere else. The
+    runtime sets this variable for the processes a session starts, which is
+    what lets a tool server report its own session's inbox without being
+    told what it is.
+
+    *cli_name* is accepted and unused, because what wakes a Claude session is
+    a path on this filesystem rather than a name: the roster's name reaches
+    the session through a tool another session holds, and the wake does not
+    go that way.
+
+    Blank where the runtime set nothing, which is the honest answer for a
+    session whose inbox this process cannot name. The mail still waits in the
+    durable record, and a sender is told nothing will nudge it.
+    """
+    inbox = ClaudeSessionEnv().inbox
+    return WakePath(runtime="claude", handle=inbox) if inbox else WakePath()

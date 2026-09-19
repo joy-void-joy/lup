@@ -31,6 +31,7 @@ from lup.coordination.repository import (
 )
 from lup.coordination.bare.store import ROSTER_FILE
 from lup.coordination.roster import Delivery
+from lup.coordination.wake import WakePath
 from lup.tools.mcp import LupMcpTool, ServerCompanion, ToolError, lup_tool
 
 
@@ -57,6 +58,7 @@ class RosterPulse(ServerCompanion, frozen=True):
     root: Path
     member_id: str
     pulse: Pulse = Pulse()
+    wake: WakePath = WakePath()
 
     async def run(self) -> None:
         peers = RepositoryPeers(self.root, pulse=self.pulse)
@@ -64,7 +66,12 @@ class RosterPulse(ServerCompanion, frozen=True):
         while True:
             if roster.exists():
                 peers.sweep(by=member_ref(self.member_id))
-                peers.join(self.member_id, self.root, delivery=Delivery.INBOX)
+                peers.join(
+                    self.member_id,
+                    self.root,
+                    delivery=Delivery.INBOX,
+                    wake=self.wake,
+                )
                 peers.beat(self.member_id)
             await asyncio.sleep(self.pulse.interval_seconds)
 
@@ -164,6 +171,7 @@ def create_peer_tools(
     peers: RepositoryPeers,
     member_id: str,
     worktree: Path,
+    wake: WakePath = WakePath(),
     door: Door = Door.AGENT,
 ) -> list[LupMcpTool]:
     """The repository verbs, bound to one roster and one session's identity.
@@ -193,7 +201,7 @@ def create_peer_tools(
         hook. What a member says about itself is what a sender is told, so
         claiming the weaker mode here would understate what a message does.
         """
-        peers.join(member_id, worktree, delivery=Delivery.INBOX)
+        peers.join(member_id, worktree, delivery=Delivery.INBOX, wake=wake)
 
     def spoken() -> None:
         """Refuse to act on the roster for a session that has not said what it is on.

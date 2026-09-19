@@ -12,7 +12,9 @@ import atexit
 
 import typer
 
-from lup.providers.identity import native_session_id
+from lup.coordination.identity import session_cli_name
+from lup.coordination.wake import WakePath
+from lup.providers.identity import native_session_id, native_wake
 from lup.tools.mcp import LupMcpTool
 from lup.tools.toolsets import (
     SessionNeeds,
@@ -46,7 +48,9 @@ def subagent_tool() -> LupMcpTool:
     )
 
 
-def session_needs(context: SessionContext, identity: str | None) -> SessionNeeds:
+def session_needs(
+    context: SessionContext, identity: str | None, wake: WakePath = WakePath()
+) -> SessionNeeds:
     """What one session gives its groups, resolved from the context it opened.
 
     *identity* is what the coordination group falls back to when no launcher
@@ -84,11 +88,14 @@ def session_needs(context: SessionContext, identity: str | None) -> SessionNeeds
         realtime_dir=context.realtime_dir,
         subagent_tool=subagent_tool(),
         member=session_member_id(named),
+        wake=wake,
     )
 
 
 def collect_session_toolset(
-    context: SessionContext | None, identity: str | None = None
+    context: SessionContext | None,
+    identity: str | None = None,
+    wake: WakePath = WakePath(),
 ) -> SessionToolset | None:
     """The session's whole toolset — groups and their servers' companions — or nothing.
 
@@ -99,7 +106,7 @@ def collect_session_toolset(
     """
     if context is None:
         return None
-    return assembled(declared_tool_groups(), session_needs(context, identity))
+    return assembled(declared_tool_groups(), session_needs(context, identity, wake))
 
 
 def collect_registry_tools() -> dict[str, list[LupMcpTool]]:
@@ -170,6 +177,7 @@ def serve_tools(
 
     context = read_session_context()
     identity: str | None = None
+    wake = WakePath()
     if context is None and session is not None:
         # A native runtime relays no context, so the session opened here is
         # named for where its notes go and not for who it is. What the roster
@@ -178,6 +186,15 @@ def serve_tools(
         # nothing where the runtime hands its servers none.
         context = harness_session_context(session)
         identity = native_session_id(runtime) if runtime is not None else ""
+        # What would make this session look, which is a different question from
+        # what it is called on the roster and answered by a different half: the
+        # name reaches a peer's own message tool, so only the adapter for the
+        # runtime that resolves that name can say whether there is one.
+        wake = (
+            native_wake(runtime, session_cli_name())
+            if runtime is not None
+            else WakePath()
+        )
     if context is not None:
         configure_metrics(metrics_path(context.session_dir))
 
@@ -188,7 +205,7 @@ def serve_tools(
             f"no group named {server_group!r}: this project declares "
             f"{', '.join(declared)}"
         )
-    toolset = collect_session_toolset(context, identity)
+    toolset = collect_session_toolset(context, identity, wake)
     if toolset is None:
         typer.echo(
             "no session context and no --session name, so there is nothing to "

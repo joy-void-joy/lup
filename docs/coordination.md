@@ -277,10 +277,27 @@ no command that speaks to a running session at all — so waking returns an
 and a skill running inside a session carries it. A third outcome, that nothing
 can reach the peer, is reported rather than silently skipped.
 
-The handle a peer is addressed by is **self-reported on the roster**, because
-on one runtime it can only be: the session identifiers in its environment are
-not what peers address it by, and the address is discoverable only by asking
-the runtime from inside the session.
+The handle a peer is woken by is **declared when it joins**, and declared by
+the adapter for the runtime that would use it — because what a handle even is
+differs by runtime, and a neutral answer would be right for at most one of
+them. On Claude it is the path of the session's own inbox socket, which the
+runtime names to the processes that session starts, so a tool server reports
+where its session listens without being told; the wake is a frame written
+there, carrying the member's session id so an inbox that is not theirs drops
+it, and the library makes it. On Codex it is the thread `codex queue` takes,
+which nothing hands a server Codex starts, so that adapter declares nothing —
+an outcome reported rather than skipped.
+
+Declaring it is not enough to reach anybody. A path is only good to a process
+that can open it, and a contained session's filesystem is its own — so the
+launcher places these sockets in one directory every session it starts can
+reach, mounted under the path it has outside, because the path is what a
+member publishes and another container reads back. Reachability of that path
+is the whole of the credential: the frame carries no token, so the directory
+those sockets live in is the boundary, and widening it widens who can put text
+into a session. It is deliberately not a directory the runtime scans for
+peers, which would make every session on the machine natively reachable by
+every other through a channel the peer policy cannot see.
 
 ## One fold, three readers
 
