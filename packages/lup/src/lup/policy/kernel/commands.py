@@ -170,6 +170,16 @@ class WriteFacts(TypedDict):
     anything confines the write is the whole of the answer.
     """
 
+    checkout_root: str
+    """Where this repository sits, for reading an absolute path back against.
+
+    The declared roles are anchored at the repository top, so an absolute
+    spelling reaches none of them and one file gets two answers depending on
+    how a caller happened to name it. A machine's own path rather than
+    anything this repository declares, so it crosses from the host per call;
+    empty leaves every reading exactly as it was.
+    """
+
 
 class SedContext(TypedDict):
     """Everything judging an in-place rewrite as an edit needs, in this shape.
@@ -222,6 +232,7 @@ def no_write_facts() -> WriteFacts:
         path_roles=[],
         path_rules=[],
         contained=False,
+        checkout_root="",
     )
 
 
@@ -268,7 +279,7 @@ def flag_write_verdict(
         """
         known = facts["existing"]
         existing = known is None or target in known
-        scope = write_scope(target, facts["path_roles"])
+        scope = write_scope(target, facts["path_roles"], facts["checkout_root"])
         return WriteAnswer(
             effect=verdict_for(
                 [
@@ -355,7 +366,10 @@ def verb_loss_scope(
     if targets is None:
         return None
     if any(
-        write_checkpoint(write_scope(target, facts["path_roles"])) == "unrecoverable"
+        write_checkpoint(
+            write_scope(target, facts["path_roles"], facts["checkout_root"])
+        )
+        == "unrecoverable"
         for target in targets
     ):
         return "unrecoverable"
