@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 109 artifacts
+## `claude` — 113 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -87,17 +87,20 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/settlement.py` | lup.policy.kernel.settlement |
 | `.claude/plugins/lup/hooks/runtime/kernel/shell.py` | lup.policy.kernel.shell |
 | `.claude/plugins/lup/hooks/runtime/kernel/spawns.py` | lup.policy.kernel.spawns |
+| `.claude/plugins/lup/hooks/runtime/kernel/subagents.py` | lup.policy.kernel.subagents |
 | `.claude/plugins/lup/hooks/runtime/kernel/syntax.py` | lup.policy.kernel.syntax |
 | `.claude/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.claude/plugins/lup/hooks/runtime/kernel/typescript.py` | lup.policy.kernel.typescript |
 | `.claude/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.claude/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
+| `.claude/plugins/lup/hooks/runtime/subagent_cleanup.py` | lup.providers.claude.assets.subagent_cleanup |
 | `.claude/plugins/lup/hooks/scripts/carrier_drift.sh` | lup.providers.drift_prompt |
 | `.claude/plugins/lup/hooks/scripts/coordination_changes.sh` | lup.providers.roster_prompt |
 | `.claude/plugins/lup/hooks/scripts/coordination_delivery.sh` | lup.providers.claude.peer_delivery |
 | `.claude/plugins/lup/hooks/scripts/coordination_departure.sh` | lup.providers.roster_prompt |
 | `.claude/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.providers.claude.assets.policy_dispatcher |
 | `.claude/plugins/lup/hooks/scripts/policy.sh` | lup.policy.dispatcher |
+| `.claude/plugins/lup/hooks/scripts/subagent_cleanup.sh` | lup.providers.subagent_cleanup |
 | `.claude/plugins/lup/scripts/file_suggest.sh` | src/lup_template/harness/content/assets/file_suggest.sh |
 | `.claude/settings.json` | lup_template.harness.content.settings |
 | `docs/README.md` | lup.harness.content.docs.index |
@@ -123,7 +126,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 85 artifacts
+## `codex` — 87 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -163,6 +166,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/settlement.py` | lup.policy.kernel.settlement |
 | `.codex/plugins/lup/hooks/runtime/kernel/shell.py` | lup.policy.kernel.shell |
 | `.codex/plugins/lup/hooks/runtime/kernel/spawns.py` | lup.policy.kernel.spawns |
+| `.codex/plugins/lup/hooks/runtime/kernel/subagents.py` | lup.policy.kernel.subagents |
 | `.codex/plugins/lup/hooks/runtime/kernel/syntax.py` | lup.policy.kernel.syntax |
 | `.codex/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.codex/plugins/lup/hooks/runtime/kernel/typescript.py` | lup.policy.kernel.typescript |
