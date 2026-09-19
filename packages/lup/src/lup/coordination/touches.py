@@ -10,8 +10,8 @@ the claim, on that session's own file.
 the path it was taken over, so a reader can ask the filesystem whether it
 still says anything: the path is gone, or somebody has written it since, or
 what this session left is what stands there. Nothing has to be written to
-retire one — which is what the vacating record used to be for, and why a claim
-over a deleted worktree outlived the worktree.
+retire one — no vacating record is needed, and a claim over a deleted
+worktree cannot outlive the worktree.
 
 **Two kinds.** A *touch* is an exact path some session changed. A *lock* is a
 prefix a session took deliberately, for the case observation cannot reach — an
@@ -39,7 +39,7 @@ from lup.coordination.bare import store
 from lup.coordination.refs import ActorRef
 
 
-class Claim(BaseModel, frozen=True):
+class HeldPath(BaseModel, frozen=True):
     """One thing sessions are holding, as a reader about to write asks about it.
 
     Absolute paths throughout, so two sessions in different worktrees never
@@ -88,7 +88,7 @@ class Claim(BaseModel, frozen=True):
         )
 
 
-def folded_claim(row: store.Held) -> Claim:
+def folded_held_path(row: store.Held) -> HeldPath:
     """One row of the shared reader, as a typed caller reads it.
 
     Total rather than validating, for the reason a member is: this is the read
@@ -96,7 +96,7 @@ def folded_claim(row: store.Held) -> Claim:
     newer library wrote must leave an older one still able to say who holds
     what.
     """
-    return Claim(
+    return HeldPath(
         path=row["path"],
         prefix=row["prefix"],
         holders=[

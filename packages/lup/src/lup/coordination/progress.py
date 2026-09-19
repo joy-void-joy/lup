@@ -2,7 +2,7 @@
 
 A spawn that has not returned is not a spawn nobody can learn from. Its turn
 events reach the journal as they happen, so the material for "which of these
-three is getting somewhere" is already on disk — what was missing is a way to
+three is getting somewhere" is already on disk — what it takes is a way to
 read it that does not cost the reader the whole transcript.
 
 That is the shape here: a fold from records to lines, at the resolution
@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field
 from lup.coordination.cohort import ActorCohort, CohortEntry
 from lup.coordination.mail import MailEventBase
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import SpawnedActor
+from lup.coordination.roster import RosterMember
 from lup.sessions.events import ToolRefusal, TurnMessage
 from lup.types import JsonObject
 
@@ -268,7 +268,7 @@ def read_progress(
             for found in cohort.live()
             if found.actor.conversation() == actor.conversation()
         ),
-        SpawnedActor(actor=actor, task="", running=False),
+        RosterMember(actor=actor, task="", running=False),
     )
     return ActorProgress(
         address=actor.label(),

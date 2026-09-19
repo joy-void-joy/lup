@@ -242,13 +242,13 @@ def cache_dir() -> Path:
 
 
 def legacy_cache_dir() -> Path:
-    """Where clones used to land, still read so nothing quietly abandons one.
+    """A second place clones sit, still read so nothing quietly abandons one.
 
-    A clone under the project root was writable with the checkout, so a
-    session could commit in one and some did. Moving the cache would leave
+    A clone under the project root is writable with the checkout, so a
+    session can commit in one and some have. Resolving the cache alone leaves
     that work in a directory nothing looks at again, which is the failure
-    this whole change is about -- so the old location is still resolved, and
-    a project found there is used where it stands rather than re-cloned
+    this guards against -- so this location is resolved as well, and a
+    project found there is used where it stands rather than re-cloned
     beside it.
     """
     return project_root() / ".cache" / "sync"
@@ -346,14 +346,14 @@ def find_project(name: str) -> ProjectEntry:
 class Upstream(BaseModel, frozen=True):
     """A registration located on disk, and the ref its commits are read from.
 
-    Two fields because the second stopped being ``HEAD`` for everything. A
+    Two fields because the second is not ``HEAD`` for everything. A
     registration naming a local path is somebody's own checkout and its HEAD
     is what they have. A clone this module made is a checkout somebody may be
     *working in*, whose HEAD is theirs rather than the upstream's -- so the
     review reads the remote-tracking ref there, which a fetch moves and
     nothing local does. That is what lets the refresh be a fetch and nothing
-    else: the hard reset that used to keep a review current is the same reset
-    that took a session's work with it.
+    else: a hard reset that kept a review current would be the same reset
+    that takes a session's work with it.
     """
 
     checkout: Path
@@ -415,8 +415,8 @@ def clone_branch(proj: ProjectEntry, repository: Path) -> str:
 def clone_upstream(proj: ProjectEntry, repository: Path) -> Upstream:
     """One cached clone read as an upstream, whichever layout it is in.
 
-    The bare layout keeps its working tree at ``tree/<branch>``; a clone made
-    before this module cloned bare *is* its own working tree. Both are
+    The bare layout keeps its working tree at ``tree/<branch>``; a clone in
+    the non-bare layout *is* its own working tree. Both are
     reviewed against a remote-tracking ref, which is the whole reason neither
     has to be reset — and the bare half answers for itself until a worktree
     is attached, because ``rev-list`` and ``show`` read a repository rather
@@ -495,9 +495,9 @@ def accessible_roots(
     Only the entries carrying a ``mount``. Registering a project says the
     tooling may read its commits; nothing about it says a session may open
     it, and the two live in the same file only because the file is where a
-    project is named. Silence here is the answer for every registration
-    written before this key existed, and for the lup entry the committed
-    scaffold ships to every adopter.
+    project is named. Silence here is the answer for every registration that
+    does not carry the key, and for the lup entry the committed scaffold
+    ships to every adopter.
 
     Read from the registry rather than from `refs/`, and that difference is
     the whole of why this exists. `refs/` is a directory of symlinks built
@@ -610,14 +610,14 @@ def verified_grant(device: Device) -> Finding:
 def clone_bare(url: str, repository: Path, report: Callable[[str], None]) -> None:
     """Clone a URL as the bare half of the layout, with its whole history.
 
-    Whole rather than the ``--depth=200`` this used to take, and that flag is
-    the reason a URL registration was never as good as a path one. A shallow
-    clone is a review window that quietly ends — a checkpoint older than the
-    window computes no range at all — and it is single-branch besides, so
-    every branch but one is missing and none can be cut a worktree from. A
-    session working in one cannot rebase past the graft or push a branch that
-    reaches behind it. The depth bought a faster first launch, once, for a
-    clone that is now made once per machine rather than once per worktree.
+    Whole rather than shallow, which is what makes a URL registration as good
+    as a path one. A shallow clone is a review window that quietly ends — a
+    checkpoint older than the window computes no range at all — and it is
+    single-branch besides, so every branch but one is missing and none can be
+    cut a worktree from. A session working in one cannot rebase past the
+    graft or push a branch that reaches behind it. A depth buys a faster
+    first launch, once, for a clone made once per machine rather than once
+    per worktree.
 
     ``--bare`` writes no ``remote.origin.fetch``, so the standard refspec is
     configured immediately afterwards. Without it every later fetch writes
@@ -645,16 +645,16 @@ def clone_bare(url: str, repository: Path, report: Callable[[str], None]) -> Non
 def refresh(name: str, repository: Path, report: Callable[[str], None]) -> None:
     """Bring this clone's remote-tracking refs level, moving nothing local.
 
-    The whole refresh, where it used to be a fetch followed by a hard reset
-    onto the upstream. The reset was there because the review read ``HEAD``,
-    and it is what made a cached clone impossible to work in: a session's
-    uncommitted files went with it and said nothing. Reading the review off
-    the remote-tracking ref removes the reason for it rather than guarding
-    it, so there is no case left in which this destroys anything.
+    The whole refresh: a fetch, with no hard reset onto the upstream behind
+    it. A reset is what a review reading ``HEAD`` would need, and it is what
+    makes a cached clone impossible to work in: a session's uncommitted
+    files go with it and say nothing. Reading the review off the
+    remote-tracking ref removes the reason for one rather than guarding
+    against it, so there is no case in which this destroys anything.
 
     The refspec is named for the same reason :func:`clone_bare` configures
-    one, and naming it here as well covers a clone made before that line
-    existed.
+    one, and naming it here as well covers a clone whose configuration is
+    missing it.
     """
     report(f"Fetching latest for '{name}' from {repository}...")
     try:
@@ -1005,8 +1005,8 @@ def mark_synced(
     if entry:
         entry["last_synced_commit"] = head
     else:
-        # The checkpoint alone, where this used to record the path beside it.
-        # A registration that named only a URL is materialized in the cache,
+        # The checkpoint alone, with no path recorded beside it.
+        # A registration that names only a URL is materialized in the cache,
         # and writing that location back as its `path` turns it into a
         # registration naming a local checkout -- one whose commits are then
         # read from whatever branch a session left it on rather than from the

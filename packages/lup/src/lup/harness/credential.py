@@ -491,7 +491,7 @@ def fleet_rewrites(
     """Every spelling the checkouts this session can open use and cannot reach.
 
     One walk per root rather than one over the session's own checkout, because
-    what a session can open stopped being a single repository. A mounted
+    what a session can open is not a single repository. A mounted
     project is one a session commits and pushes in, and its remotes are
     spelled however its own author spells them -- an ssh config alias, an
     HTTPS URL, a `git@` address -- none of which the checkout that launched
@@ -1142,13 +1142,13 @@ class GitAccess(BaseModel, frozen=True):
         identity says who a commit is authored as, and the signing member
         says what it claims.
 
-        A rewrite used to be withheld unless a token came with it, on the
-        reasoning that half this arrangement is worse than none: a remote
-        redirected to HTTPS and then asked for a password, in a session with
-        no human at the other end. What refutes it is that the prompt is
-        gone. Terminal prompting is off inside the image, so the unanswerable
-        challenge that argument feared is now a refusal with a reason, and
-        the rewrite is the only thing making a remote addressable at all.
+        Withholding a rewrite unless a token comes with it would reason that
+        half this arrangement is worse than none: a remote redirected to
+        HTTPS and then asked for a password, in a session with no human at
+        the other end. What refutes it is that the prompt is gone. Terminal
+        prompting is off inside the image, so the unanswerable challenge that
+        argument fears is a refusal with a reason, and the rewrite is the
+        only thing making a remote addressable at all.
         """
         return [
             *[rewrite.setting() for rewrite in rewrites],
@@ -1173,17 +1173,16 @@ class GitAccess(BaseModel, frozen=True):
         override what was decided out here, and nothing has to be written
         into a tree the agent can edit. A file would be both.
 
-        Sent whether or not there is a credential, which is the part that
-        used to be withheld. A remote on a transport this session cannot
-        reach fails for a reason that has nothing to do with credentials --
-        under a filtered egress the session resolves no names at all -- so
-        the rewrite is what makes a remote addressable, and a public
-        repository is readable through it on no credential whatsoever.
-        Holding it back until a token appeared turned every tokenless fetch
-        into a hostname that would not resolve, which reads as a broken
-        container rather than as a boundary, and left the signing settings
-        unsent beside it: the launch said commits were unsigned while the
-        checkout's own ``commit.gpgsign`` still stood.
+        Sent whether or not there is a credential. A remote on a transport
+        this session cannot reach fails for a reason that has nothing to do
+        with credentials -- under a filtered egress the session resolves no
+        names at all -- so the rewrite is what makes a remote addressable,
+        and a public repository is readable through it on no credential
+        whatsoever. Holding it back until a token appears turns every
+        tokenless fetch into a hostname that will not resolve, which reads as
+        a broken container rather than as a boundary, and leaves the signing
+        settings unsent beside it: the launch says commits are unsigned while
+        the checkout's own ``commit.gpgsign`` still stands.
 
         No secret is in here. The token crosses by name through
         :meth:`inherited`, and every value below is a configuration key, a

@@ -102,16 +102,15 @@ def manifest(boundary: SessionEgress | None = None) -> Manifest:
     `harness requirements --inside` is for. Three of its entries take a
     filtered boundary component by component -- the proxy being reachable, a
     request reaching the world through it, the metadata endpoint still being
-    refused -- and every one of them was a thing the first contained session
-    found broken while no preflight was in a position to see it, because the
-    image half had been declared and never run. They are asked only where that
-    boundary is declared, since each names the proxy in the exercise itself.
+    refused -- and each is one a contained session finds broken while no
+    preflight is in a position to see it, an image half declared and never
+    run. They are asked only where that boundary is declared, since each
+    names the proxy in the exercise itself.
 
     The others hold whatever the network is. One is the operator's terminal
     having arrived. The last is about the container rather than the boundary,
-    and is here for the same reason as the rest: it was found by a session
-    collapsing rather than by anything asking. A container with no reaper at
-    PID 1 keeps every
+    and is here for the same reason as the rest: a session collapsing finds
+    it, not anything asking. A container with no reaper at PID 1 keeps every
     orphan it ever made, so the process bound is reached by a session that
     leaked -- and what announces that is an unrelated suite failing to start
     threads. Declared beside them because the cure and the check belong to the

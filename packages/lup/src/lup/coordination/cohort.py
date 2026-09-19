@@ -49,7 +49,7 @@ from lup.coordination.mail import ActorDelivery, ActorMail
 from lup.coordination.manifest import CohortManifest, publish_manifest
 from lup.coordination.peers import USER_KIND, join_user
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import Delivery, Roster, SpawnedActor
+from lup.coordination.roster import Delivery, Roster, RosterMember
 from lup.coordination.sessions import (
     RECORD_ADAPTER,
     ActorEvent,
@@ -172,7 +172,7 @@ class CohortJournal(Journal[ActorRef, CohortEntry]):
 
         This is the half that makes a *working* agent legible. Its turn events
         are drained here as they happen, so what it has found so far is on
-        disk long before it returns; what a caller lacked was the read.
+        disk long before it returns; what a caller needs is the read.
         """
         return [
             entry
@@ -243,7 +243,7 @@ class ActorCohort:
         # What makes this directory a cohort to a reader that did not open it,
         # and the address a member reaches a person on — written and joined
         # here rather than by each consumer, because three call sites
-        # reconstructing the same convention is what a manifest replaces.
+        # reconstructing the same convention is what a manifest prevents.
         self.manifest: CohortManifest = publish_manifest(
             self.root, self.run_id, description
         )
@@ -359,7 +359,7 @@ class ActorCohort:
         if found is not None:
             publish_atomic(self.path(actor), found.record)
 
-    def live(self) -> list[SpawnedActor]:
+    def live(self) -> list[RosterMember]:
         """Every agent this cohort holds, the ones still working first.
 
         The agents, which is one member short of the roster: the person this
@@ -668,7 +668,7 @@ class ActorCohort:
         say something to. Mail is held by address and read at a session's
         first tool call, so nothing about that needs the work to have
         started — and a caller that had to wait for a slot before it could
-        steer what it started would be back to a caller that cannot steer.
+        steer what it started would leave a caller that cannot steer.
         The round this opens announces the same round again and the roster
         keeps one record of it.
         """

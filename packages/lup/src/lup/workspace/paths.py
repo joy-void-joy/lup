@@ -223,7 +223,7 @@ class PathConfig(BaseModel):
     def checkout_notes_dir(self) -> Path:
         """The notes tree this root has, whatever ``notes_dir`` was set to.
 
-        Two different questions share one field until this exists. ``notes_dir``
+        Two different questions would otherwise share one field. ``notes_dir``
         answers "where does this process write", which an override is entitled
         to move; this answers "where does this checkout keep its notes", which
         an override does not move and cannot, being a fact about the root

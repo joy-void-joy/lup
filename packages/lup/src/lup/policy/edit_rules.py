@@ -15,7 +15,7 @@ A shell table *is* the policy: a command absent from it reaches no judgment.
 An edit table is a set of **overrides layered over the kernel's own verdicts**,
 because every gate already has an answer and a project usually wants to move
 one of them, not restate all twelve. So an empty table decides exactly what
-the kernel decided before this existed, and a project states only its
+the kernel decides on its own, and a project states only its
 differences.
 
 Matching is **last-match-wins**, the rule `.gitignore` uses: rules are read in

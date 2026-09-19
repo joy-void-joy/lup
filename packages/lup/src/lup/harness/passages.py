@@ -49,6 +49,8 @@ than in the module. `passage` before it, because the file is a template with
 values still to place and not the finished page.
 """
 
+# lup: ignore[constant-declaration] — the marker syntax this module defines,
+# which a passage file spells and this module reads back
 SECTION_OPEN = "<!-- passage:"
 """How a section inside a passage file announces which passage it is.
 
@@ -59,7 +61,9 @@ rather than matched against the raw text, so a marker written inside a fenced
 block is the code sample it looks like and divides nothing.
 """
 
+# lup: ignore[constant-declaration] — the other half of that marker syntax
 SECTION_CLOSE = "-->"
+"""Where a marker ends, so a comment that is not one divides nothing."""
 
 
 class PassageSection(BaseModel, frozen=True):

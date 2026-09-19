@@ -56,11 +56,11 @@ def symbols_of(node: ast.AST, prefix: str, local: bool) -> list[DefinedSymbol]:
     ``type X = ...`` sits with the assignments rather than with the classes,
     because that is what it is: one name bound at module scope, with nothing
     beneath it to walk into. It parses to its own node rather than to an
-    ``Assign``, which is the whole of why it was missing — and missing
-    silently, in the one direction this module exists to make loud. Every
-    ``type`` alias in this repository was invisible to the loss check, so a
-    merge that dropped one reported having lost nothing, while the older
-    ``Name = Literal[...]`` spelling of the same idea was tracked. Two ways
+    ``Assign``, which is the whole of why it goes missing — and missing
+    silently, in the one direction this module exists to make loud. A
+    ``type`` alias invisible to the loss check means a
+    merge that drops one reports having lost nothing, while the older
+    ``Name = Literal[...]`` spelling of the same idea is tracked. Two ways
     to write one declaration, one of them checked.
     """
     match node:

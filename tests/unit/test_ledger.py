@@ -17,7 +17,7 @@ from pydantic import Field, ValidationError
 
 from lup.coordination.bare.store import Member
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import Delivery, Roster, SpawnedActor
+from lup.coordination.roster import Delivery, Roster, RosterMember
 from lup.coordination.wake import WakePath
 from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.models import LedgerEdge, LedgerNode, Standing, Surroundings
@@ -334,7 +334,7 @@ def test_every_field_an_arrival_carries_reaches_the_member_it_becomes(
         "worktree": "/tmp/tree",
         "wake": WakePath(runtime="codex", handle="thread-1"),
     }
-    shared = set(Member.__annotations__) & set(SpawnedActor.model_fields)
+    shared = set(Member.__annotations__) & set(RosterMember.model_fields)
     roster = Roster(tmp_path)
     roster.joined(ActorRef(kind="session", id="alpha"), **written)
 

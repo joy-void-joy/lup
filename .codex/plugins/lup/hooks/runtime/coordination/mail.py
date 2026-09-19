@@ -5,11 +5,11 @@ what this module separates.
 
 **A message is addressed and consumed.** It is one file in one member's inbox,
 written by the sender and deleted by the recipient, so "what is waiting for
-me" is a directory listing and there is no position for anybody to keep. The
-token that used to mean *everyone* is gone from the store: a sender resolves
-it against the roster and writes one file per live member, which is the only
-reading of "everyone" a message can honestly have — you cannot stop, or
-interrupt, a member that does not exist yet.
+me" is a directory listing and there is no position for anybody to keep. No
+token in the store means *everyone*: a sender resolves it against the roster
+and writes one file per live member, which is the only reading of "everyone" a
+message can honestly have — you cannot stop, or interrupt, a member that does
+not exist yet.
 
 **A notice is neither.** "The base moved under all of you" is a fact about the
 population rather than about its recipients: it stays true after it is said,
@@ -202,8 +202,8 @@ def retract(root: Path, notice_id: str) -> bool:
 
     Deleting it rather than marking it retracted, because a notice is read as
     state: what is there is true, and what is true is what is there. A
-    tombstone would be a record of something no longer the case, which is the
-    shape this store is getting away from.
+    tombstone would be a record of something no longer the case, which is not
+    a shape this store keeps.
     """
     return discarded(notice_path(root, notice_id))
 

@@ -239,26 +239,26 @@ def same_path_mount_requirement(
     same-path mounting is forced rather than preferred, and where it does not
     work the rail does not work.
 
-    How this is asked matters more than that it is asked, and the first
-    version got it wrong in the direction that manufactures findings. Asking
-    ``test -d`` about the mounted directory answered *false* on rootless
+    How this is asked matters more than that it is asked, and the cheap way
+    gets it wrong in the direction that manufactures findings. Asking
+    ``test -d`` about the mounted directory answers *false* on rootless
     podman for every worktree this rail leases -- which reads exactly like an
     absent mount, and is not one. Reading a file through the same mount, in
-    the same container, succeeded: the mount was present and `stat` on the
-    mount point was simply not answerable under that user-namespace mapping.
-    A presence check had answered a different question than the one asked,
-    and its wrong answer was shaped like a real defect.
+    the same container, succeeds: the mount is present and `stat` on the
+    mount point is simply not answerable under that user-namespace mapping.
+    A presence check answers a different question than the one asked, and its
+    wrong answer is shaped like a real defect.
 
     So the exercise reads a file across the boundary. That cannot succeed
     unless the mount both happened and carried content, and it cannot fail
     for a reason that has nothing to do with mounting.
 
-    Which directory it is aimed at is not written here, and that is the
-    second thing this got wrong. Spelling the checkout put an absolute host
-    path into a declaration the ownership digest hashes, and the digest then
-    moved between two worktrees of one commit -- so every checkout but the
-    last one to generate read its own committed tree as stale, for a fact
-    about where somebody had put it. :class:`MountProbe` declares the shape
+    Which directory it is aimed at is not written here either. Spelling the
+    checkout puts an absolute host path into a declaration the ownership
+    digest hashes, and the digest then moves between two worktrees
+    of one commit -- so every checkout but the last one to generate reads its
+    own committed tree as stale, for a fact about where somebody put it.
+    :class:`MountProbe` declares the shape
     and :func:`for_host` aims it, which is the same split the container
     client already goes through.
 
@@ -552,20 +552,20 @@ def agent_session_requirement(
     credential store, the egress proxy and the model endpoint all working
     together, and it cannot fail for a reason unrelated to any of them.
 
-    The list in that sentence is what the declaration used to *claim*. Spelled
-    out as its own ``run``, this exercise carried no mount, no config home, no
-    credential and no network -- so it started a bare container on the
-    engine's default bridge, where the proxy this architecture routes through
-    does not stand between anything. It could pass on a host whose sessions
-    could not open, which is the one thing a declare-and-verify manifest must
-    not do, and it is the reason the first contained session met a DNS
-    failure that no preflight had been in a position to see.
+    The list in that sentence is what a declaration can only *claim*. Spelled
+    out as its own ``run``, this exercise would carry no mount, no config
+    home, no credential and no network -- so it would start a bare container
+    on the engine's default bridge, where the proxy this architecture routes
+    through does not stand between anything. It can pass on a host whose
+    sessions cannot open, which is the one thing a declare-and-verify manifest
+    must not do, and the contained session then meets a DNS failure that no
+    preflight is in a position to see.
 
-    Declared image-side now, which is what makes it true: an image-side
-    exercise is carried out behind the argv a session opens with, so every
-    part of the boundary the sentence above names is in the path. Nothing here
-    spells a client or a tag, and that is the same fix a second time -- both
-    were host facts sitting in a declaration the ownership digest hashes.
+    Declared image-side, which is what makes it true: an image-side exercise
+    is carried out behind the argv a session opens with, so every part of the
+    boundary the sentence above names is in the path. Nothing here spells a
+    client or a tag, for the same reason -- both are host facts that would
+    sit in a declaration the ownership digest hashes.
 
     Its absence refuses rather than degrades, because an architecture whose
     sessions do not run is not a degraded architecture.
@@ -616,15 +616,15 @@ def proxy_reachable_requirement(
     machine sitting in something the ownership digest hashes. And what the
     session was *pointed at* is the right subject anyway: a probe that
     reached the proxy by some other route would verify a path no session
-    takes, which is the mistake the contained-session exercise already made
-    once.
+    takes -- the mistake the contained-session exercise is declared
+    image-side to avoid.
 
     Squid answers a direct request with a status of its own, so any HTTP code
     proves the socket opened. Being refused is a correct answer here.
 
-    This used to ask whether a DNS alias resolved, and that question could be
-    answered yes by a network whose resolver then refused every public name
-    the proxy needed -- measured, and the reason the alias is gone.
+    Asking instead whether a DNS alias resolves is a question a network can
+    answer yes while its resolver refuses every public name the proxy needs
+    -- measured, and the reason no alias stands in for this.
 
     ``at_launch`` because it is one of two places in the image roster where a
     container start is worth paying for on the way in. A session that opens

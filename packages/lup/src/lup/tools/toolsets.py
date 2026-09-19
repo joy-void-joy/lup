@@ -6,14 +6,14 @@ group's name becomes the server's name, and a tool ``foo`` in group ``notes``
 is addressed as ``mcp__notes__foo`` on every backend — and it is what lets a
 policy withhold a whole capability at once.
 
-Assembling that is the same work in every project built on this library, and
-it used to be copied into each of them: a function naming lup's own groups,
-constructing each from the session's directories, and skipping the ones this
-session has nothing for. Copied, it went stale the moment a group gained a
-companion or a builder gained a parameter — the adopter kept the old call and
-the pin landed the new library, which is the half-way arrival this exists to
-remove. What a project genuinely decides is *which* groups its sessions carry
-and what its own ones are made of, and that is a declaration.
+Assembling that is the same work in every project built on this library, so
+it lives here rather than in a copy per project: a function naming lup's own
+groups, constructing each from the session's directories, and skipping the
+ones this session has nothing for. A copy goes stale the moment a group
+gains a companion or a builder gains a parameter — the adopter keeps its
+call while the pin lands the new library, the half-way arrival this exists
+to remove. What a project genuinely decides is *which* groups its sessions
+carry and what its own ones are made of, and that is a declaration.
 
 So a group is a name and a builder over :class:`SessionNeeds`, and a builder
 that has nothing to build for this session returns nothing — which is how a
@@ -246,8 +246,8 @@ def serve_toolset(
 ) -> None:
     """Serve one group of a session's tools over MCP stdio, and its companions.
 
-    The loop every subprocess backend runs, and the one an adopter used to
-    carry a copy of. What a server serves is one named group or the default
+    The loop every subprocess backend runs, here rather than in a copy an
+    adopter carries. What a server serves is one named group or the default
     set — every group but the ones servable by name alone — and what runs
     beside it is that group's companions, so a server started for one group
     carries that group's pulse and the default set carries all of them.

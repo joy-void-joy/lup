@@ -537,10 +537,10 @@ def host_purity_breaches(shared: SourceHalf) -> list[str]:
 
     The host half is what resolves facts from the machine, and it may stand on
     nothing but the pinned standard library — not the kernel, not the ``lup``
-    package. Type checking used to settle that incidentally, by reading the
-    file somewhere the kernel did not resolve; it now reads against a
+    package. Type checking settles that only incidentally, by reading the
+    file somewhere the kernel does not resolve; it reads against a
     generated runtime so the kernel-aware half beside it can be checked at
-    all. A guarantee that has quietly become a configuration detail is not a
+    all. A guarantee that is really a configuration detail is not a
     guarantee, so it is proven here instead.
     """
     return [

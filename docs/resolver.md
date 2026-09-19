@@ -79,7 +79,7 @@ opens announces itself there, so `resolve actors` prints each agent with
 what it was asked and how it ended — working, or the summary or error it
 finished on — and resolves an address without reading the journal at all.
 That matters at the size these reach: the population is asked for on every
-status line, and the journal it used to be folded from runs to tens of
+status line, and the journal it would otherwise fold from runs to tens of
 megabytes. A worker is finished when its concern settles; its reviewer is
 not, because a join asks that reviewer again over the merged tree.
 
@@ -88,12 +88,12 @@ with no target reaches `run:<run-id>`, whose inbox `resolve actors` prints
 first, under "said to you by this run's actors". That is the channel for
 anything that is not a decision — a consequence for whoever merges, or a
 worker blocked on something a human would simply fix. It never parks anyone,
-which is the difference from a question: two workers in one run each spent a
-human round trip parked on housekeeping because the question queue was the
-only route they had been taught. Reaching *every* actor is `--to '*'`, which
+which is the difference from a question: where the question queue is the only
+route a worker is taught, two in one run each cost a human round trip parked
+on housekeeping. Reaching *every* actor is `--to '*'`, which
 is the default for `say` and `redirect`; leaving the target empty reaches
-nobody rather than everybody, because a blank that meant "everyone" is what
-delivered a worker's report to its siblings instead of to a person.
+nobody rather than everybody, because a blank meaning "everyone" delivers a
+worker's report to its siblings instead of to a person.
 
 **`state.json` lags the mailbox.** The run folds `questions/` and `answers/`
 into `state.questions`/`state.answers` as it promotes, so those copies are
@@ -146,7 +146,7 @@ in the human's own words into a run standing still, and where no run exists yet
 it opens one from those statements beside whatever notes the tree holds. Both
 are positions in the same request, so a seeded run and a scanned one reach the
 same shape of inventory and one run may mix them. Otherwise somebody arriving
-with the concerns in their own words — which is how a human arrives — had to
+with the concerns in their own words — which is how a human arrives — must
 invent a note site for the planner to read back, a file edit standing in for a
 sentence.
 

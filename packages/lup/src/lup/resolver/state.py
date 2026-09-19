@@ -174,11 +174,11 @@ def progress_index(progress: list[ConcernProgress]) -> dict[str, ConcernProgress
 def validate_concern_admission(current: ResolveState, candidate: ResolveState) -> None:
     """Allow new concerns to join a live run, and none to change or vanish.
 
-    A concern discovered mid-run could not join the run that discovered it,
-    so the work waited for the next inventory pass — which meant committing
+    A concern discovered mid-run that cannot join the run that discovered
+    it leaves the work for the next inventory pass, which means committing
     a note, re-deriving from scratch, and discarding every material answer
-    already collected. Append-only keeps what resume integrity needed: an
-    existing entry is still immutable, so a resumed run reads back exactly
+    already collected. Append-only keeps what resume integrity needs: an
+    existing entry is immutable, so a resumed run reads back exactly
     what it persisted. A successor names its predecessor rather than editing
     it, which is what lets a plan be corrected without rewriting history.
     """
@@ -521,11 +521,11 @@ class ResolverStateRepository:
     def rounds_for(self, concern_id: str) -> list[AgentRound]:
         """Every round this concern completed, in the order it took them.
 
-        A concern interrupted mid-flight re-entered at round one with its
-        feedback discarded, while its branch still carried the rounds it had
-        already committed — so the worker met its own work with no record of
-        why the reviewer had sent it back, and the review that produced that
-        record was spent for nothing.
+        A concern interrupted mid-flight and re-entered at round one with
+        its feedback discarded meets a branch carrying the rounds it
+        already committed — so the worker meets its own work with no record of
+        why the reviewer sent it back, and the review that produced that
+        record is spent for nothing.
         """
         directory = self.root / "rounds"
         if not directory.is_dir():

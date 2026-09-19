@@ -100,8 +100,8 @@ class LeaseGrants:
     Held by the policy rather than read into it, so the answer is the
     document's current contents at the moment of the call and not a list
     copied out of it when the judge was built. A judge built once and asked a
-    hundred times is how a session-long policy object came to hold a grant
-    that had been withdrawn, and how it could not hold one that arrived.
+    hundred times is a session-long policy object holding a grant that has
+    been withdrawn, and unable to hold one that arrives.
 
     Carrying no document is a lease with no grants rather than an error: most
     sessions are not leases, and they see the unchanged lattice.

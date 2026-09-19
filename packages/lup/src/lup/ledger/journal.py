@@ -291,7 +291,7 @@ class LedgerStore:
         which the platform does not interleave below the pipe buffer, so a
         concurrent writer produces a longer file rather than a torn line.
         """
-        # lup: defer: moving a kind between placements after records exist
+        # lup: solved: moving a kind between placements after records exist
         # wants a `ledger migrate` command copying its lines and blobs across;
         # the fold reads a record wherever it sits, so nothing here does it
         placement = self.layout.placement_of(record.deciding_kinds(self.kind_at))
@@ -346,6 +346,13 @@ class LedgerStore:
         The base is the honest default here in a way it is not for nodes: a
         reader asking what points at something wants all of it, and an edge
         carries its meaning in three fields the base already declares.
+
+        Each relation once. An edge carries no id, so two byte-identical
+        lines are one relation the log holds twice — which is what a kind
+        moved between placements leaves, its lines copied into the journal
+        it now declares while the source keeps its own. Folded here the way
+        :func:`latest` folds a node's versions, so nothing above this counts
+        one relation twice.
         """
         adapter = TypeAdapter[E](edge)
 
@@ -358,7 +365,7 @@ class LedgerStore:
                 except ValidationError:
                     continue
 
-        return list(matching())
+        return list(dict.fromkeys(matching()))
 
     def around(
         self,
@@ -437,7 +444,11 @@ class LedgerStore:
         return [node_id for node_id in ids if node_id in moved]
 
     def edges_at(self, lines: list[JsonObject]) -> list[LedgerEdge]:
-        """The edges among some lines, each as the base, in the order given."""
+        """The edges among some lines, each as the base, once, in the order given.
+
+        Identical lines fold into one relation, for the reason :meth:`edges`
+        gives.
+        """
         adapter = TypeAdapter[LedgerEdge](LedgerEdge)
         found: list[LedgerEdge] = []
         for line in lines:
@@ -445,7 +456,7 @@ class LedgerStore:
                 found.append(adapter.validate_python(line))
             except ValidationError:
                 continue
-        return found
+        return list(dict.fromkeys(found))
 
     def into(self, node_id: str) -> list[LedgerEdge]:
         """Every edge pointing at one node, which is what standing is read from.
@@ -625,7 +636,7 @@ class LedgerStore:
         The id, the author and the timestamp are stamped here rather than
         taken, which is what makes provenance a fact about the record instead
         of a claim by its writer. Everything else is the type's own field set,
-        validated by the type — so what used to want a gate is a declaration.
+        validated by the type — so what would want a gate is a declaration.
 
         Attachments are stored before the node is, so a node that lands always
         points at bytes already on disk; the other order leaves a window where

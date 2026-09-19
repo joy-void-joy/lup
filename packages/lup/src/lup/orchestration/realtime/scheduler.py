@@ -1,5 +1,5 @@
 # lup: ignore[native-spelling]
-# The retained scheduler callback surface still accepts legacy hook events.
+# The scheduler's hook factories name native hook events, spelled as they land.
 """In-process scheduler core for persistent agents.
 
 Owns all async timing state: sleep/wake, debounce windows, scheduled

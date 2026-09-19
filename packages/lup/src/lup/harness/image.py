@@ -573,7 +573,7 @@ class Image(BaseModel, frozen=True):
         """Where globally installed executables land, for PATH.
 
         A directory on PATH rather than each tool linked by name: a list of
-        names goes stale the moment a package is added, which it did, leaving
+        names goes stale the moment a package is added, leaving a tool like
         `tsc` installed and unreachable.
         """
         return f"{self.registry_root}/bin"
@@ -733,12 +733,12 @@ class Image(BaseModel, frozen=True):
 
         :data:`~lup.harness.environment.NON_INTERACTIVE_SHELL_ENV` first, and
         baked rather than passed, because a container is a spawn point like
-        any other and was the one that got missed: the launch and resolver
-        flows merged these at every place they start a command, and a session
-        inside the image started with none of them. What that cost is a
+        any other and the one easiest to miss: the launch and resolver
+        flows merge these at every place they start a command, and a session
+        inside the image starting with none of them costs a
         credential prompt with no terminal to answer it -- the failure the
         whole forge design exists to head off, reintroduced at the one spot
-        nothing was measuring. Baked, so anything that starts this image gets
+        nothing measures. Baked, so anything that starts this image gets
         it: a probe and a one-off ``run`` are as unattended as a session.
 
         ``LUP_CONTAINED`` says a process is inside an image this harness
@@ -861,7 +861,7 @@ RUN pacman -S --noconfirm --needed \\
 # as the tool having failed to install rather than as a permission.
 #
 # On PATH as a directory rather than each tool linked by name, because a list
-# of names goes stale the moment a package is added -- which it did, leaving
+# of names goes stale the moment a package is added, leaving a tool like
 # `tsc` installed and unreachable.
 ENV BUN_INSTALL={self.registry_root}
 ENV PATH={self.registry_bin()}:$PATH

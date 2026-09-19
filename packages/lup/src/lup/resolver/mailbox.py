@@ -1,11 +1,11 @@
 """The resolver's mailbox: the shared one, bound to its own question type.
 
-Everything this module used to hold is in :mod:`lup.coordination.mailbox`. What it
-did — declare a question once, let any door correct an offer, promote exactly
-one answer, and carry messages on a stream nothing parks on — was never about
-concerns or leases.
+The mechanism lives in :mod:`lup.coordination.mailbox`. Declaring a question
+once, letting any door correct an offer, promoting exactly one answer, and
+carrying messages on a stream nothing parks on is not about concerns or
+leases.
 
-What stays is the binding: which question rides in the slots. Only that, so
+What is here is the binding: which question rides in the slots. Only that, so
 this is a specialization rather than a barrel — a caller wanting
 ``AnswerOffer`` or ``ActorMessage`` imports it from the layer that defines it,
 and there is one place each name comes from.

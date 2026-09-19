@@ -260,9 +260,9 @@ def assembly_question(
 
     Every per-concern approval is cashed here: this is the step that merges
     the branches they authorized into one tree, and it is the least
-    reversible thing a run does. It used to follow the last worker
-    automatically, in the same invocation, so the only way to stop it was to
-    kill the process in the seconds between.
+    reversible thing a run does. Letting it follow the last worker
+    automatically, in the same invocation, leaves killing the process in the
+    seconds between as the only way to stop it.
 
     It is also the first moment three things are knowable — which concerns
     verified, which failed and are therefore excluded, and what the branch
@@ -272,7 +272,7 @@ def assembly_question(
 
     How far the base has fallen behind is the fourth. A run parks for hours
     and its branch moves underneath; assembling onto a superseded base is
-    exactly the moment a human wants to know, and it said nothing. Reported
+    exactly the moment a human wants to know, so the prompt says it. Reported
     rather than acted on, because refreshing here would move every lease
     under work already verified against where it stood.
     """
@@ -373,9 +373,9 @@ class ResolverCore:
         self.mailbox = QuestionMailbox(self.repository.root)
         self.journal = Journal(self.repository.root)
         # The cohort joins the person itself, so a worker telling the humans
-        # something has an address to send it to. That address used to be the
-        # run's own ref, which was constructed to attribute journal entries and
-        # answered to nothing else; a worker's only route out was a question.
+        # something has an address to send it to. Addressing the run's own ref
+        # instead reaches a name constructed to attribute journal entries and
+        # answering to nothing else, leaving a worker no route out but a question.
         self.actors = ActorCohort(
             self.repository.root,
             journal=self.journal,

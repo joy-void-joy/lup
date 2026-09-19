@@ -39,9 +39,12 @@ from lup.coordination.refs import ActorRef
 from lup.ledger.cite import read_cites
 from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.kinds import by_kind, declared_fields, kind_of, summary_of
+from lup.ledger.migrate import migrate
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.snapshot import snapshot
 from lup.ledger.writeup import Writeup, WriteupError, write_writeup
+from lup.observability.sessions import session_recorder
+from lup.observability.sweep import index_notes
 from lup.types import JsonObject
 from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
@@ -173,12 +176,12 @@ def create_ledger_app(
     node_kinds = by_kind(classes)
     edge_kinds = by_kind(relations)
 
+    def author() -> ActorRef:
+        """Whoever is at the console, as every record this tree writes is stamped."""
+        return ActorRef(kind="console", id=mint_member_id())
+
     def store() -> LedgerStore:
-        return LedgerStore(
-            project_root(),
-            ActorRef(kind="console", id=mint_member_id()),
-            layout,
-        )
+        return LedgerStore(project_root(), author(), layout)
 
     def found(held: LedgerStore, node_id: str) -> LedgerNode:
         node = held.resolve(node_id, classes)
@@ -646,6 +649,83 @@ def create_ledger_app(
             raise typer.Exit(1)
         held.amend(closed)
         typer.echo(f"{found.id}: done")
+
+    @app.command("migrate")
+    def migrate_cmd(
+        kinds: Annotated[
+            list[str] | None,
+            typer.Argument(
+                help="Which declared kinds to settle; every misplaced record where none is named"
+            ),
+        ] = None,
+    ) -> None:
+        """Copy a kind's records into the journal its placement now declares.
+
+        A kind's placement decides the journal at the moment a record is
+        appended, so moving a kind after records exist leaves every earlier
+        one where it was: the fold still reads them and nothing is lost, but
+        the committed half no longer carries the kind a diff is meant to show.
+        This copies those records, and the blobs they attach, into the journal
+        the mapping now declares — the edges at them too, since an edge is
+        committed only where both of its ends are.
+
+        The source lines stay where they are. This log is only ever appended
+        to, a read folds the two copies into one and takes the declared
+        journal's, and the committed half is merged by a driver that restores
+        a line any branch still holds. Running it again copies nothing.
+        """
+        named = list(kinds or [])
+        for kind in named:
+            if kind not in node_kinds and kind not in edge_kinds:
+                raise typer.BadParameter(
+                    f"{kind!r} is not a declared kind; `ledger types` lists them"
+                )
+        held = store()
+        moved = migrate(held, named or None)
+        if not moved.copied and not moved.settled:
+            typer.echo("Every record sits in the journal its kinds declare.")
+            return
+        typer.echo(f"kinds moved: {', '.join(moved.kinds())}")
+        for placement in held.roots:
+            landed = [each for each in moved.copied if each.declared == placement]
+            if landed:
+                typer.echo(
+                    f"{len(landed)} record(s) copied to {held.journal(placement)}"
+                )
+        if moved.settled:
+            typer.echo(f"{len(moved.settled)} record(s) were already there")
+        if moved.blobs():
+            typer.echo(f"{len(moved.blobs())} blob(s) copied beside them")
+        for digest in moved.missing():
+            typer.echo(f"no half of the store holds the blob {digest}")
+
+    @app.command("index-notes")
+    def index_notes_cmd() -> None:
+        """Record the runs already under notes/ that the log points at nothing of.
+
+        Recording starts when a recorder is wired, so a tree written before
+        that holds runs the ledger says nothing about. This walks it: one
+        closed session per session directory under `notes/traces/` and per
+        launch directory under `notes/harness/`, with the journal pinned as
+        the tree holds it and the outcome read off that journal's last
+        record, and one output per result document under a session, about
+        that session. A directory the log already points at is passed over,
+        so running it again records nothing.
+        """
+        recorder = session_recorder(project_root(), author(), classes, layout)
+        if recorder is None:
+            typer.echo(
+                "This project does not index its runs: `observability:session` and"
+                " `observability:output` are not among its declared kinds."
+            )
+            raise typer.Exit(1)
+        swept = index_notes(recorder)
+        typer.echo(
+            f"{len(swept.sessions())} session(s) and {len(swept.outputs())} output(s)"
+            f" recorded; {len(swept.known())} already indexed"
+        )
+        for directory in swept.refused():
+            typer.echo(f"the ledger refused the run at {directory}; the log says why")
 
     @app.command("snapshot")
     def snapshot_cmd(

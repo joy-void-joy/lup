@@ -125,7 +125,7 @@ def edit_documents(path, old_text, new_text, replace_all):
     A `replace_all` edit rewrites every occurrence, so requiring exactly one
     would reject the tool's own semantics — and a rejection here is not a
     judgment: it reaches the agent as an approval prompt that no rule
-    produced, which is how a whole class of edit went ungoverned.
+    produced, which leaves a whole class of edit ungoverned.
     """
     current = Path(path).read_text(encoding="utf-8")
     occurrences = current.count(old_text)
@@ -289,7 +289,7 @@ def dispatch(payload):
         # recipient in is its own business, and the roster answers for all of
         # them. A target nobody on it answers to passes through untouched,
         # which is what leaves subagent continuation and every other session
-        # this repository does not hold working exactly as before.
+        # this repository does not hold working untouched.
         return peer_send_decision(
             [value for value in tool_input.values() if isinstance(value, str)],
             session_directory,

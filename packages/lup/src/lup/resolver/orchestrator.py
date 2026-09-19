@@ -174,7 +174,7 @@ class WorktreeOrchestrator:
         bookkeeping is pruned, but removal keeps untracked files, and a
         session traces into the tree it runs in — so an ignored telemetry
         file survives, the directory survives with it, and `worktree add`
-        refuses the path from then on. Every later resume died there, on a
+        refuses the path from then on. Every later resume dies there, on a
         directory that is by construction disposable: a detached read-only
         checkout of a commit that still exists.
 

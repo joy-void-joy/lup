@@ -32,7 +32,7 @@ from lup.coordination.bare.store import (
 from lup.coordination.pulse import Pulse
 from lup.coordination.refs import ActorRef
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import SpawnedActor
+from lup.coordination.roster import RosterMember
 from lup.coordination.meeting import coordination_root
 
 FOREVER = Pulse(stale_after_seconds=3600.0)
@@ -52,7 +52,7 @@ def joined(root: Path, name: str, pulse: Pulse) -> tuple[RepositoryPeers, str]:
 
 def row(
     peers: RepositoryPeers, member: str, at: datetime | None = None
-) -> SpawnedActor:
+) -> RosterMember:
     """The one row the listing holds for this member, as the pulse leaves it."""
     [found] = [one for one in peers.present(at) if one.actor.id == member]
     return found

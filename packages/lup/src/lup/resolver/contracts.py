@@ -134,11 +134,11 @@ class ResolverRegression(Exception):
     says the assembled tree carries a defect that needs real work rather
     than a re-read.
 
-    Raised rather than recorded, because recording it is exactly what the
-    run used to do: the answer was written down, the concern stayed
-    verified, and the branch was assembled and completed around it. A run
-    that stops here keeps every lease and branch intact for the repair, and
-    the next resume re-checks rather than trusting the old verdict.
+    Raised rather than recorded, because recording it writes the answer
+    down while the concern stays verified and the branch is assembled and
+    completed around the defect. A run that stops here keeps every lease and
+    branch intact for the repair, and the next resume re-checks rather than
+    trusting the old verdict.
     """
 
     def __init__(self, regressed: list["RecheckRuling"]) -> None:

@@ -247,9 +247,9 @@ def recorded_reservation(branch: str, cwd: Path | None = None) -> str:
 def recorded_upstream(branch: str, cwd: Path | None = None) -> str:
     """The remote-tracking ref this branch was last published to, or empty.
 
-    No fallback, because there never was a lup key for it: a branch pushed
-    before this was recorded says nothing here, and its caller falls back to
-    git's own tracking configuration as it always did.
+    No fallback, because no legacy key carries it: a branch with nothing
+    recorded says nothing here, and its caller falls back to git's own
+    tracking configuration.
     """
     return read_record(branch, cwd).upstream
 

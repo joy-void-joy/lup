@@ -56,8 +56,8 @@ from lup.coordination.meeting import coordination_root
 from lup.coordination.peers import USER_KIND, user_peer
 from lup.coordination.pulse import Pulse
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import Delivery, Roster, SpawnedActor, folded_member
-from lup.coordination.touches import Claim, folded_claim
+from lup.coordination.roster import Delivery, Roster, RosterMember, folded_member
+from lup.coordination.touches import HeldPath, folded_held_path
 from lup.coordination.wake import WakePath
 
 
@@ -91,7 +91,7 @@ class PeerDepartedError(LookupError):
     can say when the session left and what it concluded.
     """
 
-    def __init__(self, member: SpawnedActor, cli_name: str) -> None:
+    def __init__(self, member: RosterMember, cli_name: str) -> None:
         left = member.heard.isoformat() if member.heard is not None else "unknown"
         outcome = member.summary or member.error
         super().__init__(
@@ -111,7 +111,7 @@ class PeerView(BaseModel, frozen=True):
     could type and nothing would answer.
     """
 
-    member: SpawnedActor
+    member: RosterMember
     cli_name: str = ""
 
     holding: list[str] = []
@@ -397,7 +397,7 @@ class RepositoryPeers:
             claims[0] if claims else "",
         )
 
-    def row(self, member_id: str, now: datetime | None = None) -> SpawnedActor | None:
+    def row(self, member_id: str, now: datetime | None = None) -> RosterMember | None:
         """One session as the record and the pulses say, or nothing where none stands."""
         return next(
             (member for member in self.present(now) if member.actor.id == member_id),
@@ -428,14 +428,14 @@ class RepositoryPeers:
         claims = self.held()
         names = store.called(self.root)
 
-        def told(member: SpawnedActor) -> bool:
+        def told(member: RosterMember) -> bool:
             """Whether this row is news to a reader whose look starts at *since*."""
             if member.running:
                 return True
             heard = member.heard
             return since is not None and heard is not None and heard >= since
 
-        def row(member: SpawnedActor) -> PeerView:
+        def row(member: RosterMember) -> PeerView:
             """One session, with what it is observed to hold folded in."""
             held = [
                 claim
@@ -455,7 +455,7 @@ class RepositoryPeers:
         """The listing a reader with no arrival of its own gets: the retention window."""
         return self.listing(since=self.retention.since(now or utc_now()))
 
-    def present(self, now: datetime | None = None) -> list[SpawnedActor]:
+    def present(self, now: datetime | None = None) -> list[RosterMember]:
         """Every member as the files and their modification times say, live ones first.
 
         The shared fold's, so a row the prompt hook reads as gone and a row a
@@ -474,7 +474,7 @@ class RepositoryPeers:
         """Record that this session is here now."""
         store.beat(self.root, store.session_actor(member_id))
 
-    def lapsed(self, now: datetime | None = None) -> list[SpawnedActor]:
+    def lapsed(self, now: datetime | None = None) -> list[RosterMember]:
         """Every session a sweep would retire: still listed, and no longer heard.
 
         What a console prints before it sweeps, which is why it is read rather
@@ -489,7 +489,7 @@ class RepositoryPeers:
 
     def sweep(
         self, now: datetime | None = None, by: ActorRef = user_peer()
-    ) -> list[SpawnedActor]:
+    ) -> list[RosterMember]:
         """Move what the read already derives, and delete what nobody reads.
 
         A member whose pulse stopped has its file moved to the departed, so a
@@ -501,8 +501,8 @@ class RepositoryPeers:
 
         A claim needs no sweeping and *by* names nobody: a claim stands or it
         does not, and the filesystem is what says which. Whoever swept is a
-        parameter the surfaces still pass and this no longer has a record to
-        attribute to them.
+        parameter the surfaces pass and this has no record to attribute to
+        them.
         """
         return [
             folded_member(member)
@@ -569,20 +569,23 @@ class RepositoryPeers:
     def live_ids(self) -> list[str]:
         """Every member still working here, by id, which is what expires a claim.
 
-        A claim is alive while its holder is, so this is the whole of the
-        expiry rule: no timeout to tune, no release to forget, and the failure
-        mode is a session that stopped taking its own claims with it.
+        The store's own reading, asked for the kinds this layer counts: the
+        person is on the roster, holds nothing, and would otherwise be live
+        for a claim check here and not for the addressing read the compiled
+        dispatcher takes through the same function.
         """
-        return [member.actor.id for member in self.present() if member.running]
+        return store.live_ids(
+            self.root, window=self.pulse.stale_after_seconds, without=USER_KIND
+        )
 
-    def held(self) -> list[Claim]:
+    def held(self) -> list[HeldPath]:
         """Every claim a live session is holding, newest first."""
-        return [folded_claim(row) for row in store.held(self.root, self.live_ids())]
+        return [folded_held_path(row) for row in store.held(self.root, self.live_ids())]
 
-    def holding(self, path: Path) -> list[Claim]:
+    def holding(self, path: Path) -> list[HeldPath]:
         """Every live claim a write to this path would land under."""
         return [
-            folded_claim(row)
+            folded_held_path(row)
             for row in store.covering(self.root, path, self.live_ids())
         ]
 
@@ -613,12 +616,12 @@ class RepositoryPeers:
             lambda member: store.claimed(member, [str(path) for path in paths], False),
         )
 
-    def lock(self, member_id: str, prefix: Path) -> Claim:
+    def lock(self, member_id: str, prefix: Path) -> HeldPath:
         """Take everything beneath a prefix, ahead of having touched any of it."""
         self.revise(
             member_id, lambda member: store.claimed(member, [str(prefix)], True)
         )
-        return Claim(
+        return HeldPath(
             path=str(prefix), prefix=True, holders=[member_ref(member_id)], at=utc_now()
         )
 

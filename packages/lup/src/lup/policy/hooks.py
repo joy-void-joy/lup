@@ -691,7 +691,7 @@ def create_completion_guard(
     """Create a Stop hook that blocks finishing until output is submitted.
 
     Output submission happens through a turn-bound tool, so a
-    backend's native finalization no longer guarantees a result exists. On
+    backend's native finalization does not guarantee a result exists. On
     backends with a stop event, this hook pushes the agent back with a
     corrective message when it tries to finish without submitting.
 

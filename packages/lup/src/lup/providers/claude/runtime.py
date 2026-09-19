@@ -443,8 +443,8 @@ class ClaudeConversationState:
         # Connecting is where a refused resume surfaces, and it is as much a
         # failed turn as one that breaks midway — so it leaves through the
         # portable error the rest of the runtime raises. Escaping as the SDK's
-        # own exception let it past every caller that handles a turn failing,
-        # which is how a resume the provider had lost ended whole runs.
+        # own exception would take it past every caller that handles a turn
+        # failing, so a resume the provider has lost would end a whole run.
         try:
             self.client = await self.connected(options)
         except Exception as error:

@@ -34,8 +34,8 @@ from typing import TypedDict
 # that holds the kernel package and the coordination store's reader. Naming
 # it as a search path is what lets the imports below resolve.
 sys.path.insert(0, str(Path(__file__).parent))
-from coordination.store import loaded
 from kernel.delegation import verification_notice
+from policy_data import VERIFICATION
 from kernel.subagents import (
     Armed,
     BackgroundTask,
@@ -122,8 +122,28 @@ def armed(transcript: Path) -> Armed:
     what it was started with.
     """
 
+    def entries() -> Iterator[Entry]:
+        """Every line of the transcript that is a JSON object.
+
+        Claude Code's own format, read here because it is Claude Code's. A
+        torn final line is the ordinary state of a transcript the runtime is
+        still appending to, and one that will not parse must not stop the
+        reader seeing the lines around it.
+        """
+        try:
+            written = transcript.read_text("utf-8")
+        except OSError:
+            return
+        for line in written.splitlines():
+            try:
+                record: Entry = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(record, dict):
+                yield record
+
     def calls() -> Iterator[ToolUse]:
-        for entry in loaded(transcript, Entry):
+        for entry in entries():
             message = entry.get("message", Message())
             content = message.get("content", [])
             if entry.get("type") == "assistant" and not isinstance(content, str):
@@ -195,7 +215,7 @@ def decided(payload: Payload) -> Context | Refusal | None:
                                 # that reported.
                                 Leftover(resumes=True, refused=True),
                             ),
-                            verification_notice(),
+                            verification_notice(**VERIFICATION),
                         ]
                     ),
                 )

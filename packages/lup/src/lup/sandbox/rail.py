@@ -41,9 +41,9 @@ worktree prune`, which deletes the admin directory of any worktree whose
 its siblings would look around, find every one of their directories absent,
 and delete their administrative state from the shared repository -- as
 ordinary housekeeping, with no error anywhere. Two guards, where holding
-each entry read-only used to be a third: siblings are mounted so they exist,
+each entry read-only would be a third: siblings are mounted so they exist,
 and `gc.worktreePruneExpire` is set to never. The third is not missed,
-because it only ever answered for a directory that was present anyway.
+because it only answers for a directory that is present anyway.
 
 **`config` and `hooks/` are held read-only inside the writable share.** They
 are the two places under there whose *contents* run on the host. `config`
@@ -57,7 +57,7 @@ review. So the shared directory is mounted writable and each of them is bound
 read-only back over it, which the engine supports because
 `Sandbox.declared_mounts` emits parent before child.
 
-The exposure was carried on the claim that a worker unable to write these
+Leaving them writable rests on the claim that a worker unable to write these
 cannot cut a worktree. That was measured, and it is false: `git worktree add`
 never opens `config`, and a guard armed in `hooks/` is inherited rather than
 rewritten -- `git rev-parse --git-path hooks` in a linked worktree names
@@ -76,8 +76,8 @@ pre-flight in front of it that fires only where that write is outstanding, so
 a clone that has made it cuts worktrees with both paths held, and one that
 has not meets a refusal naming the act and the command before its first
 worktree is half-made, rather than an errno about a busy device. The semantic
-policy is still what holds an approval question against those config keys by
-name; the mount table has stopped being the reason it has to.
+policy is what holds an approval question against those config keys by
+name; the mount table is not the reason it has to.
 
 **What this deliberately does not rail.** Commits landing on another branch.
 The object store and refs have to be writable to commit at all, so branch
@@ -291,10 +291,10 @@ def lease_for(worktree: Path) -> Lease:
     for the reason it gives beside that.
 
     A path the project declared its author owns is not among the read-only
-    mounts, and was. Held read-only, `README.md` refused the fast-forward
-    that landed a branch touching it: git replaces a file by unlinking it,
-    a mount point refuses that, and the merge was the user's from a host
-    terminal every time. What the mount was protecting is protected by the
+    mounts. Held read-only, `README.md` refuses the fast-forward
+    that lands a branch touching it: git replaces a file by unlinking it,
+    a mount point refuses that, and the merge is the user's from a host
+    terminal every time. What such a mount protects is protected by the
     policy: an edit or a shell write to a human-owned path asks, and the
     approval is the author's answer, which a mount can neither ask for nor
     honour.
@@ -339,11 +339,11 @@ def lease_for(worktree: Path) -> Lease:
 def worker_lease(worktree: Path) -> Lease:
     """The mounts that confine one worker to the tree it was given.
 
-    The arrangement :func:`lease_for` used to carry, at the level it is
+    The arrangement :func:`lease_for` carries, at the level it is
     actually true at. Taken when a worker starts rather than when a session
     does, it covers the checkouts that exist by then -- which is every
-    worktree a run leases, the population a launch-time table missed
-    entirely. Nothing about the shape changed; only when it is computed, and
+    worktree a run leases, the population a launch-time table misses
+    entirely. Nothing about the shape differs; only when it is computed, and
     for whom.
 
     Three nested modes rather than two flat ones: this worktree writable,
@@ -505,7 +505,7 @@ def hold_worktree_pruning(worktree: Path) -> bool:
 def hold_pruning_across(worktrees: list[Path]) -> list[Path]:
     """Arm the prune guard in every repository given, and name the refusals.
 
-    Once per repository rather than once per launch, because a lease now
+    Once per repository rather than once per launch, because a lease
     spans repositories nobody in this session owns: a `git gc` inside the
     boundary reaches their administrative state through the same shared
     directory it reaches this one's, and the mount guards only hold while the

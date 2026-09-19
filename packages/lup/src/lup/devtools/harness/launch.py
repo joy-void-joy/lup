@@ -129,7 +129,7 @@ class LaunchSandbox(StrEnum):
     NONE = "none"
     """The session opens on the host under the semantic policy alone. Nothing
     is established and nothing is vouched for, so the deny lattice stays
-    standing -- the posture a broken inner sandbox used to degrade into
+    standing -- the posture a broken inner sandbox would degrade into
     silently, stated as a choice."""
 
     def contained(self) -> bool:
@@ -191,10 +191,10 @@ def relocation_hint(worktree_path: Path) -> RelocationHint:
     a tool that runtime may not have.
 
     The wording is asked of the same spelling the guidance is rendered from
-    rather than written again here. Restating it is how the two came to
-    disagree: the guidance named the move a runtime supports, this named a
-    tool, and a workflow change had to find both to land. One of them being
-    an adapter method makes that impossible.
+    rather than written again here. Restating it is how the two come to
+    disagree: the guidance naming the move a runtime supports, this naming a
+    tool, and a workflow change having to find both to land. One of them
+    being an adapter method makes that impossible.
     """
     environ = os.environ  # lup: ignore[os-environ]
     move = f"cd /; cd {worktree_path}"
@@ -252,11 +252,11 @@ def ready_to_open(
 
     ``companions`` are the trees this launch does not open and regenerates
     anyway, which is what makes launching a runtime mean what `harness
-    generate all` means. One runtime's launcher used to leave the other's
-    tree behind whenever a shared source moved, so the next `dev check`
-    failed on drift nobody had introduced -- reported against a session that
-    had done nothing but open. They are generated in passing, so a tree that
-    was already current says nothing.
+    generate all` means. A launcher that left the other's tree behind
+    whenever a shared source moved would fail the next `dev check` on drift
+    nobody had introduced -- reported against a session that had done
+    nothing but open. They are generated in passing, so a tree that is
+    already current says nothing.
 
     ``None`` is that answer, and the opening is the other one — including an
     empty roster, which is why this is not a list and a truth test. What
@@ -361,8 +361,8 @@ def capture_watcher_diagnostics(run_directory: Path) -> logging.Handler:
     The launcher hands its terminal to an interactive CLI that draws over the
     whole screen. Nothing configures logging on this path, so a watcher failure
     would reach Python's last-resort handler and print a traceback into that UI
-    -- which is how a recovered polling error came to look like a crash. The
-    durable record is the journal's own error event; this file is for the detail
+    -- so a recovered polling error would read as a crash. The durable
+    record is the journal's own error event; this file is for the detail
     that does not belong in it.
     """
     run_directory.mkdir(parents=True, exist_ok=True)
@@ -760,15 +760,15 @@ def reported(findings: list[Finding], in_passing: bool = False) -> list[Finding]
     """Say what each finding found, and stop where absence refuses.
 
     One place for both halves so the two rosters cannot come to differ about
-    what a refusal means. They already had somewhere to differ: the inside
-    roster was written after the host one and, printed separately, would have
-    been free to treat a refused finding as a line rather than a stop.
+    what a refusal means. Two rosters printed separately have somewhere to
+    differ: either is free to treat a refused finding as a line rather than
+    a stop.
 
     The refusal names the capabilities and stops there. Joining their whole
-    consequences into the exception was tried and is unreadable at the size
-    this roster reached: four refusals became one nine-line paragraph inside
-    an error box, restating word for word what had just been printed above it
-    with the causes, the recoveries and the blank lines all flattened out. The
+    consequences into the exception is unreadable at the size this roster
+    reaches: four refusals make one nine-line paragraph inside an error box,
+    restating word for word what has just been printed above it with the
+    causes, the recoveries and the blank lines all flattened out. The
     lines above are the report; this is the exit code and what it was about.
 
     *in_passing* decides which half of a finding is read: everything it
@@ -1274,8 +1274,8 @@ def claude_sandbox_arguments(
     :data:`~lup.providers.claude.confinement.CLAUDE_CONFINEMENT` rather than
     here, so the image-side probe that asks whether a session can open at all
     opens the same one this does -- spelled twice, the probe verifies a
-    session nobody launches, which is how it came to refuse for the absence
-    of a confinement no launch has ever asked for.
+    session nobody launches, and refuses for the absence of a confinement no
+    launch has ever asked for.
 
     What the vendor documents in place of the nested sandbox travels with
     that spelling. The measured half belongs here, beside the launcher
@@ -1473,17 +1473,17 @@ def session_argv(
     banner is said here, after the verification rather than before it -- a
     launch cannot report itself ready while the thing that would refute it
     has not run yet, and thirty lines printed ahead of the answer is how the
-    refutation ends up below the fold. Both postures say it. The uncontained
-    one said nothing at all, and what stood in for it was a transcript path
-    printed on the way past by whatever had opened the file.
+    refutation ends up below the fold. Both postures say it. A posture that
+    says nothing leaves a transcript path in its place, printed on the way
+    past by whatever opened the file.
 
     And it is where the boundary is settled, for the same reason: this is the
     one place that knows which posture the launch took, so it is the only
     place a boundary can be compiled that answers for the session actually
-    about to open. Both postures write a ledger. The uncontained one used to
-    write nothing at all, which left whatever a contained launch had written
-    last standing as this session's answer -- a boundary belonging to a
-    session that had already ended.
+    about to open. Both postures write a ledger. A launch that wrote nothing
+    would leave whatever a contained launch wrote last standing as this
+    session's answer -- a boundary belonging to a session that has already
+    ended.
     """
     banner = cleared.banner
     # Minted where both runtimes pass through, so a session's coordination
@@ -1656,10 +1656,10 @@ def probing(opening: list[str], *, stdin: bool = False) -> list[str]:
     """The session's own argv, with the interactive terminal taken back off.
 
     The same argv rather than a fresh one, because a probe assembled
-    separately verifies a container no session opens -- which is how the
-    exercise this replaces could pass on a host whose sessions could not
-    start. The one difference is deliberate: a probe's output is captured,
-    and ``-it`` against a pipe fails on the terminal it was promised.
+    separately verifies a container no session opens -- an exercise that
+    passes on a host whose sessions cannot start. The one difference is
+    deliberate: a probe's output is captured, and ``-it`` against a pipe
+    fails on the terminal it was promised.
     """
     return [
         "-i" if word == "-it" else word for word in opening if stdin or word != "-it"

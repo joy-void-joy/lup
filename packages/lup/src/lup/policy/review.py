@@ -2,10 +2,10 @@
 
 A question carries the operation whole and, where a native hook captured them,
 the preimage of every file it would touch. What it does not carry is the
-*result*: that is implied by the tool's own arguments, and until something
-worked it out, a reviewer answering a whole-file write read a JSON payload with
-the new contents inside it and the old contents printed underneath, and
-compared them by eye.
+*result*: that is implied by the tool's own arguments, and unless something
+works it out, a reviewer answering a whole-file write reads a JSON payload
+with the new contents inside it and the old contents printed underneath, and
+compares them by eye.
 
 So the pair is derived here rather than stored. Deriving it keeps the record
 append-only and keeps an approval bound to the operation it was given — the

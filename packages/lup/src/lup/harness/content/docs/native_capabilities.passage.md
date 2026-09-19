@@ -107,14 +107,14 @@ part of probing.
 - **Reasoning effort is a per-model vocabulary, and the seeded home holds one
   chosen for a different model.** A scoped home is seeded from the operator's
   own configuration, so it carries their `model_reasoning_effort` beside their
-  `model` — and a session naming only the model sent the API a pair nobody
+  `model` — and a session naming only the model sends the API a pair nobody
   chose. Measured here: `gpt-5.5` with the home's `max` answers
   `400 unsupported_value`, and the message names the rungs that model takes —
   `'none', 'low', 'medium', 'high', 'xhigh'`. Two readings follow. The ladder
   is per model rather than global: `max` is real for the newer model the home
   was written for, and `minimal` sits in Lup's own accepted vocabulary while
   that list omits it. And a named model must carry an effort, which is what
-  `CodexSessionConfig.model_selection` now guarantees — the literal is
+  `CodexSessionConfig.model_selection` guarantees — the literal is
   deliberately *not* narrowed to one model's answer, because which rungs a
   model accepts is the vendor's to state per model.
 - **A Codex home decides whether the policy runs at all, through four gates,
@@ -127,11 +127,11 @@ part of probing.
   a fully trusted plugin and still run ungoverned because the *project* was
   never trusted. Each gate fails the same way: the dispatcher is present, is
   never consulted, and nothing says so.
-- **`hooks/list` is now a contract Lup depends on.** Trust-record names were
-  once composed from the hook manifest, which meant keeping a table of events
-  level with what generation declares — and it was not level, so the one call
-  deciding whether an application-opened session carries the policy raised on
-  the events it had never heard of. The runtime is asked instead, and each
+- **`hooks/list` is a contract Lup depends on.** Trust-record names composed
+  from the hook manifest mean keeping a table of events level with what
+  generation declares — and a table that is not level makes the one call
+  deciding whether an application-opened session carries the policy raise on
+  the events it has never heard of. The runtime is asked instead, and each
   hook's `key`, `currentHash`, `trustStatus` and `isManaged` are read off the
   reply. A move in those four field names breaks trust seeding silently, in
   the direction that fails open, so it belongs in the doctor's drift check

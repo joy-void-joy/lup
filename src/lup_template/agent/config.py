@@ -83,7 +83,7 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
         validation_alias="AGENT_SDK",
         description=(
             "Which engine runs the agent (claude, codex, openai-compat, "
-            "claude-compat; openai is a legacy alias of openai-compat). "
+            "claude-compat; openai also names openai-compat). "
             "Unset routes by the AGENT_MODEL vendor prefix: claude-* runs "
             "claude, gpt-*/o<digit>*/codex* runs codex, and anything else "
             "runs claude-compat when OPENROUTER_API_KEY is set or "

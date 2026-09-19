@@ -25,7 +25,7 @@ from lup.coordination.repository import (
     RepositoryPeers,
 )
 from lup.coordination.roster import Delivery
-from lup.coordination.touches import Claim
+from lup.coordination.touches import HeldPath
 from lup.coordination.watch import Watcher
 from lup.coordination.watcher import watcher_pipeline
 from lup.runs.pipeline import RunRequest
@@ -59,7 +59,7 @@ def peer_line(view: PeerView) -> str:
     )
 
 
-def claim_line(claim: Claim) -> str:
+def claim_line(claim: HeldPath) -> str:
     """One holding as a person reads it: what, who, and whether anyone is sure.
 
     The holders are spelled out in full where there is more than one, because
@@ -181,7 +181,7 @@ def create_coordination_app() -> typer.Typer:
 
         What every coordination server does on each of its ticks, for a
         roster no server is up on: a machine whose sessions all ended without
-        writing a departure, or a store written before sessions beat at all.
+        writing a departure, or a store whose sessions never beat at all.
         """
         found = peers()
         rows = found.lapsed() if dry_run else found.sweep()

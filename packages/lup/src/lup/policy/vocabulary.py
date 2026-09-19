@@ -453,25 +453,25 @@ def reaching_builtin_rules(
 
     :func:`read_only_rules` carries the control-flow builtins because they
     change nothing and nothing they do reaches a later command. These fail
-    that second half, and were held out of that list to say so — but an
-    omission is not a judgement anything can read. Left unlisted they refused
-    with "command 'eval' is not classified", which is the one thing that was
-    not true of them: they were classified, by being left out, and the agent
-    was told the opposite.
+    that second half, and holding them out of that list to say so leaves an
+    omission, which is not a judgement anything can read. Unlisted they refuse
+    with "command 'eval' is not classified", the one thing that is not true
+    of them: they are classified, by being left out, and the agent is told
+    the opposite.
 
     Declared so the refusal carries its own reason, and so the row answering
     for work nobody classified is not also the row enforcing a decision
-    somebody made. The same verdict as before, arrived at on the record.
+    somebody made. The same verdict either way, arrived at on the record.
 
     Declaring them also settles what a sandbox does about them, and settles
     it the way the inline-code refusal beside them already answered: a
     judged deny survives a boundary, because the objection to ``eval`` is
     that nothing read what it runs, and confining unread code does not read
-    it. Left unlisted they deferred to the boundary instead — so ``python -c
-    'x'`` and ``eval echo x``, which are one objection, were enforced two
-    ways depending on which of them somebody had written down.
+    it. Unlisted they defer to the boundary instead — so ``python -c
+    'x'`` and ``eval echo x``, which are one objection, are enforced two
+    ways depending on which of them somebody wrote down.
 
-    ``exec`` is absent though it was held out of that list too: reading a
+    ``exec`` is absent though it is held out of that list too: reading a
     command's words already resolves it to the command it wraps, so ``exec rm -rf src`` is
     judged as ``rm -rf src`` and a row here would never be reached. Which is
     also the right answer — what ``exec`` runs is the whole of what it does

@@ -65,7 +65,7 @@ def shell_decision(
 
 
 class StoppedCommand(BaseModel, frozen=True):
-    """One everyday command the declared table no longer lets through.
+    """One everyday command the declared table does not let through.
 
     The family travels with it because the family is the claim: a reader
     shown `git diff --stat` has to reconstruct why it mattered, and one shown
@@ -92,7 +92,7 @@ def stopped_everyday(
 
     Swept once per posture, because a verdict is only ever reached for
     somebody. A worker session and a contained one take rows an interactive
-    session never reaches, so reading one posture measured a claim narrower
+    session never reaches, so reading one posture measures a claim narrower
     than the one the corpus makes.
     """
     return [

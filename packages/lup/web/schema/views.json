@@ -20,7 +20,7 @@
     },
     "ActorRef": {
       "additionalProperties": false,
-      "description": "Which actor something belongs to.\n\nA round is part of the identity because the same worker on round two is a\ndifferent actor: it holds a different session, and a reader tracing a\ndecision needs to know which attempt they are looking at.\n\nHere rather than with the record it attributes, because addressing an\nactor is not the journal's business alone: the mailbox routes mail by the\nsame identity, and the two disagreeing about what named an actor is what\nmade a redirect reach nobody.\n\n``kind`` is an open string. The consumer names its own roles and validates\nthem at its own boundary \u2014 a closed set here would be every consumer's set\nat once, and adding a role to one would mean editing the layer underneath\nall of them.",
+      "description": "Which actor something belongs to.\n\nA round is part of the identity because the same worker on round two is a\ndifferent actor: it holds a different session, and a reader tracing a\ndecision needs to know which attempt they are looking at.\n\nHere rather than with the record it attributes, because addressing an\nactor is not the journal's business alone: the mailbox routes mail by the\nsame identity, and the two disagreeing about what names an actor is what\nmakes a redirect reach nobody.\n\n``kind`` is an open string. The consumer names its own roles and validates\nthem at its own boundary \u2014 a closed set here would be every consumer's set\nat once, and adding a role to one would mean editing the layer underneath\nall of them.",
       "properties": {
         "id": {
           "title": "Id",
@@ -933,7 +933,7 @@
     },
     "LeaseRefreshedEvent": {
       "additionalProperties": false,
-      "description": "What bringing the refreshed base into one lease did, or what stopped it.\n\nThe base event above says where the run now starts; it says nothing\nabout which branches actually took it. That answer reached stdout once\nand was never written down, so a detached run \u2014 whose output goes to a\nfile nobody is watching \u2014 left no record that three of its leases were\nrefused. A lease still on the old base is the reason its worker reads\nreplaced code, which is the failure the refresh exists to prevent.",
+      "description": "What bringing the refreshed base into one lease did, or what stopped it.\n\nThe base event above says where the run now starts; it says nothing\nabout which branches actually took it. An answer reaching stdout alone\nis never written down, so a detached run \u2014 whose output goes to a\nfile nobody is watching \u2014 keeps no record that three of its leases were\nrefused. A lease still on the old base is the reason its worker reads\nreplaced code, which is the failure the refresh exists to prevent.",
       "properties": {
         "applied": {
           "title": "Applied",
@@ -1540,7 +1540,7 @@
     },
     "ReviewResidualEvent": {
       "additionalProperties": false,
-      "description": "Observations an accepting review recorded beside its verdict.\n\nA residual on a rejected review re-enters the worker's feedback; on an\naccepted one it previously reached nobody, and real findings sat unread\nin the round records. The journal is where they surface \u2014 for the CLI,\nthe supervisor, and whoever files the follow-up work.",
+      "description": "Observations an accepting review recorded beside its verdict.\n\nA residual on a rejected review re-enters the worker's feedback; on an\naccepted one nothing else carries it, and real findings would sit unread\nin the round records. The journal is where they surface \u2014 for the CLI,\nthe supervisor, and whoever files the follow-up work.",
       "properties": {
         "concern_id": {
           "title": "Concern Id",

@@ -94,7 +94,7 @@ quiet for seconds, a solver sweep for hours.
 
 A reading never repeats the runner's own estimate of the time left. A progress
 bar smooths its rate over the last few landings, and units land in bursts —
-one per worker as a batch of budgets expires — so that number once said
+one per worker as a batch of budgets expires — so that number says
 twenty-nine seconds about thirty-six two-hour cells. The estimate here divides
 everything landed so far by the whole elapsed time, which is the only estimate
 bursty landings support. A runtime writing its own bar sets `smoothing=0` for

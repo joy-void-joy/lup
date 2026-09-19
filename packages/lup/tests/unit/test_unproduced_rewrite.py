@@ -10,7 +10,7 @@ answers only the case where the document exists and could not be judged.
 
 from pathlib import Path
 
-from lup.policy.kernel.rows import UnreadFileRow, unread_cause
+from lup.policy.kernel.rows import UnproducedDocumentRow, unproduced_cause
 from lup.policy.kernel.shell import decide_shell
 from lup.policy.models import ShellCommand
 from lup.policy.rules import ShellPolicy
@@ -25,9 +25,9 @@ def reason(cause: str | None) -> str:
     return decide_shell(
         REWRITE,
         erase_shell_rules(default_vocabulary()),
-        unread_documents=[]
+        unproduced_documents=[]
         if cause is None
-        else [UnreadFileRow(target="notes.md", cause=unread_cause(cause))],
+        else [UnproducedDocumentRow(target="notes.md", cause=unproduced_cause(cause))],
     ).reason
 
 
@@ -46,9 +46,9 @@ def test_a_target_nothing_looked_at_still_says_so() -> None:
 
 def test_an_unknown_reading_is_the_least_specific_of_them() -> None:
     """A word this does not know must not crash a hook, which would grant."""
-    assert unread_cause("something-else") == "unreadable"
-    assert unread_cause(None) == "unreadable"
-    assert unread_cause("missing") == "missing"
+    assert unproduced_cause("something-else") == "unreadable"
+    assert unproduced_cause(None) == "unreadable"
+    assert unproduced_cause("missing") == "missing"
 
 
 def test_the_host_reaches_each_of_them_over_a_real_tree(tmp_path: Path) -> None:

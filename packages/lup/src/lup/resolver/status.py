@@ -2,10 +2,10 @@
 
 "Is it still running, or did it stop?" is the most common question about a
 resolver run, because the resolver is built to be left alone: it parks,
-persists, and is resumed later. The answer used to come from reading a
-journal's mtime and hand-parsing its last event — a technique reinvented
-each session and easy to get wrong in both directions, since a run can
-legitimately print nothing for tens of minutes while a planner works.
+persists, and is resumed later. Reading a journal's mtime and hand-parsing
+its last event is the technique reinvented for it each session, and easy to
+get wrong in both directions, since a run can legitimately print nothing
+for tens of minutes while a planner works.
 
 Everything here is derived from the run directory alone. Under a sandbox
 `/proc` is PID-isolated, so `ps` and `pgrep` list nothing outside the
@@ -146,7 +146,7 @@ class PhaseProgress(BaseModel, frozen=True):
         The cells are tqdm's and the durations are ours, which is the split
         that survives asking what each is good at. Placing a bar's fill is
         fiddly — a gradient, and a partial cell where a count falls between
-        two — and rounding it to whole cells, as this did, loses the only
+        two — and rounding it by hand to whole cells loses the only
         movement a reader sees between two settlements. Saying how long is
         not fiddly, and tqdm says `131.00s/it` where a reader says `2m11s`.
 
@@ -287,7 +287,7 @@ class RunStatus(BaseModel, frozen=True):
     def settled(self, running_yet: bool) -> bool:
         """Whether nothing more will happen until somebody acts.
 
-        A watch that outlives what it watches is the loop this replaces, so
+        A watch that outlives what it watches is the loop to avoid, so
         it ends where a reader has to do something: a terminal phase, or a
         run whose lock nobody holds — a park, which is waiting on an answer.
 

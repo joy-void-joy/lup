@@ -201,9 +201,9 @@ class ConcernExecutor:
     ) -> ReviewReport:
         """Put a reviewer's accept-with-a-gap to the human who set the bar.
 
-        An accept that leaves a declared criterion unaccounted for used to be
-        turned straight back into a rejection, which sends the disagreement
-        to the worker. Sometimes that is right — a reviewer can accept
+        Turning an accept that leaves a declared criterion unaccounted for
+        straight back into a rejection sends the disagreement to the
+        worker. Sometimes that is right — a reviewer can accept
         without having checked. Sometimes it is the one thing the worker
         cannot act on: the reviewer had checked, found the criterion
         unreachable from inside the lease, and argued the remainder was a
@@ -293,11 +293,11 @@ class ConcernExecutor:
             rendered_skill_invocation=self.runner.worker_invocation(),
             answers=answers,
         )
-        # Re-entered rather than restarted. An interruption used to send a
-        # concern back to round one with its feedback discarded, while its
-        # branch still carried the rounds it had already committed — so the
-        # worker met its own work with no record of why it had been sent
-        # back, and the review that produced that record was spent for
+        # Re-entered rather than restarted. An interruption sending a
+        # concern back to round one with its feedback discarded leaves its
+        # branch carrying the rounds it already committed — so the
+        # worker meets its own work with no record of why it was sent
+        # back, and the review that produced that record is spent for
         # nothing. Every round is written whole before the next transition,
         # so this is a read rather than a reconstruction.
         rounds = self.repository.rounds_for(concern.id)
@@ -452,8 +452,8 @@ class ConcernExecutor:
             if review.accepted and diff.commit is not None:
                 if review.residual:
                     # A residual on a rejection re-enters the worker's
-                    # feedback below; on an acceptance it used to reach
-                    # nobody, and this run's residuals carried real findings.
+                    # feedback below; on an acceptance nothing else carries it,
+                    # and this run's residuals carried real findings.
                     self.journal.record(
                         ReviewResidualEvent(
                             concern_id=concern.id,

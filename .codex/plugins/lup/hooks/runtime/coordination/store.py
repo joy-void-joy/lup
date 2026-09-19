@@ -6,14 +6,14 @@
 # report after the fact.
 """The coordination store: one file per member, and everything else derived.
 
-The store was append-only records folded whole by every reader on every call.
-It answered who is here by replaying who had ever been here, which grew
-without bound, kept sixteen rows for two live sessions, and could not be asked
-anything the records had not been written to answer — so a claim over a path
-in a deleted worktree stood until another record retired it, and a change no
-window could attribute was recorded with a guess and a list of rivals.
+Append-only records folded whole by every reader on every call answer who is
+here by replaying who has ever been here, which grows without bound, keeps
+sixteen rows for two live sessions, and cannot be asked anything the records
+were not written to answer — so a claim over a path in a deleted worktree
+stands until another record retires it, and a change no window can attribute
+is recorded with a guess and a list of rivals.
 
-It is state now. One file per member, written by nobody but that member's own
+It is state. One file per member, written by nobody but that member's own
 processes, and every relation between members derived at the read:
 
 - **presence** is the member file's modification time. The owner touches it
@@ -77,8 +77,8 @@ DEPARTED_DIR = "departed"
 """Who is here, and who was here recently enough to still be news.
 
 Two directories rather than a flag inside one, because the question a reader
-asks is almost always "who is here", and a listing that had to open every file
-ever written to answer it is the fold this replaces.
+asks is almost always "who is here", and a flag would make answering it a
+listing that opens every file ever written.
 """
 
 INBOX_DIR = "inbox"
@@ -179,7 +179,7 @@ class Conversation(TypedDict, total=False):
     roots: int
 
 
-class Claim(TypedDict, total=False):
+class Holding(TypedDict, total=False):
     """One path a member holds, and the state it left that path in.
 
     The modification time is what makes the claim answerable later. A record
@@ -216,7 +216,7 @@ class Member(TypedDict, total=False):
     delivery: str
     wake: Wake
     conversation: Conversation
-    claims: list[Claim]
+    claims: list[Holding]
     arrived: str
     left_at: str
     running: bool
@@ -629,17 +629,24 @@ def live_ids(
     now: datetime | None = None,
     mine: str = "",
     window: float = STALE_AFTER_SECONDS,
+    without: str = "",
 ) -> list[str]:
     """Every member still working here, by id, which is what expires a claim.
 
     A claim is alive while its holder is, so this is the whole of the expiry
     rule: no timeout to tune, no release to forget, and the failure mode is a
     member that stopped taking its own claims with it.
+
+    ``without`` leaves out one kind, which is how a caller asking who holds a
+    claim and a caller asking which spellings reach somebody take one reading.
+    The person is on the roster and holds nothing, so a claim reading leaves
+    them out and an addressing reading must not.
     """
     return [
         text(member.get("id"))
         for member in present(root, now, mine, window)
         if member.get("running")
+        and (not without or text(member.get("kind")) != without)
     ]
 
 
@@ -722,7 +729,7 @@ def path_mtime(path: str) -> float:
         return 0.0
 
 
-def standing(claim: Claim) -> bool:
+def standing(claim: Holding) -> bool:
     """Whether this claim still says something about the path it names.
 
     Three ways it stops. The path is **gone**, and a claim over nothing names
@@ -744,7 +751,7 @@ def standing(claim: Claim) -> bool:
     return bool(claim.get("prefix")) or current <= moment(claim.get("mtime"))
 
 
-def claims_of(member: Member) -> list[Claim]:
+def claims_of(member: Member) -> list[Holding]:
     """Every claim one member's file holds that still stands."""
     found = member.get("claims")
     return [
@@ -827,7 +834,8 @@ def claimed(member: Member, paths: list[str], prefix: bool) -> Member:
     """
     at = stamped()
     taken = [
-        Claim(path=path, prefix=prefix, mtime=path_mtime(path), at=at) for path in paths
+        Holding(path=path, prefix=prefix, mtime=path_mtime(path), at=at)
+        for path in paths
     ]
     subjects = [subject_of(text(claim.get("path")), prefix) for claim in taken]
     settled = member.copy()
@@ -908,7 +916,7 @@ def addresses(root: Path, now: datetime | None = None) -> list[str]:
     )
 
 
-def listing(root: Path, now: datetime | None = None) -> list[str]:
+def listing_lines(root: Path, now: datetime | None = None) -> list[str]:
     """One line per live member, as somebody choosing who to reach reads it."""
 
     def described(member: Member) -> list[str]:

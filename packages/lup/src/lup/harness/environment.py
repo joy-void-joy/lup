@@ -55,9 +55,9 @@ has to be added, and the one that is missed is the one nobody takes away.
 
 A suite is the case that matters. A test joining a roster without saying what
 to call the session is named after whichever worktree pytest was started from
-— which is how the roster's naming tests, asking which name a session with
-none is called after, came to measure the launcher's name for whoever ran them
-and pass on the machine that wrote them.
+— so the roster's naming tests, asking which name a session with none is
+called after, measure the launcher's name for whoever runs them and pass on
+the machine that wrote them alone.
 
 Deliberately not ``UV_PROJECT_ENVIRONMENT``, which reads like one and is not.
 It names where this machine's toolchain is, and

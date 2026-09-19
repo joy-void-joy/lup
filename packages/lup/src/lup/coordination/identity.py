@@ -16,7 +16,7 @@ still reaches the session it named. A store holding only the current one would
 silently misroute every reference taken before the rename, and there is no
 error the sender could be shown, because the name they used was correct when
 they read it. On the member rather than in a record beside it, because the two
-were only ever read together.
+would only ever be read together.
 
 What is left here is the vocabulary — how an id is minted, proven and
 defaulted, and how a name is chosen against the ones already taken. Reading a

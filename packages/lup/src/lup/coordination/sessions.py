@@ -1,18 +1,18 @@
 """One durable session per actor, opened once and kept while the run moves.
 
 A caller reaching for :meth:`lup.sessions.client.Client.query` opens a session, takes
-one turn and closes it. Nine separate symptoms sat downstream of that one
-fact in the resolver: a park discarded the whole turn, a reviewer re-read its
-concern cold each round, a merger never saw the parent it joined last, and
-the same question was answered four times because each turn re-derived it
-under an id no recorded answer matched.
+one turn and closes it. Nine separate symptoms sit downstream of that one
+fact in the resolver: a park discards the whole turn, a reviewer re-reads its
+concern cold each round, a merger never sees the parent it joined last, and
+the same question is answered four times because each turn re-derives it
+under an id no recorded answer matches.
 
 An actor here is addressed rather than constructed per turn. It holds its
 session across every turn it takes, drains what it does into a journal as it
 happens, and is reattached after a park from its persisted identity. The
 multi-turn shape is not unusual — :class:`lup.orchestration.background.BackgroundAgent`
 already holds one session open across many turns — the one-shot convenience
-was simply the easier reach.
+is simply the easier reach.
 
 ``query()`` stays in the library. It is the legitimate one-shot convenience
 and ``examples/one_shot.py`` uses it; what an actor buys over it is being
@@ -175,8 +175,8 @@ class ActorInbox:
 
         Journaled here rather than at either call site, so a mid-turn
         delivery and a between-turns one leave the same record. The record
-        being written on only one path is what let a redirect vanish twice
-        over: nothing was delivered, and nothing said so.
+        being written on only one path is what lets a redirect vanish twice
+        over: nothing delivered, and nothing saying so.
 
         Separate from reading because the two are separated by however long
         it takes to open a session, and the run this exists for was

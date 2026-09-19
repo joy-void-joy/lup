@@ -1,12 +1,11 @@
 """Cutting a release: closing the changelog, moving the version, tagging it.
 
 A release here is one transaction over four files, and the argument for
-compiling it rather than writing it down is that it had been written down.
-The bump skill carried the steps as prose — fold the pending migrations into
-the changelog, close the section, move the version, empty the declarations —
-and prose kept in a skill is a list that runs only as well as whoever is
-reading it that day. Three of those steps had never run in this repository at
-all.
+compiling it rather than writing it down is what prose costs. Carried in a
+skill — fold the pending migrations into the changelog, close the section,
+move the version, empty the declarations — the steps make a list that runs
+only as well as whoever is reading it that day. Measured in this repository,
+three of the four had never run at all.
 
 What stays a judgement stays outside: which level the release is, and what the
 entries under ``## Unreleased`` should say. Both are decided by somebody

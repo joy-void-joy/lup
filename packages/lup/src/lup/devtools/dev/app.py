@@ -1267,11 +1267,11 @@ def create_dev_app(
     ) -> None:
         """Cut a release: close the changelog, move the version, tag it.
 
-        One transaction over the files a release touches, because it had been
-        four prose steps in a skill and three of them had never run. What
-        stays outside is what cannot be derived — which level the release is,
-        and what the entries under `## Unreleased` say — and everything
-        downstream of those is arithmetic, carried out the same way each time.
+        One transaction over the files a release touches, because four prose
+        steps in a skill are three steps that never run. What stays outside
+        is what cannot be derived — which level the release is, and what the
+        entries under `## Unreleased` say — and everything downstream of
+        those is arithmetic, carried out the same way each time.
 
         Refused on a dirty tree and on an undeclared break, in that order. The
         first because a release commit should hold the release and not

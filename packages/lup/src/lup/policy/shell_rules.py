@@ -158,10 +158,10 @@ class ResolvedAxes(BaseModel, frozen=True):
     effect_class: EffectClass | None
     """The class a level stated, kept for the levels beneath to inherit.
 
-    Not a row field any more. It reached the compiled table beside the effects
-    it derives, which is the same judgement twice, and nothing read it there
-    once the purpose stopped being inferred from it. It stays here because it
-    is still a *declaration*: most of the remote table says what it does by
+    Not a row field. In the compiled table it would sit beside the effects it
+    derives, which is the same judgement twice, and nothing would read it
+    there, since no purpose is inferred from it. It stays here because it
+    is a *declaration*: most of the remote table says what it does by
     naming its class and letting :func:`external_effects` turn that into
     effects, which is one judgement read once rather than a hundred remote
     operations transcribed by hand.

@@ -1,12 +1,12 @@
 """What an operation does, and the one table that says what that earns it.
 
-The lattice used to be keyed on how a command was spelled. A rule named an
-executable and stated a verdict, so two commands with the same effect reached
-different answers whenever two people wrote the two rules -- `echo x > f`
-allowed, `tee f < g` asked, `sed -i` allowed once recoverability was proven,
-and the Edit tool ran three gates none of them reached. Each was defensible
-alone. Together they were not a policy, because nothing in the model said what
-they had in common.
+A lattice keyed on how a command is spelled has a rule name an executable
+and state a verdict, so two commands with the same effect reach different
+answers whenever two people write the two rules -- `echo x > f` allowed,
+`tee f < g` asking, `sed -i` allowed once recoverability is proven, and the
+Edit tool running three gates none of them reaches. Each is defensible
+alone. Together they are not a policy, because nothing in the model says what
+they have in common.
 
 What they have in common is the effect. So a rule declares effects and this
 derives the verdict, which makes the divergence unrepresentable rather than
@@ -174,10 +174,10 @@ class Effect:
         """Which kind of decision this effect asks a person to make.
 
         Stated by the member rather than derived from the verdict's other
-        columns. A shell row used to infer it from ``checkpoint`` and
-        ``effect_class``, which worked only while those two columns happened
-        to imply it -- and said nothing at all for a row that set neither.
-        The effect knows, because the effect is the thing being weighed.
+        columns. A shell row inferring it from ``checkpoint`` and
+        ``effect_class`` works only while those two columns happen to imply
+        it, and says nothing at all for a row that sets neither. The effect
+        knows, because the effect is the thing being weighed.
         """
         return None
 
@@ -415,15 +415,15 @@ class ReadsEnvironment(Effect):
     :class:`MutatesEnvironment` already argues that this state is none of the
     things the other rows answer for; reading it is the same state, and the
     reading half needs its own word for exactly the reason the changing half
-    did.
+    does.
 
-    Reached for by :class:`ReadsPath` before this existed, at ``outside``
-    scope, which is the nearest available word and the wrong one. That scope
-    makes containment decide -- a read outside the checkout is confined by a
-    boundary or it is not -- and containment has nothing to say about a socket
-    query. So every `docker ps` was allowed by the verdict column while its
-    own declaration derived a question, on the strength of a path it never
-    touched.
+    Reaching for :class:`ReadsPath` instead, at ``outside`` scope, takes the
+    nearest available word and the wrong one. That scope makes containment
+    decide -- a read outside the checkout is confined by a boundary or it is
+    not -- and containment has nothing to say about a socket query. So
+    `docker ps` would be allowed by the verdict column while its own
+    declaration derived a question, on the strength of a path it never
+    touches.
 
     Allows at every placement, and the split is the same one the container
     surface already draws: a verb either reports on containers, images,

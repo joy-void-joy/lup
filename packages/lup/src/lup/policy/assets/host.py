@@ -45,13 +45,13 @@ def measured_boundary(
     named: ``LUP_BOUNDARY_NONCE`` says which file this session is entitled to
     believe. That is what the nonce is for. A ledger left by some other launch
     is a measurement of some other session, and reading it would be the same
-    class of wrong answer as the constant this replaces, arrived at from the
+    class of wrong answer as a ledger at a constant path, arrived at from the
     other direction.
 
     Absent, unnamed, or unparseable all come back empty, and every caller
     reads empty as "no boundary was measured" -- the fail-closed answer and
-    the honest one. A session whose launcher predates this has no ledger, and
-    gets exactly what a session whose boundary failed to stand gets.
+    the honest one. A session whose launcher wrote no ledger gets exactly
+    what a session whose boundary failed to stand gets.
     """
     environ = os.environ  # lup: ignore[os-environ]
     nonce = environ["LUP_BOUNDARY_NONCE"] if "LUP_BOUNDARY_NONCE" in environ else ""
@@ -1585,6 +1585,25 @@ def undo_snapshot(
     if cold:
         undo_expire(root, namespace=where)
     return reference
+
+
+def text_at(root: Path, target: str) -> str | None:
+    """What stands at this path, or nothing where it does not read as text.
+
+    One reading for both halves of every gate that judges a write by what it
+    replaces. The encoding is named rather than taken from the locale, because
+    the halves run in different processes — one inside a session's interpreter,
+    one as the bare script a plugin ships — and a locale differing between them
+    would make one file a document on one side and an unreadable one on the
+    other, which is a disagreement no reader of either could detect.
+
+    Nothing to read and nothing readable are one answer, because both leave the
+    caller with no preimage to judge against and neither is a grant.
+    """
+    try:
+        return (root / target).read_text(encoding="utf-8")
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
 
 
 def rewritten_text(

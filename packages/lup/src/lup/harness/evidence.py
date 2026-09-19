@@ -69,9 +69,9 @@ def cited_fixture(root: Path, path: str) -> str:
 
     Naming a file as evidence is a claim about the tree, and prose cannot
     check it: a suite that moves leaves the citation reading exactly as it
-    did while pointing at nothing, which is how this page came to cite an
-    adapter-runtime fixture after it had moved into the library's own suite.
-    Asking here fails generation instead, naming the citation to repoint.
+    did while pointing at nothing — a cited adapter-runtime fixture whose
+    file sits in the library's own suite. Asking here fails generation
+    instead, naming the citation to repoint.
     """
     if not (root / path).exists():
         raise ValueError(
@@ -84,8 +84,8 @@ def cited_fixture(root: Path, path: str) -> str:
 class SchemaDigest(BaseModel, frozen=True):
     """One app-server schema file, and the content this evidence accepted.
 
-    A digest recorded only in prose is a claim nothing can fail, which is how
-    all five of these came to describe schemas the CLI had already changed.
+    A digest recorded only in prose is a claim nothing can fail: five rows
+    describing schemas the CLI has changed read exactly like five that match.
     Held here, the same rows the page publishes are the rows a probe compares
     a regenerated schema against.
     """

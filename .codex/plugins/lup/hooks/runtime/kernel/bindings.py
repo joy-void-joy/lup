@@ -3,10 +3,10 @@
 """Shell variable bindings: which literal a name holds, and where it expands.
 
 Every reader of a command asks what its words become once the shell expands
-them, and each one answering it apart is how `S=f.py; sed -i … $S` came to be
-judged against `f.py` by the classifier and against `$S` by the host that
-produces the rewritten document -- two readings of one line, and the ask that
-fell between them. So a command's variables are resolved once, over its
+them, and each one answering it apart leaves `S=f.py; sed -i … $S` judged
+against `f.py` by the classifier and against `$S` by the host that produces
+the rewritten document -- two readings of one line, and the ask that falls
+between them. So a command's variables are resolved once, over its
 syntax tree, before any reader takes a word from it.
 
 The tree is what makes the expansion exact rather than textual. A `$S` inside

@@ -283,7 +283,7 @@ class TurnEventBase(BaseModel, frozen=True):
 
         Returning the event rather than a flag is what lets a caller keep the
         narrower type: a walk filtering on this gets exactly the durable
-        kinds, the way naming them in an ``isinstance`` used to do. Only
+        kinds, the way naming them in an ``isinstance`` would. Only
         in-flight fragments decline, so the default is every terminal event's
         answer.
         """

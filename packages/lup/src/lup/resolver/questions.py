@@ -175,9 +175,9 @@ class QuestionBroker:
         only where that concern executes again, so between advances it
         records the last transition rather than what the mailbox holds. A
         parked run is precisely the span in which nothing executes, so the
-        one value a human reads to decide whether the run is unblocked was
-        the one value nothing could refresh — and it said "waiting" over a
-        mailbox that had settled every answer it named.
+        one value a human reads to decide whether the run is unblocked is
+        the one value nothing refreshes — a stored status says "waiting"
+        over a mailbox that has settled every answer it named.
 
         Derived from the questions rather than tracked alongside them: an
         answer settling is already recorded, and a second record of the same

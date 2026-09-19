@@ -40,7 +40,7 @@ from lup.coordination.progress import (
 from lup.coordination.peers import USER_ADDRESS
 from lup.coordination.questions import Question
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import Delivery, SpawnedActor
+from lup.coordination.roster import Delivery, RosterMember
 from lup.channels.models import Door, utc_now
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
 
@@ -69,7 +69,7 @@ class NoInput(BaseModel):
 class SpawnListOutput(BaseModel):
     """Every agent this session spawned, still working ones first."""
 
-    spawns: list[SpawnedActor] = []
+    spawns: list[RosterMember] = []
 
 
 class SpawnSayInput(BaseModel):

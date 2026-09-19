@@ -5,11 +5,11 @@ description: Move every carrier of lup to one upstream commit, and resolve what 
 
 # Update from Upstream
 
-Three things in this project came from lup and each used to move on its own:
-the library by a pin, the native trees by a regeneration, and the copied half —
-`src/` and `tests/`, stamped out at initialization — only when somebody read
-upstream's commits and retyped them. Separately is how they came apart, and a
-commit that changed the library *and* its caller arrived as a breakage rather
+Three things in this project come from lup, each with a carrier of its own:
+the library a pin, the native trees a regeneration, and the copied half —
+`src/` and `tests/`, stamped out at initialization — somebody reading
+upstream's commits and retyping them. Moved separately they come apart, and a
+commit that changes the library *and* its caller arrives as a breakage rather
 than as work anybody chose.
 
 One command moves all three to one commit. What is left for a person is what

@@ -21,7 +21,7 @@ tree, and none of them would answer differently what a session is or where
 its journal sits. What a project decides is whether to index them at all,
 which it does by listing these kinds among its declared ones, the way it
 lists :class:`~lup.ledger.files.File`: a writer handed no recorder records
-nothing and works exactly as before. The kinds are declared here beside the
+nothing and works no differently. The kinds are declared here beside the
 observability package rather than in ``lup.ledger`` because they are about
 what happened in a run, which is this package's subject, and the ledger's
 charter is to declare mechanism and files and nothing about what a run is.
@@ -35,11 +35,12 @@ not against the reader's own tree, so a session recorded on branch A reads
 ``fresh`` from branch B while A's journal still holds the pinned bytes,
 ``stale`` once it grew, and ``missing`` once A's worktree is gone.
 
-Recording starts when a recorder is wired and nothing walks the tree that
-was already there.
+Recording starts when a recorder is wired; a tree written before that is
+walked on demand by :mod:`lup.observability.sweep`, which records the same
+two kinds through the same writers.
 """
 
-# lup: defer: an on-demand `ledger index-notes` sweep over an existing
+# lup: solved: an on-demand `ledger index-notes` sweep over an existing
 # notes/ tree was not built, by the decision that recording starts from
 # now and backfills nothing. It would walk notes/traces/<version>/sessions/
 # <id>/ and notes/harness/<runtime>/<launch>/, record one closed Session
@@ -305,9 +306,19 @@ class SessionRecorder:
         return self.store.project
 
     def opened(
-        self, runtime: str, agent_version: str, directory: Path, journal: Path
+        self,
+        runtime: str,
+        agent_version: str,
+        directory: Path,
+        journal: Path | None,
+        started: datetime | None = None,
     ) -> Session | None:
-        """One session's directory was opened; record it as open."""
+        """One session's directory was opened; record it as open.
+
+        ``journal`` is the trace the close will pin, or nothing where the run
+        wrote none, and ``started`` is when it opened where the caller knows
+        better than now — a sweep over directories already on disk does.
+        """
         now = utc_now()
         try:
             return self.store.record(
@@ -316,9 +327,11 @@ class SessionRecorder:
                 at=now,
                 runtime=runtime,
                 agent_version=agent_version,
-                started=now.isoformat(),
+                started=(started or now).isoformat(),
                 directory=spelled_under(directory, self.checkout),
-                journal=spelled_under(journal, self.checkout),
+                journal=""
+                if journal is None
+                else spelled_under(journal, self.checkout),
                 checkout=str(self.checkout),
             )
         except Exception:
@@ -328,10 +341,15 @@ class SessionRecorder:
             )
             return None
 
-    def closed(self, session: Session, outcome: Outcome) -> Session | None:
-        """The session ended; amend its record with the journal pinned now."""
+    def closed(
+        self, session: Session, outcome: Outcome, at: datetime | None = None
+    ) -> Session | None:
+        """The session ended; amend its record with the journal pinned now.
+
+        ``at`` is when it ended, where the caller knows better than now.
+        """
         try:
-            return self.store.amend(session.closed(outcome, utc_now()))
+            return self.store.amend(session.closed(outcome, at or utc_now()))
         except Exception:
             logger.exception(
                 "the ledger refused to close session %s; its record stays open",
@@ -339,8 +357,13 @@ class SessionRecorder:
             )
             return None
 
-    def produced(self, path: Path, session: Session | None) -> Output | None:
-        """One product was written; record it, about its session where one is known."""
+    def produced(
+        self, path: Path, session: Session | None, at: datetime | None = None
+    ) -> Output | None:
+        """One product was written; record it, about its session where one is known.
+
+        ``at`` is when it was produced, where the caller knows better than now.
+        """
         try:
             output = self.store.record(
                 Output,
@@ -348,7 +371,7 @@ class SessionRecorder:
                 path=spelled_under(path, self.checkout),
                 checkout=str(self.checkout),
                 session=session.id if session is not None else "",
-                produced=utc_now().isoformat(),
+                produced=(at or utc_now()).isoformat(),
             )
             if session is not None:
                 self.store.relate(OutputOf, output, session)

@@ -568,7 +568,7 @@ def still_at_reservation(branch: str) -> bool:
 
     Asked of a record rather than of the graph, because the graph stops
     holding the answer. A tip on the integration branch's first-parent
-    history used to stand in for it — work that landed through a merge sits
+    history would stand in for it — work that landed through a merge sits
     on the side parent, which never appears there — but that reads the way
     the landing was spelled rather than whether any landing happened. Work
     rebased and fast-forwarded moves the integration branch's own tip onto
@@ -1466,14 +1466,14 @@ def admit_an_unread_base() -> None:
     Asked rather than refused, because a base that cannot be read is not the
     same as one that has moved, and offline is a way of working rather than
     a fault: the answer belongs to the person who knows which of the two
-    they are in. Asked rather than printed, because the alternative was
-    tried and is what brought this here.
+    they are in. Asked rather than printed, because a line that is only
+    printed is one nothing has to answer.
 
-    Only where somebody can answer. The refusal that used to stand in this
-    module fell on exactly the scripted sessions nobody was watching, and a
-    prompt on an absent terminal is that refusal wearing a question mark —
-    `typer.confirm` reads end-of-file as an abort. So a session with nobody
-    in front of it says what it is doing and opens.
+    Only where somebody can answer. A refusal here falls on exactly the
+    scripted sessions nobody is watching, and a prompt on an absent terminal
+    is that refusal wearing a question mark — `typer.confirm` reads
+    end-of-file as an abort. So a session with nobody in front of it says
+    what it is doing and opens.
     """
     if not sys.stdin.isatty():
         typer.echo("nobody is here to answer, so the session opens on it unread")

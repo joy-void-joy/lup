@@ -1,7 +1,7 @@
 """Concern-DAG validation and the approval filter that rides on it.
 
 The ordering itself is :mod:`lup.execution.dag`, which any dependent work
-shares. What stays here is the part only a resolve has: a concern may be
+shares. What is here is the part only a resolve has: a concern may be
 approved for integration and still not be integrable, because one of the
 concerns it builds on was not.
 """

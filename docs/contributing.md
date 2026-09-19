@@ -93,8 +93,8 @@ the first of these that fits:
    codeintel; find literal text in explicitly scoped Python paths with `py text`.
 2. To compute something once: a script under `tmp/`, run directly. It imports
    this checkout the way any other module does, and the session it runs in is
-   itself contained, so what used to be the objection — an unreviewable thing
-   executing outside any boundary — is now only the first half. A one-off
+   itself contained, so the objection — an unreviewable thing executing
+   outside any boundary — holds for its first half alone. A one-off
    nobody will read again costs a reviewer nothing.
 3. For anything you will want twice: a new `lup-devtools` command, which
    lands in the diff and can be run again by name rather than rewritten. The
@@ -106,11 +106,10 @@ the first of these that fits:
 4. As a last resort, an inline heredoc behind an escalation marker
    ([permissions.md](permissions.md)).
 
-A rung that evaluated an expression inside its own container used to sit
-between the first two, and was removed with that container. The agent session
-is contained now, so a second boundary within it bought no isolation — and the
-one it had actively got in the way, since the tool could not import the very
-checkout it was asked about.
+No rung between the first two evaluates an expression inside its own
+container. The agent session is contained, so a second boundary within it
+buys no isolation — and actively gets in the way, since a tool inside one
+cannot import the very checkout it is asked about.
 
 The argument is reviewability, not power: an agent may already edit
 `devtools/` and run it.

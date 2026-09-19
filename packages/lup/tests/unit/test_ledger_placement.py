@@ -15,6 +15,7 @@ from lup.coordination.tasks import Blocks, Task
 from lup.devtools.roster import writeup_writers
 from lup.execution.shell import git
 from lup.ledger.journal import LedgerStore
+from lup.ledger.migrate import migrate, misplaced
 from lup.ledger.models import LedgerEdge, LedgerNode, Placement
 from lup.ledger.store import InTree, LedgerLayout, merges_by_union
 from lup.ledger.views import kinds_view
@@ -127,6 +128,159 @@ def test_a_duplicate_id_across_the_two_journals_folds_latest_wins(
 
     assert [each.title for each in after.read(Task)] == ["as amended"]
     assert placed(after) == {task.id: "committed"}
+
+
+def moved_local(tmp_path: Path) -> LedgerStore:
+    """A log written while every kind was local, read under a layout committing tasks.
+
+    Two tasks, a note, an edge between the tasks and one from the note to a
+    task: every line in the local journal, and three of them — the two tasks
+    and the edge whose ends are both tasks — placed committed by the layout
+    the store comes back under.
+    """
+    before = LedgerStore(tmp_path, AUTHOR, LedgerLayout(committed=InTree()))
+    first = before.record(Task, "first", attachments=[b"proof"])
+    second = before.record(Task, "second")
+    note = before.record(Note, "note")
+    before.relate(Blocks, first, second)
+    before.relate(Mentions, note, first)
+    return LedgerStore(tmp_path, AUTHOR, LAYOUT)
+
+
+def journal_lines(store: LedgerStore, placement: Placement) -> list[str]:
+    return store.journal(placement).read_text(encoding="utf-8").splitlines()
+
+
+def holds(store: LedgerStore, placement: Placement) -> list[str]:
+    """Which records one journal holds: a node by its id, an edge by its ends."""
+    return [
+        str(each.line["id"])
+        if "id" in each.line
+        else f"{each.line['source']}->{each.line['target']}"
+        for each in store.stored()
+        if each.placement == placement
+    ]
+
+
+def test_migrate_copies_a_moved_kinds_lines_and_blobs_to_the_journal_declaring_it(
+    tmp_path: Path,
+) -> None:
+    after = moved_local(tmp_path)
+    [first, second] = after.read(Task)
+    [note] = after.read(Note)
+    [proof] = first.attachments
+
+    moved = migrate(after)
+
+    assert [each.kinds for each in moved.copied] == [
+        ["coordination:task"],
+        ["coordination:task"],
+        ["coordination:task", "coordination:task"],
+    ]
+    assert moved.kinds() == ["coordination:task"]
+    assert moved.blobs() == [proof] and moved.missing() == []
+    # The edge from the note stays local: an edge is committed only where
+    # both of its ends are, and one of these is a kind the layout leaves local.
+    assert holds(after, "committed") == [
+        first.id,
+        second.id,
+        f"{first.id}->{second.id}",
+    ]
+    assert (tmp_path / "ledger" / "blobs" / proof).read_bytes() == b"proof"
+    assert [each.id for each in after.read(Note)] == [note.id]
+    # Copied and not moved, so the source journal still holds every one.
+    assert [each.held for each in misplaced(after)] == ["local", "local", "local"]
+
+
+def test_migrate_leaves_the_source_reading_exactly_what_it_read_before(
+    tmp_path: Path,
+) -> None:
+    after = moved_local(tmp_path)
+    [first, second] = after.read(Task)
+    [proof] = first.attachments
+    before_lines = journal_lines(after, "local")
+
+    migrate(after)
+
+    assert journal_lines(after, "local") == before_lines
+    assert (tmp_path / "lup" / "ledger" / "blobs" / proof).read_bytes() == b"proof"
+    # And the fold over both journals holds every record exactly once.
+    assert [each.id for each in after.read(Task)] == [first.id, second.id]
+    assert [edge.kind for edge in after.edges()] == [
+        "coordination:blocks",
+        "test:mentions",
+    ]
+    assert [edge.source for edge in after.into(second.id)] == [first.id]
+
+
+def test_migrate_run_again_copies_nothing(tmp_path: Path) -> None:
+    after = moved_local(tmp_path)
+    migrate(after)
+    settled = journal_lines(after, "committed")
+
+    again = migrate(after)
+
+    assert again.copied == [] and len(again.settled) == 3
+    assert again.blobs() == [] and again.missing() == []
+    assert journal_lines(after, "committed") == settled
+
+
+def test_migrate_narrowed_to_one_kind_leaves_the_others_where_they_are(
+    tmp_path: Path,
+) -> None:
+    before = LedgerStore(tmp_path, AUTHOR, LedgerLayout(committed=InTree()))
+    task = before.record(Task, "task")
+    note = before.record(Note, "note")
+    both = LedgerLayout(
+        committed=InTree(), placements={Task: "committed", Note: "committed"}
+    )
+    after = LedgerStore(tmp_path, AUTHOR, both)
+
+    migrate(after, ["coordination:task"])
+
+    assert holds(after, "committed") == [task.id]
+    assert holds(after, "local") == [task.id, note.id]
+    assert [each.kinds for each in misplaced(after, ["test:note"])] == [["test:note"]]
+
+
+def test_migrate_carries_a_kind_back_out_of_the_committed_half(
+    tmp_path: Path,
+) -> None:
+    before = LedgerStore(tmp_path, AUTHOR, LAYOUT)
+    task = before.record(Task, "task", attachments=[b"proof"])
+    [proof] = task.attachments
+    after = LedgerStore(tmp_path, AUTHOR, LedgerLayout(committed=InTree()))
+
+    moved = migrate(after)
+
+    assert [each.held for each in moved.copied] == ["committed"]
+    assert [each.declared for each in moved.copied] == ["local"]
+    assert moved.blobs() == [proof]
+    assert (tmp_path / "lup" / "ledger" / "blobs" / proof).read_bytes() == b"proof"
+    assert holds(after, "local") == [task.id]
+    assert holds(after, "committed") == [task.id]
+    assert [each.title for each in after.read(Task)] == ["task"]
+
+
+def test_the_console_migrates_a_moved_kind_and_says_what_it_copied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ledger_app, "project_root", lambda: tmp_path)
+    app = ledger_app.create_ledger_app([Task, Note], [Blocks, Mentions], layout=LAYOUT)
+    moved_local(tmp_path)
+
+    copied = CliRunner().invoke(app, ["migrate"])
+    again = CliRunner().invoke(app, ["migrate"])
+    settled = CliRunner().invoke(app, ["migrate", "test:note"])
+    unknown = CliRunner().invoke(app, ["migrate", "test:nothing"])
+
+    assert copied.exit_code == 0, copied.output
+    assert "kinds moved: coordination:task" in copied.output
+    assert "3 record(s) copied to" in copied.output
+    assert "1 blob(s) copied beside them" in copied.output
+    assert again.exit_code == 0 and "3 record(s) were already there" in again.output
+    assert "Every record sits in the journal its kinds declare." in settled.output
+    assert unknown.exit_code != 0 and "is not a declared kind" in unknown.output
 
 
 def test_blobs_land_beside_the_journal_of_the_node_attaching_them(

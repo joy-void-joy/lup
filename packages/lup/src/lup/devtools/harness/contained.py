@@ -108,21 +108,21 @@ def state_volume_name(root: Path) -> str:
     """The volume carrying this project's container-side config home.
 
     Per repository, and keyed on the shared git directory because that is the
-    only name every worktree of one repository agrees on. It used to be
-    ``root.name``, which reads as the repository right up until the checkout
-    is a linked worktree -- and the documented workflow makes one per feature.
-    What that cost was a config home created empty for every branch: the
-    theme back to default, trust re-seeded, each preference set by hand
-    again, and, now that a login can be made in here, a sign-in per feature.
+    only name every worktree of one repository agrees on. ``root.name`` reads
+    as the repository right up until the checkout is a linked worktree -- and
+    the documented workflow makes one per feature. Keying on it costs a
+    config home created empty for every branch: the theme back to default,
+    trust re-seeded, each preference set by hand again, and, since a login
+    can be made in here, a sign-in per feature.
 
     Separate from the caches because it holds decisions rather than
     artifacts: the trust a fresh config home would otherwise discard, the
     session state a ``--continue`` reopens, and the stored login.
 
-    What it costs is that worktrees of one repository now share a config
-    home, so trust and session history are visible across them. That is the
-    arrangement a host home already has, and it is the trade the name was
-    claiming to have made all along.
+    What it costs is that worktrees of one repository share a config home,
+    so trust and session history are visible across them. That is the
+    arrangement a host home already has, and it is the trade the name makes
+    plain.
     """
     return f"lup-cfg-{repository_layout(root).name()}"
 
@@ -219,16 +219,15 @@ def declaration_digest(dockerfile: str) -> str:
 def image_matches(tag: str, dockerfile: str, engine: ContainerEngine) -> bool:
     """Whether this tag exists *and* was built from this declaration.
 
-    Presence alone was the question for a while, and it is the wrong one: an
-    image is built once and the declaration goes on changing, so every later
-    edit -- a pinned CLI, a package, the entrypoint -- was a change that
-    landed in the repository and never in the thing a session actually ran
-    in. Nothing reported it, because from the outside a stale image and a
-    current one are one tag.
+    Presence alone is the wrong question: an image is built once and the
+    declaration goes on changing, so every later edit -- a pinned CLI, a
+    package, the entrypoint -- is a change that lands in the repository and
+    never in the thing a session actually runs in. Nothing reports it,
+    because from the outside a stale image and a current one are one tag.
 
     The digest is a label rather than a file beside the image, so it travels
     with what it describes and cannot be left behind by a `rmi`. An image
-    carrying no label at all is one built before this existed, and is treated
+    carrying no label at all says nothing about what built it, and is treated
     as stale: rebuilding costs a build, and trusting it costs a session
     running in something nobody can identify.
     """
@@ -528,16 +527,16 @@ def departed(
 def proxy_matches(name: str, declaration: str, engine: ContainerEngine) -> bool:
     """Whether a running proxy was started from the declaration in force now.
 
-    The same question :func:`image_matches` asks of an image, and missing for
-    the proxy until a change to the declaration failed to reach one. A proxy
+    The same question :func:`image_matches` asks of an image, asked of the
+    proxy because a change to the declaration reaches one no better. A proxy
     is started once and the declaration goes on moving -- the policy, the
-    resolvers, the pinned image -- so every later edit landed in the
-    repository and never in the container a session reached. Measured: a
+    resolvers, the pinned image -- so every later edit lands in the
+    repository and never in the container a session reaches. Measured: a
     ``--dns`` flag added, a launch run, and the proxy found running and left
     exactly as it was, with the launch reporting the boundary it was supposed
     to have.
 
-    A proxy carrying no label is one started before this existed and is
+    A proxy carrying no label says nothing about what started it and is
     treated as stale, for the reason an unlabelled image is: replacing it
     costs a second, and trusting it costs a session behind a boundary nobody
     can identify.
@@ -618,11 +617,11 @@ def start_egress(
     nothing on the far side of it -- which is the failure mode the filtered
     posture exists to avoid, arrived at by the launcher itself.
 
-    The attachment is the piece an earlier version assumed. It returned as
-    soon as the proxy was *running*, so a proxy that had lost its place on the
+    The attachment is the piece an assumption skips. A check answering as
+    soon as the proxy is *running* leaves one that has lost its place on the
     internal network -- or never taken one, the connect half of the start
-    having failed after the run half succeeded -- was found running and left
-    exactly as it was, on every launch afterwards. :func:`attached` is what
+    having failed after the run half succeeded -- found running and left
+    exactly as it is, on every launch afterwards. :func:`attached` is what
     turns that from a permanent state into a repair.
 
     The rendered configuration is written into the checkout's scratch
@@ -949,11 +948,11 @@ class EgressState(BaseModel, frozen=True):
     def addressable(self) -> bool:
         """Whether a session on this network has a proxy it can send to.
 
-        Every clause was a candidate in turn, and the one that is gone is
-        instructive: this used to ask whether an *alias* resolved, which is a
-        question that could be answered yes by a network whose resolver then
-        refused every public name the proxy needed. Addressing the proxy
-        where it is removed the question rather than answering it.
+        Every clause here is a candidate that earned its place, and the one
+        left out is instructive: whether an *alias* resolves is a question
+        that can be answered yes by a network whose resolver then
+        refuses every public name the proxy needs. Addressing the proxy
+        where it is removes that question rather than answering it.
 
         A proxy on the engine's bridge and not on this network is invisible
         to a session on it, and one with no address there is the same thing
@@ -1337,10 +1336,10 @@ def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
         notice.say()
     if not egress.filtered():
         return
-    # What is declared, then what is running. Only the first was ever printed,
-    # and the two came apart in the way that matters: the notice above says
-    # traffic is filtered through a proxy, which was true, while the session
-    # could not resolve the name it addresses that proxy by.
+    # What is declared, then what is running. The first alone comes apart
+    # from the second in the way that matters: the notice above says
+    # traffic is filtered through a proxy, which is true, while the session
+    # cannot resolve the name it addresses that proxy by.
     for notice in egress_state(egress, project, client.engine()).notices():
         notice.say()
 
@@ -1348,15 +1347,15 @@ def report_egress(egress: SessionEgress, root: Path, down: bool) -> None:
 def network_matches(name: str, declaration: str, engine: ContainerEngine) -> bool:
     """Whether this network was created under the declaration in force now.
 
-    The third thing in this design that was reused whatever the declaration
-    said, and the one that would have swallowed the repair for the other two.
-    A network is created once and outlives every launch, so the posture it
+    The third thing in this design a launch would reuse whatever the
+    declaration said, and the one that would swallow the repair for the other
+    two. A network is created once and outlives every launch, so the posture it
     was first created under is the posture it keeps -- and the flag that
-    stops its resolver shadowing the proxy's would never have reached a
-    machine whose network already existed.
+    stops its resolver shadowing the proxy's never reaches a machine whose
+    network already exists.
 
-    An unlabelled network is one created before this existed and counts as
-    stale, for the reason an unlabelled image and an unlabelled proxy do.
+    An unlabelled network says nothing about the posture it was created under
+    and counts as stale, for the reason an unlabelled image and proxy do.
     """
     try:
         labelled = sh.Command(engine.binary)(

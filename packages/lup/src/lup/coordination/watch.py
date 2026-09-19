@@ -12,7 +12,7 @@ path a console peeks with, so a watcher reporting that a message arrived is
 not a watcher that stopped the peer ever seeing it. What it saw is kept by
 identity rather than by position, because a position is the peer's own —
 committed when the peer reads — and a second reader holding one would be the
-two-cursors-over-one-stream bug this module's neighbours were built to close.
+two-cursors-over-one-stream bug this module's neighbours close.
 
 **Waking is on top of the record, never instead of it.** Where asked to, the
 watcher nudges a member that has new mail by whatever path that member
@@ -31,7 +31,7 @@ from pydantic import BaseModel
 from lup.channels.models import utc_now
 from lup.coordination.mail import ActorMessage
 from lup.coordination.repository import PeerView, RepositoryPeers
-from lup.coordination.roster import SpawnedActor
+from lup.coordination.roster import RosterMember
 from lup.coordination.wake import Woken, wake
 
 
@@ -199,11 +199,11 @@ class Watcher:
         def roster_changes() -> Iterator[WatchEvent]:
             for member_id, view in current.items():
                 match (self.known.get(member_id), view):
-                    case (None, PeerView(member=SpawnedActor(running=True))):
+                    case (None, PeerView(member=RosterMember(running=True))):
                         yield Arrived(at=now, address=view.address, doing=view.doing)
                     case (
-                        PeerView(member=SpawnedActor(running=True)),
-                        PeerView(member=SpawnedActor(running=False)),
+                        PeerView(member=RosterMember(running=True)),
+                        PeerView(member=RosterMember(running=False)),
                     ):
                         yield Departed(
                             at=now, address=view.address, summary=view.member.summary

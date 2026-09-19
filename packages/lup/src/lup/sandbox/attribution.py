@@ -151,23 +151,38 @@ def unquoted(word: str, punctuation: str = PATH_PUNCTUATION) -> str:
     return word.strip(punctuation)
 
 
-def candidate_paths(failure: str) -> list[str]:
-    """Every absolute path the failure text mentions, in the order it did.
+def candidate_paths(failure: str, directory: str = "") -> list[str]:
+    """Every path the failure text mentions, in the order it did.
 
     Deliberately crude, and crude in the safe direction: these are only
     *candidates*, and the mount table decides which of them means anything. A
     token that merely looks like a path and is under no mount contributes
     nothing, so over-collecting costs a lookup and never a wrong claim.
+
+    ``directory`` is where the command ran, and it is what reaches a relative
+    one. A relative candidate is taken only where the diagnostic put it in
+    quotes: the crudeness that is safe for an absolute path is not safe for a
+    bare word, which under a read-only checkout would make every noun in the
+    sentence a claim about the mount.
     """
-    # lup: defer: git names a path relative to the checkout -- "unable to
+    # lup: solved: git names a path relative to the checkout -- "unable to
     # unlink old 'README.md': Device or resource busy" -- which this filter
     # never reaches; anchoring it needs the session's directory here and in the
     # compiled twin in lup.policy.assets.host
-    return [
+    quoted = [
         stripped
         for word in failure.split()
         for stripped in [unquoted(word)]
-        if stripped.startswith("/") and len(stripped) > 1
+        if stripped and word != stripped and not stripped.startswith("/")
+    ]
+    return [
+        *[
+            stripped
+            for word in failure.split()
+            for stripped in [unquoted(word)]
+            if stripped.startswith("/") and len(stripped) > 1
+        ],
+        *[str(PurePosixPath(directory) / name) for name in quoted if directory],
     ]
 
 
@@ -195,6 +210,7 @@ def attribute_filesystem(
     failure: str,
     topology: MountTopology,
     markers: tuple[str, ...] = WRITE_REFUSAL_MARKERS,
+    directory: str = "",
 ) -> Attribution:
     """Attribute a write refusal to the mount that caused it, or to nothing.
 
@@ -211,10 +227,14 @@ def attribute_filesystem(
     ordinarily succeeds, into the container's own filesystem, so a refusal
     there is not the mount table's doing at all -- and the branch matched
     every path the table never mentioned, which is most paths on the machine.
+
+    ``directory`` is where the command ran, which is what resolves the paths
+    git names relative to the checkout. A caller that does not know where it
+    ran passes nothing and gets the absolute reading alone.
     """
     if not any(marker in failure for marker in markers):
         return Unattributed(detail=failure)
-    for path in candidate_paths(failure):
+    for path in candidate_paths(failure, directory):
         mount = read_only_mount(topology, path)
         if mount is not None:
             return FilesystemRefusal(path=path, mount=mount)

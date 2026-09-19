@@ -105,9 +105,9 @@ def declaration_delta(
     """Compare one account against the paths a worktree actually moved.
 
     The safety property is that nothing changes undeclared, which is
-    containment and not equality. Requiring equality also punished a worker
-    for a stale path it believed it had touched, and cost 71 files of
-    correct work over two such entries — nothing was hidden in either. Over-
+    containment and not equality. Requiring equality also punishes a worker
+    for a stale path it believes it touched, at a cost of 71 files of
+    correct work over two such entries — nothing hidden in either. Over-
     reporting is named back rather than rejected, because a reason that
     names no path cannot converge: every retry re-derives the same report
     and fails identically until the budget is spent.

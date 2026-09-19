@@ -1,13 +1,13 @@
 """The whole sub-app roster this library ships, built over one declaration.
 
-A project used to name its inherited sub-apps one by one, which put the roster
-on the wrong side of the boundary between the two halves of lup. The library
+A project naming its inherited sub-apps one by one puts the roster on the
+wrong side of the boundary between the two halves of lup. The library
 arrives through a lock refresh and the template through a hand-replayed commit,
-so a sub-app added here reached a project's dependencies immediately and its
-``--help`` never: the name was written down in a copied file nobody had reason
-to revisit, and an absent sub-app read exactly like a declined one.
+so a sub-app added here reaches a project's dependencies immediately and its
+``--help`` never: the name sits in a copied file nobody has reason to
+revisit, and an absent sub-app reads exactly like a declined one.
 
-So the default is everything, and a project states its delta. What made that
+So the default is everything, and a project states its delta. What makes that
 possible is that the factories need only the handful of facts
 :class:`DevtoolsDeclarations` carries, every one of which a project already
 declares once for something else — which also retires the other half of the

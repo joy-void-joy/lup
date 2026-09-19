@@ -8,9 +8,9 @@ runtime anything -- so the launch writes the answer down and the session reads
 it back. That is the same arrangement the mount table already uses, for the
 same reason.
 
-What the ledger replaces is a variable. Containment used to be
-``LUP_CONTAINED``, a constant baked into the image, and a constant answers yes
-for any container built from that image, for a bare ``run`` holding none of the
+What the ledger stands in place of is a variable. Containment spelled as
+``LUP_CONTAINED``, a constant baked into the image, answers yes for any
+container built from that image, for a bare ``run`` holding none of the
 lease, and -- since a launcher forwards its own environment -- for an
 uncontained session started from a shell that happened to export it. Keyed by a
 value minted here, the ledger answers only for the launch that wrote it.
@@ -72,8 +72,8 @@ def ledger_path(root: Path, nonce: str, ledger: str = ".lup/preflight") -> Path:
     Named rather than shared, and that is not tidiness. One file per checkout
     is a file two concurrent sessions overwrite for each other, and the loser
     reads a boundary belonging to a launch that is not its own -- which is the
-    same class of wrong answer as the inherited variable this replaces, arrived
-    at from the other direction.
+    same class of wrong answer as an inherited variable, arrived at from the
+    other direction.
     """
     return root / ledger / f"{nonce}.json"
 
@@ -93,9 +93,9 @@ def record_preflight(
     reader that has to understand two shapes is a reader with a branch nobody
     exercised.
 
-    Written on every launch, contained or not. An uncontained launch used to
-    write nothing at all, which left whatever a contained launch wrote last
-    standing as this session's answer.
+    Written on every launch, contained or not. A launch that writes nothing
+    leaves whatever a contained launch wrote last standing as this session's
+    answer.
 
     ``launch`` is the launcher's own invocation, recorded so a session can
     spell its own reopening. A mount registered mid-session takes effect only

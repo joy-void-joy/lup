@@ -6,14 +6,14 @@ door that wants to steer a spawn is often not the process that made it, and a
 run resumed after a park has forgotten every address it ever minted. Both cases
 read as "no such actor" from a store that was simply never rebuilt.
 
-So the population is on disk. It was a stream of arrivals and departures that
-every reader folded; it is a file per member now, which answers the same
-questions in a directory listing and answers two the fold could not: whether a
-member that wrote no departure is still there, and what it is holding. Both
-are the file itself — its modification time, and what it says.
+So the population is on disk, a file per member rather than a stream of
+arrivals and departures every reader folds. A directory listing answers the
+same questions, and two a fold cannot: whether a member that wrote no
+departure is still there, and what it is holding. Both are the file itself —
+its modification time, and what it says.
 
-What that costs is history. The stream could say who was here last Tuesday,
-and nothing asked: every reader wanted who is here, and paid for the replay.
+What that costs is history. A stream could say who was here last Tuesday, and
+nothing asks: every reader wants who is here, and pays for the replay.
 What stops is a store that grows without bound, and rows for sessions that
 ended weeks ago crowding out the two that are working.
 
@@ -71,7 +71,7 @@ def carried(spelled: str, fallback: Delivery) -> Delivery:
     return next((mode for mode in Delivery if mode.value == spelled), fallback)
 
 
-class SpawnedActor(BaseModel, frozen=True):
+class RosterMember(BaseModel, frozen=True):
     """One member the population holds: who it is, and what it is doing.
 
     It carries the ref rather than a copy of the parts, so what a reader is
@@ -90,9 +90,9 @@ class SpawnedActor(BaseModel, frozen=True):
     heard: datetime | None = None
     """When this member was last heard from: its own file's modification time.
 
-    One source rather than two. The record used to say when a member last
-    *said* something and the pulse when it was last *seen*, and a reader had
-    to take the later of them; a member that touches its own file while it
+    One source rather than two. A record saying when a member last *said*
+    something beside a pulse for when it was last *seen* would leave a reader
+    taking the later of them; a member that touches its own file while it
     lives collapses that into the stat every read already does.
     """
 
@@ -139,8 +139,8 @@ class SpawnedActor(BaseModel, frozen=True):
     cli_name: str = ""
     """What this member is called now, empty until something named it.
 
-    On the member rather than in a record beside it, because the two were
-    always read together and a rename is the member changing rather than an
+    On the member rather than in a record beside it, because the two would
+    always be read together and a rename is the member changing rather than an
     event about it. What it *was* called stays in its file, so a reference
     somebody wrote down still resolves.
     """
@@ -169,7 +169,7 @@ def member_identity(actor: ActorRef) -> store.Actor:
     return store.Actor(kind=actor.kind, id=actor.id, round=actor.round)
 
 
-def folded_member(member: store.Member) -> SpawnedActor:
+def folded_member(member: store.Member) -> RosterMember:
     """One member file, as a typed caller reads it.
 
     Total rather than validating: every field is coerced to something the model
@@ -178,7 +178,7 @@ def folded_member(member: store.Member) -> SpawnedActor:
     still able to say who is here. What a malformed field costs is that field.
     """
     wake = member.get("wake") or store.Wake()
-    return SpawnedActor(
+    return RosterMember(
         actor=ActorRef(
             kind=store.text(member.get("kind")),
             id=store.text(member.get("id")),
@@ -290,12 +290,12 @@ class Roster:
         """Record that this member is here now."""
         store.beat(self.root, member_identity(actor))
 
-    def standing(self) -> Iterator[SpawnedActor]:
+    def standing(self) -> Iterator[RosterMember]:
         """Every member this population holds, as the read leaves each."""
         for member in store.present(self.root):
             yield folded_member(member)
 
-    def live(self) -> list[SpawnedActor]:
+    def live(self) -> list[RosterMember]:
         """Every member, the ones still working first."""
         return sorted(self.standing(), key=lambda member: not member.running)
 

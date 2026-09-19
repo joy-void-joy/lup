@@ -1,11 +1,10 @@
 """Every carrier moved to one upstream commit, by one command.
 
-Three mechanisms carry an upstream scaffold into a project and each used to be
-moved separately: a pin for the library, a regeneration for the native trees,
-a hand-port for the copied half. Separately is how they come apart — the pin
-lands a library whose callers are still last month's, and nothing says so until
-something breaks. So the update is one command, and what it moves them all to
-is one commit.
+Three mechanisms carry an upstream scaffold into a project: a pin for the
+library, a regeneration for the native trees, a hand-port for the copied
+half. Moved separately, they come apart — the pin lands a library whose
+callers are still last month's, and nothing says so until something breaks.
+So the update is one command, and what it moves them all to is one commit.
 
 The commit is read back rather than chosen twice. `uv lock` resolves the pin
 and writes the commit it got; that commit is what the scaffold is compiled at

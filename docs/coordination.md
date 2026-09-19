@@ -132,9 +132,9 @@ claims go with it.
 the path it was taken over, so a reader asks the filesystem rather than the
 record: the path is gone and the claim names nothing anybody could write;
 somebody has written it since and what stands there is not what this session
-left; otherwise it holds. Nothing has to be written to retire one, which is
-what a worktree removed from under a live session used to need — the claim
-outlived the tree, and only another record could end it. A prefix lock is
+left; otherwise it holds. Nothing has to be written to retire one, which a
+worktree removed from under a live session would otherwise need — a claim
+outliving the tree, endable only by another record. A prefix lock is
 exempt from the second test, because a directory's time moves whenever
 anything under it does, including by the holder: a lock ends when it is
 released, when its holder leaves, or when the prefix is gone.
@@ -310,18 +310,18 @@ every other through a channel the peer policy cannot see.
 
 ## The store is state, not records
 
-The store was append-only logs folded whole by every reader on every call. It
-answered *who is here* by replaying everyone who had ever been here, which grew
+Records are append-only logs folded whole by every reader on every call. They
+answer *who is here* by replaying everyone who has ever been here, which grows
 without bound — 597 KB of touches and sixteen rows for two live sessions — and
-it could not be asked anything the records had not been written to answer. A
-claim over a path in a deleted worktree stood until another record retired it.
-A change nothing could attribute was written down with a guess and a list of
-suspects beside it. Presence needed a second stamp directory, because the only
-record that ended a row was the one a session wrote on its way out, and a
+they cannot be asked anything they were not written to answer. A
+claim over a path in a deleted worktree stands until another record retires it.
+A change nothing can attribute is written down with a guess and a list of
+suspects beside it. Presence needs a second stamp directory, because the only
+record that ends a row is the one a session writes on its way out, and a
 killed session writes nothing.
 
-It is one file per member now, written by nobody but that member's own
-processes, and every relation between members derived at the read:
+The store is one file per member instead, written by nobody but that member's
+own processes, and every relation between members derived at the read:
 
 | Question | What answers it |
 | --- | --- |
@@ -334,7 +334,7 @@ processes, and every relation between members derived at the read:
 Nothing is folded and nothing is replayed, so what the store holds is bounded
 by the population rather than by its history: a member that stops takes its
 file to `departed/`, and the sweep deletes that after the retention window.
-Compaction was designed for the old shape and is moot in this one.
+Nothing here needs compaction.
 
 **The one place this spends more is the stat**, because settling a claim means
 asking the filesystem rather than reading a record. Measured on 2026-09-19
@@ -378,12 +378,12 @@ in one file per notice, is read at the head of a turn, and is retracted by
 deleting it. Nothing consumes it, so nothing has to remember having read it —
 which is why a replayed or resumed turn reads exactly what a first one did.
 
-That separation is what killed the broadcast token. "To everyone" used to be a
-`*` every reader matched against itself, and matching at *read* is what forced
-the delivery cursor: a message nobody had addressed to you could still be
-yours, so you had to remember how far you had got. It was also wrong for half
-its uses — `redirect --to everyone` stopped every worker spawned *after* the
-stop, with a reason that was never about it.
+That separation is why there is no broadcast token. A "to everyone" spelled as
+a `*` every reader matches against itself matches at *read*, and that forces a
+delivery cursor: a message nobody addressed to you can still be
+yours, so you have to remember how far you got. It is wrong for half its uses
+besides — `redirect --to everyone` would stop every worker spawned *after* the
+stop, with a reason that is never about it.
 
 So the two acts are spelled apart. A **redirect** is about now: it denies a
 tool call, and a member that does not exist cannot be stopped, so "everyone"
@@ -410,11 +410,11 @@ runtime fires — before a prompt, as a session ends — are bare scripts spawne
 with no working directory, no `PYTHONPATH` and no virtual environment. The
 compiled permission dispatcher is a third, under the same constraint.
 
-Each of them once folded the store for itself, so every record the store
-gained had to be taught to three readers separately — and a reader that missed
-one went on answering confidently about a store it no longer understood. The
-fold is written once instead, in `lup.coordination.bare`, under the strictest
-of the three constraints: the standard library alone, no pydantic, no `lup`.
+A fold in each of them separately means every record the store gains has to be
+taught to three readers, and a reader that misses one goes on answering
+confidently about a store it does not understand. The fold is written once
+instead, in `lup.coordination.bare`, under the strictest of the three
+constraints: the standard library alone, no pydantic, no `lup`.
 The library imports it as an ordinary module; each plugin carries the package
 whole beneath `hooks/runtime/coordination/`, the way the policy kernel is
 carried, so its relative imports resolve there exactly as they do here and

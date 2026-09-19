@@ -1,10 +1,9 @@
 """Which file each typed declaration compiles to, walked from the compiled trees.
 
-The page describing generated output used to carry this as a table somebody
-maintained. It drifts one way only: an artifact added to a recipe is invisible
-until whoever added it remembers the page, so the rows that go missing are
-always the newest — and a map with a family missing reads exactly like a
-complete one.
+A table of generated output that somebody maintains drifts one way only: an
+artifact added to a recipe is invisible until whoever added it remembers
+the page, so the rows that go missing are always the newest — and a map
+with a family missing reads exactly like a complete one.
 
 Nothing here is authored. Every artifact already knows where it came from,
 because a reader who opens the generated file has to be told where to edit

@@ -421,7 +421,9 @@ class Sandbox:
         answer and the one that stops an agent hunting a wall that was not
         involved.
         """
-        on_disk = attribute_filesystem(failure, self.topology())
+        on_disk = attribute_filesystem(
+            failure, self.topology(), directory=self.shared_path
+        )
         if on_disk.explains():
             return on_disk
         refused = attribute_egress(self.proxy_log())

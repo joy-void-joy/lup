@@ -32,6 +32,7 @@ from lup.policy.assets.host import (
     recoverable_write_targets,
     resolved_write_targets,
     rewritten_text,
+    text_at,
     tracked_write_targets,
 )
 from lup.policy.kernel.effects import STRENGTH
@@ -54,10 +55,10 @@ from lup.policy.kernel.rows import (
     PathRuleKind,
     PathRuleRow,
     RewriteReading,
-    RewrittenFileRow,
-    UnreadFileRow,
+    RewrittenDocumentRow,
+    UnproducedDocumentRow,
     UrlScopeRow,
-    unread_cause,
+    unproduced_cause,
 )
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
 from lup.policy.kernel.words import command_words as kernel_command_words
@@ -274,28 +275,23 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         if self.authored is None:
             return None
         root = event.cwd or Path.cwd()
-        changes: list[EditChange] = []
-        for write in authored_writes(event.command):
-            landed = root / write["path"]
-            existing = landed.is_file()
-            try:
-                before = landed.read_text(encoding="utf-8") if existing else None
-            except OSError:
-                continue
-            changes.append(
-                EditChange(
-                    path=Path(write["path"]),
-                    before=before,
-                    after=(before or "") + write["content"]
-                    if write["append"]
-                    else write["content"],
-                    operation="modify"
-                    if write["append"]
-                    else "overwrite"
-                    if existing
-                    else "create",
-                )
+        changes = [
+            EditChange(
+                path=Path(write["path"]),
+                before=before,
+                after=(before or "") + write["content"]
+                if write["append"]
+                else write["content"],
+                operation="modify"
+                if write["append"]
+                else "overwrite"
+                if existing
+                else "create",
             )
+            for write in authored_writes(event.command)
+            for existing in [(root / write["path"]).is_file()]
+            for before in [text_at(root, write["path"]) if existing else None]
+        ]
         if not changes:
             return None
         return self.authored.decide(EditBatch(changes=changes))
@@ -310,7 +306,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         verdict onto a shell verdict in its own words.
 
         A file this could not produce yields the reason it could not, and the
-        classifier says which reason rather than that something went unread.
+        classifier says which reason rather than that something went unproduced.
 
         ``resolution`` is left unanswered here for the reason
         :meth:`EditPolicy.decide_change` leaves it unanswered: resolving a
@@ -328,23 +324,29 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
             for target in reversed(rewrite["targets"])
         }
 
-        documents: list[RewrittenFileRow] = []
-        unread: list[UnreadFileRow] = []
+        # lup: ignore[empty-collection] — one reading feeding two collections:
+        # each target reaches exactly one of them and which it is costs a sed
+        # run, so a comprehension per list would run every script twice
+        documents: list[RewrittenDocumentRow] = []
+        unproduced: list[UnproducedDocumentRow] = []  # lup: ignore[empty-collection]
         for target, scripts in scripts_for.items():
             attempt = rewritten_text(scripts, target, root)
             after = attempt["text"]
             if after is None:
-                unread.append(
-                    UnreadFileRow(target=target, cause=unread_cause(attempt["cause"]))
+                unproduced.append(
+                    UnproducedDocumentRow(
+                        target=target, cause=unproduced_cause(attempt["cause"])
+                    )
                 )
                 continue
-            try:
-                before = (root / target).read_text(encoding="utf-8")
-            except (OSError, ValueError, UnicodeDecodeError):
-                unread.append(UnreadFileRow(target=target, cause="unreadable"))
+            before = text_at(root, target)
+            if before is None:
+                unproduced.append(
+                    UnproducedDocumentRow(target=target, cause="unreadable")
+                )
                 continue
             documents.append(
-                RewrittenFileRow(
+                RewrittenDocumentRow(
                     target=target,
                     path=worktree_path(target),
                     before=before,
@@ -354,10 +356,10 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     resolution=None,
                 )
             )
-        return RewriteReading(documents=documents, unread=unread)
+        return RewriteReading(documents=documents, unproduced=unproduced)
 
     def rewrite_antipatterns(
-        self, rows: list[RewrittenFileRow]
+        self, rows: list[RewrittenDocumentRow]
     ) -> dict[str, list[AntiPatternRow]]:
         """The anti-pattern table for exactly the suffixes a rewrite touches.
 
@@ -429,7 +431,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 runner_targets=self.runner_targets,
                 target_tables=self.target_tables,
                 rewritten_documents=rewritten["documents"],
-                unread_documents=rewritten["unread"],
+                unproduced_documents=rewritten["unproduced"],
                 antipattern_rows=self.rewrite_antipatterns(rewritten["documents"]),
                 edit_rules=[] if edits is None else edits.edit_rules,
                 import_boundaries=[] if edits is None else edits.import_boundaries,

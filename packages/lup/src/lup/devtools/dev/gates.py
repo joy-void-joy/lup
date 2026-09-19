@@ -29,15 +29,15 @@ So the integration branch is read too, for the notes naming the branch in
 hand, and those wake on that branch rather than on whoever merges later.
 
 What this cannot do is reach a checkout that does not carry this code. A
-branch cut before these gates existed runs the check it has, so its warning
-still arrives with the merge that brings the tooling — no worse than before,
-and no better. Every branch cut since is reached on its first run.
+branch without it runs the check it has, so its warning still arrives with
+the merge that brings the tooling — no worse for these gates, and no better.
+Every branch carrying it is reached on its first run.
 
 Prose keeps working and keeps meaning what it meant. A condition this module
 does not recognise is not an error and not a typo to be corrected: "until the
 v2 API ships" is a real gate that this checkout simply cannot see, and the
 listing carrying it to a reader is the whole of what it ever did. What
-changes is only that a condition which *can* be resolved no longer settles
+changes is only that a condition which *can* be resolved does not settle
 for being read.
 
 The spellings are a union rather than a table of branches, so naming another

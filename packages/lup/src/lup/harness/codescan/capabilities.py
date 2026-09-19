@@ -17,7 +17,7 @@ it declares ``BaseModel`` beside ``ABC`` and is not judged here.
 ``abstract-declaration`` is what makes that list worth reading. Pydantic's
 metaclass is an ``ABCMeta``, so an ``@abstractmethod`` binds on a model and
 the base becomes uninstantiable while the word ``ABC`` never appears — which
-is how thirteen of this library's unions came to be abstract by an incidental
+is how thirteen of this library's unions are abstract by an incidental
 property of a dependency rather than by anything anybody wrote. Declaring an
 abstract member and naming ``ABC`` are one act, so this rule requires the
 second wherever it finds the first.

@@ -1182,7 +1182,7 @@ DECLARED = [
         steps=[
             MigrationStep(
                 instruction=(
-                    "Read `SpawnedActor.heard` for `RepositoryPeers.heard`, "
+                    "Read `RosterMember.heard` for `RepositoryPeers.heard`, "
                     "which the fold fills from the member file's own stat. "
                     "`standing()` is gone, because there is no reading of the "
                     "record apart from the pulse; `present()` is the one "
@@ -1260,6 +1260,94 @@ DECLARED = [
                     "window, so `stale_window` has nothing to judge. "
                     "`store.record_claims(root, mine, paths)` takes the three "
                     "arguments that are left."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["rewritten_files"],
+        reason=(
+            "one function had two names on the two sides of the boundary it "
+            "answers across, and the row type beside it said `File` where the "
+            "field it fills says `documents` — what a rewrite leaves behind is "
+            "the document, the file being the path it lands at"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call `rewritten_documents` where `rewritten_files` was "
+                    "called; the arguments and the reading are unchanged. "
+                    "`RewrittenFileRow` is `RewrittenDocumentRow` and "
+                    "`UnreadFileRow` is `UnproducedDocumentRow`, whose field "
+                    "on `RewriteReading` is `unproduced` rather than "
+                    "`unread` — the word `unread` stays with the shell write "
+                    "nobody read the content of, which is a different question."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "SpawnedActor",
+            "SpawnedActor.actor",
+            "SpawnedActor.address",
+            "SpawnedActor.arrived",
+            "SpawnedActor.delivery",
+            "SpawnedActor.description",
+            "SpawnedActor.error",
+            "SpawnedActor.heard",
+            "SpawnedActor.kind",
+            "SpawnedActor.liveness",
+            "SpawnedActor.running",
+            "SpawnedActor.summary",
+            "SpawnedActor.task",
+            "SpawnedActor.wake",
+            "SpawnedActor.worktree",
+        ],
+        reason=(
+            "a repository peer is a session somebody started in a checkout, "
+            "which nothing here spawned: the word belonged to a cohort's "
+            "workers and read as false on the roster that carries most of "
+            "these rows, where the fold's own source is a member file"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import `RosterMember` from `lup.coordination.roster` "
+                    "where `SpawnedActor` was imported. Every field keeps its "
+                    "name and its meaning; only the type is spelled for what "
+                    "it folds, which is `store.Member`."
+                ),
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "Claim",
+            "Claim.at",
+            "Claim.covers",
+            "Claim.held",
+            "Claim.holders",
+            "Claim.path",
+            "Claim.prefix",
+            "Claim.subject",
+            "folded_claim",
+        ],
+        reason=(
+            "`Claim` named two shapes one import apart: a member's own record "
+            "of a path it holds, and the cross-member row derived from every "
+            "member claiming one path. The first is `store.Holding` and the "
+            "second is this, so each says which it is"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import `HeldPath` from `lup.coordination.touches` where "
+                    "`Claim` was imported, and `folded_held_path` where "
+                    "`folded_claim` was. The fields are unchanged: a path, "
+                    "whether it is a prefix, and the members holding it. A "
+                    "caller that meant one member's own record wants "
+                    "`lup.coordination.bare.store.Holding` instead."
                 ),
             ),
         ],

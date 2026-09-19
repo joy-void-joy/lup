@@ -5,18 +5,18 @@ list and the same env-file helpers. A domain customizes setup once; both
 interfaces then expose the same fields, status checks, and bespoke-flow
 fallbacks.
 
-What changed is what "fallback" means. A declarative integration becomes a
+Here a "fallback" is a step like any other. A declarative integration becomes a
 :class:`~lup.devtools.dashboard.wizard.SetupStep` here — the same guide,
 external link, and fields it already declares, drawn in a browser instead of a
 terminal. An integration with a ``setup_func`` still cannot be run from the
 page, because a function that prompts on a terminal has no browser shape to
-infer; but it is now drawn as a step that says so and names the command,
-rather than being a second kind of thing the page had to know about.
+infer; but it is drawn as a step that says so and names the command, rather
+than being a second kind of thing the page has to know about.
 
 A project that wants its bespoke flow in the browser writes its own step and
 passes it in. That is the seam this exists for: the page has no opinion about
-what a step does, and a project no longer has to leave the dashboard behind
-the moment its setup stops being a list of tokens.
+what a step does, and a project need not leave the dashboard behind the
+moment its setup stops being a list of tokens.
 """
 
 from collections.abc import Callable

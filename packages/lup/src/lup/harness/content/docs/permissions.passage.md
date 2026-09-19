@@ -38,10 +38,10 @@ prompt, a judged deny wins the batch. Malformed input fails conservatively.
 ### What a rule states, and what it earns
 
 **A rule says what an operation does. It never says what that earns.** The
-lattice was once keyed on how a command was *spelled*: a rule named an
-executable and stated a verdict beside it, so two commands with one effect
-reached different answers whenever two people wrote the two rules. `effects`
-is the declaration now — a list from the closed table in
+lattice is not keyed on how a command is *spelled*: a rule naming an
+executable and stating a verdict beside it gives two commands with one effect
+different answers whenever two people write the two rules. `effects`
+is the declaration instead — a list from the closed table in
 `policy/kernel/effects.py`, each member deciding its own verdict from the
 scope it was given, what the host measured, and where the session sits — and
 `declared_verdict` derives the answer wherever it is used. Two spellings of
@@ -142,8 +142,8 @@ is a snapshot of the checkout, and a loss beyond it is held by nothing. So a
 redirection reads its scope off the target, and a path verb reads its
 strongest operand — only the ones it *writes*, since a source `cp` merely
 reads is an ordinary read however far out it sits. Without that, `rm
-/etc/hosts` was settled as "the affected paths are captured and restorable",
-which is a sentence about a file no snapshot had ever seen.
+/etc/hosts` settles as "the affected paths are captured and restorable",
+which is a sentence about a file no snapshot has ever seen.
 
 Where the capture was actually *taken*, `RecoveredLoss` settles the question
 as a **permission**. Not a deferral: deferring would make the outcome depend
@@ -167,7 +167,7 @@ it. And a `# lup: escalate[decision]:` marker keeps its question either way:
 the agent asked to be judged, and evidence does not overrule the request.
 
 **And it is written down**, which is what makes the relaxation honest rather
-than merely quieter. The lattice asked about everything unjudged for an
+than merely quieter. The lattice asks about everything unjudged for an
 *observability* reason, and a deferral is the one verdict that reaches nobody
 — the runtime's own gate decides and the reason goes to no human. So every
 deferral appends to `.lup/hooks/learned.jsonl`, one line per distinct command,

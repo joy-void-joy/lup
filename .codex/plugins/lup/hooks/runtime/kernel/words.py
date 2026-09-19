@@ -651,32 +651,12 @@ def git_restore_operands(words: list[str]) -> RestoreOperands | None:
     return RestoreOperands(source=source, paths=paths, named=named)
 
 
-def git_apply_patches(words: list[str]) -> list[str]:
-    """The patch files ``git apply`` is handed, which name the paths it writes.
-
-    A patch is the one write in this table whose targets are neither operands
-    nor flag values: they are inside a file, in a format with a reader of its
-    own. So this names the file, and what reads it asks Git what the patch
-    would touch -- delegating to the format's parser rather than growing a
-    second one here, which is the same arrangement the archive readers keep.
-
-    Empty where the patch arrives on standard input, which is a spelling this
-    cannot see and must not guess at: ``git apply < f`` names no operand, and
-    reporting the redirection's source as a write would be reporting the wrong
-    file in the wrong direction. The row's own verdict answers for that.
-
-    Over-naming is safe here in a way it is not elsewhere, because nothing
-    consults these words as paths. They are handed to a patch reader that
-    rejects whatever is not a patch, so a flag value swept up by mistake
-    yields no targets rather than a target nobody writes.
-    """
-    return [named["path"] for named in git_apply_words(words)]
-
-
 def git_apply_words(words: list[str]) -> list[PathWord]:
-    """Which words those patch files were read out of.
+    """Which words a `git apply` reads its patch files out of.
 
-    The positional reading :func:`git_apply_patches` is the file list of.
+    The words rather than the paths, because where each sits in the command is
+    what resolves it: a list of paths alone cannot say which of them a `-C`
+    moved, and every reader here places a path from the word that named it.
     """
     if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "apply":
         return []
@@ -835,19 +815,19 @@ def asks_before_removing_a_directory(
     A delete confined to files is bounded by the files named. A directory is
     not: its size is whatever it happens to hold, and nothing in the command
     says what that is. That is the question, and it is a question rather than
-    a wall -- the earlier wording said the operation "is never granted" and
-    then offered approval in the same sentence, which reads as a refusal and
-    was worked around as one.
+    a wall -- wording that says the operation "is never granted" and then
+    offers approval in the same sentence reads as a refusal and is worked
+    around as one.
 
     Recoverable in exactly the sense a file delete is, so it settles the same
-    way. The reasoning this replaces held that untracked work inside a
-    directory is restored by nothing, which was true of `git stash create`
-    and is why :mod:`lup.devtools.dev.undo` does not use it: that module
+    way. Reasoning that untracked work inside a directory is restored by
+    nothing holds only of `git stash create`, which is why
+    :mod:`lup.devtools.dev.undo` does not use it: that module
     captures tracked content *and* untracked files, and names ``rm -rf src/``
     as the case it exists for. Carrying the purpose and the requirement lets
     the settlement layer discharge this against a capture that completed, and
     keep the question where one did not -- rather than opting out of that
-    layer by returning a bare verdict, which is what left a proven capture
+    layer by returning a bare verdict, which would leave a proven capture
     unable to answer the one operation it was built for.
 
     What stays outside any capture is ignored content, which is not a fact
@@ -1633,43 +1613,12 @@ def sed_invocation(words: list[str]) -> SedInvocation | KernelDecision:
     )
 
 
-def sed_rewrite_operands(words: list[str]) -> list[str] | None:
-    """The files an in-place sed replaces, or ``None`` where the line is no sed.
-
-    One of the readers a path-writing verb's operands are named by, and like
-    :func:`git_restore_operands` it recognises its own command: what a
-    utility does with its operands is a fact about that utility, so the
-    reader that knows the utility is the one that says whether a line is it.
-
-    A sed without ``-i`` is ``cat`` with an address: what sits at its operand
-    is the same afterwards, so the operand is a path the command reads and
-    not one it acts on. Naming it anyway was defended as the safe direction,
-    because two of the three questions asked of an acted-on path stat it and
-    a file that is there answers them harmlessly -- but the third resolves it
-    against what the launch mounted writable, and a file under a read-only
-    mount is exactly the path no writable root contains. So
-    ``sed -n 1,80p /mounted/verify.py`` was reported as a write outside the
-    lease and asked, while ``head -80`` over the same file was allowed.
-
-    Read through :func:`sed_invocation` rather than by a grammar of its own,
-    on the terms that function states: a second reader of which files a
-    rewrite touches parts company with the first the moment one of them
-    learns a flag the other has not, and this one had never learned ``-i``.
-
-    A call the reader refuses names nothing. The classifier returns that same
-    refusal before any fact about the file is consulted, and a refusal is not
-    reopened by anything the facts could say -- which is also what every
-    other unclassified command names, so a sed nobody judged is treated as
-    one.
-    """
-    named = sed_rewrite_words(words)
-    return None if named is None else [target["path"] for target in named]
-
-
 def sed_rewrite_words(words: list[str]) -> list[PathWord] | None:
-    """Which words those files were read out of.
+    """Which words an in-place sed reads the files it rewrites out of.
 
-    The positional reading :func:`sed_rewrite_operands` is the file list of.
+    The words rather than the paths, for the reason every path reader here
+    hands words back: where an operand sits is what a placement resolves it
+    from, and a bare list of paths has thrown that away.
     """
     if posixpath.basename(words[0]) != "sed":
         return None

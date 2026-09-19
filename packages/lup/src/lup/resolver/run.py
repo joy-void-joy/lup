@@ -1,8 +1,8 @@
 """The one live resolve state a run holds, and how it is written down.
 
 Every phase of a resolve reads this state and most of them write it, which
-is why they all used to live in one class: reaching the state meant holding
-whatever else that class had. Naming the state itself — with the lock that
+is the pull toward putting them in one class: reaching the state means holding
+whatever else that class has. Naming the state itself — with the lock that
 guards it, the event that ends a poll early, and the observer that watches
 it move — lets a phase take *this* instead of taking the composer.
 

@@ -138,8 +138,8 @@ class Joiner:
 
         So the plan goes over in full — every tip, the concern behind it and
         the paths it wrote — and the merger sequences its own work through
-        ``start_parent`` and ``land_parent``. Those verbs keep what the loop
-        used to: the accounting gate refuses a short account while the merger
+        ``start_parent`` and ``land_parent``. Those verbs keep what an owning
+        loop would: the accounting gate refuses a short account while the merger
         is still on the parent it belongs to, verification runs per parent so
         a red gate names one, the checkpoint is written as each lands, and a
         drain is reported on the way out of every landing.
@@ -567,8 +567,8 @@ class Joiner:
         """Re-run each concern's reviewer against the tree its siblings built.
 
         ``review_turn`` runs against a concern's own worktree before
-        integration, so nothing re-checked a criterion that stopped holding
-        once a sibling landed. This is the only instrument aimed at "concern
+        integration, so nothing else re-checks a criterion that stops holding
+        once a sibling lands. This is the only instrument aimed at "concern
         three's criterion two no longer holds now that concern seven merged"
         — the final audit is about content that went missing, which is a
         different failure.
@@ -720,12 +720,12 @@ class Joiner:
     ) -> list[RecheckRuling]:
         """Wait for these re-checks, and report what each was ruled.
 
-        Queuing publishes a question; it does not wait for one. So the run
-        used to reach the end of integration with its re-checks unanswered,
-        mark the branch complete, and finish — and a `regression` ruling that
-        arrived afterwards was recorded into a run that had already shipped
-        it. Waiting parks the run instead, which costs nothing to resume and
-        makes the answer arrive before the decision it governs.
+        Queuing publishes a question; it does not wait for one. A run that
+        only queues reaches the end of integration with its re-checks
+        unanswered, marks the branch complete, and finishes — a `regression`
+        ruling arriving afterwards is recorded into a run that has already
+        shipped it. Waiting parks the run instead, which costs nothing to
+        resume and makes the answer arrive before the decision it governs.
 
         Only the final pass waits. A per-join standing check already has a
         consumer — it is what stops the same finding being re-asked join

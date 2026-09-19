@@ -418,8 +418,8 @@ def offer_flag_answers(
     """Offer every ``--answer`` value through the mailbox.
 
     Offers may precede their questions, so a flag answers a question this
-    run has not asked yet — which is why a fresh run no longer has to park
-    once before its answers can count.
+    run has not asked yet — which is why a fresh run need not park once
+    before its answers can count.
 
     Every flag is put to the mailbox before any refusal is raised, so one
     rerun is told about all of its stale corrections rather than finding the
@@ -705,10 +705,10 @@ def report_environment_fault(
 ) -> None:
     """Print what stopped the host, and the command that continues once it works.
 
-    Says plainly that nothing failed, because the record used to say the
-    opposite: every concern in flight was written down as having failed with
-    a provider's error as its reason, and a reader deciding what to re-admit
-    could not tell those from work that did not hold up.
+    Says plainly that nothing failed, because a record saying the opposite --
+    every concern in flight written down as having failed with a provider's
+    error as its reason -- leaves a reader deciding what to re-admit unable
+    to tell those from work that did not hold up.
     """
     typer.echo(
         f"{local_stamp()} — resolver run stopped on an environmental fault, "
@@ -756,7 +756,7 @@ def report_deferred_assembly(
 
     Deferring is not failing, and the wording matters: every branch this
     names is committed, verified and untouched. The run stopped at the one
-    junction where stopping used to mean killing the process.
+    junction where stopping otherwise means killing the process.
     """
     typer.echo(f"{local_stamp()} — assembly deferred. The review branch was not built.")
     typer.echo(f"  ready to merge: {', '.join(deferred.verified)}")
@@ -1627,15 +1627,15 @@ def run_resolve(
         # is seeded from the one document this reads, so a run that cannot
         # read it opens no session anywhere — a fact about the environment
         # rather than about any concern. Discovering it per worker instead
-        # turned one environmental fault into an exception group of concern
-        # failures and burned every lease the run had taken.
+        # turns one environmental fault into an exception group of concern
+        # failures and burns every lease the run has taken.
         home = (
             selected_config_home(session_environment) if adapter == "claude" else None
         )
         # Two facts about the same home, established before anything is
         # leased: whether its document can be read, and whether a session
         # opened under it would keep its shell. The second is the one a run
-        # used to discover by losing Bash in every worker at once, with each
+        # otherwise discovers by losing Bash in every worker at once, with each
         # failure naming a read-only filesystem and none of them naming the
         # boundary that made it one.
         fault = next(

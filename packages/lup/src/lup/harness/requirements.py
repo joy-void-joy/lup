@@ -133,8 +133,8 @@ class Package(BaseModel, frozen=True):
         The question the roster is actually asked, and the reason it is a
         method rather than a manager comparison at each call site: a caller
         testing ``manager != "script"`` is asking about the ecosystem when it
-        means to ask about integrity, and those stopped being the same question
-        the moment a script could carry a digest.
+        means to ask about integrity, and those are two questions the moment
+        a script can carry a digest.
         """
         return self.manager != "script" or bool(self.digest)
 
@@ -408,8 +408,7 @@ class ExerciseOutcome(BaseModel, frozen=True):
     alike here and send a reader to opposite places. An operation that ran and
     answered no is evidence about the capability; one that never ran is
     evidence about whatever stopped it, and reporting the second as the first
-    is how a container that refused to start got announced as a proxy nobody
-    could reach.
+    announces a container that refused to start as a proxy nobody can reach.
     """
 
     proved: bool

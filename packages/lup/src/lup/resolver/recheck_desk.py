@@ -2,7 +2,7 @@
 
 Every other phase of a run skips work it has already done — the worker phase
 from ``state.outcomes``, the join sequence from its landing checkpoint — and
-the re-check was the one that did not. A resumed run re-examined all of it:
+the re-check needs its own record. Without one a resume re-examines all of it:
 one measured run spent 47 reviewer turns on 21 concerns across a handful of
 interruptions, and re-running a reviewer does not only cost a turn, it can
 return a different verdict for the same unchanged tree and wedge the run on a

@@ -5,11 +5,11 @@ A hook runs only where the home trusts it, per event and per hash, and Codex
 plugin with trust for one event of six runs every session past the five it
 never granted, and says nothing about it.
 
-Asking which those are used to mean constructing each trust record's name
-here, from the manifest, over a table pairing the manifest's spelling of an
-event with the record's. The table is the part that could not hold. The
+Answering which those are here means constructing each trust record's name
+from the manifest, over a table pairing the manifest's spelling of an
+event with the record's. The table is the part that cannot hold. The
 manifest is generated, so an event added to it is named nowhere here, and
-the reader then raised on this repository's own plugin instead of answering
+the reader raises on this repository's own plugin instead of answering
 about it -- which is the whole gate for a session an application opens.
 
 So the question goes to the runtime that owns both spellings. ``hooks/list``
@@ -142,7 +142,7 @@ def hook_wire_fields() -> list[str]:
 
     Read off the model rather than listed beside it. A second declaration of
     the same names is free to fall behind the first, which is precisely the
-    failure that retired the hand-kept event table this module replaced.
+    failure a hand-kept table of these names would carry.
 
     What it is for: a rename on this reply fails *open*. Trust would be
     seeded against a field that is no longer there, every hook would resolve

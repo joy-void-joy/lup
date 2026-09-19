@@ -160,9 +160,9 @@ type BannerExemptionReason = Literal[
 The first two are formats that *could* hold a comment and must not: model-
 facing prompt text, where the banner would enter every prompt, and a verbatim
 copy, where it would break the diff proving the copy faithful. The third is a
-format with no comment at all — JSON — which was previously said by declaring
-no banner and is said here instead, so that an artifact's provenance is
-carried in every case and only its rendering varies."""
+format with no comment at all — JSON — said here rather than by declaring no
+banner, so that an artifact's provenance is carried in every case and only its
+rendering varies."""
 
 
 class BannerExemption(BaseModel, frozen=True):

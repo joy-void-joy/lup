@@ -131,7 +131,7 @@ class ReviewResidualEvent(BaseModel, frozen=True):
     """Observations an accepting review recorded beside its verdict.
 
     A residual on a rejected review re-enters the worker's feedback; on an
-    accepted one it previously reached nobody, and real findings sat unread
+    accepted one nothing else carries it, and real findings would sit unread
     in the round records. The journal is where they surface — for the CLI,
     the supervisor, and whoever files the follow-up work.
     """
@@ -229,9 +229,9 @@ class LeaseRefreshedEvent(BaseModel, frozen=True):
     """What bringing the refreshed base into one lease did, or what stopped it.
 
     The base event above says where the run now starts; it says nothing
-    about which branches actually took it. That answer reached stdout once
-    and was never written down, so a detached run — whose output goes to a
-    file nobody is watching — left no record that three of its leases were
+    about which branches actually took it. An answer reaching stdout alone
+    is never written down, so a detached run — whose output goes to a
+    file nobody is watching — keeps no record that three of its leases were
     refused. A lease still on the old base is the reason its worker reads
     replaced code, which is the failure the refresh exists to prevent.
     """

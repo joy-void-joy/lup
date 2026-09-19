@@ -143,8 +143,8 @@ def list_questions(
     ``--pending`` is what a human reads after answering, so it means what
     they mean by it: still waiting on you. A question already offered is
     waiting on the run to take it, not on another answer — listed as
-    pending it read as though nothing had been recorded, and the only way
-    to tell was to go and count files on disk.
+    pending it would read as though nothing had been recorded, and the only
+    way to tell would be to go and count files on disk.
     """
     views = pending_views(open_mailbox(run_id))
     waiting = [view for view in views if view.answered is None and view.offer is None]
@@ -210,23 +210,23 @@ def list_actors(
 
     Undelivered mail is shown because sending is not delivering: a door
     writes the stream and the actor reads it at its next tool call or turn,
-    and nothing between those two moments used to say which had happened.
+    and nothing between those two moments otherwise says which has happened.
     A redirect sitting here through a whole concern is that concern being
     worked on the instructions it was supposed to abandon.
     """
     # Before the journal is read, not after. A run directory that is not
-    # there yields no actors, which printed "nothing recorded yet" and exited
-    # zero — indistinguishable from a real run that has not started, and the
-    # answer a sibling worktree with no `.lup` at all gave for every id.
+    # there yields no actors, so asking after would print "nothing recorded
+    # yet" and exit zero — indistinguishable from a real run that has not
+    # started, and the answer a sibling worktree with no `.lup` gives for any id.
     cohort = open_cohort(run_id)
     members = cohort.live()
     if not members:
         typer.echo("No actor has recorded anything yet.")
         return
     # What the person has been told, first, because it is addressed to whoever
-    # is reading this. A worker's report used to go out unaddressed, which
-    # every actor matched and consumed, so the one message meant for a person
-    # was the one no surface showed.
+    # is reading this. A worker's report that went out unaddressed is matched
+    # and consumed by every actor, so the one message meant for a person
+    # would be the one no surface shows.
     told = cohort.heard().messages
     if told:
         typer.echo(f"{cohort.user.label()} — said to you by this run's actors:")
@@ -656,7 +656,7 @@ def retire_concern(
     A run parked while its branch moved forward routinely finds the branch
     already did some of its work, and base refresh makes that the expected
     consequence of following a branch rather than a rare accident. Without
-    this, every route was wrong: hand-resolving an add/add conflict between
+    this, every route is wrong: hand-resolving an add/add conflict between
     two independent implementations of one thing, letting a worker open on a
     concern whose notes no longer exist in its tree, or aborting the whole
     run — discarding every settled answer — to retire one concern.

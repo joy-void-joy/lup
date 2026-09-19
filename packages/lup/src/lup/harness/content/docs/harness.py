@@ -14,9 +14,9 @@ def kernel_module_count() -> int:
     """How many modules the generated policy runtime carries, from the copier.
 
     Asked of :func:`policy_kernel_modules` rather than counted here, because
-    that is the function whose output lands in the tree. The row this feeds
-    once described a single `kernel.py`, and went on describing it after the
-    kernel became a package — a source path that no longer resolved.
+    that is the function whose output lands in the tree. A number written down
+    here goes on describing a single `kernel.py` where the kernel is a
+    package — a source path that resolves to nothing.
     """
     return len(policy_kernel_modules())
 

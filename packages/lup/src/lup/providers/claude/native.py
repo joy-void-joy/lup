@@ -147,7 +147,7 @@ class ClaudeEventDecoder(NativeEventDecoder[ClaudeBeforeToolEvent]):
                 # the marker gate compares a file's notes against nothing,
                 # finds none of them missing, and admits a write that erased
                 # every one. The generated dispatchers read that document
-                # themselves; this path had no equivalent.
+                # themselves; nothing else on this path does.
                 tool = EditBatch(
                     changes=[
                         EditChange(

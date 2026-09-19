@@ -399,7 +399,7 @@ def normalize_codex_approval(
 ) -> Literal["untrusted", "on-request", "granular", "never"] | None:
     """Validate the Codex approval policy before model construction.
 
-    The asking policies are answerable now that the adapter replies to the
+    The asking policies are answerable because the adapter replies to the
     app-server's approval requests from a session's declared hooks, so they
     are settings rather than refusals. Legacy configuration aliases normalize
     here so the app-server wire receives only its current spellings.

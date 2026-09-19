@@ -1828,9 +1828,8 @@ def audit_text(
 
         Every line up to the head of the comment block, because that is what
         `suppression_reaches` accepts and this only asks it where to look. A
-        fixed pair of candidates was exactly complete while the policy was
-        capped at the line directly above, and stopped being the moment it
-        widened.
+        fixed pair of candidates is complete only where the policy is capped
+        at the line directly above, and this one reaches further.
 
         The head of the block is also where the search stops. A line that
         does not continue the block ends every reach from above it, so

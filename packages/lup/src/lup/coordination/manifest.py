@@ -5,11 +5,11 @@
 """What makes one directory a cohort, written where the cohort is.
 
 A roster, a message stream and a journal in one directory are a cohort, and
-until something says so that is a convention rather than a fact. Every reader
-had to know it: the run that owns the directory, the tool server attaching to
-it, and the console steering it each rebuilt the same construction out of the
-same assumption, and a peer that wanted to *find* a cohort it did not create
-had nothing to read at all.
+unless something says so that is a convention rather than a fact. Every
+reader would have to know it: the run that owns the directory, the tool
+server attaching to it, and the console steering it each rebuilding the same
+construction out of the same assumption, and a peer that wants to *find* a
+cohort it did not create would have nothing to read at all.
 
 So the fact is written down. The manifest is the one file whose presence
 answers "is this a cohort?", and its contents answer the two things a reader

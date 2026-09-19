@@ -569,11 +569,11 @@ class SessionEgress(BaseModel, frozen=True):
         nobody was told about is one whose refusals get debugged as something
         else.
 
-        Each of them is *one* line, which is the part that had to be fought
-        for. The unfiltered posture used to spend four sentences explaining
-        why a shared loopback is what lets a sign-in redirect land -- true,
-        and rationale, and printed at every launch above the sentence that
-        decided whether the session could work. What a reader needs here is
+        Each of them is *one* line, and that is the part worth holding. Four
+        sentences from the unfiltered posture on why a shared loopback is
+        what lets a sign-in redirect land would be true, and rationale,
+        and printed at every launch above the sentence that decides whether
+        the session can work. What a reader needs here is
         which posture is in force and what it exposes; why it exposes that is
         this module's header and ``docs/permissions.md``.
         """

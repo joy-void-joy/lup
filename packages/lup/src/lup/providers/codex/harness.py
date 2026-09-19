@@ -64,6 +64,7 @@ from lup.policy.bundle import (
     POLICY_DATA_BANNER,
     policy_kernel_modules,
     render_policy_data,
+    verification_row,
     runtime_url_scope,
 )
 from lup.policy.dispatcher import (
@@ -506,8 +507,8 @@ def codex_project_config(
     compiles into its served-tool grants, derived from the same fact: a
     server named in a plugin here is this project's own code, wired in
     deliberately, so asking per call would make the declaration a suggestion.
-    Undeclared, the two runtimes disagreed on it — a session opened with no
-    operator to ask held every server it had been given and could call none
+    Undeclared, the two runtimes disagree on it — a session opened with no
+    operator to ask holds every server it was given and can call none
     of them, refusing each with its approval policy rather than with anything
     naming the servers.
 
@@ -732,7 +733,7 @@ def codex_allow_prefixes(
     # expresses: each `add` reads the prefixes the ones before it produced
     prefixes: list[list[str]] = []
     for row in rows:
-        # Derived, as everywhere a row's verdict is wanted now. The unresolved
+        # Derived, as everywhere a row's verdict is wanted. The unresolved
         # reading is the right one here for the reason it is right in the
         # classifier: a prefix is written down ahead of any command, so nothing
         # about a path is known when it is offered.
@@ -940,6 +941,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     ),
                     banner=POLICY_DATA_BANNER,
                     body=render_policy_data(
+                        verification=verification_row(source.subagent_cleanup),
                         allowed_fetch_scopes=[
                             runtime_url_scope(
                                 str(scope.origin),

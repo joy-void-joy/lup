@@ -1,8 +1,8 @@
 """The tools a resolver worker asks its material questions through.
 
-A worker used to surface questions by ending its turn with them in its
-typed report, which cost a whole new session to deliver the answer. These
-tools let it ask mid-turn and keep working.
+Surfacing a question by ending a turn with it in the typed report costs a
+whole new session to deliver the answer. These tools let a worker ask
+mid-turn and keep working.
 
 The handlers touch nothing but the mailbox and the lease they are bound to,
 so one factory serves both transports: Claude registers the server

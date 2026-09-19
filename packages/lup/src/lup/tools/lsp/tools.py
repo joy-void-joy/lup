@@ -235,7 +235,7 @@ def workspace_for(
     so it is what picks the workspace. Module scope rather than a closure
     because every consumer that drives a language server needs the same
     answer, and one of them getting it right by accident of process
-    lifetime is how this went unnoticed.
+    lifetime is how this goes unnoticed.
     """
     for directory in file.parents:
         if any((directory / marker).exists() for marker in markers):
@@ -295,7 +295,7 @@ def create_codeintel_tools(
         because both trees hold that path.
 
         The permission hook publishes where editing is happening on every
-        edit, which is the fact the guess was standing in for.
+        edit, which is the fact the guess would stand in for.
         """
         published = read_edition(edition or edition_path(root))
         return published.workspace if published is not None else None

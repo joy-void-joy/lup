@@ -51,6 +51,7 @@ from lup.policy.bundle import (
     POLICY_DATA_BANNER,
     policy_kernel_modules,
     render_policy_data,
+    verification_row,
     runtime_url_scope,
 )
 from lup.policy.dispatcher import (
@@ -833,6 +834,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     ),
                     banner=POLICY_DATA_BANNER,
                     body=render_policy_data(
+                        verification=verification_row(source.subagent_cleanup),
                         allowed_fetch_scopes=[
                             runtime_url_scope(
                                 str(scope.origin),

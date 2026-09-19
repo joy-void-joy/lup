@@ -104,8 +104,8 @@ def names_same_repository(value: str, other: str) -> bool:
     either does not. That is the lever rather than an omission: a project on
     two forges writes `host/owner/name` and gets the discrimination, and one
     on a single forge writes the pair and needs none. The asymmetric reading
-    — a named host on one side refusing a bare pair on the other — was tried
-    and is the defect this whole surface exists to remove: it refuses the
+    — a named host on one side refusing a bare pair on the other — is the
+    defect this whole surface exists to remove: it refuses the
     caller who wrote the *more* precise form, which teaches everybody to
     write the vaguer one.
     """
@@ -204,7 +204,7 @@ def attributed_stderr(
     """
     reported = decode_stderr(e)
     observed = topology if topology is not None else observed_topology()
-    account = attribute_filesystem(reported, observed)
+    account = attribute_filesystem(reported, observed, directory=str(Path.cwd()))
     return f"{reported}\n{account.sentence()}" if account.explains() else reported
 
 

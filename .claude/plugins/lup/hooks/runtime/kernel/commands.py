@@ -22,11 +22,11 @@ from .rows import (
     ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
-    RewrittenFileRow,
+    RewrittenDocumentRow,
     RunnerTargetRow,
     ShellRuleRow,
-    UnreadCause,
-    UnreadFileRow,
+    UnproducedCause,
+    UnproducedDocumentRow,
     UrlScopeRow,
 )
 from .edit import decide_edit
@@ -73,7 +73,7 @@ IN_PLACE_SED_RECOVERY = (
     " with a file edit, which the edit gates read."
 )
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
-UNREAD_SED_RECOVERY = (
+UNPRODUCED_SED_RECOVERY = (
     "The edit gates judge the file a rewrite would produce, and it could not be"
     " produced here. Make the change with a file edit, which carries its own"
     " content."
@@ -100,12 +100,12 @@ def row_verdict(
     into each of the hundred-odd rows that ask.
 
     The purpose comes from the effect that decided, because the effect is the
-    thing being weighed. It used to be inferred from two other columns -- an
-    ask whose checkpoint was anything but ``unrecoverable`` was a local
-    mutation, one carrying an effect class was an external consequence -- which
-    held only while those columns happened to imply it, and said nothing at all
-    for a row setting neither. Fifty-one of the hundred and eight rows that ask
-    were in that last group, reaching a reviewer's queue unclassified.
+    thing being weighed. Inferred from two other columns -- an ask whose
+    checkpoint is anything but ``unrecoverable`` a local mutation, one
+    carrying an effect class an external consequence -- it would hold only
+    while those columns happen to imply it, and say nothing at all for a row
+    setting neither. Fifty-one of the hundred and eight rows that ask are in
+    that last group, and would reach a reviewer's queue unclassified.
 
     Read off the row rather than off resolved paths, and that is exact rather
     than approximate: no member's ``purpose`` consults the evidence, and no row
@@ -213,8 +213,8 @@ class SedContext(TypedDict):
     maximum_added_lines: int
     autonomous: bool
     allowances: list[str]
-    rewritten_documents: list[RewrittenFileRow]
-    unread_documents: list[UnreadFileRow]
+    rewritten_documents: list[RewrittenDocumentRow]
+    unproduced_documents: list[UnproducedDocumentRow]
     """What each named file would hold afterwards, where the host could say.
 
     A list rather than a mapping because it crosses the same boundary every
@@ -716,11 +716,11 @@ def split_subcommand(
     A global that only moves the command to another directory is a value flag
     and nothing more: the parser steps over its argument and the verb behind
     it is judged by its own row, exactly as ``cd there && git <verb>`` is
-    judged by two segments. ``git -C /elsewhere commit`` was once a question
-    on the ground that the reflog which makes a commit reversible is in the
-    other tree -- and it is, and it is that tree's reflog, which undoes the
+    judged by two segments. Asking about ``git -C /elsewhere commit`` on the
+    ground that the reflog which makes a commit reversible is in the other
+    tree grants the ground and misses it -- it is that tree's reflog, which
     commit exactly as this one's would. Every other spelling of the same act
-    was allowed, so the question deterred nothing and cost a turn each time.
+    is allowed, so such a question deters nothing and costs a turn each time.
 
     A guarded global whose value is a *setting* is judged by the setting, the
     way `git config` is judged by the key it writes. `git -c core.pager=x`
@@ -875,13 +875,13 @@ def decide_sed_words(words: list[str], context: "SedContext") -> KernelDecision:
             "deny", IN_PLACE_SED_REFUSAL, recovery=IN_PLACE_SED_RECOVERY
         )
     documents = {row["target"]: row for row in context["rewritten_documents"]}
-    unread: dict[str, UnreadCause] = {
-        row["target"]: row["cause"] for row in context["unread_documents"]
+    unread: dict[str, UnproducedCause] = {
+        row["target"]: row["cause"] for row in context["unproduced_documents"]
     }
     verdicts = [
         rewrite_verdict(target, documents[target], context)
         if target in documents
-        else unread_verdict(target, unread.get(target))
+        else unproduced_verdict(target, unread.get(target))
         for target in invocation["targets"]
     ]
     stopped = [verdict for verdict in verdicts if verdict.effect != "allow"]
@@ -894,20 +894,19 @@ def decide_sed_words(words: list[str], context: "SedContext") -> KernelDecision:
     return max(stopped, key=lambda verdict: STRENGTH.index(verdict.effect))
 
 
-def unread_verdict(target: str, cause: UnreadCause | None) -> KernelDecision:
+def unproduced_verdict(target: str, cause: UnproducedCause | None) -> KernelDecision:
     """What to say about a file an in-place rewrite names and nothing produced.
 
     Four causes and a fifth silence, each sending the writer somewhere else.
-    One sentence stood for all five, so a mistyped path, a rewrite aimed at a
-    directory and a script sed would not run were told the same thing, and
-    offered the one recovery that fits none of them -- make the change as an
-    edit instead, which answers only the case where the document exists and
-    could not be judged.
+    One sentence standing for all five tells a mistyped path, a rewrite aimed
+    at a directory and a script sed will not run the same thing, and offers
+    the one recovery that fits none of them -- make the change as an edit
+    instead, which answers only the case where the document exists and could
+    not be judged.
 
-    ``None`` is the silence, and it keeps the old words because they are true
-    of it: nothing read the rewrite. That is what a composition reaching the
-    documents late, or not at all, leaves behind, and it stays a question for
-    the reason it always did.
+    ``None`` is the silence, and the general sentence is true of it: nothing
+    read the rewrite. That is what a composition reaching the documents late,
+    or not at all, leaves behind, and it is a question on that ground.
     """
     match cause:
         case "missing":
@@ -949,19 +948,19 @@ def unread_verdict(target: str, cause: UnreadCause | None) -> KernelDecision:
                 f"sed would rewrite {target} in place, and neither what stands"
                 " there nor what would replace it reads as text",
                 purpose="quality_review",
-                recovery=UNREAD_SED_RECOVERY,
+                recovery=UNPRODUCED_SED_RECOVERY,
             )
     return KernelDecision(
         "ask",
         f"sed would rewrite {target} in place, and nothing read what it would"
         " leave behind",
         purpose="quality_review",
-        recovery=UNREAD_SED_RECOVERY,
+        recovery=UNPRODUCED_SED_RECOVERY,
     )
 
 
 def rewrite_verdict(
-    target: str, document: RewrittenFileRow, context: "SedContext"
+    target: str, document: RewrittenDocumentRow, context: "SedContext"
 ) -> KernelDecision:
     """What the edit gates say about one file an in-place rewrite would produce.
 

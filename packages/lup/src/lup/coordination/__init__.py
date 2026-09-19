@@ -8,9 +8,9 @@ that settle without stalling whoever asked.
 
 Nothing here knows what the actors are for. The resolver names its own kinds
 and carries its own question type over the same mechanism; a research session
-names different ones. That is what the vocabulary was hiding: the layer was
-written once against one consumer, and the consumer was never what made it
-work.
+names different ones. A vocabulary borrowed from one consumer hides that:
+the layer is written against the mechanism, and no consumer is what makes
+it work.
 
 **Coordination rather than orchestration**, and the distinction is the reason
 this is its own package. Orchestration is one process deciding what several

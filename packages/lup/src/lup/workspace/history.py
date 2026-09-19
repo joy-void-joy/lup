@@ -352,8 +352,8 @@ def version_dirs(roots: Sequence[Path] | None = None) -> list[Path]:
     """Return all version directories under the trace roots given, sorted.
 
     Omitting ``roots`` takes the one this process resolved, which is the only
-    answer that was available before and stays the default. Naming them
-    replaces that set rather than extending it, for the reason
+    answer available to a caller that names none, and stays the default.
+    Naming them replaces that set rather than extending it, for the reason
     :func:`iter_run_dirs` spells out: a caller able to add a root but not to
     decline one has had a choice made for it out of a value only this package
     can see.
@@ -380,8 +380,8 @@ def iter_session_dirs(
     relocate the notes root so part of a session writes into a directory of
     its own, and a lookup for a session another process recorded then searches
     inside this one and comes back empty — not because the record is gone but
-    because one tree was searched for something kept in another. A caller that
-    knows of a second tree had no way to say so.
+    because one tree was searched for something kept in another. ``roots`` is
+    how a caller that knows of a second tree says so.
 
     A directory reached through two roots is yielded once, under the spelling
     the earliest root produces. Where a caller counts what comes back to decide
@@ -429,10 +429,10 @@ def iter_run_dirs(
     decline one, which is a choice made for every adopter out of a value only
     this package can see.
 
-    This exists because the tree above is written here and was readable
-    nowhere: every caller wanting a run back from its id re-derived the
-    ``<provider>/<run_id>`` shape, which made a layout this package owns into
-    something it could not change without breaking readers it cannot see.
+    This exists because the tree above is written here and would otherwise be
+    readable nowhere: every caller wanting a run back from its id re-deriving
+    the ``<provider>/<run_id>`` shape makes a layout this package owns into
+    something it cannot change without breaking readers it cannot see.
 
     A directory reached twice is still one directory. The root set is the
     adopter's, so two of its entries can nest, name the same tree by different

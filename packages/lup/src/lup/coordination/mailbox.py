@@ -137,7 +137,7 @@ class QuestionMailbox[Q: Question]:
         # Two verbs, because they are two requests. Park ends every open
         # *wait*, which reaches a run sitting on an answer and no other; a
         # worker inside a model turn is not waiting on anything, so a busy
-        # run was unaffected by it and killing was the only way to stop one.
+        # run is unaffected by it and killing would be its only stop.
         # Draining ends the *work*, at the next boundary where stopping
         # costs nothing. One verb meaning both would surprise whoever
         # wanted the first.

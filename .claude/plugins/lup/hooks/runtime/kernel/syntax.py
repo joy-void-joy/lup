@@ -2,14 +2,14 @@
 # The dependency-free runtime deliberately uses primitive rows and stdlib scanners.
 """Shell syntax: one command line read into a tree, by recursive descent.
 
-Every reader of a command used to take its words from a lexer that dropped
-quoting on the way through, and recovered structure afterwards by matching
-keywords at the front of flat segments. Two facts were lost that way and
-could not be got back: whether a `$S` stood inside single quotes, where the
-shell never expands it, and which segments a loop, a branch or a case arm
-actually encloses. This module keeps both. It knows grammar only -- nothing
-here judges a command, binds a variable or reads a filesystem -- and a line
-it cannot read comes back as the unjudged decision naming why, never as an
+A reader taking a command's words from a lexer that drops quoting on
+the way through, and recovering structure afterwards by matching
+keywords at the front of flat segments, loses two facts for good:
+whether a `$S` stands inside single quotes, where the shell never expands
+it, and which segments a loop, a branch or a case arm actually encloses.
+This module keeps both. It knows grammar only -- nothing here judges a
+command, binds a variable or reads a filesystem -- and a line it cannot
+read comes back as the unjudged decision naming why, never as an
 exception.
 
 The grammar is POSIX sh with the bash forms agents actually write: `[[ ]]`,

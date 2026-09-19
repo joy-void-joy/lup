@@ -52,21 +52,20 @@ configuration and refuse nothing silently: Codex names the three fields it
 has no spelling for and raises rather than dropping them. Each splits
 rendering from building, so an application can stack a ``ConfigTransform``
 onto what a request asked for before a session exists — which is what the
-transforms in each ``config.py`` are for, and what the Codex side had no
-entry point to until the split was made on both.
+transforms in each ``config.py`` are for, and what the Codex side has no
+entry point to without that split.
 
 ``usage/`` — both read an account's metered windows and its daily tokens into
 the report in :mod:`lup.observability.usage`, which owns the display, the pacing bars, and
-the ``--json`` snapshot. This was Claude-only, on the belief that the other
-runtime published nothing to read; it publishes both readings over its own
-app-server, so the display was made neutral and each adapter left holding
-only what its account actually reports. What still differs is that one
+the ``--json`` snapshot. Codex publishes both readings over its own
+app-server as Claude does, so the display is neutral and each adapter holds
+only what its account actually reports. What differs is that one
 account splits its tokens by model and the other does not, which is why one
 draws a legend and the other has none to draw.
 
 The Codex method names are read off the shipped binary rather than off the
-published schema, which is how the daily read came to be spelled wrongly
-once: the response type is ``GetAccountTokenUsageResponse`` and the
+published schema, which is what keeps the daily read from being spelled
+wrongly: the response type is ``GetAccountTokenUsageResponse`` and the
 notification beside it is ``thread/tokenUsage/updated``, so the method looks
 like it should match, and it does not. A wrong method name here is invisible
 — the runtime answers with an error, and an error on the daily read renders

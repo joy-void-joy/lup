@@ -18,8 +18,8 @@ The set is shared with the hook; the verdicts need not be. This sweep reads
 whole parseable files, so it hands `lup.harness.codescan.resolution` a type oracle and
 decides some rules more narrowly than a hook judging an untyped edit fragment
 ever could. Every finding that narrowing drops is reported as a **refuted**
-row carrying the declaration that settled it, and the directive that used to
-guard it turns up as spurious on the next line of the report.
+row carrying the declaration that settled it, and the directive guarding it
+turns up as spurious on the next line of the report.
 """
 
 from collections import Counter, defaultdict
@@ -138,9 +138,9 @@ def within_scope(rel: str, paths: Sequence[str] | None) -> bool:
         Those come from `git ls-files`, which names them relative to the
         repository, and the walk runs where that command runs. An absolute
         path names the same file in a spelling the other side never takes, so
-        it matched nothing and the sweep reported a clean tree — an answer,
+        it matches nothing and the sweep reports a clean tree — an answer,
         rather than a scope that caught no files. That is the same failure a
-        trailing separator used to cause, reached from the other direction.
+        trailing separator causes, reached from the other direction.
 
         One outside this checkout keeps its spelling and goes on matching
         nothing, which is not the same bug: it names a file the sweep is not

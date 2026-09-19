@@ -3,8 +3,8 @@
 A skill that tells its reader to open the system prompt has to say where the
 system prompt is, and that is one of the few facts about a repository the
 library cannot know: initialization renames the package, so a path written
-down here would name a directory that is gone. Every author who needed one
-reached for ``src/lup_template/`` — the template's own package — which reads
+down here would name a directory that is gone. An author needing one reaches
+for ``src/lup_template/`` — the template's own package — which reads
 correctly in exactly one repository and misdirects every project built on it.
 
 The rename is not what makes this necessary. A project resolving ``lup`` from

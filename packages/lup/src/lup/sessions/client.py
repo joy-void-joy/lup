@@ -9,8 +9,8 @@ The package root re-exports it, so ``from lup import Client`` is still what a
 reader meets and what every example annotates against; this is where the
 engine behind that name lives. Which provider serves a given model id is
 :mod:`lup.providers.routing`'s question, asked at the vendor edge, because
-asking it from here is what made this module and ``providers`` import each
-other -- a front door that had to know what was behind every door it opened.
+asking it from here makes this module and ``providers`` import each
+other -- a front door that has to know what is behind every door it opens.
 """
 
 from collections.abc import Callable

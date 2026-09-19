@@ -1433,6 +1433,18 @@ class SubagentCleanup(BaseModel, frozen=True):
     """Whether the subagent is told at its start; the stop-time refusal is the
     declaration itself."""
 
+    gate: str = "`uv run lup-devtools dev check`"
+    scoped: str = "`uv run lup-devtools dev check --changed`"
+    record: str = "your report"
+    """How this project spells the gate, its scoped form, and where a delegated
+    agent names what it could not check.
+
+    Declared rather than written into the notice, because the notice ships
+    into a project that named its own devtools CLI and would otherwise read
+    an agent an invocation it does not serve. The defaults are this
+    repository's, which is what an adopter inherits until it says otherwise —
+    the same arrangement every other spelling in this declaration has."""
+
 
 class HookSandbox(BaseModel, frozen=True):
     """OS sandbox declaration compiled into native settings and launchers.

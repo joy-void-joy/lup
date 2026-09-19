@@ -310,14 +310,14 @@ class RecheckRuling(BaseModel, frozen=True):
 class ClosedAnswer(StrEnum):
     """One gate's whole answer domain, published and read from one place.
 
-    A question with a fixed set of answers has one fact to state, and it was
-    stated four ways across this package: two constant pairs, a third pair,
-    and a list of literals whose reader compared the same literals by hand.
-    Nothing tied the choices a question published to the token its reader
-    tested — which is how the allowance gate came to offer its answers as
-    suggestions while its only reader tested for a literal, so a human's
-    prose grant promoted cleanly and then meant refusal, with nothing
-    anomalous to report anywhere.
+    A question with a fixed set of answers has one fact to state, and with
+    no one place to state it that fact gets stated four ways: two constant
+    pairs, a third pair, and a list of literals whose reader compares the
+    same literals by hand. Nothing ties the choices a question publishes to
+    the token its reader tests — which is how the allowance gate offers its
+    answers as suggestions while its only reader tests for a literal, so a
+    human's prose grant promotes cleanly and then means refusal, with
+    nothing anomalous to report anywhere.
 
     Deriving the offer from the domain closes that by construction: a reader
     can only test a member, and every member is offered. A gate whose answers
@@ -926,8 +926,8 @@ class VerificationRecord(BaseModel, frozen=True):
     output: str = ""
     """What the check said, kept because a verdict is read long after it ran.
 
-    A rejection used to record only the gate's own name, so learning which
-    row of an eleven-row check failed meant reproducing the whole check
+    A rejection recording only the gate's own name makes learning which
+    row of an eleven-row check failed mean reproducing the whole check
     inside the lease worktree — which a later session often cannot do,
     because the run is still holding it. Three concerns in one run were
     rejected on the same string for the same pre-existing finding, and each
@@ -942,7 +942,7 @@ class ConcernRetirement(BaseModel, frozen=True):
     A run parked while its branch moved forward will routinely find that
     the branch already did some of its work, and base refresh makes that
     the expected consequence of following a branch rather than a rare
-    accident. Every route available without this was wrong: hand-resolving
+    accident. Every route available without this is wrong: hand-resolving
     an add/add conflict between two independent implementations of one
     thing, letting a worker open on a concern whose notes no longer exist,
     or aborting the whole run to retire one concern.

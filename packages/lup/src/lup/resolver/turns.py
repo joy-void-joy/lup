@@ -475,8 +475,8 @@ class TurnRunner:
         parent nine, with the first two already resolved in ways it would
         not have chosen knowing about it.
 
-        What the orchestrator used to interleave is in the tools instead, so
-        nothing is traded for the foreknowledge: ``land_parent`` refuses a
+        What the orchestrator would otherwise interleave is in the tools instead,
+        so nothing is traded for the foreknowledge: ``land_parent`` refuses a
         short account while the merger is still on that parent, verifies the
         tree it just made, writes the checkpoint, and says on the way out
         whether a drain is waiting.
@@ -538,8 +538,8 @@ class TurnRunner:
     ) -> MergeReport:
         """Put one join to the merger, with what each side meant by it.
 
-        The merger used to receive a purpose string, a worktree and two
-        shas, so it could read what changed but not which behaviour was a
+        A merger handed only a purpose string, a worktree and two
+        shas can read what changed but not which behaviour was a
         deliberate decision. The argument against telling it more is that a
         merger who knows what each side intended can rationalize a bad merge
         as intended; what settled it the other way is that the observed

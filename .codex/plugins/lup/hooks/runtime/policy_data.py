@@ -16,6 +16,7 @@ from kernel.rows import (
     ShellRuleRow,
     SpawnNameRow,
     UrlScopeRow,
+    VerificationRow,
 )
 
 
@@ -2097,6 +2098,12 @@ SPAWN_NAMES: SpawnNameRow | None = {
     "misspelled": "a name outside that shape is rejected by one runtime or another, one of them silently, so the spawn dies where nothing records it",
     "punctuation": "_",
     "limit": 64,
+}
+
+VERIFICATION: VerificationRow = {
+    "gate": "`uv run lup-devtools dev check`",
+    "scoped": "`uv run lup-devtools dev check --changed`",
+    "record": "your report",
 }
 
 SHELL_RULES: list[ShellRuleRow] = [

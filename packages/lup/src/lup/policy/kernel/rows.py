@@ -101,6 +101,20 @@ class PathRoleRow(TypedDict):
     role: PathRoleName
 
 
+class VerificationRow(TypedDict):
+    """How this project spells the gate a delegated agent is pointed at.
+
+    Three strings rather than one sentence, because the notice is composed
+    where it is read and only the spellings are the project's. A repository
+    that named its devtools CLI something else reads its own invocation here,
+    where a verbatim notice names one it does not serve.
+    """
+
+    gate: str
+    scoped: str
+    record: str
+
+
 class SpawnNameRow(TypedDict):
     """One erased decision that a spawned agent carries a name, and how it is spelled.
 
@@ -157,7 +171,7 @@ class ResolutionRow(TypedDict):
     unresolved: dict[str, list[int]]
 
 
-class RewrittenFileRow(TypedDict):
+class RewrittenDocumentRow(TypedDict):
     """One file an in-place rewrite names, as it stands and as it would stand.
 
     The host produces this by running the screened script over a *copy*, never
@@ -382,14 +396,14 @@ class ShellRuleRow(TypedDict):
     turn ``git something-new`` into an allow.
 
     ``write_flags`` name the options whose value is a path the command writes
-    — ``sort -o``, ``yq -i``, ``git log --output``. They were among the
-    ``ask_flags`` until it became clear that list was holding two unlike
-    things: a flag that lands a file and a flag that runs a program both
-    escalated the row, so one column decided both and neither could be read
-    for what it was. It showed as `sort -o out.txt` asking while
-    `sort f > out.txt` allowed, and as `base64 -o README.md` allowing while
-    `echo x > README.md` asked — the same file, written two ways, answered
-    by whether a checkpoint happened to discharge the row.
+    — ``sort -o``, ``yq -i``, ``git log --output``. Among the ``ask_flags``
+    they would leave that list holding two unlike things: a flag that lands a
+    file and a flag that runs a program both escalate the row, so one column
+    decides both and neither can be read for what it is. It shows as
+    `sort -o out.txt` asking while `sort f > out.txt` allows, and as
+    `base64 -o README.md` allowing while `echo x > README.md` asks — the same
+    file, written two ways, answered by whether a checkpoint happens to
+    discharge the row.
 
     Separated so the path can be resolved and judged as a write, by the row
     every other spelling of a write reaches. What stays in ``ask_flags`` is
@@ -467,12 +481,12 @@ class ShellRuleRow(TypedDict):
     this model exists to make unrepresentable. What a row earns is derived
     where it is used instead, against evidence the row cannot hold: whether the
     target exists, whether git tracks it, whether a boundary confines this
-    session. That is the question a table of declared verdicts had to guess at.
+    session. That is the question a table of declared verdicts has to guess at.
 
     A row stating no effects allows, which is the reading of a rule that
     positively says this does nothing worth guarding. Saying it is the point:
-    ``ShellCommandRule.effects`` is required for the reason its stated verdict
-    used to be, so a command nobody classified is a gap a reader sees rather
+    ``ShellCommandRule.effects`` is required for the reason a stated verdict
+    would be, so a command nobody classified is a gap a reader sees rather
     than a grant nothing wrote down.
 
     ``refuses`` is the one verdict those effects do not reach, and it is
@@ -708,8 +722,8 @@ class PeerPolicyRow(TypedDict):
 class PathWord(TypedDict):
     """One word of a command that a reader read a path out of.
 
-    What a reader knows and used to throw away: not only *which* file a
-    command names, but which word named it and how that word spells it. Both
+    What a reader knows and would otherwise throw away: not only *which* file
+    a command names, but which word names it and how that word spells it. Both
     halves are needed to put a path word back after resolving it -- ``at``
     says which word, and ``prefix`` is whatever the word carries before the
     path, so ``--output=dist/x`` is rewritten at its value and a bare operand
@@ -728,7 +742,7 @@ class PathWord(TypedDict):
     path: str
 
 
-UnreadCause = Literal["missing", "irregular", "unreadable", "refused"]
+UnproducedCause = Literal["missing", "irregular", "unreadable", "refused"]
 """Why running a screened script over one file produced no after-document.
 
 A cause and not a sentence, because the host establishes these and the kernel
@@ -740,7 +754,7 @@ before or after, and ``refused`` a script sed itself would not run.
 """
 
 
-class UnreadFileRow(TypedDict):
+class UnproducedDocumentRow(TypedDict):
     """One file an in-place rewrite names that the host could not produce.
 
     The difference between "nothing was read" and "this is why", which the
@@ -751,7 +765,7 @@ class UnreadFileRow(TypedDict):
     """
 
     target: str
-    cause: UnreadCause
+    cause: UnproducedCause
 
 
 class RewriteReading(TypedDict):
@@ -766,11 +780,11 @@ class RewriteReading(TypedDict):
     did.
     """
 
-    documents: list[RewrittenFileRow]
-    unread: list[UnreadFileRow]
+    documents: list[RewrittenDocumentRow]
+    unproduced: list[UnproducedDocumentRow]
 
 
-def unread_cause(reported: str | None) -> UnreadCause:
+def unproduced_cause(reported: str | None) -> UnproducedCause:
     """The kernel's own literal for what the host reported about a rewrite.
 
     The host half may name no kernel type, so what stopped it reading a file

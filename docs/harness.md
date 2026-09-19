@@ -116,11 +116,11 @@ prove which bytes it owns, so it would refuse to replace anything.
 ### Every generated path and its source
 
 [generated-paths.md](generated-paths.md) is that map, one row per artifact,
-walked from the trees the recipes compile. It was a table here and a table
-here drifts one way only: an artifact added to a recipe stayed invisible until
-somebody remembered this page, so the rows that went missing were always the
+walked from the trees the recipes compile. A table here drifts one way only:
+an artifact added to a recipe stays invisible until somebody remembers this
+page, so the rows that go missing are always the
 newest — and a map with a family missing reads exactly like a complete one.
-Each row is now the artifact's own attribution, the same one its banner prints
+Each row is the artifact's own attribution, the same one its banner prints
 for a reader who opens the file, so nothing there can name a source the
 artifact does not.
 
@@ -667,7 +667,7 @@ same variable writes to a different profile and appears to do nothing.
 Reviewing a whole-file write in a terminal is reading a wall of text and
 deciding. An editor renders the same approval as a side-by-side diff you can
 edit before accepting it, and a contained session can reach one on the host.
-Nothing had to be built for this — the pieces were already here — so the recipe
+Nothing is built for this — the pieces are already here — so the recipe
 is the whole of it:
 
 1. Install the editor's Claude Code extension.

@@ -1,19 +1,19 @@
 # lup: ignore[library-default]
 # Every section here is a block of prose offered for composition, not a table
 # of judgements imposed on a reader: a project that wants different words
-# retires one and declares its own under the same id. That override is now a
-# spelling the rule can see — which is why `constant-declaration` no longer
-# has to be silenced beside it.
+# retires one and declares its own under the same id. That override is a
+# spelling the rule can see, which is why `constant-declaration` needs no
+# silencing beside it.
 """Convention text that is portable, held once and rendered by every flavor.
 
 A project's guidance, the downstream template it publishes, and the reference
-pages beside them used to restate the same conventions in near-identical
-prose, and a skill instructed an editor to "mirror relevant changes" between
-them by hand. That is the shape ``docs/self-improvement.md`` rejects — a
-prompt rule coexisting peacefully with the failure it warns about — and the
-drift it produced was visible: em dashes in one copy and double hyphens in
-the other, a bullet present in one and missing from the other, for text that
-was supposed to be the same text.
+pages beside them would otherwise restate the same conventions in
+near-identical prose, with a skill telling an editor to "mirror relevant
+changes" between them by hand. That is the shape
+``docs/self-improvement.md`` rejects — a prompt rule coexisting peacefully
+with the failure it warns about — and the drift it produces is visible: em
+dashes in one copy and double hyphens in the other, a bullet present in one
+and missing from the other, for text that is supposed to be the same text.
 
 What lives here is what every reader needs identically, which is why it is
 the library's rather than any one project's. Anything true only of a

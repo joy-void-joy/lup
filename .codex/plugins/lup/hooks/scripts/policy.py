@@ -63,9 +63,9 @@ from kernel.rows import (
     DisplacedTargetRow,
     ResolutionRow,
     RewriteReading,
-    RewrittenFileRow,
-    UnreadFileRow,
-    unread_cause,
+    RewrittenDocumentRow,
+    UnproducedDocumentRow,
+    unproduced_cause,
 )
 from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
@@ -111,13 +111,13 @@ def measured_boundary(
     named: ``LUP_BOUNDARY_NONCE`` says which file this session is entitled to
     believe. That is what the nonce is for. A ledger left by some other launch
     is a measurement of some other session, and reading it would be the same
-    class of wrong answer as the constant this replaces, arrived at from the
+    class of wrong answer as a ledger at a constant path, arrived at from the
     other direction.
 
     Absent, unnamed, or unparseable all come back empty, and every caller
     reads empty as "no boundary was measured" -- the fail-closed answer and
-    the honest one. A session whose launcher predates this has no ledger, and
-    gets exactly what a session whose boundary failed to stand gets.
+    the honest one. A session whose launcher wrote no ledger gets exactly
+    what a session whose boundary failed to stand gets.
     """
     environ = os.environ  # lup: ignore[os-environ]
     nonce = environ["LUP_BOUNDARY_NONCE"] if "LUP_BOUNDARY_NONCE" in environ else ""
@@ -1653,6 +1653,25 @@ def undo_snapshot(
     return reference
 
 
+def text_at(root: Path, target: str) -> str | None:
+    """What stands at this path, or nothing where it does not read as text.
+
+    One reading for both halves of every gate that judges a write by what it
+    replaces. The encoding is named rather than taken from the locale, because
+    the halves run in different processes — one inside a session's interpreter,
+    one as the bare script a plugin ships — and a locale differing between them
+    would make one file a document on one side and an unreadable one on the
+    other, which is a disagreement no reader of either could detect.
+
+    Nothing to read and nothing readable are one answer, because both leave the
+    caller with no preimage to judge against and neither is a grant.
+    """
+    try:
+        return (root / target).read_text(encoding="utf-8")
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+
+
 def rewritten_text(
     scripts: list[str], target: str, root: Path
 ) -> dict[Literal["text", "cause"], str | None]:
@@ -2125,7 +2144,7 @@ def bash_decision(
     reference = undo_snapshot(cwd, command)
     # Both halves of one reading: the documents a rewrite would leave, and why
     # the rest left none. Computed together so a target reaches exactly one.
-    reading = rewritten_files(command, cwd or Path.cwd())
+    reading = rewritten_documents(command, cwd or Path.cwd())
     verdict = decide_shell(
         command,
         SHELL_RULES,
@@ -2163,7 +2182,7 @@ def bash_decision(
         autonomous=autonomous,
         allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
         rewritten_documents=reading["documents"],
-        unread_documents=reading["unread"],
+        unproduced_documents=reading["unproduced"],
         interactive=interactive,
         # A reviewed worker is non-interactive and not therefore alone: it
         # holds a mailbox reaching the human supervising its run, and a
@@ -2432,7 +2451,7 @@ def peer_listing_attachment(cwd: Path | None) -> str:
     if directory is None:
         return ""
     return peer_listing_context(
-        store.listing(directory),
+        store.listing_lines(directory),
         PEER_POLICY,
     )
 
@@ -2470,7 +2489,7 @@ def resolution_of(
     return ResolutionRow(refuted=reply["refuted"], unresolved=reply["unresolved"])
 
 
-def rewritten_files(command: str, cwd: Path) -> RewriteReading:
+def rewritten_documents(command: str, cwd: Path) -> RewriteReading:
     """What every in-place rewrite in this command would leave behind.
 
     The kernel names which files a screened rewrite would replace and this
@@ -2488,25 +2507,31 @@ def rewritten_files(command: str, cwd: Path) -> RewriteReading:
     file, and the second reading would run the script over the same bytes to
     reach the same answer.
     """
-    rows: list[RewrittenFileRow] = []
-    unread: list[UnreadFileRow] = []
+    # lup: ignore[empty-collection] — one reading feeding two collections: each
+    # target reaches exactly one of them and which it is costs a sed run, so a
+    # comprehension per list would run every script twice
+    rows: list[RewrittenDocumentRow] = []
+    unproduced: list[UnproducedDocumentRow] = []  # lup: ignore[empty-collection]
     for rewrite in shell_sed_rewrites(command, SHELL_RULES):
         for target in rewrite["targets"]:
             if any(row["target"] == target for row in rows) or any(
-                row["target"] == target for row in unread
+                row["target"] == target for row in unproduced
             ):
                 continue
             attempt = rewritten_text(rewrite["scripts"], target, cwd)
             after = attempt["text"]
             if after is None:
-                unread.append(
-                    UnreadFileRow(target=target, cause=unread_cause(attempt["cause"]))
+                unproduced.append(
+                    UnproducedDocumentRow(
+                        target=target, cause=unproduced_cause(attempt["cause"])
+                    )
                 )
                 continue
-            try:
-                before = (cwd / target).read_text()
-            except (OSError, ValueError, UnicodeDecodeError):
-                unread.append(UnreadFileRow(target=target, cause="unreadable"))
+            before = text_at(cwd, target)
+            if before is None:
+                unproduced.append(
+                    UnproducedDocumentRow(target=target, cause="unreadable")
+                )
                 continue
             path_text = worktree_path(target)
             suffix = Path(path_text).suffix.lower()
@@ -2515,7 +2540,7 @@ def rewritten_files(command: str, cwd: Path) -> RewriteReading:
             )
             foreign = foreign_repository(target, cwd)
             rows.append(
-                RewrittenFileRow(
+                RewrittenDocumentRow(
                     target=target,
                     path=path_text,
                     before=before,
@@ -2537,7 +2562,7 @@ def rewritten_files(command: str, cwd: Path) -> RewriteReading:
                     ),
                 )
             )
-    return RewriteReading(documents=rows, unread=unread)
+    return RewriteReading(documents=rows, unproduced=unproduced)
 
 
 def edit_decision(
@@ -2649,34 +2674,22 @@ def authored_review(command: str, cwd: Path, autonomous: bool) -> KernelDecision
     than refused for being unreadable: the reading is a relaxation's
     precondition, not a gate of its own.
     """
-    verdicts: list[KernelDecision] = []
-    for write in authored_writes(command):
-        landed = cwd / write["path"]
-        existing = landed.is_file()
-        try:
-            before = landed.read_text() if existing else None
-        except OSError:
-            continue
-        after = (
-            (before or "") + write["content"] if write["append"] else write["content"]
+    verdicts = [
+        edit_decision(
+            write["path"],
+            before,
+            (before or "") + write["content"] if write["append"] else write["content"],
+            path_exists=existing,
+            autonomous=autonomous,
+            operation=(
+                "modify" if write["append"] else "overwrite" if existing else "create"
+            ),
+            cwd=cwd,
         )
-        verdicts.append(
-            edit_decision(
-                write["path"],
-                before,
-                after,
-                path_exists=existing,
-                autonomous=autonomous,
-                operation=(
-                    "modify"
-                    if write["append"]
-                    else "overwrite"
-                    if existing
-                    else "create"
-                ),
-                cwd=cwd,
-            )
-        )
+        for write in authored_writes(command)
+        for existing in [(cwd / write["path"]).is_file()]
+        for before in [text_at(cwd, write["path"]) if existing else None]
+    ]
     stopped = [verdict for verdict in verdicts if verdict.effect != "allow"]
     if not stopped:
         return None
@@ -2717,39 +2730,36 @@ def written_review(command: str, cwd: Path) -> list[str]:
     which is what lets that row allow instead of refusing an operation with no
     reasonable substitute.
     """
-    findings: list[str] = []
     carried = [write["path"] for write in authored_writes(command)]
-    for target in [
-        *shell_write_targets(command),
-        *shell_flag_write_targets(command, SHELL_RULES),
-        *patch_write_targets(shell_patch_operands(command, SHELL_RULES), cwd),
-    ]:
-        # A write whose bytes were in the command went to these gates before
-        # it ran, and reporting it again tells the agent the same thing twice
-        # about a write somebody has already answered for.
-        if target in carried:
-            continue
-        landed = cwd / target
-        if not landed.is_file():
-            continue
-        try:
-            after = landed.read_text()
-        except OSError:
-            continue
-        verdict = edit_decision(
-            target,
-            committed_text(target, cwd),
-            after,
-            path_exists=True,
-            # There is nobody to ask about a file already written, so the
-            # gates are put the question in the form that states what they
-            # found rather than the one that offers somebody a choice.
-            autonomous=True,
-            cwd=cwd,
-        )
-        if verdict.effect != "allow":
-            findings.append(f"{target}: {verdict.reason}")
-    return findings
+
+    return [
+        f"{target}: {verdict.reason}"
+        for target in [
+            *shell_write_targets(command),
+            *shell_flag_write_targets(command, SHELL_RULES),
+            *patch_write_targets(shell_patch_operands(command, SHELL_RULES), cwd),
+        ]
+        # A write whose bytes were in the command went to these gates before it
+        # ran, and reporting it again tells the agent the same thing twice about
+        # a write somebody has already answered for.
+        if target not in carried and (cwd / target).is_file()
+        for after in [text_at(cwd, target)]
+        if after is not None
+        for verdict in [
+            edit_decision(
+                target,
+                committed_text(target, cwd),
+                after,
+                path_exists=True,
+                # There is nobody to ask about a file already written, so the
+                # gates are put the question in the form that states what they
+                # found rather than the one that offers somebody a choice.
+                autonomous=True,
+                cwd=cwd,
+            )
+        ]
+        if verdict.effect != "allow"
+    ]
 
 
 def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision | None:

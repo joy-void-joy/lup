@@ -134,6 +134,12 @@ def laid_out(
             Path("hooks") / "runtime" / RUNTIME_ENTRY,
             artifacts[plugin / "hooks" / "runtime" / RUNTIME_ENTRY].content,
         ),
+        # The entry reads this project's own gate spellings out of it, the way
+        # the compiled dispatcher beside it reads every other declared value.
+        (
+            Path("hooks") / "runtime" / "policy_data.py",
+            artifacts[plugin / "hooks" / "runtime" / "policy_data.py"].content,
+        ),
         *[
             (Path("hooks") / "runtime" / "kernel" / module.name, module.source)
             for module in policy_kernel_modules()

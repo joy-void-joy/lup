@@ -210,7 +210,7 @@ def test_the_listing_says_what_carries_a_message_to_each_member(
     member = mint_member_id()
     peers.join(member, work, cli_name="feat-touches", delivery=Delivery.INBOX)
     peers.describe(member, "rewriting the touch ledger")
-    listing = store.listing(coordination_root(work))
+    listing = store.listing_lines(coordination_root(work))
     row = next(line for line in listing if line.startswith("feat-touches"))
     assert "rewriting the touch ledger" in row
     assert Delivery.INBOX in row

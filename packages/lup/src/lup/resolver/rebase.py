@@ -1,11 +1,11 @@
 """Bringing a run's base, and the leases cut from it, up to its branch.
 
-A run's leases are pinned to the commit the run was created at, and nothing
-used to bring the repository into them. So a fix made on the integration
-branch *specifically to unblock a parked run* was the one thing that run
-could not see: its workers read code that had already been replaced and
-reached confident conclusions contradicting decisions taken upstream, and
-every lease failed the same gate on a finding none of them introduced.
+A run's leases are pinned to the commit the run was created at. Leaving
+them there makes a fix landed on the integration branch *specifically to
+unblock a parked run* the one thing that run cannot see: its workers read
+replaced code and reach confident conclusions contradicting decisions
+taken upstream, and every lease fails the same gate on a finding none of
+them introduced.
 
 Two moments, because they are not the same decision. A lease being created
 has no work to lose, so it takes the current base by default. A lease that

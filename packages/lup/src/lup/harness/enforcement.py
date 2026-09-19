@@ -4,8 +4,8 @@ Generated native plugins erase a :class:`~lup.harness.models.HookSet` into
 primitive rows and enforce them from their own dispatcher. A session this
 program composes and runs itself has no dispatcher, so it needs the same
 declaration as live policy objects — otherwise enforcement is written twice
-and drifts, which is how a resolver worker came to be bounded by a directory
-ACL while every generated plugin judged the same acts semantically.
+and drifts: a resolver worker bounded by a directory ACL while every
+generated plugin judges the same acts semantically.
 
 The path rules here compile to exactly the rows :mod:`lup.policy.bundle`
 renders, and a test holds them equal. A rule that reached one tree and not

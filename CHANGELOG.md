@@ -75,6 +75,52 @@ the page mentioned. Every other export in the ledger resolved to its new home.
   `+build` suffix orders with the release it came from, and `resolve_version`
   takes the counter and the word for what it counts as overridable defaults.
 
+### The coordination store is state
+
+Four append-only logs folded whole by every reader on every call became one
+file per member, written by that member's own processes under its own lock,
+with every relation between members derived at the read: presence is the
+file's modification time, a claim carries the modification time of the path it
+was taken over and is settled by a stat, and a contest is two live members'
+files meeting on one path. Mail is one file per message in one inbox, consumed
+by deletion, so no reader keeps a position.
+
+Broadcast splits into the two acts it always was. A message has one recipient,
+so a sender that means everyone resolves it against the roster; a standing
+fact is state — read at the head of a turn for as long as it holds, retracted
+by deleting it, and reaching a session that starts tomorrow.
+
+Eight migrations are declared over the hundred and fifty-three names this
+moves; `uv run lup-devtools dev migrate map` prints what to call instead.
+
+### A module's prose is one file
+
+Prose a content module composes is authored as Markdown beside it. A module
+composing several passages marks them off inside that one file with
+`<!-- passage: name -->` and names which it is placing, so a subject is one
+file rather than eleven and a passage is named for what it holds rather than
+for its position in a list.
+
+`passage_path` takes the module alone — which passage is `Passage.name`, read
+off the section markers rather than off a second filename. How many newlines a
+rendered document ends on moved from `sectioned` to the renderer, which is the
+one reader that sees a whole document whatever kinds of part composed it.
+
+### The rest
+
+- Every parsed command carries the directory it runs in, and a segment's path
+  words resolve by position rather than by value, so a relative operand after
+  a `cd` is judged against the file it would reach.
+- An in-place rewrite nothing produced says which reading stopped it: a path
+  naming no file, a target that is not a regular file, a script `sed` would
+  not run, and text that could not be read each carry their own recovery.
+- A global in front of a subcommand is consumed before the subcommand is read.
+- A contained session reads the clock in the operator's zone, filled from the
+  file the machine keeps it in rather than from a `TZ` a Linux host exports
+  for nobody.
+- Every workflow job names the pinned runner image, held to it by a sweep over
+  `.github/workflows` rather than by whoever remembers.
+
 ### What this release carries no migration for
 
 A repository declares which of its subtrees it publishes nothing out of, in

@@ -6,9 +6,6 @@ import { useForm } from "@tanstack/react-form";
 import { useState } from "react";
 import type { Row, RowAct, RowRequest, StepAnswers, StepView } from "../generated/views";
 
-// lup: solved: the form is controlled inputs; TanStack Form, the default
-// answer for form-heavy UI, waits on `bun add @tanstack/react-form`, which
-// the policy asks about — take it when the wizard's forms outgrow two fields
 function Fields({ step, onRun }: { step: StepView; onRun(answers: StepAnswers): void }) {
   const form = useForm({
     defaultValues: step.fields.reduce<Record<string, string>>(

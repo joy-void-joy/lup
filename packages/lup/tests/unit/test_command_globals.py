@@ -17,6 +17,7 @@ from pathlib import Path
 from lup.policy.kernel.lex import (
     command_directory,
     command_words_read,
+    shell_flag_write_targets,
     shell_path_verb_targets,
     shell_write_targets,
 )
@@ -109,3 +110,18 @@ def test_both_spellings_of_one_restore_reach_one_verdict(tmp_path: Path) -> None
     assert decided("git restore notes.md") == decided(
         "git --git-dir=.git restore notes.md"
     )
+
+
+def test_a_write_flag_resolves_from_the_directory_the_command_names() -> None:
+    """The flag reader reads what every other path reader reads.
+
+    Taking the placement directly rather than the segment leaves this one
+    reader seeing the subcommand a word further along than the classifier
+    does, and resolving its operand from a `cd` alone — so a `-C` that moves
+    where the write lands would be read by the verb reader beside it and not
+    by this one, and the two would name different files for one command.
+    """
+    assert shell_flag_write_targets("sort -o out.txt f", ROWS) == ["out.txt"]
+    assert shell_flag_write_targets("cd tmp && sort -o out.txt f", ROWS) == [
+        "tmp/out.txt"
+    ]

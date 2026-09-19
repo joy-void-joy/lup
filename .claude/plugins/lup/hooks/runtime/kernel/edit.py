@@ -353,7 +353,7 @@ def python_tree(source: str) -> ast.Module | None:
     Unbounded for the reason the prose map is: the key is text the caller is
     already holding, so evicting an entry frees nothing it was not keeping.
     A source that will not parse is remembered as ``None``, which is the same
-    answer every caller had been computing separately.
+    answer every caller would compute separately.
     """
     try:
         return ast.parse(source)
@@ -586,25 +586,13 @@ STRING_TOKEN_TYPES = (
 )
 """Every token type whose characters are string text, not code.
 
-An f-string stopped being one STRING token in 3.12: it lexes as a start
+An f-string is not one STRING token from 3.12 on: it lexes as a start
 marker, literal middle fragments, and an end marker, with real code tokens
-between them for each interpolation. Masking only STRING left f-string
+between them for each interpolation. Masking only STRING leaves f-string
 prose readable as code — converting a prompt's r-string to an rf-string
-exposed its English to the anti-pattern rules — while the interpolations
+exposes its English to the anti-pattern rules — while the interpolations
 stay visible here because they are code.
 """
-
-
-def string_literal_lines(source: str) -> set[int]:
-    """Return every line touched by a Python string token."""
-    tokens = python_tokens(source)
-    if tokens is None:
-        return set()
-    lines: set[int] = set()
-    for token in tokens:
-        if token.type in STRING_TOKEN_TYPES:
-            lines.update(range(token.start[0], token.end[0] + 1))
-    return lines
 
 
 def mask_python_string_literals(source: str) -> list[str]:
@@ -731,11 +719,6 @@ def notes_outside_examples(
     ]
 
 
-def count_outside_examples(pattern: re.Pattern[str], text: str) -> int:
-    """Count matches in one chunk of prose, skipping backtick-quoted examples."""
-    return len(notes_outside_examples(pattern, text))
-
-
 def notes_in_prose(
     source: str, pattern: re.Pattern[str], python_source: bool = False
 ) -> list[LocatedNote] | None:
@@ -777,21 +760,6 @@ def count_in_prose(
     """Tally the notes :func:`notes_in_prose` finds, preserving its `None`."""
     located = notes_in_prose(source, pattern, python_source)
     return None if located is None else len(located)
-
-
-def review_marker_count(source: str, python_source: bool = False) -> int | None:
-    """Count review notes — the feedback whose removal is the gated act."""
-    return count_in_prose(source, NOTE_RE, python_source)
-
-
-def open_note_count(source: str, python_source: bool = False) -> int | None:
-    """Count notes still owed an answer, excluding resolution claims."""
-    return count_in_prose(source, OPEN_NOTE_RE, python_source)
-
-
-def solved_note_count(source: str, python_source: bool = False) -> int | None:
-    """Count resolution claims waiting to be checked."""
-    return count_in_prose(source, SOLVED_NOTE_RE, python_source)
 
 
 def note_body(text: str) -> str:
@@ -2065,9 +2033,9 @@ def string_replace_sites(source: str) -> list[MatchSite]:
     Arity is what separates this from the rename that wears the same name:
     ``str.replace`` takes the old text and the new, while a bound
     ``Path.replace`` takes a destination and moves a file. Reading the call's
-    shape decides that for every receiver, where the spelling the rule used
-    to look for — a name not ending in ``path`` — let a genuine string
-    replace through whenever the variable holding the string was called one.
+    shape decides that for every receiver, where a spelling to look for — a
+    name not ending in ``path`` — lets a genuine string replace through
+    whenever the variable holding the string is called one.
 
     The unbound spellings in `RENAME_CALLS` are the exception arity cannot
     reach, and they are named rather than guessed at.
@@ -2490,10 +2458,10 @@ def empty_collection_sites(source: str) -> list[MatchSite]:
 
     Stated as a difference because that is what it is: the defect is a seed
     the code goes on to append to, and "goes on to append to" is a property
-    of the surrounding scope rather than of the assignment. What the
-    conversion buys is that the first half is now the tree's answer too, so a
-    ``= []`` written inside a string or spelled across a line break is
-    counted exactly as the language reads it.
+    of the surrounding scope rather than of the assignment. Both halves are
+    the tree's answer rather than a pattern's, so a ``= []`` written inside a
+    string or spelled across a line break is counted exactly as the language
+    reads it.
     """
     tree = python_tree(source)
     if tree is None:
@@ -2737,9 +2705,9 @@ def resites_a_suppression(line: str, gone: list[str]) -> bool:
     it makes one gate request what the other grants — the same split a
     matcher stating its rule once exists to avoid.
 
-    Moving one is the same shape and was refused for the same reason. Adopting
-    a placement policy necessarily rewrites the markers the old policy allowed,
-    so a concern approved to do exactly that met a gate demanding
+    Moving one is the same shape and is refused for the same reason. Adopting
+    a placement policy necessarily rewrites the markers the policy it replaces
+    allowed, so a concern approved to do exactly that meets a gate demanding
     `antipattern-suppression` — an allowance that also authorizes genuinely new
     suppressions, which is a narrow action buying a wide permission.
 
@@ -3053,7 +3021,7 @@ def awaits_resolution(
     session, and it is answerable without one: the regex and the tree already
     say which lines are candidates, and only those can be decided differently
     once a receiver is resolved. Every other edit — most of them — is judged
-    exactly as before and costs nothing.
+    without one and costs nothing.
 
     A line a directive already covers still counts. Resolving it is not waste:
     if the declaration turns out to be outside the rule's family, the audit
@@ -3840,11 +3808,11 @@ def decide_edit(
     # A whole-file write is one the caller named as such, or one that arrived
     # with no preimage at all. Both spellings are kept because they answer
     # different callers: an adapter that knows the native call says so, and
-    # one that only has the documents falls back to the absence that used to
-    # be the whole test. Keying on the operation is what survives an adapter
-    # learning to carry a file's current text as the preimage — without it,
-    # teaching `Write` to do that would silently move every overwrite from
-    # this gate to the size gate below.
+    # one that only has the documents falls back to the absence, which alone
+    # would be the whole test. Keying on the operation is what survives an
+    # adapter learning to carry a file's current text as the preimage —
+    # without it, teaching `Write` to do that would silently move every
+    # overwrite from this gate to the size gate below.
     whole_file = operation in ("create", "overwrite") or before is None
     if whole_file and role == "production":
         if autonomous:

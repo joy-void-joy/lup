@@ -467,9 +467,9 @@ def writes_to_a_stream(
     """Whether a redirection into this target can destroy nothing.
 
     Read before the rows that ask, because a stream has no prior contents to
-    lose and so raises no question for anybody to answer -- and, before this,
-    every one of these but `/dev/null` reached the fallback and was retired by
-    the recovery row instead, which told the reader that "the affected paths
+    lose and so raises no question for anybody to answer -- and without it
+    every one of these but `/dev/null` reaches the fallback and is retired by
+    the recovery row instead, which tells the reader that "the affected paths
     are captured and restorable" about a terminal.
 
     Only descriptors 1 and 2 are named, and `/dev/fd/<n>` is deliberately not
@@ -696,8 +696,8 @@ def carried_text(
     ``None`` everywhere the reading is not certain: an unquoted heredoc the
     shell substitutes into, a word carrying an expansion, an `echo` flag that
     changes what the words mean, a printf conversion this cannot render. Each
-    of those leaves the write answered by its path, which is the answer it had
-    before this existed.
+    of those leaves the write answered by its path, which is the answer a
+    write nothing read the content of gets.
     """
     if not words:
         return None
@@ -1032,29 +1032,34 @@ def shell_flag_write_targets(command: str, rows: list[ShellRuleRow]) -> list[str
     does not guard is a fact nobody consults.
 
     That proviso is the whole of why these stay out of the lease's target
-    list. Naming a word the command does not write is how `sed`'s script came
-    to be reported as a write outside the lease, and the lease is the one
-    reader that escalates on what it is handed.
+    list. Naming a word the command does not write is what reports `sed`'s
+    script as a write outside the lease, and the lease is the one reader that
+    escalates on what it is handed.
+
+    Read through :func:`read_segments` like every other path reader here, so
+    the words are the ones the classifier matched a row against and the
+    directory is the command's own joined with the one a `cd` left. Taking
+    the placement directly reads the subcommand one word further along than
+    the classifier does, and resolves an operand from the `cd` alone — so
+    `git -C ../other <sub> -o out.txt` names `out.txt` where the verb reader
+    beside it names `../other/out.txt`.
     """
-    targets: list[str] = []
-    for placement in shell_placements(command):
-        words = effective_command(placement["words"])["words"]
-        if not words:
-            continue
-        executable = posixpath.basename(words[0])
-        declared = [
-            flag
-            for row in rows
-            if row["command"] == executable
-            for flag in row["write_flags"]
+    return [
+        placed
+        for segment in read_segments(command, rows)
+        for executable in [posixpath.basename(segment["words"][0])]
+        for declared in [
+            [
+                flag
+                for row in rows
+                if row["command"] == executable
+                for flag in row["write_flags"]
+            ]
         ]
-        targets.extend(
-            placed
-            for target in flag_write_targets(words, declared)
-            for placed in [placed_path(target, placement["directory"])]
-            if placed is not None
-        )
-    return targets
+        for target in flag_write_targets(segment["words"], declared)
+        for placed in [placed_path(target, segment["directory"])]
+        if placed is not None
+    ]
 
 
 def shell_patch_operands(command: str, rows: list[ShellRuleRow]) -> list[str]:

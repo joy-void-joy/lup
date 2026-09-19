@@ -31,17 +31,22 @@ from lup.ledger.models import Surroundings
 from lup.ledger.tools import NoInput, RecordInput, create_ledger_tools
 from lup.observability.sessions import (
     Output,
+    OutputOf,
     Session,
     SessionRecorder,
     recorded_session_factory,
     session_recorder,
+    spelled_under,
 )
+from lup.observability.sweep import index_notes
+from lup.observability.trace import TraceEvent, TraceLogger
 from lup.providers.claude.transcripts import ClaudeTranscripts
 from lup.sessions.client import Client
 from lup.sessions.events import SessionHandle, SessionId, TurnHandle, TurnRequest
 from lup.tools.mcp import ToolError
 from lup.workspace.history import save_session
 from lup.workspace.notes import setup_notes
+from lup.workspace.paths import parse_timestamp
 
 AUTHOR = ActorRef(kind="test", id="t")
 
@@ -296,6 +301,207 @@ def test_a_launch_that_failed_or_was_interrupted_says_so(launched: Path) -> None
     )
 
     assert [each.outcome for each in store.read(Session)] == ["failed", "interrupted"]
+
+
+class Stamped(BaseModel):
+    """A result document naming the backend that wrote it, as a run's does."""
+
+    summary: str
+    agent_sdk: str
+
+
+def wrote_session(
+    session_id: str, backend: str = "", saved: bool = True, failed: bool = False
+) -> Path:
+    """One session directory under notes/traces/, written with no recorder wired.
+
+    The tree an existing checkout already has: the directory, a result
+    document, and the trace log its writer saved — or did not, where the run
+    stopped before it got that far.
+    """
+    notes = setup_notes(session_id)
+    save_session(
+        Stamped(summary="done", agent_sdk=backend)
+        if backend
+        else Result(summary="done"),
+        session_id=session_id,
+    )
+    trace = TraceLogger(trace_path=notes.trace_log, title=session_id)
+    if failed:
+        trace.emit_event(
+            TraceEvent(kind="error", timestamp=utc_now().isoformat(), brief="fell over")
+        )
+    if saved:
+        trace.save()
+    return notes.session
+
+
+def launched_run(root: Path, succeeded: bool = True, ended: bool = True) -> Path:
+    """One launch directory under notes/harness/, written with no recorder wired."""
+    transcript = launch.start_harness_transcript(
+        "claude",
+        ClaudeTranscripts(root / "config"),
+        model=None,
+        profile=None,
+        arguments=[],
+        transcribe=False,
+    )
+    if ended:
+        transcript.close(succeeded=succeeded)
+    return transcript.journal.path.parent
+
+
+def test_index_notes_records_one_closed_session_per_session_directory(
+    tmp_lup_project: Path,
+) -> None:
+    store = LedgerStore(tmp_lup_project, AUTHOR)
+    wrote_session("clean", backend="codex")
+    wrote_session("broken", failed=True)
+    wrote_session("unfinished", saved=False)
+
+    swept = index_notes(recorder_at(tmp_lup_project))
+
+    assert {(each.title, each.runtime, each.outcome) for each in swept.sessions()} == {
+        ("clean", "codex", "completed"),
+        ("broken", "unknown", "failed"),
+        ("unfinished", "unknown", "interrupted"),
+    }
+    assert [each.agent_version for each in swept.sessions()] == ["1.2.3"] * 3
+    assert all(each.finished() for each in swept.sessions())
+    assert {each.id for each in store.read(Session)} == {
+        each.id for each in swept.sessions()
+    }
+
+
+def test_a_swept_session_pins_the_journal_as_the_tree_holds_it(
+    tmp_lup_project: Path,
+) -> None:
+    store = LedgerStore(tmp_lup_project, AUTHOR)
+    directory = wrote_session("clean")
+
+    [closed] = index_notes(recorder_at(tmp_lup_project)).sessions()
+
+    assert closed.directory == spelled_under(directory, tmp_lup_project)
+    assert closed.journal.startswith("notes/traces/1.2.3/logs/clean/")
+    assert closed.journal_digest == digest_of(closed.journal_path())
+    assert store.standing(closed).label == "fresh"
+    closed.journal_path().write_text("one more line\n", encoding="utf-8")
+    assert store.standing(closed).label == "stale"
+
+
+def test_a_swept_session_with_no_trace_pins_nothing_and_says_so(
+    tmp_lup_project: Path,
+) -> None:
+    store = LedgerStore(tmp_lup_project, AUTHOR)
+    wrote_session("unfinished", saved=False)
+
+    [closed] = index_notes(recorder_at(tmp_lup_project)).sessions()
+
+    assert closed.journal == "" and closed.journal_digest == ""
+    assert store.standing(closed).label == "unpinned"
+
+
+def test_index_notes_records_one_output_per_result_about_its_session(
+    tmp_lup_project: Path,
+) -> None:
+    store = LedgerStore(tmp_lup_project, AUTHOR)
+    wrote_session("clean")
+
+    swept = index_notes(recorder_at(tmp_lup_project))
+
+    [session] = swept.sessions()
+    [output] = swept.outputs()
+    assert output.path.startswith("notes/traces/1.2.3/sessions/clean/")
+    assert output.session == session.id and output.digest == digest_of(output.held_at())
+    assert store.standing(output).label == "fresh"
+    [edge] = store.edges()
+    assert (edge.kind, edge.source, edge.target) == (
+        "observability:output_of",
+        output.id,
+        session.id,
+    )
+
+
+def test_index_notes_reads_a_launchs_outcome_off_its_observable_journal(
+    tmp_lup_project: Path,
+) -> None:
+    store = LedgerStore(tmp_lup_project, AUTHOR)
+    done = launched_run(tmp_lup_project)
+    fell = launched_run(tmp_lup_project, succeeded=False)
+    stopped = launched_run(tmp_lup_project, ended=False)
+
+    swept = index_notes(recorder_at(tmp_lup_project))
+
+    assert {(each.title, each.outcome) for each in swept.sessions()} == {
+        (done.name, "completed"),
+        (fell.name, "failed"),
+        (stopped.name, "interrupted"),
+    }
+    [closed] = [each for each in swept.sessions() if each.title == done.name]
+    assert closed.runtime == "claude"
+    # Nothing in the tree says which agent version opened a launch, so the
+    # record says nothing rather than taking the version running the sweep.
+    assert closed.agent_version == ""
+    assert closed.journal == f"notes/harness/claude/{done.name}/observable.jsonl"
+    assert closed.journal_digest == digest_of(closed.journal_path())
+    assert closed.started == parse_timestamp(done.name).astimezone()
+    assert store.standing(closed).label == "fresh"
+    assert swept.outputs() == []
+
+
+def test_index_notes_run_again_records_nothing_twice(tmp_lup_project: Path) -> None:
+    store = LedgerStore(tmp_lup_project, AUTHOR)
+    wrote_session("clean")
+    launched_run(tmp_lup_project)
+    first = index_notes(recorder_at(tmp_lup_project))
+    written = len(store.lines())
+
+    again = index_notes(recorder_at(tmp_lup_project))
+
+    assert len(first.sessions()) == 2 and len(first.outputs()) == 1
+    assert again.sessions() == [] and again.outputs() == []
+    assert sorted(again.known()) == sorted(each.directory for each in first.runs)
+    assert len(store.lines()) == written
+
+
+def test_a_session_already_recorded_as_it_ran_is_passed_over(
+    tmp_lup_project: Path,
+) -> None:
+    recorder = recorder_at(tmp_lup_project)
+    notes = setup_notes("s1", recorder=recorder, runtime="fake")
+
+    swept = index_notes(recorder)
+
+    assert notes.record is not None
+    assert swept.sessions() == [] and swept.known() == [notes.session]
+
+
+def test_the_console_indexes_the_tree_it_is_run_over(
+    tmp_lup_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ledger_app, "project_root", lambda: tmp_lup_project)
+    app = ledger_app.create_ledger_app([Session, Output], [OutputOf])
+    wrote_session("clean")
+
+    swept = CliRunner().invoke(app, ["index-notes"])
+    again = CliRunner().invoke(app, ["index-notes"])
+
+    assert swept.exit_code == 0, swept.output
+    assert "1 session(s) and 1 output(s) recorded; 0 already indexed" in swept.output
+    assert "0 session(s) and 0 output(s) recorded; 1 already indexed" in again.output
+    assert len(LedgerStore(tmp_lup_project, AUTHOR).read(Session)) == 1
+
+
+def test_the_console_says_where_a_project_does_not_index_its_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ledger_app, "project_root", lambda: tmp_path)
+    app = ledger_app.create_ledger_app([Session])
+
+    refused = CliRunner().invoke(app, ["index-notes"])
+
+    assert refused.exit_code == 1
+    assert "observability:output" in refused.output
 
 
 def session_fields(root: Path) -> str:

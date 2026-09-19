@@ -18,6 +18,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.harness.codescan.antipatterns import RuleSet
+from lup.harness.models import SubagentCleanup
 from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
 from lup.policy.identity import AGENT_IDENTITY_ENV
@@ -36,6 +37,7 @@ from lup.policy.kernel.rows import (
     RunnerTargetRow,
     ShellRuleRow,
     SpawnNameRow,
+    VerificationRow,
     UrlScopeRow,
     runner_target_values,
     shell_row_values,
@@ -309,6 +311,27 @@ def acceptance_guard_literal(guard: AcceptanceGuardRow | None) -> str:
     return "{\n" + "".join(f"    {entry},\n" for entry in entries) + "}"
 
 
+def verification_literal(row: VerificationRow) -> str:
+    """Render the gate spellings the way every other row here is rendered."""
+    return (
+        "{\n"
+        + "".join(f"    {json.dumps(name)}: {json.dumps(row[name])},\n" for name in row)
+        + "}"
+    )
+
+
+def verification_row(declared: SubagentCleanup | None) -> VerificationRow:
+    """How this project spells the gate, as the shipped notice reads it.
+
+    A project that declined the cleanup declaration still gets spellings,
+    because the notice is composed wherever a delegated agent is dispatched
+    and the model's own defaults are what an adopter inherits until it says
+    otherwise.
+    """
+    held = declared or SubagentCleanup()
+    return VerificationRow(gate=held.gate, scoped=held.scoped, record=held.record)
+
+
 def spawn_names_literal(row: SpawnNameRow | None) -> str:
     """Render the declared spawn-name requirement, or the absence of one.
 
@@ -371,7 +394,7 @@ def runner_target_rows_literal(rows: list[RunnerTargetRow]) -> str:
     Walked off :func:`~lup.policy.kernel.rows.runner_target_values` rather
     than spelled here, which is what :func:`mapping_rows_literal` exists for:
     a renderer listing the fields itself is a second enumeration of the row,
-    and this row carries a list of mappings now, which a renderer written for
+    and this row carries a list of mappings, which a renderer written for
     scalars turns into a string.
     """
     return mapping_rows_literal(
@@ -562,6 +585,7 @@ def render_policy_data(
     path_roles: list[PathRoleRow],
     acceptance_guard: AcceptanceGuardRow | None,
     spawn_names: SpawnNameRow | None,
+    verification: VerificationRow | None = None,
     shell_rules: list[ShellCommandRule],
     edit_rules: list[EditRule],
     refused_tools: list[RefusedTool],
@@ -598,6 +622,8 @@ def render_policy_data(
             "ACCEPTANCE_GUARD: AcceptanceGuardRow | None = "
             + acceptance_guard_literal(acceptance_guard),
             "SPAWN_NAMES: SpawnNameRow | None = " + spawn_names_literal(spawn_names),
+            "VERIFICATION: VerificationRow = "
+            + verification_literal(verification or verification_row(None)),
             "SHELL_RULES: list[ShellRuleRow] = "
             + shell_rule_rows_literal(erase_shell_rules(shell_rules)),
             "EDIT_RULES: list[EditRuleRow] = "
@@ -647,6 +673,7 @@ def render_policy_data(
         "    ShellRuleRow,\n"
         "    SpawnNameRow,\n"
         "    UrlScopeRow,\n"
+        "    VerificationRow,\n"
         ")"
         "\n\n\n" + body + "\n"
     )

@@ -4,9 +4,8 @@ Two questions with one vocabulary. A project that has declared its own
 factories routes a model to one of them by name or by match; a caller holding
 nothing but a model id asks the coarser question of which *provider* serves
 it. Both are matching a model name, so both are expressed with the matchers
-below rather than one of them growing a private prefix table -- which is what
-the front door used to carry, and what made it reach for both adapters to
-answer.
+below rather than one of them growing a private prefix table -- which the
+front door would otherwise carry, reaching for both adapters to answer.
 """
 
 from collections.abc import Callable, Sequence

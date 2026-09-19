@@ -49,10 +49,10 @@ def release_heading(version: str, date: dt.date) -> str:
 
     The version is bare and the date follows a dash, which is what this
     repository's changelog was already written in — a format that predates
-    the module and was, until the reader was widened, one this module could
-    not read at all. `ReleaseHeading.read` still accepts the parenthesised
-    ``v`` spelling, so a document written before this stays readable and only
-    its new entries are written the one way.
+    the module, and one a narrower reader could not read at all.
+    `ReleaseHeading.read` accepts the parenthesised ``v`` spelling as well,
+    so a document in it stays readable and only its new entries are written
+    the one way.
     """
     return f"## {version} — {date.isoformat()}"
 
@@ -60,10 +60,10 @@ def release_heading(version: str, date: dt.date) -> str:
 class ReleaseNote(BaseModel, frozen=True):
     """One release, as the fields a bump states rather than as markdown.
 
-    ``details`` is a list because a bump names them one at a time. It was once
-    a single string split on commas, which silently shredded any detail whose
-    prose held one and kept only the last of several — a container deciding
-    its own contents from their punctuation.
+    ``details`` is a list because a bump names them one at a time. A single
+    string split on commas silently shreds any detail whose prose holds one
+    and keeps only the last of several — a container deciding its own
+    contents from their punctuation.
     """
 
     version: str
@@ -95,8 +95,8 @@ class ReleaseHeading(BaseModel, frozen=True):
         The inverse of :meth:`ReleaseNote.heading`, and the reason a round-trip
         test can hold the two together rather than a convention doing it.
 
-        Read more widely than it is written, because in every repository that
-        kept a changelog before this module the document is older than it: the
+        Read more widely than it is written, because in any repository that
+        keeps a changelog by hand the document is older than this module: the
         ``v`` is optional and the date may be parenthesised or introduced by a
         dash, which is how a hand-written entry usually spells it. Reading only
         what this module writes is not a stricter reading but a blinder one --

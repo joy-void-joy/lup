@@ -6,7 +6,7 @@ saw a tool call and never its result, because tool results reached the
 message list and never the event stream. A stream that omits half of what
 happened cannot serve as a trace, whatever else it is good for.
 
-One fold, used by every adapter, is what keeps that from happening again.
+One fold, used by every adapter, is what keeps them from diverging.
 """
 
 from collections.abc import Sequence

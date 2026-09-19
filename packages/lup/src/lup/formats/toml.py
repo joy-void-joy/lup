@@ -1,8 +1,8 @@
 """The nodes a generated TOML document is declared as.
 
 The third container, and the one that looks safest: TOML quotes a basic
-string much as JSON does, which is why `json.dumps` stood in for its quoting
-for as long as it did. The two agree until they do not — a literal TOML
+string much as JSON does, which is why `json.dumps` is a tempting stand-in
+for its quoting. The two agree until they do not — a literal TOML
 reader is entitled to its own escapes, a multi-line value wants its own
 delimiter, and the day a value carries something the two spell differently is
 the day a generated agent file stops parsing with nothing in the generator

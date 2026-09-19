@@ -2,11 +2,11 @@
 
 A hand-written layout diagram is a claim about the filesystem that nothing
 checks, and it decays the way every uncheckable claim does: the template's own
-diagram went on describing `devtools/claude/`, `py/`, `feedback/`, `trace/`
-and `sync.py` under the application package for as long as it took someone to
-notice, when the library/template split had moved all of them and added
-`harness/` and `subapps.py` that it never mentioned. Every name in it existed
-somewhere, so even a basename check passed.
+diagram goes on describing `devtools/claude/`, `py/`, `feedback/`, `trace/`
+and `sync.py` under the application package for as long as it takes somebody
+to notice, while the library/template split has moved all of them and added
+`harness/` and `subapps.py` it never mentions. Every name in it exists
+somewhere, so even a basename check passes.
 
 Nothing here is declared. The structure is walked, and each caption is the
 module's own docstring — a package's from its ``__init__.py``, a module's from
@@ -91,8 +91,8 @@ def top_level_entries(
     """Every importable entry directly beneath ``subtree``, with its source file.
 
     A page that lists what a tree contains is making a claim about the tree,
-    and prose cannot check it — which is how a roster promising "every
-    remaining top-level entry" came to omit six of them. Walking the entries
+    and prose cannot check it — a roster promising "every remaining top-level
+    entry" omits six of them and reads as complete. Walking the entries
     here lets the page hold its own authored description of each one while
     the *set* it describes is the tree's to decide.
 

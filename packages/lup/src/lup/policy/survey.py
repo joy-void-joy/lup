@@ -54,7 +54,7 @@ class SurveyedRule(BaseModel, frozen=True):
     reports the answer a session would reach and not a second one beside it.
     What only a resolved path could change -- a capture discharging a loss, a
     write landing in a scratch tree -- is by definition not a property of the
-    row, and was not in the column this replaces either.
+    row, and would not be in a column of declared verdicts either.
     """
     effects_source: RuleLevel
     sandbox: SandboxPlacement

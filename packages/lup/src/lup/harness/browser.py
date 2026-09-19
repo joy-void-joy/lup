@@ -223,7 +223,7 @@ class BrowserBridge(BaseModel, frozen=True):
         )
 
     def notice(self, serving: bool, lands: bool = False) -> list[Notice]:
-        """Say that this channel exists, because it is one and it is new.
+        """Say that this channel exists, because it is one and nothing else does.
 
         A boundary nobody was told about is one whose refusals get debugged
         as something else, and the same holds for a boundary's one opening:
@@ -231,12 +231,12 @@ class BrowserBridge(BaseModel, frozen=True):
         can do that, before it happens rather than while it does.
 
         One line for the posture, and the sign-in instructions subordinate to
-        it rather than beside it. The posture line used to spend three
-        clauses explaining that a channel carrying a URL and nothing else
-        carries nothing else -- printed at every launch, whether or not
-        anybody was about to sign in. What survives is the fact an operator
-        acts on: that their browser may open by itself, and for how many
-        addresses. The reasoning is this module's header.
+        it rather than beside it. Three clauses in that line explaining that
+        a channel carrying a URL and nothing else carries nothing else would
+        print at every launch, whether or not anybody is about to sign in.
+        What stands is the fact an operator acts on: that their browser may
+        open by itself, and for how many addresses. The reasoning is this
+        module's header.
         """
         if not serving:
             return [

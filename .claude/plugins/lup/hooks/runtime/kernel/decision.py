@@ -220,8 +220,8 @@ def sandbox_escaped(sandbox: SandboxPlacement) -> bool:
     One function rather than a comparison spelled at each of the boundaries
     that render the crossing — both hook factories, the in-process renderer,
     and each compiled dispatcher — because a condition spelled out at four
-    sites is one that can be spelled differently at four sites, which is how
-    a placement came to be honoured on one path and stripped on the other.
+    sites is one that can be spelled differently at four sites, which leaves
+    a placement honoured on one path and stripped on the other.
     """
     return sandbox == "outside"
 
@@ -608,27 +608,6 @@ def handed_over(reason: str, rule: str = "", evaluator: str = "") -> KernelDecis
     """
     return KernelDecision(
         "defer", reason, abstention="provider_native", rule=rule, evaluator=evaluator
-    )
-
-
-def capability_blocked(
-    reason: str, capability: Capability, rule: str = "", evaluator: str = ""
-) -> KernelDecision:
-    """The runtime cannot deliver a guarantee this operation requires.
-
-    Rendered as ``deny`` because a refusal is what a provider can act on, and
-    carrying the typed cause because a refusal that reads as a policy
-    judgement sends the agent to argue with a rule instead of to the missing
-    channel. Approval and decision escalation cannot manufacture a capability,
-    so neither reaches it.
-    """
-    return KernelDecision(
-        "deny",
-        reason,
-        cause="capability",
-        capability=capability,
-        rule=rule,
-        evaluator=evaluator,
     )
 
 

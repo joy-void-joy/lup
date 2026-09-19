@@ -111,7 +111,7 @@ Present findings and proposed changes one layer at a time. For each layer:
 
 - `guidance.py` is the source of truth. Changes here set the direction for everything else.
 - Consider: new section, additions to existing sections, anti-pattern entries, removal of contradictions.
-- Convention text both readers need identically lives once, in `conventions.py`, and is spliced into `guidance.py` and `template_sections.py` alike — so editing it there lands in both without anyone remembering to copy it. Never restate a shared convention in either consumer; that is what drifted before, down to em dashes in one copy and double hyphens in the other.
+- Convention text both readers need identically lives once, in `conventions.py`, and is spliced into `guidance.py` and `template_sections.py` alike — so editing it there lands in both without anyone remembering to copy it. Never restate a shared convention in either consumer; a restatement drifts, down to em dashes in one copy and double hyphens in the other.
 - Repo-specific material is an **addition** after the shared part, never a rewrite of it. An addition cannot drift from what it adds to.
 - Keep template sections general — domain-specific details belong in `guidance.py` only.
 

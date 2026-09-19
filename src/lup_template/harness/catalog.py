@@ -113,9 +113,8 @@ EXCLUDED_COMMANDS = [
     # normal.
     "uv run lup-devtools harness *",
     # A resolver run opens native sessions, which is the same requirement the
-    # line above states — it sat inside `harness *` until the resolver got a
-    # sub-app of its own, and the exclusion has to follow the commands rather
-    # than the name they used to be nested under.
+    # line above states from its own sub-app, and the exclusion follows the
+    # commands rather than whichever name they are nested under.
     "uv run lup-devtools resolve *",
     # The verbs that drive git rather than read it. `git *` is excluded above
     # and a child of a confined command is confined too, so leaving these

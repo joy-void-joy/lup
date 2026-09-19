@@ -62,8 +62,8 @@ def read_clipboard_image() -> ClipboardImage | None:
     library's -- they are what the model accepts -- so the types are named
     here and the backend that serves them is found there. Reading through the
     library is also what makes this work on a Wayland desktop, where the
-    ``xclip`` this used to call either answers for a different clipboard than
-    the one being copied into or is absent entirely.
+    ``xclip`` a direct call would reach either answers for a different
+    clipboard than the one being copied into or is absent entirely.
     """
     return clipboard_image(CLIPBOARD_IMAGE_MIMES)
 

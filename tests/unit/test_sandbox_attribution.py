@@ -140,3 +140,22 @@ def test_a_busy_mount_point_is_the_boundary_refusing_a_replacement() -> None:
     )
     assert isinstance(found, FilesystemRefusal)
     assert found.path == "/repo/siblings/README.md"
+
+
+def test_git_names_its_path_relative_to_the_checkout() -> None:
+    """The refusal an agent most needs explained names no absolute path.
+
+    `unable to unlink old 'README.md'` is what git writes when a read-only
+    mount refuses a fast-forward, and an absolute-only reading finds no path
+    in it at all — so the one message the rail exists to explain arrived
+    unattributed.
+    """
+    assert candidate_paths("unable to unlink old 'README.md'") == []
+    assert candidate_paths("unable to unlink old 'README.md'", "/work") == [
+        "/work/README.md"
+    ]
+
+
+def test_a_bare_word_is_not_a_path_however_a_directory_is_named() -> None:
+    """Quoted or nothing: crude is safe for `/x`, and not for every noun."""
+    assert candidate_paths("Device or resource busy", "/work") == []

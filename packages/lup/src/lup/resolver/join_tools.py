@@ -1,23 +1,22 @@
 """The verbs a merger joins a whole set of parents through.
 
-A join used to be a loop the orchestrator owned: it merged one parent,
-spent a merger turn where the merge needed deciding, committed, verified,
-checkpointed, and went round again. One session saw every parent, but it
-met each one cold — the merger learned that three branches all rewrite the
-same module at the ninth of them, with two already resolved in ways it
+A join run as a loop the orchestrator owns merges one parent, spends a
+merger turn where the merge needs deciding, commits, verifies,
+checkpoints, and goes round again. One session sees every parent, but it
+meets each one cold — the merger learns that three branches all rewrite
+the same module at the ninth of them, with two already resolved in ways it
 would not have chosen knowing the third.
 
 Here the merger is handed every parent at once and drives its own
 sequence, the way somebody landing a stack of branches reads the whole
-survey before touching the first. What the loop used to own does not
-disappear with it: the checkpoint, the verification and the drain are
-verbs the merger calls, so a join is still resumable at every parent, a
-red gate still names the parent that turned it red, and a drain is still
-observed between two of them.
+survey before touching the first. What such a loop owns does not go with
+it: the checkpoint, the verification and the drain are verbs the merger
+calls, so a join is resumable at every parent, a red gate names the parent
+that turned it red, and a drain is observed between two of them.
 
-The accounting moves the same way and gets stronger for it. The
-orchestrator used to check a report after the fact and spend a correction
-turn when it fell short; ``land_parent`` refuses instead, naming what is
+The accounting moves the same way and gets stronger for it. An
+orchestrator checking a report after the fact spends a correction
+turn when it falls short; ``land_parent`` refuses instead, naming what is
 unaccounted for while the merger is still on the parent it belongs to.
 
 The handlers touch nothing but the run directory, the lease they are bound

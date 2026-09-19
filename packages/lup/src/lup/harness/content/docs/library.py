@@ -143,11 +143,11 @@ class Roster(BaseModel, frozen=True):
         the module explaining itself to somebody already inside it.
 
         Read from the code rather than restated here, and that is the point.
-        This page used to key an authored string to each name — two
-        descriptions of one subject, in two files, with nothing holding them
-        together. The hand-written half had already drifted: its `channels` row
-        named six consumers where the import graph counts eleven, and a page
-        confidently wrong is worse than one that had to be looked up.
+        An authored string per name is two descriptions of one subject, in
+        two files, with nothing holding them together, and the hand-written
+        half drifts: a `channels` row naming six consumers where the import
+        graph counts eleven, and a page confidently wrong is worse than one
+        that has to be looked up.
         """
         docstring = ast.get_docstring(ast.parse(source.read_text(encoding="utf-8")))
         if not docstring:
@@ -180,11 +180,11 @@ class Roster(BaseModel, frozen=True):
 
         Nothing left to fall behind: every row is the entry's own docstring, so
         an entry added to the library arrives here by existing and one deleted
-        leaves by the same route. What used to be a hand-kept list checked
-        against a walk is now the walk.
+        leaves by the same route. The walk is the list; a hand-kept one
+        checked against it is the second copy that falls behind.
 
-        A missing docstring still fails generation loudly, for the reason the
-        authored roster did: a page that quietly drops a package reads exactly
+        A missing docstring fails generation loudly, for the reason an
+        authored roster would: a page that quietly drops a package reads exactly
         like a complete one.
         """
         return models.MarkdownTable(

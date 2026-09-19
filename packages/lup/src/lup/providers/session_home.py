@@ -108,8 +108,8 @@ class SessionHomes:
         """
         if not self.shared.is_dir():
             return
-        # The derived homes sit in the checkout, so the shared home no longer
-        # contains them — except where somebody selected the checkout itself
+        # The derived homes sit in the checkout, so the shared home does not
+        # contain them — except where somebody selected the checkout itself
         # as the shared home, which would otherwise link the tree into a home
         # inside it. Reserving the leading segment keeps that from closing.
         reserved = [self.layout.derived_dir.parts[0], *self.layout.private_files]

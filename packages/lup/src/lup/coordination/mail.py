@@ -12,18 +12,18 @@ to wait on, so no amount of saying things can park a run. That split —
 questions are slots, everything here is not — is what lets a caller volunteer
 information to a working actor without stalling whoever volunteered it.
 
-**"Everyone" is resolved by the sender.** It used to be a token every reader
-matched against itself, which is what forced a delivery position per member:
-a message nobody had addressed to you could still be yours, so you had to
-remember how far you had read. It also meant a redirect reached members
-spawned *after* the stop, which is not a thing a stop can sensibly mean. Now
-a sender that means everyone asks the roster who is live and posts one file
-each, and the store holds nothing but messages with one recipient.
+**"Everyone" is resolved by the sender.** A sender that means everyone asks
+the roster who is live and posts one file each, so the store holds nothing
+but messages with one recipient. A token every reader matched against
+itself would force a delivery position per member: a message nobody had
+addressed to you could still be yours, so you would have to remember how
+far you had read, and a redirect would reach members spawned *after* the
+stop, which is not a thing a stop can sensibly mean.
 
-What that would have lost — a standing fact reaching a member that arrives
-later — is what a notice is for, and a notice does it better: it is still
-there at that member's first turn, and at every turn after, because it has
-not stopped being true.
+What that costs — a standing fact reaching a member that arrives later —
+is what a notice is for, and a notice does it better: it is still there at
+that member's first turn, and at every turn after, because it has not
+stopped being true.
 """
 
 from datetime import datetime
@@ -80,8 +80,8 @@ class ActorDelivery(BaseModel, frozen=True):
 
     The messages themselves are the handle: consuming is deleting the files
     they came from, so a caller that read and then committed cannot commit
-    past something it never saw. The offset this used to carry could, which
-    is how a message posted between reading and handing over was skipped.
+    past something it never saw. An offset could, skipping a message posted
+    between reading and handing over.
     """
 
     messages: list[ActorMessage]

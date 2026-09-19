@@ -49,7 +49,9 @@ from typing import TypedDict
 # that holds the kernel package. Naming it as a search path is what lets the
 # import below resolve.
 sys.path.insert(0, str(Path(__file__).parent))
+from kernel.delegation import verification_notice
 from kernel.subagents import Leftover, notice
+from policy_data import VERIFICATION
 
 
 class Payload(TypedDict, total=False):
@@ -76,10 +78,15 @@ def decided(payload: Payload) -> Context | None:
             return Context(
                 hookSpecificOutput=Pushed(
                     hookEventName="SubagentStart",
-                    additionalContext=notice(
-                        "an `exec_command` session",
-                        "`write_stdin` carrying the interrupt",
-                        Leftover(resumes=False, refused=False),
+                    additionalContext="\n\n".join(
+                        [
+                            notice(
+                                "an `exec_command` session",
+                                "`write_stdin` carrying the interrupt",
+                                Leftover(resumes=False, refused=False),
+                            ),
+                            verification_notice(**VERIFICATION),
+                        ]
                     ),
                 )
             )
