@@ -73,6 +73,10 @@ from lup.harness.materialization import (
 )
 from lup.harness.validation import validated_tree
 from lup.harness.models import (
+    BulletItem,
+    BulletList,
+    InlinePart,
+    Passage,
     GUIDANCE_BUDGET,
     INVOCATION_SIGILS,
     GuidanceBudget,
@@ -108,7 +112,7 @@ from lup.harness.models import (
     document_byte_size,
 )
 from lup.harness.contracts import PromptRenderer
-from lup.formats.markdown import CodeCell, PlainCell
+from lup.formats.markdown import CodeCell, PlainCell, ProseCode, ProseStrong
 from lup.harness.ownership import (
     OwnershipManifest,
     OwnershipManifestError,
@@ -857,6 +861,28 @@ PART_CONTRACT: dict[str, PartExpectation] = {
     ),
     "ResolverEntry": PartExpectation(part=ResolverEntry(), diverges=True),
     "ArgumentsRef": PartExpectation(part=ArgumentsRef(), diverges=True),
+    # A passage is prose and the values it names, so it diverges exactly
+    # where one of its values does. This one names an argument reference,
+    # which each runtime spells in its own sigil.
+    "Passage": PartExpectation(
+        part=Passage(
+            module="lup.harness.content.skills.analyze",
+            values={
+                "arguments": ArgumentsRef(),
+                "ask": AskUser(question="which conversation to read"),
+            },
+        ),
+        diverges=True,
+    ),
+    "InlinePart": PartExpectation(
+        part=InlinePart(node=ProseCode(text="agent/core.py")), diverges=False
+    ),
+    "BulletList": PartExpectation(
+        part=BulletList(
+            items=[BulletItem(lead=ProseStrong(text="Open notes"), text="a | b")]
+        ),
+        diverges=False,
+    ),
 }
 """Every prompt part, with the cross-runtime promise its renderings make."""
 
@@ -903,6 +929,8 @@ PART_QUESTIONS: dict[str, PartQuestion] = {
             "MarkdownTable",
             "ToolRoster",
             "CommandInvocation",
+            "Passage",
+            "BulletList",
         ],
     ),
     # What a skill's own `tools` grant is checked against, so a step telling
@@ -1167,6 +1195,7 @@ NAMES_RATHER_THAN_PROSE = [
     "Agent.id",
     "Delegate.name",
     "Harness.generator_version",
+    "Passage.name",
     "Plugin.id",
     "Plugin.version",
     "Skill.id",
@@ -1177,9 +1206,12 @@ NAMES_RATHER_THAN_PROSE = [
 Most identify or version a declaration rather than teaching anything, so they
 never reach a reader as words. ``SpellingExample.text`` is the one that does
 and is exempt anyway: its whole subject is what each runtime spells, which is
-the one thing portable prose cannot say. Every other free-text field a prompt
-or its discovery metadata carries is portable, and a new field has to join one
-list or the other rather than quietly accepting anything."""
+the one thing portable prose cannot say. ``Passage.name`` says which file
+beside a module the words are read from rather than carrying any; the prose
+itself is held to the constraint where the scan reads it, through
+``text_payload``. Every other free-text field a prompt or its discovery
+metadata carries is portable, and a new field has to join one list or the
+other rather than quietly accepting anything."""
 
 
 def test_every_free_text_declaration_field_is_portable_prose() -> None:
