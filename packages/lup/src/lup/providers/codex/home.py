@@ -51,8 +51,11 @@ TRUSTED_PROJECT = "trusted"
 # keeps its hook decisions under; a caller given these to set would be writing
 # records the runtime reads somewhere else
 HOOKS_KEY = "hooks"
+# lup: ignore[constant-declaration] — the sub-map each hook's decision sits in
 STATE_KEY = "state"
+# lup: ignore[constant-declaration] — the digest a decision was recorded against
 TRUSTED_HASH_KEY = "trusted_hash"
+# lup: ignore[constant-declaration] — whether the hook runs at all
 ENABLED_KEY = "enabled"
 """How a home records which hook definitions it has answered for.
 
