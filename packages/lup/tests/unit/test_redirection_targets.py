@@ -254,20 +254,21 @@ class TestAFlagThatWritesIsJudgedWhereEveryWriteIs:
         """`cmd -o run.log` over yesterday's log: nothing reviews it."""
         assert written("sort -o notes.txt f").effect == "allow"
 
-    def test_replacing_tracked_source_allows_and_is_read_afterwards(self) -> None:
-        """The content question is not refused here, because it is not asked here.
+    def test_replacing_tracked_source_asks_rather_than_refusing(self) -> None:
+        """The content question is asked here, and is not refused here.
 
-        What a command writes is produced by running it, so no gate could
-        read it in advance and a refusal would fall on exactly the writes for
-        which that is unavoidable. The path question is answered before the
-        fact and the content question after it, against the file itself.
+        What a command writes is produced by running it, so no gate could read
+        it in advance and a refusal would fall on exactly the writes for which
+        that is unavoidable. What a reviewed version being replaced by unread
+        bytes earns is therefore the question, answered before the fact, with
+        the file itself read after it as before.
         """
-        assert written("sort -o src.py f", tracked=["src.py"]).effect == "allow"
+        assert written("sort -o src.py f", tracked=["src.py"]).effect == "ask"
 
     def test_the_same_file_answers_alike_by_either_spelling(self) -> None:
         """The whole point: the path decides, not which word named it."""
         for spelling in ("sort -o src.py f", "sort f > src.py"):
-            assert written(spelling, tracked=["src.py"]).effect == "allow", spelling
+            assert written(spelling, tracked=["src.py"]).effect == "ask", spelling
         for spelling in ("sort -o tmp/o.txt f", "sort f > tmp/o.txt"):
             assert written(spelling, tracked=["src.py"]).effect == "allow", spelling
 
@@ -304,3 +305,51 @@ class TestAFlagThatWritesIsJudgedWhereEveryWriteIs:
     ) -> None:
         """The stronger question survives: a file's answer is not a program's."""
         assert written("sort --compress-program=x -o tmp/o.txt f").effect == "ask"
+
+
+class TestAWriteNobodyCanRead:
+    """A redirection whose bytes only running produces, landing in the tree.
+
+    The asymmetry these pin: `echo x > docs/f.md` reached the content gates
+    and `date +%s > docs/f.md` reached nothing, for one file and one write.
+    Which spelling carried its bytes is a fact about the command, not about
+    what is being replaced, so it cannot be what decides whether anybody is
+    asked.
+    """
+
+    def test_replacing_tracked_content_with_unread_bytes_asks(self) -> None:
+        answer = written("date +%s > src.py", tracked=["src.py"])
+
+        assert answer.effect == "ask"
+        assert "src.py" in answer.reason
+
+    def test_appending_is_the_same_answer_as_replacing(self) -> None:
+        """The bytes are equally unread either way, so the question is too."""
+        assert written("date +%s >> src.py", tracked=["src.py"]).effect == "ask"
+
+    def test_the_question_names_both_ways_past_it(self) -> None:
+        """A question an agent cannot act on becomes a retry."""
+        answer = written("date +%s > src.py", tracked=["src.py"])
+
+        assert "scratch" in answer.recovery
+        assert "carry the content" in answer.recovery
+
+    def test_a_create_replaces_nothing_and_keeps_its_allow(self) -> None:
+        """What the question is about is the reviewed version being replaced."""
+        assert written("date +%s > fresh.txt", tracked=["src.py"]).effect == "allow"
+
+    def test_a_file_git_never_held_is_the_ordinary_work_it_was(self) -> None:
+        """Yesterday's log rewritten in place loses no reviewed version."""
+        assert written("date +%s > notes.txt").effect == "allow"
+
+    def test_scratch_stays_out_of_it(self) -> None:
+        assert (
+            written("date +%s > tmp/out.txt", tracked=["tmp/out.txt"]).effect == "allow"
+        )
+
+    def test_a_command_carrying_its_bytes_is_left_to_the_content_gates(self) -> None:
+        """Judged twice would be this rule holding a weaker copy of that one."""
+        answer = written("echo x > src.py", tracked=["src.py"])
+
+        assert answer.effect == "allow"
+        assert "only running the command produces" not in answer.reason

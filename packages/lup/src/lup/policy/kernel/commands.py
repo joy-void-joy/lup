@@ -49,6 +49,8 @@ from .words import (
     protected_write_target,
     refspec_effects,
     sed_invocation,
+    unread_over_tracked,
+    unread_question,
     uv_run_module_root,
     uv_run_words,
     write_checkpoint,
@@ -83,6 +85,7 @@ def row_verdict(
     checkpoint: CheckpointRequirement | None = None,
     effects: list[EffectRow] | None = None,
     arguments: list[str] | None = None,
+    asked: KernelDecision | None = None,
 ) -> KernelDecision:
     """One row's verdict, carrying every fact the row states about itself.
 
@@ -142,10 +145,16 @@ def row_verdict(
         row["sandbox"],
         checkpoint=settled,
         reviewer=row["reviewer"],
-        purpose=purpose,
+        purpose=asked.purpose if asked is not None else purpose,
         rule=row["rule"],
         evaluator="shell-vocabulary",
-        recovery=row["recovery"] if effect in ("ask", "deny") else "",
+        recovery=(
+            asked.recovery
+            if asked is not None
+            else row["recovery"]
+            if effect in ("ask", "deny")
+            else ""
+        ),
     )
 
 
@@ -212,10 +221,17 @@ class SedContext(TypedDict):
 
 
 class WriteAnswer(TypedDict):
-    """What one write target earned, beside the scope that decided it."""
+    """What one write target earned, beside the scope that decided it.
+
+    ``path`` and ``unread`` travel together for the one verdict whose reason
+    is about the file rather than about the row: a write replacing reviewed
+    content with content nobody read names that file when it asks.
+    """
 
     effect: DecisionEffect
     scope: str
+    path: str
+    unread: bool
 
 
 def no_write_facts() -> WriteFacts:
@@ -280,7 +296,15 @@ def flag_write_verdict(
         known = facts["existing"]
         existing = known is None or target in known
         scope = write_scope(target, facts["path_roles"], facts["checkout_root"])
+        # A flag never carries the bytes it writes -- `sort -o` names a file
+        # and reads another -- so the carried case is false here rather than
+        # unreachable, and the same question the redirection spelling puts is
+        # put by this one.
+        if unread_over_tracked(scope, False, existing, target in facts["tracked"]):
+            return WriteAnswer(effect="ask", scope=scope, path=target, unread=True)
         return WriteAnswer(
+            path=target,
+            unread=False,
             effect=verdict_for(
                 [
                     declare(
@@ -319,6 +343,19 @@ def flag_write_verdict(
     )
     if answered["effect"] == "allow":
         return row_verdict(row, "allow", "this write lands where nothing is reviewed")
+    if answered["unread"]:
+        # Through the row rather than beside it, so an operator-only row still
+        # denies and the sandbox, rule and reviewer the row states still
+        # travel; what this verdict knows better is the reason it asks for.
+        asked = unread_question(answered["path"])
+        return row_verdict(
+            row,
+            "ask",
+            asked.reason,
+            write_checkpoint(answered["scope"]),
+            arguments=arguments,
+            asked=asked,
+        )
     return row_verdict(
         row,
         answered["effect"],

@@ -39,6 +39,8 @@ from .words import (
     refuses_generated_plugin_target,
     sed_invocation,
     sed_rewrite_operands,
+    unread_over_tracked,
+    unread_question,
     uv_run_words,
     SCOPE_PHRASES,
     write_checkpoint,
@@ -476,6 +478,16 @@ def authored_writes(command: str) -> list[AuthoredWrite]:
     tree = parse_shell(command)
     if isinstance(tree, KernelDecision):
         return []
+    return carried_writes(tree)
+
+
+def carried_writes(tree: Script) -> list[AuthoredWrite]:
+    """The same reading over a script already parsed, for a caller holding one.
+
+    :func:`authored_writes` is the entry from a command line; the redirection
+    verdict runs over the tree it parsed once, and re-parsing to ask whether
+    this redirection's bytes are in the call would be the same walk twice.
+    """
     authored: list[AuthoredWrite] = []
     for pipeline in all_pipelines(tree):
         incoming: str | None = None
@@ -576,6 +588,8 @@ def resolve_redirection(
     recoverable_targets: list[str] | None = None,
     contained: bool = False,
     checkout_root: str = "",
+    carried: bool = False,
+    tracked_targets: list[str] | None = None,
 ) -> KernelDecision | None:
     """Classify one redirection, or ``None`` where it is safe.
 
@@ -639,6 +653,10 @@ def resolve_redirection(
             purpose="unrecovered_local_mutation",
         )
     existing = existing_targets is None or spelled in existing_targets
+    if unread_over_tracked(
+        scope, carried, existing, spelled in (tracked_targets or [])
+    ):
+        return unread_question(spelled)
     decided = verdict_for(
         [
             declare(
@@ -676,8 +694,15 @@ def redirection_verdict(
     recoverable_targets: list[str] | None = None,
     contained: bool = False,
     checkout_root: str = "",
+    tracked_targets: list[str] | None = None,
 ) -> KernelDecision | None:
-    """The first redirection in a command that is not safe, judged as it is met."""
+    """The first redirection in a command that is not safe, judged as it is met.
+
+    Each is told whether the command carries the bytes it writes, because that
+    is what decides who judges the content: the edit gates read a write whose
+    content is in the call, and nothing reads one produced by running.
+    """
+    landing = {write["path"] for write in carried_writes(script)}
     return next(
         (
             decided
@@ -691,6 +716,9 @@ def redirection_verdict(
                     recoverable_targets,
                     contained,
                     checkout_root,
+                    bool(redirect["target"])
+                    and word_text(redirect["target"][0]) in landing,
+                    tracked_targets,
                 )
             ]
             if decided is not None
