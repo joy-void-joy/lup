@@ -9,6 +9,7 @@ beside its managing module instead (see the package docstring).
 
 import re  # lup: ignore[import-re] — prose has no parser; its shape is the rule
 from abc import ABC, abstractmethod
+from json import dumps
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -27,7 +28,14 @@ from lup.devtools.launcher import DEFAULT_ENVIRONMENT
 from lup.formats.banner import ArtifactBanner, GeneratedBanner
 from lup.harness.image import Image
 from lup.harness.requirements import Manifest
-from lup.formats.markdown import CodeCell, PlainCell, TableCell, escaped
+from lup.formats.markdown import (
+    CodeCell,
+    MarkdownDocument,
+    PlainCell,
+    TableCell,
+    escaped,
+)
+from lup.formats.yaml import PlainData, YamlDocument
 from lup.tools.mcp import ToolDeclaration
 from lup.policy.boundary import BoundaryCapability
 from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName
@@ -1870,6 +1878,80 @@ class Artifact(BaseModel, frozen=True):
             content=banner.applied_to(path, body),
             semantic_id=semantic_id,
             executable=executable,
+            banner=banner,
+        )
+
+    @classmethod
+    def in_yaml(
+        cls,
+        *,
+        path: ArtifactPath,
+        document: YamlDocument,
+        semantic_id: str,
+        banner: GeneratedBanner,
+        preamble: str = "",
+    ) -> "Artifact":
+        """One artifact whose body is a YAML document rather than text about one.
+
+        The constructor a generator reaches for instead of formatting the
+        file: what it is handed is a tree that has already been emitted and
+        parsed back, so a derived value cannot arrive having ended the mapping
+        it was written into.
+
+        ``preamble`` is the document that has to open with something the
+        nodes cannot hold — a `---` separating a Markdown file's frontmatter
+        from the prose beneath it.
+        """
+        return cls.generated(
+            path=path,
+            body=preamble + document.text(),
+            semantic_id=semantic_id,
+            banner=banner,
+        )
+
+    @classmethod
+    def in_markdown(
+        cls,
+        *,
+        path: ArtifactPath,
+        document: MarkdownDocument,
+        semantic_id: str,
+        banner: ArtifactBanner,
+    ) -> "Artifact":
+        """One artifact whose body is a Markdown document, frontmatter included.
+
+        The banner is asked rather than applied, because most of these carry
+        the exemption instead: a skill file is verbatim model-facing text, and
+        a comment opening it would open every prompt compiled from it.
+        """
+        return cls(
+            path=path,
+            content=banner.applied_to(path, document.text()),
+            semantic_id=semantic_id,
+            banner=banner,
+        )
+
+    @classmethod
+    def in_json(
+        cls,
+        *,
+        path: ArtifactPath,
+        data: PlainData,
+        semantic_id: str,
+        banner: ArtifactBanner,
+        indent: int = 2,
+    ) -> "Artifact":
+        """One artifact whose body is JSON, serialized rather than formatted.
+
+        Keys are sorted, because the artifact is compared against what is
+        committed and a mapping that reordered itself between runs would read
+        as a change nobody made. JSON holds no comment, so the banner most of
+        these carry is the exemption saying why.
+        """
+        return cls(
+            path=path,
+            content=dumps(data, indent=indent, sort_keys=True),
+            semantic_id=semantic_id,
             banner=banner,
         )
 
