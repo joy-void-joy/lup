@@ -6,7 +6,9 @@ change reported twice, and a run that never lands because nothing told it the
 population was gone.
 """
 
+import socket
 from pathlib import Path
+from threading import Thread
 
 from lup.coordination.identity import member_ref, mint_member_id
 from lup.coordination.repository import RepositoryPeers
@@ -96,14 +98,15 @@ def test_a_member_filter_narrows_the_mail_and_not_the_roster(tmp_path: Path) -> 
     ]
 
 
-def test_nudging_reports_the_runtime_asymmetry_rather_than_hiding_it(
+def test_nudging_wakes_a_peer_through_its_inbox_and_says_so_for_one_without(
     tmp_path: Path,
 ) -> None:
-    """A Claude peer cannot be woken by a process, so the nudge says what would
-    wake it; a peer that declared nothing is told so rather than skipped.
+    """A peer that declared an inbox is woken through it; a peer that declared
+    nothing is told so rather than skipped.
     """
     peers = RepositoryPeers(tmp_path)
     claude = mint_member_id()
+    inbox = tmp_path / "claude.sock"
     # Joined on the roster directly so the wake path is on the first record,
     # then named, rather than through `join`, which declares none.
     peers.cohort.roster.joined(
@@ -111,7 +114,7 @@ def test_nudging_reports_the_runtime_asymmetry_rather_than_hiding_it(
         task="working",
         delivery=Delivery.INBOX,
         worktree=str(tmp_path / "claude"),
-        wake=WakePath(runtime="claude", handle="claude [ab12]"),
+        wake=WakePath(runtime="claude", handle=str(inbox)),
     )
     peers.names.rename(claude, "claude")
     silent = mint_member_id()
@@ -121,11 +124,21 @@ def test_nudging_reports_the_runtime_asymmetry_rather_than_hiding_it(
 
     peers.send("claude", "look")
     peers.send("silent", "look")
-    nudges = [event for event in watcher.tick() if isinstance(event, Nudged)]
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(inbox))
+        listener.listen(1)
+
+        def take_one_frame() -> None:
+            connection, _ = listener.accept()
+            connection.close()
+
+        waiting = Thread(target=take_one_frame)
+        waiting.start()
+        nudges = [event for event in watcher.tick() if isinstance(event, Nudged)]
+        waiting.join(timeout=5)
 
     by_address = {nudge.address: nudge.outcome for nudge in nudges}
-    assert "SendMessage" in by_address["claude"].instruction
-    assert not by_address["claude"].reached
+    assert by_address["claude"].reached
     assert "declared no wake path" in by_address["silent"].reason
 
 

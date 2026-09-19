@@ -719,6 +719,31 @@ DECLARED = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "Woken.instruction",
+            "Handover.instruction",
+            "Delegation.instruction",
+        ],
+        reason=(
+            "a wake is finished by the library on both runtimes now that a "
+            "Claude session is reached by writing to its own inbox socket, so "
+            "the outcome where the caller had to finish the job with a tool "
+            "this library does not hold no longer happens"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Drop the field from anything that read it. A wake now "
+                    "either reached the peer or did not: read `reached` for "
+                    "which, and `reason` for why not. Code that printed "
+                    "`instruction` beside `note` should print `note` alone, "
+                    "and code that branched on `instruction` being set has "
+                    "one branch fewer."
+                ),
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

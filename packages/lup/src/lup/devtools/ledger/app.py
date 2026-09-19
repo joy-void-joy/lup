@@ -485,9 +485,8 @@ def create_ledger_app(
             typer.echo(f"  locked {taken}")
         if result.woken:
             typer.echo("  woken")
-        for line in (result.instruction, result.note):
-            if line:
-                typer.echo(f"  {line}")
+        if result.note:
+            typer.echo(f"  {result.note}")
 
     @app.command("handoff")
     def handoff_cmd(
@@ -558,9 +557,8 @@ def create_ledger_app(
             )
         if result_of.woken:
             typer.echo("  woken")
-        for line in (result_of.instruction, result_of.note):
-            if line:
-                typer.echo(f"  {line}")
+        if result_of.note:
+            typer.echo(f"  {result_of.note}")
 
     @app.command("brief")
     def brief_cmd(
