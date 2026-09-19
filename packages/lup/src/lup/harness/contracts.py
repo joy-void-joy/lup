@@ -252,6 +252,19 @@ class NativeSpellings(SkillInvocationRenderer, ABC):  # lup: ignore[abc-capabili
         """
 
     @abstractmethod
+    def nested_run(self, prompt: str) -> Instruction:
+        """Spell how to run this runtime once, non-interactively, from a directory.
+
+        A probe kit measures a hook or a payload by launching the runtime over
+        a throwaway project whose settings register the hook. Each runtime has
+        its own print mode, its own approval switch, and its own answer to
+        whether a nested launch is allowed at all, so prose naming "a
+        non-interactive run" leaves the reader to guess the flags, and a
+        wrong guess stops at the first approval prompt nobody is there to
+        answer.
+        """
+
+    @abstractmethod
     def read_document(self, path: str) -> Spelling:
         """Name the tool this runtime hands a whole document to, path and all.
 

@@ -219,6 +219,24 @@ class CodexSpellings(NativeSpellings):
             "reported"
         )
 
+    def nested_run(self, prompt: str) -> Instruction:
+        """Spell the non-interactive launch, `codex exec`.
+
+        Read from codex-cli 0.155.1's own help rather than from a run, since
+        no Codex session is signed in where this was written: `exec` takes
+        the prompt as its argument, `--dangerously-bypass-approvals-and-sandbox`
+        answers every approval a hook probe would otherwise stall on, and
+        `--dangerously-bypass-hook-trust` admits a hooks file this machine has
+        not trusted, which a throwaway kit's never is.
+        """
+        return Instruction(
+            "Run `codex exec --dangerously-bypass-approvals-and-sandbox"
+            f" --dangerously-bypass-hook-trust {json.dumps(prompt)}` from the"
+            " kit's directory. A non-interactive run loads the hooks in that"
+            " directory's settings at launch and exits when the prompt is"
+            " answered"
+        )
+
     def read_document(self, path: str) -> Spelling:
         return Unsupported(
             reason=(

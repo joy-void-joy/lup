@@ -92,6 +92,7 @@ from lup.harness.models import (
     PromptDocument,
     PromptPart,
     RelocateSession,
+    NestedRun,
     WatchOutput,
     CommandInvocation,
     RequestApproval,
@@ -839,6 +840,9 @@ PART_CONTRACT: dict[str, PartExpectation] = {
     ),
     "RelocateSession": PartExpectation(
         part=RelocateSession(path="the path step 1 prints"), diverges=True
+    ),
+    "NestedRun": PartExpectation(
+        part=NestedRun(prompt="reply with the single word ok"), diverges=True
     ),
     "WatchOutput": PartExpectation(
         part=WatchOutput(command="lup-devtools resolve status --watch"),

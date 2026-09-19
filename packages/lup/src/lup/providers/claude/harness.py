@@ -203,6 +203,20 @@ class ClaudeSpellings(NativeSpellings):
             "reporting unless the command has exited"
         )
 
+    def nested_run(self, prompt: str) -> Instruction:
+        """Spell the print-mode launch, which nests inside a running session.
+
+        Measured on 2.1.278: `claude -p` runs from a session's own shell with
+        no variable unset, loads the hooks in the directory's settings at
+        launch, and exits when the prompt is answered.
+        """
+        return Instruction(
+            f"Run `claude -p {json.dumps(prompt)} --permission-mode"
+            " bypassPermissions` from the kit's directory. A print-mode session"
+            " loads the hooks in that directory's settings at launch, runs"
+            " nested inside this one, and exits when the prompt is answered"
+        )
+
     def read_document(self, path: str) -> Spelling:
         return Spelled(
             words=Instruction(
