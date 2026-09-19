@@ -28,6 +28,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from lup.channels.models import utc_now
 from lup.coordination.mail import ActorMessage
 from lup.coordination.repository import PeerView, RepositoryPeers
 from lup.coordination.wake import Woken, wake
@@ -132,6 +133,14 @@ class Watcher:
         self.root = root
         self.member = member
         self.nudge = nudge
+        self.started = utc_now()
+        """When this watcher began, which bounds the departures it is shown.
+
+        A listing shows the live rows and the rows that stopped since a
+        moment the reader names; a watcher names its own start, so a
+        departure during the watch is a row it sees stop, and one before it
+        is the history the baseline leaves out.
+        """
         self.known: dict[str, PeerView] = {}
         self.seen: dict[str, ActorMessage] = {}
         """Every message already reported, under the identity it is known by.
@@ -148,7 +157,10 @@ class Watcher:
     def tick(self) -> list[WatchEvent]:
         """Look once, and say what is different from the last look."""
         now = datetime.now().astimezone()
-        current = {view.member.actor.id: view for view in self.peers.listing()}
+        current = {
+            view.member.actor.id: view
+            for view in self.peers.listing(since=self.started)
+        }
 
         def roster_changes() -> Iterator[WatchEvent]:
             for member_id, view in current.items():

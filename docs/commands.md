@@ -26,7 +26,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 
 | Command | What it does |
 | --- | --- |
-| `coordination roster` | List every session working in this repository, the live ones first. |
+| `coordination roster` | List every session working in this repository, and the recent departures. |
 | `coordination join` | Put a session on the roster and print the id it answers to. |
 | `coordination describe` | Record what one session is doing, for whoever reads the roster next. |
 | `coordination rename` | Rename one session, leaving the old name resolving to it. |
@@ -36,7 +36,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `coordination inbox` | Read what is queued for one session, consuming it only when asked. |
 | `coordination holdings` | List what each live session in this repository is holding. |
 | `coordination lock` | Take everything beneath a prefix, before having touched any of it. |
-| `coordination release` | Give a prefix back, which does nothing unless this session held it. |
+| `coordination release` | Give a prefix back, refusing where this session does not hold it. |
 | `coordination watch` | Stream what changes: who arrives and leaves, what they are on, what reaches them. |
 
 ## `dev`

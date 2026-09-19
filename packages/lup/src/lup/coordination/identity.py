@@ -32,7 +32,9 @@ argument from the adapter that knows it, and this module stays the vocabulary
 both halves share.
 """
 
+from collections.abc import Collection
 from datetime import datetime
+from itertools import count
 from pathlib import Path
 from uuid import uuid4
 
@@ -46,6 +48,14 @@ from lup.types import EnvVars
 
 MEMBER_ENV = "LUP_COORDINATION_MEMBER"
 """Environment variable naming the durable id a launcher minted for a session."""
+
+NAME_ENV = "LUP_COORDINATION_NAME"
+"""Environment variable naming what a launcher called the session it minted an id for.
+
+Exported beside the id for the same reason: the runtime's own chrome shows a
+name the launcher chose, and the roster has to answer to the same one, so the
+choice is made once where both can read it rather than derived twice.
+"""
 
 MEMBER_KIND = "session"
 """What a repository peer is on the roster, beside spawned workers and the user.
@@ -78,13 +88,23 @@ NAME_ADAPTER: TypeAdapter[MemberNamed] = TypeAdapter(MemberNamed)
 class MemberEnv(BaseSettings):
     """The launcher's half of the identity contract, read from the environment.
 
-    The consumer side of what :func:`member_environment` writes, spelled once
-    so the process that mints an id and the process that answers to it cannot
-    drift — the arrangement :class:`~lup.workspace.context.SessionEnv` uses,
-    for the same reason.
+    The consumer side of what :meth:`LaunchedMember.environment` writes,
+    spelled once so the process that mints an id and the process that answers
+    to it cannot drift — the arrangement
+    :class:`~lup.workspace.context.SessionEnv` uses, for the same reason.
     """
 
     member_id: str = Field(default="", validation_alias=MEMBER_ENV)
+    cli_name: str = Field(default="", validation_alias=NAME_ENV)
+
+
+def session_cli_name() -> str:
+    """What the launcher called this session, or blank where nothing launched it.
+
+    Blank is a real answer: a session with the plugin and no launcher is named
+    after its worktree when it joins, and nothing here has to invent one.
+    """
+    return MemberEnv().cli_name
 
 
 def session_member_id(fallback: str = "") -> str:
@@ -115,15 +135,63 @@ def mint_member_id() -> str:
     return uuid4().hex[:12]
 
 
-def member_environment(member_id: str) -> EnvVars:
-    """Declare one session's coordination id, or clear it with an empty value.
+class LaunchedMember(BaseModel, frozen=True):
+    """The identity a launcher mints for one session: its id and what it is called.
 
-    Cleared rather than omitted for the reason the agent identity is: runtimes
-    merge a session's environment over the launching process's, so an operator
-    with this exported would otherwise hand their own address to every session
-    they start, and two peers would answer to one id.
+    Minted together because they are exported together and read together: the
+    tool server joins under the id and answers to the name, and the runtime's
+    chrome shows the name, so a launcher holding them as two values would be
+    the one place they could disagree.
     """
-    return {MEMBER_ENV: member_id}
+
+    member_id: str
+    cli_name: str
+
+    def environment(self) -> EnvVars:
+        """Declare this session's coordination identity for the processes it starts.
+
+        Set rather than omitted for the reason the agent identity is: runtimes
+        merge a session's environment over the launching process's, so an
+        operator with these exported would otherwise hand their own address
+        to every session they start, and two peers would answer to one id.
+        """
+        return {MEMBER_ENV: self.member_id, NAME_ENV: self.cli_name}
+
+
+def unique_cli_name(wanted: str, taken: Collection[str]) -> str:
+    """*wanted* where nobody else answers to it, else the first free numbered form.
+
+    Numbered rather than refused, because the name is a default nobody chose:
+    two sessions opened in one worktree are two peers and both are called
+    after it, and the second has to be reachable by a name that is not the
+    first's. A name somebody chose is refused instead, by the caller that
+    knows it was chosen.
+    """
+    if wanted not in taken:
+        return wanted
+    return next(
+        candidate
+        for candidate in (f"{wanted}-{ordinal}" for ordinal in count(2))
+        if candidate not in taken
+    )
+
+
+class NameTakenError(ValueError):
+    """Raised when a session asks for a name a live session already answers to.
+
+    A refusal rather than a silent suffix, because the name was chosen: a
+    session renaming itself to what another live session is called would make
+    the roster print one address for two peers, which is the collision the
+    numbered default exists to rule out.
+    """
+
+    def __init__(self, cli_name: str, holder_id: str) -> None:
+        super().__init__(
+            f"{cli_name!r} is what session {holder_id} is called; a live "
+            "session's name reaches it, so choose another"
+        )
+        self.cli_name = cli_name
+        self.holder_id = holder_id
 
 
 def member_ref(member_id: str) -> ActorRef:
@@ -137,8 +205,9 @@ def derived_cli_name(worktree: Path) -> str:
     The worktree, because that is what a person watching several sessions is
     actually distinguishing between — which branch is this one on — and it is
     the one fact a session has before it has done anything. Two sessions in one
-    worktree collide on the name and not on the id, which is the right way
-    round: the collision is visible, and renaming is one call.
+    worktree want the same one, and the second is numbered by
+    :func:`unique_cli_name` when it joins, so the address a listing prints for
+    either reaches that one and not the other.
     """
     return worktree.name
 
@@ -165,20 +234,43 @@ class MemberNames:
         """Every naming ever recorded, oldest first."""
         return [pair.item for pair in self.stream.read_from(0)]
 
+    def latest(self, member_id: str) -> MemberNamed | None:
+        """This member's newest naming, or nothing where it was never named."""
+        found = [record for record in self.named() if record.id == member_id]
+        return found[-1] if found else None
+
     def current(self, member_id: str) -> str:
         """What this member is called now, or nothing where it was never named."""
-        found = [record for record in self.named() if record.id == member_id]
-        return found[-1].cli_name if found else ""
+        latest = self.latest(member_id)
+        return latest.cli_name if latest is not None else ""
 
-    def resolve(self, cli_name: str) -> str:
-        """The member a name reaches, taking the most recent claim on it.
+    def resolve(self, cli_name: str, live: Collection[str] = ()) -> str:
+        """The member a name reaches: the live one that claimed it last, else the last.
 
-        Newest wins rather than first, because a name is a handle and handles
-        get reused: a session that took a name its predecessor released is the
-        session somebody typing that name means. An older binding still
-        resolves for as long as nothing else claims it, which is the whole
-        point of keeping the record — a reference written down before a rename
-        goes on working.
+        A name is a handle and handles get reused, so among the sessions that
+        ever answered to one, the one somebody typing it means is the one
+        still here — and where two are, the one that claimed it most recently.
+        Only where nobody live ever held it does the last claimant of all
+        stand, so a reference written down before a rename or a departure
+        still resolves to the session it named, and the sender is told what
+        became of it rather than that the name means nothing.
         """
-        found = [record for record in self.named() if record.cli_name == cli_name]
-        return found[-1].id if found else ""
+        found = [record.id for record in self.named() if record.cli_name == cli_name]
+        present = [member_id for member_id in found if member_id in live]
+        return (present or found)[-1] if found else ""
+
+    def called(self, live: Collection[str], except_id: str = "") -> list[MemberNamed]:
+        """The current naming of every live member but one.
+
+        The names a newcomer must not take: whatever every other live session
+        currently answers to. A name a live session renamed away from is not
+        here and may be taken — the record still resolves it for anyone who
+        wrote it down, live holders first.
+        """
+        return [
+            latest
+            for member_id in live
+            if member_id != except_id
+            for latest in [self.latest(member_id)]
+            if latest is not None
+        ]
