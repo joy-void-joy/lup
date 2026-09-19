@@ -8,7 +8,7 @@ Nothing here files anything. Publishing under an account belongs to whoever owns
 
 ## Worktree isolation refuses fifteen shell words in any argv position, including in read-only commands containing no git
 
-Measured against **Claude Code 2.1.237**. Goes to `anthropics/claude-code`; currently **not filed**.
+Measured against **Claude Code 2.1.237**. Goes to `anthropics/claude-code`; currently **filed as https://github.com/anthropics/claude-code/issues/95611**.
 
 ```bash
 uv run lup-devtools sync upstream worktree-token-wall | gh issue create --repo anthropics/claude-code --title 'Worktree isolation refuses fifteen shell words in any argv position, including in read-only commands containing no git' --body-file -
@@ -213,7 +213,7 @@ operator's home directory and are attached by whoever files this.
 
 ## ListAgents gives two live sessions the same bracketed ref, in the line that tells each how it is addressed
 
-Measured against **Claude Code 2.1.278**. Goes to `anthropics/claude-code`; currently **not filed**.
+Measured against **Claude Code 2.1.278**. Goes to `anthropics/claude-code`; currently **filed as https://github.com/anthropics/claude-code/issues/95610**.
 
 ```bash
 uv run lup-devtools sync upstream list-agents-ref-collision | gh issue create --repo anthropics/claude-code --title 'ListAgents gives two live sessions the same bracketed ref, in the line that tells each how it is addressed' --body-file -
