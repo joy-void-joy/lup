@@ -151,8 +151,6 @@ class ClipboardTool(BaseModel, frozen=True):
         return buffer.getvalue()
 
 
-# lup: ignore[library-default] — each backend's own command line, fixed by what
-# the tool accepts rather than by anything an adopter would choose differently
 CLIPBOARD_TOOLS = (
     ClipboardTool(
         writer="wl-copy",
