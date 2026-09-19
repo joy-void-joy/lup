@@ -1,6 +1,7 @@
 """Named native harness composition roots over canonical declarations."""
 
 from enum import StrEnum
+from pathlib import Path
 
 from lup.providers.claude.harness import (
     ClaudeAgentRenderer,
@@ -11,6 +12,7 @@ from lup.providers.claude.harness import (
     ClaudeSkillRenderer,
     ClaudeSpellings,
 )
+from lup.providers.codex.patch import patched_files
 from lup.providers.codex.harness import (
     CodexAgentRenderer,
     CodexGuidanceRenderer,
@@ -32,6 +34,7 @@ from lup.harness.models import (
     Plugin,
 )
 from lup.harness.validation import validated_tree
+from lup.policy.review import ReviewedFile
 from lup.types import JsonObject
 
 
@@ -217,3 +220,54 @@ def compile_codex(source: Harness) -> ArtifactTree:
     reject_oversized_guidance(guidance)
     artifacts.extend(guidance.artifacts)
     return validated_tree(artifacts)
+
+
+def patch_review(command: str, cwd: Path) -> list[ReviewedFile]:
+    """Decode a patch envelope into the before/after pairs a reviewer reads.
+
+    Named here rather than at the surface that renders them, for the reason
+    every other function in this module is: the envelope's grammar is one
+    adapter's word, and this is where an adapter may be named. What a review
+    receives is the neutral pair, so the surface stays portable and a second
+    runtime's envelope becomes another arm here rather than another import
+    there.
+
+    The decoder is the one the dispatcher judges with, which is the whole
+    point of not writing a second: a reviewer shown a different reading of the
+    patch would be approving a different patch.
+
+    Both documents come out of the decode rather than off disk, because an
+    approval binds to the operation as submitted -- a preimage re-read from a
+    file that moved since would show a change nobody proposed.
+    """
+
+    def resolved(path: str) -> Path:
+        """One decoded path against the directory the operation ran in."""
+        named = Path(path)
+        return named if named.is_absolute() else cwd / named
+
+    def document(path: str) -> str | None:
+        """What stood at one path, with absence kept apart from emptiness."""
+        target = resolved(path)
+        return (
+            target.read_text(encoding="utf-8", errors="replace")
+            if target.is_file()
+            else None
+        )
+
+    try:
+        decoded = patched_files(command, document)
+    except ValueError:
+        # An envelope this cannot read is a question with no diff rather than
+        # a listing that fails: the payload is still printed, and a reviewer
+        # reads exactly what the agent submitted.
+        return []
+    return [
+        ReviewedFile(
+            path=resolved(change.path),
+            before=change.before,
+            after=change.after,
+            overwrite=change.overwrite,
+        )
+        for change in decoded
+    ]
