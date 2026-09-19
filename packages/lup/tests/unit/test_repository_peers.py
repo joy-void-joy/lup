@@ -14,28 +14,45 @@ from pathlib import Path
 
 import pytest
 
+import json
+
 from lup.channels.models import utc_now
+from lup.coordination.bare import store
+from lup.coordination.bare.changes import MOVED_LINE, changes
 from lup.coordination.identity import (
     MEMBER_ENV,
     NAME_ENV,
-    MemberNames,
     NameTakenError,
     derived_cli_name,
-    member_ref,
     mint_member_id,
     session_member_id,
 )
 from lup.coordination.peer_tools import create_peer_tools
-from lup.coordination.bare.store import reset
 from lup.coordination.repository import (
     PeerDepartedError,
     RepositoryPeers,
     Retention,
     launched_member,
 )
-from lup.coordination.roster import ActorDescribed, Delivery
+from lup.coordination.roster import Delivery
 from lup.coordination.meeting import coordination_root
 from lup.tools.mcp import LupMcpTool, ToolResponse, response_text
+
+
+def written(transcript: Path, roots: int) -> None:
+    """A transcript with this many conversations in it, as a rewind leaves one.
+
+    A rewind appends a root to the same file — a turn parented by nothing —
+    which is the one sign the runtime leaves that the conversation this prompt
+    belongs to is not the one before it.
+    """
+    transcript.write_text(
+        "".join(
+            json.dumps({"type": "user", "uuid": f"u{index}", "parentUuid": None}) + "\n"
+            for index in range(roots)
+        ),
+        encoding="utf-8",
+    )
 
 
 def joined(
@@ -84,7 +101,7 @@ def test_a_name_written_down_before_a_rename_still_reaches_its_session(
     peers.rename(member, "merger")
 
     assert peers.address("reviewer") == peers.address("merger")
-    assert peers.names.current(member) == "merger"
+    assert peers.called(member) == "merger"
 
 
 def test_a_name_a_live_session_answers_to_cannot_be_taken(tmp_path: Path) -> None:
@@ -97,7 +114,7 @@ def test_a_name_a_live_session_answers_to_cannot_be_taken(tmp_path: Path) -> Non
         peers.rename(second, "reviewer")
 
     assert refused.value.holder_id == first
-    assert peers.names.current(second) == "worker"
+    assert peers.called(second) == "worker"
     with pytest.raises(NameTakenError):
         peers.join(mint_member_id(), tmp_path / "third", cli_name="reviewer")
 
@@ -143,7 +160,7 @@ def test_two_sessions_in_one_worktree_are_numbered_apart(tmp_path: Path) -> None
     peers.join(second, worktree)
     peers.join(third, worktree)
 
-    assert [peers.names.current(one) for one in (first, second, third)] == [
+    assert [peers.called(one) for one in (first, second, third)] == [
         "dev",
         "dev-2",
         "dev-3",
@@ -167,8 +184,8 @@ def test_a_numbered_name_is_kept_across_rejoins_and_freed_by_a_departure(
     peers.leave(first)
     peers.join(third, worktree)
 
-    assert peers.names.current(second) == "dev-2"
-    assert peers.names.current(third) == "dev"
+    assert peers.called(second) == "dev-2"
+    assert peers.called(third) == "dev"
 
 
 def test_a_launched_session_joins_under_the_name_its_launcher_minted(
@@ -181,7 +198,7 @@ def test_a_launched_session_joins_under_the_name_its_launcher_minted(
 
     peers.join(member, tmp_path / "dev")
 
-    assert peers.names.current(member) == "dev-2"
+    assert peers.called(member) == "dev-2"
 
 
 def test_a_launcher_mints_a_name_no_live_session_answers_to(tmp_path: Path) -> None:
@@ -220,6 +237,7 @@ def test_a_listing_says_what_each_session_is_holding_not_only_what_it_claims(
     peers, member = joined(tmp_path, "reviewer")
 
     peers.describe(member, "reading the merge")
+    (tmp_path / "packages" / "lup").mkdir(parents=True)
     peers.lock(member, tmp_path / "packages" / "lup")
 
     [view] = peers.listing()
@@ -253,10 +271,14 @@ def test_a_claim_nothing_could_attribute_appears_on_both_sessions_rows(
     second = mint_member_id()
     peers.join(second, tmp_path / "other", cli_name="second")
     disputed = tmp_path / "src" / "shared.py"
+    disputed.parent.mkdir(parents=True, exist_ok=True)
+    disputed.write_text("shared = True\n", encoding="utf-8")
 
-    peers.touches.contested(
-        member_ref(first), disputed, rivals=[member_ref(second)], digest="abc"
-    )
+    # Nothing records the contest. Each session writes down what it left the
+    # path in, on its own file, and the two meeting there is the whole of it —
+    # which is what a single record with a guessed author could never be.
+    peers.touched(first, disputed)
+    peers.touched(second, disputed)
 
     rows = {view.address: view for view in peers.listing()}
     assert rows["first"].contested == [f"at {disputed}"]
@@ -371,7 +393,7 @@ def test_a_session_with_no_name_is_called_after_its_worktree(tmp_path: Path) -> 
 
     peers.join(member, tmp_path / "feat-coordination")
 
-    assert peers.names.current(member) == "feat-coordination"
+    assert peers.called(member) == "feat-coordination"
     assert derived_cli_name(tmp_path / "feat-coordination") == "feat-coordination"
 
 
@@ -394,15 +416,26 @@ def test_a_session_nobody_launched_answers_to_its_own_runtime_identity(
     assert session_member_id() == ""
 
 
-def test_renames_are_a_record_rather_than_a_field(tmp_path: Path) -> None:
-    """Every naming is kept, which is what lets an old one go on resolving."""
-    names = MemberNames(tmp_path / "names.jsonl")
-    names.rename("one", "first")
-    names.rename("one", "second")
+def test_every_name_a_session_answered_to_stays_on_its_own_file(
+    tmp_path: Path,
+) -> None:
+    """Kept rather than replaced, which is what lets an old one go on resolving.
 
-    assert [record.cli_name for record in names.named()] == ["first", "second"]
-    assert names.resolve("first") == "one"
-    assert names.current("one") == "second"
+    On the member rather than in a record beside it: the two were only ever
+    read together, and a name is the member changing rather than an event
+    about it.
+    """
+    peers, member = joined(tmp_path, "first")
+
+    peers.rename(member, "second")
+
+    [found] = [one for one in store.members(peers.root) if one.get("id") == member]
+    assert [named.get("cli_name") for named in store.names_of(found)] == [
+        "first",
+        "second",
+    ]
+    assert peers.answering("first") == member
+    assert peers.called(member) == "second"
 
 
 async def test_a_session_using_its_tools_is_on_the_roster(tmp_path: Path) -> None:
@@ -478,24 +511,24 @@ async def test_a_rewind_unsays_the_description_and_the_verbs_ask_again(
 ) -> None:
     """What a discarded conversation said it was on is not what this one is on.
 
-    The description is written a second in the past because a file stamp
-    carries the kernel's coarse clock, which can trail the record's clock by a
-    tick; a real rewind is human time away from whatever the row last said.
+    The rewind is noticed where the conversation is visible — the prompt fold,
+    which reads the transcript this prompt belongs to against the one this
+    session's row records — and what it leaves is this row with nothing said
+    about itself. The verbs then ask again, because they read the same field
+    every peer does.
     """
     peers = RepositoryPeers(tmp_path)
     tools = verbs(peers, "abc123", tmp_path / "feat-thing")
     peers.join("abc123", tmp_path / "feat-thing")
-    peers.cohort.roster.stream.append(
-        ActorDescribed(
-            actor=member_ref("abc123"),
-            description="the old plan",
-            at=utc_now() - timedelta(seconds=1),
-        )
-    )
-    await tools["coordination_peers"].handler({})
+    await tools["coordination_describe"].handler({"description": "the old plan"})
+    transcript = tmp_path / "transcript.jsonl"
+    written(transcript, roots=1)
+    changes(peers.root, "abc123", tmp_path / "feat-thing", str(transcript))
 
-    reset(peers.root, "abc123")
+    written(transcript, roots=2)
+    told = changes(peers.root, "abc123", tmp_path / "feat-thing", str(transcript))
 
+    assert told and told[0] == MOVED_LINE
     assert "coordination_describe" in refusal(
         await tools["coordination_peers"].handler({})
     )
@@ -536,7 +569,7 @@ async def test_the_rename_verb_refuses_a_name_a_live_session_answers_to(
     )
 
     await tools["coordination_rename"].handler({"name": "merger"})
-    assert peers.names.current("abc123") == "merger"
+    assert peers.called("abc123") == "merger"
     found = peers.address("merger")
     assert found is not None and found.id == "abc123"
 
@@ -572,21 +605,27 @@ async def test_releasing_a_prefix_this_session_does_not_hold_is_refused(
     assert peers.holding(held / "a.py")
 
 
-def test_a_claim_over_a_path_that_has_gone_is_ended_by_the_sweep(
+def test_a_claim_over_a_path_that_has_gone_ends_at_the_read(
     tmp_path: Path,
 ) -> None:
-    """A worktree removed from under a live session takes its paths with it."""
+    """A worktree removed from under a live session takes its paths with it.
+
+    Nothing is swept and nothing is written. The claim carries the path's
+    modification time, so a reader asks the filesystem: gone is vacant, and a
+    file written since is somebody else's state rather than this session's.
+    That is what kept a claim over a deleted worktree standing for a day —
+    there was a record and nothing to retire it with.
+    """
     peers, member = joined(tmp_path, "reviewer")
     tree = tmp_path / "tree"
     tree.mkdir()
     changed = tree / "a.py"
     changed.write_text("value = 1\n", encoding="utf-8")
-    peers.touches.touched(member_ref(member), changed, digest="abc")
+    peers.touched(member, changed)
     assert [claim.path for claim in peers.held()] == [str(changed)]
 
     changed.unlink()
-    assert [claim.path for claim in peers.held()] == [str(changed)]
-    peers.sweep()
+
     assert peers.held() == []
 
     changed.write_text("value = 2\n", encoding="utf-8")

@@ -51,6 +51,7 @@ from .mail import Notice, notices
 from .store import (
     LOOKS_DIR,
     MEMBER_KIND,
+    conversation_of,
     Conversation,
     Held,
     Member,
@@ -58,6 +59,7 @@ from .store import (
     called,
     held,
     present,
+    session_actor,
     revised,
     text,
 )
@@ -185,9 +187,7 @@ def turns(transcript: Path) -> list[TranscriptEntry]:
         lines = transcript.read_text("utf-8").splitlines()
     except OSError:
         return []
-    return [
-        entry for line in lines for entry in [entry_of(line)] if entry is not None
-    ]
+    return [entry for line in lines for entry in [entry_of(line)] if entry is not None]
 
 
 def entry_of(line: str) -> TranscriptEntry | None:
@@ -252,11 +252,7 @@ def looked(root: Path, mine: str, checkout: str) -> Folded:
         if text(member.get("kind")) == MEMBER_KIND
     }
     names = called(root)
-    live = [
-        member_id
-        for member_id, member in members.items()
-        if member.get("running")
-    ]
+    live = [member_id for member_id, member in members.items() if member.get("running")]
     claims = [claim for claim in held(root, live) if concerns(claim, checkout)]
 
     def name(member_id: str) -> str:
@@ -304,6 +300,18 @@ def stated(notice: Notice) -> str:
     """One standing fact as a reader is told it, with whoever posted it."""
     by = text(notice.get("by"))
     return text(notice.get("text")) + (f" ({by})" if by else "")
+
+
+# lup: ignore[dict-str-payload] — the look's own ``standing`` map, passed as
+# the field it is rather than copied into a shape this half has no type for
+def standing_lines(standing: dict[str, str]) -> list[str]:
+    """Facts standing over this repository, as a prompt carries them.
+
+    The same framing at a baseline as at a difference, so a session that
+    arrived after a notice was posted reads what one already here read when it
+    was — and neither is left to guess whether the line is news or a state.
+    """
+    return [f"standing: {said}" for _, said in sorted(standing.items())]
 
 
 def last_look(cursor: Path) -> Look | None:
@@ -377,11 +385,13 @@ def differences(before: Look, now: Look, members: dict[str, Member]) -> list[str
         member = members.get(member_id)
         return text(member.get("summary")) if member else ""
 
-    standing = [
-        f"standing: {said}"
-        for notice_id, said in sorted(now["standing"].items())
-        if notice_id not in before["standing"]
-    ]
+    posted = standing_lines(
+        {
+            notice_id: said
+            for notice_id, said in now["standing"].items()
+            if notice_id not in before["standing"]
+        }
+    )
     lifted = [
         f"no longer standing: {said}"
         for notice_id, said in sorted(before["standing"].items())
@@ -421,7 +431,7 @@ def differences(before: Look, now: Look, members: dict[str, Member]) -> list[str
         and seen["doing"] != before["peers"][member_id]["doing"]
     ]
     return [
-        *standing,
+        *posted,
         *lifted,
         *contested,
         *holding,
@@ -451,7 +461,7 @@ def rewound(root: Path, mine: str, here: Conversation) -> None:
         settled["conversation"] = here
         return settled
 
-    revised(root, mine, afresh)
+    revised(root, session_actor(mine), afresh)
 
 
 def opened(root: Path, mine: str, here: Conversation) -> None:
@@ -463,7 +473,7 @@ def opened(root: Path, mine: str, here: Conversation) -> None:
         settled["conversation"] = here
         return settled
 
-    revised(root, mine, belongs)
+    revised(root, session_actor(mine), belongs)
 
 
 def changes(root: Path, mine: str, checkout: Path, transcript: str = "") -> list[str]:
@@ -485,8 +495,8 @@ def changes(root: Path, mine: str, checkout: Path, transcript: str = "") -> list
     folded = looked(root, mine, str(checkout))
     if not folded["members"]:
         return []
-    beat(root, mine)
-    cursor = root / LOOKS_DIR / f"{MEMBER_KIND}-{mine}.json"
+    beat(root, session_actor(mine))
+    cursor = root / LOOKS_DIR / f"{conversation_of(session_actor(mine))}.json"
     before = last_look(cursor)
     now = folded["look"]
     here = conversation(transcript)
@@ -494,7 +504,7 @@ def changes(root: Path, mine: str, checkout: Path, transcript: str = "") -> list
     if before is None:
         opened(root, mine, here)
         remember(cursor, now)
-        return [*sorted(now["standing"].values()), pointer(len(now["peers"]))]
+        return [*standing_lines(now["standing"]), pointer(len(now["peers"]))]
     if moved(said, here):
         rewound(root, mine, here)
         remember(cursor, now)

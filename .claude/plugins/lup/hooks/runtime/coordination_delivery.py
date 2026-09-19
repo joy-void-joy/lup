@@ -43,6 +43,7 @@ from typing import TypedDict
 # interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parent))
 from coordination.mail import Message, consume, spoken, waiting
+from coordination.store import MEMBER_KIND, Actor, conversation_of
 
 EVENT_FIELD = "hookEventName"
 EVENT_NAME = "PreToolUse"
@@ -96,14 +97,20 @@ def envelope(messages: list[Message]) -> HookOutput:
 def deliver(root: Path, member_id: str) -> HookOutput | None:
     """Take this member's mail and say what the session should be told.
 
+    The inbox is keyed by the conversation this session is on the roster as,
+    spelled by the shipped fold rather than assembled here: a sender writes to
+    the same key through the typed half, and a directory only one of them
+    could name is a message nobody receives.
+
     Consumed by deleting exactly what is being handed over, so a message that
     arrived between the listing and the deletion waits for the next call
     rather than leaving unseen.
     """
-    messages = waiting(root, member_id)
+    inbox = conversation_of(Actor(kind=MEMBER_KIND, id=member_id))
+    messages = waiting(root, inbox)
     if not messages:
         return None
-    consume(root, member_id, messages)
+    consume(root, inbox, messages)
     return envelope(messages)
 
 

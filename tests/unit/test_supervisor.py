@@ -29,7 +29,7 @@ from lup.sessions.events import TurnEvent
 from lup.coordination.mailbox import AnswerDoor, RecordedAnswer
 from lup.coordination.questions import QuestionAnswer
 from lup.coordination.refs import ActorRef
-from lup.coordination.bare.store import ROSTER_FILE
+from lup.resolver.mailbox import run_cohort
 from lup.coordination.roster import Roster
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.resolver.models import (
@@ -302,34 +302,97 @@ async def test_a_message_reaches_an_actor_without_parking_the_run(
 ) -> None:
     """A message settles nothing, so no amount of messaging can park a run.
 
-    That is the whole reason messages are a stream and decisions are slots.
+    That is the whole reason messages ride an inbox and decisions ride slots.
+    The recipient is spawned first because an inbox belongs to a member: the
+    address is resolved against the population, and a spelling this run never
+    recorded is reported rather than written into a directory nobody reads.
     """
     mailbox = build_run(tmp_path)
+    cohort = run_cohort(mailbox, "run-1")
+    worker = ActorRef(kind="worker", id="a")
+    cohort.roster.spawned(worker, "resolve a")
 
     async with client_for(tmp_path) as client:
         sent = await client.post(
             "/api/runs/run-1/messages",
             json={"text": "the sibling already renamed that", "to_actor": "worker:a#1"},
         )
+        missing = await client.post(
+            "/api/runs/run-1/messages",
+            json={"text": "anyone there", "to_actor": "worker:nobody"},
+        )
 
     assert sent.status_code == 200
-    waiting = mailbox.waiting(ActorRef(kind="worker", id="a"))
-    assert [message.text for message in waiting.messages] == [
+    assert [message.text for message in cohort.mail.waiting(worker).messages] == [
         "the sibling already renamed that"
     ]
     assert sent.json()["status"] != "awaiting_answers"
+    assert missing.status_code == 400
+    assert "no actor this run has recorded" in missing.json()["detail"]
 
 
-async def test_a_broadcast_reaches_every_actor(tmp_path: Path) -> None:
+async def test_a_redirect_naming_nobody_stops_whoever_is_working(
+    tmp_path: Path,
+) -> None:
+    """Every live actor, resolved at the send rather than matched at each read.
+
+    A redirect denies a tool call, so "everyone" can only honestly mean
+    everyone with a call to deny. An actor spawned afterwards was spawned
+    knowing about the stop and is left alone.
+    """
     mailbox = build_run(tmp_path)
-
-    async with client_for(tmp_path) as client:
-        await client.post("/api/runs/run-1/messages", json={"text": "stop rewriting"})
-
+    cohort = run_cohort(mailbox, "run-1")
     merger = ActorRef(kind="merger", id="integration")
     reviewer = ActorRef(kind="reviewer", id="b", round=2)
-    assert len(mailbox.waiting(merger).messages) == 1
-    assert len(mailbox.waiting(reviewer).messages) == 1
+    cohort.roster.spawned(merger, "integrate")
+    cohort.roster.spawned(reviewer, "review b")
+
+    async with client_for(tmp_path) as client:
+        stopped = await client.post(
+            "/api/runs/run-1/messages",
+            json={"text": "stop rewriting", "redirect": True},
+        )
+
+    assert stopped.status_code == 200
+    assert len(cohort.mail.waiting(merger).messages) == 1
+    assert len(cohort.mail.waiting(reviewer).messages) == 1
+
+
+async def test_a_message_naming_nobody_is_refused_rather_than_broadcast(
+    tmp_path: Path,
+) -> None:
+    """Mail is addressed and consumed, so there is no honest reading of "all"."""
+    build_run(tmp_path)
+
+    async with client_for(tmp_path) as client:
+        refused = await client.post(
+            "/api/runs/run-1/messages", json={"text": "stop rewriting"}
+        )
+
+    assert refused.status_code == 400
+    assert "notice" in refused.json()["detail"]
+
+
+async def test_a_notice_stands_over_the_run_until_it_is_taken_down(
+    tmp_path: Path,
+) -> None:
+    """State rather than mail: read at every turn head, and never consumed."""
+    mailbox = build_run(tmp_path)
+    cohort = run_cohort(mailbox, "run-1")
+
+    async with client_for(tmp_path) as client:
+        posted = await client.post(
+            "/api/runs/run-1/notices", json={"text": "the base moved under all of you"}
+        )
+        [standing] = cohort.mail.standing()
+        lifted = await client.delete(f"/api/runs/run-1/notices/{standing.id}")
+        absent = await client.delete("/api/runs/run-1/notices/nothing")
+
+    assert posted.status_code == 200
+    assert standing.text == "the base moved under all of you"
+    assert lifted.status_code == 200
+    assert absent.status_code == 404
+    assert cohort.mail.standing() == []
 
 
 async def test_the_review_branch_is_reported_with_no_decision_to_take(
@@ -509,7 +572,7 @@ def test_a_redirect_reports_who_it_is_queued_for_rather_than_that_it_sent(
     build_run(tmp_path)
     # The population record, which is what a door resolves an address
     # against — the run announces each round as it opens one.
-    Roster(tmp_path / "run-1" / ROSTER_FILE).spawned(
+    Roster(tmp_path / "run-1").spawned(
         ActorRef(kind="worker", id="alpha", round=2), "resolve alpha"
     )
 

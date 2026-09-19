@@ -1,25 +1,38 @@
 """A session's row is present while its pulse says so, and gone when it stops.
 
 Written against the failure the roster had: every session that ever joined
-read as running forever, because the only record that ends a row is the one a
-session writes on its way out, and a killed session writes nothing. What is
-asserted is the read a peer makes — the listing, and the claims that expire
-with a session — and the sweep that makes the read durable.
+read as running forever, because the only record that ended a row was the one
+a session wrote on its way out, and a killed session writes nothing. The pulse
+is the member's own file now — its modification time, touched while the
+session lives — so there is one fact rather than a record and a stamp beside
+it, and no way for the two to disagree. What is asserted is the read a peer
+makes: the listing, the claims that expire with a session, and the sweep that
+moves a stopped session's file where a listing agrees with a stat.
 """
 
 import asyncio
+import os
 from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from lup.channels.models import utc_now
-from lup.coordination.identity import member_ref, mint_member_id
+from lup.coordination.identity import mint_member_id
 from lup.coordination.peer_tools import RosterPulse
-from lup.coordination.bare.store import HEARTBEATS_DIR, beat, heard_at, reset
+from lup.coordination.bare.store import (
+    DEPARTED_DIR,
+    MEMBERS_DIR,
+    beat,
+    conversation_of,
+    departed_path,
+    member_path,
+    session_actor,
+    present,
+)
 from lup.coordination.pulse import Pulse
 from lup.coordination.refs import ActorRef
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import ActorDescribed, ActorJoined, SpawnedActor
+from lup.coordination.roster import SpawnedActor
 from lup.coordination.meeting import coordination_root
 
 FOREVER = Pulse(stale_after_seconds=3600.0)
@@ -45,24 +58,56 @@ def row(
     return found
 
 
-def test_a_beat_is_one_file_per_member_whose_time_is_the_beat(tmp_path: Path) -> None:
-    assert heard_at(tmp_path, "abc") is None
+def silent_since(peers: RepositoryPeers, member: str, ago: timedelta) -> None:
+    """Put this member's file back in time, the way a stopped session leaves it.
 
+    The modification time *is* the pulse, so backdating the file is the whole
+    of what a session that stopped beating looks like — which is why nothing
+    has to be appended anywhere to arrange one.
+    """
+    when = (utc_now() - ago).timestamp()
+    os.utime(member_path(peers.root, session_actor(member)), (when, when))
+
+
+def heard(peers: RepositoryPeers, member: str) -> datetime | None:
+    """When this member was last heard from, as every reader reads it."""
+    return row(peers, member).heard
+
+
+def test_a_beat_touches_the_member_s_own_file_and_nothing_else(
+    tmp_path: Path,
+) -> None:
+    """One fact rather than two: there is no stamp beside the row to disagree."""
+    peers, member = joined(tmp_path, "mine", FOREVER)
+    said = row(peers, member).description
+
+    silent_since(peers, member, timedelta(hours=1))
     before = utc_now()
-    beat(tmp_path, "abc")
-    heard = heard_at(tmp_path, "abc")
+    beat(peers.root, session_actor(member))
+    when = heard(peers, member)
 
-    assert (tmp_path / HEARTBEATS_DIR / "abc").is_file()
-    assert heard is not None
-    assert before - timedelta(seconds=1) <= heard <= utc_now() + timedelta(seconds=1)
+    assert when is not None
+    assert before - timedelta(seconds=1) <= when <= utc_now() + timedelta(seconds=1)
+    assert row(peers, member).description == said
+    assert not (peers.root / "heartbeats").exists()
 
 
-def test_a_session_just_joined_is_present_on_its_record_alone(tmp_path: Path) -> None:
-    """The arrival counts as being heard, so a session needs no beat to be seen."""
+def test_a_beat_for_a_member_that_never_joined_writes_nothing(tmp_path: Path) -> None:
+    """A pulse is a member saying it is still here, and there is no member."""
+    peers, _ = joined(tmp_path, "mine", FOREVER)
+
+    beat(peers.root, session_actor("nobody"))
+
+    assert not member_path(peers.root, session_actor("nobody")).exists()
+
+
+def test_a_session_just_joined_is_present_without_having_beaten(
+    tmp_path: Path,
+) -> None:
+    """Writing the file is being heard, so a session needs no beat to be seen."""
     peers, member = joined(tmp_path, "mine", FOREVER)
 
     assert row(peers, member).running
-    assert heard_at(peers.root, member) is None
 
 
 def test_a_session_whose_pulse_stopped_reads_as_gone_and_says_since_when(
@@ -77,20 +122,33 @@ def test_a_session_whose_pulse_stopped_reads_as_gone_and_says_since_when(
     assert member not in peers.live_ids()
 
 
-def test_a_beat_keeps_a_session_present_past_its_record(tmp_path: Path) -> None:
-    """The record says when a session last spoke; the pulse says it is still there."""
-    peers = RepositoryPeers(tmp_path, pulse=Pulse(stale_after_seconds=60.0))
-    member = mint_member_id()
-    long_ago = utc_now() - timedelta(hours=1)
-    peers.cohort.roster.stream.append(
-        ActorJoined(actor=member_ref(member), task="working", at=long_ago)
-    )
+def test_a_beat_keeps_a_session_present_past_its_last_write(tmp_path: Path) -> None:
+    """The file says what a session is; its time says when it last said so."""
+    peers, member = joined(tmp_path, "mine", Pulse(stale_after_seconds=60.0))
+    silent_since(peers, member, timedelta(hours=1))
 
     assert not row(peers, member).running
 
     peers.beat(member)
 
     assert row(peers, member).running
+
+
+def test_a_reader_never_reads_its_own_row_as_absent(tmp_path: Path) -> None:
+    """The reader is manifestly here, and its own beat may land after the read.
+
+    Named at the fold, because that is where a reader knows which row is its
+    own: a listing asked about the population has no such member, and one
+    reading on behalf of a session says so.
+    """
+    peers, member = joined(tmp_path, "mine", INSTANTLY)
+
+    assert not row(peers, member).running
+    assert [
+        one.get("running")
+        for one in present(peers.root, mine=member, window=0.0)
+        if one.get("id") == member
+    ] == [True]
 
 
 def test_a_spawned_agent_is_answered_for_by_its_spawner_not_by_a_pulse(
@@ -106,24 +164,30 @@ def test_a_spawned_agent_is_answered_for_by_its_spawner_not_by_a_pulse(
 def test_a_gone_session_no_longer_holds_its_claims(tmp_path: Path) -> None:
     """Expiry is the roster's, and the roster reads the pulse."""
     peers, member = joined(tmp_path, "mine", FOREVER)
-    peers.touches.touched(member_ref(member), tmp_path / "tree" / "a.py")
+    changed = tmp_path / "tree" / "a.py"
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("x = 1", encoding="utf-8")
+    peers.touched(member, changed)
 
-    assert [claim.path for claim in peers.held()] == [str(tmp_path / "tree" / "a.py")]
+    assert [claim.path for claim in peers.held()] == [str(changed)]
 
     peers.pulse = INSTANTLY
 
     assert peers.held() == []
 
 
-def test_a_sweep_writes_the_finish_and_the_next_join_revives_the_row(
+def test_a_sweep_moves_the_file_and_the_next_join_revives_the_row(
     tmp_path: Path,
 ) -> None:
+    """A listing that reads the directory agrees with one that stats the file."""
     peers, member = joined(tmp_path, "mine", INSTANTLY)
 
     retired = peers.sweep()
 
     assert [one.actor.id for one in retired] == [member]
-    [recorded] = [one for one in peers.cohort.live() if one.actor.id == member]
+    assert not member_path(peers.root, session_actor(member)).exists()
+    assert departed_path(peers.root, session_actor(member)).is_file()
+    [recorded] = [one for one in peers.present() if one.actor.id == member]
     assert not recorded.running
     assert recorded.error.startswith("unheard since ")
     assert peers.sweep() == []
@@ -133,6 +197,22 @@ def test_a_sweep_writes_the_finish_and_the_next_join_revives_the_row(
 
     assert row(peers, member).running
     assert row(peers, member).error == ""
+    assert peers.called(member) == "mine"
+
+
+def test_a_sweep_deletes_a_departure_past_the_retention_window(
+    tmp_path: Path,
+) -> None:
+    """The store is the population rather than its history."""
+    peers, member = joined(tmp_path, "mine", FOREVER)
+    peers.leave(member, summary="landed it")
+
+    assert departed_path(peers.root, session_actor(member)).is_file()
+
+    peers.sweep(now=utc_now() + timedelta(seconds=peers.retention.departed_seconds * 2))
+
+    assert not departed_path(peers.root, session_actor(member)).exists()
+    assert peers.present() == []
 
 
 async def test_the_server_companion_sweeps_and_beats_while_it_serves(
@@ -153,8 +233,9 @@ async def test_the_server_companion_sweeps_and_beats_while_it_serves(
     with suppress(asyncio.CancelledError):
         await serving
 
-    assert heard_at(peers.root, me) is not None
-    [recorded] = [one for one in peers.cohort.live() if one.actor.id == stale]
+    assert member_path(peers.root, session_actor(me)).is_file()
+    assert departed_path(peers.root, session_actor(stale)).is_file()
+    [recorded] = [one for one in peers.present() if one.actor.id == stale]
     assert not recorded.running
     assert recorded.error.startswith("unheard since ")
 
@@ -165,7 +246,7 @@ async def test_the_companion_puts_back_a_row_the_session_outlived(
     """A finish written while the process lives on is undone by the next tick."""
     peers, me = joined(tmp_path, "mine", FOREVER)
     peers.leave(me)
-    assert not [one for one in peers.cohort.live() if one.actor.id == me][0].running
+    assert not member_path(peers.root, session_actor(me)).exists()
     companion = RosterPulse(
         root=tmp_path, member_id=me, pulse=Pulse(interval_seconds=0.01)
     )
@@ -177,7 +258,7 @@ async def test_the_companion_puts_back_a_row_the_session_outlived(
         await serving
 
     assert row(peers, me).running
-    assert len([one for one in peers.cohort.live() if one.actor.id == me]) == 1
+    assert len([one for one in peers.present() if one.actor.id == me]) == 1
 
 
 async def test_the_companion_writes_nothing_where_no_session_ever_joined(
@@ -197,42 +278,11 @@ async def test_the_companion_writes_nothing_where_no_session_ever_joined(
     assert not coordination_root(tmp_path).exists()
 
 
-def test_a_moved_conversation_leaves_the_description_unsaid_until_it_speaks_again(
-    tmp_path: Path,
-) -> None:
-    """A rewind keeps the id and the pulse; what the row said belongs to what is gone.
-
-    The description is written a second in the past because a file stamp
-    carries the kernel's coarse clock, which can trail the record's clock by a
-    tick; a real rewind is human time away from whatever the row last said.
-    """
-    peers, member = joined(tmp_path, "mine", FOREVER)
-    peers.cohort.roster.stream.append(
-        ActorDescribed(
-            actor=member_ref(member),
-            description="the work the rewind discards",
-            at=utc_now() - timedelta(seconds=1),
-        )
-    )
-
-    reset(peers.root, member)
-
-    assert row(peers, member).description == ""
-    assert row(peers, member).running
-
-    peers.describe(member, "the work after it")
-
-    assert row(peers, member).description == "the work after it"
-
-
-def test_the_listing_puts_the_present_first_whatever_the_record_says(
+def test_the_listing_puts_the_present_first_whatever_the_files_say(
     tmp_path: Path,
 ) -> None:
     peers, stale = joined(tmp_path, "stale", Pulse(stale_after_seconds=60.0))
-    long_ago = utc_now() - timedelta(hours=1)
-    peers.cohort.roster.stream.append(
-        ActorJoined(actor=member_ref(stale), task="working", at=long_ago)
-    )
+    silent_since(peers, stale, timedelta(hours=1))
     fresh = mint_member_id()
     peers.join(fresh, tmp_path / "tree", cli_name="fresh")
 
@@ -240,3 +290,24 @@ def test_the_listing_puts_the_present_first_whatever_the_record_says(
 
     assert listed[0] == ("fresh", True)
     assert ("stale", False) in listed
+
+
+def test_the_store_holds_the_population_rather_than_its_history(
+    tmp_path: Path,
+) -> None:
+    """Two directories, one file each, and nothing that grows per call."""
+    peers, member = joined(tmp_path, "mine", FOREVER)
+    for _ in range(20):
+        peers.beat(member)
+        peers.describe(member, "still on it")
+
+    mine = conversation_of(session_actor(member))
+    assert sorted(
+        path.name
+        for path in (peers.root / MEMBERS_DIR).iterdir()
+        if path.name.startswith(mine)
+    ) == [
+        f"{mine}.json",
+        f"{mine}.lock",
+    ]
+    assert not (peers.root / DEPARTED_DIR).exists()

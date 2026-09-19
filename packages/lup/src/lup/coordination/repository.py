@@ -261,7 +261,7 @@ class RepositoryPeers:
         and both take the free one.
         """
         with self.naming_settled():
-            current = self.called(member_id)
+            current = self.standing_name(member_id)
             taken = self.names_taken(except_id=member_id)
             if cli_name and cli_name != current and cli_name in taken:
                 raise NameTakenError(cli_name, taken[cli_name])
@@ -272,8 +272,12 @@ class RepositoryPeers:
                 delivery=delivery,
                 worktree=str(worktree),
             )
-            chosen = cli_name or current or unique_cli_name(
-                session_cli_name() or derived_cli_name(worktree), taken
+            chosen = (
+                cli_name
+                or current
+                or unique_cli_name(
+                    session_cli_name() or derived_cli_name(worktree), taken
+                )
             )
             if chosen != current:
                 self.record_name(member_id, chosen)
@@ -301,23 +305,46 @@ class RepositoryPeers:
 
         Current names rather than every name ever claimed: a name its holder
         has renamed away from is free for somebody else to take, and goes on
-        reaching the old holder only until they do.
+        reaching the old holder only until they do. A departed session's name
+        is free for the same reason — it is not there to be confused with.
         """
+        live = self.live_ids()
         return {
             name: member_id
             for member_id, name in store.called(self.root).items()
-            if member_id != except_id and member_id in self.live_ids()
+            if member_id != except_id and member_id in live
         }
 
     def record_name(self, member_id: str, cli_name: str) -> None:
         """Append one name to this member's own file, under that member's lock."""
         store.revised(
-            self.root, member_id, lambda member: store.renamed(member, cli_name)
+            self.root,
+            store.session_actor(member_id),
+            lambda member: store.renamed(member, cli_name),
         )
 
+    def standing_name(self, member_id: str) -> str:
+        """What this session is called on a file still under ``members/``.
+
+        Deliberately blind to the departed, which is what makes a rejoin after
+        a departure name itself again. The stub a departure leaves keeps the
+        name for whoever reads *that* row, and a fresh file carrying no name
+        because a stub beside it had one would be a session nothing addresses.
+        """
+        found = store.read_member(
+            store.member_path(self.root, store.session_actor(member_id)), running=True
+        )
+        return store.current_name(found) if found is not None else ""
+
     def called(self, member_id: str) -> str:
-        """What this session is called now, blank until something named it."""
-        member = store.member_of(self.root, member_id)
+        """What this session is called now, wherever its file sits.
+
+        The departed included, because a surface reporting who left has the id
+        and wants the name — and a name a live session has since taken reaches
+        that one, which is why this is read for rendering and never for
+        deciding what is free.
+        """
+        member = store.member_of(self.root, store.session_actor(member_id))
         return store.current_name(member) if member is not None else ""
 
     def describe(self, member_id: str, description: str) -> None:
@@ -418,12 +445,6 @@ class RepositoryPeers:
         """The listing a reader with no arrival of its own gets: the retention window."""
         return self.listing(since=self.retention.since(now or utc_now()))
 
-    def standing(self) -> list[SpawnedActor]:
-        """Every member the record holds but the person, as the record alone says."""
-        return [
-            member for member in self.roster.live() if member.actor.kind != USER_KIND
-        ]
-
     def present(self, now: datetime | None = None) -> list[SpawnedActor]:
         """Every member as the files and their modification times say, live ones first.
 
@@ -441,15 +462,19 @@ class RepositoryPeers:
 
     def beat(self, member_id: str) -> None:
         """Record that this session is here now."""
-        store.beat(self.root, member_id)
+        store.beat(self.root, store.session_actor(member_id))
 
     def lapsed(self, now: datetime | None = None) -> list[SpawnedActor]:
-        """Every session whose file is still under ``members/`` and whose pulse stopped."""
-        recorded = {member.actor.id for member in self.standing() if member.running}
+        """Every session a sweep would retire: still listed, and no longer heard.
+
+        What a console prints before it sweeps, which is why it is read rather
+        than derived from a second reading of the record — there is no record
+        beside the file, and the file's own time is the whole of the answer.
+        """
         return [
-            member
-            for member in self.present(now)
-            if not member.running and member.actor.id in recorded
+            folded_member(member)
+            for member in store.lapsed(self.root, now, self.pulse.stale_after_seconds)
+            if store.text(member.get("kind")) != USER_KIND
         ]
 
     def sweep(
@@ -469,7 +494,10 @@ class RepositoryPeers:
         parameter the surfaces still pass and this no longer has a record to
         attribute to them.
         """
-        return [folded_member(member) for member in store.swept(self.root, now)]
+        return [
+            folded_member(member)
+            for member in store.swept(self.root, now, self.pulse.stale_after_seconds)
+        ]
 
     def send(
         self,
@@ -559,7 +587,9 @@ class RepositoryPeers:
         that has no file: a revision of nobody would put a row on the roster
         that never joined.
         """
-        return store.revised(self.root, member_id, revise) is not None
+        return (
+            store.revised(self.root, store.session_actor(member_id), revise) is not None
+        )
 
     def touched(self, member_id: str, *paths: Path) -> None:
         """Record that this session changed exactly these files.
@@ -600,9 +630,7 @@ class RepositoryPeers:
         """
         if not self.holds(member_id, prefix):
             return False
-        return self.revise(
-            member_id, lambda member: store.unclaimed(member, prefix)
-        )
+        return self.revise(member_id, lambda member: store.unclaimed(member, prefix))
 
 
 def launched_member(root: Path) -> LaunchedMember:

@@ -158,6 +158,17 @@ class SpawnedActor(BaseModel, frozen=True):
         return self.actor.kind
 
 
+def member_identity(actor: ActorRef) -> store.Actor:
+    """One member's address, as the store names the file that holds it.
+
+    The whole ref rather than its id, because an id is unique only within a
+    kind: two members taken on over one concern — a worker and its reviewer —
+    share one, and a store keyed by it would give them one file to answer for
+    each other from.
+    """
+    return store.Actor(kind=actor.kind, id=actor.id, round=actor.round)
+
+
 def folded_member(member: store.Member) -> SpawnedActor:
     """One member file, as a typed caller reads it.
 
@@ -204,7 +215,9 @@ class Roster:
         work then opened; for a peer, one session rejoining after a restart —
         and writing twice would reset what the first had already recorded.
         """
-        found = store.read_member(store.member_path(self.root, actor.id), running=True)
+        found = store.read_member(
+            store.member_path(self.root, member_identity(actor)), running=True
+        )
         return found is not None and store.whole(found.get("round")) >= actor.round
 
     def announce(
@@ -265,15 +278,15 @@ class Roster:
             settled["description"] = description
             return settled
 
-        store.revised(self.root, actor.id, said)
+        store.revised(self.root, member_identity(actor), said)
 
     def finished(self, actor: ActorRef, summary: str = "", error: str = "") -> None:
         """Record that this address has stopped, and how."""
-        store.depart(self.root, actor.id, summary=summary, error=error)
+        store.depart(self.root, member_identity(actor), summary=summary, error=error)
 
     def beat(self, actor: ActorRef) -> None:
         """Record that this member is here now."""
-        store.beat(self.root, actor.id)
+        store.beat(self.root, member_identity(actor))
 
     def standing(self) -> Iterator[SpawnedActor]:
         """Every member this population holds, as the read leaves each."""

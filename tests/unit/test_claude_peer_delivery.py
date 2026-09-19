@@ -58,10 +58,15 @@ def handed(root: Path, member_id: str) -> JsonObject | None:
 
 
 def queued(root: Path, member_id: str, text: str, redirect: bool = False) -> None:
-    """Put one message in a member's inbox, the way a sender leaves it."""
+    """Put one message in a member's inbox, the way a sender leaves it.
+
+    Under the conversation key the typed sender writes to, spelled by the ref
+    rather than assembled here — a directory only the test could name would
+    pin nothing about where mail actually lands.
+    """
     post(
         root,
-        member_id,
+        member_ref(member_id).conversation(),
         new_message(
             sender="somebody",
             to=member_id,
@@ -72,12 +77,21 @@ def queued(root: Path, member_id: str, text: str, redirect: bool = False) -> Non
     )
 
 
-def carried(answer: JsonObject | None) -> str:
-    """What one delivery puts in front of the session, however it was framed."""
+def spoken(answer: JsonObject | None) -> JsonObject:
+    """The envelope one delivery carries, failing where it delivered nothing."""
     assert answer is not None
     envelope = answer["hookSpecificOutput"]
-    return envelope.get("additionalContext", "") or envelope.get(
-        "permissionDecisionReason", ""
+    assert isinstance(envelope, dict)
+    return envelope
+
+
+def carried(answer: JsonObject | None) -> str:
+    """What one delivery puts in front of the session, however it was framed."""
+    envelope = spoken(answer)
+    return str(
+        envelope.get("additionalContext")
+        or envelope.get("permissionDecisionReason")
+        or ""
     )
 
 
@@ -90,9 +104,7 @@ def test_the_reader_and_the_typed_writer_meet_in_one_inbox(tmp_path: Path) -> No
     """
     ActorMail(tmp_path).send(member_ref("abc123"), "from the typed half")
 
-    assert "from the typed half" in carried(
-        handed(tmp_path, "abc123")
-    )
+    assert "from the typed half" in carried(handed(tmp_path, "abc123"))
 
 
 def test_mail_is_delivered_once_and_leaves_the_inbox(tmp_path: Path) -> None:
@@ -127,7 +139,7 @@ def test_a_redirect_stops_the_call_it_arrived_before(tmp_path: Path) -> None:
     answer = handed(tmp_path, "abc123")
 
     assert answer is not None
-    assert answer["hookSpecificOutput"].get("permissionDecision") == "deny"
+    assert spoken(answer).get("permissionDecision") == "deny"
     assert "wrong branch" in carried(answer)
 
 
@@ -142,7 +154,7 @@ def test_a_message_still_being_written_is_left_for_the_next_call(
     the messages around it.
     """
     queued(tmp_path, "abc123", "whole")
-    inbox = tmp_path / "inbox" / "abc123"
+    inbox = tmp_path / "inbox" / member_ref("abc123").conversation()
     (inbox / "half.json").write_text('{"id": "half", "text": "half', encoding="utf-8")
 
     delivered = carried(handed(tmp_path, "abc123"))
@@ -182,7 +194,7 @@ def test_the_envelope_names_the_event_the_runtime_fires_it_under(
     answer = handed(tmp_path, "abc123")
 
     assert answer is not None
-    assert answer["hookSpecificOutput"].get(bundled_delivery().EVENT_FIELD) == (
+    assert spoken(answer).get(bundled_delivery().EVENT_FIELD) == (
         bundled_delivery().EVENT_NAME
     )
     assert json.loads(json.dumps(answer)) == answer

@@ -80,14 +80,22 @@ class Notice(TypedDict, total=False):
     posted_at: str
 
 
-def inbox_path(root: Path, member_id: str) -> Path:
-    """Where one member's mail waits."""
-    return root / INBOX_DIR / member_id
+def inbox_path(root: Path, inbox: str) -> Path:
+    """Where one member's mail waits, under the conversation that reads it.
+
+    The conversation rather than the bare id, because an id is unique only
+    within a kind: a worker and a reviewer taken on over one concern share an
+    id and are two members, and one directory between them would hand each
+    the other's mail. It is also what outlives a round — a member taken
+    through a second round is that member further on, and reads what was said
+    to the first.
+    """
+    return root / INBOX_DIR / inbox
 
 
-def message_path(root: Path, member_id: str, message_id: str) -> Path:
+def message_path(root: Path, inbox: str, message_id: str) -> Path:
     """Where one message to one member sits."""
-    return inbox_path(root, member_id) / f"{message_id}.json"
+    return inbox_path(root, inbox) / f"{message_id}.json"
 
 
 def new_message(
@@ -115,7 +123,7 @@ def new_message(
     )
 
 
-def post(root: Path, member_id: str, message: Message) -> bool:
+def post(root: Path, inbox: str, message: Message) -> bool:
     """Put one message in one member's inbox, by rename.
 
     One recipient, always. Where a sender meant everyone, it resolved that
@@ -124,12 +132,12 @@ def post(root: Path, member_id: str, message: Message) -> bool:
     message for whoever owns that inbox.
     """
     landed = published(
-        message_path(root, member_id, text(message.get("id")) or uuid4().hex), message
+        message_path(root, inbox, text(message.get("id")) or uuid4().hex), message
     )
     return landed is not None
 
 
-def waiting(root: Path, member_id: str) -> list[Message]:
+def waiting(root: Path, inbox: str) -> list[Message]:
     """Everything queued for this member, oldest first, consuming none of it.
 
     Reading is separated from consuming so that asking what a member has
@@ -138,14 +146,14 @@ def waiting(root: Path, member_id: str) -> list[Message]:
     """
     found = [
         message
-        for path in listed(inbox_path(root, member_id))
+        for path in listed(inbox_path(root, inbox))
         for message in [loaded(path, Message)]
         if message is not None and text(message.get("id"))
     ]
     return sorted(found, key=lambda message: text(message.get("sent_at")))
 
 
-def consume(root: Path, member_id: str, messages: list[Message]) -> None:
+def consume(root: Path, inbox: str, messages: list[Message]) -> None:
     """Take these messages out of this member's inbox, having handed them over.
 
     By deletion, which is what makes the inbox its own position: there is no
@@ -153,7 +161,7 @@ def consume(root: Path, member_id: str, messages: list[Message]) -> None:
     handed over, and a second reader cannot be behind a first.
     """
     for message in messages:
-        discarded(message_path(root, member_id, text(message.get("id"))))
+        discarded(message_path(root, inbox, text(message.get("id"))))
 
 
 def notice_path(root: Path, notice_id: str) -> Path:

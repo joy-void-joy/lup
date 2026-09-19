@@ -15,9 +15,9 @@ from typing import Literal
 import pytest
 from pydantic import Field, ValidationError
 
-from lup.coordination.bare.store import ROSTER_FILE
+from lup.coordination.bare.store import Member
 from lup.coordination.refs import ActorRef
-from lup.coordination.roster import ActorJoined, Delivery, Roster, SpawnedActor
+from lup.coordination.roster import Delivery, Roster, SpawnedActor
 from lup.coordination.wake import WakePath
 from lup.ledger.journal import LedgerRefusal, LedgerStore
 from lup.ledger.models import LedgerEdge, LedgerNode, Standing, Surroundings
@@ -316,27 +316,35 @@ def test_every_field_an_arrival_carries_reaches_the_member_it_becomes(
     """A fold that drops a field is a fact that silently stops applying.
 
     Structural rather than per-field, because the failure this catches is
-    somebody adding a field to the arrival record and not to the fold — which
+    somebody adding a field to the member file and not to the fold — which
     happened while `wake` was being added, and which the type checker cannot
     see because both sides default.
 
-    Through the file rather than through a call, because the fold is now the
-    one every reader of the store shares: what is asserted is that a record
-    the typed writer serializes survives being read back by a half that
-    imports none of its types.
+    Through the file rather than through a call, because the fold is the one
+    every reader of the store shares: what is asserted is that what the typed
+    writer put down survives being read back by a half that imports none of
+    its types. The exempt set is the fields nothing an arrival says carries —
+    a description a session has not given, an outcome it has not reached, and
+    the presence the file's own modification time answers for.
     """
-    shared = set(ActorJoined.model_fields) & set(SpawnedActor.model_fields)
-    arrival = ActorJoined(
-        actor=ActorRef(kind="session", id="alpha"),
-        task="working",
-        liveness="watcher",
-        delivery=Delivery.INBOX,
-        worktree="/tmp/tree",
-        wake=WakePath(runtime="codex", handle="thread-1"),
-        at=datetime(2026, 9, 9, tzinfo=UTC),
-    )
-    roster = Roster(tmp_path / ROSTER_FILE)
-    roster.stream.append(arrival)
+    written = {
+        "task": "working",
+        "liveness": "watcher",
+        "delivery": Delivery.INBOX,
+        "worktree": "/tmp/tree",
+        "wake": WakePath(runtime="codex", handle="thread-1"),
+    }
+    shared = set(Member.__annotations__) & set(SpawnedActor.model_fields)
+    roster = Roster(tmp_path)
+    roster.joined(ActorRef(kind="session", id="alpha"), **written)
+
     member = next(iter(roster.standing()))
-    for field in shared - {"at", "type", "running"}:
-        assert getattr(member, field) == getattr(arrival, field), field
+
+    derived = {"running", "heard", "arrived", "description", "summary", "error"}
+    assert shared - set(written) == derived, (
+        "a field the member file carries and the model reads, written by "
+        "neither this arrival nor anything derived at the read: fold it, or "
+        "say here why an arrival does not carry it"
+    )
+    for field, value in written.items():
+        assert getattr(member, field) == value, field

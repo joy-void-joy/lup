@@ -5,6 +5,7 @@ joined reading as running — where nothing but a person's command could put
 the record right, since the servers that would have swept it were gone.
 """
 
+import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -12,25 +13,24 @@ import pytest
 from typer.testing import CliRunner
 
 from lup.channels.models import utc_now
-from lup.coordination.identity import member_ref, mint_member_id
+from lup.coordination.bare.store import departed_path, member_path, session_actor
+from lup.coordination.identity import mint_member_id
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import ActorJoined
 from lup.devtools.coordination import app as coordination_app
 
 
 def long_gone(root: Path, name: str) -> tuple[RepositoryPeers, str]:
-    """One repository whose only session spoke an hour ago and never beat."""
+    """One repository whose only session spoke an hour ago and never beat.
+
+    The member file put back in time, which is the whole of what a stopped
+    session looks like: its modification time is the pulse, so there is
+    nothing to append and no stamp to leave behind.
+    """
     peers = RepositoryPeers(root)
     member = mint_member_id()
-    peers.cohort.roster.stream.append(
-        ActorJoined(
-            actor=member_ref(member),
-            task="working",
-            worktree=str(root / "tree"),
-            at=utc_now() - timedelta(hours=1),
-        )
-    )
-    peers.names.rename(member, name)
+    peers.join(member, root / "tree", cli_name=name)
+    when = (utc_now() - timedelta(hours=1)).timestamp()
+    os.utime(member_path(peers.root, session_actor(member)), (when, when))
     return peers, member
 
 
@@ -47,8 +47,11 @@ def test_a_dry_run_names_the_lapsed_and_retires_nobody(
     assert result.exit_code == 0, result.output
     assert result.output.startswith(f"stale — session:{member}#1 — unheard since ")
     assert result.output.endswith("would retire 1 session(s)\n")
-    [recorded] = [one for one in peers.cohort.live() if one.actor.id == member]
-    assert recorded.running
+    # Nothing moved, which is the whole of what a dry run promises: the file
+    # is where a live member's file sits, and the pulse says what it says
+    # whether or not anybody has swept.
+    assert member_path(peers.root, session_actor(member)).is_file()
+    assert not departed_path(peers.root, session_actor(member)).exists()
 
 
 def test_a_sweep_retires_the_lapsed_once(

@@ -26,7 +26,12 @@ guard with it, instead of leaving a script that reads a path nobody writes.
 from importlib import resources
 from pathlib import Path
 
-from lup.coordination.bare.store import COORDINATION_DIR, INBOX_DIR, STORE_DIR
+from lup.coordination.bare.store import (
+    COORDINATION_DIR,
+    INBOX_DIR,
+    MEMBER_KIND,
+    STORE_DIR,
+)
 from lup.formats.banner import (
     REGENERATE_COMMAND,
     VERBATIM_COPY,
@@ -63,6 +68,10 @@ def guard_body() -> str:
     against a cursor and no way for two writes inside one filesystem tick to
     hide each other, which is what a length check had to be careful about.
 
+    The directory is named for the conversation this session is on the roster
+    as, which is the member kind and the id together — an id alone is unique
+    only within a kind, and the guard has to look where the sender wrote.
+
     The glob is expanded into the positional parameters and its first word
     tested, because an unmatched glob in a POSIX shell stays literal: `[ -e ]`
     on that word is false, which is the answer wanted, and no `ls` is started
@@ -82,7 +91,7 @@ case "$shared" in
     *) shared="$PWD/$shared" ;;
 esac
 root="$shared/{STORE_DIR}/{COORDINATION_DIR}"
-inbox="$root/{INBOX_DIR}/$LUP_COORDINATION_MEMBER"
+inbox="$root/{INBOX_DIR}/{MEMBER_KIND}-$LUP_COORDINATION_MEMBER"
 [ -d "$inbox" ] || exit 0
 set -- "$inbox"/*.json
 [ -e "$1" ] || exit 0

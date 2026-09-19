@@ -9,6 +9,7 @@ read against a roster the real writer produced.
 """
 
 import json
+import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -16,11 +17,11 @@ import sh
 
 from lup.channels.models import utc_now
 from lup.coordination.bare import store
-from lup.coordination.identity import member_ref, mint_member_id
+from lup.coordination.identity import mint_member_id
 from lup.coordination.meeting import coordination_root
 from lup.coordination.policy import peer_policy
 from lup.coordination.repository import RepositoryPeers
-from lup.coordination.roster import ActorJoined, Delivery
+from lup.coordination.roster import Delivery
 from lup.policy.kernel.peers import (
     decide_peer_listing,
     decide_peer_send,
@@ -193,16 +194,18 @@ def test_a_member_whose_pulse_stopped_is_no_longer_reached_until_it_beats(
     work = tmp_path / "work"
     peers = joined_repository(work, tmp_path / "hooks")
     member = mint_member_id()
-    long_ago = utc_now() - timedelta(seconds=store.STALE_AFTER_SECONDS + 1)
-    peers.cohort.roster.stream.append(
-        ActorJoined(actor=member_ref(member), task="working", at=long_ago)
+    peers.join(member, work, cli_name="feat-touches")
+    long_ago = (
+        utc_now() - timedelta(seconds=store.STALE_AFTER_SECONDS + 1)
+    ).timestamp()
+    os.utime(
+        store.member_path(peers.root, store.session_actor(member)), (long_ago, long_ago)
     )
-    peers.names.rename(member, "feat-touches")
 
     assert "feat-touches" not in folded_addresses(work)
     assert "user" in folded_addresses(work)
 
-    store.beat(peers.root, member)
+    store.beat(peers.root, store.session_actor(member))
 
     assert "feat-touches" in folded_addresses(work)
 

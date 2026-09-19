@@ -113,7 +113,7 @@ def test_nudging_reports_the_runtime_asymmetry_rather_than_hiding_it(
         worktree=str(tmp_path / "claude"),
         wake=WakePath(runtime="claude", handle="claude [ab12]"),
     )
-    peers.names.rename(claude, "claude")
+    peers.rename(claude, "claude")
     silent = mint_member_id()
     peers.join(silent, tmp_path / "silent", cli_name="silent")
     watcher = Watcher(peers, nudge=True)

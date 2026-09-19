@@ -10,7 +10,7 @@ case "$shared" in
     *) shared="$PWD/$shared" ;;
 esac
 root="$shared/lup/coordination"
-inbox="$root/inbox/$LUP_COORDINATION_MEMBER"
+inbox="$root/inbox/session-$LUP_COORDINATION_MEMBER"
 [ -d "$inbox" ] || exit 0
 set -- "$inbox"/*.json
 [ -e "$1" ] || exit 0

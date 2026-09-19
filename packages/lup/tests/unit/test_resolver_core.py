@@ -2186,7 +2186,13 @@ async def test_complete_resolver_lifecycle_uses_real_isolated_git_worktrees(
     }
     # And it resolves the addresses it prints, from the record alone.
     assert core.actors.reaching("worker:a#1") == members["worker:a#2"].actor
-    assert core.actors.reaching("b") == members["worker:b#1"].actor
+    # A bare concern id is answered to by every member working that concern —
+    # its worker and its reviewer are two members of one id — so it reaches one
+    # of them and the roster prefers whoever is still live. Naming the exact
+    # member is what the qualified address is for.
+    reached = core.actors.reaching("b")
+    assert reached is not None and reached.id == "b"
+    assert core.actors.reaching("worker:b#1") == members["worker:b#1"].actor
 
     assert [record.action for record in manifest.cleanup] == [
         "removed",

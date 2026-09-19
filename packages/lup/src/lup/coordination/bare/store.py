@@ -56,6 +56,7 @@ a field a newer library adds must not make its file unreadable here.
 
 import fcntl
 import json
+import os
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -363,19 +364,35 @@ def discarded(path: Path) -> bool:
     return True
 
 
-def member_path(root: Path, member_id: str) -> Path:
-    """Where one member's own file sits while it is here."""
-    return root / MEMBERS_DIR / f"{member_id}.json"
+def session_actor(member_id: str) -> Actor:
+    """The identity a repository session is a member under.
+
+    The one kind a hook can assume: a prompt fold, a departure writer and the
+    permission dispatcher each know a session id and nothing else, because the
+    runtime that spawned them is a session's.
+    """
+    return Actor(kind=MEMBER_KIND, id=member_id)
 
 
-def departed_path(root: Path, member_id: str) -> Path:
+def member_path(root: Path, member: Actor) -> Path:
+    """Where one member's own file sits while it is here.
+
+    Named for the conversation rather than the bare id, because an id is
+    unique only within a kind: a worker and a reviewer taken on over one
+    concern are two members of one id, and a single file between them would
+    let each answer for the other's presence, task and claims.
+    """
+    return root / MEMBERS_DIR / f"{conversation_of(member)}.json"
+
+
+def departed_path(root: Path, member: Actor) -> Path:
     """Where one member's file sits once it has stopped."""
-    return root / DEPARTED_DIR / f"{member_id}.json"
+    return root / DEPARTED_DIR / f"{conversation_of(member)}.json"
 
 
-def member_lock(root: Path, member_id: str) -> Path:
+def member_lock(root: Path, member: Actor) -> Path:
     """The lock one member's own processes revise its file under."""
-    return root / MEMBERS_DIR / f"{member_id}.lock"
+    return root / MEMBERS_DIR / f"{conversation_of(member)}.lock"
 
 
 def read_member(path: Path, running: bool) -> Member | None:
@@ -437,12 +454,12 @@ def stored(member: Member) -> Member:
 
 def write_member(root: Path, member: Member) -> bool:
     """Put one member's file down whole, by rename."""
-    landed = published(member_path(root, text(member.get("id"))), stored(member))
+    landed = published(member_path(root, member_actor(member)), stored(member))
     return landed is not None
 
 
 def revised(
-    root: Path, member_id: str, revise: Callable[[Member], Member]
+    root: Path, member: Actor, revise: Callable[[Member], Member]
 ) -> Member | None:
     """Read this member's file, apply *revise*, and put it back, under its lock.
 
@@ -458,13 +475,13 @@ def revised(
     Nothing is created for a member that has no file: a revision of nobody
     would put a row on the roster that never joined.
     """
-    lock = member_lock(root, member_id)
+    lock = member_lock(root, member)
     try:
         lock.parent.mkdir(parents=True, exist_ok=True)
         with lock.open("a", encoding="utf-8") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
-                found = read_member(member_path(root, member_id), running=True)
+                found = read_member(member_path(root, member), running=True)
                 if found is None:
                     return None
                 settled = revise(found)
@@ -475,15 +492,19 @@ def revised(
         return None
 
 
-def beat(root: Path, member_id: str) -> None:
+def beat(root: Path, member: Actor) -> None:
     """Record that this member is here now, without rewriting what it says.
 
-    The modification time is the whole of the pulse, so a beat touches the
-    file rather than revising it: nothing is read, nothing is locked, and a
+    The modification time is the whole of the pulse, so a beat moves the time
+    rather than revising the file: nothing is read, nothing is locked, and a
     beat cannot race a description being written in another process.
+
+    Nothing is created. A beat is a member saying it is still here, so one for
+    a member that never joined has nobody to be about — and a file put down by
+    a beat would be a row on the roster that says nothing about who it is.
     """
     try:
-        member_path(root, member_id).touch()
+        os.utime(member_path(root, member))
     except OSError:
         return
 
@@ -569,24 +590,37 @@ def present(
 
     *mine* is the reading member's own id, which is never read as absent: the
     reader is manifestly here, and its own beat may land after this read.
+
+    A member that left and came back is here once. Its departed stub is what
+    the previous standing ended as, and reporting both would give a listing two
+    rows for one session and a sender two answers about whether it can be
+    reached.
     """
     moment_now = now or datetime.now(UTC)
     here = [
         member if text(member.get("id")) == mine else pulsed(member, moment_now, window)
         for member in members(root)
     ]
+    standing = {conversation_of(member_actor(member)) for member in here}
     return sorted(
-        [*here, *departed(root, moment_now)],
+        [
+            *here,
+            *[
+                member
+                for member in departed(root, moment_now)
+                if conversation_of(member_actor(member)) not in standing
+            ],
+        ],
         key=lambda member: not member.get("running"),
     )
 
 
-def member_of(root: Path, member_id: str) -> Member | None:
-    """One member by id, wherever its file sits, or nothing where none does."""
-    here = read_member(member_path(root, member_id), running=True)
+def member_of(root: Path, member: Actor) -> Member | None:
+    """One member, wherever its file sits, or nothing where none does."""
+    here = read_member(member_path(root, member), running=True)
     if here is not None:
         return here
-    return read_member(departed_path(root, member_id), running=False)
+    return read_member(departed_path(root, member), running=False)
 
 
 def live_ids(
@@ -834,7 +868,10 @@ def record_claims(root: Path, mine: str, paths: list[str]) -> bool:
     """
     if not mine or not paths:
         return False
-    return revised(root, mine, lambda member: claimed(member, paths, False)) is not None
+    return (
+        revised(root, session_actor(mine), lambda member: claimed(member, paths, False))
+        is not None
+    )
 
 
 def addresses(root: Path, now: datetime | None = None) -> list[str]:
@@ -879,7 +916,7 @@ def listing(root: Path, now: datetime | None = None) -> list[str]:
     ]
 
 
-def depart(root: Path, member_id: str, summary: str = "", error: str = "") -> bool:
+def depart(root: Path, member: Actor, summary: str = "", error: str = "") -> bool:
     """Move this member's file to the departed, saying whether one was moved.
 
     A session's ending hook runs in a process with no typed writer to reach,
@@ -891,23 +928,43 @@ def depart(root: Path, member_id: str, summary: str = "", error: str = "") -> bo
     departed stub for a member that never arrived is a row no listing should
     carry.
     """
-    if not member_id:
+    if not actor_id(member):
         return False
-    found = read_member(member_path(root, member_id), running=False)
+    found = read_member(member_path(root, member), running=False)
     if found is None:
         return False
     settled = found.copy()
     settled["summary"] = summary or text(found.get("summary"))
     settled["error"] = error or text(found.get("error"))
     settled["left_at"] = stamped()
-    if published(departed_path(root, member_id), stored(settled)) is None:
+    if published(departed_path(root, member), stored(settled)) is None:
         return False
-    discarded(member_path(root, member_id))
-    discarded(member_lock(root, member_id))
+    discarded(member_path(root, member))
+    discarded(member_lock(root, member))
     return True
 
 
-def swept(root: Path, now: datetime | None = None) -> list[Member]:
+def lapsed(
+    root: Path, now: datetime | None = None, window: float = STALE_AFTER_SECONDS
+) -> list[Member]:
+    """Every member still under ``members/`` whose pulse has stopped.
+
+    What a sweep would move, without moving it — which is what lets a console
+    say what it is about to do before doing it. The departed are not here:
+    they have already been moved, and a sweep that reported them would report
+    the same rows on every run.
+    """
+    moment_now = now or datetime.now(UTC)
+    return [
+        gone
+        for member in members(root)
+        if not (gone := pulsed(member, moment_now, window)).get("running")
+    ]
+
+
+def swept(
+    root: Path, now: datetime | None = None, window: float = STALE_AFTER_SECONDS
+) -> list[Member]:
     """Retire what the read already derives, and delete what nobody reads.
 
     A member whose pulse stopped is moved to the departed, so a reader that
@@ -915,17 +972,17 @@ def swept(root: Path, now: datetime | None = None) -> list[Member]:
     stub older than the retention window is deleted, which is what keeps the
     store the size of the population rather than of its history.
 
+    The window is the caller's, and the caller is a session's own tool server:
+    a sweep reading a silence for longer than the listings beside it do would
+    leave rows every reader calls gone and nothing ever moves.
+
     A claim needs no sweeping: it stands or it does not, and the filesystem is
     what says which.
     """
     moment_now = now or datetime.now(UTC)
-    retired = [
-        gone
-        for member in members(root)
-        if not (gone := pulsed(member, moment_now, STALE_AFTER_SECONDS)).get("running")
-    ]
+    retired = lapsed(root, moment_now, window)
     for member in retired:
-        depart(root, text(member.get("id")), error=text(member.get("error")))
+        depart(root, member_actor(member), error=text(member.get("error")))
     since = moment_now - timedelta(seconds=DEPARTED_SECONDS)
     for path in listed(root / DEPARTED_DIR):
         found = read_member(path, running=False)

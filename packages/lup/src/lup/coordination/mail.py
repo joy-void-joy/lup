@@ -208,7 +208,7 @@ class ActorMail:
             in_reply_to=in_reply_to,
             redirect=redirect,
         )
-        mail.post(self.root, to.id, message)
+        mail.post(self.root, to.conversation(), message)
         return folded_message(message)
 
     def waiting(self, actor: ActorRef) -> ActorDelivery:
@@ -220,7 +220,8 @@ class ActorMail:
         """
         return ActorDelivery(
             messages=[
-                folded_message(message) for message in mail.waiting(self.root, actor.id)
+                folded_message(message)
+                for message in mail.waiting(self.root, actor.conversation())
             ]
         )
 
@@ -232,7 +233,7 @@ class ActorMail:
         """
         mail.consume(
             self.root,
-            actor.id,
+            actor.conversation(),
             [mail.Message(id=message.id) for message in delivery.messages],
         )
 
