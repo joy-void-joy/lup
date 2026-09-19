@@ -16,6 +16,7 @@ from lup.providers.roster_prompt import (
     prompt_hook,
     store_artifacts,
 )
+from lup.providers.subagent_cleanup import cleanup_hooks
 from lup.types import ModelTier
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.formats.banner import (
@@ -621,6 +622,32 @@ operator's to start from a host terminal. The runtime's own spelling of the
 moment, so not a value a project could choose.
 """
 
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
+CODEX_SUBAGENT_START_EVENT = "SubagentStart"
+"""The event Codex fires as a subagent begins, before its first turn.
+
+Documented at https://learn.chatgpt.com/docs/hooks and measured on 0.155.1 in
+a user-run session, whose payload is kept as a fixture: the hook reads
+`agent_id`, `agent_type`, `turn_id` and `permission_mode` beside the common
+fields, cannot stop the subagent — `continue: false` is parsed and ignored
+here — and on exit 0 its stdout's `hookSpecificOutput.additionalContext` is
+added as context the subagent reads. The runtime's own spelling of the
+moment, so not a value a project could choose.
+"""
+
+CODEX_SUBAGENT_CLEANUP = (
+    resources.files("lup.providers.codex")
+    .joinpath("assets/subagent_cleanup.py")
+    .read_text("utf-8")
+)
+"""The start-time sentence's host half, shipped beside the kernel it imports.
+
+No stop event travels with it. Measured on 0.155.1: a subagent's session
+outlives its report, and output forced onto that session afterwards resumes
+nobody — so the sentence is owed and the refusal is not.
+"""
+
 CODEX_PATCH_RUNTIME = (
     resources.files("lup.providers.codex").joinpath("patch.py").read_text("utf-8")
 )
@@ -811,6 +838,18 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
             source,
             CODEX_EXIT_EVENT,
         )
+        # A subagent is told at its start what it opens is its own to close.
+        # It is not refused at its stop: measured on 0.155.1, the session it
+        # leaves running resumes nobody, so no stop event is named here.
+        cleanup = cleanup_hooks(
+            Path(f".codex/plugins/{self.plugin_name}"),
+            "PLUGIN_ROOT",
+            source,
+            CODEX_SUBAGENT_CLEANUP,
+            "lup.providers.codex.assets.subagent_cleanup",
+            CODEX_SUBAGENT_START_EVENT,
+            None,
+        )
         hooks = {
             "hooks": {
                 **{
@@ -823,6 +862,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 },
                 **roster.registered,
                 **departure.registered,
+                **cleanup.registered,
             }
         }
         evidence = {
@@ -861,6 +901,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 ),
                 *roster.artifacts,
                 *departure.artifacts,
+                *cleanup.artifacts,
                 *store_artifacts(Path(f".codex/plugins/{self.plugin_name}"), source.id),
                 *[
                     Artifact(

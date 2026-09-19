@@ -126,7 +126,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 87 artifacts
+## `codex` — 89 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -172,11 +172,13 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/typescript.py` | lup.policy.kernel.typescript |
 | `.codex/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.codex/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
+| `.codex/plugins/lup/hooks/runtime/subagent_cleanup.py` | lup.providers.codex.assets.subagent_cleanup |
 | `.codex/plugins/lup/hooks/scripts/carrier_drift.sh` | lup.providers.drift_prompt |
 | `.codex/plugins/lup/hooks/scripts/coordination_changes.sh` | lup.providers.roster_prompt |
 | `.codex/plugins/lup/hooks/scripts/coordination_departure.sh` | lup.providers.roster_prompt |
 | `.codex/plugins/lup/hooks/scripts/policy.py` | lup.policy.assets.host and lup.providers.codex.assets.policy_dispatcher |
 | `.codex/plugins/lup/hooks/scripts/policy.sh` | lup.policy.dispatcher |
+| `.codex/plugins/lup/hooks/scripts/subagent_cleanup.sh` | lup.providers.subagent_cleanup |
 | `.codex/plugins/lup/skills/add-command/SKILL.md` | lup.harness.content.skills.add_command |
 | `.codex/plugins/lup/skills/analyze/SKILL.md` | lup.harness.content.skills.analyze |
 | `.codex/plugins/lup/skills/brainstorm/SKILL.md` | lup_template.harness.content.skills.brainstorm |
