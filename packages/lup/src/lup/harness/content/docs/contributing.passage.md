@@ -12,14 +12,27 @@ change once you know where it goes.
 uv sync                                    # both workspace packages
 {{ setup }}uv run lup-devtools dev check --changed     # ruff + pyright on what you changed
 uv run lup-devtools dev test <paths>       # while iterating: only these files
-uv run lup-devtools dev check              # the local pre-flight bar
+uv run lup-devtools dev check              # the bar for landing
 ```
 
-Three commands, because they answer different questions. `dev check` puts both
-test suites, pyright and ruff on the machine at once and costs whichever of
-them finishes last — a couple of minutes — and it is what has to be green
-before a commit. The gate reports what each of its checks cost, so a run that
-felt slow can be read rather than guessed at.
+Three commands, because they answer different questions, and which one you owe
+depends on what you are about to do. `dev check` puts both test suites, pyright
+and ruff on the machine at once and costs whichever of them finishes last — a
+couple of minutes — and it is **the bar for landing**: run it on the integrated
+result before work reaches the integration branch, which is what `/lup:land`
+does and the only moment the whole answer means anything. The gate reports what
+each of its checks cost, so a run that felt slow can be read rather than
+guessed at.
+
+A commit on a feature branch owes the scoped pair instead — `dev check
+--changed` over what you touched, and `dev test` over the files your change
+reaches. The full gate is not forbidden there and is often worth running; what
+it is not is owed on every commit, and treating it as owed is how several
+agents sharing one working tree each start the whole suite at once. Over a tree
+still being edited that answer is about a state that never existed, and a
+failure in it cannot be attributed to whoever caused it — so a delegated agent
+runs the scoped pair, names what it could not check, and leaves the gate and
+the commit to whoever dispatched it.
 
 The other two are the loop while a change is still moving. `dev check
 --changed` runs ruff and pyright over the Python files changed since the
