@@ -110,6 +110,7 @@ class Wake(TypedDict, total=False):
 
     runtime: str
     handle: str
+    session: str
 
 
 class RosterRecord(TypedDict, total=False):

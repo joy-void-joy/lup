@@ -13,6 +13,17 @@ token it could only have read there, and measured again through an inbox moved
 by ``--messaging-socket-path``. The frame shape is the runtime's own, spelled
 in its own startup output.
 
+A frame also names the session it is for, and an inbox drops one whose name
+disagrees with its own — measured, by sending two frames at one live session
+and watching only the one carrying its id arrive. That matters because a
+socket path is not unique the way a session is: every contained session's
+default inbox is ``/tmp/cc-socks/<pid>.sock``, and two containers whose
+runtime is pid 1 or pid 7 in their own namespaces name the same file. So the
+id travels with the path, and a nudge that reached the wrong session is
+refused by it rather than delivered to it. :mod:`lup.harness.messaging` is
+where lup puts the sockets so that case is rare rather than ordinary; this is
+what makes it harmless when it happens anyway.
+
 So this finishes the job on both, and a member nothing can wake is one that
 declared no path rather than one whose runtime offers none.
 """
@@ -65,8 +76,20 @@ class WakePath(BaseModel, frozen=True):
     socket, which the launcher places and the session binds.
     """
 
+    session: str = ""
+    """Which session the handle belongs to, where the runtime checks it.
 
-def declared_wake(runtime: str, handle: str) -> WakePath:
+    Claude's own id for the session, which it compares against a frame's
+    ``session_id`` and drops the frame on a mismatch. Carried beside the
+    handle rather than folded into it because it answers a different question:
+    the handle says where to write, and this says who has to be there for the
+    write to count. Empty asks for no check, which is the honest reading of a
+    member that never said — and the reason Codex leaves it so, its queue
+    addressing a conversation by name rather than a file anybody could bind.
+    """
+
+
+def declared_wake(runtime: str, handle: str, session: str = "") -> WakePath:
     """One member's wake path as a fold read it off the record.
 
     Narrowing rather than validating, because this is the read path a listing
@@ -75,9 +98,9 @@ def declared_wake(runtime: str, handle: str) -> WakePath:
     """
     match runtime:
         case "claude" | "codex":
-            return WakePath(runtime=runtime, handle=handle)
+            return WakePath(runtime=runtime, handle=handle, session=session)
         case _:
-            return WakePath(handle=handle)
+            return WakePath(handle=handle, session=session)
 
 
 class Woken(BaseModel, frozen=True):
@@ -108,7 +131,7 @@ def wake(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
         case "codex" if path.handle:
             return queued(path.handle, message, cwd)
         case "claude" if path.handle:
-            return injected(Path(path.handle), message)
+            return injected(Path(path.handle), message, path.session)
         case _:
             return Woken(
                 reached=False,
@@ -119,7 +142,9 @@ def wake(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
             )
 
 
-def injected(inbox: Path, message: str, patience: float = 3.0) -> Woken:
+def injected(
+    inbox: Path, message: str, session: str = "", patience: float = 3.0
+) -> Woken:
     """Write one message into a Claude session's own inbox socket.
 
     One frame, carrying the message as the session's own user turn, because
@@ -130,11 +155,21 @@ def injected(inbox: Path, message: str, patience: float = 3.0) -> Woken:
     some of them, so requiring it here would make the wake work for a subset
     of peers and fail silently for the rest.
 
+    *session* is the id the receiving inbox checks the frame against, and
+    omitting it asks for no check. It is the difference between reaching a
+    path and reaching a member: paths collide across pid namespaces and
+    members do not, so a frame that names its session is dropped by whoever
+    else has bound that path rather than delivered by them.
+
     *patience* bounds the write rather than leaving it to the kernel, because
     a socket file can outlive the process that bound it, and the worst this
     call is allowed to cost is a peer that stays un-nudged.
     """
-    frame = {"type": "user", "message": {"role": "user", "content": message}}
+    frame = {
+        "type": "user",
+        "message": {"role": "user", "content": message},
+        **({"session_id": session} if session else {}),
+    }
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
             peer.settimeout(patience)
