@@ -563,6 +563,7 @@ def test_state_repository_writes_atomic_typed_projection_tree(tmp_path: Path) ->
 
     assert repository.load() == state
     assert sorted(path.name for path in repository.root.iterdir()) == [
+        ".state.lock",
         "agents",
         "answers.json",
         "bases.json",

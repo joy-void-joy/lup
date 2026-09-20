@@ -14,6 +14,7 @@ from lup.harness.process import ProcessLauncher
 from lup.resolver.contracts import (
     ResolverAssemblyDeferred,
     ResolverAwaitingAnswers,
+    ResolverConcernRetired,
     ResolverDrained,
     ResolverEnvironmentFault,
     ResolverObserver,
@@ -885,7 +886,11 @@ class ResolverCore:
             if lease.concern_id != "integration"
         }
         unleased = [
-            concern for concern in approved if concern.id not in lease_by_concern
+            concern
+            for concern in approved
+            if concern.id not in lease_by_concern
+            and concern.id
+            not in {item.concern_id for item in self.require_state().retirements}
         ]
         # A resume is when the branch has moved: the run parked, the fix that
         # unblocks it landed, and the base is what carries that fix to every
@@ -932,6 +937,12 @@ class ResolverCore:
         match state.integration:
             case None:
                 for batch in graph.topological_batches():
+                    state = self.require_state()
+                    retired = {item.concern_id for item in state.retirements}
+                    completed_ids.update(retired)
+                    commits.update(
+                        {identifier: state.root_base().commit for identifier in retired}
+                    )
                     selected = [
                         item
                         for item in batch
@@ -975,14 +986,17 @@ class ResolverCore:
                     # door reads.
                     runnable_by_id = {concern.id: concern for concern in runnable}
 
-                    async def execute_for(opened: ActorRef) -> ConcernExecution:
+                    async def execute_for(opened: ActorRef) -> ConcernExecution | None:
                         """This address's concern, carried through its whole work."""
-                        return await self.executor.execute_concern(
-                            runnable_by_id[opened.id],
-                            lease_by_concern[opened.id],
-                            commits,
-                            builder,
-                        )
+                        try:
+                            return await self.executor.execute_concern(
+                                runnable_by_id[opened.id],
+                                lease_by_concern[opened.id],
+                                commits,
+                                builder,
+                            )
+                        except ResolverConcernRetired:
+                            return None
 
                     results = await self.actors.work_all(
                         execute_for,
@@ -999,7 +1013,7 @@ class ResolverCore:
                     executions = [
                         result
                         for result in results
-                        if not isinstance(result, BaseException)
+                        if isinstance(result, ConcernExecution)
                     ]
                     for execution in executions:
                         if (
@@ -1335,7 +1349,12 @@ class ResolverCore:
         self, state: ResolveState, outcomes: list[ConcernOutcome]
     ) -> ResolveState:
         if state.integration is None:
-            verified = [outcome for outcome in outcomes if outcome.verified]
+            retired = {item.concern_id for item in self.require_state().retirements}
+            verified = [
+                outcome
+                for outcome in outcomes
+                if outcome.verified and outcome.concern_id not in retired
+            ]
             integration_lease = next(
                 (lease for lease in state.leases if lease.concern_id == "integration"),
                 None,

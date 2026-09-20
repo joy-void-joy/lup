@@ -28,6 +28,10 @@ class ResolverAwaitingAnswers(Exception):
         self.problems = problems
 
 
+class ResolverConcernRetired(Exception):
+    """An operator retired this concern while its actor was in flight."""
+
+
 class ResolverEnvironmentFault(Exception):
     """A run stopped because its host failed, not because its work did.
 
