@@ -253,6 +253,20 @@ def create_harness_app(
         ):
             raise typer.Exit(1)
 
+    @app.command("sandbox-check")
+    def sandbox_check_command(
+        image: Annotated[
+            str | None, typer.Option(help="Sandbox image; defaults to the library's")
+        ] = None,
+    ) -> None:
+        """Evaluate arithmetic in a disposable Python sandbox without network access."""
+        from lup.devtools.harness.sandbox import check_sandbox
+
+        outcome = check_sandbox(image)
+        typer.echo(outcome.detail, err=not outcome.proved)
+        if not outcome.proved:
+            raise typer.Exit(1)
+
     @app.command("image")
     def image_command(
         target: Annotated[str, typer.Argument(help=selector)] = targets.every,

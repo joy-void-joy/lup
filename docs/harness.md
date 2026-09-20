@@ -55,6 +55,15 @@ including tools for sessions running on the host. Add `--inside` to check
 the container, or `--inside --launch-only` to run just its startup checks.
 Full container checks include a test model turn.
 
+Host setup checks include `harness sandbox-check`: a disposable, network-disabled
+Python sandbox evaluates `1 + 1` through the persistent REPL and is removed
+afterward. This verifies container creation and code execution beyond the
+daemon-info check. It installs no packages; unavailable images, denied container
+creation, broken Python, or failed cleanup produce a failed requirement with
+the original diagnostic. Use `harness sandbox-check --image <image>` to exercise
+a project's alternate sandbox image. Init and install run these declared
+checks and report repairs that require host administration or a fresh session.
+
 A host device — a GPU — is never in the manifest, because a manifest is
 committed and which GPU a machine holds is that machine's fact. `sync grant
 <name>` records it in the machine's `sync.json.local`, and the host checks
