@@ -36,7 +36,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
-from lup.devtools.harness.preflight import LaunchSentinels
+from lup.devtools.harness.preflight import LaunchSentinels, ROOT_VARIABLE
 from lup.harness.credential import committer, fleet_rewrites
 from lup.harness.devices import (
     Device,
@@ -1760,7 +1760,7 @@ def contained_argv(
         terminal=terminal.environment,
         streams=streams,
         proxy_address=reached_at,
-        boundary=sentinels.within(),
+        boundary={**sentinels.within(), ROOT_VARIABLE: str(root.resolve())},
         inherited_environment=inherited_environment,
         environments=held_environments(root, accessible, image.project_environment),
         devices=granted_devices.granted,

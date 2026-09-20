@@ -970,6 +970,8 @@ def rewrite_verdict(
     The word is still what the reason names, because that is what the writer
     typed and what they would have to change.
     """
+    if "decision" in document:
+        return document["decision"]
     suffix = posixpath.splitext(document["path"])[1].lower()
     verdict = decide_edit(
         document["path"],

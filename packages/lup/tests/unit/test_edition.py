@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from lup.devtools.launcher import ENVIRONMENT_VARIABLE
+from lup.execution.shell import git
 from lup.policy.assets.host import (
     declared_program,
     file_diagnostics,
@@ -28,16 +29,14 @@ from lup.workspace.edition import Edition, edition_path, read_edition
 
 def checkout(root: Path) -> Path:
     """A main checkout: `.git` is the git directory itself."""
-    (root / ".git").mkdir(parents=True)
-    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    git("init", "-q", "-b", "main", str(root))
     return root
 
 
 def linked(main: Path, root: Path) -> Path:
     """A worktree of *main*: `.git` is a file naming the main git directory."""
-    root.mkdir(parents=True)
-    (root / ".git").write_text(
-        f"gitdir: {main / '.git' / 'worktrees' / root.name}\n", encoding="utf-8"
+    git(
+        "-C", str(main), "worktree", "add", "-q", "--orphan", "-b", root.name, str(root)
     )
     return root
 
@@ -109,11 +108,10 @@ def test_a_repository_kept_beside_its_worktrees_resolves_too(tmp_path: Path) -> 
     there in both layouts.
     """
     bare = tmp_path / "repo.git"
-    (bare / "worktrees" / "feature").mkdir(parents=True)
+    git("init", "-q", "--bare", "-b", "main", str(bare))
     work = tmp_path / "tree" / "feature"
-    work.mkdir(parents=True)
-    (work / ".git").write_text(
-        f"gitdir: {bare / 'worktrees' / 'feature'}\n", encoding="utf-8"
+    git(
+        "-C", str(bare), "worktree", "add", "-q", "--orphan", "-b", "feature", str(work)
     )
 
     assert shared_git_directory(str(edited(work))) == str(bare)

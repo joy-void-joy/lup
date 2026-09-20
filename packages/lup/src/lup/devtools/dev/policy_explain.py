@@ -27,6 +27,7 @@ from lup.harness.enforcement import (
 )
 from lup.harness.models import HookSet
 from lup.policy.kernel.fetch import scope_text
+from lup.policy.assets.host import text_at
 from lup.policy.kernel.lex import shell_write_targets
 from lup.policy.models import EditBatch, EditChange, FetchUrl, ShellCommand
 from lup.policy.rules import url_scope_row
@@ -82,6 +83,8 @@ class PolicyVerdict(BaseModel, frozen=True):
     readings: list[PolicyReading]
     assumed: list[str] = []
     """Session facts every reading supplied itself, where they could move one."""
+    unavailable: list[str] = []
+    """Edit facts a path-only preview cannot establish."""
     declared: list[str] = []
     """The fetch scopes a URL was read against, spelled as URLs they admit.
 
@@ -115,6 +118,22 @@ def unresolved_facts(subject: str, kind: str) -> list[str]:
         f"a capture holds {', '.join(targets)}",
         "every write target is inside what this launch mounted writable",
     ]
+
+
+def concrete_edit_batch(document: Path, cwd: Path) -> EditBatch:
+    """Read complete proposed documents and require their preimages still match."""
+    batch = EditBatch.model_validate_json(document.read_text(encoding="utf-8"))
+    changes = [
+        change.model_copy(update={"path": (cwd / change.path).resolve()})
+        for change in batch.changes
+    ]
+    for change in changes:
+        current = text_at(cwd, str(change.path))
+        if current != change.before:
+            raise ValueError(
+                f"Edit preimage does not match {change.path}; read the file again."
+            )
+    return EditBatch(changes=changes, cwd=cwd)
 
 
 def read_under(
@@ -154,9 +173,16 @@ def read_under(
             event = ShellCommand(command=subject, cwd=cwd)
         case "fetch":
             event = FetchUrl(url=AnyHttpUrl(subject))
+        case "edit-batch":
+            event = concrete_edit_batch(cwd / subject, cwd)
         case _:
+            path = (cwd / subject).resolve()
+            current = text_at(cwd, str(path))
             event = EditBatch(
-                changes=[EditChange(path=Path(subject), before=None, after="")]
+                cwd=cwd,
+                changes=[
+                    EditChange(path=path, before=current or "", after=current or "")
+                ],
             )
     decision = policy.decide(event)
     return PolicyReading(
@@ -201,6 +227,18 @@ def verdict_for(
             for placement in placements
         ],
         assumed=unresolved_facts(subject, kind),
+        unavailable=(
+            [
+                "proposed content and operation: this is a path-only preview of unchanged content; use --kind edit-batch with a JSON EditBatch for a concrete verdict",
+                *(
+                    ["current file content: no readable preimage at this path"]
+                    if text_at(cwd, subject) is None
+                    else []
+                ),
+            ]
+            if kind == "edit"
+            else []
+        ),
         declared=declared_scopes(kind, hooks),
     )
 
@@ -251,10 +289,15 @@ def explain(
     it. One that differs prints both, which is the case the reader came for.
     """
     root = Path.cwd()
-    verdicts = [
-        verdict_for(subject, kind, autonomous, root, hooks, chosen_placements(sandbox))
-        for subject in subjects
-    ]
+    try:
+        verdicts = [
+            verdict_for(
+                subject, kind, autonomous, root, hooks, chosen_placements(sandbox)
+            )
+            for subject in subjects
+        ]
+    except (OSError, ValueError) as error:
+        raise typer.BadParameter(str(error)) from error
     if as_json:
         output_json([verdict.model_dump() for verdict in verdicts])
         if not any(verdict.allows_anywhere() for verdict in verdicts):
@@ -272,14 +315,16 @@ def explain(
             typer.echo(f"       {label}{reading.reason}")
         for assumed in verdict.assumed:
             typer.echo(f"       assuming {assumed}")
+        for unavailable in verdict.unavailable:
+            typer.echo(f"       unavailable {unavailable}")
         for scope in verdict.declared:
             typer.echo(f"       scope {scope}")
         # The declaration's answer, which a remembered approval overrides in
         # a session: said only under a question, since it moves nothing else.
         if any(reading.effect == "ask" for reading in shown):
             typer.echo(
-                "       unless this exact call was answered yes before"
-                " (`dev hooks approvals`)"
+                "       a matching approval may authorize an exact retry;"
+                " use the runtime's review channel"
             )
     if not any(verdict.allows_anywhere() for verdict in verdicts):
         raise typer.Exit(1)

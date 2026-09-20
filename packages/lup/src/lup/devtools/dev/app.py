@@ -1404,7 +1404,9 @@ def create_dev_app(
         ],
         kind: Annotated[
             str,
-            typer.Option("--kind", help="What the inputs are: shell, fetch, or edit"),
+            typer.Option(
+                "--kind", help="Input: shell, fetch, edit path, or edit-batch JSON"
+            ),
         ] = "shell",
         sandbox: Annotated[
             bool | None,
@@ -1422,9 +1424,10 @@ def create_dev_app(
         as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
     ) -> None:
         """Show what the declared permission policy decides about an input, and why."""
-        if kind not in ("shell", "fetch", "edit"):
+        if kind not in ("shell", "fetch", "edit", "edit-batch"):
             typer.echo(
-                f"unknown kind {kind!r}: expected shell, fetch, or edit", err=True
+                f"unknown kind {kind!r}: expected shell, fetch, edit, or edit-batch",
+                err=True,
             )
             raise typer.Exit(2)
         # Every placement, not this session's. The guidance sends a reader here

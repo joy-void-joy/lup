@@ -19,6 +19,7 @@ import typer
 import lup.devtools.harness.doctor as doctor
 import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
+import lup.devtools.harness.policy_refresh as policy_refresh
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
 from lup.coordination.refs import ActorRef
@@ -109,6 +110,18 @@ def create_harness_app(
         drift.generate_targets(
             targets.resolve(target, project_root()), repository_wide(target)
         )
+
+    @app.command("policy-refresh")
+    def policy_refresh_command(
+        nonce: Annotated[
+            str, typer.Option(help="Live launch nonce from its policy diagnostic")
+        ],
+        repository: Annotated[
+            Path, typer.Option(help="Already granted destination checkout")
+        ],
+    ) -> None:
+        """Accept changed destination policy from an independent operator terminal."""
+        policy_refresh.refresh_command(project_root(), nonce, repository)
 
     @app.command("check")
     def check_command(

@@ -70,6 +70,7 @@ from lup.policy.bundle import (
 from lup.policy.dispatcher import (
     DispatcherDeclaration,
     compile_dispatcher,
+    edit_evaluator_artifact,
     dispatcher_banner,
     guarded_hook_command,
     hook_guard_artifact,
@@ -908,6 +909,11 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 ),
                 hook_guard_artifact(
                     Path(f".codex/plugins/{self.plugin_name}"), source.id
+                ),
+                edit_evaluator_artifact(
+                    Path(f".codex/plugins/{self.plugin_name}"),
+                    CODEX_DISPATCHER,
+                    source.id,
                 ),
                 *roster.artifacts,
                 *departure.artifacts,

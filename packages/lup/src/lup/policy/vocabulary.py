@@ -669,7 +669,7 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
 
 
 def review_queue_rules() -> list[ShellSubcommandRule]:
-    """Queue decisions are operator actions; reading and cancelling stay available."""
+    """Accepting review decisions or replacement policy is an operator action."""
     return [
         ShellSubcommandRule(
             name="dev",
@@ -683,7 +683,18 @@ def review_queue_rules() -> list[ShellSubcommandRule]:
                 )
                 for action in ("answer", "reject")
             ],
-        )
+        ),
+        ShellSubcommandRule(
+            name="harness",
+            operations=[
+                ShellOperationRule(
+                    name="policy-refresh",
+                    operator_only=True,
+                    reason="a requesting agent cannot accept replacement destination policy",
+                    recovery="The operator must refresh from a terminal outside the agent session.",
+                )
+            ],
+        ),
     ]
 
 

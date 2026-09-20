@@ -166,6 +166,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | Command | What it does |
 | --- | --- |
 | `harness generate` | Deterministically generate owned native artifacts without launching. |
+| `harness policy-refresh` | Accept changed destination policy from an independent operator terminal. |
 | `harness check` | Read-only ownership and generated-artifact drift check for CI. |
 | `harness reconcile` | Classify local differences without rewriting canonical Python source. |
 | `harness apply-reconciliation` | Apply a stale-base-checked source patch, then regenerate every target. |

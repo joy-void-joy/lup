@@ -57,6 +57,7 @@ from lup.policy.bundle import (
 from lup.policy.dispatcher import (
     DispatcherDeclaration,
     compile_dispatcher,
+    edit_evaluator_artifact,
     dispatcher_banner,
     guarded_hook_command,
     hook_guard_artifact,
@@ -805,6 +806,11 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 ),
                 hook_guard_artifact(
                     Path(f".claude/plugins/{self.plugin_name}"), source.id
+                ),
+                edit_evaluator_artifact(
+                    Path(f".claude/plugins/{self.plugin_name}"),
+                    CLAUDE_DISPATCHER,
+                    source.id,
                 ),
                 *delivery_artifacts(
                     Path(f".claude/plugins/{self.plugin_name}"), source.id

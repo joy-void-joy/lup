@@ -113,6 +113,7 @@ from lup_template.harness.catalog import (
     declared_test_roots,
     portable_harness,
 )
+from tests.unit.repos import initialized_repo
 
 SHELL_RULES = declared_hook_set().resolved_shell_rules()
 """This project's vocabulary as the runtime resolves it, not as it is declared.
@@ -401,9 +402,7 @@ def test_import_ownership_resolves_absolute_paths_in_their_own_worktree(
     tmp_path: Path, path: str, effect: str
 ) -> None:
     repository = tmp_path / "sibling"
-    marker = repository / ".git"
-    marker.mkdir(parents=True)
-    (marker / "HEAD").write_text("ref: refs/heads/fixture\n", encoding="utf-8")
+    initialized_repo(repository, tmp_path / "hooks")
     policy = EditPolicy(
         protected=[], import_boundaries=native_import_boundaries(application_roots())
     )
@@ -415,7 +414,8 @@ def test_import_ownership_resolves_absolute_paths_in_their_own_worktree(
                     before="",
                     after="import openai\n",
                 )
-            ]
+            ],
+            cwd=repository,
         )
     )
     assert decision.effect == effect
@@ -4095,6 +4095,7 @@ def test_fragment_edits_are_judged_as_the_documents_they_produce(
     text is seen as a document, which is the point.
     """
     monkeypatch.chdir(tmp_path)
+    initialized_repo(tmp_path, tmp_path / "hooks")
     Path("content.py").write_text(
         'TABLE = """\nA note spells itself as # lup: fix this here.\n"""\n',
         encoding="utf-8",
@@ -4814,6 +4815,7 @@ def test_a_test_the_bun_suite_collects_is_written_whole_without_a_question(
     source beside it, a backup of the test, and a stem bun does not collect
     ask as any production file does.
     """
+    initialized_repo(tmp_path, tmp_path / "hooks")
     policy = semantic_policy_for(declared_hook_set())
 
     def written(target: str) -> str:
@@ -4822,7 +4824,7 @@ def test_a_test_the_bun_suite_collects_is_written_whole_without_a_question(
 
     def created(target: str) -> str:
         change = EditChange(path=Path(target), after=typescript_module(35))
-        return policy.decide(EditBatch(changes=[change])).effect
+        return policy.decide(EditBatch(changes=[change], cwd=tmp_path)).effect
 
     explorer = "packages/lup/web/src/explorer"
     for test in (f"{explorer}/mount.test.tsx", f"{explorer}/narrow.test.ts"):

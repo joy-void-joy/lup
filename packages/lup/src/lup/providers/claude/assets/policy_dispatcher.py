@@ -214,11 +214,10 @@ def dispatch(payload):
     # once, because the shell path and the edit path ask the same question of
     # it and a second read is a second place it can be forgotten.
     session_directory = session_root(payload)
-    agent_type = payload["agent_type"] if "agent_type" in payload else ""
-    autonomous = (
-        agent_type in AUTONOMOUS_AGENT_IDENTITIES
-        or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
-    )
+    agent_identity = (
+        payload["agent_type"] if "agent_type" in payload else ""
+    ) or declared_identity(AGENT_IDENTITY_ENV)
+    autonomous = agent_identity in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
         unsandboxed = spent_escape(tool_input)
         # A command names no file it will write, so what it changed can only
@@ -240,6 +239,7 @@ def dispatch(payload):
             # The same identity the edit branches below are given, because a
             # command carrying its own content reaches the same gates.
             autonomous=autonomous,
+            agent_identity=agent_identity,
         )
     if name == "WebFetch":
         # The same directory the shell branch reads its boundary from: the
@@ -263,6 +263,7 @@ def dispatch(payload):
                 autonomous,
                 "modify",
                 session_directory,
+                agent_identity=agent_identity,
             ),
             path,
             session_directory,
@@ -279,6 +280,7 @@ def dispatch(payload):
                 autonomous,
                 "overwrite" if exists else "create",
                 session_directory,
+                agent_identity=agent_identity,
             ),
             path,
             session_directory,
