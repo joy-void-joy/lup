@@ -549,6 +549,7 @@ def review_hook_call(
     rule: str,
     purpose: str,
     reviewer: str,
+    policy_identity: str = "",
 ) -> dict[Literal["state", "id", "reason"], str]:
     """Park a native call or spend its explicit, single-use reviewer answer."""
     if not session:
@@ -560,7 +561,19 @@ def review_hook_call(
     payload = json.loads(arguments)
     before = json.loads(preconditions)
     material = json.dumps(
-        [session, str(root), tool, payload, before, reason, rule, purpose, reviewer],
+        [
+            session,
+            str(root),
+            tool,
+            payload,
+            before,
+            reason,
+            rule,
+            purpose,
+            reviewer,
+            policy_identity,
+            {path: str(Path(path).resolve()) for path in before},
+        ],
         sort_keys=True,
     )
     fingerprint = sha256(material.encode()).hexdigest()
@@ -602,7 +615,13 @@ def review_hook_call(
                 handle.write(json.dumps(entry, sort_keys=True) + "\n")
             return {"state": "approved", "id": entry["id"], "reason": ""}
     if entry is not None and entry["state"] in ("pending", "rejected"):
-        return {"state": entry["state"], "id": entry["id"], "reason": entry["reason"]}
+        answer = entry["answer"] if "answer" in entry else None
+        note = answer["note"] if answer and "note" in answer else ""
+        return {
+            "state": entry["state"],
+            "id": entry["id"],
+            "reason": note or entry["reason"],
+        }
     identifier = os.urandom(16).hex()
     entry = {
         "id": identifier,

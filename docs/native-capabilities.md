@@ -109,7 +109,19 @@ part of probing.
   therefore correct rather than a workaround. And `dev questions` is Codex's
   review surface rather than its fallback, which is what makes that surface's
   diff rendering load-bearing instead of a convenience. Issue #180 is this gap
-  met from a real session, and it has no native answer.
+  met from a real session; queue settlement requires an independent operator.
+
+  **Queue delivery is measured without a model or credentials** by
+  `tests/integration/test_codex_review_delivery.py`: an inert loopback Responses
+  endpoint requests a copy, the generated hook blocks it, and `hook/completed`
+  carries the review id and operator commands as a warning. A recorded operator
+  answer permits one exact retry; another retry asks again. The supported
+  `PreToolUse` `deny` plus `systemMessage` shape is documented in the
+  [official hooks reference](https://learn.chatgpt.com/docs/hooks).
+  Exiting 2 drops `systemMessage` on Codex CLI 0.155.1; successful
+  structured denial preserves both the warning and refusal. `codex exec --json`
+  omits hook notifications, so its agent-facing refusal remains the delivery
+  path on that surface.
 
   Both arms stay in the suite as `xfail(strict=True)`, so the day a vendor
   grows the channel they pass and the suite says so.

@@ -163,7 +163,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "760efea2764c4464983fdab414229f2fb6b88de1d52b76db6be4fd6f0a5ab5d3",
+      "sha256": "55f8221ff446cf5083c5068978aae1bd4b5aa878644e0e433c55dcc805fb6199",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -234,6 +234,13 @@
       "path": ".codex/plugins/lup/hooks/runtime/kernel/policy_protocol.py",
       "category": "generated",
       "sha256": "02b62f92e73b9f3d4e9fb4163fc1be0b4c8f9bc2346fe6017ae0498ee2b38a01",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/hooks/runtime/kernel/review.py",
+      "category": "generated",
+      "sha256": "2cbed960ac81bda8658a7b9d47e70b51d0ad8eb280012f9fdedaaeaeb8f9b8a1",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -310,7 +317,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "df5b8672ad970bb80fcad9724fdefddc845597a26b5f12812d5e88428d78e8b0",
+      "sha256": "021f031e30406b91372311691ab465efaad87e144dfb43a98f92b309b7eaf8a0",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -352,7 +359,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "651577d0b88fe1cd7d2f941e21d2036eb3f07af2f05ba396dfec69672b18bdef",
+      "sha256": "ae1b3084af4c31efd47be8ed4a3ac5eeddbc7b2bfef75451a1ef0f55c9b97308",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -366,7 +373,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy_evaluator.py",
       "category": "generated",
-      "sha256": "ec1e34d4591f3558b4380a89412c2563eba8a1c7eeae9e6ed3f583d4d338cf4e",
+      "sha256": "021ae41cb70cbef9c9b443f4a5657fc3e1d43043e1313ae29d408a1fbccd9596",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

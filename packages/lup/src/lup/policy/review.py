@@ -30,7 +30,9 @@ from lup.policy.relay import PersistentQuestion
 
 type FileOperation = Literal["create", "modify", "overwrite", "delete"]
 
-type PatchReader = Callable[[str, Path], list["ReviewedFile"]]
+type PatchReader = Callable[
+    [str, Path, dict[Path, str | None], bool], list["ReviewedFile"]
+]
 """Decode one provider's patch envelope into the pairs it would produce.
 
 Taken as an argument rather than imported, because the envelope's grammar is
@@ -211,5 +213,10 @@ def reviewed_files(
                 captured(named),
             )
         case "apply_patch" | "Bash" if patches is not None and text("command"):
-            return patches(text("command"), cwd)
+            return patches(
+                text("command"),
+                cwd,
+                question.preconditions,
+                question.operation.tool == "Bash",
+            )
     return []

@@ -1924,7 +1924,10 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
         sandboxed=True,
         plugin_data=codex_data,
     )
-    assert codex.exit_code == 2
+    assert codex.exit_code == 0
+    assert (
+        json.loads(codex.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    )
 
     for data_root in (claude_data, codex_data):
         written = (data_root / "hook-events.jsonl").read_text(encoding="utf-8")
@@ -2124,10 +2127,12 @@ def test_generated_codex_pretool_never_treats_pending_requests_as_approval(
         **pretool,
         "tool_input": {"command": command.replace("180", "181")},
     }
-    assert codex_hook_result(mismatched, True, tmp_path).exit_code == 2
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
+    for proposed in (mismatched, pretool, pretool, pretool):
+        refused = codex_hook_result(proposed, True, tmp_path)
+        assert refused.exit_code == 0
+        output = json.loads(refused.stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "Review " in output["systemMessage"]
 
 
 def test_generated_codex_permission_request_denies_unapproved_code() -> None:

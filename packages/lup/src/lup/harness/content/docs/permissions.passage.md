@@ -528,6 +528,11 @@ parks the exact call in `.lup/questions.jsonl`. The refusal names its review
 id and the commands to inspect, approve, or reject it. Codex uses this
 fallback: its pre-tool event runs before native approval, and a pending
 native permission event is not evidence that anyone approved the call.
+The queued refusal uses a supported structured `deny` with `systemMessage`,
+so Codex's app-server delivers an operator-visible warning in `hook/completed`
+alongside the agent's refusal. `codex exec --json` omits those hook events;
+its agent still receives the same refusal and review commands. Neither surface
+turns a policy question into an implicit approval.
 
 The operator runs `uv run lup-devtools dev questions show <id>` from the
 indicated checkout, then `uv run lup-devtools dev questions answer <id>
@@ -538,9 +543,12 @@ requester authority to answer itself. Nested command paths are declared
 with `ShellOperationRule.parents`, and the deepest matching path decides.
 
 Approval releases one exact retry in the same session and directory.
-The hook re-runs policy, compares the payload and patch preimages, then
+The hook re-runs policy, compares the payload, captured file preimages,
+resolved paths, originating dispatcher and policy bytes, and accepted
+destination policy bindings, then
 claims the approval exclusively before allowing execution. A changed file
-or payload requires another review. Rejection leaves the operation stopped.
+or payload or policy requires another review. Rejection leaves the operation
+stopped and delivers the operator's note.
 A crash after claiming approval does not make it reusable. Native sandbox
 restrictions still apply; queue approval does not change execution placement.
 
@@ -549,6 +557,13 @@ shell `apply_patch` with a single-quoted argument or a quoted heredoc reaches
 the same edit gates. Relative paths resolve against the hook payload's
 working directory. Add-file operations replacing existing files are judged
 as overwrites. Compound shell commands are never reduced to only their patch.
+Plain two-path `cp` commands capture both source and destination; changes to
+either invalidate approval. Every statically known shell write target also
+contributes its preimage, including redirections, authored content and in-place
+rewrites. The review diff uses the captured documents for
+patches and copies, so it remains the proposal submitted even if another writer
+changes the files before the operator opens it. Other shell commands display
+their exact command text rather than claiming a predicted file diff.
 
 
 ## Two markers change a decision
@@ -618,8 +633,10 @@ pulled from — `dev policy`, this page — rather than repeating it.
 
 ## An answer is remembered
 
-A question the author answered yes to is not asked again for the same exact
-call: the same command or URL, from the same checkout. The runtime's prompt
+Claude remembers an answered question for the same exact command or URL
+from the same checkout, except commands whose known targets write files.
+Codex uses independent, single-use queue answers and never consumes or creates
+this persistent memory. Claude's native prompt
 exposes its answer to no hook, so the memory is read off the two events a
 hook does see — the call was asked about, and then it ran — and it is keyed
 on the input the tool actually ran with, so a call changed on the way
@@ -633,6 +650,10 @@ be answered. The memory is `.lup/hooks/approvals.jsonl` beside the checkout;
 call>` retires one, after which the next identical call asks again. `dev
 policy` reads the declaration and not this memory, and says so under a
 question.
+
+The `uv` command reader resolves global options before the subcommand, including
+`--directory`, so relocating an operator-only queue command cannot make it an
+unclassified command that a contained session runs freely.
 
 ## Asking before spending a turn on it
 

@@ -1,10 +1,4 @@
-"""Both compiled dispatchers remember a question answered yes, the same way.
-
-The runtime's prompt exposes its answer to no hook, so each dispatcher reads
-it off the two events it does see: PreToolUse asked, PostToolUse ran. Driven
-through the generated scripts rather than the modules they are compiled from,
-because the script is the only thing a live session runs.
-"""
+"""Native approval memory preserves each runtime's authorization boundaries."""
 
 import json
 import os
@@ -13,7 +7,12 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup.policy.assets.host import approvals_log
+from lup.policy.assets.host import (
+    approvals_log,
+    approval_fingerprint,
+    note_asked,
+    note_ran,
+)
 from tests.unit.repos import commit_file, initialized_repo
 
 CLAUDE = Path(".claude/plugins/lup/hooks/scripts/policy.py")
@@ -100,10 +99,50 @@ def test_a_call_changed_on_the_way_through_approves_nothing(repo: Path) -> None:
     assert decision(claude("PreToolUse", repo))["permissionDecision"] == "ask"
 
 
-def test_codex_remembers_the_same_way(repo: Path) -> None:
-    """Asked is a parked question and exit 2; remembered is exit 0."""
-    assert codex("PreToolUse", repo).exit_code == 2
+def test_codex_never_turns_a_queue_retry_into_persistent_approval(repo: Path) -> None:
+    refused = codex("PreToolUse", repo)
+    assert (
+        json.loads(refused.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    )
 
     assert codex("PostToolUse", repo).exit_code == 0
 
-    assert codex("PreToolUse", repo).exit_code == 0
+    again = codex("PreToolUse", repo)
+    assert (
+        json.loads(again.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    )
+    assert not approvals_log(repo).exists()
+
+
+def test_codex_does_not_consume_legacy_approval_memory(repo: Path) -> None:
+    fingerprint = approval_fingerprint("shell", COMMAND, repo)
+    note_asked(repo, fingerprint, "shell", COMMAND)
+    note_ran(repo, fingerprint)
+    refused = codex("PreToolUse", repo)
+    assert (
+        json.loads(refused.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cp proposal.md DESIGN.md",
+        "printf 'new\\n' > DESIGN.md",
+        "sed -i 's/old/new/' DESIGN.md",
+    ],
+)
+def test_claude_never_reuses_approval_memory_for_file_writes(
+    repo: Path, command: str
+) -> None:
+    before = "# lup: old\n" if command.startswith("sed ") else "old\n"
+    command = f"# lup: escalate[decision]: review this file write\n{command}"
+    (repo / "DESIGN.md").write_text(before)
+    (repo / "proposal.md").write_text("new\n")
+    assert decision(claude("PreToolUse", repo, command))["permissionDecision"] == "ask"
+    fingerprint = approval_fingerprint("shell", command, repo)
+    note_asked(repo, fingerprint, "shell", command)
+    note_ran(repo, fingerprint)
+    refused = decision(claude("PreToolUse", repo, command))
+    assert refused["permissionDecision"] in ("ask", "deny")
+    assert not str(refused["permissionDecisionReason"]).startswith("approved ")

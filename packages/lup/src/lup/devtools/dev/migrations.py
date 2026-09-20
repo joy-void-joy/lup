@@ -130,6 +130,21 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["shell_patch", "remembered_run", "patch_review"],
+        reason="Native hook reviews bind captured documents and policy bytes; Codex approvals remain single-use.",
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Regenerate both native plugins. Replace direct shell_patch callers with "
+                    "lup.policy.kernel.review.literal_input(command, 'apply_patch'). "
+                    "Pass captured preconditions and the shell flag to patch_review; never re-read "
+                    "the working tree for a parked review. Codex no longer consumes or creates "
+                    "persistent approval memory: operators answer each queued review independently."
+                )
+            )
+        ],
+    ),
+    Migration(
         subjects=["Runtime.contained"],
         reason=(
             "`contained` named the configuration home a workspace's sessions "

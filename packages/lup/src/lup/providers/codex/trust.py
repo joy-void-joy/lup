@@ -59,7 +59,7 @@ class CodexHook(BaseModel, frozen=True):
     """The name the home records trust under, spelled by whoever reads it."""
 
     event_name: str = Field(alias="eventName")
-    plugin_id: str = Field(alias="pluginId", default="")
+    plugin_id: str | None = Field(alias="pluginId", default=None)
     source: str
     enabled: bool
     is_managed: bool = Field(alias="isManaged")

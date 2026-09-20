@@ -16,6 +16,7 @@ from lup.policy.operations import Operation
 from lup.types import JsonObject
 from lup.policy.relay import PersistentQuestion
 from lup.policy.review import ReviewedFile, reviewed_files, spliced
+from lup.providers.harness import patch_review
 
 ROOT = Path("/repo")
 
@@ -151,3 +152,44 @@ def test_every_diff_line_ends_in_a_newline_however_the_file_ended() -> None:
 
     assert all(line for line in rendered.splitlines())
     assert rendered.endswith("\n")
+
+
+def test_patch_review_uses_captured_preimages_after_the_file_changes(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "design.md"
+    target.write_text("another writer\n")
+    command = "*** Begin Patch\n*** Update File: design.md\n@@\n-original\n+approved\n*** End Patch"
+    [change] = patch_review(command, tmp_path, {target: "original\n"}, False)
+    assert change.before == "original\n"
+    assert change.after == "approved\n"
+    assert target.read_text() == "another writer\n"
+
+
+def test_shell_patch_review_reads_the_same_literal_envelope(tmp_path: Path) -> None:
+    target = tmp_path / "design.md"
+    command = "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: design.md\n+approved\n*** End Patch\nPATCH"
+    [change] = patch_review(command, tmp_path, {target: "original\n"}, True)
+    assert change.before == "original\n"
+    assert change.after == "approved\n"
+
+
+def test_copy_review_uses_captured_source_and_destination(tmp_path: Path) -> None:
+    source = tmp_path / "proposal.md"
+    target = tmp_path / "design.md"
+    source.write_text("changed proposal\n")
+    target.write_text("changed destination\n")
+    [change] = patch_review(
+        "cp proposal.md design.md",
+        tmp_path,
+        {source: "approved\n", target: "original\n"},
+        True,
+    )
+    assert change.before == "original\n"
+    assert change.after == "approved\n"
+
+
+def test_uncaptured_patch_never_reads_current_files(tmp_path: Path) -> None:
+    (tmp_path / "design.md").write_text("original\n")
+    command = "*** Begin Patch\n*** Add File: design.md\n+approved\n*** End Patch"
+    assert patch_review(command, tmp_path, {}, False) == []

@@ -601,6 +601,7 @@ def review_hook_call(
     rule: str,
     purpose: str,
     reviewer: str,
+    policy_identity: str = "",
 ) -> dict[Literal["state", "id", "reason"], str]:
     """Park a native call or spend its explicit, single-use reviewer answer."""
     if not session:
@@ -612,7 +613,19 @@ def review_hook_call(
     payload = json.loads(arguments)
     before = json.loads(preconditions)
     material = json.dumps(
-        [session, str(root), tool, payload, before, reason, rule, purpose, reviewer],
+        [
+            session,
+            str(root),
+            tool,
+            payload,
+            before,
+            reason,
+            rule,
+            purpose,
+            reviewer,
+            policy_identity,
+            {path: str(Path(path).resolve()) for path in before},
+        ],
         sort_keys=True,
     )
     fingerprint = sha256(material.encode()).hexdigest()
@@ -654,7 +667,13 @@ def review_hook_call(
                 handle.write(json.dumps(entry, sort_keys=True) + "\n")
             return {"state": "approved", "id": entry["id"], "reason": ""}
     if entry is not None and entry["state"] in ("pending", "rejected"):
-        return {"state": entry["state"], "id": entry["id"], "reason": entry["reason"]}
+        answer = entry["answer"] if "answer" in entry else None
+        note = answer["note"] if answer and "note" in answer else ""
+        return {
+            "state": entry["state"],
+            "id": entry["id"],
+            "reason": note or entry["reason"],
+        }
     identifier = os.urandom(16).hex()
     entry = {
         "id": identifier,
@@ -2320,6 +2339,7 @@ def bash_decision(
     autonomous: bool = False,
     agent_identity: str = "",
     park: bool = True,
+    allow_memory: bool = True,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
 
@@ -2510,7 +2530,15 @@ def bash_decision(
     # Before the relay, because a question the author already answered for
     # this exact call is not a question, and parking it would hand the queue
     # one nobody needs to answer.
-    if verdict.effect == "ask":
+    content_bound = bool(
+        authored is not None
+        or reading["documents"]
+        or reading["unproduced"]
+        or shell_write_targets(command)
+        or acted_on
+        or flagged
+    )
+    if verdict.effect == "ask" and allow_memory and not content_bound:
         verdict = remembered_or_asked(verdict, cwd, "shell", command)
     # Parked before anything is rendered, because the relay is the durable
     # record every final ask is written to and the provider's own prompt is
@@ -2574,7 +2602,9 @@ def unconfined_by_declaration(command: str) -> bool:
     return sandbox_excluded(command, SANDBOX_EXCLUDED_COMMANDS)
 
 
-def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
+def fetch_decision(
+    url: str, root: Path | None = None, allow_memory: bool = True
+) -> KernelDecision:
     """Judge one outbound fetch against the declared scopes.
 
     The profile's answer for an origin no scope names is read from the same
@@ -2588,7 +2618,7 @@ def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
         DENIED_FETCH_SCOPES,
         "defer" if defers_unjudged(measured_boundary(root)) else "ask",
     )
-    if verdict.effect != "ask":
+    if verdict.effect != "ask" or not allow_memory:
         return verdict
     return remembered_or_asked(verdict, root, "fetch", url)
 

@@ -436,7 +436,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "760efea2764c4464983fdab414229f2fb6b88de1d52b76db6be4fd6f0a5ab5d3",
+      "sha256": "55f8221ff446cf5083c5068978aae1bd4b5aa878644e0e433c55dcc805fb6199",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -507,6 +507,13 @@
       "path": ".claude/plugins/lup/hooks/runtime/kernel/policy_protocol.py",
       "category": "generated",
       "sha256": "02b62f92e73b9f3d4e9fb4163fc1be0b4c8f9bc2346fe6017ae0498ee2b38a01",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".claude/plugins/lup/hooks/runtime/kernel/review.py",
+      "category": "generated",
+      "sha256": "2cbed960ac81bda8658a7b9d47e70b51d0ad8eb280012f9fdedaaeaeb8f9b8a1",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -583,7 +590,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "df5b8672ad970bb80fcad9724fdefddc845597a26b5f12812d5e88428d78e8b0",
+      "sha256": "021f031e30406b91372311691ab465efaad87e144dfb43a98f92b309b7eaf8a0",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -632,7 +639,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "6aed3810d4bfb16e5f66efc3bf4bf138d29f909feb29de99310c211c5e3b6d05",
+      "sha256": "3504cd525edd0c310621dd6f17b51326ee2a94033fc264fb6c33f6c4f4d863ea",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -646,7 +653,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy_evaluator.py",
       "category": "generated",
-      "sha256": "ec1e34d4591f3558b4380a89412c2563eba8a1c7eeae9e6ed3f583d4d338cf4e",
+      "sha256": "021ae41cb70cbef9c9b443f4a5657fc3e1d43043e1313ae29d408a1fbccd9596",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -723,7 +730,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "5b3c2fd07bb99e98c9d5ee013679f0f0d1c14334bc3e6f2403d4464fe8b038c4",
+      "sha256": "8684e336c9289010c76178cfb527d722304fa4c673e5719c0c2d63e5fba8c591",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -744,7 +751,7 @@
     {
       "path": "docs/native-capabilities.md",
       "category": "generated",
-      "sha256": "7568eabdbc72bdc726f81718a564bec4d6d54b626bc7ee2e3e3e0159695fb609",
+      "sha256": "5b25b77d288c974b1f2d9ba706ec20de45d6e68a7bbdaf214e65e7c6e324fa5a",
       "semantic_id": "docs.native-capabilities",
       "executable": false
     },
@@ -765,14 +772,14 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "025d9f4d350554624e50c991d9d6f5b3c46d6d16bfb0bb35d4d6dc564ddb95fa",
+      "sha256": "e75a0bd9aa23dfae343e8c8c6a4ee3ae3f086a867a2844618905222b56ae885e",
       "semantic_id": "docs.permissions",
       "executable": false
     },
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "18c531eff561bba06946688a0375f6960205d4b8e8ff4260c528fb4afb5b3151",
+      "sha256": "386e7a202a2d17758f91d933ac59cdb9059971133d445b066e0bdfd0bb09acf6",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
