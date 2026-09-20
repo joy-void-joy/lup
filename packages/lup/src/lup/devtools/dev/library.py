@@ -77,7 +77,14 @@ lup's own layout, not a choice an adopter makes."""
 
 
 class ExecutionEnvironment(TypedDict):
-    """One pyright execution environment: a root and its extra search paths."""
+    """One pyright execution environment lup declares: a root and its paths.
+
+    Both keys, because an environment lup owns exists to put the generated
+    runtime on the search path. An environment the *project* declares is not
+    this shape — ``extraPaths`` is optional in pyright's schema, and the
+    diagnostic overrides an environment may carry are not lup's to restate —
+    so those move as the tables they were written as.
+    """
 
     root: str
     extraPaths: list[str]
@@ -93,8 +100,8 @@ Derived rather than listed: a search path exists for an adapter because lup
 ships one, so the answer is :data:`~lup.providers.routing.Provider`'s and a
 second spelling here is a list that would go on naming two after a third
 arrived."""
-VENDORED_EXECUTION_ENVIRONMENTS = [
-    ExecutionEnvironment(
+VENDORED_EXECUTION_ENVIRONMENTS = {
+    runtime: ExecutionEnvironment(
         root=f"{VENDORED_SRC}/lup/providers/{runtime}/assets",
         extraPaths=[
             f".{runtime}/plugins/lup/hooks/runtime",
@@ -102,7 +109,10 @@ VENDORED_EXECUTION_ENVIRONMENTS = [
         ],
     )
     for runtime in RUNTIMES
-]
+}
+"""The environment each runtime's vendored adapter needs, keyed by that
+runtime — so where one belongs among the project's own is read off the key
+rather than sniffed back out of its root."""
 
 
 class LibraryMode(StrEnum):
@@ -316,27 +326,37 @@ def apply_search_path(
     return [f"{'.'.join([*table, key])}: {paths} -> {wanted}"]
 
 
-def runtime_of(root: str) -> str:
-    """Name the runtime whose tree an execution environment is rooted in."""
-    return next((runtime for runtime in RUNTIMES if runtime in root), RUNTIMES[0])
-
-
 def restored_beside_their_runtime(
-    kept: list[ExecutionEnvironment],
-) -> list[ExecutionEnvironment]:
-    """Group every environment under its own runtime, vendored one first.
+    kept: list[tomlkit.items.Table],
+) -> list[tomlkit.items.Table]:
+    """Put each vendored environment back ahead of its runtime's own tree.
 
     Order is reconstructed rather than remembered, so leaving the vendored
     mode and returning to it restores the list the project started with
-    instead of handing every adopter a reshuffled diff.
+    instead of handing every adopter a reshuffled diff. Reconstruction only
+    ever inserts: the environments the project kept stay in the order it wrote
+    them, including one whose root names no runtime at all and which therefore
+    anchors nothing.
     """
-    return [
-        entry
-        for runtime in RUNTIMES
-        for group in (VENDORED_EXECUTION_ENVIRONMENTS, kept)
-        for entry in group
-        if runtime_of(entry["root"]) == runtime
-    ]
+
+    def declared_table(declared: ExecutionEnvironment) -> tomlkit.items.Table:
+        """Render one environment lup owns as the table the file holds."""
+        entry = tomlkit.table()
+        entry.update(declared)
+        return entry
+
+    placed = list(kept)
+    for runtime, declared in VENDORED_EXECUTION_ENVIRONMENTS.items():
+        beside = next(
+            (
+                index
+                for index, entry in enumerate(placed)
+                if runtime in str(entry["root"])
+            ),
+            len(placed),
+        )
+        placed.insert(beside, declared_table(declared))
+    return placed
 
 
 def apply_execution_environments(
@@ -344,30 +364,28 @@ def apply_execution_environments(
 ) -> list[str]:
     """Keep pyright environments rooted in the package only while it is there.
 
-    Restored entries lead, which is the order the template ships and the only
-    one reconstructible without remembering where they sat. Environments match
-    on disjoint roots, so order carries no meaning to pyright — fixing it is
-    what makes leaving and re-entering the vendored mode churn-free.
+    A restored entry lands ahead of its own runtime's tree, which is the order
+    the template ships and the only one reconstructible without remembering
+    where it sat. Environments match on disjoint roots, so order carries no
+    meaning to pyright — fixing it is what makes leaving and re-entering the
+    vendored mode churn-free.
+
+    Every other environment is moved rather than rewritten: the table the
+    project wrote is the one that lands, so a missing ``extraPaths`` and a
+    diagnostic override beside the root both survive a mode change lup has no
+    reason to involve them in.
     """
     pyright = document["tool"]["pyright"]
     key = "executionEnvironments"
     if key not in pyright:
         return []
-    current = [
-        ExecutionEnvironment(
-            root=str(item["root"]),
-            extraPaths=[str(path) for path in item["extraPaths"]],
-        )
-        for item in pyright[key]
-    ]
-    kept = [item for item in current if not item["root"].startswith(VENDORED_ROOT)]
+    current = list(pyright[key])
+    kept = [item for item in current if not str(item["root"]).startswith(VENDORED_ROOT)]
     desired = restored_beside_their_runtime(kept) if vendored else kept
     if desired == current:
         return []
     environments = tomlkit.aot()
-    for declared in desired:
-        entry = tomlkit.table()
-        entry.update(declared)
+    for entry in desired:
         environments.append(entry)
     pyright[key] = environments
     return [f"pyright environments: {len(current)} -> {len(desired)}"]
