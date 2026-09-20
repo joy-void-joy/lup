@@ -60,6 +60,11 @@ DEPARTURE_SCRIPT = "coordination_departure.sh"
 """The same three under the runtime's ending event, reaching the one writer
 that finishes this session's row on a clean exit."""
 
+ARRIVAL_MODULE = "arrival"
+ARRIVAL_ENTRY = "coordination_arrival.py"
+ARRIVAL_SCRIPT = "coordination_arrival.sh"
+"""The native session identity binder and its two entry artifacts."""
+
 STORE_ORIGIN = bare.__name__
 """Where the shipped package is copied from, for the banner each file carries."""
 
@@ -294,3 +299,29 @@ def hook_artifacts(
             banner=GeneratedBanner(source=__name__, command=REGENERATE_COMMAND),
         ),
     ]
+
+
+def wake_hook(
+    plugin_root: Path,
+    plugin_root_env: str,
+    source: HookSet,
+    runtime: str,
+    events: tuple[str, ...],
+) -> PromptHook:
+    """Bind a root native session after startup or a delayed roster join."""
+    if source.peer_policy is None:
+        return PromptHook(registered={}, artifacts=[])
+    return PromptHook(
+        registered={
+            event: [{"hooks": [hook_entry(plugin_root_env, ARRIVAL_SCRIPT)]}]
+            for event in events
+        },
+        artifacts=hook_artifacts(
+            plugin_root,
+            source.id,
+            runtime,
+            ARRIVAL_SCRIPT,
+            ARRIVAL_ENTRY,
+            ARRIVAL_MODULE,
+        ),
+    )

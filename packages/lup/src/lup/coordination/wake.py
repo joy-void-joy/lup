@@ -184,7 +184,10 @@ def injected(
 
 
 def queued(thread: str, message: str, cwd: Path | None = None) -> Woken:
-    """Hand one message to a Codex session through its own queue."""
+    """Hand a message to Codex's queue; reached means the queue accepted it.
+
+    Acceptance does not establish that an idle session started a turn.
+    """
     try:
         CODEX_COMMAND(
             "queue",

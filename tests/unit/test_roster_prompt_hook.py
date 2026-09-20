@@ -22,6 +22,7 @@ import pytest
 import sh
 
 from lup.coordination.bare.changes import envelope, pointer
+from lup.coordination.bare.store import member_of, session_actor
 from lup.coordination.identity import MEMBER_ENV, mint_member_id
 from lup.coordination.repository import RepositoryPeers
 from lup.devtools.harness.generate import NativeHarnessComposition
@@ -30,6 +31,8 @@ from lup.policy.dispatcher import STORE_PACKAGE
 from lup.providers.claude.harness import CLAUDE_EXIT_EVENT, CLAUDE_PROMPT_EVENT
 from lup.providers.codex.harness import CODEX_EXIT_EVENT, CODEX_PROMPT_EVENT
 from lup.providers.roster_prompt import (
+    ARRIVAL_ENTRY,
+    ARRIVAL_SCRIPT,
     CHANGES_ENTRY,
     DEPARTURE_ENTRY,
     DEPARTURE_SCRIPT,
@@ -320,3 +323,78 @@ def test_the_entry_reaches_the_package_under_an_isolated_interpreter(
     )
 
     assert json.loads(isolated) == envelope(event, [pointer(1)])
+
+
+@pytest.mark.parametrize("event", ["SessionStart", CODEX_PROMPT_EVENT])
+def test_codex_native_arrival_binds_the_existing_launcher_member(
+    tmp_path: Path, event: str
+) -> None:
+    artifacts = shipped(codex_target)
+    plugin = rendered(".codex")
+    hooks = json.loads(artifacts[plugin / "hooks" / "hooks.json"].content)["hooks"]
+    assert any(
+        ARRIVAL_SCRIPT in hook["command"]
+        for group in hooks[event]
+        for hook in group["hooks"]
+    )
+    guard = laid_out(
+        artifacts, plugin, tmp_path / "plugin", ARRIVAL_SCRIPT, ARRIVAL_ENTRY
+    )
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    sh.git("init", "-q", str(repository))
+    peers = RepositoryPeers(repository)
+    member = mint_member_id()
+    peers.join(member, repository, cli_name="root")
+    payload = {
+        "session_id": "native-thread",
+        "cwd": str(repository),
+        "hook_event_name": event,
+    }
+    result = str(
+        sh.sh(
+            str(guard),
+            _in=json.dumps(payload),
+            _cwd=str(repository),
+            _env={**os.environ, MEMBER_ENV: member},
+        )
+    )
+    assert result == ""
+    found = member_of(peers.root, session_actor(member))
+    assert found is not None
+    assert found.get("wake", {}).get("handle") == "native-thread"
+    assert found.get("wake", {}).get("runtime") == "codex"
+
+
+def test_codex_arrival_entry_runs_without_site_packages(tmp_path: Path) -> None:
+    laid_out(
+        shipped(codex_target),
+        rendered(".codex"),
+        tmp_path / "plugin",
+        ARRIVAL_SCRIPT,
+        ARRIVAL_ENTRY,
+    )
+    peers = RepositoryPeers(tmp_path)
+    member = mint_member_id()
+    peers.join(member, tmp_path, cli_name="root")
+    result = str(
+        sh.Command("python3")(
+            "-I",
+            "-S",
+            str(tmp_path / "plugin" / "hooks" / "runtime" / ARRIVAL_ENTRY),
+            str(peers.root),
+            member,
+            "codex",
+            _in=json.dumps(
+                {
+                    "session_id": "native-thread",
+                    "cwd": str(tmp_path),
+                    "hook_event_name": "SessionStart",
+                }
+            ),
+        )
+    )
+    assert result == ""
+    found = member_of(peers.root, session_actor(member))
+    assert found is not None
+    assert found.get("wake", {}).get("handle") == "native-thread"

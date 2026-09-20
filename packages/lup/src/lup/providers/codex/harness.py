@@ -15,6 +15,7 @@ from lup.providers.roster_prompt import (
     folded,
     prompt_hook,
     store_artifacts,
+    wake_hook,
 )
 from lup.providers.subagent_cleanup import cleanup_hooks
 from lup.types import ModelTier
@@ -828,6 +829,13 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
         # the runtime runs whichever of them the project declared.
         roster = folded(
             [
+                wake_hook(
+                    Path(f".codex/plugins/{self.plugin_name}"),
+                    "PLUGIN_ROOT",
+                    source,
+                    "codex",
+                    ("SessionStart", CODEX_PROMPT_EVENT),
+                ),
                 prompt_hook(
                     Path(f".codex/plugins/{self.plugin_name}"),
                     "PLUGIN_ROOT",
