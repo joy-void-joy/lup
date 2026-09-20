@@ -85,6 +85,7 @@ class CodexAppServer:
         self.process: sh.RunningCommand | None = None
         self.reader: asyncio.Task[None] | None = None
         self.watcher: asyncio.Task[None] | None = None
+        self.handlers: set[asyncio.Task[None]] = set()
         self.closing = False
         self.exit_error: Exception | None = None
         self.connection_error: Exception | None = None
@@ -135,7 +136,7 @@ class CodexAppServer:
                     "capabilities": {"experimentalApi": True},
                 },
             )
-        except Exception:
+        except BaseException:
             await self.close()
             raise
         self.notify("initialized", {})
@@ -143,6 +144,9 @@ class CodexAppServer:
     async def close(self) -> None:
         close_error: Exception | None = None
         self.closing = True
+        for handler in self.handlers:
+            handler.cancel()
+        await asyncio.gather(*self.handlers, return_exceptions=True)
         self.input.put(None)
         reader = self.reader
         self.reader = None
@@ -244,24 +248,41 @@ class CodexAppServer:
                                 RpcNotification(method=method, params=message.params)
                             )
                     case _:
-                        asyncio.create_task(self.resolve_server_request(message))
+                        self.spawn_handler(self.resolve_server_request(message))
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            self.connection_error = error
-            for future in self.pending.values():
-                if not future.done():
-                    future.set_exception(error)
-            self.pending.clear()
-            if self.disconnect_handler is not None:
-                self.disconnect_handler(error)
+            self.fail_connection(error)
             raise
+
+    def fail_connection(self, error: Exception) -> None:
+        """Fail every pending consumer when connection-owned work fails."""
+        self.connection_error = error
+        for future in self.pending.values():
+            if not future.done():
+                future.set_exception(error)
+        self.pending.clear()
+        if self.disconnect_handler is not None:
+            self.disconnect_handler(error)
+
+    def spawn_handler(self, awaitable: Awaitable[None]) -> None:
+        """Own asynchronous request and notification work until connection close."""
+
+        async def handle() -> None:
+            try:
+                await awaitable
+            except Exception as error:
+                self.fail_connection(error)
+
+        task = asyncio.create_task(handle())
+        self.handlers.add(task)
+        task.add_done_callback(self.handlers.discard)
 
     async def resolve_response(self, message: RpcMessage) -> None:
         if not isinstance(message.id, int):
             return
         future = self.pending.pop(message.id, None)
-        if future is None:
+        if future is None or future.done():
             return
         if message.error is not None:
             future.set_exception(AppServerError(message.error))
