@@ -148,6 +148,8 @@ class Wake(TypedDict, total=False):
     runtime: str
     handle: str
     session: str
+    home: str
+    scope: str
 
 
 class Named(TypedDict, total=False):

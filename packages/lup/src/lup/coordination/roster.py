@@ -197,6 +197,8 @@ def folded_member(member: store.Member) -> RosterMember:
             store.text(wake.get("runtime")),
             store.text(wake.get("handle")),
             store.text(wake.get("session")),
+            store.text(wake.get("home")),
+            store.text(wake.get("scope")),
         ),
         delivery=carried(store.text(member.get("delivery")), Delivery.INBOX),
         cli_name=store.current_name(member),
@@ -252,7 +254,13 @@ class Roster:
         member["liveness"] = liveness
         member["delivery"] = delivery.value
         member["worktree"] = worktree
-        member["wake"] = store.Wake(runtime=wake.runtime, handle=wake.handle)
+        member["wake"] = store.Wake(
+            runtime=wake.runtime,
+            handle=wake.handle,
+            session=wake.session,
+            home=wake.home,
+            scope=wake.scope,
+        )
         store.write_member(self.root, member)
 
     def spawned(self, actor: ActorRef, task: str) -> None:

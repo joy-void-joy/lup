@@ -835,6 +835,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     source,
                     "codex",
                     ("SessionStart", CODEX_PROMPT_EVENT),
+                    CODEX_LOGIN.config_home_env,
                 ),
                 prompt_hook(
                     Path(f".codex/plugins/{self.plugin_name}"),

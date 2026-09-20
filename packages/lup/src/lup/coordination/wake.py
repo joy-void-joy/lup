@@ -4,8 +4,9 @@ Mail is the durable record and it is always written; a wake sits on top of it,
 never instead of it. That ordering is the whole safety property here — a wake
 that fails costs a peer some latency, and never a message.
 
-**Both runtimes can be reached from any process on the machine**, by means that
-are each the runtime's own. Codex serves ``codex queue``. Claude gives every
+Native transports have different execution boundaries. Codex's ``queue`` uses
+the daemon selected by its configuration home, so a sender must share the
+target's proven execution scope and select that home. Claude gives every
 session a private inbox on a Unix socket and accepts a newline-delimited JSON
 frame written to it, which arrives in that session as a message and starts a
 turn — measured against a background session confirmed idle, which answered a
@@ -24,8 +25,8 @@ refused by it rather than delivered to it. :mod:`lup.harness.messaging` is
 where lup puts the sockets so that case is rare rather than ordinary; this is
 what makes it harmless when it happens anyway.
 
-So this finishes the job on both, and a member nothing can wake is one that
-declared no path rather than one whose runtime offers none.
+An unavailable native route leaves durable mail pending and reports why no
+wake was attempted. Queue acceptance does not prove an idle turn started.
 """
 
 import json
@@ -36,10 +37,10 @@ from typing import Literal
 from pydantic import BaseModel
 
 from lup.execution.shell import LazyCommand
+from lup.coordination.bare.scope import execution_scope
 
-# lup: ignore[constant-declaration] — the provider's own executable name,
-# which is what `codex queue` is spelled as and not a choice a caller makes
-CODEX_COMMAND = LazyCommand("codex")
+# lup: ignore[constant-declaration] — env overlays the target home while retaining native process discovery settings
+QUEUE_COMMAND = LazyCommand("env")
 
 type WakeRuntime = Literal["", "claude", "codex"]
 """Which runtimes a member can declare a wake path for, named once.
@@ -87,8 +88,16 @@ class WakePath(BaseModel, frozen=True):
     session id too; the queue targets the handle directly.
     """
 
+    home: str = ""
+    """Native configuration home recorded inside the target session's boundary."""
 
-def declared_wake(runtime: str, handle: str, session: str = "") -> WakePath:
+    scope: str = ""
+    """Execution identity proving this process can address that home and daemon."""
+
+
+def declared_wake(
+    runtime: str, handle: str, session: str = "", home: str = "", scope: str = ""
+) -> WakePath:
     """One member's wake path as a fold read it off the record.
 
     Narrowing rather than validating, because this is the read path a listing
@@ -97,7 +106,9 @@ def declared_wake(runtime: str, handle: str, session: str = "") -> WakePath:
     """
     match runtime:
         case "claude" | "codex":
-            return WakePath(runtime=runtime, handle=handle, session=session)
+            return WakePath(
+                runtime=runtime, handle=handle, session=session, home=home, scope=scope
+            )
         case _:
             return WakePath(handle=handle, session=session)
 
@@ -105,9 +116,8 @@ def declared_wake(runtime: str, handle: str, session: str = "") -> WakePath:
 class Woken(BaseModel, frozen=True):
     """What happened when somebody tried to make a member look.
 
-    Two outcomes, because there are two: the peer was made to look, or it was
-    not and the mail waits for it. Nothing here asks the caller to finish the
-    job, since on both runtimes this library can.
+    Native acceptance is distinct from a peer reading mail. Missing or
+    unreachable routes leave the durable record waiting for the peer.
     """
 
     reached: bool
@@ -131,7 +141,7 @@ def wake(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
     """
     match path.runtime:
         case "codex" if path.handle:
-            return queued(path.handle, message, cwd)
+            return queued(path, message, cwd)
         case "claude" if path.handle:
             return injected(Path(path.handle), message, path.session)
         case _:
@@ -185,16 +195,29 @@ def injected(
     return Woken(reached=True)
 
 
-def queued(thread: str, message: str, cwd: Path | None = None) -> Woken:
+def queued(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
     """Hand a message to Codex's queue; reached means the queue accepted it.
 
     Acceptance does not establish that an idle session started a turn.
     """
+    if not path.home or not Path(path.home).is_absolute() or not path.scope:
+        return Woken(
+            reached=False,
+            reason="Codex wake has no verified target home and execution scope; durable mail remains pending.",
+        )
+    if path.scope != execution_scope():
+        # lup: defer: Add an owned execution bridge before supporting Codex wake across container boundaries.
+        return Woken(
+            reached=False,
+            reason="Codex wake cannot cross this execution boundary; durable mail remains pending until the peer next acts.",
+        )
     try:
-        CODEX_COMMAND(
+        QUEUE_COMMAND(
+            f"CODEX_HOME={path.home}",
+            "codex",
             "queue",
             "--thread",
-            thread,
+            path.handle,
             "--message",
             message,
             _cwd=str(cwd) if cwd else None,
@@ -202,6 +225,6 @@ def queued(thread: str, message: str, cwd: Path | None = None) -> Woken:
     except Exception as failure:
         return Woken(
             reached=False,
-            reason=f"codex queue did not reach {thread!r}: {failure}",
+            reason=f"codex queue did not reach {path.handle!r}: {failure}",
         )
     return Woken(reached=True)

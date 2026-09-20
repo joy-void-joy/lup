@@ -34,6 +34,7 @@ leaving a script that reads a path nobody writes.
 
 from importlib import resources
 from pathlib import Path
+import shlex
 
 from lup.coordination import bare
 from lup.coordination.bare.store import COORDINATION_DIR, MEMBERS_DIR, STORE_DIR
@@ -133,7 +134,9 @@ main()
 '''
 
 
-def guard_body(event: str, entry: str) -> str:
+def guard_body(
+    event: str, entry: str, home_env: str = "", events: tuple[str, ...] = ()
+) -> str:
     """A store-existence check that answers "nobody coordinates here" without Python.
 
     The store's members directory is the whole test: a repository whose
@@ -157,6 +160,8 @@ def guard_body(event: str, entry: str) -> str:
     hands the hook; the environment variable's name stays the identity
     module's and the event's name stays the adapter's.
     """
+    home_argument = f' "${{{home_env}:-}}"' if home_env else (' ""' if events else "")
+    event_arguments = f" {shlex.join(events)}" if events else ""
     return f"""#!/bin/sh
 command -v python3 >/dev/null 2>&1 || exit 0
 shared=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
@@ -166,7 +171,7 @@ case "$shared" in
 esac
 root="$shared/{STORE_DIR}/{COORDINATION_DIR}"
 [ -d "$root/{MEMBERS_DIR}" ] || exit 0
-exec python3 "${{0%/*}}/../runtime/{entry}" "$root" "${MEMBER_ENV}" "{event}"
+exec python3 "${{0%/*}}/../runtime/{entry}" "$root" "${MEMBER_ENV}" "{event}"{home_argument}{event_arguments}
 """
 
 
@@ -282,12 +287,14 @@ def hook_artifacts(
     guard_script: str,
     entry: str,
     module: str,
+    home_env: str = "",
+    events: tuple[str, ...] = (),
 ) -> list[Artifact]:
     """One event's guard and the entry it runs, beside the shipped package."""
     return [
         Artifact.generated(
             path=plugin_root / "hooks" / "scripts" / guard_script,
-            body=guard_body(event, entry),
+            body=guard_body(event, entry, home_env, events),
             semantic_id=semantic_id,
             banner=GeneratedBanner(source=__name__, command=REGENERATE_COMMAND),
             executable=True,
@@ -307,6 +314,7 @@ def wake_hook(
     source: HookSet,
     runtime: str,
     events: tuple[str, ...],
+    home_env: str,
 ) -> PromptHook:
     """Bind a root native session after startup or a delayed roster join."""
     if source.peer_policy is None:
@@ -323,5 +331,7 @@ def wake_hook(
             ARRIVAL_SCRIPT,
             ARRIVAL_ENTRY,
             ARRIVAL_MODULE,
+            home_env,
+            events,
         ),
     )

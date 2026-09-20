@@ -93,7 +93,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/coordination/arrival.py",
       "category": "generated",
-      "sha256": "d181176232a708fe1a3f4c4f2ebdbced91eeba410fc51c5177a28e3b0b83a13a",
+      "sha256": "ed0c00d8371c87a70e670868ee9269cca29d490498cf14413adf8ff99b7f330f",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -119,9 +119,16 @@
       "executable": false
     },
     {
+      "path": ".codex/plugins/lup/hooks/runtime/coordination/scope.py",
+      "category": "generated",
+      "sha256": "1059abedb85e3bf4271464ec40aaa9ded15883e1760ba24c929c9e4a5579c611",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
       "path": ".codex/plugins/lup/hooks/runtime/coordination/store.py",
       "category": "generated",
-      "sha256": "8b0836eddae0344c9dfb355b6cb05b762ba48611d97cb1885ba06424a3ce54e4",
+      "sha256": "15a26d6a9ee87da0b3ba21e5f8504690786fa34a0effd421f5d85337bf30faf2",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -345,7 +352,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/coordination_arrival.sh",
       "category": "generated",
-      "sha256": "cbbf5176205ce0a9a5fe194320de28da0e69b0818a641c51f8b9ed65ccfcedeb",
+      "sha256": "7fa4d0cd3b41415e25474df3c77da5408aeae1310cac7a3c27334c832f1eb77f",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },

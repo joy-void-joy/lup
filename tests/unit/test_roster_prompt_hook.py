@@ -40,6 +40,7 @@ from lup.providers.roster_prompt import (
     departure_hook,
     prompt_hook,
     store_modules,
+    wake_hook,
 )
 from lup_template.harness.catalog import portable_harness
 from lup_template.harness.composition import claude_target, codex_target
@@ -385,6 +386,9 @@ def test_codex_arrival_entry_runs_without_site_packages(tmp_path: Path) -> None:
             str(peers.root),
             member,
             "codex",
+            "/native-home",
+            "SessionStart",
+            CODEX_PROMPT_EVENT,
             _in=json.dumps(
                 {
                     "session_id": "native-thread",
@@ -398,3 +402,50 @@ def test_codex_arrival_entry_runs_without_site_packages(tmp_path: Path) -> None:
     found = member_of(peers.root, session_actor(member))
     assert found is not None
     assert found.get("wake", {}).get("handle") == "native-thread"
+
+
+def test_arrival_guard_carries_only_its_declared_events(tmp_path: Path) -> None:
+    plugin = Path("plugin")
+    event = "Root 'Ready'"
+    hook = wake_hook(
+        plugin,
+        "PLUGIN_ROOT",
+        portable_harness().declared_hooks,
+        "codex",
+        (event,),
+        "NATIVE_HOME",
+    )
+    guard = laid_out(
+        {artifact.path: artifact for artifact in hook.artifacts},
+        plugin,
+        tmp_path / "plugin",
+        ARRIVAL_SCRIPT,
+        ARRIVAL_ENTRY,
+    )
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    sh.git("init", "-q", str(repository))
+    peers = RepositoryPeers(repository)
+    member = mint_member_id()
+    peers.join(member, repository, cli_name="root")
+    environment = {**os.environ, MEMBER_ENV: member, "NATIVE_HOME": "/target home"}
+    for actual, expected in [("SessionStart", ""), (event, "native-thread")]:
+        result = str(
+            sh.sh(
+                str(guard),
+                _in=json.dumps(
+                    {
+                        "session_id": "native-thread",
+                        "cwd": str(repository),
+                        "hook_event_name": actual,
+                    }
+                ),
+                _cwd=str(repository),
+                _env=environment,
+            )
+        )
+        assert result == ""
+        found = member_of(peers.root, session_actor(member))
+        assert found is not None
+        assert found.get("wake", {}).get("handle", "") == expected
+    assert found.get("wake", {}).get("home") == "/target home"

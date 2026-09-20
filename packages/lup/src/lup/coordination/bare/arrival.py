@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from .store import MEMBER_KIND, Member, Wake, revised, session_actor, text
+from .scope import execution_scope
 
 
 class Arrival(TypedDict, total=False):
@@ -24,10 +25,18 @@ class Arrival(TypedDict, total=False):
     agent_type: str
 
 
-def bind(root: Path, member: str, runtime: str, arrival: Arrival) -> bool:
+def bind(
+    root: Path,
+    member: str,
+    runtime: str,
+    arrival: Arrival,
+    events: tuple[str, ...],
+    home: str = "",
+) -> bool:
     """Bind an existing member only when the native root scope matches it."""
     session = text(arrival.get("session_id"))
-    if arrival.get("hook_event_name") not in {"SessionStart", "UserPromptSubmit"}:
+    event = text(arrival.get("hook_event_name"))
+    if not event or event not in events:
         return False
     cwd = text(arrival.get("cwd"))
     if not session or not cwd or not runtime or not member:
@@ -48,7 +57,13 @@ def bind(root: Path, member: str, runtime: str, arrival: Arrival) -> bool:
         wake = found.get("wake", Wake())
         if wake.get("runtime") not in {None, "", runtime}:
             return found
-        found["wake"] = Wake(runtime=runtime, handle=session, session=session)
+        found["wake"] = Wake(
+            runtime=runtime,
+            handle=session,
+            session=session,
+            home=str(Path(home).resolve()) if home else "",
+            scope=execution_scope(),
+        )
         bound = True
         return found
 
@@ -60,7 +75,7 @@ def main() -> None:
     try:
         root, member, runtime = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
         arrival: Arrival = json.load(sys.stdin)
-        bind(root, member, runtime, arrival)
+        bind(root, member, runtime, arrival, tuple(sys.argv[5:]), sys.argv[4])
     except Exception as error:
         print(
             f"Native session wake binding failed ({type(error).__name__}); "

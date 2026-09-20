@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 116 artifacts
+## `claude` — 117 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -66,6 +66,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/coordination/changes.py` | lup.coordination.bare.changes |
 | `.claude/plugins/lup/hooks/runtime/coordination/departure.py` | lup.coordination.bare.departure |
 | `.claude/plugins/lup/hooks/runtime/coordination/mail.py` | lup.coordination.bare.mail |
+| `.claude/plugins/lup/hooks/runtime/coordination/scope.py` | lup.coordination.bare.scope |
 | `.claude/plugins/lup/hooks/runtime/coordination/store.py` | lup.coordination.bare.store |
 | `.claude/plugins/lup/hooks/runtime/coordination_changes.py` | lup.providers.roster_prompt |
 | `.claude/plugins/lup/hooks/runtime/coordination_delivery.py` | lup.providers.claude.assets.peer_delivery_runtime |
@@ -129,7 +130,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 94 artifacts
+## `codex` — 95 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -149,6 +150,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/coordination/changes.py` | lup.coordination.bare.changes |
 | `.codex/plugins/lup/hooks/runtime/coordination/departure.py` | lup.coordination.bare.departure |
 | `.codex/plugins/lup/hooks/runtime/coordination/mail.py` | lup.coordination.bare.mail |
+| `.codex/plugins/lup/hooks/runtime/coordination/scope.py` | lup.coordination.bare.scope |
 | `.codex/plugins/lup/hooks/runtime/coordination/store.py` | lup.coordination.bare.store |
 | `.codex/plugins/lup/hooks/runtime/coordination_arrival.py` | lup.providers.roster_prompt |
 | `.codex/plugins/lup/hooks/runtime/coordination_changes.py` | lup.providers.roster_prompt |
