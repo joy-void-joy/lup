@@ -24,10 +24,11 @@ assumed.
 import asyncio
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
+from hashlib import sha256
 from pathlib import Path
 
 from lup.channels.models import utc_now
-from lup.resolver.contracts import ResolverDrained
+from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverDrained
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
     JoinAuditEvent,
@@ -180,9 +181,9 @@ class Joiner:
             self.record_join_progress(progress.joined, current, tips)
         outstanding = [tip for tip in tips if tip not in progress.joined]
         if outstanding:
-            # A drain is the one way to leave parents on the table, and it is
-            # observed at a landing, so what is recorded is a tree that
-            # exists and a resume re-enters at the next parent.
+            pending = await self.questions.unanswered_for(lease.concern_id)
+            if pending:
+                raise ResolverAwaitingAnswers(pending, [])
             drain = self.questions.draining()
             if drain is None:
                 raise ResolverInvariantError(
@@ -260,6 +261,25 @@ class Joiner:
             blocked = report.blocked
             progress = desk.progress()
             self.record_landings(before, progress)
+            pending = await self.questions.unanswered_for(lease.concern_id)
+            if (
+                blocked
+                and not pending
+                and len(progress.joined) < len(plan.tips)
+                and self.questions.draining() is None
+            ):
+                question = MaterialQuestion(
+                    id=f"{lease.concern_id}-join-blocked-{sha256(blocked.encode()).hexdigest()}",
+                    concern_id=lease.concern_id,
+                    prompt=(
+                        f"How should the join for {lease.concern_id} proceed? "
+                        f"The merger reported this blocker for {purpose}:\n\n{blocked}"
+                    ),
+                )
+                self.questions.queue_questions([question], lease.concern_id)
+                pending = await self.questions.unanswered_for(lease.concern_id)
+            if pending:
+                raise ResolverAwaitingAnswers(pending, [])
             await self.recheck_landed(lease, plan, before, progress)
             # Every parent landed, nothing landed this turn, or the run was
             # asked to stop. The last is checked here as well as inside the

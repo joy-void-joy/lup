@@ -483,6 +483,17 @@ class TurnRunner:
         """
         landed = {commit for commit in progress.joined}
         remaining = [tip for tip in plan.tips if tip.commit not in landed]
+        questions = {
+            item.question.id: item.question
+            for item in self.mailbox.questions()
+            if item.question.concern_id == lease.concern_id
+        }
+        decisions = "\n".join(
+            f"Question: {questions[item.answer.question_id].prompt}\n"
+            f"Answer: {item.answer.value}"
+            for item in self.mailbox.answers()
+            if item.answer.question_id in questions
+        )
         prompt = (
             "Join every parent below into the assigned worktree. You own the "
             "sequence: read the whole set first, decide the order that puts "
@@ -521,6 +532,7 @@ class TurnRunner:
             + f"Already landed: {len(landed)} of {len(plan.tips)}\n\n"
             + format_tips(remaining)
             + format_carried(plan.carried)
+            + f"\n\nRecorded decisions for this join:\n{decisions}"
         )
         result = await self.merger_round(
             lease, turn_request(TurnInput(text=prompt), JoinReport)

@@ -188,7 +188,9 @@ class JoinReport(BaseModel, frozen=True, extra="forbid"):
         description=(
             "Why you stopped with parents still on the table, when nothing "
             "asked you to. An incompletion with a cause is answerable; one "
-            "without a cause reads as an unexplained failure."
+            "without a cause reads as an unexplained failure. An unfinished join "
+            "with a blocker and no pending question opens a recovery question "
+            "containing this complete text."
         ),
     )
 

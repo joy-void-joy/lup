@@ -84,6 +84,7 @@ DECLARED_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
     ConcernStatus.INELIGIBLE: [],
     ConcernStatus.LEASED: [
         ConcernStatus.RUNNING,
+        ConcernStatus.WAITING_FOR_ANSWERS,
         ConcernStatus.ELIGIBLE,
         ConcernStatus.FAILED,
     ],
