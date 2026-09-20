@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 
 import sh
 import tomlkit
-from packaging.version import Version
+from semver import Version
 from pydantic import BaseModel, Field
 
 from lup.providers.codex.login import CODEX_LOGIN
@@ -42,12 +42,17 @@ class PluginCacheConfig(BaseModel, frozen=True):
     # Required for explicit shared homes and for a stable installed-cache path.
     marketplace: str
     plugin: str = "lup"
-    # None derives an immutable cachebuster from deployable plugin content.
+    # None derives an immutable installation revision newer than retained caches.
     # An explicit value selects an already-versioned external fixture.
     version: str | None = None
 
+    def cache_root(self) -> Path:
+        """Every retained native revision for this plugin in the selected home."""
+        return self.codex_home / "plugins" / "cache" / self.marketplace / self.plugin
+
 
 class PluginCacheEvidence(BaseModel, frozen=True):
+    package_version: str = ""
     source_root: Path
     installed_root: Path
     source_digest: str
@@ -135,9 +140,64 @@ def plugin_manifest_version(source_root: Path) -> str:
 
 
 def cachebusted_plugin_version(source_root: Path, content_digest: str) -> str:
-    """Name an immutable Codex cache revision for this plugin content."""
-    base = Version(plugin_manifest_version(source_root)).public
+    """Name the initial content revision before a home retains older revisions."""
+    base = Version.parse(plugin_manifest_version(source_root)).replace(build=None)
     return f"{base}+codex.{content_digest}"
+
+
+def selected_plugin_version(
+    source_root: Path,
+    content_digest: str,
+    config: PluginCacheConfig,
+) -> str:
+    """Select immutable content with a strictly increasing native release.
+
+    Codex chooses the highest cached version, independent of marketplace
+    registration. Semantic release ordering is shared with the native loader;
+    build metadata ordering differs, so tied releases publish a higher patch.
+    Only a unique highest revision can be reused. The authored package version
+    remains in source; a staged manifest names this installation revision.
+    """
+    versions: dict[Path, Version] = {}
+    unparsed: list[Path] = []
+    cache = config.cache_root()
+    for path in cache.iterdir() if cache.is_dir() else []:
+        if not path.is_dir() or not all(
+            character.isascii() and (character.isalnum() or character in ".+_-")
+            for character in path.name
+        ):
+            continue
+        try:
+            versions[path] = Version.parse(path.name)
+        except ValueError:
+            unparsed.append(path)
+    base = Version.parse(plugin_manifest_version(source_root)).replace(build=None)
+    latest = max(versions.values(), default=base)
+    highest = [path for path, version in versions.items() if version == latest]
+    match config.version, highest:
+        case str(candidate), _:
+            requested = Version.parse(candidate)
+            if any(
+                version > requested or (version == requested and path.name != candidate)
+                for path, version in versions.items()
+            ):
+                raise RuntimeError(
+                    "Explicit Codex plugin revision is shadowed by retained cache versions. Use automatic installation revisions or select a clean Codex home; live caches are preserved."
+                )
+        case None, [path] if latest >= base and (
+            plugin_content_digest(path) == content_digest
+            or latest.build == f"codex.{content_digest}"
+        ):
+            candidate = path.name
+        case None, _:
+            release = max(base, latest.bump_patch()) if versions else base
+            candidate = str(release.replace(build=f"codex.{content_digest}"))
+    for path in unparsed:
+        if path.name == "local" or path.name > candidate:
+            raise RuntimeError(
+                f"Native Codex cache revision {path} overrides semantic revisions. Select a clean Codex home; live cache paths cannot be removed or overwritten."
+            )
+    return candidate
 
 
 def plugin_cache_evidence(
@@ -147,7 +207,7 @@ def plugin_cache_evidence(
     source = plugin_content_digest(source_root)
     if source is None:
         raise FileNotFoundError(f"Codex plugin source does not exist: {source_root}")
-    version = config.version or cachebusted_plugin_version(source_root, source)
+    version = selected_plugin_version(source_root, source, config)
     installed_root = (
         config.codex_home
         / "plugins"
@@ -158,6 +218,7 @@ def plugin_cache_evidence(
     )
     installed = plugin_content_digest(installed_root)
     return PluginCacheEvidence(
+        package_version=plugin_manifest_version(source_root),
         source_root=source_root,
         installed_root=installed_root,
         source_digest=source,
@@ -308,7 +369,10 @@ class CodexPluginInstaller:
                 prefix=".plugin-install-", dir=self.config.codex_home
             ) as temporary_text:
                 staged = self.config.model_copy(
-                    update={"codex_home": Path(temporary_text)}
+                    update={
+                        "codex_home": Path(temporary_text),
+                        "version": before.installed_root.name,
+                    }
                 )
                 environment = {
                     **self.plugin_environment(),
