@@ -36,7 +36,12 @@ from tests.unit.doubles import (
     session_factory,
     turn_result,
 )
-from lup.coordination.mailbox import AnswerDoor, AnswerOffer, ParkRequest
+from lup.coordination.mailbox import (
+    AnswerDoor,
+    AnswerOffer,
+    ParkRequest,
+    RecordedAnswer,
+)
 from lup.coordination.questions import QuestionAnswer
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.policy.identity import ConcernAllowance
@@ -5012,6 +5017,137 @@ async def test_recheck_prompt_carries_the_record_and_corrects_foreign_labels(
     assert "declared criterion ids" in log[0]
     assert "never declared: guidance-roster-done" in log[1]
     assert [item.question.id for item in core.mailbox.questions()] == []
+
+
+@pytest.mark.parametrize("published", [False, True])
+async def test_recheck_resume_replays_verdict_across_question_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, published: bool
+) -> None:
+    calls: list[str] = []
+
+    def response(_root: Path, _output_name: str) -> JsonObject:
+        calls.append("review")
+        return {
+            "concern_id": "a",
+            "accepted": False,
+            "generalized": True,
+            "reason": "criterion lost",
+            "criteria_met": [],
+        }
+
+    core = recheck_core(tmp_path, "recheck-interrupted", response, [])
+    queue = core.questions.queue_questions
+
+    def interrupted(questions: list[MaterialQuestion], asked_by: str) -> None:
+        if published:
+            queue(questions, asked_by)
+        raise RuntimeError("interrupted publication")
+
+    monkeypatch.setattr(core.questions, "queue_questions", interrupted)
+    with pytest.raises(RuntimeError, match="interrupted publication"):
+        await core.joiner.recheck_concern(
+            concern("a"),
+            tmp_path,
+            situation="integrated",
+            occasion="integrated",
+            lost_because="after integration",
+            commit="first-tree",
+        )
+    await core.joiner.runner.actors.close()
+    resumed = recheck_core(tmp_path, "recheck-interrupted", response, [])
+    question = await resumed.joiner.recheck_concern(
+        concern("a"),
+        tmp_path,
+        situation="resumed",
+        occasion="integrated",
+        lost_because="after integration",
+        commit="first-tree",
+    )
+    assert calls == ["review"]
+    assert question is not None and question.recheck_commit == "first-tree"
+    assert [pending.question for pending in resumed.mailbox.questions()] == [question]
+    resumed.mailbox.record(
+        RecordedAnswer(
+            run_id="recheck-interrupted",
+            answer=QuestionAnswer(question_id=question.id, value="superseded"),
+            door=AnswerDoor.CONSOLE,
+            answered_at=utc_now(),
+        )
+    )
+    again = await resumed.joiner.recheck_concern(
+        concern("a"),
+        tmp_path,
+        situation="resumed again",
+        occasion="integrated",
+        lost_because="after integration",
+        commit="first-tree",
+    )
+    assert again == question
+    assert resumed.mailbox.answered_ids() == [question.id]
+    assert calls == ["review"]
+    await resumed.joiner.runner.actors.close()
+
+
+async def test_recheck_changed_tree_preserves_old_question_and_answer(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def response(_root: Path, _output_name: str) -> JsonObject:
+        calls.append("review")
+        return {
+            "concern_id": "a",
+            "accepted": False,
+            "generalized": True,
+            "reason": "criterion finding",
+            "criteria_met": ["a-done"] if len(calls) == 1 else [],
+        }
+
+    core = recheck_core(tmp_path, "recheck-repaired", response, [])
+    item = concern("a").model_copy(
+        update={
+            "criteria": [
+                *concern("a").criteria,
+                AcceptanceCriterion(id="a-more", description="more"),
+            ]
+        }
+    )
+    first = await core.joiner.recheck_concern(
+        item,
+        tmp_path,
+        situation="integrated",
+        occasion="integrated",
+        lost_because="after integration",
+        commit="first-tree",
+    )
+    assert first is not None
+    core.mailbox.record(
+        RecordedAnswer(
+            run_id="recheck-repaired",
+            answer=QuestionAnswer(question_id=first.id, value="superseded"),
+            door=AnswerDoor.CONSOLE,
+            answered_at=utc_now(),
+        )
+    )
+    second = await core.joiner.recheck_concern(
+        item,
+        tmp_path,
+        situation="repaired",
+        occasion="integrated",
+        lost_because="after repair",
+        commit="repaired-tree",
+    )
+    assert second is not None and second.id != first.id
+    assert first.criteria == ["a-more"]
+    assert second.criteria == ["a-done", "a-more"]
+    assert core.mailbox.answered_ids() == [first.id]
+    assert {pending.question.id for pending in core.mailbox.questions()} == {
+        first.id,
+        second.id,
+    }
+    changed = journal_events(core, "recheck_changed")
+    assert len(changed) == 1 and changed[0]["commit"] == "repaired-tree"
+    await core.joiner.runner.actors.close()
 
 
 def standing_state(run_id: str, ruling: str | None) -> ResolveState:

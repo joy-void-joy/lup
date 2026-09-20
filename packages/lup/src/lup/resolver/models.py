@@ -293,6 +293,8 @@ class MaterialQuestion(Question, frozen=True):
             "occasions instead of re-asked per join."
         ),
     )
+    recheck_commit: str | None = None
+    """The exact tree this criterion finding examined, absent for other questions."""
 
 
 class RecheckRuling(BaseModel, frozen=True):

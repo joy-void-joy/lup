@@ -38,8 +38,14 @@ from lup.resolver.journal import (
     Journal,
     RecheckRepeatedEvent,
     RecheckReusedEvent,
+    RecheckChangedEvent,
 )
-from lup.resolver.recheck_desk import RecheckDesk, RecheckRecord
+from lup.resolver.recheck_desk import (
+    RecheckDesk,
+    RecheckIdentity,
+    RecheckRecord,
+    RecheckVerdict,
+)
 from lup.resolver.join_desk import (
     JoinDesk,
     JoinPlan,
@@ -580,6 +586,7 @@ class Joiner:
                 ),
                 occasion=f"join-{parent[:12]}",
                 lost_because=f"once {parent[:12]} was joined into the same tree",
+                commit=self.worktrees.head(lease),
             )
 
     async def recheck_criteria(
@@ -734,6 +741,7 @@ class Joiner:
             ),
             occasion="integrated",
             lost_because="once every sibling is integrated",
+            commit=integration.commit,
         )
 
     async def settle_rechecks(
@@ -767,6 +775,7 @@ class Joiner:
         situation: str,
         occasion: str,
         lost_because: str,
+        commit: str | None = None,
     ) -> MaterialQuestion | None:
         """Ask one concern's reviewer whether its criteria still hold here.
 
@@ -777,6 +786,18 @@ class Joiner:
         twice rather than colliding on one id — the second failure is its own
         fact, and it names a different join.
         """
+        identity = RecheckIdentity(
+            concern=concern, occasion=occasion, commit=commit or ""
+        )
+        desk = RecheckDesk(self.questions.mailbox.root)
+        cached = desk.verdict(identity) if commit else None
+        if cached is not None:
+            self.journal.record(
+                RecheckReusedEvent(concerns=[concern.id], commit=commit or "")
+            )
+            if cached.question is not None:
+                self.questions.queue_questions([cached.question], concern.id)
+            return cached.question
         reviewer = ActorRef(kind="reviewer", id=concern.id)
         declared = {criterion.id: True for criterion in concern.criteria}
         # The reviewer session may be fresh — a resumed run, a parked actor —
@@ -813,17 +834,46 @@ class Joiner:
         lost = [
             criterion.id for criterion in concern.criteria if criterion.id not in met
         ]
+        for previous in self.questions.mailbox.questions():
+            if (
+                previous.question.concern_id == concern.id
+                and previous.question.criteria
+                and sorted(previous.question.criteria) != sorted(lost)
+            ):
+                self.journal.record(
+                    RecheckChangedEvent(
+                        concern_id=concern.id,
+                        occasion=occasion,
+                        commit=commit or "",
+                        previous_question=previous.question,
+                        criteria=sorted(lost),
+                    )
+                )
         if not lost:
+            if commit:
+                desk.preserve(
+                    RecheckVerdict(
+                        identity=identity, report=result.output, question=None
+                    )
+                )
             return None
-        if self.standing_ruling_exists(concern.id, lost):
+        if self.standing_ruling_exists(
+            concern.id, lost, commit=commit if occasion == "integrated" else None
+        ):
             self.journal.record(
                 RecheckRepeatedEvent(
                     concern_id=concern.id, occasion=occasion, criteria=sorted(lost)
                 )
             )
+            if commit:
+                desk.preserve(
+                    RecheckVerdict(
+                        identity=identity, report=result.output, question=None
+                    )
+                )
             return None
         question = MaterialQuestion(
-            id=f"{concern.id}-superseded-{occasion}",
+            id=identity.question_id(lost),
             concern_id=concern.id,
             prompt=(
                 f"{concern.id} no longer meets {', '.join(lost)} "
@@ -834,11 +884,20 @@ class Joiner:
             choices=SupersessionRuling.choices(),
             closed_choices=True,
             criteria=sorted(lost),
+            recheck_commit=commit,
         )
+        if commit:
+            desk.preserve(
+                RecheckVerdict(
+                    identity=identity, report=result.output, question=question
+                )
+            )
         self.questions.queue_questions([question], concern.id)
         return question
 
-    def standing_ruling_exists(self, concern_id: str, lost: list[str]) -> bool:
+    def standing_ruling_exists(
+        self, concern_id: str, lost: list[str], *, commit: str | None = None
+    ) -> bool:
         """Whether this lost-criteria set was already put to the humans.
 
         The same standing finding reproduced by join after join asked five
@@ -859,6 +918,11 @@ class Joiner:
             if question.id in state.retired_questions:
                 continue
             if question.concern_id != concern_id or not question.criteria:
+                continue
+            if commit is not None and (
+                question.recheck_commit not in (None, commit)
+                or question.id == f"{concern_id}-superseded-integrated"
+            ):
                 continue
             if {identifier: True for identifier in question.criteria} != lost_map:
                 continue

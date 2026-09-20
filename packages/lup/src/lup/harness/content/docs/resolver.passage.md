@@ -128,6 +128,15 @@ State lives at `<state-root>/<run-id>/` as an atomic schema-versioned
 agent rounds, reviews, and integration projections. Restart must load only that
 explicit run and verify recorded branches, commits, worktrees, and leases.
 
+Criterion rechecks persist the complete reviewer verdict before publishing a
+question. Their identity includes the declared concern, occasion and exact commit;
+resume replays that verdict instead of asking a model to reconstruct its answer
+domain. A different integrated commit receives a separate question and cannot
+inherit the earlier tree's answer. Earlier findings and answers remain readable,
+and changed lost-criterion sets are recorded as `recheck_changed` journal events.
+These records preserve model judgments; they do not claim an independent
+mechanical verification of each criterion.
+
 A changed submission schema still refuses reuse of its actor's conversation.
 For a stopped run, `uv run lup-devtools resolve rebind-actor 'kind:id#round'
 --run-id RUN --reason 'schema change'` journals the complete prior binding and

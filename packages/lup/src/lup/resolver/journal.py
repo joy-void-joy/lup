@@ -207,6 +207,17 @@ class RecheckRepeatedEvent(BaseModel, frozen=True):
     criteria: list[str]
 
 
+class RecheckChangedEvent(BaseModel, frozen=True):
+    """A recorded finding and a later verdict disagree about lost criteria."""
+
+    type: Literal["recheck_changed"] = "recheck_changed"
+    concern_id: str
+    occasion: str
+    commit: str
+    previous_question: MaterialQuestion
+    criteria: list[str]
+
+
 class BaseRefreshedEvent(BaseModel, frozen=True):
     """A lease made from here starts from the branch as it stands now.
 
@@ -304,6 +315,7 @@ type RunEvent = (
     | ForeignCriteriaEvent
     | VerificationFailedEvent
     | RecheckRepeatedEvent
+    | RecheckChangedEvent
     | BaseRefreshedEvent
     | LeaseRefreshedEvent
     | LeaseDriftEvent

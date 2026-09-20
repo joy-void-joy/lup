@@ -1189,7 +1189,8 @@
         "concern_id",
         "recheck_commit",
         "allowances",
-        "criteria"
+        "criteria",
+        "recheck_commit"
       ],
       "title": "MaterialQuestion",
       "type": "object"
@@ -1585,6 +1586,50 @@
       "title": "QuestionAskedEvent",
       "type": "object"
     },
+    "RecheckChangedEvent": {
+      "additionalProperties": false,
+      "description": "A recorded finding and a later verdict disagree about lost criteria.",
+      "properties": {
+        "commit": {
+          "title": "Commit",
+          "type": "string"
+        },
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "criteria": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Criteria",
+          "type": "array"
+        },
+        "occasion": {
+          "title": "Occasion",
+          "type": "string"
+        },
+        "previous_question": {
+          "$ref": "#/$defs/MaterialQuestion"
+        },
+        "type": {
+          "const": "recheck_changed",
+          "default": "recheck_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "concern_id",
+        "occasion",
+        "commit",
+        "previous_question",
+        "criteria"
+      ],
+      "title": "RecheckChangedEvent",
+      "type": "object"
+    },
     "RecheckRepeatedEvent": {
       "additionalProperties": false,
       "description": "A re-check reproduced a standing finding already put to the humans.\n\nThe same lost-criteria set for the same concern asks once; a later join\nthat reproduces it is recorded here instead of re-raising an identical\nquestion per join.",
@@ -1879,6 +1924,9 @@
         },
         {
           "$ref": "#/$defs/RecheckRepeatedEvent"
+        },
+        {
+          "$ref": "#/$defs/RecheckChangedEvent"
         },
         {
           "$ref": "#/$defs/BaseRefreshedEvent"
