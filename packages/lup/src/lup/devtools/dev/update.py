@@ -91,7 +91,11 @@ def upstream_checkout(project: str, report: Callable[[str], None]) -> Path:
 
 
 def resolved_pin(
-    root: Path, distribution: str, commit: str, report: Callable[[str], None]
+    root: Path,
+    distribution: str,
+    commit: str,
+    report: Callable[[str], None],
+    project: str = library.DISTRIBUTION,
 ) -> str:
     """Move the pin, and hand back the commit the lock resolved it to.
 
@@ -102,12 +106,11 @@ def resolved_pin(
     for itself would be a fourth carrier to keep in step.
     """
     if commit:
-        source = library.read_git_source(root)
         library.set_mode(
             root,
             library.LibraryMode.GIT,
             git=library.GitSource(
-                url=source.url if source else library.REPOSITORY_URL,
+                url=library.repository_url(root, project=project),
                 ref_kind="rev",
                 ref=commit,
             ),
@@ -169,7 +172,7 @@ def updated(
     side.
     """
     repository = upstream_checkout(source.project, report)
-    resolved = resolved_pin(root, distribution, commit, report)
+    resolved = resolved_pin(root, distribution, commit, report, source.project)
     if not resolved:
         report(
             f"{distribution} resolves to no commit, so the copied half has "

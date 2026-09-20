@@ -142,6 +142,7 @@ def test_cli_forwards_correction_number(monkeypatch: pytest.MonkeyPatch) -> None
         return "https://github.test/o/r/issues/179"
 
     monkeypatch.setattr(issues.FrictionReport, "file", record)
+    monkeypatch.setattr("lup.devtools.dev.app.repository_slug", lambda: "acme/widget")
     result = CliRunner().invoke(app, [*friction_arguments(), "--issue", "179"])
     assert result.exit_code == 0
-    assert calls == [(friction_report(), "joy-void-joy/lup", 179)]
+    assert calls == [(friction_report(), "acme/widget", 179)]

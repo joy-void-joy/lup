@@ -130,6 +130,25 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["REPOSITORY_URL", "GitSource.url"],
+        reason="Repository identity is configured by each consumer; the library "
+        "carries no hosting account or implicit upstream URL.",
+        steps=[
+            MigrationStep(
+                instruction="Pass url when constructing GitSource. Replace imports of "
+                "REPOSITORY_URL with repository_url(root), or supply your own URL. "
+                "For CLI use, pass dev library git --url <repository>, keep an existing "
+                "Git dependency pin, or configure the scaffold's named project in "
+                "sync.json.local with its url or checkout path."
+            ),
+            MigrationStep(
+                instruction="Declare publication URLs in your package metadata when "
+                "needed. Dependency tracker routing follows the configured library "
+                "source; project issue routing continues to use its own origin."
+            ),
+        ],
+    ),
+    Migration(
         subjects=["Runtime.contained"],
         reason=(
             "`contained` named the configuration home a workspace's sessions "

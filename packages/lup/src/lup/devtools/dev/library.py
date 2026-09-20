@@ -40,17 +40,22 @@ import tomllib
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypedDict, get_args
+from urllib.parse import urlsplit
 
 import httpx
 import tomlkit
 import tomlkit.items
 import typer
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
 from lup.workspace.paths import project_root
 from lup.execution.shell import git
+from lup.devtools.sync import load_projects
+from lup.harness.credential import parse_remote, remote_url, resolved_host
+from lup.devtools.project import Tracker
+from lup.devtools.utils import slug_from_remote
 from lup.providers.routing import Provider
 
 # The three below spell where the vendored copy sits, which is a fact about
@@ -62,14 +67,10 @@ VENDORED_SIBLINGS = {"src": VENDORED_SRC, "tests": f"{VENDORED_ROOT}/tests"}
 """Each plain search root and the vendored one that shadows it. A search path
 naming the plain root wants its vendored twin exactly while the package is
 there, and wants it gone the moment the package is not."""
-# lup: ignore[constant-declaration] — the name the library is published under
 DISTRIBUTION = "lup"
 # lup: ignore[constant-declaration] — the glob this repository's own uv workspace
 # is laid out as, which the manifest below already states
 WORKSPACE_MEMBERS = ["packages/*"]
-REPOSITORY_URL = "https://github.com/joy-void-joy/lup"
-"""Where the library is published as source. Overridable: a fork, a mirror, or
-a private host serves the same package from the same layout."""
 
 PACKAGE_SUBDIRECTORY = VENDORED_ROOT
 """Where the distribution sits inside that repository — a fixed fact about
@@ -125,7 +126,7 @@ class GitSource(BaseModel, frozen=True):
     one, and a model that can hold two only moves the error later.
     """
 
-    url: str = REPOSITORY_URL
+    url: str = Field(min_length=1)
     ref_kind: GitRefKind = "branch"
     ref: str = "main"
 
@@ -215,6 +216,57 @@ def read_git_source(root: Path) -> GitSource | None:
             return GitSource(url=url)
         case _:
             return None
+
+
+def configured_repository(root: Path, project: str = DISTRIBUTION) -> str:
+    """The dependency's repository, from its pin or named sync registration."""
+    source = read_git_source(root)
+    if source is not None:
+        return source.url
+    registered = next(
+        (entry for entry in load_projects(root) if entry["name"] == project), None
+    )
+    if registered is None:
+        return ""
+    if url := registered.get("url"):
+        return url
+    if path := registered.get("path"):
+        return remote_url((root / Path(path).expanduser()).resolve(), "origin")
+    return ""
+
+
+def repository_url(
+    root: Path, url: str | None = None, project: str = DISTRIBUTION
+) -> str:
+    """Require a declared dependency source, allowing an explicit override."""
+    found = url if url is not None else configured_repository(root, project)
+    if not found.strip():
+        raise typer.BadParameter(
+            f"No repository is configured for '{project}'. Pass --url <repository> "
+            "to dev library git, or set its url/path in sync.json.local."
+        )
+    return found
+
+
+def library_trackers(root: Path, project: str = DISTRIBUTION) -> list[Tracker]:
+    """Route library defects to its configured forge, preserving the host."""
+    url = configured_repository(root, project)
+    address = parse_remote(url)
+    if address is None or not address.host:
+        return []
+    parsed = urlsplit(url) if "://" in url else None
+    host = address.host
+    if parsed is None or parsed.scheme == "ssh":
+        host = resolved_host(host)
+    if parsed is not None and parsed.scheme in {"http", "https"} and parsed.port:
+        host = f"{host}:{parsed.port}"
+    return [
+        Tracker(
+            repository=f"{host}/{slug_from_remote(url)}",
+            what="the framework this project is built on",
+            components=[DISTRIBUTION],
+        )
+    ]
 
 
 def requirement_for(entry: str, version: str | None) -> str:
@@ -349,6 +401,8 @@ def apply_execution_environments(
     on disjoint roots, so order carries no meaning to pyright — fixing it is
     what makes leaving and re-entering the vendored mode churn-free.
     """
+    if "pyright" not in document["tool"]:
+        return []
     pyright = document["tool"]["pyright"]
     key = "executionEnvironments"
     if key not in pyright:

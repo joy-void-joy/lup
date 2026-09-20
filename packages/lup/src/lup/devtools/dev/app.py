@@ -1061,8 +1061,11 @@ def create_dev_app(
     @library_app.command("git")
     def library_git_cmd(
         url: Annotated[
-            str, typer.Option("--url", help="Repository serving the lup package")
-        ] = library_mod.REPOSITORY_URL,
+            str | None,
+            typer.Option(
+                "--url", help="Repository URL, overriding the pin or sync registration"
+            ),
+        ] = None,
         branch: Annotated[
             str | None, typer.Option("--branch", help="Branch to resolve lup at")
         ] = None,
@@ -1077,8 +1080,11 @@ def create_dev_app(
         dry_run: DryRun = False,
     ) -> None:
         """Resolve lup from its repository, for use before a release is published."""
+        scaffold = declared().scaffold
+        project = scaffold.project if scaffold is not None else library_mod.DISTRIBUTION
+        source_url = library_mod.repository_url(project_root(), url, project)
         library_mod.git_library(
-            library_mod.git_source(url, branch=branch, tag=tag, rev=rev),
+            library_mod.git_source(source_url, branch=branch, tag=tag, rev=rev),
             keep_vendored,
             force,
             dry_run,

@@ -52,11 +52,6 @@ conversation = [
     "playwright>=1.62.0",
 ]
 
-[project.urls]
-Homepage = "https://github.com/joy-void-joy/lup"
-Repository = "https://github.com/joy-void-joy/lup"
-Issues = "https://github.com/joy-void-joy/lup/issues"
-
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

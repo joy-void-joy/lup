@@ -45,11 +45,6 @@ lup-devtools = "lup.devtools.entrypoint:main"
 [project.entry-points."lup.devtools"]
 application = "lup_template.devtools.main:app"
 
-[project.urls]
-Homepage = "https://github.com/joy-void-joy/lup"
-Repository = "https://github.com/joy-void-joy/lup"
-Issues = "https://github.com/joy-void-joy/lup/issues"
-
 [dependency-groups]
 dev = [
     "pyright>=1.1.408",

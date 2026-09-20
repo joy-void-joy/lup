@@ -800,7 +800,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "617be5f2b42d97e4127f9de73ca25781ab2960bf8732023043fabca973b97314",
+      "sha256": "b7cec6cccc7e4bd02c1d643b57e1cc94a049128db7b7ca35bcc1e43def22deb2",
       "semantic_id": "docs.template",
       "executable": false
     },

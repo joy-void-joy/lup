@@ -8,12 +8,15 @@ identity — a project can move between modes without accumulating drift.
 """
 
 import tomllib
+import json
 from pathlib import Path
 
 import pytest
 import typer
+from pydantic import ValidationError
 
 import lup.devtools.dev.library as library
+from lup.execution.shell import git
 from lup.types import JsonValue
 
 VENDORED_PYPROJECT = """\
@@ -134,7 +137,7 @@ def test_un_vendoring_drops_the_tests_root_along_with_the_source_one(
 
 def test_a_git_project_reads_as_git_and_names_where_it_resolves(project: Path) -> None:
     source = library.GitSource(
-        url="https://github.com/joy-void-joy/lup", ref_kind="branch", ref="dev"
+        url="https://github.com/upstream/framework", ref_kind="branch", ref="dev"
     )
 
     library.set_mode(project, library.LibraryMode.GIT, git=source)
@@ -148,7 +151,8 @@ def test_a_git_project_reads_as_git_and_names_where_it_resolves(project: Path) -
 
 
 def test_git_un_vendors_exactly_as_publishing_does(project: Path) -> None:
-    library.set_mode(project, library.LibraryMode.GIT, git=library.GitSource(ref="dev"))
+    source = library.GitSource(url="https://github.com/upstream/framework", ref="dev")
+    library.set_mode(project, library.LibraryMode.GIT, git=source)
 
     assert at(project, "tool", "uv", "workspace") is None
     assert strings(project, "tool", "pytest", "ini_options", "pythonpath") == ["src"]
@@ -160,7 +164,9 @@ def test_git_un_vendors_exactly_as_publishing_does(project: Path) -> None:
 
 def test_each_kind_of_ref_is_written_under_its_own_key(project: Path) -> None:
     for kind in ("branch", "tag", "rev"):
-        source = library.GitSource(ref_kind=kind, ref="something")
+        source = library.GitSource(
+            url="https://github.com/upstream/framework", ref_kind=kind, ref="something"
+        )
         library.set_mode(project, library.LibraryMode.GIT, git=source)
 
         assert at(project, "tool", "uv", "sources", "lup", kind) == "something"
@@ -223,3 +229,121 @@ def test_an_unrenamed_template_refuses_to_un_vendor(project: Path) -> None:
         library.guard_leaving_local(project, force=False)
 
     library.guard_leaving_local(project, force=True)
+
+
+def test_a_git_source_requires_a_nonempty_repository() -> None:
+    for fields in ({}, {"url": ""}):
+        with pytest.raises(ValidationError):
+            library.GitSource.model_validate(fields)
+
+
+def test_an_explicit_source_overrides_the_pin_and_registry(project: Path) -> None:
+    source = library.GitSource(url="https://forge.example/pinned/framework")
+    library.set_mode(project, library.LibraryMode.GIT, git=source)
+    (project / "sync.json").write_text(
+        '{"projects":[{"name":"lup","url":"https://forge.example/registered/framework"}]}'
+    )
+    assert library.repository_url(
+        project, "https://forge.example/chosen/framework"
+    ) == ("https://forge.example/chosen/framework")
+    assert library.repository_url(project) == source.url
+
+
+def test_the_named_local_registration_overrides_its_shared_entry(project: Path) -> None:
+    (project / "sync.json").write_text(
+        '{"projects":[{"name":"custom","url":"https://forge.example/shared/framework"}]}'
+    )
+    (project / "sync.json.local").write_text(
+        '{"projects":[{"name":"custom","url":"https://forge.example/local/framework"}]}'
+    )
+    assert library.repository_url(project, project="custom") == (
+        "https://forge.example/local/framework"
+    )
+    assert library.configured_repository(project) == ""
+
+
+def test_a_registered_checkout_supplies_its_own_origin(project: Path) -> None:
+    upstream = project / "upstream"
+    upstream.mkdir()
+    git("init", "--quiet", str(upstream))
+    git(
+        "-C",
+        str(upstream),
+        "remote",
+        "add",
+        "origin",
+        "git@forge.example:maintainers/framework.git",
+    )
+    (project / "sync.json.local").write_text(
+        '{"projects":[{"name":"lup","path":"upstream"}]}'
+    )
+    assert (
+        library.repository_url(project) == "git@forge.example:maintainers/framework.git"
+    )
+    assert library.library_trackers(project)[0].repository == (
+        "forge.example/maintainers/framework"
+    )
+
+
+def test_the_consuming_origin_never_becomes_the_dependency_source(
+    project: Path,
+) -> None:
+    git("init", "--quiet", str(project))
+    git("-C", str(project), "remote", "add", "origin", "https://forge.example/acme/app")
+    with pytest.raises(typer.BadParameter, match="Pass --url"):
+        library.repository_url(project)
+    assert library.library_trackers(project) == []
+
+
+@pytest.mark.parametrize(
+    ("url", "repository"),
+    [
+        ("https://forge.example/team/framework.git", "forge.example/team/framework"),
+        (
+            "https://forge.example:8443/team/framework.git",
+            "forge.example:8443/team/framework",
+        ),
+        (
+            "ssh://git@forge.example:2222/team/framework.git",
+            "forge.example/team/framework",
+        ),
+        ("ssh://git@forge.example/team/framework.git", "forge.example/team/framework"),
+        (
+            "https://user:secret@forge.example/team/framework.git",
+            "forge.example/team/framework",
+        ),
+        ("file:///local/framework", ""),
+        ("/local/framework", ""),
+    ],
+)
+def test_tracker_identity_keeps_the_forge_without_credentials_or_local_paths(
+    project: Path, url: str, repository: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(library, "resolved_host", lambda alias: alias)
+    (project / "sync.json.local").write_text(
+        json.dumps({"projects": [{"name": "lup", "url": url}]})
+    )
+    trackers = library.library_trackers(project)
+    assert [tracker.repository for tracker in trackers] == (
+        [repository] if repository else []
+    )
+    if trackers:
+        assert trackers[0].claims("lup.resolver")
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["git@work-forge:team/framework.git", "ssh://git@work-forge/team/framework.git"],
+)
+def test_tracker_routing_resolves_ssh_aliases_without_changing_the_git_source(
+    project: Path, monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    (project / "sync.json.local").write_text(
+        json.dumps({"projects": [{"name": "lup", "url": url}]})
+    )
+    monkeypatch.setattr(library, "resolved_host", lambda _alias: "forge.example")
+    assert library.repository_url(project) == url
+    assert (
+        library.library_trackers(project)[0].repository
+        == "forge.example/team/framework"
+    )

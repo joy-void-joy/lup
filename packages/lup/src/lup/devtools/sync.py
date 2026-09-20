@@ -313,10 +313,10 @@ def ensure_ref_symlink(name: str, target: str) -> None:
     logger.debug("refs/%s -> %s", name, target_path)
 
 
-def load_projects() -> list[ProjectEntry]:
+def load_projects(root: Path | None = None) -> list[ProjectEntry]:
     """Load and merge projects from sync.json + sync.json.local."""
-    base = load_json(sync_file())
-    local = load_json(local_file())
+    base = load_json(root / "sync.json" if root is not None else sync_file())
+    local = load_json(root / "sync.json.local" if root is not None else local_file())
 
     merged: dict[str, ProjectEntry] = {}  # lup: ignore[empty-collection] — merge fold
     for p in base.get("projects", []):

@@ -240,20 +240,32 @@ resolver's supervisor page; see [supervisor.md](supervisor.md).
 improvements with and reviews their commits since the last sync. The /lup:update and /lup:import skills are built on it. Two files declare
 what to track.
 
-**`sync.json` (committed)** is the template's default registry. It ships with
-a single entry — the repository this template comes from — so a fresh project
-can immediately pull template improvements:
+**`sync.json` (committed)** declares the upstream's name without choosing
+a hosting account. Configure its URL or checkout path in `sync.json.local`
+before fetching template improvements:
 
 ```json
 {
   "projects": [
     {
-      "name": "lup",
-      "url": "https://github.com/joy-void-joy/lup"
+      "name": "lup"
     }
   ]
 }
 ```
+
+For example, a local registration can supply
+`{"projects": [{"name": "lup", "url": "https://github.com/example/framework"}]}`.
+A checkout can be registered with `uv run lup-devtools sync setup lup /path/to/repo`.
+
+Repository identity is configured independently from the adopting project's
+own Git origin. `uv run lup-devtools dev library git --url <repository>` selects the dependency's
+source explicitly. Without `--url`, it uses the existing Git dependency pin,
+then the scaffold's named sync registration: its URL, or its checkout's origin.
+An absent source is reported before any pin is changed. Library friction reports
+use that same configured upstream; the consuming project's reports use its own
+origin. Package metadata may declare `[project.urls]` for publication; the
+template supplies no account-specific URLs.
 
 It is scaffold, not personal state. **Agents must never modify the tracked
 `sync.json`**, and neither should routine project work; the edit policy
@@ -264,7 +276,7 @@ additional projects. Entries there override tracked entries by name or add
 local-only ones, and `sync setup` and `mark-synced` write only there.
 
 The registry has no direction in its name because direction depends on where
-you sit. A project built on the template keeps the shipped `lup` entry and
+you sit. A project built on the template configures the shipped `lup` entry and
 pulls *from* it. The lup repository itself sets `"ignore": true` on its own
 entry and registers its downstream fleet in `sync.json.local`, so /lup:update can generalize emerged patterns back into the template. Same
 registry, opposite seats.

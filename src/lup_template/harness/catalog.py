@@ -42,13 +42,13 @@ from lup.harness.codescan.boundaries import (
 )
 from lup.harness.content.modules.specs import RESOLVER
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
-from lup.devtools.dev.library import DISTRIBUTION, VENDORED_ROOT
+from lup.devtools.dev.library import DISTRIBUTION, VENDORED_ROOT, library_trackers
 from lup.devtools.dev.release import ReleaseSpec
 from lup.devtools.dev.reach import Spread
 from lup.devtools.dev.scaffold import ScaffoldSource
 from lup.devtools.dev.seams import DECLARED_SEAMS, Seam
 from lup.devtools.dev.workflow import FrontendSpec, PublishSpec, WorkflowSpec
-from lup.devtools.project import DevProject, Tracker
+from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
 from lup.policy.boundary import depends_on
@@ -343,9 +343,9 @@ def declared_scaffold() -> ScaffoldSource:
 
     Inherited rather than written at initialization: a project stamped out of
     this tree receives this declaration with the rest of the copied half, and
-    it is already true of it — the registration `sync.json` ships names the
-    repository it was stamped from, and the roots are the ones the stamp
-    copied. What it says of *this* checkout is that this is the scaffold
+    the registration `sync.json` ships names the source a project configures
+    in `sync.json.local`; the roots are the ones the stamp copied.
+    What it says of *this* checkout is that this is the scaffold
     itself, which `dev update` refuses on the strength of the template flag
     rather than of anything said here: the origin of every copy has nothing
     upstream to merge from.
@@ -526,17 +526,7 @@ def dev_project() -> DevProject:
         # cannot make. A project that outgrows this replaces the entry; one
         # that owns everything it runs empties the list, and `dev tracker`
         # then reaches nowhere but here.
-        trackers=[
-            Tracker(
-                repository="joy-void-joy/lup",
-                what="the framework this project is built on",
-                # Every spelling a report has been filed under, as prefixes
-                # rather than paths: a component arrives as whatever the
-                # reporter typed — `lup/policy`, `lup.resolver.state`,
-                # `lup-devtools` — and one prefix answers for all of them.
-                components=["lup"],
-            )
-        ],
+        trackers=library_trackers(project_root(), declared_scaffold().project),
         modules=MODULE_SELECTION,
         coverage=declared_coverage(),
         path_roles=declared_role_rows(list(hooks.path_roles)),
