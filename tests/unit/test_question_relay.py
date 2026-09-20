@@ -6,6 +6,7 @@ yes, it is that nobody else can, that the yes covers exactly what was shown,
 and that it is spent once.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -242,6 +243,23 @@ def test_the_queue_survives_a_torn_write_at_the_end_of_the_log(
         handle.write('{"id": "q-2", "operat')
 
     assert [entry.id for entry in relay.questions()] == ["q-1"]
+    damaged = relay.path.read_bytes()
+    relay.answer("q-1", "lead", True)
+    assert relay.path.read_bytes().startswith(damaged)
+    assert relay.dispatchable("q-1").state == "approved"
+
+
+def test_concurrent_appenders_preserve_every_large_record(tmp_path: Path) -> None:
+    relay, question = parked(tmp_path)
+    questions = [
+        question.model_copy(update={"id": f"q-{index}", "reason": "evidence" * 10000})
+        for index in range(2, 18)
+    ]
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        list(workers.map(relay.record, questions))
+    assert {item.id: item for item in relay.questions()} == {
+        item.id: item for item in [question, *questions]
+    }
 
 
 def test_a_cycle_in_the_chain_climbs_to_the_human_rather_than_hanging(

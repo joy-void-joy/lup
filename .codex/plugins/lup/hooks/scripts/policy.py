@@ -29,12 +29,14 @@ from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 from policy_data import DIAGNOSTICS_COMMAND, REPAIR_COMMAND
 import csv
+import fcntl
 from datetime import UTC, datetime, timedelta
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
 from typing import Literal
 from urllib.parse import urlsplit
+import shlex
 from coordination import store
 from kernel.edit import (
     awaits_resolution,
@@ -87,6 +89,7 @@ from policy_data import (
     PATH_ROLES,
     PATH_RULES,
     PEER_POLICY,
+    POLICY_ROOT_ENV,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
@@ -357,6 +360,73 @@ def script_run_nudge(
     )
 
 
+def review_records(path: Path) -> list[dict]:
+    """Read complete object records, preserving malformed bytes as inert evidence."""
+    try:
+        stream = path.open("rb")
+    except FileNotFoundError:
+        return []
+
+    def complete():
+        with stream:
+            fcntl.flock(stream, fcntl.LOCK_SH)
+            for line in stream:
+                if not line.endswith(b"\n"):
+                    continue
+                try:
+                    entry = json.loads(line)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if isinstance(entry, dict):
+                    yield entry
+
+    return list(complete())
+
+
+def append_review_record(path: Path, encoded: str) -> None:
+    """Frame an append without repairing an incomplete record into authority.
+
+    Every writer holds the same file lock. An unterminated tail is retained
+    and marked invalid before the next record, even if its partial write
+    happened to end after a syntactically complete JSON object.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        stream.seek(0, os.SEEK_END)
+        if stream.tell():
+            stream.seek(-1, os.SEEK_END)
+            if stream.read(1) != b"\n":
+                stream.write(b" [incomplete review record]\n")
+        stream.write(encoded.encode("utf-8") + b"\n")
+        stream.flush()
+
+
+def native_review_records(path: Path) -> dict[str, dict]:
+    """Read only native receipts with the fields used by the hermetic boundary."""
+
+    def valid():
+        for entry in review_records(path):
+            match entry:
+                case {
+                    "id": str(),
+                    "fingerprint": str(),
+                    "state": str(),
+                    "reason": str(),
+                    "resumption": "native_retry",
+                    "operation": {
+                        "session": str(),
+                        "requester": str(),
+                        "cwd": str(),
+                        "tool": str(),
+                        "payload": dict(),
+                    },
+                }:
+                    yield entry
+
+    return {entry["id"]: entry for entry in valid()}
+
+
 def review_hook_call(
     root: Path,
     session: str,
@@ -385,29 +455,28 @@ def review_hook_call(
     fingerprint = sha256(material.encode()).hexdigest()
     log = root / ".lup/questions.jsonl"
 
-    def recorded():
-        if not log.exists():
-            return
-        for line in log.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            yield json.loads(line)
-
-    entries = {entry["id"]: entry for entry in recorded()}
+    entries = native_review_records(log)
     matches = [
-        entry
-        for entry in entries.values()
-        if entry["fingerprint"] == fingerprint
-        and "resumption" in entry
-        and entry["resumption"] == "native_retry"
+        entry for entry in entries.values() if entry["fingerprint"] == fingerprint
     ]
     entry = matches[-1] if matches else None
     if entry is not None and entry["state"] == "approved":
-        answer = entry["answer"]
-        if not answer or not answer["approved"] or answer["principal"] == session:
-            raise ValueError("hook approval has no independent affirmative answer")
-        if answer["receipt"] != "recorded":
-            raise ValueError("a native permission request is not a recorded approval")
+        match entry:
+            case {
+                "answer": {
+                    "approved": True,
+                    "principal": str() as principal,
+                    "receipt": "recorded",
+                }
+            } if principal and principal not in (
+                session,
+                entry["operation"]["requester"],
+            ):
+                pass
+            case _:
+                raise ValueError(
+                    "hook approval has no recorded independent affirmative answer"
+                )
         claim = root / ".lup/review-claims" / entry["id"]
         claim.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -418,8 +487,7 @@ def review_hook_call(
         else:
             entry["state"] = "dispatched"
             entry["execution_id"] = execution_id
-            with log.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+            append_review_record(log, json.dumps(entry, sort_keys=True))
             return {"state": "approved", "id": entry["id"], "reason": ""}
     if entry is not None and entry["state"] in ("pending", "rejected"):
         return {"state": entry["state"], "id": entry["id"], "reason": entry["reason"]}
@@ -448,9 +516,7 @@ def review_hook_call(
             "worktree": str(root),
         },
     }
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    append_review_record(log, json.dumps(entry, sort_keys=True))
     return {"state": "pending", "id": identifier, "reason": reason}
 
 
@@ -461,21 +527,15 @@ def observe_hook_call(
     log = root / ".lup/questions.jsonl"
     if not session or not log.exists():
         return []
-    entries = {
-        entry["id"]: entry
-        for line in log.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-        for entry in [json.loads(line)]
-    }
+    entries = native_review_records(log)
     matches = [
         entry
         for entry in entries.values()
-        if entry.get("resumption") == "native_retry"
-        and entry["operation"]["session"] == session
+        if entry["operation"]["session"] == session
         and entry["operation"]["cwd"] == str(root)
         and entry["operation"]["tool"] == tool
         and (
-            entry.get("execution_id") == execution_id
+            "execution_id" in entry and entry["execution_id"] == execution_id
             if execution_id
             else entry["operation"]["payload"] == arguments
         )
@@ -492,8 +552,7 @@ def observe_hook_call(
         if authorized
         else "Native execution observed without a consumed approval receipt."
     )
-    with log.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    append_review_record(log, json.dumps(entry, sort_keys=True))
     if authorized:
         return []
     return [
@@ -578,12 +637,12 @@ def record_question(
     )
     path = root / relay
     try:
-        held = path.read_text(encoding="utf-8") if path.exists() else ""
-        if f'"id": "{identifier}"' in held:
+        if any(
+            "id" in entry and entry["id"] == identifier
+            for entry in review_records(path)
+        ):
             return identifier
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as sink:
-            sink.write(entry + "\n")
+        append_review_record(path, entry)
     except OSError:
         return ""
     return identifier
@@ -2397,13 +2456,23 @@ def reviewed_decision(
             effect="deny",
             recovery=f"Review queue unavailable: {result['reason']}. Run this operation from an operator terminal.",
         )
+    project = declared_identity(POLICY_ROOT_ENV)
+    prefix = [
+        "uv",
+        "run",
+        *(["--project", project] if project else []),
+        "lup-devtools",
+        "dev",
+        "questions",
+    ]
+    show = shlex.join([*prefix, "show", identifier])
+    answer = shlex.join([*prefix, "answer", identifier, "--as", "operator"])
+    reject = shlex.join([*prefix, "reject", identifier, "--as", "operator"])
     return decision.revised(
         effect="deny",
         recovery=(
             f"Review {identifier} is {result['state']}. In {cwd}, the operator can run "
-            f"'uv run lup-devtools dev questions show {identifier}', then "
-            f"'uv run lup-devtools dev questions answer {identifier} --as operator' "
-            f"or 'uv run lup-devtools dev questions reject {identifier} --as operator'. "
+            f"`{show}`, then `{answer}` or `{reject}`. "
             "After approval, retry this exact tool call; changed file contents require fresh review."
         ),
     )

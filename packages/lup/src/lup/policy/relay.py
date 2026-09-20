@@ -16,13 +16,13 @@ Two invariants hold everywhere:
   quietly reused.
 """
 
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from lup.policy.assets.host import append_review_record, review_records
 from lup.policy.kernel.semantics import ReviewPurpose, ReviewerRequirement
 from lup.policy.operations import Operation
 
@@ -243,26 +243,20 @@ class QuestionRelay:
 
     def record(self, question: PersistentQuestion) -> PersistentQuestion:
         """Append one question's current state, and return it unchanged."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(question.model_dump_json() + "\n")
+        append_review_record(self.path, question.model_dump_json())
         return question
 
     def questions(self) -> list[PersistentQuestion]:
         """Every question, folded forward to its latest recorded state.
 
-        A line that will not parse is skipped rather than fatal: a torn write
-        at the end of the log is the expected shape of a crash, and refusing
-        to read the whole queue over it would lose every question before it.
+        Malformed or unterminated lines remain inert evidence. Appenders
+        preserve those bytes and frame later records separately, so a torn
+        write neither loses the queue nor becomes authority on a later read.
         """
-        if not self.path.exists():
-            return []
         folded: dict[str, PersistentQuestion] = {}
-        for line in self.path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
+        for record in review_records(self.path):
             try:
-                entry = PersistentQuestion.model_validate(json.loads(line))
+                entry = PersistentQuestion.model_validate(record)
             except ValueError:
                 continue
             folded[entry.id] = entry

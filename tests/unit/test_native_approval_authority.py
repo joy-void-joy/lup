@@ -11,7 +11,7 @@ import pytest
 import sh
 
 from lup.policy.assets.host import approval_fingerprint, approvals_log
-from lup.policy.relay import QuestionRelay, ReceiptKind
+from lup.policy.relay import Answer, QuestionRelay, ReceiptKind
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.types import JsonObject
 
@@ -225,4 +225,54 @@ def test_external_review_recovery_commands_select_the_application_environment(
     viewed = sh.Command(show[0])(*show[1:], _cwd=str(root))
     assert json.loads(str(viewed))["id"] == question.id
     sh.Command(approve[0])(*approve[1:], _cwd=str(root))
+    assert native_call(root, runtime) == "allow"
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("tail", [b'{"id":', b"\xff", b'[]\n{}\n{"id":'])
+def test_damaged_review_log_retains_later_answers_and_observations(
+    root: Path, runtime: str, tail: bytes
+) -> None:
+    assert native_call(root, runtime) == "deny"
+    relay = QuestionRelay(root / ".lup/questions.jsonl")
+    (question,) = relay.pending()
+    with relay.path.open("ab") as stream:
+        stream.write(tail)
+    damaged = relay.path.read_bytes()
+    assert native_call(root, runtime) == "deny"
+    relay.answer(question.id, "operator", True)
+    assert relay.path.read_bytes().startswith(damaged)
+    assert native_call(root, runtime) == "allow"
+    with relay.path.open("ab") as stream:
+        stream.write(tail)
+    native_call(root, runtime, "PostToolUse")
+    completed = relay.find(question.id)
+    assert completed is not None and completed.state == "completed"
+    assert native_call(root, runtime) == "deny"
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_unterminated_approval_never_becomes_authority_on_later_append(
+    root: Path, runtime: str
+) -> None:
+    assert native_call(root, runtime) == "deny"
+    relay = QuestionRelay(root / ".lup/questions.jsonl")
+    (question,) = relay.pending()
+    interrupted = question.model_copy(
+        update={
+            "state": "approved",
+            "answer": Answer(approved=True, principal="operator"),
+        }
+    )
+    with relay.path.open("ab") as stream:
+        stream.write(interrupted.model_dump_json().encode())
+    damaged = relay.path.read_bytes()
+    assert native_call(root, runtime) == "deny"
+    assert relay.pending() == [question]
+    other: JsonObject = {"command": "git push origin --delete a-different-ref"}
+    assert native_call(root, runtime, arguments=other) == "deny"
+    assert relay.path.read_bytes().startswith(damaged)
+    assert relay.find(question.id) == question
+    assert native_call(root, runtime) == "deny"
+    relay.answer(question.id, "operator", True)
     assert native_call(root, runtime) == "allow"

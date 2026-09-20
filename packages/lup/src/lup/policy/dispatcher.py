@@ -99,6 +99,7 @@ DISPATCHER_STDLIB = (
     "datetime",
     "hashlib",
     "csv",
+    "fcntl",
     "urllib.parse",
     "typing",
 )
@@ -108,6 +109,11 @@ Pinned rather than open: the script starts through a native CLI with
 ``python3``, outside Lup's import graph and any active virtual environment,
 so a convenient project helper — or the ``lup`` package itself — would make
 permissions disappear precisely where packaging differs.
+
+``fcntl`` serializes question-log readers and appenders across the native
+dispatchers and operator relay. Without a shared file lock, a concurrent
+writer's unfinished record could be mistaken for a crashed append and
+invalidated while that writer is still completing it.
 
 ``subprocess`` earns its place because asking Git whether a path is
 recoverable is a question only a process can answer, and every alternative
