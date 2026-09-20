@@ -23,6 +23,7 @@ import lup.devtools.dev.resolve_review as resolve_review
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.resolve.cost import show_cost
+from lup.devtools.resolve.recovery import recover_integration
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
 from lup.devtools.supervisor.app import serve_supervisor
 from lup.devtools.supervisor.doors import (
@@ -64,6 +65,7 @@ def create_resolve_app(
     )
     app.command("status")(show_status)
     app.command("cost")(show_cost)
+    app.command("recover-integration")(recover_integration)
     app.command("supervise")(serve_supervisor)
     app.command("questions")(list_questions)
     app.command("answer")(answer_questions)

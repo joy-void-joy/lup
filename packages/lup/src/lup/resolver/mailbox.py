@@ -16,8 +16,9 @@ from pathlib import Path
 from lup.coordination.cohort import ActorCohort
 from lup.coordination.mailbox import PendingQuestion as SharedPendingQuestion
 from lup.coordination.mailbox import QuestionMailbox as SharedMailbox
+from lup.coordination.mailbox import AnswerOffer, MailboxConflictError
 from lup.resolver.journal import Journal
-from lup.resolver.models import MaterialQuestion
+from lup.resolver.models import MaterialQuestion, ResolveState
 
 
 class PendingQuestion(SharedPendingQuestion[MaterialQuestion], frozen=True):
@@ -38,6 +39,27 @@ class QuestionMailbox(SharedMailbox[MaterialQuestion]):
 
     def __init__(self, root: Path) -> None:
         super().__init__(root, MaterialQuestion)
+
+    def retired_ids(self) -> list[str]:
+        """Read explicit question retirement from the run's atomic authority."""
+        path = self.root / "state.json"
+        if not path.exists():
+            return []
+        return ResolveState.model_validate_json(path.read_text()).retired_questions
+
+    def questions(
+        self, include_retired: bool = False
+    ) -> list[SharedPendingQuestion[MaterialQuestion]]:
+        retired = [] if include_retired else self.retired_ids()
+        return [item for item in super().questions() if item.question.id not in retired]
+
+    def offer(self, offer: AnswerOffer) -> None:
+        if offer.question_id in self.retired_ids():
+            raise MailboxConflictError(
+                f"question {offer.question_id!r} was retired by integration recovery; "
+                "its recorded evidence and answers are retained"
+            )
+        super().offer(offer)
 
 
 def run_cohort(mailbox: QuestionMailbox, run_id: str) -> ActorCohort:

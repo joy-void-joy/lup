@@ -239,3 +239,25 @@ Integration runs configured verification commands, requests an independent
 final typed review, records cleanup or retained-worktree instructions, and
 stops at human acceptance. It never merges into the user's branch. Failure
 records partial evidence and retains actionable cleanup state.
+
+An interrupted integration has two explicit recovery actions, both requiring the
+run to be stopped. `lup-devtools resolve recover-integration restore-recorded
+--run-id <id>` returns its worktree to the last durable join, including a landing
+the merger recorded before the run process projected it. Before resetting, it
+retains the prior commit under a recovery ref and writes a worktree archive,
+index and staged-object pack, merge metadata, and state snapshot beneath
+`integration/recovery/` in the run directory. The command prints that evidence
+path. Untracked files remain unless they obstruct the restored tracked tree;
+the archive includes them either way. Ordinary resume preserves a parked merge.
+
+After committing a deliberate repair on top of a recorded integration result,
+`lup-devtools resolve recover-integration adopt-head --run-id <id>` adopts that
+clean descendant and marks verification unfinished. Resume reruns the configured
+checks and all final criterion reviews against that commit, retaining prior
+questions, answers, and concern outcomes. Findings tied to superseded trees
+become inactive in the same state transaction as adoption; their declarations
+and answers remain recorded, and they cannot block or answer the fresh review.
+Adoption refuses unrelated history,
+uncommitted work, and an unfinished Git operation. Both actions journal the
+exact commit move; refusals exit nonzero. Neither action changes the run's source
+or configuration, and neither runs an agent until the run is resumed.

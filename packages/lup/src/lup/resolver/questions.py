@@ -237,7 +237,10 @@ class QuestionBroker:
             state = self.run.require()
             questions = QuestionBatch(
                 run_id=state.run_id,
-                questions=[item.question for item in self.mailbox.questions()],
+                questions=[
+                    item.question
+                    for item in self.mailbox.questions(include_retired=True)
+                ],
             )
             answers = AnswerBatch(
                 run_id=state.run_id,
@@ -288,6 +291,8 @@ class QuestionBroker:
 
     async def await_questions(self, questions: list[MaterialQuestion]) -> AnswerBatch:
         """Wait for every named question, or park the run on what is missing."""
+        retired = self.mailbox.retired_ids()
+        questions = [question for question in questions if question.id not in retired]
         if not questions:
             return AnswerBatch(run_id=self.config.run_id, answers=[])
         await self.apply_mailbox()
@@ -320,6 +325,7 @@ class QuestionBroker:
             question.id
             for question in (state.questions.questions if state.questions else [])
             if question.concern_id == concern_id
+            and question.id not in state.retired_questions
         }
         return [
             answer

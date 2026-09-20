@@ -276,6 +276,7 @@ class MaterialQuestion(Question, frozen=True):
     """
 
     concern_id: str
+    recheck_commit: str | None = None
     allowances: list[ConcernAllowance] = Field(
         default=[],
         description=(
@@ -1248,6 +1249,13 @@ class ResolveState(BaseModel, frozen=True):
     progress: list[ConcernProgress]
     questions: QuestionBatch | None = None
     answers: AnswerBatch | None = None
+    retired_questions: list[str] = []
+    """Questions explicitly made inactive by adopting another integration tree.
+
+    Their declarations and answers remain in the mailbox and state; this list
+    changes atomically with the adopted commit so interrupted recovery cannot
+    release a question about the tree still recorded as authoritative.
+    """
     eligibility: list[ConcernEligibility] = []
     leases: list[WritableRootLease] = []
     bases: list[DependencyBase] = []

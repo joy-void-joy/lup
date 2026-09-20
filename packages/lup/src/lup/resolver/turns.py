@@ -818,6 +818,7 @@ class TurnRunner:
             question.id: question.prompt
             for question in state.questions.questions
             if question.concern_id == concern_id
+            and question.id not in state.retired_questions
         }
         return "\n".join(
             f"- {answer.question_id}: {prompts[answer.question_id]}\n"

@@ -105,6 +105,7 @@ function asked(
       id,
       prompt,
       recommendation: null,
+      recheck_commit: null,
     },
   };
 }

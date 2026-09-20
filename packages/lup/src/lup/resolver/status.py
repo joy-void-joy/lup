@@ -583,6 +583,7 @@ def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
             1
             for question in (state.questions.questions if state.questions else [])
             if question.id not in answered
+            and question.id not in state.retired_questions
         ),
         progress=phase_progress(state, repository.root),
         last=None

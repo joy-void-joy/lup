@@ -21,6 +21,7 @@ function asked(
       id,
       prompt: `question ${id}`,
       recommendation: null,
+      recheck_commit: null,
       ...question,
     },
   };

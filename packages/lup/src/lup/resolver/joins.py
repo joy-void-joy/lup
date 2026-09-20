@@ -856,6 +856,8 @@ class Joiner:
             for answer in (state.answers.answers if state.answers else [])
         }
         for question in state.questions.questions:
+            if question.id in state.retired_questions:
+                continue
             if question.concern_id != concern_id or not question.criteria:
                 continue
             if {identifier: True for identifier in question.criteria} != lost_map:

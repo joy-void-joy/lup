@@ -631,6 +631,61 @@
       "title": "GraphView",
       "type": "object"
     },
+    "IntegrationRecoveredEvent": {
+      "additionalProperties": false,
+      "description": "An explicit integration move with its preserved recovery evidence.",
+      "properties": {
+        "after": {
+          "title": "After",
+          "type": "string"
+        },
+        "before": {
+          "title": "Before",
+          "type": "string"
+        },
+        "evidence": {
+          "title": "Evidence",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "restore-recorded",
+            "adopt-head"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "recorded": {
+          "title": "Recorded",
+          "type": "string"
+        },
+        "retired_questions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Retired Questions",
+          "type": "array"
+        },
+        "type": {
+          "const": "integration_recovered",
+          "default": "integration_recovered",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "mode",
+        "recorded",
+        "before",
+        "after",
+        "evidence",
+        "retired_questions"
+      ],
+      "title": "IntegrationRecoveredEvent",
+      "type": "object"
+    },
     "JoinAuditEvent": {
       "additionalProperties": false,
       "description": "The finished tree was re-checked against every parent that built it.",
@@ -1039,6 +1094,18 @@
           "title": "Prompt",
           "type": "string"
         },
+        "recheck_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recheck Commit"
+        },
         "recommendation": {
           "anyOf": [
             {
@@ -1059,6 +1126,7 @@
         "recommendation",
         "closed_choices",
         "concern_id",
+        "recheck_commit",
         "allowances",
         "criteria"
       ],
@@ -1759,6 +1827,9 @@
         },
         {
           "$ref": "#/$defs/LeaseDriftEvent"
+        },
+        {
+          "$ref": "#/$defs/IntegrationRecoveredEvent"
         },
         {
           "$ref": "#/$defs/RunFailedEvent"

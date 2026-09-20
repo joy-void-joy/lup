@@ -57,7 +57,6 @@ from lup.resolver.models import (
     ConcernStatus,
     ConcernOutcome,
     IntegrationRecord,
-    JoinProgress,
     MaterialQuestion,
     QuestionBatch,
     RecheckRuling,
@@ -83,6 +82,7 @@ from lup.resolver.orchestrator import (
 from lup.resolver.questions import QuestionBroker
 from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun, ResolverInvariantError
+from lup.resolver.recovery import IntegrationRecoveryDesk
 from lup.resolver.state import (
     PHASE_ORDER,
     ResolverStateRepository,
@@ -1156,19 +1156,12 @@ class ResolverCore:
         }
         for lease in self.leases.leases.values():
             if lease.concern_id == "integration":
-                # Three states, and each names the commit it expects rather
-                # than accepting whatever HEAD happens to hold. A finished
-                # integration expects its record; a partway one expects the
-                # last join it recorded, so the joins already built survive
-                # and only the interrupted merge and its index are discarded;
-                # one that never started expects the source commit.
-                match state.integration, state.join_progress:
-                    case IntegrationRecord(commit=str() as commit), _:
-                        self.restore_worktree(lease, commit, True)
-                    case _, JoinProgress(commit=commit):
-                        self.restore_worktree(lease, commit, True)
-                    case _:
-                        self.restore_worktree(lease, state.root_base().commit, False)
+                # The merger can publish its landing before the run process
+                # projects it. Recovery and resume read that same authority.
+                expected = IntegrationRecoveryDesk(self.repository).recorded_commit(
+                    state, lease
+                )
+                self.restore_worktree(lease, expected, True)
                 continue
             outcome = (
                 outcomes[lease.concern_id] if lease.concern_id in outcomes else None
@@ -1230,6 +1223,13 @@ class ResolverCore:
                 raise ResolverInvariantError(
                     f"persisted commit changed for {lease.concern_id}: expected "
                     f"{expected}, found {found}"
+                    + (
+                        "; stop the run and use resolve recover-integration "
+                        "restore-recorded or adopt-head --run-id "
+                        f"{self.config.run_id} after inspecting the worktree"
+                        if lease.concern_id == "integration"
+                        else ""
+                    )
                 )
             self.journal.record(
                 LeaseDriftEvent(

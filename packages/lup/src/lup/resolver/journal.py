@@ -259,6 +259,18 @@ class LeaseDriftEvent(BaseModel, frozen=True):
     found: str
 
 
+class IntegrationRecoveredEvent(BaseModel, frozen=True):
+    """An explicit integration move with its preserved recovery evidence."""
+
+    type: Literal["integration_recovered"] = "integration_recovered"
+    mode: Literal["restore-recorded", "adopt-head"]
+    recorded: str
+    before: str
+    after: str
+    evidence: str
+    retired_questions: list[str] = []
+
+
 class RunFailedEvent(BaseModel, frozen=True):
     """The run reached a terminal failure."""
 
@@ -286,6 +298,7 @@ type RunEvent = (
     | BaseRefreshedEvent
     | LeaseRefreshedEvent
     | LeaseDriftEvent
+    | IntegrationRecoveredEvent
     | RunFailedEvent
 )
 """What the run did, as opposed to what one actor's session did.
