@@ -324,6 +324,15 @@ session keeping its environment elsewhere is not checked against a stale
 `.venv` beside it; with the variable unset, the root configuration's `.venv`
 stands.
 
+For tests spanning the application and library, use
+`uv run lup-devtools dev test tests/unit/test_toolsets.py packages/lup/tests/unit/test_lup_tool.py`.
+It starts a separate pytest process in each declared test root, preserving
+each suite's configuration and imports. A raw pytest invocation naming both
+roots can fail while importing `tests.conftest`, because both independently
+installed suites use that package name. Recover with `dev test` over the same
+paths; changing import mode does not separate those packages. The runner uses
+parallel workers only when pytest-xdist is installed; otherwise it runs serially.
+
 The generated trees include the frontend bundles under `lup.web`'s package
 data, built from `packages/lup/web/` by Vite, so the gate needs `bun`. The
 workspace's dependencies it restores itself, the way `uv run` syncs the
