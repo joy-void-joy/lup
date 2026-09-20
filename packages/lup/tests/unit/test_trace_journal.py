@@ -1,9 +1,18 @@
 """The observable journal: redaction, the hash chain, and delegated spans."""
 
+import asyncio
+from collections.abc import AsyncIterator
 from pathlib import Path
+
+import pytest
+
+from lup.sessions.capabilities import EventStream
+from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
+from lup.sessions.errors import DeltaStreamingDisabled
 
 from lup.sessions.events import (
     BlockCompletedEvent,
+    BlockDeltaEvent,
     MessageCompletedEvent,
     SessionId,
     TurnCompletedEvent,
@@ -12,6 +21,10 @@ from lup.sessions.events import (
     TurnMessage,
     TurnTextBlock,
     TurnToolCallBlock,
+    LiveTurnEvent,
+    TurnEvent,
+    TurnStartedEvent,
+    turn_request,
 )
 from lup.observability.audit import (
     ArgvRedaction,
@@ -20,11 +33,14 @@ from lup.observability.audit import (
     TraceActor,
     TraceContext,
     TraceJournal,
+    JournalSession,
+    JournalEventStream,
     TurnRecorder,
     read_observable_events,
     verify_event_chain,
 )
 from lup.types import JsonObject
+from tests.unit.test_capability_runtime import RecordingBinder
 
 IDENTIFIERS = TurnIdentifiers(
     session=SessionId(value="session-1"), turn=TurnId(value="turn-1")
@@ -195,3 +211,111 @@ def test_an_undelegated_message_opens_no_span(tmp_path: Path) -> None:
     )
 
     assert read_observable_events(path) == []
+
+
+class DurableSource(EventStream):
+    """A provider that refuses deltas at accessor or iterator entry."""
+
+    def __init__(self, deferred: bool) -> None:
+        self.deferred = deferred
+        self.reads = 0
+
+    async def events(self) -> AsyncIterator[TurnEvent]:
+        self.reads += 1
+        yield TurnStartedEvent(identifiers=IDENTIFIERS)
+        yield BlockCompletedEvent(
+            identifiers=IDENTIFIERS, block=TurnTextBlock(text="durable answer")
+        )
+        yield TurnCompletedEvent(identifiers=IDENTIFIERS)
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
+        if not self.deferred:
+            raise DeltaStreamingDisabled("partials disabled")
+        return self.refused()
+
+    async def refused(self) -> AsyncIterator[LiveTurnEvent]:
+        if self.deferred:
+            raise DeltaStreamingDisabled("partials disabled")
+        yield TurnStartedEvent(identifiers=IDENTIFIERS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deferred", [False, True])
+async def test_a_delta_free_session_keeps_its_durable_journal_and_result(
+    tmp_path: Path, deferred: bool
+) -> None:
+    source = DurableSource(deferred)
+
+    async def complete() -> CompletedTurn:
+        return CompletedTurn(blocks=[TurnTextBlock(text="durable answer")])
+
+    async def start(_text: str) -> AcceptedTurn:
+        return AcceptedTurn(identifiers=IDENTIFIERS, complete=complete, events=source)
+
+    path = tmp_path / "journal.jsonl"
+    session = JournalSession(
+        ComposedSession(start, RecordingBinder()), journal_at(path)
+    )
+    handle = await session.start(turn_request("hello"))
+    assert handle.events is not None
+    with pytest.raises(DeltaStreamingDisabled):
+        await anext(handle.events.live())
+
+    durable = [event async for event in handle.events.events()]
+    result = await handle.turn.result()
+
+    assert [event.type for event in durable] == [
+        "turn_started",
+        "block_completed",
+        "turn_completed",
+    ]
+    assert result.blocks == [TurnTextBlock(text="durable answer")]
+    assert source.reads == 1
+    recorded = read_observable_events(path)
+    assert [event.kind for event in recorded] == [
+        "turn_input",
+        "turn_start",
+        "message",
+        "turn_end",
+        "turn_result",
+    ]
+    assert verify_event_chain(recorded)
+
+
+class LiveSource(EventStream):
+    def __init__(self, fails: bool) -> None:
+        self.fails = fails
+
+    def events(self) -> AsyncIterator[TurnEvent]:
+        raise AssertionError("a partially consumed stream must not be replayed")
+
+    async def live(self) -> AsyncIterator[LiveTurnEvent]:
+        yield TurnStartedEvent(identifiers=IDENTIFIERS)
+        if self.fails:
+            raise DeltaStreamingDisabled("invalid late capability refusal")
+        yield BlockDeltaEvent(identifiers=IDENTIFIERS, delta="partial")
+        yield TurnCompletedEvent(identifiers=IDENTIFIERS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_journaling_preserves_live_events_and_never_replays_after_a_delta(
+    tmp_path: Path, fails: bool
+) -> None:
+    source = JournalEventStream(
+        LiveSource(fails), journal_at(tmp_path / "journal.jsonl"), asyncio.Queue()
+    )
+
+    events = [event async for event in source.live()]
+
+    if fails:
+        with pytest.raises(DeltaStreamingDisabled, match="late capability"):
+            await source.wait()
+        assert [event.type for event in events] == ["turn_started"]
+    else:
+        await source.wait()
+        assert [event.type for event in events] == [
+            "turn_started",
+            "block_delta",
+            "turn_completed",
+        ]
