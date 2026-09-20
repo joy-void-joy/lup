@@ -24,8 +24,8 @@ assumed.
 import asyncio
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
-from hashlib import sha256
 from pathlib import Path
+from uuid import uuid4
 
 from lup.channels.models import utc_now
 from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverDrained
@@ -269,7 +269,7 @@ class Joiner:
                 and self.questions.draining() is None
             ):
                 question = MaterialQuestion(
-                    id=f"{lease.concern_id}-join-blocked-{sha256(blocked.encode()).hexdigest()}",
+                    id=f"join-blocked-{uuid4().hex}",
                     concern_id=lease.concern_id,
                     prompt=(
                         f"How should the join for {lease.concern_id} proceed? "

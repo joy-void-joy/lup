@@ -18,6 +18,8 @@ from tests.unit.test_resolver_core import (
     snapshot,
 )
 from lup.types import JsonObject
+from lup.channels.models import utc_now
+from lup.coordination.mailbox import AnswerDoor, AnswerOffer
 
 
 @pytest.mark.asyncio
@@ -91,3 +93,17 @@ async def test_merger_blockers_park_with_visible_questions(
         JoinDesk(core.repository.root, "c" if dependent else "integration").plan()
         is not None
     )
+    core.mailbox.offer(
+        AnswerOffer(
+            run_id=core.config.run_id,
+            question_id=question.id,
+            value="Retry the join with the original intent.",
+            door=AnswerDoor.FLAG,
+            offered_at=utc_now(),
+        )
+    )
+    with pytest.raises(ResolverAwaitingAnswers) as repeated:
+        await core.resume()
+    assert calls == 2
+    assert repeated.value.pending[0].id != question.id
+    assert blocked in repeated.value.pending[0].prompt
