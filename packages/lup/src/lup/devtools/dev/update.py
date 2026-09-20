@@ -125,7 +125,7 @@ def resolved_pin(
 
 
 def owed_since(
-    merged: str, repository: Path, report: Callable[[str], None]
+    merged: str, repository: Path, report: Callable[[str], None], root: Path = Path()
 ) -> list[str]:
     """What this update asks of the project beyond what the merge already did.
 
@@ -140,10 +140,24 @@ def owed_since(
     """
     if not merged:
         return []
-    pending = migrations.unapplied(migrations.DECLARED, merged, repository)
-    if not pending:
+    pending = migrations.RenderedMigrations.model_validate_json(
+        uv.out(
+            "run",
+            "--no-sync",
+            "lup-devtools",
+            "dev",
+            "migrate",
+            "pending",
+            merged,
+            "--repository",
+            str(repository.resolve()),
+            "--json",
+            _cwd=str(root),
+        )
+    )
+    if not pending.count:
         return []
-    return [f"{len(pending)} migration(s) pending:", *migrations.rendered(pending)]
+    return [f"{pending.count} migration(s) pending:", *pending.lines]
 
 
 def regenerated(root: Path, report: Callable[[str], None]) -> None:
@@ -194,7 +208,7 @@ def updated(
     scaffold.advanced(root, repository, source, package, resolved)
     outcome = scaffold.merged(root, source)
     report(f"Copied half: {outcome.spelled()}.")
-    for line in owed_since(already, repository, report):
+    for line in owed_since(already, repository, report, root):
         report(line)
     for path in outcome.conflicted:
         report(f"  conflicted  {path}")

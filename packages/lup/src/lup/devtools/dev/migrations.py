@@ -128,6 +128,13 @@ class Migration(BaseModel, frozen=True):
         ]
 
 
+class RenderedMigrations(BaseModel, frozen=True):
+    """Installed-library output consumed by a process started before its update."""
+
+    count: int
+    lines: list[str]
+
+
 DECLARED: list[Migration] = [
     Migration(
         subjects=[

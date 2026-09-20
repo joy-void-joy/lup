@@ -1269,6 +1269,14 @@ def create_dev_app(
             str,
             typer.Argument(help="Where the project stands, as a commit of this one"),
         ],
+        repository: Annotated[
+            Path | None,
+            typer.Option(help="Upstream checkout holding the migration commits"),
+        ] = None,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Render an installed-library report as JSON"),
+        ] = False,
     ) -> None:
         """What a project standing at that commit still owes, beyond the map.
 
@@ -1276,7 +1284,16 @@ def create_dev_app(
         that split. A project already past the commit that made the break has
         applied it, and is told nothing.
         """
-        owed = migrations.unapplied(migrations.DECLARED, revision)
+        owed = migrations.unapplied(
+            migrations.DECLARED, revision, repository or Path.cwd()
+        )
+        if as_json:
+            output_json(
+                migrations.RenderedMigrations(
+                    count=len(owed), lines=migrations.rendered(owed)
+                )
+            )
+            return
         if not owed:
             typer.echo(f"nothing declared since {revision}")
             return
