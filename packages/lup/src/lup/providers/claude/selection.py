@@ -11,6 +11,7 @@ from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.claude.runtime import (
     ClaudeEffort,
     ClaudePermissionMode,
+    ClaudeSandboxConfig,
     ClaudeSessionConfig,
     create_claude,
 )
@@ -18,6 +19,7 @@ from lup.sessions.client import Client
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
+    SessionContainment,
     SessionEffort,
     SessionRequest,
 )
@@ -47,12 +49,44 @@ CLAUDE_EFFORT: dict[SessionEffort, ClaudeEffort] = {
 ``minimal`` meets ``low`` because Claude's ladder has no rung beneath it."""
 
 
+# lup: ignore[constant-declaration] — each value is Claude Code's own sandbox
+# setting for the wall beside it, over a vocabulary this library closes
+CLAUDE_CONTAINMENT: dict[SessionContainment, ClaudeSandboxConfig | None] = {
+    "outer": ClaudeSandboxConfig(enabled=False),
+    "inner": ClaudeSandboxConfig(),
+    "none": None,
+}
+"""What Claude Code is told about its own sandbox, behind each wall.
+
+The SDK counterpart of
+:data:`~lup.providers.claude.confinement.CLAUDE_CONFINEMENT`, which says the
+same thing in argv to a CLI this library launches rather than opens. Both
+spell it as the sandbox settings key, because that is the surface it lives
+on; only the carrier differs.
+
+``outer`` states the sandbox off rather than leaving it unsaid, so the
+session and the policy kernel judging it agree on which wall is load-bearing
+— :meth:`~lup.providers.claude.runtime.ClaudeSandboxConfig.posture` reads
+this same object. Unsaid, the CLI would answer from a settings file the
+spawned session may not even read. ``none`` says nothing on purpose: no
+sandbox key is sent, and whatever the runtime's own configuration decides is
+what the session gets, which is what a request meant before this axis
+existed.
+"""
+
+
 def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
     """Render a portable request into Claude's own session configuration.
 
     Rendering is separate from building so an application can stack a
     :class:`~lup.providers.config.ConfigTransform` — a compatible endpoint, a
     profile — onto what a request asked for, before any session exists.
+
+    Autonomy and containment render into two fields that decide nothing
+    about each other: a permission mode says how much the session may do
+    before it asks, and the sandbox settings say what confines it while it
+    does. Codex spells both with one word and has to reconcile them; here
+    the request's two axes stay two.
     """
     return ClaudeSessionConfig(
         model=request.model,
@@ -68,6 +102,8 @@ def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
         max_turns=request.max_turns,
         max_thinking_tokens=request.max_thinking_tokens,
         cwd=request.cwd,
+        sandbox=CLAUDE_CONTAINMENT[request.containment],
+        cli_path=request.contained_program,
         environment=request.environment,
         hooks=request.hooks,
         submission_gate_resolver=request.submission_gate,

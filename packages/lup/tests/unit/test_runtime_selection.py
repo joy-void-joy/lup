@@ -16,6 +16,7 @@ from pydantic import BaseModel, ValidationError
 from lup.providers.claude.runtime import ClaudeSessionConfig
 from lup.providers.claude.selection import (
     CLAUDE_AUTONOMY,
+    CLAUDE_CONTAINMENT,
     CLAUDE_RUNTIME,
     claude_config,
 )
@@ -275,3 +276,51 @@ def test_a_program_nothing_would_start_is_refused(wall: SessionContainment) -> N
     """
     with pytest.raises(ValidationError, match="containment='outer'"):
         SessionRequest(containment=wall, contained_program=Path("enter.sh"))
+
+
+def test_claude_opens_an_inner_session_in_its_own_sandbox(tmp_path: Path) -> None:
+    config = claude_config(SessionRequest(cwd=tmp_path, containment="inner"))
+
+    assert config.sandbox is not None
+    assert config.sandbox.enabled
+    assert config.sandbox.posture().active
+    assert config.cli_path is None
+
+
+def test_claude_stands_its_sandbox_down_inside_the_container(tmp_path: Path) -> None:
+    """The container is the wall, and the session is told so in both fields.
+
+    Told rather than left unsaid: a spawned session reads none of the
+    settings files a launched one does, so an unstated sandbox is decided by
+    whatever the runtime falls back to — and the policy judging the session
+    would be reading a posture nobody set.
+    """
+    program = tmp_path / "enter.sh"
+    config = claude_config(
+        SessionRequest(cwd=tmp_path, containment="outer", contained_program=program)
+    )
+
+    assert config.cli_path == program
+    assert config.sandbox is not None
+    assert not config.sandbox.enabled
+    assert not config.sandbox.posture().active
+
+
+def test_claude_says_nothing_about_a_wall_nobody_asked_for(tmp_path: Path) -> None:
+    config = claude_config(SessionRequest(cwd=tmp_path))
+
+    assert config.sandbox is None
+    assert config.cli_path is None
+
+
+@pytest.mark.parametrize("degree", AUTONOMY_DEGREES)
+def test_claude_decides_autonomy_and_containment_apart(degree: SessionAutonomy) -> None:
+    """Every degree of autonomy keeps the sandbox the request asked for.
+
+    The property Codex cannot state this simply, and the reason the two
+    adapters are tested differently rather than through one parametrization.
+    """
+    config = claude_config(SessionRequest(autonomy=degree, containment="inner"))
+
+    assert config.permission_mode == CLAUDE_AUTONOMY[degree]
+    assert config.sandbox == CLAUDE_CONTAINMENT["inner"]
