@@ -51,14 +51,14 @@ A uv workspace member any project can depend on unmodified. Provider SDKs sit be
 
 Optional behavior is present on `SessionHandle` and `TurnHandle` or absent as `None` — no unsupported-operation stubs. This checked-in evidence targets Claude Agent SDK 0.2.89 and Codex CLI/app-server 0.144.4; regenerate it with `uv run lup-devtools agent capabilities --markdown` when native evidence changes.
 
-| Capability | claude-sdk-0.2.152 | codex-app-server-0.144.4 |
+| Capability | claude-sdk-0.2.152 | codex-app-server-0.155.1 |
 | --- | --- | --- |
 | live_events | ✅ | ✅ |
 | interrupt | ✅ | ✅ |
 | steer | — | ✅ |
 | fork | ✅ | ✅ |
-| resume | ✅ | without a fresh dynamic tool |
-| typed_submission | reconnect per turn | thread-start schema only |
+| resume | ✅ | ✅ |
+| typed_submission | reconnect per turn | per-turn outputSchema with bounded gate correction |
 | background | ✅ | ✅ |
 
 

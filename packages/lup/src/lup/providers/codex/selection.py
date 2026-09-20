@@ -39,6 +39,7 @@ from lup.providers.codex.runtime import (
 )
 from lup.tools.mcp import McpServerEntry, RawStdioServerConfig
 from lup.sessions.client import Client
+from lup.sessions.errors import UnsupportedCapability
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
@@ -196,9 +197,22 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         if asked
     ]
     if refused:
-        raise ValueError(
+        raise UnsupportedCapability(
             f"Codex has no session-level {', '.join(refused)}; govern this "
             "session through the policy dispatcher in its harness tree"
+        )
+    limits = [
+        name
+        for name, value in (
+            ("max_turns", request.max_turns),
+            ("max_thinking_tokens", request.max_thinking_tokens),
+        )
+        if value is not None
+    ]
+    if limits:
+        raise UnsupportedCapability(
+            f"Codex cannot enforce {', '.join(limits)}; omit these limits and use "
+            "effort for reasoning, or client timeout/budget middleware for a whole turn"
         )
     if request.cwd is None:
         raise ValueError("Codex sandboxes a session against a cwd; none was given")

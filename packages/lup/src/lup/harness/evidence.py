@@ -106,6 +106,14 @@ SCHEMA_DIGESTS = [
         sha256="b36fb37326b1cf69f75c8b306f1f886d53a57c4b1b985e08e298e2407ea2ad02",
     ),
     SchemaDigest(
+        path="v2/TurnSteerParams.json",
+        sha256="2e0cdcea6a90d6c8bc584fdc2ff838e824754b1eef0d2d16aa71bec4276fef44",
+    ),
+    SchemaDigest(
+        path="v2/ItemCompletedNotification.json",
+        sha256="69aba3fe5f72f38bf5c541e7e2c09de40778abe65ff969d9fc73372037812091",
+    ),
+    SchemaDigest(
         path="v2/ThreadResumeParams.json",
         sha256="5ebc2fe61b33d85dd6dfa81acf88f632fe2bafe4aa83ff57ee58e866f14d49ac",
     ),
@@ -124,15 +132,12 @@ Dated by the ``codex-cli`` row, which is what regenerates them: a digest here
 was read out of the same CLI that row accepts, so a drift message names that
 row's reading rather than a date of its own.
 
-``v2/ThreadResumeParams.json`` is the only one of the five that moved between
-0.153.4 and 0.155.1, and it was accepted on what the digest guards rather than
-on the hash alone: ``dynamicTools`` is still absent from it and from
-``TurnStartParams``, and still present on ``ThreadStartParams`` — so the fact
-this table exists to pin, that a dynamic-tool binding can be made only where a
-thread starts, holds at the newer version. What the file gained beside that is
-resume vocabulary the adapter does not reach: ``approvalsReviewer``,
-``personality``, ``runtimeWorkspaceRoots``, ``serviceTier``, ``excludeTurns``
-and ``initialTurnsPage``.
+``TurnStartParams.outputSchema`` constrains the final response per turn,
+including a resumed thread. ``TurnSteerParams.expectedTurnId`` guards active
+turn steering. ``ItemCompletedNotification`` supplies the complete native
+activity union retained by replay; fixture tests enumerate its kinds so a
+schema refresh makes additions visible. Dynamic tools remain thread-scoped,
+but structured output does not depend on that facility.
 """
 
 

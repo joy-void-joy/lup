@@ -9,7 +9,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, model_validator
 
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.providers.codex.hooks import (
@@ -29,7 +29,10 @@ from lup.sessions.capabilities import (
     Steer,
     TurnToolBinder,
 )
-from lup.sessions.errors import ProviderTurnError, TurnFailure, TurnInterruptedError
+from lup.sessions.errors import ProviderTurnError, StructuredOutputError
+from lup.sessions.errors import TurnFailure, TurnInterruptedError, ValidationAttempt
+from lup.sessions.errors import UnsupportedCapability
+from lup.sessions.middleware import CorrectionConfig, DecoratingSession
 from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
@@ -122,6 +125,10 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
     environment: EnvVars = {}
     submission_gate_resolver: SubmissionGateResolver | None = None
+    correction: CorrectionConfig = CorrectionConfig()
+    continuation: CorrectionConfig = CorrectionConfig(
+        instruction="Continue according to the Stop hook feedback."
+    )
     mcp_servers: dict[str, "CodexMcpServerConfig"] = {}
     writable_roots: list[Path] = []
     delegated_tools: CodexSubagentTools | None = None
@@ -207,6 +214,10 @@ class CodexConfigReadResponse(BaseModel, frozen=True):
     config: CodexInheritedConfig
 
 
+class CodexNotificationScope(BaseModel, frozen=True):
+    thread_id: str | None = Field(default=None, alias="threadId")
+
+
 class CodexTurnRef(BaseModel, frozen=True):
     id: str
     status: str = "inProgress"
@@ -221,12 +232,8 @@ class CodexTurnResponse(BaseModel, frozen=True):
     turn: CodexTurnRef
 
 
-class DynamicToolCall(BaseModel, frozen=True):
-    thread_id: str = Field(alias="threadId")
-    turn_id: str = Field(alias="turnId")
-    call_id: str = Field(alias="callId")
-    tool: str
-    arguments: JsonValue
+class McpElicitationMetadata(BaseModel, frozen=True):
+    codex_approval_kind: str | None = None
 
 
 class McpElicitationRequest(BaseModel, frozen=True):
@@ -239,6 +246,33 @@ class McpElicitationRequest(BaseModel, frozen=True):
 
     thread_id: str = Field(alias="threadId")
     server_name: str = Field(alias="serverName")
+    metadata: McpElicitationMetadata = Field(
+        default_factory=McpElicitationMetadata, alias="_meta"
+    )
+
+
+class CodexItemOutcome(BaseModel, frozen=True):
+    """Outcome fields shared by native activities, with their absent defaults."""
+
+    activity: str = Field(default="unknown", alias="type")
+    status: str | None = None
+    success: bool | None = None
+    exit_code: int | None = Field(default=None, alias="exitCode")
+    failure: JsonValue = None
+
+    @property
+    def failed(self) -> bool:
+        return (
+            self.success is False
+            or self.exit_code not in (None, 0)
+            or self.status in ("failed", "errored", "rejected")
+            or self.failure is not None
+        )
+
+
+class CodexReasoningItem(BaseModel, frozen=True):
+    summary: list[str] = []
+    content: list[str] = []
 
 
 class TokenUsageBreakdown(BaseModel, frozen=True):
@@ -259,10 +293,6 @@ class CodexCompletedTurn(BaseModel, frozen=True):
     status: str
     duration_ms: int | None = Field(default=None, alias="durationMs")
     error: CodexTurnFailure | None = None
-
-
-class CodexSchemaRebindingError(RuntimeError):
-    """The current app-server cannot change thread-scoped dynamic tools safely."""
 
 
 def notification_turn_id(notification: RpcNotification) -> str | None:
@@ -336,6 +366,7 @@ class CodexTurnChannel:
                 TurnFailure(
                     message=str(error),
                     blocks=self.blocks,
+                    messages=fold_transcript(self.durable),
                     usage=self.usage,
                     duration=timedelta(seconds=perf_counter() - self.started),
                     identifiers=identifiers,
@@ -346,13 +377,16 @@ class CodexTurnChannel:
         self.events.put_nowait(None)
 
     def decode(self, notification: RpcNotification) -> None:
+        if notification.method not in self.notifications:
+            return
+        scope = CodexNotificationScope.model_validate(notification.params)
+        if scope.thread_id not in (None, self.session_id):
+            return
         candidate = notification_turn_id(notification)
         if candidate is not None:
             if self.turn_id is not None and candidate != self.turn_id:
                 return
             self.turn_id = candidate
-        if notification.method not in self.notifications:
-            return
         match notification.method, notification.params:
             case "turn/started", {"turn": {"id": str()}}:
                 self.events.put_nowait(TurnStartedEvent(identifiers=self.identifiers()))
@@ -381,7 +415,9 @@ class CodexTurnChannel:
                         MessageCompletedEvent(
                             identifiers=self.identifiers(),
                             message=TurnMessage(
-                                role=message_role(item), blocks=completed
+                                role=message_role(item),
+                                blocks=completed,
+                                native=item,
                             ),
                         )
                     )
@@ -422,6 +458,7 @@ class CodexTurnChannel:
                                     else f"Codex turn ended with status {status}"
                                 ),
                                 blocks=self.blocks,
+                                messages=fold_transcript(self.durable),
                                 usage=self.usage,
                                 duration=duration,
                                 identifiers=self.identifiers(),
@@ -471,11 +508,6 @@ class CodexLiveEventStream(EventStream):
         return self.iterate()
 
 
-# lup: ignore[constant-declaration] — what the app-server advertises the tool as
-SUBMISSION_TOOL = "submit_output"
-"""What the app-server advertises this turn's dynamic submission tool as."""
-
-
 class CodexConversationState:
     """One app-server connection, thread, and current turn binding."""
 
@@ -490,7 +522,6 @@ class CodexConversationState:
         self.resume = resume
         self.thread_id: str | None = None
         self.submission: TurnSubmission | None = None
-        self.schema_digest: str | None = None
         self.channel: CodexTurnChannel | None = None
         self.inherited_servers: list[str] = []
         self.server.server_request_handler = self.handle_server_request
@@ -512,19 +543,11 @@ class CodexConversationState:
             )
             self.inherited_servers = list(inherited.config.mcp_servers)
         if self.resume is not None:
-            # Codex persists dynamic tools in the thread's rollout metadata and
-            # restores them on resume when none are supplied, so a resumed
-            # thread keeps the submission tool by saying nothing about it.
-            # Refusing to resume with a binding at all was self-imposed: the
-            # digest carried in from the persisted record is what still catches
-            # a genuine schema change, in `bind` rather than here.
             params = self.thread_parameters()
             params["threadId"] = self.resume.value
             result = await self.server.request("thread/resume", params)
         else:
             params = self.thread_parameters()
-            if self.submission is not None:
-                params["dynamicTools"] = [dynamic_tool(self.submission)]
             result = await self.server.request("thread/start", params)
         response = CodexThreadResponse.model_validate(result)
         self.thread_id = response.thread.id
@@ -570,6 +593,7 @@ class CodexConversationState:
         thread_id = await self.ensure_thread()
         channel = CodexTurnChannel(thread_id)
         self.channel = channel
+        submission = self.submission
         params: JsonObject = {
             "threadId": thread_id,
             "input": [{"type": "text", "text": text}],
@@ -579,6 +603,8 @@ class CodexConversationState:
         selected = self.config.model_selection()
         if "effort" in selected:
             params["effort"] = selected["effort"]
+        if submission is not None:
+            params["outputSchema"] = submission.schema
         result = await self.server.request("turn/start", params)
         response = CodexTurnResponse.model_validate(result)
         channel.turn_id = response.turn.id
@@ -588,7 +614,10 @@ class CodexConversationState:
         )
 
         async def complete() -> CompletedTurn:
-            return await channel.completed
+            completed = await channel.completed
+            if submission is not None:
+                await submit_completed_output(submission, completed, identifiers)
+            return completed
 
         return AcceptedTurn(
             identifiers=identifiers,
@@ -603,32 +632,9 @@ class CodexConversationState:
             return await self.resolve_approval(message)
         if message.method == "mcpServer/elicitation/request":
             return self.resolve_mcp_elicitation(message)
-        if message.method != "item/tool/call":
-            raise RuntimeError(f"unsupported app-server request {message.method!r}")
-        call = DynamicToolCall.model_validate(message.params)
-        submission = self.submission
-        if submission is None or call.tool != SUBMISSION_TOOL:
-            return {
-                "contentItems": [
-                    {
-                        "type": "inputText",
-                        "text": "No matching turn output binding is active.",
-                    }
-                ],
-                "success": False,
-            }
-        if self.channel is None or self.channel.turn_id != call.turn_id:
-            return {
-                "contentItems": [
-                    {"type": "inputText", "text": "Submission belongs to a stale turn."}
-                ],
-                "success": False,
-            }
-        response = await submission.submit(call.arguments)
-        return {
-            "contentItems": [{"type": "inputText", "text": response.message}],
-            "success": response.accepted,
-        }
+        raise UnsupportedCapability(
+            f"Codex app-server request {message.method!r} requires a client handler; use an interactive client for this capability"
+        )
 
     async def resolve_approval(self, message: RpcMessage) -> JsonValue:
         """Answer one approval request from this session's declared hooks.
@@ -654,6 +660,12 @@ class CodexConversationState:
         reported to the model as "user rejected MCP tool call".
         """
         request = McpElicitationRequest.model_validate(message.params)
+        if request.thread_id != self.thread_id:
+            return {"action": "decline"}
+        if request.metadata.codex_approval_kind != "mcp_tool_call":
+            raise UnsupportedCapability(
+                "Codex MCP forms, URL and verification elicitations require an interactive client; use an interactive session to answer them"
+            )
         if request.server_name in self.config.mcp_servers:
             return {"action": "accept"}
         return {"action": "decline"}
@@ -668,22 +680,14 @@ class CodexConversationState:
 
 
 class CodexTurnToolBinder(TurnToolBinder):
-    """Refresh A-to-A handler state and reject unsafe schema transitions."""
+    """Bind each turn's native final-output schema and validation independently."""
 
     def __init__(self, state: CodexConversationState) -> None:
         self.state = state
 
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:
         submission = bound_submission(binding) if binding is not None else None
-        digest = submission.digest if submission is not None else None
-        if self.state.schema_digest is not None and digest != self.state.schema_digest:
-            raise CodexSchemaRebindingError(
-                "the installed Codex app-server exposes dynamicTools only on "
-                "thread/start; changing or removing submit_output would lose "
-                "conversation identity"
-            )
         self.state.submission = submission
-        self.state.schema_digest = digest
 
 
 class CodexInterrupt(Interrupt):
@@ -709,7 +713,7 @@ class CodexSteer(Steer):
             "turn/steer",
             {
                 "threadId": thread_id,
-                "turnId": self.turn_id,
+                "expectedTurnId": self.turn_id,
                 "input": [{"type": "text", "text": input.text}],
             },
         )
@@ -784,16 +788,27 @@ class CodexSessionOpener:
             state.start_turn,
             CodexTurnToolBinder(state),
             gate_resolver=config.submission_gate_resolver,
-            submission_tool=SUBMISSION_TOOL,
+        )
+        corrected = DecoratingSession(
+            session,
+            timeout=None,
+            budget=None,
+            recovery=None,
+            correction=config.correction,
+            continuation=config.continuation,
+            persistence=None,
         )
         with recursive_agent_scope(allowance):
             try:
-                yield SessionHandle(session=session, fork=CodexFork(state))
+                yield SessionHandle(session=corrected, fork=CodexFork(state))
             finally:
                 try:
                     await session.abort_active()
                 finally:
-                    await server.close()
+                    try:
+                        await corrected.close()
+                    finally:
+                        await server.close()
 
 
 def create_codex(
@@ -845,14 +860,38 @@ def create_codex(
     return Client(CodexSessionOpener(config).open_session)
 
 
-def dynamic_tool(submission: TurnSubmission) -> JsonObject:
-    """Render the exact Pydantic schema into the experimental native tool spec."""
-    return {
-        "name": SUBMISSION_TOOL,
-        "description": "Submit the final validated result for this turn.",
-        "inputSchema": submission.schema,
-        "deferLoading": False,
-    }
+async def submit_completed_output(
+    submission: TurnSubmission, completed: CompletedTurn, identifiers: TurnIdentifiers
+) -> None:
+    """Validate a native final answer and retain actionable correction evidence."""
+    text = next(
+        (
+            text
+            for block in reversed(completed.blocks)
+            if (text := block.text_payload) is not None
+        ),
+        "",
+    )
+    try:
+        value = TypeAdapter(JsonValue).validate_json(text)
+    except ValidationError as error:
+        message = f"Final output is not valid JSON: {error}"
+    else:
+        response = await submission.submit(value)
+        if response.accepted:
+            return
+        message = response.message
+    raise StructuredOutputError(
+        TurnFailure(
+            message=message,
+            blocks=completed.blocks,
+            messages=completed.messages,
+            usage=completed.usage,
+            duration=completed.duration,
+            identifiers=identifiers,
+            validation_history=[ValidationAttempt(message=message)],
+        )
+    )
 
 
 def decode_usage(payload: JsonObject) -> Usage:
@@ -877,8 +916,24 @@ def message_role(payload: JsonObject) -> Literal["user", "assistant", "tool", "s
             {"type": "commandExecution"}
             | {"type": "fileChange"}
             | {"type": "mcpToolCall"}
+            | {"type": "functionCallOutput"}
+            | {"type": "webSearch"}
+            | {"type": "imageView"}
+            | {"type": "imageGeneration"}
+            | {"type": "collabAgentToolCall"}
+            | {"type": "sleep"}
         ):
             return "tool"
+        case {"type": "userMessage"}:
+            return "user"
+        case {
+            "type": "hookPrompt"
+            | "contextCompaction"
+            | "enteredReviewMode"
+            | "exitedReviewMode"
+            | "subAgentActivity"
+        }:
+            return "system"
         case _:
             return "assistant"
 
@@ -890,14 +945,19 @@ def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
         TurnThinkingBlock,
         TurnToolCallBlock,
         TurnToolResultBlock,
+        TurnNativeActivityBlock,
     )
 
+    native = CodexItemOutcome.model_validate(payload)
     match payload:
         case {"type": "agentMessage", "text": str(text)}:
             return [TurnTextBlock(text=text)]
-        case {"type": "reasoning", "content": list(content)}:
+        case {"type": "reasoning"}:
+            reasoning = CodexReasoningItem.model_validate(payload)
             return [
-                TurnThinkingBlock(thinking="\n".join(str(item) for item in content))
+                TurnThinkingBlock(
+                    thinking="\n".join([*reasoning.summary, *reasoning.content])
+                )
             ]
         case {
             "type": "commandExecution",
@@ -915,7 +975,7 @@ def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
                 TurnToolResultBlock(
                     tool_call_id=identifier,
                     content=output if isinstance(output, str) else "",
-                    is_error=status != "completed",
+                    is_error=status != "completed" or native.failed,
                 ),
             ]
             return blocks
@@ -985,9 +1045,39 @@ def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
                 TurnToolResultBlock(
                     tool_call_id=identifier,
                     content=json.dumps(payload, sort_keys=True),
-                    is_error=status != "completed",
+                    is_error=status != "completed" or native.failed,
                 ),
             ]
             return blocks
+        case {"type": "functionCallOutput", "id": str(identifier)}:
+            return [
+                TurnToolResultBlock(
+                    tool_call_id=identifier, content=json.dumps(payload, sort_keys=True)
+                )
+            ]
+        case {
+            "type": (
+                "webSearch"
+                | "imageView"
+                | "collabAgentToolCall"
+                | "imageGeneration"
+                | "sleep"
+            ) as activity,
+            "id": str(identifier),
+        }:
+            return [
+                TurnToolCallBlock(id=identifier, name=activity, arguments=payload),
+                TurnToolResultBlock(
+                    tool_call_id=identifier,
+                    content=json.dumps(payload, sort_keys=True),
+                    is_error=native.failed,
+                ),
+            ]
         case _:
-            return []
+            return [
+                TurnNativeActivityBlock(
+                    provider="codex",
+                    activity=native.activity,
+                    payload=payload,
+                )
+            ]

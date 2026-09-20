@@ -23,7 +23,7 @@ so this page cannot come to name a version nothing was probed on.
 | Codex hooks | Codex CLI 0.155.1 | `codex --enable hooks features list` reported hooks stable; hermetic dispatcher fixtures in `tests/unit/test_harness_compilation.py`; [Codex hooks](https://developers.openai.com/codex/hooks) | Plugin hook commands receive `PLUGIN_ROOT`. Non-allow policy decisions fail closed because the command-hook boundary has no portable ask effect. Hook trust is never *generated*, but a worktree-scoped home seeds it from the account. **A non-interactive `codex exec` reaches the hook**, re-probed on Codex CLI 0.155.1 by `tests/integration/test_codex_exec_governance.py`: in a scoped home carrying the plugin's trust record, an allowed command ran with `hook: PreToolUse Completed` in the transcript, a denied one was blocked with the dispatcher's own diagnostic, and the same denied command under `--dangerously-bypass-hook-trust` behaved identically — so the seeded trust record is what it governs through rather than a stale hash that the flag was papering over. `exec` still reports `approval: never`, so the `PermissionRequest` half never fires there and a non-allow decision reaches the session as the fail-closed denial. One interactive trust grant per plugin hash is still required on a fresh machine, which `install_declared_policy` enforces by refusing an untrusted home. |
 | Codex blocked edit | Codex CLI 0.155.1 | Scheduled `test_codex_plugin_blocks_a_forbidden_apply_patch` installs the generated plugin in an isolated home and requests an anti-pattern edit through the real CLI | The `apply_patch` call is rejected, the target file remains unchanged, and the native session stays alive to report the rejection. A CLI version drift makes the nightly doctor fail until this observation is repeated. |
 | Codex app-server lifecycle | Codex CLI 0.155.1 | Version-generated JSON Schema plus routed-notification fixtures; [Codex app server](https://developers.openai.com/codex/app-server) | `thread/start`, `thread/resume`, `thread/fork`, `turn/start`, `turn/steer`, and `turn/interrupt` exist; live notifications are distinct from completed replay. |
-| Codex turn tool binding | Codex CLI 0.155.1 | Version-generated `ThreadStartParams`, `TurnStartParams`, `ThreadResumeParams`, and dynamic-tool call/response schemas | `dynamicTools` exists only on `thread/start`. A typed resume or schema transition that would need a new handler is rejected before input to preserve conversation identity. Native `outputSchema` is not enabled alongside Lup submission. |
+| Codex typed output | Codex CLI 0.155.1 | Version-generated `TurnStartParams`, `TurnSteerParams`, and `ItemCompletedNotification` fixtures; scripted adapter lifecycle tests | Every typed `turn/start` carries `outputSchema`. Lup validates the final JSON with Pydantic and the submission gate. `CodexSessionConfig.correction` uses the shared `CorrectionConfig` defaults to bound correction turns and carries the rejection reason into the next input; usage, events, steering and interruption cover the logical turn. Untyped turns, schema changes and typed resume preserve the native thread. These fixtures do not prove a live model round-trip. |
 | Codex custom agents | Codex CLI 0.155.1 | Generated TOML fixture parsing; [custom-agent documentation](https://developers.openai.com/codex/agent-configuration/subagents) | Portable agents render as project-scoped `.codex/agents/*.toml`, outside the plugin. |
 | Codex project guidance | Codex CLI 0.155.1 | Generated root fixture; [AGENTS.md documentation](https://developers.openai.com/codex/agent-configuration/agents-md) | Portable repository guidance renders to root `AGENTS.md`. |
 
@@ -33,6 +33,8 @@ The accepted Codex 0.155.1 schema hashes are:
 | --- | --- |
 | `v2/ThreadStartParams.json` | `25f490368ec6df52a2a3b82a5469d2413307eb93439121b309f415b5648eee7a` |
 | `v2/TurnStartParams.json` | `b36fb37326b1cf69f75c8b306f1f886d53a57c4b1b985e08e298e2407ea2ad02` |
+| `v2/TurnSteerParams.json` | `2e0cdcea6a90d6c8bc584fdc2ff838e824754b1eef0d2d16aa71bec4276fef44` |
+| `v2/ItemCompletedNotification.json` | `69aba3fe5f72f38bf5c541e7e2c09de40778abe65ff969d9fc73372037812091` |
 | `v2/ThreadResumeParams.json` | `5ebc2fe61b33d85dd6dfa81acf88f632fe2bafe4aa83ff57ee58e866f14d49ac` |
 | `DynamicToolCallParams.json` | `401bba20cfbd95762bef0467d840430c46be53369093ad9f26425ba757e34efc` |
 | `DynamicToolCallResponse.json` | `abb082cad67f11fcc98ba75f2eff75d7d1723af0c657655329b83ff160451a02` |
@@ -66,11 +68,13 @@ part of probing.
 
 ## Explicit release gaps
 
-- Codex 0.155.1 cannot pass the persistent typed-schema transition acceptance
-  sequence `None -> A -> A -> B -> None` while preserving one thread: the
-  native schema offers no dynamic-tool field on `turn/start` or
-  `thread/resume`. One-shot typed turns and repeated same-schema turns are
-  supported; incompatible transitions fail before input.
+- Codex 0.155.1 has no native exact iteration or thinking-token limit.
+  Portable `max_turns` and `max_thinking_tokens` requests raise
+  `UnsupportedCapability`; use reasoning `effort` or client timeout/budget
+  middleware when those different constraints meet the application's needs.
+- MCP tool-call approval is accepted only for the current thread and a declared
+  server with the native approval marker. Forms, URL and user-verification
+  elicitations require an interactive client and fail explicitly.
 - Claude steering is not claimed by the 0.2 adapter; its handle field is
   `None`. Partial events and latest-turn transcript forking are implemented.
 - Codex exposes project tool groups, including `run_subagent`, through MCP.

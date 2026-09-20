@@ -33,12 +33,10 @@ from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotifi
 from lup.providers.codex.runtime import (
     CodexConversationState,
     CodexMcpServerConfig,
-    CodexSchemaRebindingError,
     CodexSessionConfig,
     CodexSteer,
     CodexTurnChannel,
     CodexTurnToolBinder,
-    DynamicToolCall,
     McpElicitationRequest,
     decode_completed_item,
     decode_usage,
@@ -65,6 +63,7 @@ from lup.sessions.events import (
     TurnStartedEvent,
     TurnTextBlock,
     TurnThinkingBlock,
+    TurnNativeActivityBlock,
     TurnToolBinding,
     TurnToolCallBlock,
     TurnToolResultBlock,
@@ -357,6 +356,7 @@ async def test_mcp_elicitation_accepts_composed_servers_declines_others(
             },
         )
 
+    state.thread_id = "t1"
     accepted = await state.handle_server_request(elicitation("notes"))
     declined = await state.handle_server_request(elicitation("stranger"))
 
@@ -921,7 +921,7 @@ async def test_claude_submission_server_serves_the_binding_installed_now() -> No
 
 
 @pytest.mark.asyncio
-async def test_codex_binder_refreshes_same_schema_turns_and_fails_before_input(
+async def test_codex_binder_refreshes_each_schema_without_replacing_the_thread(
     tmp_path: Path,
 ) -> None:
     state = CodexConversationState(
@@ -933,7 +933,7 @@ async def test_codex_binder_refreshes_same_schema_turns_and_fails_before_input(
 
     first_store = InMemorySubmittedOutputStore()
     await binder.bind(TurnToolBinding(output_type=FirstOutput, store=first_store))
-    assert state.schema_digest is not None
+    assert state.submission is not None
     state.thread_id = "thread-1"
 
     refreshed_store = InMemorySubmittedOutputStore()
@@ -944,17 +944,14 @@ async def test_codex_binder_refreshes_same_schema_turns_and_fails_before_input(
     assert refreshed_store.read(FirstOutput) == FirstOutput(answer="refreshed")
     assert first_store.read(FirstOutput) is None
 
-    digest = state.schema_digest
-    with pytest.raises(CodexSchemaRebindingError, match="thread/start"):
-        await binder.bind(
-            TurnToolBinding(
-                output_type=SecondOutput, store=InMemorySubmittedOutputStore()
-            )
-        )
-    with pytest.raises(CodexSchemaRebindingError, match="thread/start"):
-        await binder.bind(None)
-    assert state.submission is installed
-    assert state.schema_digest == digest
+    await binder.bind(
+        TurnToolBinding(output_type=SecondOutput, store=InMemorySubmittedOutputStore())
+    )
+    assert state.submission is not None
+    assert state.submission.schema == SecondOutput.model_json_schema()
+    await binder.bind(None)
+    assert state.submission is None
+    assert state.thread_id == "thread-1"
 
 
 @pytest.mark.asyncio
@@ -983,7 +980,7 @@ async def test_codex_steer_targets_the_active_turn(
             "method": "turn/steer",
             "params": {
                 "threadId": "thread-1",
-                "turnId": "turn-9",
+                "expectedTurnId": "turn-9",
                 "input": [{"type": "text", "text": "focus on the tests"}],
             },
         }
@@ -1159,7 +1156,9 @@ NOTIFICATION_CASES = [
             MessageCompletedEvent(
                 identifiers=turn_identifiers(),
                 message=TurnMessage(
-                    role="assistant", blocks=[TurnTextBlock(text="hello")]
+                    role="assistant",
+                    blocks=[TurnTextBlock(text="hello")],
+                    native={"type": "agentMessage", "text": "hello"},
                 ),
             ),
         ],
@@ -1198,6 +1197,13 @@ NOTIFICATION_CASES = [
                 identifiers=turn_identifiers(),
                 message=TurnMessage(
                     role="tool",
+                    native={
+                        "type": "commandExecution",
+                        "id": "c1",
+                        "command": "uv run pytest",
+                        "aggregatedOutput": "2 passed",
+                        "status": "completed",
+                    },
                     blocks=[
                         TurnToolCallBlock(
                             id="c1",
@@ -1211,11 +1217,33 @@ NOTIFICATION_CASES = [
         ],
     ),
     NotificationCase(
-        # An item no arm decodes publishes nothing at all — not even an empty
-        # message, which is the `if completed:` guard rather than the loop.
         name="item/completed-with-an-undecodable-item",
         method="item/completed",
         params={"turnId": "turn-1", "item": {"type": "unheardOf", "id": "m1"}},
+        events=[
+            BlockCompletedEvent(
+                identifiers=turn_identifiers(),
+                block=TurnNativeActivityBlock(
+                    provider="codex",
+                    activity="unheardOf",
+                    payload={"type": "unheardOf", "id": "m1"},
+                ),
+            ),
+            MessageCompletedEvent(
+                identifiers=turn_identifiers(),
+                message=TurnMessage(
+                    role="assistant",
+                    blocks=[
+                        TurnNativeActivityBlock(
+                            provider="codex",
+                            activity="unheardOf",
+                            payload={"type": "unheardOf", "id": "m1"},
+                        )
+                    ],
+                    native={"type": "unheardOf", "id": "m1"},
+                ),
+            ),
+        ],
     ),
     NotificationCase(
         # Usage is folded into the channel rather than published, so this arm
@@ -1248,7 +1276,7 @@ COMPLETED_ITEM_CASES = [
     ),
     CompletedItemCase(
         name="reasoning",
-        arm="(type=reasoning, content)",
+        arm="(type=reasoning)",
         payload={"type": "reasoning", "content": ["step one", "step two"]},
         blocks=[TurnThinkingBlock(thinking="step one\nstep two")],
     ),
@@ -1431,11 +1459,57 @@ COMPLETED_ITEM_CASES = [
         name="an-item-type-with-no-arm",
         arm="_",
         payload={"type": "unheardOf", "id": "m1", "status": "completed"},
+        blocks=[
+            TurnNativeActivityBlock(
+                provider="codex",
+                activity="unheardOf",
+                payload={"type": "unheardOf", "id": "m1", "status": "completed"},
+            )
+        ],
+    ),
+    CompletedItemCase(
+        name="native-function-output",
+        arm="(type=functionCallOutput, id)",
+        payload={
+            "type": "functionCallOutput",
+            "id": "f1",
+            "name": "inspect",
+            "output": "ok",
+        },
+        blocks=[
+            TurnToolResultBlock(
+                tool_call_id="f1",
+                content='{"id": "f1", "name": "inspect", "output": "ok", "type": "functionCallOutput"}',
+            )
+        ],
+    ),
+    CompletedItemCase(
+        name="native-image-view",
+        arm="(type, id)",
+        payload={"type": "imageView", "id": "i1", "path": "/tmp/image.png"},
+        blocks=[
+            TurnToolCallBlock(
+                id="i1",
+                name="imageView",
+                arguments={"type": "imageView", "id": "i1", "path": "/tmp/image.png"},
+            ),
+            TurnToolResultBlock(
+                tool_call_id="i1",
+                content='{"id": "i1", "path": "/tmp/image.png", "type": "imageView"}',
+            ),
+        ],
     ),
     CompletedItemCase(
         name="an-item-missing-the-field-its-arm-reads",
         arm="_",
         payload={"type": "agentMessage"},
+        blocks=[
+            TurnNativeActivityBlock(
+                provider="codex",
+                activity="agentMessage",
+                payload={"type": "agentMessage"},
+            )
+        ],
     ),
 ]
 
@@ -1524,7 +1598,11 @@ async def test_a_completed_turn_replays_its_transcript_blocks_and_usage() -> Non
 
     assert completed.blocks == [TurnTextBlock(text="hello")]
     assert completed.messages == [
-        TurnMessage(role="assistant", blocks=[TurnTextBlock(text="hello")])
+        TurnMessage(
+            role="assistant",
+            blocks=[TurnTextBlock(text="hello")],
+            native={"type": "agentMessage", "text": "hello"},
+        )
     ]
     assert completed.usage == Usage(
         input_tokens=120, output_tokens=8, cache_read_input_tokens=90
@@ -1649,7 +1727,9 @@ def test_every_message_role_arm_is_named_by_a_case() -> None:
     above the first arm and every item becomes an assistant message.
     """
     assert arm_labels(message_role) == [
-        "(type=commandExecution) | (type=fileChange) | (type=mcpToolCall)",
+        "(type=commandExecution) | (type=fileChange) | (type=mcpToolCall) | (type=functionCallOutput) | (type=webSearch) | (type=imageView) | (type=imageGeneration) | (type=collabAgentToolCall) | (type=sleep)",
+        "(type=userMessage)",
+        "(type)",
         "_",
     ]
 
@@ -1687,50 +1767,6 @@ def test_the_usage_breakdown_maps_every_native_count() -> None:
 def test_a_usage_breakdown_missing_a_count_is_refused() -> None:
     with pytest.raises(ValidationError):
         decode_usage({"inputTokens": 120, "outputTokens": 8})
-
-
-def test_a_dynamic_tool_call_reads_the_native_call_identity() -> None:
-    call = DynamicToolCall.model_validate(
-        {
-            "threadId": "thread-1",
-            "turnId": "turn-1",
-            "callId": "call-1",
-            "tool": "submit_output",
-            "arguments": {"answer": "x"},
-        }
-    )
-
-    assert call.thread_id == "thread-1"
-    assert call.turn_id == "turn-1"
-    assert call.call_id == "call-1"
-    assert call.tool == "submit_output"
-    assert call.arguments == {"answer": "x"}
-
-
-def test_a_dynamic_tool_call_missing_the_call_it_answers_is_refused() -> None:
-    with pytest.raises(ValidationError):
-        DynamicToolCall.model_validate(
-            {
-                "threadId": "thread-1",
-                "turnId": "turn-1",
-                "tool": "submit_output",
-                "arguments": {"answer": "x"},
-            }
-        )
-
-
-def test_a_dynamic_tool_call_spelled_in_snake_case_is_refused() -> None:
-    """The wire spelling is the vendor's, so only the vendor's is accepted."""
-    with pytest.raises(ValidationError):
-        DynamicToolCall.model_validate(
-            {
-                "thread_id": "thread-1",
-                "turn_id": "turn-1",
-                "call_id": "call-1",
-                "tool": "submit_output",
-                "arguments": {"answer": "x"},
-            }
-        )
 
 
 def test_an_elicitation_reads_the_server_it_names() -> None:
