@@ -74,13 +74,23 @@ it here would refuse configurations that work.
 """
 
 
+CODEX_PROGRAM = Path("codex")
+"""The program a Codex session is started as when nothing names another.
+
+Named once because two places read it: the field default below, and the
+caller that falls back to it when a request asked for no container to enter.
+Spelled twice, the fallback would be a second opinion about what this
+runtime is called.
+"""
+
+
 class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Immutable Codex-only app-server configuration."""
 
     model: str | None = None
     developer_instructions: str = ""
     cwd: Path
-    executable: Path = Path("codex")
+    executable: Path = CODEX_PROGRAM
     named_profile: str | None = None
     model_provider: str | None = None
     provider_config: JsonObject | None = None

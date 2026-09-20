@@ -31,6 +31,7 @@ from typing import Literal
 from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.runtime import (
+    CODEX_PROGRAM,
     CodexEffort,
     CodexMcpServerConfig,
     CodexSessionConfig,
@@ -41,6 +42,7 @@ from lup.sessions.client import Client
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
+    SessionContainment,
     SessionEffort,
     SessionRequest,
 )
@@ -108,6 +110,65 @@ def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:
             )
 
 
+# lup: ignore[constant-declaration] — each value is Codex's own sandbox name for
+# the wall beside it, over a vocabulary this library closes
+CODEX_CONTAINMENT: dict[SessionContainment, CodexSandbox | None] = {
+    "outer": "danger-full-access",
+    "inner": "workspace-write",
+    "none": None,
+}
+"""What Codex's one sandbox field is asked for behind each wall.
+
+``outer`` is the word
+:data:`~lup.providers.codex.confinement.CODEX_CONFINEMENT` already sends a
+launched CLI, for the same reason: Codex confines with the kernel's own
+facilities, which an unprivileged container does not hand a nested caller,
+so inside one the honest posture is the container alone.
+
+``none`` names no mode at all. The wall was not asked for, so the field is
+left to whatever the autonomy implies — which is what every request meant
+before this axis existed.
+"""
+
+# lup: ignore[constant-declaration] — Codex's own sandbox names, narrowest first
+CODEX_SANDBOX_WIDTH: list[CodexSandbox] = [
+    "read-only",
+    "workspace-write",
+    "danger-full-access",
+]
+"""Codex's sandbox modes, ordered by how much they let a session reach."""
+
+
+def codex_sandbox(request: SessionRequest) -> CodexSandbox | None:
+    """The one field Codex says both how much and how far with.
+
+    Claude holds a permission mode and a sandbox and decides them apart.
+    Codex has neither word: it states what a session may do by stating what
+    it may reach, so a request naming an autonomy and a wall has named one
+    field twice.
+
+    The narrower of the two wins. That is not a precedence rule to remember
+    but the refusal of one: neither axis may widen what the other narrowed,
+    so an unattended session behind the inner wall reaches
+    ``workspace-write``, and a planning one stays ``read-only``.
+
+    ``outer`` takes the field outright instead. The container is the wall by
+    then, and narrowing this field would arm a second boundary inside it —
+    the one that cannot start there, which is what standing it down was for.
+    """
+    if request.containment == "outer":
+        return CODEX_CONTAINMENT["outer"]
+    asked: list[CodexSandbox] = [
+        mode
+        for mode in (
+            CODEX_CONTAINMENT[request.containment],
+            None if request.autonomy is None else CODEX_AUTONOMY[request.autonomy],
+        )
+        if mode is not None
+    ]
+    return min(asked, key=CODEX_SANDBOX_WIDTH.index, default=None)
+
+
 def codex_config(request: SessionRequest) -> CodexSessionConfig:
     """Render a portable request into Codex's own session configuration.
 
@@ -118,6 +179,11 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
     ``cwd`` is required rather than defaulted: Codex sandboxes a session
     against its working directory, so inferring one would decide what the
     session may write from wherever the process happened to start.
+
+    ``containment`` and ``autonomy`` both land on the sandbox, which is the
+    only field Codex has for either; :func:`codex_sandbox` states how the
+    two are reconciled. An ``outer`` request is also started as the program
+    that enters its container, the same seam Claude spells ``cli_path``.
     """
     refused = [
         name
@@ -140,9 +206,8 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         model=request.model,
         developer_instructions=request.instructions,
         cwd=request.cwd,
-        sandbox=(
-            None if request.autonomy is None else CODEX_AUTONOMY[request.autonomy]
-        ),
+        sandbox=codex_sandbox(request),
+        executable=request.contained_program or CODEX_PROGRAM,
         approval_policy="never",
         effort=(None if request.effort is None else CODEX_EFFORT[request.effort]),
         environment=request.environment,

@@ -20,9 +20,11 @@ from lup.providers.claude.selection import (
     CLAUDE_RUNTIME,
     claude_config,
 )
-from lup.providers.codex.runtime import CodexSessionConfig
+from lup.providers.codex.runtime import CODEX_PROGRAM, CodexSessionConfig
 from lup.providers.codex.selection import (
     CODEX_AUTONOMY,
+    CODEX_CONTAINMENT,
+    CODEX_SANDBOX_WIDTH,
     CODEX_RUNTIME,
     codex_config,
     codex_mcp_server,
@@ -40,6 +42,7 @@ from lup.sessions.composition import submission_gate_resolver
 from lup.sessions.events import SubmissionDecision
 
 AUTONOMY_DEGREES = get_args(SessionAutonomy.__value__)
+CONTAINMENT_WALLS = get_args(SessionContainment.__value__)
 
 
 @pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
@@ -324,3 +327,81 @@ def test_claude_decides_autonomy_and_containment_apart(degree: SessionAutonomy) 
 
     assert config.permission_mode == CLAUDE_AUTONOMY[degree]
     assert config.sandbox == CLAUDE_CONTAINMENT["inner"]
+
+
+@pytest.mark.parametrize("wall", CONTAINMENT_WALLS)
+def test_every_runtime_spells_every_wall(wall: SessionContainment) -> None:
+    """A wall added to the axis fails here until both runtimes answer it."""
+    assert wall in CLAUDE_CONTAINMENT
+    assert wall in CODEX_CONTAINMENT
+
+
+def test_codex_opens_an_inner_session_in_its_own_sandbox(tmp_path: Path) -> None:
+    config = codex_config(SessionRequest(cwd=tmp_path, containment="inner"))
+
+    assert config.sandbox == "workspace-write"
+    assert config.executable == CODEX_PROGRAM
+
+
+def test_codex_stands_its_sandbox_down_inside_the_container(tmp_path: Path) -> None:
+    """Codex confines with kernel facilities a container will not nest.
+
+    So the container takes the field outright rather than being narrowed
+    into a second boundary that cannot start where it was asked for.
+    """
+    program = tmp_path / "enter.sh"
+    config = codex_config(
+        SessionRequest(cwd=tmp_path, containment="outer", contained_program=program)
+    )
+
+    assert config.sandbox == "danger-full-access"
+    assert config.executable == program
+
+
+@pytest.mark.parametrize("degree", AUTONOMY_DEGREES)
+def test_codex_leaves_an_unwalled_session_to_its_autonomy(
+    degree: SessionAutonomy, tmp_path: Path
+) -> None:
+    """Asking for no wall renders what the request rendered before the axis."""
+    config = codex_config(SessionRequest(cwd=tmp_path, autonomy=degree))
+
+    assert config.sandbox == CODEX_AUTONOMY[degree]
+
+
+@pytest.mark.parametrize("degree", AUTONOMY_DEGREES)
+def test_neither_axis_widens_what_the_other_narrowed(
+    degree: SessionAutonomy, tmp_path: Path
+) -> None:
+    """The inner wall and every autonomy settle on the narrower of the two.
+
+    Stated over every degree rather than over the interesting one, because
+    the property is that no degree escapes the wall — an unattended session
+    reaches `workspace-write` and no further, and a planning one is not
+    widened to it.
+    """
+    config = codex_config(
+        SessionRequest(cwd=tmp_path, autonomy=degree, containment="inner")
+    )
+
+    assert config.sandbox is not None
+    ordering = CODEX_SANDBOX_WIDTH.index
+    assert ordering(config.sandbox) == min(
+        ordering("workspace-write"), ordering(CODEX_AUTONOMY[degree])
+    )
+
+
+def test_an_outer_codex_session_keeps_its_wall_whatever_it_may_do(
+    tmp_path: Path,
+) -> None:
+    """The one place the narrower reading is deliberately not taken."""
+    program = tmp_path / "enter.sh"
+    config = codex_config(
+        SessionRequest(
+            cwd=tmp_path,
+            autonomy="plan",
+            containment="outer",
+            contained_program=program,
+        )
+    )
+
+    assert config.sandbox == "danger-full-access"
