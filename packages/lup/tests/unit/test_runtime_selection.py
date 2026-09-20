@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import get_args
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from lup.providers.claude.runtime import ClaudeSessionConfig
 from lup.providers.claude.selection import (
@@ -29,7 +29,12 @@ from lup.providers.codex.selection import (
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import create_mcp_server
 from lup.sessions.client import Client
-from lup.providers.selection import Runtime, SessionAutonomy, SessionRequest
+from lup.providers.selection import (
+    Runtime,
+    SessionAutonomy,
+    SessionContainment,
+    SessionRequest,
+)
 from lup.sessions.composition import submission_gate_resolver
 from lup.sessions.events import SubmissionDecision
 
@@ -244,3 +249,29 @@ def test_an_ungated_request_renders_no_gate(
     config = render(SessionRequest(cwd=tmp_path))
 
     assert config.submission_gate_resolver is None
+
+
+def test_a_request_is_uncontained_until_it_says_otherwise() -> None:
+    """The default is what every request meant before the field existed."""
+    request = SessionRequest()
+
+    assert request.containment == "none"
+    assert request.contained_program is None
+
+
+def test_an_outer_request_names_the_program_that_enters_its_container() -> None:
+    """Asking for the container without one would open on the host."""
+    with pytest.raises(ValidationError, match="contained_program"):
+        SessionRequest(containment="outer")
+
+
+@pytest.mark.parametrize("wall", ["inner", "none"])
+def test_a_program_nothing_would_start_is_refused(wall: SessionContainment) -> None:
+    """A wrapper named by a request that opens no container never runs.
+
+    Refused rather than ignored: the request reads as contained, and the
+    session it opens is not, which is the one failure a boundary cannot
+    afford to state wrongly.
+    """
+    with pytest.raises(ValidationError, match="containment='outer'"):
+        SessionRequest(containment=wall, contained_program=Path("enter.sh"))

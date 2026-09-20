@@ -14,9 +14,9 @@ for. A field added here is a request every runtime then has to answer.
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import McpServerEntry
@@ -45,6 +45,30 @@ little" on one runtime without saying so.
 """
 
 
+type SessionContainment = Literal["outer", "inner", "none"]
+"""Which wall a session is opened behind.
+
+The launcher's three words, in the same order and with the same meanings
+:class:`~lup.devtools.harness.launch.LaunchSandbox` gives them, because the
+two are one question asked at two moments -- what a launched session opens
+under, and what a session an application opens through :class:`~lup.Client`
+opens under. A caller holding one vocabulary per entry point would be holding
+two names for one wall.
+
+``outer`` is the container: the runtime is started as the program
+``contained_program`` names, and that runtime's own sandbox stands down
+inside it, because a wall that has to be weakened to start nested is worth
+less than saying plainly which wall is load-bearing. ``inner`` is the
+runtime's own sandbox, established wherever the session runs. ``none`` is
+neither, and is what every request meant before this field existed.
+
+Independent of :data:`SessionAutonomy`, which says how much a session may do
+before it stops to ask. One runtime spells the two with two fields and the
+other with one, which is a rendering problem each adapter settles in its own
+words -- not a reason for a caller to state a boundary as an autonomy.
+"""
+
+
 class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """What an application asks of a session, before a runtime renders it."""
 
@@ -55,6 +79,22 @@ class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
     cwd: Path | None = None
     autonomy: SessionAutonomy | None = None
     effort: SessionEffort | None = None
+
+    containment: SessionContainment = "none"
+    """Which wall this session is opened behind, defaulting to the one it had."""
+
+    contained_program: Path | None = Field(
+        default=None,
+        description=(
+            "The program an outer session's runtime is started as: the "
+            "wrapper that execs the real CLI inside a container, which "
+            "`lup.devtools.harness.contained.contained_cli` writes. Named "
+            "here rather than derived, because the image, the mount table "
+            "and the login it is built from are the application's, and a "
+            "request is a declaration that builds nothing"
+        ),
+    )
+
     tools: list[str] | None = None
     allowed_tools: list[str] = []
     disallowed_tools: list[str] = []
@@ -84,6 +124,30 @@ class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
     session would name a provider to say something true of both, and would
     gate whichever provider it happened to name.
     """
+
+    @model_validator(mode="after")
+    def the_container_is_named_where_it_is_asked_for(self) -> Self:
+        """An outer request carries its program, and no other request does.
+
+        Both halves refuse rather than degrade, and they fail in opposite
+        directions. A request asking for the container without naming the
+        program that enters it would open on the host having asked for a
+        boundary. A request naming one without asking for the container
+        built a wrapper nothing starts, which reads as containment until
+        somebody checks what the session actually ran in.
+        """
+        match self.containment, self.contained_program:
+            case "outer", None:
+                raise ValueError(
+                    "an outer session is started as the program that enters "
+                    "its container; name it in contained_program"
+                )
+            case (("inner" | "none"), Path()):
+                raise ValueError(
+                    f"contained_program names a container no {self.containment} "
+                    "session opens; ask for containment='outer' or drop it"
+                )
+        return self
 
 
 type SessionOpener = Callable[[SessionRequest], Client]
