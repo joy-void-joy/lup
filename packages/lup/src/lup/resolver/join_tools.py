@@ -264,7 +264,7 @@ def create_join_tools(
     The lease is bound here rather than taken as an argument, so a merger
     structurally cannot land a parent into somebody else's tree.
     """
-    desk = JoinDesk(run_dir)
+    desk = JoinDesk(run_dir, concern_id)
     mailbox = QuestionMailbox(run_dir)
     process = launcher if launcher is not None else LocalProcessLauncher()
     worktrees = WorktreeOrchestrator(process, lease_root)

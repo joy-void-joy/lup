@@ -485,13 +485,25 @@ def join_bar(progress: JoinProgress | None, run_dir: Path) -> PhaseProgress | No
     rate, which is the same bargain :func:`recheck_bar` makes and the reason
     verification was the one phase estimating accurately.
     """
-    checkpoint = JoinDesk(run_dir).progress()
-    planned = {*(progress.planned if progress else []), *checkpoint.planned}
-    landed = {*(progress.joined if progress else []), *checkpoint.joined}
+    desks = JoinDesk.active(run_dir)
+    checkpoints = [(desk, desk.progress()) for desk in desks]
+    planned = {
+        ("integration", commit) for commit in (progress.planned if progress else [])
+    }
+    landed = {
+        ("integration", commit) for commit in (progress.joined if progress else [])
+    }
+    for desk, checkpoint in checkpoints:
+        plan = desk.plan()
+        planned.update((desk.concern_id, commit) for commit in checkpoint.planned)
+        if plan is not None:
+            planned.update((desk.concern_id, tip.commit) for tip in plan.tips)
+        landed.update((desk.concern_id, commit) for commit in checkpoint.joined)
     if not planned:
         return None
     completions = sorted(
         datetime.fromisoformat(landing.at)
+        for _desk, checkpoint in checkpoints
         for landing in checkpoint.landings
         if landing.merged and landing.at
     )

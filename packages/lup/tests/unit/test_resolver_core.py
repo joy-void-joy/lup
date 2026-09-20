@@ -6248,7 +6248,7 @@ async def test_a_parent_an_earlier_run_landed_is_recorded_without_a_second_accou
 
     run_dir = tmp_path / "state" / "resumed-join"
     run_dir.mkdir(parents=True)
-    desk = JoinDesk(run_dir)
+    desk = JoinDesk(run_dir, "integration")
     desk.write_plan(
         JoinPlan(
             concern_id="integration",

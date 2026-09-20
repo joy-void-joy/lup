@@ -137,6 +137,18 @@ class RenderedMigrations(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["JoinDesk", "JoinDesk.__init__"],
+        reason="Concurrent resolver joins require concern-owned checkpoint directories.",
+        steps=[
+            MigrationStep(
+                instruction="Construct JoinDesk(run_dir, concern_id). With the run stopped, "
+                "move any join/plan.json and join/progress.json into join/<concern_id>/, "
+                "using the identity recorded in the plan. Dependency checkpoints no longer "
+                "populate the integration-only ResolveState.join_progress field."
+            ),
+        ],
+    ),
+    Migration(
         subjects=["ProjectEntry.review_from", "ProjectEntry.last_synced_commit"],
         commit="1e185c85c94c04c2d5eb73c2e45e106294a2d0de",
         reason=(

@@ -159,7 +159,7 @@ class Joiner:
         riding = {item.commit: item.inside for item in carried}
         tips = [parent for parent in ordered if parent not in riding]
         self.journal.record(JoinPlannedEvent(tips=tips, carried=carried))
-        desk = JoinDesk(self.run.repository.root)
+        desk = JoinDesk(self.run.repository.root, lease.concern_id)
         desk.write_plan(
             JoinPlan(
                 concern_id=lease.concern_id,
@@ -176,7 +176,8 @@ class Joiner:
         blocked = await self.drive_join(lease, desk, purpose)
         progress = desk.progress()
         current = progress.commit or self.worktrees.head(lease)
-        self.record_join_progress(progress.joined, current, tips)
+        if lease.concern_id == "integration":
+            self.record_join_progress(progress.joined, current, tips)
         outstanding = [tip for tip in tips if tip not in progress.joined]
         if outstanding:
             # A drain is the one way to leave parents on the table, and it is

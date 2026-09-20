@@ -173,7 +173,7 @@ def test_the_bar_moves_while_the_join_turn_is_still_running(tmp_path: Path) -> N
     wedged run has — and the guidance sends a reader to this surface
     precisely so they do not have to judge by silence.
     """
-    desk = JoinDesk(tmp_path)
+    desk = JoinDesk(tmp_path, "integration")
     for index in range(10):
         desk.record(JoinLanding(commit=f"{index:040d}", head="c" * 40), planned=PLANNED)
 
@@ -207,7 +207,7 @@ def test_a_parent_recorded_without_a_merge_does_not_set_the_rate(
     was measured on — and a rate averaged over them promises an ETA the
     joins remaining will not come close to.
     """
-    desk = JoinDesk(tmp_path)
+    desk = JoinDesk(tmp_path, "integration")
     for index in range(4):
         desk.record(
             JoinLanding(commit=f"{index:040d}", head="c" * 40, merged=False),
@@ -233,7 +233,7 @@ def test_a_landing_outside_the_plan_cannot_take_the_bar_past_its_end(
     something having gone wrong in a run that is entirely healthy.
     """
     plan = PLANNED[:5]
-    desk = JoinDesk(tmp_path)
+    desk = JoinDesk(tmp_path, "integration")
     for commit in [*plan, "f" * 40]:
         desk.record(JoinLanding(commit=commit, head="c" * 40), planned=plan)
 
@@ -269,7 +269,7 @@ def test_the_join_rate_ignores_the_completions_carried_from_another_phase(
             stale + timedelta(minutes=48),
         ],
     )
-    desk = JoinDesk(tmp_path)
+    desk = JoinDesk(tmp_path, "integration")
     desk.record(JoinLanding(commit=PLANNED[0], head="c" * 40), planned=PLANNED)
 
     progress = join_bar(carried, tmp_path)
