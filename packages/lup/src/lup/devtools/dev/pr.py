@@ -166,12 +166,12 @@ class GhCheck(BaseModel):
     name: str = ""
     context: str = ""
     status: str = ""
-    conclusion: str = ""
+    conclusion: str | None = ""
     state: str = ""
 
     def as_check(self) -> CheckInfo:
         """Normalize GitHub's two check payloads before computing the rollup."""
-        status, conclusion = self.status, self.conclusion
+        status, conclusion = self.status, self.conclusion or ""
         if not status:
             match self.state.upper():
                 case "SUCCESS":

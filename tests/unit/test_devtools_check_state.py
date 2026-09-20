@@ -73,7 +73,7 @@ def test_each_state_prints_its_own_marker() -> None:
 
 
 def scripted_gh(
-    monkeypatch: pytest.MonkeyPatch, checks: list[dict[str, str]]
+    monkeypatch: pytest.MonkeyPatch, checks: list[dict[str, str | None]]
 ) -> Recorder:
     """Answer the two `gh` queries `pr.status` makes, in the order it makes them."""
     listing = json.dumps([{"number": 193, "title": "feat: thing", "url": "u"}])
@@ -141,3 +141,17 @@ def test_failed_legacy_status_settles_a_mixed_rollup(
     pr.status(branch="feature", as_json=True)
 
     assert json.loads(capsys.readouterr().out)["pr"]["checks_state"] == "failing"
+
+
+def test_a_null_native_conclusion_keeps_the_check_running(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    scripted_gh(
+        monkeypatch, [{"name": "tests", "status": "IN_PROGRESS", "conclusion": None}]
+    )
+
+    pr.status(branch="feature", as_json=True)
+
+    reported = json.loads(capsys.readouterr().out)
+    assert reported["pr"]["checks_state"] == "running"
+    assert reported["pr"]["checks"][0]["conclusion"] == ""
