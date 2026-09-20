@@ -711,7 +711,6 @@ class CodexConversationState:
                 output.decision in {"deny", "block", "ask"} for output in outputs
             )
             if channel.hook_error is None and not feedback and not refused:
-                self.stop_hook_active = False
                 return completed
             failure = TurnFailure(
                 message=str(channel.hook_error)

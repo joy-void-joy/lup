@@ -31,7 +31,6 @@ from typing import Literal
 
 from lup.policy.hooks import LupHooksConfig
 from lup.providers.codex.hooks import APPROVAL_METHODS
-from lup.sessions.errors import UnsupportedCapability
 from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.runtime import (

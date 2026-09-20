@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
+from lup.policy.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHooksConfig
+
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.providers.codex.output import CodexJsonEnvelope, codex_output_contract
 from lup.providers.codex.runtime import (
@@ -196,6 +198,143 @@ def scripted_codex(monkeypatch: pytest.MonkeyPatch) -> ScriptedCodex:
         "lup.providers.codex.runtime.CodexAppServer", lambda *args, **kwargs: server
     )
     return server
+
+
+async def test_envelope_stop_then_gate_correction_share_one_logical_continuation(
+    tmp_path: Path, scripted_codex: ScriptedCodex
+) -> None:
+    answers = [
+        CodexJsonEnvelope(
+            output_json=json.dumps({"scores": {"key": value}})
+        ).model_dump_json()
+        for value in (0, 1, 2)
+    ]
+    scripted_codex.answers.extend([*answers, "fresh turn"])
+    stop_active: list[bool] = []
+    receipts: list[int] = []
+    gated: list[int] = []
+
+    async def stop(event: LupHookInput) -> LupHookOutput:
+        stop_active.append(event.stop_hook_active)
+        if len(stop_active) == 1:
+            return LupHookOutput(
+                decision="block",
+                reason="Inspect the evidence before finishing",
+                delivery_receipt=lambda: receipts.append(scripted_codex.turn_count),
+            )
+        return LupHookOutput()
+
+    async def gate(value: BaseModel) -> SubmissionDecision:
+        assert isinstance(value, FlexibleAnswer)
+        gated.append(value.scores["key"])
+        return SubmissionDecision(
+            accepted=value.scores["key"] == 2, message="Use score two"
+        )
+
+    config = CodexSessionConfig(
+        cwd=tmp_path,
+        hooks=LupHooksConfig(stop=[LupHookMatcher(hook=stop)]),
+        submission_gate_resolver=lambda _output: gate,
+    )
+    async with create_codex(config).open() as handle:
+        accepted = await handle.session.start(turn_request("score", FlexibleAnswer))
+        assert accepted.events is not None
+        events = [event async for event in accepted.events.events()]
+        result = await accepted.turn.result()
+        assert result.output == FlexibleAnswer(scores={"key": 2})
+        assert result.usage.output_tokens == 6
+        assert result.duration.total_seconds() == 0.03
+        assert [
+            message.native["text"] for message in result.messages if message.native
+        ] == answers
+        assert {event.identifiers.turn.value for event in events} == {
+            "turn-1",
+            "turn-2",
+            "turn-3",
+        }
+        fresh = await handle.session.start(turn_request("another logical turn"))
+        await fresh.turn.result()
+    assert gated == [1, 2]
+    assert receipts == [2]
+    assert stop_active == [False, True, True, False]
+    turns = [
+        params for method, params in scripted_codex.requests if method == "turn/start"
+    ]
+    assert all(
+        turn["outputSchema"] == CodexJsonEnvelope.model_json_schema()
+        for turn in turns[:-1]
+    )
+    assert "Inspect the evidence" in str(turns[1]["input"])
+    assert "Use score two" in str(turns[2]["input"])
+
+
+async def test_late_tool_feedback_preserves_envelope_until_accepted_continuation(
+    tmp_path: Path, scripted_codex: ScriptedCodex, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scripted_codex.answers.extend(
+        [
+            CodexJsonEnvelope(output_json='{"scores":{"key":1}}').model_dump_json(),
+            CodexJsonEnvelope(output_json='{"scores":{"key":2}}').model_dump_json(),
+        ]
+    )
+    original_emit = scripted_codex.emit
+
+    def emit(method: str, params: JsonObject) -> None:
+        if method == "item/completed" and params["turnId"] == "turn-1":
+            original_emit(
+                method,
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "id": "command",
+                        "type": "commandExecution",
+                        "command": "git status",
+                        "aggregatedOutput": "complete evidence",
+                        "status": "completed",
+                        "exitCode": 0,
+                    },
+                },
+            )
+        original_emit(method, params)
+
+    monkeypatch.setattr(scripted_codex, "emit", emit)
+    receipts: list[int] = []
+    gated: list[int] = []
+
+    async def after(event: LupHookInput) -> LupHookOutput:
+        assert event.tool_result == "complete evidence"
+        return LupHookOutput(
+            system_message="Check this completed command before finishing",
+            delivery_receipt=lambda: receipts.append(scripted_codex.turn_count),
+        )
+
+    async def gate(value: BaseModel) -> SubmissionDecision:
+        assert isinstance(value, FlexibleAnswer)
+        gated.append(value.scores["key"])
+        return SubmissionDecision(accepted=True)
+
+    config = CodexSessionConfig(
+        cwd=tmp_path,
+        hooks=LupHooksConfig(
+            post_tool_use=[LupHookMatcher(matcher="^ShellCommand$", hook=after)]
+        ),
+        submission_gate_resolver=lambda _output: gate,
+    )
+    async with create_codex(config).open() as handle:
+        accepted = await handle.session.start(turn_request("score", FlexibleAnswer))
+        result = await accepted.turn.result()
+    assert result.output == FlexibleAnswer(scores={"key": 2})
+    assert result.usage.output_tokens == 4
+    assert len(result.messages) == 3
+    assert gated == [2]
+    assert receipts == [2]
+    turns = [
+        params for method, params in scripted_codex.requests if method == "turn/start"
+    ]
+    assert len(turns) == 2
+    assert turns[1]["outputSchema"] == CodexJsonEnvelope.model_json_schema()
+    assert "Check this completed command" in str(turns[1]["input"])
 
 
 @pytest.mark.parametrize("resume", [None, SessionId(value="thread-1")])
