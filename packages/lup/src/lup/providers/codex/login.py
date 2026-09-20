@@ -30,5 +30,6 @@ past the first would read a perfectly good login as dead and re-seed over it.
 Host-login fingerprints decide whether an explicit host change is applied;
 unchanged host credentials leave container renewals intact. The launcher asks
 Codex's account API to validate or renew the selected login inside the session
-boundary, and offers device authentication there when a fresh login is needed.
+boundary, choosing browser login when its callback can reach the session and
+device authentication when the container holds a separate loopback interface.
 """

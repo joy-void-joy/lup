@@ -1458,7 +1458,7 @@ def session_argv(
     cleared: LaunchOpening = LaunchOpening(),
     mounts: list[AccessibleRoot] = [],
     devices: list[Device] = [],
-    authenticate: Callable[[list[str], Path], None] | None = None,
+    authenticate: Callable[[list[str], Path, bool], None] | None = None,
     member: LaunchedMember | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
@@ -1535,7 +1535,7 @@ def session_argv(
                 ]
             )
         if authenticate is not None:
-            authenticate([cli], config_home)
+            authenticate([cli], config_home, False)
         settle_boundary(
             plugin,
             sandbox,
@@ -1603,9 +1603,13 @@ def session_argv(
         environment=environment,
         in_passing=True,
     )
+    # A contained session sharing host loopback can receive a browser callback.
+    # Device login is needed where that callback stays outside its namespace.
     if authenticate is not None:
         authenticate(
-            [*probing(opening, stdin=True), cli], Path(harness.image.config_home)
+            [*probing(opening, stdin=True), cli],
+            Path(harness.image.config_home),
+            not harness.image.egress.shares_host_loopback(),
         )
     # Both halves of one measurement, joined here because this is where the
     # second is taken. The host roster answered for the relay and the store
@@ -1938,12 +1942,12 @@ def launch_codex(
         else mode.opened("codex", transcript.journal, transcribing)
     )
 
-    def authenticate(command: list[str], native_home: Path) -> None:
+    def authenticate(command: list[str], native_home: Path, headless: bool) -> None:
         codex_login_preflight(
             native_home,
             environment,
             command,
-            headless=sandbox.contained(),
+            headless=headless,
             profile=profile,
         )
         if home.isolated and not sandbox.contained():
