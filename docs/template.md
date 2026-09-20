@@ -270,10 +270,22 @@ template supplies no account-specific URLs.
 It is scaffold, not personal state. **Agents must never modify the tracked
 `sync.json`**, and neither should routine project work; the edit policy
 enforces this by treating it as a protected path. Every personal registration
-belongs in the gitignored **`sync.json.local`**: local paths, per-project
-`last_synced_commit` state, branch overrides, `"ignore": true` opt-outs, and
+belongs in the gitignored **`sync.json.local`**: local paths,
+branch overrides, `"ignore": true` opt-outs, and
 additional projects. Entries there override tracked entries by name or add
-local-only ones, and `sync setup` and `mark-synced` write only there.
+local-only ones. `sync setup` writes that registration. `sync mark-synced`
+stores a checkpoint under the repository's common Git directory, so every
+sibling worktree reads the same review progress. Existing `last_synced_commit`
+values are used until a shared checkpoint is recorded; the shared record wins
+over stale local values and is bound to its upstream URL and reviewed ref.
+
+`sync fetch` refreshes remote-tracking refs without moving a local branch or
+touching work in an attached checkout. `sync status` names the exact ref it
+reads. Registrations with an origin review `refs/remotes/origin/<branch>`;
+use `sync setup <name> <path> --review-from local` to review unpublished local
+work. A repository without an origin is itself the upstream. An unbranched
+`lup` registration follows the Git dependency's branch when their URLs agree;
+an explicit branch mismatch is reported. A failed fetch exits nonzero.
 
 The registry has no direction in its name because direction depends on where
 you sit. A project built on the template configures the shipped `lup` entry and

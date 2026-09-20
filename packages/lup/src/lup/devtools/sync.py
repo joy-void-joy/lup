@@ -23,8 +23,8 @@ Two registry files declare what to track:
   It is template scaffold: agents must never modify it — every personal
   registration belongs in sync.json.local, and the edit policy asks before
   any change to the tracked file.
-- sync.json.local (gitignored): personal registrations — local paths, sync
-  state, overrides by project name, and local-only projects. Set
+- sync.json.local (gitignored): personal registrations — local paths,
+  overrides by project name, and local-only projects. Set
   "ignore": true to skip a project (useful when you ARE the upstream).
 
 The registry is direction-neutral: "sync" names the mechanism, not a
@@ -34,6 +34,9 @@ sync.json.local registers the downstream fleet whose commits /lup:update
 reviews. Same tooling, opposite seats.
 
 The script merges both: .local entries override sync.json entries by name.
+Review checkpoints live under the common Git directory and are shared by
+sibling worktrees. A legacy `last_synced_commit` remains a seed until a
+shared checkpoint is explicitly recorded with `mark-synced`.
 A project with a URL and no local path is materialized under
 ``~/.cache/lup/sync/`` in the layout a registration naming a local path
 already points at -- a bare repository with a worktree attached to it -- so a
@@ -81,6 +84,8 @@ from pydantic import (
 )
 
 from lup.workspace.paths import project_root
+from lup.devtools import sync_state
+from lup.harness.credential import remote_url
 import lup.harness.content.docs.upstream_reports as upstream_reports
 from lup.devtools.harness.preflight import reopened
 from lup.devtools.subapps import subapp
@@ -156,6 +161,7 @@ class ProjectEntry(TypedDict, total=False):
     path: str
     url: str
     branch: str
+    review_from: Literal["remote", "local"]
     last_synced_commit: str
     ignore: bool
     mount: Literal["rw", "ro"]
@@ -346,14 +352,9 @@ def find_project(name: str) -> ProjectEntry:
 class Upstream(BaseModel, frozen=True):
     """A registration located on disk, and the ref its commits are read from.
 
-    Two fields because the second is not ``HEAD`` for everything. A
-    registration naming a local path is somebody's own checkout and its HEAD
-    is what they have. A clone this module made is a checkout somebody may be
-    *working in*, whose HEAD is theirs rather than the upstream's -- so the
-    review reads the remote-tracking ref there, which a fetch moves and
-    nothing local does. That is what lets the refresh be a fetch and nothing
-    else: a hard reset that kept a review current would be the same reset
-    that takes a session's work with it.
+    The checkout locates Git objects and a place to browse files. Review
+    targets a fetched remote ref unless the registration explicitly asks for
+    local work or has no origin. Fetching never moves a worker's branch.
     """
 
     checkout: Path
@@ -401,15 +402,59 @@ def bare_repository(path: Path) -> bool:
 
 
 def clone_branch(proj: ProjectEntry, repository: Path) -> str:
-    """The branch a clone tracks: the registered one, or the clone's own HEAD.
+    """The declared/consumed branch, then remote HEAD, then the local branch.
 
     Empty where HEAD names no branch, which a detached checkout is and a
     review still has to answer for — the caller falls back to the remote's
     own default rather than failing over a state nobody asked about.
     """
-    return proj.get("branch", "") or git.out(
+    declared = review_branch(proj, repository)
+    if declared:
+        return declared
+    remote_head = git.out(
+        "-C",
+        str(repository),
+        "symbolic-ref",
+        "--short",
+        "refs/remotes/origin/HEAD",
+        _ok_code=[0, 1, 128],
+    )
+    if remote_head and proj.get("review_from", "remote") == "remote":
+        return remote_head.removeprefix("origin/")
+    return git.out(
         "-C", str(repository), "symbolic-ref", "--short", "HEAD", _ok_code=[0, 1]
     )
+
+
+def review_branch(proj: ProjectEntry, repository: Path) -> str:
+    """Honor an explicit branch and expose disagreements with the library pin."""
+    from lup.devtools.dev.library import read_git_source
+
+    declared = proj.get("branch", "")
+    manifest = project_root() / "pyproject.toml"
+    source = read_git_source(project_root()) if manifest.is_file() else None
+    if source is None or source.ref_kind != "branch":
+        return declared
+    registered_url = proj.get("url") or remote_url(repository, "origin")
+    if registered_url != source.url:
+        if proj["name"] == "lup":
+            logger.warning(
+                "Sync registration %s names %s while the library consumes %s",
+                proj["name"],
+                registered_url or repository,
+                source.url,
+            )
+        return declared
+    if declared and declared != source.ref:
+        logger.warning(
+            "Sync reviews branch %s while the library consumes %s; "
+            "set sync setup %s --branch %s to follow the consumed branch",
+            declared,
+            source.ref,
+            proj["name"],
+            source.ref,
+        )
+    return declared or source.ref
 
 
 def clone_upstream(proj: ProjectEntry, repository: Path) -> Upstream:
@@ -431,25 +476,67 @@ def clone_upstream(proj: ProjectEntry, repository: Path) -> Upstream:
 
 
 def registered_upstream(proj: ProjectEntry, path: Path) -> Upstream:
-    """A registration naming a path: somebody's own checkout, read where they work.
+    """Read fetched upstream refs without moving a registered working tree.
 
-    A plain checkout is read at its HEAD, which is what they have. A bare
-    repository has no HEAD worth reading — it names whatever branch the
-    clone was made on, which for a clone kept beside its worktrees is the
-    default branch and not the one anybody links against — so it is read at
-    the branch the registration names, as that clone's *own* ref rather
-    than a remote-tracking one: the user's clone is the upstream here, and
-    what they committed on that branch is what a linked project builds on.
-    The commits are read from the worktree attached for the branch where
-    one is, and from the bare half otherwise.
+    ``review_from: local`` explicitly reviews unpublished local commits.
+    A repository without an origin is itself the upstream and stays local.
     """
-    if not bare_repository(path):
+    if not (path / ".git").exists() and not bare_repository(path):
         return Upstream(checkout=path)
     branch = clone_branch(proj, path)
     attached = path / "tree" / branch
+    remote = proj.get("review_from", "remote") == "remote" and bool(
+        remote_url(path, "origin")
+    )
+    prefix = "refs/remotes/origin" if remote else "refs/heads"
     return Upstream(
-        checkout=attached if branch and attached.is_dir() else path,
-        tip=f"refs/heads/{branch}" if branch else "HEAD",
+        checkout=attached
+        if bare_repository(path) and branch and attached.is_dir()
+        else path,
+        tip=f"{prefix}/{branch}"
+        if branch
+        else ("refs/remotes/origin/HEAD" if remote else "HEAD"),
+    )
+
+
+def checkpoint_identity(found: Upstream) -> sync_state.ReviewSource:
+    """A remote URL or local repository identity, paired with the reviewed ref."""
+    repository = remote_url(found.checkout, "origin") or git_in(
+        str(found.checkout), "rev-parse", "--path-format=absolute", "--git-common-dir"
+    )
+    ref = found.tip
+    if ref == "HEAD":
+        ref = (
+            git.out("-C", str(found.checkout), "symbolic-ref", "HEAD", _ok_code=[0, 1])
+            or f"detached:{git_in(str(found.checkout), 'rev-parse', 'HEAD')}"
+        )
+    return sync_state.ReviewSource(repository=repository, ref=ref)
+
+
+def checkpoint(proj: ProjectEntry, found: Upstream) -> str:
+    """The shared checkpoint wins over stale worktree-local declarations."""
+    recorded = sync_state.read(project_root(), proj["name"])
+    if recorded is None:
+        return proj.get("last_synced_commit", "")
+    source = checkpoint_identity(found)
+    if recorded.source != source:
+        logger.warning(
+            "%s checkpoint belongs to %s at %s; %s at %s has not been reviewed",
+            proj["name"],
+            recorded.source.repository,
+            recorded.source.ref,
+            source.repository,
+            source.ref,
+        )
+        return ""
+    return recorded.commit
+
+
+def record_checkpoint(proj: ProjectEntry, found: Upstream, commit: str) -> None:
+    sync_state.write(
+        project_root(),
+        proj["name"],
+        sync_state.Checkpoint(source=checkpoint_identity(found), commit=commit),
     )
 
 
@@ -670,6 +757,7 @@ def refresh(name: str, repository: Path, report: Callable[[str], None]) -> None:
             )
     except sh.ErrorReturnCode as error:
         report(f"Warning: fetch failed: {decode_stderr(error)}")
+        raise typer.Exit(1) from error
 
 
 def attach_worktree(
@@ -726,9 +814,9 @@ def ensure_local(
     Reviewing upstream commits (``log``/``diff``) means reading the upstream's
     actual git history, which only exists locally — so before any such command
     can run, the project must be present and current on disk. This is that
-    guarantee: it clones a project that has only a URL, fetches one already
-    cached so the review sees the latest commits rather than a stale snapshot,
-    and leaves a user-provided local path as-is. In every case it (re)points
+    guarantee: it clones a project that has only a URL and fetches cached or
+    registered repositories while preserving their branches and working trees.
+    In every case it (re)points
     ``refs/<name>`` at the result and hands back where the caller runs git.
     ``status`` deliberately does *not* call this (it uses
     :func:`existing_upstream` instead) so a status check never clones,
@@ -746,6 +834,10 @@ def ensure_local(
     path = proj.get("path", "")
     name = proj["name"]
     if path and Path(path).exists():
+        if proj.get("review_from", "remote") == "remote" and remote_url(
+            Path(path), "origin"
+        ):
+            refresh(name, Path(path), report)
         ensure_ref_symlink(name, path)
         return registered_upstream(proj, Path(path))
 
@@ -879,14 +971,16 @@ def status_cmd() -> None:
             note = "not cloned (run: sync fetch)" if has_url else "no path/url"
             return [p["name"], "—", synced_short, reach(p), note]
 
+        synced = checkpoint(p, resolved)
+        synced_short = short_sha(synced) if synced else "never"
+
         try:
             behind: int | str = commit_count(
                 str(resolved.checkout), synced, resolved.tip
             )
         except (sh.ErrorReturnCode, ValueError):
             behind = "?"
-        branch = p.get("branch", "")
-        source = f"{resolved.checkout}" + (f" ({branch})" if branch else "")
+        source = f"{resolved.checkout} ({resolved.tip})"
         return [p["name"], str(behind), synced_short, reach(p), source]
 
     rows = [project_row(p) for p in projects]
@@ -917,12 +1011,16 @@ def fetch_cmd(
         if project
         else [p for p in projects if not p.get("ignore")]
     )
+    failed = False
     for p in targets:
         try:
             resolved = ensure_local(p)
             typer.echo(f"{p['name']}: ready at {resolved.checkout}")
         except (typer.Exit, sh.ErrorReturnCode):
+            failed = True
             typer.echo(f"{p['name']}: could not materialize", err=True)
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command("log")
@@ -941,7 +1039,7 @@ def show_log(
     proj = find_project(project)
     found = ensure_local(proj)
 
-    synced = proj.get("last_synced_commit", "")
+    synced = checkpoint(proj, found)
     range_spec = f"{synced}..{found.tip}" if synced else found.tip
 
     args = ["log", "--oneline"]
@@ -978,14 +1076,15 @@ def mark_synced(
         ),
     ] = "",
 ) -> None:
-    """Advance the sync checkpoint to where the upstream now stands.
+    """Share the reviewed checkpoint across this repository's worktrees.
 
     Run once a review is finished: it records that every commit up to the
-    upstream's tip has been considered, so the next ``sync log`` / ``status``
+    selected fetched tip has been considered, so the next ``sync log`` / ``status``
     only surfaces commits that land afterward. Marking synced even when nothing
     was ported is correct — it means "reviewed, decided to port none."
 
-    ``--at`` records a commit the project already consumed rather than the
+    This command does not fetch an already materialized upstream; ``--at``
+    names the immutable tip actually reviewed. It also records a commit the project already consumed rather than the
     one the upstream is on now. A project adopting a library mid-stream knows
     which commit it took and has, without this, no way to say so: marking
     synced would silently claim every commit that landed afterward as
@@ -994,28 +1093,11 @@ def mark_synced(
     commit that is not there is refused rather than written.
     """
     proj = find_project(project)
-    found = ensure_local(proj)
+    found = existing_upstream(proj) or ensure_local(proj)
 
     head = resolved_checkpoint(str(found.checkout), at, found.tip)
 
-    local_data = load_json(local_file())
-    local_projects = local_data.get("projects", [])
-
-    entry = next((p for p in local_projects if p["name"] == project), None)
-    if entry:
-        entry["last_synced_commit"] = head
-    else:
-        # The checkpoint alone, with no path recorded beside it.
-        # A registration that names only a URL is materialized in the cache,
-        # and writing that location back as its `path` turns it into a
-        # registration naming a local checkout -- one whose commits are then
-        # read from whatever branch a session left it on rather than from the
-        # upstream. Nothing needs the path recorded: it is derived from the
-        # name every time it is wanted.
-        local_projects.append({"name": project, "last_synced_commit": head})
-        local_data["projects"] = local_projects
-
-    save_local(local_data)
+    record_checkpoint(proj, found, head)
     typer.echo(f"Marked '{project}' as synced at {short_sha(head)}.")
 
 
@@ -1038,6 +1120,13 @@ def setup_project(
                 f"Open this project from a session: {' or '.join(MOUNT_MODES)}. "
                 "Omitted, it is tracked and not reachable"
             ),
+        ),
+    ] = "",
+    review_from: Annotated[
+        Literal["", "remote", "local"],
+        typer.Option(
+            "--review-from",
+            help="Review fetched remote commits or local unpublished work",
         ),
     ] = "",
 ) -> None:
@@ -1083,13 +1172,16 @@ def setup_project(
 
     if branch:
         entry["branch"] = branch
+    if review_from:
+        entry["review_from"] = review_from
 
     if mount:
         entry["mount"] = "rw" if mount == "rw" else "ro"
 
-    head = current_head(str(resolved)) if synced else ""
+    found = registered_upstream(entry, resolved)
+    head = resolved_checkpoint(str(found.checkout), "", found.tip) if synced else ""
     if synced:
-        entry["last_synced_commit"] = head
+        record_checkpoint(entry, found, head)
 
     save_local(local_data)
     ensure_ref_symlink(name, str(resolved))

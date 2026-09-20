@@ -40,10 +40,12 @@ def test_a_bare_clone_is_read_at_the_branch_the_registration_names(
     sh.git("-C", str(bare), "worktree", "add", "-q", str(bare / "tree" / "dev"), "dev")
 
     linked = registered_upstream(
-        {"name": "lib", "path": str(bare), "branch": "dev"}, bare
+        {"name": "lib", "path": str(bare), "branch": "dev", "review_from": "local"},
+        bare,
     )
     unattached = registered_upstream(
-        {"name": "lib", "path": str(bare), "branch": "main"}, bare
+        {"name": "lib", "path": str(bare), "branch": "main", "review_from": "local"},
+        bare,
     )
     plain = registered_upstream({"name": "lib", "path": str(source)}, source)
 
@@ -53,4 +55,4 @@ def test_a_bare_clone_is_read_at_the_branch_the_registration_names(
         sh.git("-C", str(linked.checkout), "rev-parse", linked.tip).strip() == dev_tip
     )
     assert unattached.checkout == bare and unattached.tip == "refs/heads/main"
-    assert plain.checkout == source and plain.tip == "HEAD"
+    assert plain.checkout == source and plain.tip == "refs/heads/dev"

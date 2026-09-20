@@ -48,7 +48,7 @@ commits, report that and stop. Where one or more do, read each project's
 commits with `sync log <project>` and `sync diff <project> <sha>` — the
 **complete** diff, never skimmed — build the inventory before classifying
 anything, then work through the steps below once per project with its range as
-the frozen one. Advance the checkpoint with `sync mark-synced <project>` after
+the frozen one. Advance the checkpoint with `sync mark-synced <project> --at <SOURCE>` after
 a full pass, whether or not anything was applied.
 
 Moving *this* project onto a newer version of what it was built from is the
@@ -84,8 +84,9 @@ uv run lup-devtools sync log <project>
 ```
 
 Resolve **both ends** to immutable commit ids before reading history. An
-explicit `BASE..SOURCE` wins. Otherwise SOURCE is the selected ref, or
-`HEAD` for a path/project. Derive BASE with `git merge-base` against this
+explicit `BASE..SOURCE` wins. Otherwise SOURCE is the selected ref, the review
+ref printed by `sync status` for a registered project, or `HEAD` for an
+unregistered path. Derive BASE with `git merge-base` against this
 checkout only when both repositories actually share that history; if they do
 not, ask the user to name BASE. Never silently substitute the root commit or
 an arbitrary branch.

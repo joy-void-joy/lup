@@ -269,7 +269,15 @@ def test_a_bare_path_registration_is_read_at_the_branch_it_registered(
         git_in(sidecar, tmp_path / "hooks"), sidecar, "side.txt", "on\n", "sidecar work"
     )
     main = sync.git_in(str(bare), "rev-parse", "main")
-    registered(registry_root, {"name": "own", "path": str(bare), "branch": "sidecar"})
+    registered(
+        registry_root,
+        {
+            "name": "own",
+            "path": str(bare),
+            "branch": "sidecar",
+            "review_from": "local",
+        },
+    )
 
     found = sync.existing_upstream(sync.find_project("own"))
 

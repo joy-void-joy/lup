@@ -205,21 +205,21 @@
     {
       "path": ".claude/plugins/lup/commands/import.md",
       "category": "generated",
-      "sha256": "92f6ace09746c1d3cfafa97da10c37aacee15839b7cad1a962742021eafe57cd",
+      "sha256": "37b9eea3a4d883974e48f0456a1ba570d8ae1a2252439f8cf46dab9903c86e7f",
       "semantic_id": "skill.import",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "301dd46366318d8bad916c25e2bc47dcde7520c3d65515a331230754abb5c332",
+      "sha256": "3b79dc7e9c7bc6474be840fc240d16abb2bc3a2633981e15ef6a869f9909fd17",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/install.md",
       "category": "generated",
-      "sha256": "47e775aa92cb26f8277511a2ea9787aac77726020037d6b70fe4954cdc6fe884",
+      "sha256": "021eca990e8d39c1b028dac9a9bf38cc81a16d73f9ffa8721ee32057ccfb669f",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -814,7 +814,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "b7cec6cccc7e4bd02c1d643b57e1cc94a049128db7b7ca35bcc1e43def22deb2",
+      "sha256": "11798051cec9651518791769df4bbee2750fbb1a7a7ba0d4f87b4967fee32890",
       "semantic_id": "docs.template",
       "executable": false
     },
