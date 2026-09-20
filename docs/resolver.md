@@ -276,6 +276,14 @@ index and staged-object pack, merge metadata, and state snapshot beneath
 path. Untracked files remain unless they obstruct the restored tracked tree;
 the archive includes them either way. Ordinary resume preserves a parked merge.
 
+Both recovery actions import questions and recorded answers held only in legacy
+state into the mailbox while holding the run and state locks. The archived state
+preserves original values; existing mailbox declarations and settled answers win
+conflicts, which `mailbox-import.json` records. Imported records identify recovery
+and its current timestamp, without claiming an unknown original author or time.
+An answer without its matching question or valid closed answer domain refuses
+recovery rather than gaining authority over another question.
+
 After committing a deliberate repair on top of a recorded integration result,
 `lup-devtools resolve recover-integration adopt-head --run-id <id>` adopts that
 clean descendant and marks verification unfinished. Resume reruns the configured
