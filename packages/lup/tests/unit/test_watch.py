@@ -141,7 +141,20 @@ def test_nudging_wakes_a_peer_through_its_inbox_and_says_so_for_one_without(
                 connection, _ = listener.accept()
             except TimeoutError:
                 continue
-            connection.close()
+            with connection:
+                # Read to EOF before closing. The sender writes its frame and
+                # closes, so a listener that closed first would reset the
+                # connection with the frame still unread -- reported as a
+                # broken pipe and a wake that did not land, which is this
+                # stand-in's doing and not the watcher's. Timed, because a
+                # sender that neither writes nor closes must cost this thread
+                # a second rather than the whole suite.
+                connection.settimeout(1.0)
+                try:
+                    while connection.recv(4096):
+                        pass
+                except TimeoutError:
+                    continue
 
     serving = Thread(target=serve_until_stopped)
     serving.start()
