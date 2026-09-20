@@ -130,6 +130,67 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=[
+            "ClaudeProfileStore",
+            "ClaudeProfileStore.homes_root",
+            "ClaudeProfileStore.load_registry",
+            "ClaudeProfileStore.save_registry",
+            "ClaudeProfileStore.resolver_registry",
+            "ClaudeProfileStore.resolve_config_dir",
+            "ClaudeProfileStore.names",
+            "ClaudeProfileStore.config_dir_for",
+            "ClaudeProfileStore.active_profile",
+            "ClaudeProfileStore.add_profile",
+            "ClaudeProfileStore.set_active",
+            "ClaudeProfileStore.remove_profile",
+        ],
+        commit="fcb61ade64fe36d224b0889eebb1e097ffa954cf",
+        reason=(
+            "personal Claude profile storage, reading names, and curating accounts "
+            "are separate collaborators; the registry file format is unchanged"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import AccountFile, ClaudeProfileNames, and "
+                    "ClaudeProfileRegistrar from lup.providers.claude.profile_store. "
+                    "Construct accounts = AccountFile(registry_path), then pass the "
+                    "same accounts to ClaudeProfileNames(accounts) and "
+                    "ClaudeProfileRegistrar(accounts). Keep homes_root, "
+                    "load_registry, save_registry, resolver_registry, and "
+                    "resolve_config_dir calls on accounts; call names, "
+                    "config_dir_for, and active_profile on the names reader; call "
+                    "add_profile, set_active, and remove_profile on the registrar."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "For CLI profile selection, compose ProfileDirectory(names, "
+                    "registrar, CLAUDE_LOGIN) from lup.providers.profiles and "
+                    "lup.providers.claude.login. Preserve the existing registry "
+                    "path and account homes; no credential or data migration is needed."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        # lup: ignore[native-spelling] — migration names the retired import
+        subjects=["CLAUDE_CONFIG_DIR"],
+        commit="da46c6bb283385f65ba2f30946d06647b758bc14",
+        reason="the Claude configuration-home declaration belongs to its login adapter",
+        steps=[
+            MigrationStep(
+                instruction=(
+                    # lup: ignore[native-spelling] — migration names its replacement import
+                    "Import CLAUDE_CONFIG_DIR from lup.providers.claude.login "
+                    "instead of the former lup.adapters.claude.config module. "
+                    "When building a launch environment, prefer "
+                    "CLAUDE_LOGIN.environment(config_home) from the same module."
+                )
+            )
+        ],
+    ),
+    Migration(
         subjects=["CODEX_COMMAND"],
         reason="Codex queue delivery must select the target's verified home and execution scope.",
         steps=[

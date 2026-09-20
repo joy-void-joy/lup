@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Migrating personal Claude profile callers
+
+Two earlier public API changes have explicit migration records for adopters
+updating from before those changes:
+
+- `ClaudeProfileStore` split at `fcb61ade6`. Import `AccountFile`,
+  `ClaudeProfileNames`, and `ClaudeProfileRegistrar` from
+  `lup.providers.claude.profile_store`. Construct one
+  `accounts = AccountFile(registry_path)` and share it between
+  `ClaudeProfileNames(accounts)` and `ClaudeProfileRegistrar(accounts)`.
+  Registry reads, writes, home resolution, and `resolver_registry()` belong to
+  `accounts`; `names()`, `config_dir_for()`, and `active_profile()` belong to
+  the names reader; `add_profile()`, `set_active()`, and `remove_profile()`
+  belong to the registrar. A CLI composes these with
+  `ProfileDirectory(names, registrar, CLAUDE_LOGIN)` from
+  `lup.providers.profiles`. The existing registry and account homes remain valid.
+- `CLAUDE_CONFIG_DIR` moved at `da46c6bb2`. Import it from
+  `lup.providers.claude.login`, which also declares `CLAUDE_LOGIN`; use
+  `CLAUDE_LOGIN.environment(config_home)` when constructing a launch environment.
+  The former `lup.adapters` namespace is `lup.providers` in the current API.
+
+`dev update` reports these migration steps when the previous pin predates the
+corresponding change. Run `uv run lup-devtools dev check` after adapting callers
+to catch remaining imports and capability mismatches.
+
 ### A session an application opens can be walled
 
 `SessionRequest` could say how much a session may do and nothing about what
