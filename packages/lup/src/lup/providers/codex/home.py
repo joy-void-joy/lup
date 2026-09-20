@@ -390,6 +390,9 @@ def install_declared_policy(
     root: Path | None = None,
     seed: bool = False,
     workspace: Path | None = None,
+    *,
+    executable: Path = Path("codex"),
+    environment: EnvVars | None = None,
 ) -> CodexMarketplace | None:
     """Install the project's own plugin into one home, and say which it was.
 
@@ -413,6 +416,8 @@ def install_declared_policy(
     ``root`` selects the application's policy declaration. ``workspace`` is
     the native session directory whose effective hook configuration is checked;
     a temporary working directory need not contain another marketplace.
+    ``executable`` and ``environment`` select the same native process boundary
+    as the session, including plugin discovery and hook trust queries.
 
     Failure is raised rather than warned past, either way. A session that
     opened without the policy it was meant to run under is
@@ -427,11 +432,20 @@ def install_declared_policy(
     installer = CodexPluginInstaller(
         PluginCacheConfig(
             codex_home=home, marketplace=declared.name, plugin=declared.plugin
-        )
+        ),
+        executable=executable,
+        environment=environment,
     )
     evidence = installer.ensure(declared.source, project)
     installer.verify(evidence, native_cwd)
-    unanswered = policy_hooks_skipped(home, native_cwd, declared, policy_root=project)
+    unanswered = policy_hooks_skipped(
+        home,
+        native_cwd,
+        declared,
+        policy_root=project,
+        executable=executable,
+        environment=environment,
+    )
     if unanswered and seed:
         # Verified rather than asserted: the records were written from the
         # hashes this read reported, and whether Codex then honours them is
@@ -439,7 +453,12 @@ def install_declared_policy(
         # file. A record it rejects reads exactly like one never written.
         seed_hook_trust(home, unanswered)
         unanswered = policy_hooks_skipped(
-            home, native_cwd, declared, policy_root=project
+            home,
+            native_cwd,
+            declared,
+            policy_root=project,
+            executable=executable,
+            environment=environment,
         )
     if unanswered:
         raise CodexPolicyUntrusted(
@@ -461,9 +480,13 @@ def policy_hooks_skipped(
     marketplace: CodexMarketplace,
     *,
     policy_root: Path | None = None,
+    executable: Path = Path("codex"),
+    environment: EnvVars | None = None,
 ) -> list[CodexHook]:
     """Which of this plugin's hooks the home resolves but would not run."""
-    report = asyncio.run(read_hooks(home, project))
+    report = asyncio.run(
+        read_hooks(home, project, executable=executable, environment=environment)
+    )
     if report.warnings():
         logger.warning(
             "Native hook discovery reported %s warning(s) for %s in %s; "

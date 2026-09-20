@@ -1009,10 +1009,12 @@ class CodexSessionOpener:
                     config.policy_root or config.cwd,
                     seed=CodexWorktreeHomeStore().derived(home),
                     workspace=config.cwd,
+                    executable=config.executable,
+                    environment=effective,
                 )
             )
             config = config.model_copy(
-                update={"environment": {**config.environment, CODEX_HOME: str(home)}}
+                update={"environment": {**effective, CODEX_HOME: str(home)}}
             )
         server = CodexAppServer(
             config.executable,

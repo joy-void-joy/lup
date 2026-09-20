@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 import sh
@@ -228,6 +228,11 @@ async def test_custom_host_executables_still_need_host_policy_checks(
     assert policy.call_count == (0 if containment == "outer" else 1)
     if containment != "outer":
         assert policy.call_args.args == (tmp_path / "host-home", tmp_path)
+        assert policy.call_args.kwargs["executable"] == config.executable
+        assert (
+            policy.call_args.kwargs["environment"][CODEX_HOME]
+            == config.environment[CODEX_HOME]
+        )
 
 
 def test_outer_boundary_requires_a_container_executable(tmp_path: Path) -> None:
@@ -276,7 +281,14 @@ async def test_host_policy_and_process_use_the_same_resolved_native_home(
         server.start.assert_awaited_once()
 
     home = tmp_path / expected
-    calls.policy.assert_called_once_with(home, tmp_path, seed=False, workspace=tmp_path)
+    calls.policy.assert_called_once_with(
+        home,
+        tmp_path,
+        seed=False,
+        workspace=tmp_path,
+        executable=config.executable,
+        environment=ANY,
+    )
     assert calls.server.call_args.kwargs["environment"][CODEX_HOME] == str(home)
     assert calls.mock_calls[0][0] == "policy"
     assert calls.mock_calls[1][0] == "server"
@@ -300,7 +312,12 @@ async def test_host_policy_failure_stops_before_constructing_the_native_process(
             pytest.fail("a policy failure must prevent native startup")
 
     policy.assert_called_once_with(
-        tmp_path / "codex-home", tmp_path, seed=False, workspace=tmp_path
+        tmp_path / "codex-home",
+        tmp_path,
+        seed=False,
+        workspace=tmp_path,
+        executable=runtime.CODEX_PROGRAM,
+        environment=ANY,
     )
     native.assert_not_called()
 
@@ -428,4 +445,6 @@ async def test_application_policy_is_verified_in_an_external_native_workspace(
 
     installer.ensure.assert_called_once_with(project / ".codex/plugins/lup", project)
     installer.verify.assert_called_once_with(installer.ensure.return_value, workspace)
-    discovery.assert_awaited_once_with(home, workspace)
+    discovery.assert_awaited_once_with(
+        home, workspace, executable=config.executable, environment=ANY
+    )

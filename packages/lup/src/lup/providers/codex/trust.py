@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field
 
 from lup.providers.codex.app_server import CodexAppServer
 from lup.providers.codex.login import CODEX_HOME
-from lup.types import JsonObject
+from lup.types import EnvVars, JsonObject
 
 # lup: ignore[constant-declaration] — the app-server method Codex answers to
 HOOKS_LIST = "hooks/list"
@@ -120,6 +120,7 @@ async def read_hooks(
     executable: Path = Path("codex"),
     arguments: list[str] | None = None,
     timeout_seconds: float = 120.0,
+    environment: EnvVars | None = None,
 ) -> CodexHookReport:
     """Ask one home which hooks it would run for one working directory.
 
@@ -129,7 +130,9 @@ async def read_hooks(
     could have read.
     """
     server = CodexAppServer(
-        executable, arguments=arguments, environment={CODEX_HOME: str(home)}
+        executable,
+        arguments=arguments,
+        environment={**(environment or {}), CODEX_HOME: str(home)},
     )
     try:
         async with asyncio.timeout(timeout_seconds):

@@ -3,7 +3,6 @@
 import fcntl
 import hashlib
 import json
-import os
 import shutil
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -16,6 +15,7 @@ from semver import Version
 from pydantic import BaseModel, Field
 
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.app_server import native_command, native_environment
 from lup.harness.contracts import CapabilityProbe
 from lup.harness.models import CapabilityEvidence
 from lup.types import EnvVars
@@ -337,15 +337,17 @@ class CodexPluginInstaller:
         self,
         config: PluginCacheConfig,
         executable: Path = Path("codex"),
+        environment: EnvVars | None = None,
     ) -> None:
         self.config = config
         self.executable = executable
+        self.environment = dict(environment or {})
 
     def plugin_environment(self) -> EnvVars:
         """Environment shared by every Codex plugin lifecycle command."""
         self.config.codex_home.mkdir(parents=True, exist_ok=True)
         return {
-            **os.environ,  # lup: ignore[os-environ] — exact child-process inheritance
+            **native_environment(self.environment),
             **CODEX_LOGIN.environment(self.config.codex_home),
         }
 
@@ -378,7 +380,7 @@ class CodexPluginInstaller:
                     **self.plugin_environment(),
                     **CODEX_LOGIN.environment(staged.codex_home),
                 }
-                command = sh.Command(str(self.executable))
+                command = native_command(self.executable, environment)
                 command(
                     "plugin",
                     "marketplace",
@@ -428,14 +430,15 @@ class CodexPluginInstaller:
 
     def verify(self, evidence: PluginCacheEvidence, cwd: Path) -> None:
         """Refuse a cache the native runtime does not discover as enabled."""
-        reported = sh.Command(str(self.executable))(
+        environment = self.plugin_environment()
+        reported = native_command(self.executable, environment)(
             "plugin",
             "list",
             "--json",
             "--marketplace",
             self.config.marketplace,
             _cwd=str(cwd),
-            _env=self.plugin_environment(),
+            _env=environment,
         )
         listing = CodexPluginListing.model_validate_json(str(reported))
         selector = f"{self.config.plugin}@{self.config.marketplace}"
@@ -483,7 +486,7 @@ class CodexPluginInstaller:
         """Explicitly remove this plugin and its configured marketplace."""
         environment = self.plugin_environment()
         selector = f"{self.config.plugin}@{self.config.marketplace}"
-        sh.Command(str(self.executable))(
+        native_command(self.executable, environment)(
             "plugin",
             "remove",
             selector,
@@ -491,7 +494,7 @@ class CodexPluginInstaller:
             _env=environment,
             _ok_code=[0, 1],
         )
-        sh.Command(str(self.executable))(
+        native_command(self.executable, environment)(
             "plugin",
             "marketplace",
             "remove",

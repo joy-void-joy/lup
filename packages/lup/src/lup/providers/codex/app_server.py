@@ -73,6 +73,11 @@ def native_environment(overrides: EnvVars) -> EnvVars:
     return environment
 
 
+def native_command(executable: Path, environment: EnvVars) -> sh.Command:
+    """Resolve the executable in the same PATH its native process receives."""
+    return sh.Command(str(executable), search_paths=os.get_exec_path(environment))
+
+
 class CodexAppServer:
     """One initialized app-server process and routed JSON-RPC connection."""
 
@@ -113,7 +118,7 @@ class CodexAppServer:
             self.stderr.append(line)
 
         environment = native_environment(self.environment)
-        command = sh.Command(str(self.executable))
+        command = native_command(self.executable, environment)
         running = command(
             *self.arguments,
             "app-server",
