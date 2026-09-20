@@ -8,6 +8,10 @@ from lup.sessions.events import AnyTurnBlock, TurnIdentifiers
 from lup.types import Usage
 
 
+class UnsupportedCapability(ValueError):
+    """A provider cannot enforce a requested capability or constraint."""
+
+
 class ValidationAttempt(BaseModel, frozen=True):
     """One rejected structured-output submission."""
 
