@@ -17,6 +17,24 @@ uses the current source commit. The generated Claude and Codex entries only
 launch these composition roots; they contain no resolver phases, and both
 render the same direct CLI instruction.
 
+## Where a run's time went
+
+`uv run lup-devtools resolve cost --run-id <id>` reads only the existing
+`journal.jsonl`. It reports observed wall time, active and idle time, completed
+turn counts and mean/max/total duration per actor kind, peak concurrency,
+failure counts by exact recorded reason, and every idle gap longer than ten
+minutes with its preceding event. `--gap-seconds` selects that reporting
+threshold; `--json` returns the complete typed report.
+
+The observation window runs from the first journal timestamp to the last.
+Active time is the union of accepted-turn intervals, so overlapping actors
+count once and a silent model turn remains active. Actor totals sum each
+completed turn independently and can exceed wall time. A run failure ends
+open turns as interrupted; turns still open at the end of the record are
+unfinished. Neither contributes a fabricated completed duration. Missing or
+duplicate boundaries are reported as evidence anomalies. Reading cost takes
+no run lock, changes no state, and opens no model session.
+
 ## Questions are files, and every door writes to them
 
 A run holds `flock(LOCK_EX | LOCK_NB)` on `.run.lock` for its entire life, so

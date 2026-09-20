@@ -211,6 +211,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | Command | What it does |
 | --- | --- |
 | `resolve status` | Say whether a run is alive, where it stands, and what it last did. |
+| `resolve cost` | Report observed wall time, activity, actor turns, failures, and idle gaps. |
 | `resolve supervise` | Answer any run under ``.lup/resolve``, live or parked. |
 | `resolve questions` | List a run&#x27;s questions and what each one has been answered. |
 | `resolve answer` | Offer an answer to one or more of a run&#x27;s questions. |
