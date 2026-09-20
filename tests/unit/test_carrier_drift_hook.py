@@ -155,11 +155,12 @@ def test_the_rendered_guard_names_both_commits_when_they_have_parted(
     tmp_path: Path,
 ) -> None:
     """The line a session is handed, over a branch built the way an update builds it."""
+    source = scaffold.ScaffoldSource(project="upstream")
     upstream = repository(tmp_path / "upstream")
-    (upstream / "src" / "lup_template").mkdir(parents=True)
-    (upstream / "src" / "lup_template" / "serve.py").write_text("x = 1\n")
-    (upstream / "tests").mkdir()
-    (upstream / "tests" / "test_serve.py").write_text("assert True\n")
+    for root in source.roots:
+        directory = upstream / root.upstream
+        directory.mkdir(parents=True)
+        (directory / "fixture.py").write_text("x = 1\n", encoding="utf-8")
     base = committed(upstream, "the scaffold")
 
     project = repository(tmp_path / "project")
@@ -170,7 +171,6 @@ def test_the_rendered_guard_names_both_commits_when_they_have_parted(
         encoding="utf-8",
     )
     committed(project, "the project")
-    source = scaffold.ScaffoldSource(project="upstream")
     scaffold.adopt(project, upstream, source, "demo", base)
 
     spoken = str(
