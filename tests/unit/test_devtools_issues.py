@@ -4,9 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import sh
 from typer.testing import CliRunner
 
 from lup.devtools.dev import issues
+from lup.devtools.dev import library
 from lup_template.devtools.main import app
 
 
@@ -21,8 +23,8 @@ def friction_report() -> issues.FrictionReport:
     )
 
 
-def friction_arguments() -> list[str]:
-    report = friction_report()
+def friction_arguments(report: issues.FrictionReport | None = None) -> list[str]:
+    report = report or friction_report()
     return [
         "dev",
         "report-friction",
@@ -146,3 +148,72 @@ def test_cli_forwards_correction_number(monkeypatch: pytest.MonkeyPatch) -> None
     result = CliRunner().invoke(app, [*friction_arguments(), "--issue", "179"])
     assert result.exit_code == 0
     assert calls == [(friction_report(), "acme/widget", 179)]
+
+
+@pytest.mark.parametrize(
+    ("component", "expected"),
+    [
+        ("lup/sandbox, lup/devtools", "forge.example/upstream/framework"),
+        ("lup.resolver.state", "forge.example/upstream/framework"),
+        ("lup/policy/resolver", "forge.example/upstream/framework"),
+        ("aib.devtools.trace", "acme/widget"),
+    ],
+)
+def test_cli_routes_to_the_configured_dependency_owner(
+    monkeypatch: pytest.MonkeyPatch, component: str, expected: str
+) -> None:
+    """The copied catalog and wired command preserve component ownership."""
+    monkeypatch.setattr(
+        library,
+        "configured_repository",
+        lambda *_args: "https://forge.example/upstream/framework.git",
+    )
+    monkeypatch.setattr("lup.devtools.dev.app.repository_slug", lambda: "acme/widget")
+    report = friction_report().model_copy(update={"component": component})
+    filed = Mock(return_value="https://forge.example/upstream/framework/issues/1")
+    monkeypatch.setattr(issues.FrictionReport, "file", filed)
+
+    result = CliRunner().invoke(app, friction_arguments(report))
+
+    assert result.exit_code == 0, result.output
+    filed.assert_called_once_with(repository=expected, issue=None)
+
+
+def test_disabled_issues_offer_an_explicit_declared_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed report is not silently filed in another project's intake."""
+    monkeypatch.setattr(
+        library,
+        "configured_repository",
+        lambda *_args: "https://forge.example/upstream/framework.git",
+    )
+    monkeypatch.setattr("lup.devtools.dev.app.repository_slug", lambda: "acme/widget")
+    filed = Mock(
+        side_effect=[
+            sh.ErrorReturnCode_1(
+                "gh issue create",
+                b"",
+                b"the 'acme/widget' repository has disabled issues",
+            ),
+            "https://forge.example/upstream/framework/issues/1",
+        ]
+    )
+    monkeypatch.setattr(issues.FrictionReport, "file", filed)
+
+    refused = CliRunner().invoke(app, friction_arguments())
+
+    assert refused.exit_code == 1
+    assert "has disabled issues" in refused.output
+    assert "forge.example/upstream/framework" in refused.output
+    assert "--repo" in refused.output
+    filed.assert_called_once_with(repository="acme/widget", issue=None)
+
+    recovered = CliRunner().invoke(
+        app,
+        [*friction_arguments(), "--repo", "forge.example/upstream/framework"],
+    )
+
+    assert recovered.exit_code == 0, recovered.output
+    assert filed.call_count == 2
+    filed.assert_called_with(repository="forge.example/upstream/framework", issue=None)
