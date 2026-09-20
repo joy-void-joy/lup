@@ -438,8 +438,16 @@ def review_hook_call(
     purpose: str,
     reviewer: str,
     execution_id: str = "",
+    stage: str = "",
+    predecessor: str = "",
 ) -> dict[Literal["state", "id", "reason"], str]:
-    """Park a native call or spend its explicit, single-use reviewer answer."""
+    """Park a call or spend its explicit, single-use reviewer answer.
+
+    A declared successor stage may spend one further claim for that same
+    identified invocation. The immutable primary claim proves which stage
+    consumed the answer; neither a dispatched log row nor observed execution
+    alone establishes that authority.
+    """
     if not session:
         return {
             "state": "unavailable",
@@ -459,6 +467,42 @@ def review_hook_call(
     matches = [
         entry for entry in entries.values() if entry["fingerprint"] == fingerprint
     ]
+    continuations = [
+        entry
+        for entry in matches
+        if stage
+        and predecessor
+        and isinstance(execution_id, str)
+        and execution_id
+        and entry["state"] == "dispatched"
+        and "execution_id" in entry
+        and entry["execution_id"] == execution_id
+    ]
+    if continuations:
+        entry = continuations[-1]
+        claim = root / ".lup/review-claims" / entry["id"]
+        with claim.open(encoding="utf-8") as handle:
+            consumed = json.load(handle)
+        expected = {
+            "fingerprint": fingerprint,
+            "execution_id": execution_id,
+            "stage": predecessor,
+        }
+        if consumed == expected:
+            successor = (
+                root
+                / ".lup/review-stage-claims"
+                / entry["id"]
+                / sha256(stage.encode()).hexdigest()
+            )
+            successor.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with successor.open("x", encoding="utf-8") as handle:
+                    handle.write(json.dumps(expected, sort_keys=True))
+            except FileExistsError:
+                pass
+            else:
+                return {"state": "approved", "id": entry["id"], "reason": ""}
     entry = matches[-1] if matches else None
     if entry is not None and entry["state"] == "approved":
         match entry:
@@ -481,7 +525,15 @@ def review_hook_call(
         claim.parent.mkdir(parents=True, exist_ok=True)
         try:
             with claim.open("x", encoding="utf-8") as handle:
-                handle.write(fingerprint)
+                json.dump(
+                    {
+                        "fingerprint": fingerprint,
+                        "execution_id": execution_id,
+                        "stage": stage,
+                    },
+                    handle,
+                    sort_keys=True,
+                )
         except FileExistsError:
             entry = None
         else:
@@ -2426,6 +2478,8 @@ def reviewed_decision(
     arguments: dict,
     preconditions: dict[Path, str | None],
     execution_id: str = "",
+    stage: str = "",
+    predecessor: str = "",
 ) -> KernelDecision:
     """Only an explicit, single-use recorded answer can settle a native ask."""
     result = review_hook_call(
@@ -2442,6 +2496,8 @@ def reviewed_decision(
         decision.purpose or "",
         decision.reviewer,
         execution_id,
+        stage,
+        predecessor,
     )
     if result["state"] == "approved":
         return decision.revised(effect="allow")
@@ -3178,7 +3234,7 @@ def dispatch(payload, permission_request=False):
 
 
 def queued_review(payload, decision):
-    """An explicit reviewer answer is the fallback for a hook that cannot prompt."""
+    """Both judging events require the same explicit review authority."""
     cwd = Path(payload["cwd"]) if "cwd" in payload else Path.cwd()
     tool_input = payload["tool_input"]
     name = payload["tool_name"]
@@ -3206,6 +3262,11 @@ def queued_review(payload, decision):
         tool_input,
         before,
         payload["tool_use_id"] if "tool_use_id" in payload else "",
+        payload["hook_event_name"] if "hook_event_name" in payload else "",
+        "PreToolUse"
+        if "hook_event_name" in payload
+        and payload["hook_event_name"] == "PermissionRequest"
+        else "",
     )
 
 
@@ -3315,8 +3376,13 @@ def observe(payload):
 
 def main():
     payload = {}
+    permission_request = False
     try:
         payload = json.load(sys.stdin)
+        permission_request = (
+            "hook_event_name" in payload
+            and payload["hook_event_name"] == "PermissionRequest"
+        )
         record_hook_evidence(plugin_data_root(), payload, "started")
         # Watching and deciding are separate events, and this one returns
         # before a verdict exists: the patch has already applied, so there is
@@ -3343,11 +3409,10 @@ def main():
                 raise SystemExit(2)
             record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
-        permission_request = event == "PermissionRequest"
         decision = dispatch(payload, permission_request)
-        # PreToolUse runs before native approval and cannot request a prompt.
-        # Only a recorded reviewer answer may release its exact pending call.
-        if not permission_request and decision.effect == "ask":
+        # Native approval mode does not prove who answers. Both judging events
+        # require a recorded reviewer answer for this exact pending call.
+        if decision.effect == "ask":
             decision = queued_review(payload, decision)
         # A verdict from here places nothing: this hook answers, and the call
         # runs with the arguments the model wrote, so a placement is degraded
@@ -3377,22 +3442,29 @@ def main():
             "error",
             f"{type(error).__name__}: {error}",
         )
-        sys.stderr.write(f"Malformed hook input requires approval: {error}")
-        raise SystemExit(2) from error
-    if permission_request and decision.effect == "allow":
+        decision = KernelDecision(
+            "deny", f"Malformed hook input requires approval: {error}"
+        )
+        if not permission_request:
+            sys.stderr.write(decision.addressed())
+            raise SystemExit(2) from error
+    if permission_request and decision.effect != "defer":
+        allowed = decision.effect == "allow"
         json.dump(
             {
                 "hookSpecificOutput": {
                     "hookEventName": "PermissionRequest",
-                    "decision": {"behavior": "allow"},
+                    "decision": {
+                        "behavior": "allow" if allowed else "deny",
+                        **({} if allowed else {"message": decision.addressed()}),
+                    },
                 }
             },
             sys.stdout,
         )
-        record_hook_evidence(plugin_data_root(), payload, "completed", "allow")
-        return
-    if permission_request and decision.effect == "ask":
-        record_hook_evidence(plugin_data_root(), payload, "completed", "ask")
+        record_hook_evidence(
+            plugin_data_root(), payload, "completed", "allow" if allowed else "deny"
+        )
         return
     if decision.effect in ("allow", "defer"):
         record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)

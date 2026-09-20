@@ -363,6 +363,8 @@ def reviewed_decision(
     arguments: dict,
     preconditions: dict[Path, str | None],
     execution_id: str = "",
+    stage: str = "",
+    predecessor: str = "",
 ) -> KernelDecision:
     """Only an explicit, single-use recorded answer can settle a native ask."""
     result = review_hook_call(
@@ -379,6 +381,8 @@ def reviewed_decision(
         decision.purpose or "",
         decision.reviewer,
         execution_id,
+        stage,
+        predecessor,
     )
     if result["state"] == "approved":
         return decision.revised(effect="allow")

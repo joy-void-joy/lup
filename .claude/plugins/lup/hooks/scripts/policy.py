@@ -437,8 +437,16 @@ def review_hook_call(
     purpose: str,
     reviewer: str,
     execution_id: str = "",
+    stage: str = "",
+    predecessor: str = "",
 ) -> dict[Literal["state", "id", "reason"], str]:
-    """Park a native call or spend its explicit, single-use reviewer answer."""
+    """Park a call or spend its explicit, single-use reviewer answer.
+
+    A declared successor stage may spend one further claim for that same
+    identified invocation. The immutable primary claim proves which stage
+    consumed the answer; neither a dispatched log row nor observed execution
+    alone establishes that authority.
+    """
     if not session:
         return {
             "state": "unavailable",
@@ -458,6 +466,42 @@ def review_hook_call(
     matches = [
         entry for entry in entries.values() if entry["fingerprint"] == fingerprint
     ]
+    continuations = [
+        entry
+        for entry in matches
+        if stage
+        and predecessor
+        and isinstance(execution_id, str)
+        and execution_id
+        and entry["state"] == "dispatched"
+        and "execution_id" in entry
+        and entry["execution_id"] == execution_id
+    ]
+    if continuations:
+        entry = continuations[-1]
+        claim = root / ".lup/review-claims" / entry["id"]
+        with claim.open(encoding="utf-8") as handle:
+            consumed = json.load(handle)
+        expected = {
+            "fingerprint": fingerprint,
+            "execution_id": execution_id,
+            "stage": predecessor,
+        }
+        if consumed == expected:
+            successor = (
+                root
+                / ".lup/review-stage-claims"
+                / entry["id"]
+                / sha256(stage.encode()).hexdigest()
+            )
+            successor.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with successor.open("x", encoding="utf-8") as handle:
+                    handle.write(json.dumps(expected, sort_keys=True))
+            except FileExistsError:
+                pass
+            else:
+                return {"state": "approved", "id": entry["id"], "reason": ""}
     entry = matches[-1] if matches else None
     if entry is not None and entry["state"] == "approved":
         match entry:
@@ -480,7 +524,15 @@ def review_hook_call(
         claim.parent.mkdir(parents=True, exist_ok=True)
         try:
             with claim.open("x", encoding="utf-8") as handle:
-                handle.write(fingerprint)
+                json.dump(
+                    {
+                        "fingerprint": fingerprint,
+                        "execution_id": execution_id,
+                        "stage": stage,
+                    },
+                    handle,
+                    sort_keys=True,
+                )
         except FileExistsError:
             entry = None
         else:
@@ -2425,6 +2477,8 @@ def reviewed_decision(
     arguments: dict,
     preconditions: dict[Path, str | None],
     execution_id: str = "",
+    stage: str = "",
+    predecessor: str = "",
 ) -> KernelDecision:
     """Only an explicit, single-use recorded answer can settle a native ask."""
     result = review_hook_call(
@@ -2441,6 +2495,8 @@ def reviewed_decision(
         decision.purpose or "",
         decision.reviewer,
         execution_id,
+        stage,
+        predecessor,
     )
     if result["state"] == "approved":
         return decision.revised(effect="allow")

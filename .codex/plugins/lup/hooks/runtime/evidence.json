@@ -1,5 +1,5 @@
 {
-  "askApproximation": "asks defer only on PermissionRequest; PreToolUse fails closed",
+  "askApproximation": "asks require explicit exact review receipts at PreToolUse and PermissionRequest",
   "policyIds": [
     "fetch",
     "shell",

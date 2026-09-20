@@ -339,7 +339,10 @@ class TestDispatchedPatches:
         assert "no matching PreToolUse snapshot" in dispatcher.observe(payload)[0]
 
     def test_native_pretool_entrypoint_records_only_allowed_calls(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         dispatcher = bundled_dispatcher()
         root = worktree(tmp_path / "feature")
@@ -369,8 +372,13 @@ class TestDispatchedPatches:
         target.write_text("a permission request must not replace the preimage\n")
         recorded = snapshot.read_text()
         monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
-        with pytest.raises(SystemExit):
-            dispatcher.main()
+        dispatcher.main()
+        assert (
+            json.loads(capsys.readouterr().out)["hookSpecificOutput"]["decision"][
+                "behavior"
+            ]
+            == "deny"
+        )
         assert snapshot.read_text() == recorded
 
     def test_an_ordinary_small_edit_is_allowed(self, tmp_path: Path) -> None:

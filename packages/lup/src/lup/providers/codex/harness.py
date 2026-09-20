@@ -902,7 +902,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
         evidence = {
             "schemaVersion": 1,
             "policyIds": source.policy_ids,
-            "askApproximation": "asks defer only on PermissionRequest; PreToolUse fails closed",
+            "askApproximation": "asks require explicit exact review receipts at PreToolUse and PermissionRequest",
         }
         return ArtifactTree(
             artifacts=[

@@ -490,9 +490,10 @@ inside a shell tool call never reaches the dispatcher that judges it.
 Both native dispatchers park unresolved policy asks in `.lup/questions.jsonl`
 and refuse execution until an explicit answer is recorded. The refusal names
 the review id and commands to inspect, approve, or reject it. Claude auto mode
-has executed a native hook ask without a human prompt (#436); Codex pre-tool
-review precedes native approval. Neither native prompting nor observed
-execution is evidence of a human answer.
+has executed a native hook ask without a human prompt (#436). Codex requires
+the same recorded authority at both pre-tool and permission-request events;
+a pending or rejected review returns an explicit native denial. Neither
+native prompting nor observed execution is evidence of a human answer.
 
 The operator runs `uv run lup-devtools dev questions show <id>` from the
 indicated checkout, then `uv run lup-devtools dev questions answer <id>
@@ -512,6 +513,13 @@ Post-tool evidence marks a dispatched review completed, without claiming that
 the operation's effects succeeded. Execution against an unresolved review is
 recorded as `in_doubt` and diagnosed. A missing matching event leaves dispatch
 unresolved; it never makes the answer reusable.
+
+A Codex pre-tool receipt can advance once to the permission event when both
+events carry the same nonempty native invocation ID and exact operation.
+The handoff takes a separate exclusive claim, so repeated permission events
+cannot reuse it. The native permission-event contract does not promise that
+ID; when absent, the pre-tool receipt cannot establish the handoff. The call
+stays blocked pending fresh review or execution from an operator terminal.
 
 Native patches are decoded into file transitions before review. A standalone
 shell `apply_patch` with a single-quoted argument or a quoted heredoc reaches

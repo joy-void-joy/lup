@@ -270,7 +270,7 @@ def dispatch(payload, permission_request=False):
 
 
 def queued_review(payload, decision):
-    """An explicit reviewer answer is the fallback for a hook that cannot prompt."""
+    """Both judging events require the same explicit review authority."""
     cwd = Path(payload["cwd"]) if "cwd" in payload else Path.cwd()
     tool_input = payload["tool_input"]
     name = payload["tool_name"]
@@ -298,6 +298,11 @@ def queued_review(payload, decision):
         tool_input,
         before,
         payload["tool_use_id"] if "tool_use_id" in payload else "",
+        payload["hook_event_name"] if "hook_event_name" in payload else "",
+        "PreToolUse"
+        if "hook_event_name" in payload
+        and payload["hook_event_name"] == "PermissionRequest"
+        else "",
     )
 
 
@@ -407,8 +412,13 @@ def observe(payload):
 
 def main():
     payload = {}
+    permission_request = False
     try:
         payload = json.load(sys.stdin)
+        permission_request = (
+            "hook_event_name" in payload
+            and payload["hook_event_name"] == "PermissionRequest"
+        )
         record_hook_evidence(plugin_data_root(), payload, "started")
         # Watching and deciding are separate events, and this one returns
         # before a verdict exists: the patch has already applied, so there is
@@ -435,11 +445,10 @@ def main():
                 raise SystemExit(2)
             record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
-        permission_request = event == "PermissionRequest"
         decision = dispatch(payload, permission_request)
-        # PreToolUse runs before native approval and cannot request a prompt.
-        # Only a recorded reviewer answer may release its exact pending call.
-        if not permission_request and decision.effect == "ask":
+        # Native approval mode does not prove who answers. Both judging events
+        # require a recorded reviewer answer for this exact pending call.
+        if decision.effect == "ask":
             decision = queued_review(payload, decision)
         # A verdict from here places nothing: this hook answers, and the call
         # runs with the arguments the model wrote, so a placement is degraded
@@ -469,22 +478,29 @@ def main():
             "error",
             f"{type(error).__name__}: {error}",
         )
-        sys.stderr.write(f"Malformed hook input requires approval: {error}")
-        raise SystemExit(2) from error
-    if permission_request and decision.effect == "allow":
+        decision = KernelDecision(
+            "deny", f"Malformed hook input requires approval: {error}"
+        )
+        if not permission_request:
+            sys.stderr.write(decision.addressed())
+            raise SystemExit(2) from error
+    if permission_request and decision.effect != "defer":
+        allowed = decision.effect == "allow"
         json.dump(
             {
                 "hookSpecificOutput": {
                     "hookEventName": "PermissionRequest",
-                    "decision": {"behavior": "allow"},
+                    "decision": {
+                        "behavior": "allow" if allowed else "deny",
+                        **({} if allowed else {"message": decision.addressed()}),
+                    },
                 }
             },
             sys.stdout,
         )
-        record_hook_evidence(plugin_data_root(), payload, "completed", "allow")
-        return
-    if permission_request and decision.effect == "ask":
-        record_hook_evidence(plugin_data_root(), payload, "completed", "ask")
+        record_hook_evidence(
+            plugin_data_root(), payload, "completed", "allow" if allowed else "deny"
+        )
         return
     if decision.effect in ("allow", "defer"):
         record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
