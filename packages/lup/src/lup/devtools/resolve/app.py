@@ -76,6 +76,7 @@ def create_resolve_app(
     app.command("drain")(drain_run)
     app.command("refresh")(resolve.refresh_run)
     app.command("intake")(resolve.preview_intake)
+    app.command("admissions")(resolve.list_admissions)
 
     @app.command("serve-tools")
     def serve_resolver_tools_command() -> None:
@@ -338,6 +339,10 @@ def create_resolve_app(
         admitted = resolve.AdmissionFlags(
             statements=admit or [], notes=admit_note or [], issues=admit_issue or []
         )
+        if abort is None and resolve.queue_existing_admission(
+            admitted, run_id, answer or [], start_new
+        ):
+            return
         if detach:
             if adapter is None:
                 raise typer.BadParameter(

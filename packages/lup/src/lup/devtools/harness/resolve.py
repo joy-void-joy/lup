@@ -51,7 +51,8 @@ from lup.resolver.journal import Journal
 from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun
-from lup.resolver.state import ResolverStateRepository
+from lup.resolver.state import ResolverStateRepository, StateTransitionError
+from lup.resolver.admissions import AdmissionMailbox
 from lup.resolver.status import tally_bar, unfinished_runs
 from lup.resolver.models import (
     AdmissionRequest,
@@ -1193,6 +1194,75 @@ def admission_request(flags: AdmissionFlags) -> AdmissionRequest | None:
         statements=flags.statements,
         issues=admitted_issues(flags.issues),
     )
+
+
+def queue_existing_admission(
+    flags: AdmissionFlags, run_id: str | None, answers: list[str], start_new: bool
+) -> bool:
+    """Route evidence to an existing run before a detached child can be opened."""
+    if not flags.named_anything() or (start_new and run_id is None):
+        return False
+    root = project_root()
+    state_root = root / ".lup" / "resolve"
+    selected = run_id or chosen_run(
+        state_root,
+        "resolve-"
+        + resolver_git(
+            LocalProcessLauncher(), root, ["rev-parse", "--short=12", "HEAD"]
+        ),
+        start_new=False,
+        ending=False,
+    )
+    repository = ResolverStateRepository(state_root, selected)
+    if not repository.exists():
+        if (refusal := missing_run_refusal(run_id, selected)) is not None:
+            raise typer.BadParameter(refusal)
+        return False
+    request = admission_request(flags)
+    if request is None:
+        return False
+    offer_flag_answers(
+        QuestionMailbox(repository.root), selected, parse_answer_flags(answers)
+    )
+    try:
+        receipt = repository.queue_admission(request)
+    except StateTransitionError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"Admission {receipt.id} queued for run {selected}.")
+    typer.echo(
+        "Evidence is durable; the run plans it at its next scheduling boundary. Resume the run if it is idle."
+    )
+    typer.echo(f"Inspect: uv run lup-devtools resolve admissions --run-id {selected}")
+    return True
+
+
+def list_admissions(
+    run_id: str = typer.Option(
+        ..., "--run-id", help="Run whose admission receipts to read"
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Print each complete receipt as JSON"
+    ),
+) -> None:
+    """Inspect accepted evidence and its pending, applied, or rejected result."""
+    repository = ResolverStateRepository(project_root() / ".lup" / "resolve", run_id)
+    if not repository.exists():
+        raise typer.BadParameter(f"no resolver run {run_id!r}")
+    receipts = AdmissionMailbox(repository.root).receipts()
+    if not receipts:
+        typer.echo("No admission requests.")
+    for receipt in receipts:
+        if json_output:
+            typer.echo(receipt.model_dump_json())
+        else:
+            typer.echo(f"{receipt.id}: {receipt.status}")
+            if receipt.error:
+                typer.echo(receipt.error)
+            if receipt.result is not None:
+                typer.echo(
+                    "Concerns: "
+                    + ", ".join(item.id for item in receipt.result.concerns)
+                )
 
 
 def missing_run_refusal(run_id: str | None, resolved_run_id: str) -> str | None:

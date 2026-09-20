@@ -224,6 +224,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `resolve drain` | Ask a busy run to finish what is in flight and stop, resumably. |
 | `resolve refresh` | Bring a run&#x27;s base, and the leases holding work, up to its branch. |
 | `resolve intake` | Print what a run started now would plan from, without starting one. |
+| `resolve admissions` | Inspect accepted evidence and its pending, applied, or rejected result. |
 | `resolve serve-tools` | Serve one worker&#x27;s question tools over stdio, for out-of-process runtimes. |
 | `resolve branch` | Create + switch to the resolve/&lt;id&gt; branch (a resolve editor&#x27;s first step). |
 | `resolve review` | Render a resolve manifest and its branch diffs into one static HTML review. |

@@ -9,8 +9,14 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from lup.channels.models import publish_atomic
+from lup.resolver.admissions import (
+    AdmissionMailbox,
+    AdmissionReceipt,
+    ResolverAdmissionsPending,
+)
 from lup.resolver.models import (
     AgentRound,
+    AdmissionRequest,
     AnswerBatch,
     BasesDocument,
     ConcernProgress,
@@ -499,6 +505,15 @@ class ResolverStateRepository:
             current = self.load()
             state = preserve_retirements(current, state)
             if (
+                current.phase != ResolvePhase.INTEGRATION
+                and state.phase == ResolvePhase.INTEGRATION
+                and any(
+                    item.id not in state.admitted_requests
+                    for item in AdmissionMailbox(self.root).pending()
+                )
+            ):
+                raise ResolverAdmissionsPending()
+            if (
                 state.source != current.source
                 or state.spec != current.spec
                 or state.config_digest != current.config_digest
@@ -549,6 +564,24 @@ class ResolverStateRepository:
         self.write_model("leases.json", LeasesDocument(leases=state.leases))
         self.write_model("bases.json", BasesDocument(bases=state.bases))
         return state
+
+    def queue_admission(self, request: AdmissionRequest) -> AdmissionReceipt:
+        """Accept evidence atomically with the run's integration cutoff."""
+        with self.writing():
+            state = self.load()
+            reached = (
+                state.resume_from or state.phase
+                if state.phase == ResolvePhase.FAILED
+                else state.phase
+            )
+            if (
+                state.phase in {ResolvePhase.ABORTED, ResolvePhase.COMPLETE}
+                or PHASE_ORDER[reached] >= PHASE_ORDER[ResolvePhase.INTEGRATION]
+            ):
+                raise StateTransitionError(
+                    f"run has reached {reached}; admission is available only before integration"
+                )
+            return AdmissionMailbox(self.root).submit(request)
 
     def write_agent_round(self, state: ResolveState) -> None:
         """Write each complete round independently for inspection and resumption."""

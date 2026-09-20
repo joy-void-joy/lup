@@ -1257,6 +1257,7 @@ class ResolveState(BaseModel, frozen=True):
     verification: list[VerificationRecord] = []
     acceptances: list[VerificationAcceptance] = []
     retirements: list[ConcernRetirement] = []
+    admitted_requests: list[str] = []
     cleanup: list[CleanupRecord] = []
     failures: list[str] = []
     resume_from: ResolvePhase | None = None

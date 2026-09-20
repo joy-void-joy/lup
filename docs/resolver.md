@@ -160,7 +160,7 @@ derived from an issue lands, the run comments there naming the review branch,
 and never closes it — a reviewer passing is not a human having read the code.
 
 **Statements seed a run as well as widen one.** `--admit <text>` carries work
-in the human's own words into a run standing still, and where no run exists yet
+in the human's own words into a live or parked run, and where no run exists yet
 it opens one from those statements beside whatever notes the tree holds. Both
 are positions in the same request, so a seeded run and a scanned one reach the
 same shape of inventory and one run may mix them. Otherwise somebody arriving
@@ -168,15 +168,23 @@ with the concerns in their own words — which is how a human arrives — must
 invent a note site for the planner to read back, a file edit standing in for a
 sentence.
 
-Admission reaches into the run and mutates it: the concern set widens, the
-graph is revalidated for unique ids, present dependencies and acyclicity, and
-the writable roots are checked. So it takes the run's exclusive lock as its
-first act, and a run some process is still driving refuses it with `resolver
-run '<id>' is already active`: a park is when to admit. An answer lands
-against a moving run because it deposits into a mailbox the run applies on its
-own schedule, and admission has no such route — so a detached admission
-against a moving run leaves the refusal in the child's log, behind a
-foreground banner reporting the run started.
+Admission into an existing run writes a durable receipt before returning,
+including when `--detach` is present. The response says **queued**: it accepts
+evidence, without claiming that planning or approval has finished. No competing
+child opens and the running process's log remains intact. Inspect each request
+with `resolve admissions --run-id <id> --json`; a receipt retains its complete
+evidence, planned concerns, and any rejection. Resume a parked run to apply it.
+
+The owning run applies receipts between worker waves and before integration.
+Only that owner widens the concern set, validates the graph and writable roots,
+and sends each admitted concern through the ordinary material-question and
+approval gates. A request received during the final assembly decision holds
+integration until it has been processed. Requests arriving after integration
+starts are refused before a receipt is written. An applied request id is saved
+with its concerns, so a process dying before updating the receipt cannot insert
+the same concerns twice. Library callers enqueue with
+`ResolverStateRepository.queue_admission`; `ResolverCore.admit` plans immediately
+under exclusive ownership when the run is idle.
 
 **A base is refreshed, not only inherited.** The base starts as the source
 snapshot and is brought up to the branch it came from whenever a lease is
