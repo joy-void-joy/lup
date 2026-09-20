@@ -194,7 +194,8 @@ class TestDispatchedPatches:
     ) -> None:
         root = worktree(tmp_path / "feature")
         target = root / "new.py"
-        target.write_text("value = 2\n", encoding="utf-8")
+        (root / "old.py").write_text("value = 1\n", encoding="utf-8")
+        (root / "gone.py").write_text("gone = True\n", encoding="utf-8")
         envelope = (
             "*** Begin Patch\n*** Update File: old.py\n*** Move to: new.py\n"
             "@@\n-value = 1\n+value = 2\n*** Delete File: gone.py\n*** End Patch"
@@ -212,12 +213,19 @@ class TestDispatchedPatches:
 
         monkeypatch.setattr(dispatcher, "repaired_directives", repair)
         monkeypatch.setattr(dispatcher, "file_diagnostics", diagnostics)
+        monkeypatch.setenv("PLUGIN_DATA", str(tmp_path / "data"))
         command = f"apply_patch <<'PATCH'\n{envelope}\nPATCH" if shell else envelope
         payload = {
             "tool_name": "Bash" if shell else "apply_patch",
             "tool_input": {"command": command},
             "cwd": str(root),
+            "session_id": "session",
+            "tool_use_id": "patch-call",
         }
+        dispatcher.remember_patch(payload)
+        (root / "old.py").unlink()
+        (root / "gone.py").unlink()
+        target.write_text("value = 2\n", encoding="utf-8")
 
         assert dispatcher.observe(payload) == [f"{target}: type mismatch"]
         assert calls == [
@@ -225,6 +233,109 @@ class TestDispatchedPatches:
             for path in ("old.py", "new.py", "gone.py")
             for operation in ("repair", "diagnostics")
         ]
+
+    @pytest.mark.parametrize("partial", [False, True])
+    @pytest.mark.parametrize("shell", [False, True])
+    def test_failed_patches_only_observe_files_that_actually_changed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        partial: bool,
+        shell: bool,
+    ) -> None:
+        root = worktree(tmp_path / "feature")
+        first, second = root / "first.py", root / "second.py"
+        for path in (first, second):
+            path.write_text("value = 1\n", encoding="utf-8")
+        envelope = (
+            "*** Begin Patch\n*** Update File: first.py\n@@\n-value = 1\n+value = 2\n"
+            "*** Update File: second.py\n@@\n-value = 1\n+value = 2\n*** End Patch"
+        )
+        dispatcher = bundled_dispatcher()
+        calls: list[str] = []
+
+        def record(path: str, _command: list[str]) -> list[str]:
+            calls.append(path)
+            return []
+
+        monkeypatch.setattr(dispatcher, "repaired_directives", record)
+        monkeypatch.setattr(dispatcher, "file_diagnostics", record)
+        monkeypatch.setattr(dispatcher, "named_claim_recorded", record)
+        monkeypatch.setenv("PLUGIN_DATA", str(tmp_path / "data"))
+        payload = {
+            "tool_name": "Bash" if shell else "apply_patch",
+            "tool_input": {
+                "command": f"apply_patch <<'PATCH'\n{envelope}\nPATCH"
+                if shell
+                else envelope
+            },
+            "cwd": str(root),
+            "session_id": "session",
+            "tool_use_id": "failed-call",
+        }
+        dispatcher.remember_patch(payload)
+        if partial:
+            first.write_text("value = 2\n", encoding="utf-8")
+        payload["tool_response"] = {"exit_code": 1, "output": "failed to apply"}
+
+        assert dispatcher.observe(payload) == []
+        assert calls == ([str(first)] * 3 if partial else [])
+        assert second.read_text(encoding="utf-8") == "value = 1\n"
+        assert not dispatcher.patch_snapshot(payload).exists()
+
+    def test_a_post_patch_without_its_own_snapshot_cannot_repair_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dispatcher = bundled_dispatcher()
+        monkeypatch.setenv("PLUGIN_DATA", str(tmp_path / "data"))
+        payload = {
+            **patch_payload(
+                "*** Begin Patch\n*** Add File: module.py\n+value = 1\n*** End Patch"
+            ),
+            "cwd": str(tmp_path),
+            "session_id": "session",
+            "tool_use_id": "first-call",
+        }
+        dispatcher.remember_patch(payload)
+        (tmp_path / "module.py").write_text("value = 1\n", encoding="utf-8")
+        payload["tool_use_id"] = "different-call"
+
+        assert "no matching PreToolUse snapshot" in dispatcher.observe(payload)[0]
+
+    def test_native_pretool_entrypoint_records_only_allowed_calls(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dispatcher = bundled_dispatcher()
+        root = worktree(tmp_path / "feature")
+        target = root / "module.py"
+        target.write_text(GREETING, encoding="utf-8")
+        monkeypatch.setenv("PLUGIN_DATA", str(tmp_path / "data"))
+        payload = {
+            **patch_payload(
+                update_envelope(
+                    str(target), ' def greet():\n-    return "hi"\n+    return "hello"'
+                )
+            ),
+            "cwd": str(root),
+            "session_id": "session",
+            "tool_use_id": "allowed-call",
+            "hook_event_name": "PreToolUse",
+        }
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+        dispatcher.main()
+
+        snapshot = dispatcher.patch_snapshot(payload)
+        assert snapshot.is_file()
+        assert str(target) in json.loads(snapshot.read_text())
+        assert "return" not in snapshot.read_text()
+        payload["hook_event_name"] = "PermissionRequest"
+        target.write_text("a permission request must not replace the preimage\n")
+        recorded = snapshot.read_text()
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+        with pytest.raises(SystemExit):
+            dispatcher.main()
+        assert snapshot.read_text() == recorded
 
     def test_an_ordinary_small_edit_is_allowed(self, tmp_path: Path) -> None:
         root = worktree(tmp_path / "feature")

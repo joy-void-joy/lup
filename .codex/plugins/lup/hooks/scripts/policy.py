@@ -11,6 +11,7 @@ the standard library and the kernel copied beside it.
 import json
 import os
 import sys
+from hashlib import sha256
 from pathlib import Path
 
 # The hook is launched as a bare script, promised no cwd, PYTHONPATH, or
@@ -28,7 +29,6 @@ from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 from policy_data import DIAGNOSTICS_COMMAND, REPAIR_COMMAND
 import csv
-from hashlib import sha256
 from datetime import UTC, datetime, timedelta
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
@@ -3111,6 +3111,54 @@ def remembered_run(payload):
     note_ran(root, approval_fingerprint(subject["kind"], subject["text"], root))
 
 
+def patch_snapshot(payload):
+    """One native call's before-image record, without storing command contents."""
+    root = plugin_data_root()
+    if root is None or not payload.get("session_id") or not payload.get("tool_use_id"):
+        return None
+    identity = {
+        key: payload.get(key)
+        for key in ("session_id", "tool_use_id", "cwd", "tool_input")
+    }
+    digest = sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    return root / "patch-snapshots" / f"{digest}.json"
+
+
+def patch_stamps(payload):
+    """Digest named files so a failed or partly applied patch is observed honestly."""
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", "")
+    name = payload.get("tool_name", "")
+    envelope = (
+        command
+        if name == "apply_patch"
+        else shell_patch(command)
+        if name == "Bash"
+        else None
+    )
+    if not command or envelope is None:
+        return None
+    directory = Path(payload.get("cwd") or Path.cwd())
+    stamps = {}
+    for path in patched_paths(envelope):
+        target = directory / path
+        try:
+            stamps[str(target)] = sha256(target.read_bytes()).hexdigest()
+        except FileNotFoundError:
+            stamps[str(target)] = None
+    return stamps
+
+
+def remember_patch(payload):
+    """Capture the allowed call immediately before native execution."""
+    path = patch_snapshot(payload)
+    stamps = patch_stamps(payload)
+    if path is None or stamps is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.write_text(json.dumps(stamps), encoding="utf-8")
+
+
 def observe(payload):
     """Record each patched path and run the shared post-edit checks."""
     root = payload["cwd"] if "cwd" in payload else ""
@@ -3124,14 +3172,32 @@ def observe(payload):
     envelope = command if name == "apply_patch" else shell_patch(command)
     if envelope is not None:
         directory = Path(root) if root else Path.cwd()
-        findings = []
-        for path in patched_paths(envelope):
-            target = str(directory / path)
+        snapshot = patch_snapshot(payload)
+        if snapshot is None or not snapshot.is_file():
+            return [
+                "Patch diagnostics have no matching PreToolUse snapshot; run dev check to verify the result."
+            ]
+        before = json.loads(snapshot.read_text(encoding="utf-8"))
+        snapshot.unlink()
+        after = patch_stamps(payload)
+        assert after is not None
+        changed = [
+            target
+            for target, stamp in after.items()
+            if target in before and before[target] != stamp
+        ]
+        for target in changed:
             publish_edition(target)
             named_claim_recorded(target, directory)
-            findings.extend(repaired_directives(target, REPAIR_COMMAND))
-            findings.extend(file_diagnostics(target, DIAGNOSTICS_COMMAND))
-        return findings
+        return [
+            finding
+            for target in changed
+            for check, command in (
+                (repaired_directives, REPAIR_COMMAND),
+                (file_diagnostics, DIAGNOSTICS_COMMAND),
+            )
+            for finding in check(target, command)
+        ]
     # What the command changed, read against the snapshot its own PreToolUse
     # took, and contested where another session had a window open across it.
     claim_window_closed(Path(root) if root else None)
@@ -3180,6 +3246,8 @@ def main():
         # channel exists the question already says where the call lands.
         root = Path(payload["cwd"]) if "cwd" in payload else None
         decision = decision.placed(escapable=False, contained=session_contained(root))
+        if not permission_request and decision.effect in ("allow", "defer"):
+            remember_patch(payload)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and a traceback exit is not the
