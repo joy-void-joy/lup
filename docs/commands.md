@@ -149,6 +149,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `git worktree adopt-records` | Move lup&#x27;s `branch.*.lup-*` config keys into the shared `lup/` directory. |
 | `git pr status` | Fetch PR review status, checks, and comments for a branch. |
 | `git pr merge` | Merge a PR and pull changes into the integration branch. |
+| `git pr prepare` | Merge an explicit local base, regenerate every harness, and commit. |
 | `git pr sync-base` | Sync the base branch and merge it into the current feature branch. |
 | `git pr push` | Push the current branch and report any existing PR. |
 | `git pr create` | Create a new PR. |

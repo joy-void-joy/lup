@@ -308,6 +308,27 @@ session. The driver is per-clone git config, so it covers a merge performed in
 a clone that registered it and nothing else: a merge run on the forge's own
 server reads no config and lands the conflict anyway.
 
+Before publishing a PR, fetch its target and run `uv run lup-devtools git pr
+prepare --base origin/<target> --json` in the clean feature checkout. This
+merges the exact target commit using the generated-tree driver, regenerates
+all harnesses from the combined sources, and commits locally. It pushes
+nothing. The resulting head contains the target as an ancestor, so a forge
+needs no custom merge driver. Source conflicts remain open for `git conflict`
+repair; regenerate before completing that merge. Re-run preparation if the
+target advances or the feature history is rebuilt.
+
+Cleanup checks the live coordination roster as well as Git worktree locks.
+A clean checkout owned by a live session remains protected even with
+`--force`; removal becomes available after the session departs or its pulse
+expires. Cleanup rechecks ownership immediately before removing the tree.
+
+Undo snapshots publish and retire duplicate refs in one fsynced Git reference
+transaction. `dev undo` also reports empty or null loose undo refs, which Git
+omits from its ordinary listing but which can break fetch. Run `uv run
+lup-devtools dev undo --repair` to quarantine those bytes under the shared Git
+directory's `lup/undo-damaged/` directory. Valid snapshots and active ref locks
+are preserved; the command prints every quarantine path.
+
 ## What has to be green
 
 ```bash

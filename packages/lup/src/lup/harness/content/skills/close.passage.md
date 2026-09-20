@@ -16,6 +16,16 @@ uv run lup-devtools git pr status --json
 
 If no PR is found, check if the user passed a PR number as an argument. If still nothing, report the error and stop.
 
+### 2b. Prepare against the PR target
+
+Read `<target>` from the status result's `base_ref`, then fetch `origin` before
+running `uv run lup-devtools git pr prepare --base origin/<target> --json` in
+its clean feature checkout. The command merges the exact fetched target,
+regenerates every runtime tree, and commits without pushing. If it commits,
+review and check those changes, publish through `git pr push`, then read status
+again and wait for checks and reviews on that head. The forge runs no custom
+merge driver, so this preparation lets it merge generated ownership proofs.
+
 ### 3. Evaluate reviews
 
 **If there are unresolved review comments or requested changes:**
