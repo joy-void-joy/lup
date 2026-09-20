@@ -103,11 +103,15 @@ class CodexHookReport(BaseModel, frozen=True):
         would not parse and a plugin whose cache is gone both arrive here as
         a directory with no hooks in it.
         """
-        return [
-            said
-            for listing in self.data
-            for said in [*listing.warnings, *(str(error) for error in listing.errors)]
-        ]
+        return [*self.warnings(), *(str(error) for error in self.failures())]
+
+    def warnings(self) -> list[str]:
+        """Native adjustments that do not themselves report failed loading."""
+        return [warning for listing in self.data for warning in listing.warnings]
+
+    def failures(self) -> list[JsonObject]:
+        """Native errors leave hook discovery incomplete."""
+        return [error for listing in self.data for error in listing.errors]
 
 
 async def read_hooks(

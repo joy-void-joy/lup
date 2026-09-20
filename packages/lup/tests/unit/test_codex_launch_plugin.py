@@ -1,5 +1,6 @@
 """Plugin readiness is measured where the session actually opens its home."""
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -9,9 +10,13 @@ import sh
 import lup.devtools.harness.launch as launch
 import lup.providers.codex.install as installation
 import lup.providers.codex.runtime as runtime
+import lup.providers.codex.home as codex_home
+import lup.providers.codex.selection as codex_selection
 from lup.harness.clipboard import ClipboardBridge
+from lup.policy.identity import POLICY_ROOT_ENV
 from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
+from lup.providers.codex.trust import CodexHookReport
 from lup.providers.codex.selection import codex_config
 from lup.providers.login import NativeHomeScope
 from lup.providers.selection import SessionRequest
@@ -271,7 +276,7 @@ async def test_host_policy_and_process_use_the_same_resolved_native_home(
         server.start.assert_awaited_once()
 
     home = tmp_path / expected
-    calls.policy.assert_called_once_with(home, tmp_path, seed=False)
+    calls.policy.assert_called_once_with(home, tmp_path, seed=False, workspace=tmp_path)
     assert calls.server.call_args.kwargs["environment"][CODEX_HOME] == str(home)
     assert calls.mock_calls[0][0] == "policy"
     assert calls.mock_calls[1][0] == "server"
@@ -294,7 +299,9 @@ async def test_host_policy_failure_stops_before_constructing_the_native_process(
         ).open_session():
             pytest.fail("a policy failure must prevent native startup")
 
-    policy.assert_called_once_with(tmp_path / "codex-home", tmp_path, seed=False)
+    policy.assert_called_once_with(
+        tmp_path / "codex-home", tmp_path, seed=False, workspace=tmp_path
+    )
     native.assert_not_called()
 
 
@@ -317,3 +324,108 @@ async def test_a_project_without_declared_policy_opens_with_its_native_default_h
     assert list(home.iterdir()) == []
     assert native.call_args.kwargs["environment"][CODEX_HOME] == str(home)
     server.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "evidence", ["ready", "missing", "untrusted", "unresolved", "warning", "skill-only"]
+)
+@pytest.mark.parametrize("portable", [False, True])
+async def test_application_policy_is_verified_in_an_external_native_workspace(
+    tmp_lup_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    evidence: str,
+    portable: bool,
+) -> None:
+    project = tmp_lup_project
+    workspace = project.parent / f"{project.name}-native"
+    workspace.mkdir()
+    home = project / "session-home"
+    manifest = project / ".agents/plugins/marketplace.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "application",
+                "plugins": [{"name": "lup", "source": {"path": ".codex/plugins/lup"}}],
+            }
+        )
+    )
+    plugin_manifest = project / ".codex/plugins/lup/.codex-plugin/plugin.json"
+    plugin_manifest.parent.mkdir(parents=True)
+    plugin_manifest.write_text(
+        json.dumps(
+            {"name": "lup"}
+            if evidence == "skill-only"
+            else {"name": "lup", "hooks": "./hooks/hooks.json"}
+        )
+    )
+    config = (
+        codex_config(SessionRequest(cwd=workspace, environment={CODEX_HOME: str(home)}))
+        if portable
+        else runtime.CodexSessionConfig(
+            cwd=workspace, policy_root=project, environment={CODEX_HOME: str(home)}
+        )
+    )
+    assert config.policy_root == project
+    assert config.cwd == workspace
+    monkeypatch.setattr(codex_selection, "project_root", lambda: workspace)
+    installer = Mock()
+    monkeypatch.setattr(
+        codex_home, "CodexPluginInstaller", Mock(return_value=installer)
+    )
+    hooks = (
+        []
+        if evidence in ("missing", "skill-only")
+        else [
+            {
+                "key": "application-policy",
+                "eventName": "preToolUse",
+                "pluginId": "lup@application",
+                "source": "plugin",
+                "enabled": True,
+                "isManaged": False,
+                "currentHash": "digest",
+                "trustStatus": "untrusted" if evidence == "untrusted" else "trusted",
+            }
+        ]
+    )
+    discovery = AsyncMock(
+        return_value=CodexHookReport.model_validate(
+            {
+                "data": [
+                    {
+                        "cwd": str(workspace),
+                        "hooks": hooks,
+                        "warnings": ["timeout clamped"]
+                        if evidence == "warning"
+                        else [],
+                        "errors": [{"message": "unresolved declaration"}]
+                        if evidence == "unresolved"
+                        else [],
+                    }
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr(codex_home, "read_hooks", discovery)
+    server = Mock(start=AsyncMock(), close=AsyncMock())
+    native = Mock(return_value=server)
+    monkeypatch.setattr(runtime, "CodexAppServer", native)
+
+    if evidence in ("ready", "warning", "skill-only"):
+        async with runtime.CodexSessionOpener(config).open_session():
+            server.start.assert_awaited_once()
+        assert native.call_args.kwargs["environment"][CODEX_HOME] == str(home)
+        assert native.call_args.kwargs["environment"][POLICY_ROOT_ENV] == str(project)
+    else:
+        with pytest.raises(codex_home.CodexPolicyUntrusted) as failure:
+            async with runtime.CodexSessionOpener(config).open_session():
+                pytest.fail("missing policy evidence must prevent native startup")
+        native.assert_not_called()
+        assert str(project) in str(failure.value)
+        assert str(workspace) in str(failure.value)
+        assert "lup@application" in str(failure.value)
+
+    installer.ensure.assert_called_once_with(project / ".codex/plugins/lup", project)
+    installer.verify.assert_called_once_with(installer.ensure.return_value, workspace)
+    discovery.assert_awaited_once_with(home, workspace)

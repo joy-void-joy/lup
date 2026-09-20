@@ -22,6 +22,7 @@ against the workspace.
 """
 
 import json
+import shlex
 from pathlib import Path
 
 from host import (
@@ -111,6 +112,7 @@ from policy_data import (
     PATH_ROLES,
     PATH_RULES,
     PEER_POLICY,
+    POLICY_ROOT_ENV,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
@@ -391,13 +393,23 @@ def reviewed_decision(
             effect="deny",
             recovery=f"Review queue unavailable: {result['reason']}. Run this operation from an operator terminal.",
         )
+    project = declared_identity(POLICY_ROOT_ENV)
+    prefix = [
+        "uv",
+        "run",
+        *(["--project", project] if project else []),
+        "lup-devtools",
+        "dev",
+        "questions",
+    ]
+    show = shlex.join([*prefix, "show", identifier])
+    answer = shlex.join([*prefix, "answer", identifier, "--as", "operator"])
+    reject = shlex.join([*prefix, "reject", identifier, "--as", "operator"])
     return decision.revised(
         effect="deny",
         recovery=(
             f"Review {identifier} is {result['state']}. In {cwd}, the operator can run "
-            f"'uv run lup-devtools dev questions show {identifier}', then "
-            f"'uv run lup-devtools dev questions answer {identifier} --as operator' "
-            f"or 'uv run lup-devtools dev questions reject {identifier} --as operator'. "
+            f"`{show}`, then `{answer}` or `{reject}`. "
             "After approval, retry this exact tool call; changed file contents require fresh review."
         ),
     )

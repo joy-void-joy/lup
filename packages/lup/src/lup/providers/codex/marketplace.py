@@ -38,6 +38,16 @@ class CodexMarketplace(BaseModel, frozen=True):
         """How the Codex CLI names this plugin when installing or removing it."""
         return f"{self.plugin}@{self.name}"
 
+    def declares_hooks(self) -> bool:
+        """Whether this plugin asks the runtime to load a hook declaration."""
+        manifest = self.source / ".codex-plugin/plugin.json"
+        declaration = json.loads(manifest.read_text(encoding="utf-8"))
+        return (
+            bool(declaration["hooks"])
+            if "hooks" in declaration
+            else (self.source / "hooks/hooks.json").is_file()
+        )
+
     @classmethod
     def declared(cls, root: Path) -> "CodexMarketplace | None":
         """The plugin this project offers, or None where it offers none.

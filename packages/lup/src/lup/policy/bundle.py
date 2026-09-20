@@ -21,7 +21,7 @@ from lup.harness.codescan.antipatterns import RuleSet
 from lup.harness.models import SubagentCleanup
 from lup.formats.banner import REGENERATE_COMMAND, GeneratedBanner
 from lup.policy.grants import ALLOWANCE_GRANTS_ENV, known_allowances
-from lup.policy.identity import AGENT_IDENTITY_ENV
+from lup.policy.identity import AGENT_IDENTITY_ENV, POLICY_ROOT_ENV
 import lup.policy.kernel as kernel
 from lup.policy.kernel.typescript import TYPESCRIPT_SUFFIXES
 from lup.policy.kernel.effects import EffectRow, effect_row_values
@@ -639,6 +639,7 @@ def render_policy_data(
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
+            "POLICY_ROOT_ENV = " + json.dumps(POLICY_ROOT_ENV),
             "ALLOWANCE_GRANTS_ENV = " + json.dumps(ALLOWANCE_GRANTS_ENV),
             "KNOWN_ALLOWANCES: list[str] = " + string_rows_literal(known_allowances()),
             "MAXIMUM_ADDED_LINES = 3",

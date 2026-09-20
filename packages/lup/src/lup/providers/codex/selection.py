@@ -51,6 +51,7 @@ from lup.providers.selection import (
     SessionRequest,
 )
 from lup.types import EnvVars
+from lup.workspace.paths import project_root
 
 type CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 
@@ -222,6 +223,7 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         model=request.model,
         developer_instructions=request.instructions,
         cwd=request.cwd,
+        policy_root=project_root(),
         sandbox=codex_sandbox(request),
         executable=request.contained_program or CODEX_PROGRAM,
         containment=request.containment,

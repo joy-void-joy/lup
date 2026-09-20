@@ -6,6 +6,8 @@ than dropped: Claude's effort ladder starts at ``low``, so a request for
 ``minimal`` opens at that floor.
 """
 
+from lup.policy.identity import POLICY_ROOT_ENV
+from lup.workspace.paths import project_root
 from lup.providers.claude.config_home import workspace_config_environment
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.claude.runtime import (
@@ -104,7 +106,7 @@ def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
         cwd=request.cwd,
         sandbox=CLAUDE_CONTAINMENT[request.containment],
         cli_path=request.contained_program,
-        environment=request.environment,
+        environment={**request.environment, POLICY_ROOT_ENV: str(project_root())},
         hooks=request.hooks,
         submission_gate_resolver=request.submission_gate,
     )

@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from lup.execution.threads import run_sync
 from lup.providers.codex.app_server import (
     CodexAppServer,
     RpcMessage,
@@ -29,6 +30,7 @@ from lup.providers.codex.login import CODEX_HOME, native_home
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
 from lup.providers.codex.subagents import CodexSubagentTools
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
+from lup.policy.identity import POLICY_ROOT_ENV
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
     EventStream,
@@ -109,6 +111,8 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     model: str | None = None
     developer_instructions: str = ""
     cwd: Path
+    policy_root: Path | None = None
+    """Application project declaring policy; direct callers default to cwd."""
     executable: Path = CODEX_PROGRAM
     containment: SessionContainment = "none"
     """The boundary owning this executable's home; outer wrappers prepare theirs."""
@@ -981,7 +985,10 @@ class CodexSessionOpener:
         environment = allowance.environment(self.config.environment)
         config = self.config.model_copy(
             update={
-                "environment": environment,
+                "environment": {
+                    **environment,
+                    POLICY_ROOT_ENV: str(self.config.policy_root or self.config.cwd),
+                },
                 "mcp_servers": {
                     name: server.model_copy(
                         update={"env": allowance.environment(server.env)}
@@ -995,8 +1002,14 @@ class CodexSessionOpener:
             home = native_home(effective)
             if not effective.get(CODEX_HOME):
                 home.mkdir(mode=0o700, parents=True, exist_ok=True)
-            install_declared_policy(
-                home, config.cwd, seed=CodexWorktreeHomeStore().derived(home)
+            await run_sync(
+                partial(
+                    install_declared_policy,
+                    home,
+                    config.policy_root or config.cwd,
+                    seed=CodexWorktreeHomeStore().derived(home),
+                    workspace=config.cwd,
+                )
             )
             config = config.model_copy(
                 update={"environment": {**config.environment, CODEX_HOME: str(home)}}

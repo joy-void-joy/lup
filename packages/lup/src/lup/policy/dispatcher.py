@@ -91,6 +91,7 @@ call in the session.
 # lup: ignore[library-default] — the stdlib a compiled dispatcher actually imports; widening it is the hazard the pin exists to prevent
 DISPATCHER_STDLIB = (
     "json",
+    "shlex",
     "os",
     "sys",
     "pathlib",
