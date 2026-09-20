@@ -67,6 +67,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.workspace.paths import path_is_under
@@ -129,6 +130,9 @@ class LupHookOutput(BaseModel):
     spells the placement in its own words, and one whose runtime cannot
     renders the decision alone rather than a placement nothing honours."""
     system_message: str | None = None
+    delivery_receipt: SkipJsonSchema[Callable[[], None] | None] = Field(
+        default=None, exclude=True, repr=False
+    )
     updated_input: JsonObject | None = Field(
         default=None,
         description=(
@@ -149,6 +153,12 @@ class LupHookOutput(BaseModel):
             "it."
         ),
     )
+
+    def delivered(self) -> None:
+        """Acknowledge context only after its native transport accepted it."""
+        if self.delivery_receipt is not None:
+            self.delivery_receipt()
+            self.delivery_receipt = None
 
 
 type LupHookFn = Callable[[LupHookInput], Awaitable[LupHookOutput]]

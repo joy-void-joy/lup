@@ -1,6 +1,7 @@
 """Codex app-server Client with live optional turn capabilities."""
 
 import asyncio
+from functools import partial
 import json
 from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -21,10 +22,11 @@ from lup.providers.selection import SessionContainment
 from lup.providers.codex.login import CODEX_HOME
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
 from lup.providers.codex.subagents import CodexSubagentTools
-from lup.policy.hooks import LupHooksConfig
+from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
     EventStream,
+    Session,
     ForkSession,
     Interrupt,
     Steer,
@@ -34,6 +36,8 @@ from lup.sessions.errors import ProviderTurnError, StructuredOutputError
 from lup.sessions.errors import TurnFailure, TurnInterruptedError, ValidationAttempt
 from lup.sessions.errors import UnsupportedCapability
 from lup.sessions.middleware import CorrectionConfig, DecoratingSession
+from lup.sessions.errors import TurnAlreadyActiveError
+from lup.sessions.middleware import SerializedTurn
 from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
@@ -50,7 +54,11 @@ from lup.sessions.events import (
     TurnIdentifiers,
     TurnId,
     TurnInput,
+    TurnRequest,
+    TurnHandle,
     TurnMessage,
+    TurnToolCallBlock,
+    TurnToolResultBlock,
     TurnToolBinding,
 )
 from lup.sessions.output import TurnSubmission, bound_submission
@@ -237,6 +245,14 @@ class McpElicitationMetadata(BaseModel, frozen=True):
     codex_approval_kind: str | None = None
 
 
+class CodexHookActivity(BaseModel, frozen=True, extra="ignore"):
+    """Native notification/request identity and optional completed item."""
+
+    thread_id: str | None = Field(default=None, alias="threadId")
+    turn_id: str | None = Field(default=None, alias="turnId")
+    item: JsonObject | None = None
+
+
 class McpElicitationRequest(BaseModel, frozen=True):
     """One approval elicitation for an MCP server tool call.
 
@@ -337,6 +353,9 @@ class CodexTurnChannel:
         self.blocks: list[AnyTurnBlock] = []
         self.usage = Usage()
         self.started = perf_counter()
+        self.hook_tasks: list[asyncio.Task[None]] = []
+        self.hook_error: Exception | None = None
+        self.deferred_context: list[LupHookOutput] = []
 
     def identifiers(self) -> TurnIdentifiers:
         if self.turn_id is None:
@@ -525,6 +544,9 @@ class CodexConversationState:
         self.submission: TurnSubmission | None = None
         self.channel: CodexTurnChannel | None = None
         self.inherited_servers: list[str] = []
+        self.context_lock = asyncio.Lock()
+        self.stop_hook_active = False
+        self.pending_hook_receipts: list[LupHookOutput] = []
         self.server.server_request_handler = self.handle_server_request
         self.server.notification_handler = self.handle_notification
         self.server.disconnect_handler = self.handle_disconnect
@@ -593,6 +615,7 @@ class CodexConversationState:
     async def start_turn(self, text: str) -> AcceptedTurn:
         thread_id = await self.ensure_thread()
         channel = CodexTurnChannel(thread_id)
+        stop_hook_active = self.stop_hook_active
         self.channel = channel
         submission = self.submission
         output = codex_output_contract(submission.schema) if submission else None
@@ -611,6 +634,9 @@ class CodexConversationState:
             params["outputSchema"] = output.native
         result = await self.server.request("turn/start", params)
         response = CodexTurnResponse.model_validate(result)
+        for receipt in self.pending_hook_receipts:
+            receipt.delivered()
+        self.pending_hook_receipts.clear()
         channel.turn_id = response.turn.id
         identifiers = TurnIdentifiers(
             session=SessionId(value=thread_id),
@@ -618,7 +644,7 @@ class CodexConversationState:
         )
 
         async def complete() -> CompletedTurn:
-            completed = await channel.completed
+            completed = await self.complete_turn(channel, identifiers, stop_hook_active)
             if submission is not None and output is not None:
                 await submit_completed_output(
                     submission, output, completed, identifiers
@@ -642,6 +668,101 @@ class CodexConversationState:
             f"Codex app-server request {message.method!r} requires a client handler; use an interactive client for this capability"
         )
 
+    async def complete_turn(
+        self,
+        channel: CodexTurnChannel,
+        identifiers: TurnIdentifiers,
+        stop_hook_active: bool,
+    ) -> CompletedTurn:
+        """Evaluate completion only after all completed-tool hooks have settled."""
+        from lup.sessions.errors import TurnContinuationError
+
+        completed = await channel.completed
+        await asyncio.gather(*channel.hook_tasks)
+        async with self.context_lock:
+            outputs = list(channel.deferred_context)
+            if self.config.hooks is not None and channel.hook_error is None:
+                responder = CodexApprovalResponder(hooks=self.config.hooks)
+                try:
+                    outputs.extend(
+                        await responder.evaluate(
+                            LupHookInput(
+                                event="Stop",
+                                cwd=str(self.config.cwd),
+                                stop_hook_active=stop_hook_active,
+                            )
+                        )
+                    )
+                except Exception as error:
+                    channel.hook_error = error
+            feedback = CodexApprovalResponder(hooks=LupHooksConfig()).context(outputs)
+            refused = any(
+                output.decision in {"deny", "block", "ask"} for output in outputs
+            )
+            if channel.hook_error is None and not feedback and not refused:
+                self.stop_hook_active = False
+                return completed
+            failure = TurnFailure(
+                message=str(channel.hook_error)
+                if channel.hook_error
+                else (feedback or "The Stop hook requires another continuation."),
+                blocks=completed.blocks,
+                messages=completed.messages,
+                usage=completed.usage,
+                duration=completed.duration,
+                identifiers=identifiers,
+            )
+            if channel.hook_error is not None:
+                raise ProviderTurnError(failure) from channel.hook_error
+            self.stop_hook_active = True
+            self.pending_hook_receipts = outputs
+            raise TurnContinuationError(failure)
+
+    async def deliver_activity(
+        self,
+        channel: CodexTurnChannel,
+        notification: RpcNotification,
+    ) -> None:
+        """Run completed-tool callbacks and retain feedback the turn cannot accept."""
+        try:
+            if self.config.hooks is None:
+                return
+            async with self.context_lock:
+                if channel is not self.channel:
+                    return
+                responder = CodexApprovalResponder(
+                    hooks=self.config.hooks,
+                    deliver_context=partial(self.deliver_context, channel),
+                )
+                item = CodexHookActivity.model_validate(notification.params).item
+                if item is not None:
+                    blocks = decode_completed_item(item)
+                    results = {
+                        block.tool_call_id: block.content
+                        for block in blocks
+                        # lup: ignore[own-model-dispatch] — adapter pairs tool call/result records
+                        if isinstance(block, TurnToolResultBlock)
+                    }
+                    for block in blocks:
+                        # lup: ignore[own-model-dispatch] — adapter pairs tool call/result records
+                        if isinstance(block, TurnToolCallBlock):
+                            outputs = await responder.evaluate(
+                                LupHookInput(
+                                    event="PostToolUse",
+                                    tool_name=block.name,
+                                    tool_input=block.arguments,
+                                    tool_result=results.get(block.id, ""),
+                                    cwd=str(self.config.cwd),
+                                )
+                            )
+                            if not await responder.deliver(outputs):
+                                channel.deferred_context.extend(outputs)
+                if not channel.completed.done():
+                    await responder.deliver_pending()
+        except Exception as error:
+            channel.hook_error = error
+            raise
+
     async def resolve_approval(self, message: RpcMessage) -> JsonValue:
         """Answer one approval request from this session's declared hooks.
 
@@ -653,7 +774,21 @@ class CodexConversationState:
         """
         if self.config.hooks is None:
             return {"decision": "decline"}
-        responder = CodexApprovalResponder(hooks=self.config.hooks)
+        channel = self.channel
+        if channel is None or channel.completed.done():
+            return {"decision": "decline"}
+        if self.thread_id is None or channel.turn_id is None:
+            return {"decision": "decline"}
+        activity = CodexHookActivity.model_validate(message.params)
+        if activity.turn_id != channel.turn_id:
+            return {"decision": "decline"}
+        if activity.thread_id != self.thread_id:
+            return {"decision": "decline"}
+        responder = CodexApprovalResponder(
+            hooks=self.config.hooks,
+            deliver_context=partial(self.deliver_context, channel),
+            delivery_lock=self.context_lock,
+        )
         method = message.method or ""
         return {"decision": await responder.decide(method, message.params)}
 
@@ -676,13 +811,66 @@ class CodexConversationState:
             return {"action": "accept"}
         return {"action": "decline"}
 
+    async def deliver_context(self, channel: CodexTurnChannel, text: str) -> None:
+        """Steer only the active turn whose context this hook is delivering."""
+        if (
+            channel is not self.channel
+            or channel.turn_id is None
+            or channel.completed.done()
+        ):
+            raise RuntimeError("no active Codex turn can receive hook context")
+        await CodexSteer(self, channel.turn_id).steer(TurnInput(text=text))
+
     def handle_notification(self, notification: RpcNotification) -> None:
+        activity = CodexHookActivity.model_validate(notification.params)
+        if activity.thread_id not in {None, self.thread_id}:
+            return
         if self.channel is not None:
             self.channel.feed(notification)
+            if (
+                notification.method == "item/completed"
+                and notification_turn_id(notification) == self.channel.turn_id
+            ):
+                self.channel.hook_tasks.append(
+                    self.server.spawn_handler(
+                        self.deliver_activity(self.channel, notification)
+                    )
+                )
 
     def handle_disconnect(self, error: Exception) -> None:
         if self.channel is not None:
             self.channel.fail(error)
+
+
+class CodexHookSession(Session):
+    """Reset Stop state once per logical turn, preserving it across native retries."""
+
+    def __init__(self, state: CodexConversationState, inner: Session) -> None:
+        self.state = state
+        self.inner = inner
+        self.lock = asyncio.Lock()
+
+    async def start[T: BaseModel | None](
+        self, request: TurnRequest[T]
+    ) -> TurnHandle[T]:
+        if self.lock.locked():
+            raise TurnAlreadyActiveError("a logical Codex turn is already active")
+        await self.lock.acquire()
+        self.state.stop_hook_active = False
+        self.state.pending_hook_receipts.clear()
+        accepted = False
+        try:
+            handle = await self.inner.start(request)
+            accepted = True
+        finally:
+            if not accepted:
+                self.lock.release()
+        return TurnHandle[T](
+            turn=SerializedTurn(handle.turn, self.lock),
+            events=handle.events,
+            interrupt=handle.interrupt,
+            steer=handle.steer,
+        )
 
 
 class CodexTurnToolBinder(TurnToolBinder):
@@ -806,7 +994,9 @@ class CodexSessionOpener:
         )
         with recursive_agent_scope(allowance):
             try:
-                yield SessionHandle(session=corrected, fork=CodexFork(state))
+                yield SessionHandle(
+                    session=CodexHookSession(state, corrected), fork=CodexFork(state)
+                )
             finally:
                 try:
                     await session.abort_active()
