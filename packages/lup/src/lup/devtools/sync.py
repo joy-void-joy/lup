@@ -475,7 +475,9 @@ def clone_upstream(proj: ProjectEntry, repository: Path) -> Upstream:
     )
 
 
-def registered_upstream(proj: ProjectEntry, path: Path) -> Upstream:
+def registered_upstream(
+    proj: ProjectEntry, path: Path, report: Callable[[str], None] = typer.echo
+) -> Upstream:
     """Read fetched upstream refs without moving a registered working tree.
 
     ``review_from: local`` explicitly reviews unpublished local commits.
@@ -483,6 +485,15 @@ def registered_upstream(proj: ProjectEntry, path: Path) -> Upstream:
     """
     if not (path / ".git").exists() and not bare_repository(path):
         return Upstream(checkout=path)
+    url = proj.get("url", "")
+    pointing = registered_elsewhere(path, url)
+    if pointing:
+        report(
+            f"The registered checkout at {path} points at {pointing}, "
+            f"but '{proj['name']}' names {url}. Correct the registration "
+            "before fetching or reviewing it."
+        )
+        raise typer.Exit(1)
     branch = clone_branch(proj, path)
     attached = path / "tree" / branch
     remote = proj.get("review_from", "remote") == "remote" and bool(
@@ -501,7 +512,12 @@ def registered_upstream(proj: ProjectEntry, path: Path) -> Upstream:
 
 def checkpoint_identity(found: Upstream) -> sync_state.ReviewSource:
     """A remote URL or local repository identity, paired with the reviewed ref."""
-    repository = remote_url(found.checkout, "origin") or git_in(
+    remote = (
+        remote_url(found.checkout, "origin")
+        if found.tip.startswith("refs/remotes/")
+        else ""
+    )
+    repository = remote or git_in(
         str(found.checkout), "rev-parse", "--path-format=absolute", "--git-common-dir"
     )
     ref = found.tip
@@ -618,8 +634,8 @@ def accessible_roots(
         """Where one registration is on disk, materializing it if it is not."""
         if "mount" not in project:
             return None
-        found = existing_upstream(project)
         try:
+            found = existing_upstream(project)
             if found is None:
                 found = ensure_local(project, report)
             opened = openable(project, found, report)
@@ -834,12 +850,13 @@ def ensure_local(
     path = proj.get("path", "")
     name = proj["name"]
     if path and Path(path).exists():
+        found = registered_upstream(proj, Path(path), report)
         if proj.get("review_from", "remote") == "remote" and remote_url(
             Path(path), "origin"
         ):
             refresh(name, Path(path), report)
         ensure_ref_symlink(name, path)
-        return registered_upstream(proj, Path(path))
+        return found
 
     url = proj.get("url", "")
     repository = cached_clone(name)
@@ -1145,7 +1162,7 @@ def setup_project(
         typer.echo(f"Path does not exist: {resolved}")
         raise typer.Exit(1)
 
-    repository = (resolved / ".git").exists() or (resolved / ".git").is_file()
+    repository = (resolved / ".git").exists() or bare_repository(resolved)
     # A directory that is not a checkout can still be worth reaching -- a
     # corpus, a set of reference material -- and the lease mounts one as a
     # plain bind. What it cannot do is be *reviewed*, which is what the rest
@@ -1178,10 +1195,12 @@ def setup_project(
     if mount:
         entry["mount"] = "rw" if mount == "rw" else "ro"
 
-    found = registered_upstream(entry, resolved)
+    inherited = next((p for p in load_projects() if p["name"] == name), {})
+    effective = PROJECT_ENTRY_ADAPTER.validate_python({**inherited, **entry})
+    found = registered_upstream(effective, resolved)
     head = resolved_checkpoint(str(found.checkout), "", found.tip) if synced else ""
     if synced:
-        record_checkpoint(entry, found, head)
+        record_checkpoint(effective, found, head)
 
     save_local(local_data)
     ensure_ref_symlink(name, str(resolved))

@@ -166,3 +166,81 @@ def test_explicit_branch_mismatch_is_reported(
 
     assert branch == "main"
     assert "library consumes dev" in caplog.text
+
+
+def test_setup_accepts_a_bare_repository(registry: Path, tmp_path: Path) -> None:
+    bare = tmp_path / "source.git"
+    sh.git("init", "--bare", str(bare))
+
+    sync.setup_project("source", str(bare), branch="main")
+
+    assert sync.find_project("source").get("path") == str(bare)
+
+
+def test_local_reviews_of_distinct_clones_have_distinct_checkpoint_sources(
+    registry: Path, tmp_path: Path
+) -> None:
+    upstream = tmp_path / "upstream"
+    git = initialized_repo(upstream, tmp_path / "hooks")
+    commit_file(git, upstream, "file", "base", "base")
+    identities = []
+    for name in ("first", "second"):
+        clone = tmp_path / name
+        sh.git("clone", str(upstream), str(clone))
+        found = sync.registered_upstream(
+            {"name": "source", "review_from": "local"}, clone
+        )
+        identities.append(sync.checkpoint_identity(found))
+
+    assert identities[0] != identities[1]
+
+
+def test_a_registration_cannot_fetch_a_checkout_for_another_remote(
+    registry: Path, tmp_path: Path
+) -> None:
+    clone = tmp_path / "clone"
+    git = initialized_repo(clone, tmp_path / "hooks")
+    commit_file(git, clone, "file", "base", "base")
+    git("remote", "add", "origin", str(tmp_path / "different"))
+    messages: list[str] = []
+
+    with pytest.raises(typer.Exit):
+        sync.ensure_local(
+            {"name": "source", "path": str(clone), "url": str(tmp_path / "wanted")},
+            messages.append,
+        )
+
+    assert "Correct the registration" in "\n".join(messages)
+
+
+def test_setup_checkpoint_honors_the_committed_branch(
+    registry: Path, tmp_path: Path
+) -> None:
+    upstream = tmp_path / "upstream"
+    git = initialized_repo(upstream, tmp_path / "hooks")
+    commit_file(git, upstream, "file", "base", "base")
+    git("checkout", "-b", "dev")
+    commit_file(git, upstream, "file", "dev", "dev")
+    expected = git("rev-parse", "HEAD").strip()
+    git("checkout", "main")
+    clone = tmp_path / "clone"
+    sh.git("clone", str(upstream), str(clone))
+    (registry / "sync.json").write_text(
+        json.dumps(
+            {
+                "projects": [
+                    {
+                        "name": "source",
+                        "branch": "dev",
+                    }
+                ]
+            }
+        )
+    )
+
+    sync.setup_project("source", str(clone), synced=True)
+
+    project = sync.find_project("source")
+    found = sync.existing_upstream(project)
+    assert found is not None
+    assert sync.checkpoint(project, found) == expected
