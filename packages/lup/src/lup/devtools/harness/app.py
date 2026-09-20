@@ -535,6 +535,32 @@ def create_harness_app(
 
     codex_target = targets.builder("codex")
     if codex_target is not None:
+        codex_plugin = typer.Typer(
+            help="Install and verify this project's Codex plugin"
+        )
+        app.add_typer(codex_plugin, name="codex-plugin")
+
+        @codex_plugin.command("install")
+        def install_codex_plugin(
+            codex_home: Annotated[
+                Path,
+                typer.Option("--codex-home", help="The home the runtime will open"),
+            ],
+            force: Annotated[
+                bool,
+                typer.Option("--force", help="Reinstall a matching cached revision"),
+            ] = False,
+            trust_project: Annotated[
+                bool,
+                typer.Option(
+                    "--trust-project", help="Trust this checkout in a launch-owned home"
+                ),
+            ] = False,
+        ) -> None:
+            """Install the declared plugin and verify native discovery in the selected home."""
+            launch.prepare_codex_plugin(
+                [], codex_home, project_root(), {}, force, trust_project
+            )
 
         @app.command(
             "codex",

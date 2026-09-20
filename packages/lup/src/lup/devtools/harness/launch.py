@@ -32,10 +32,7 @@ from lup.providers.codex.confinement import CODEX_CONFINEMENT
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.account import read_account
-from lup.providers.codex.harness_runtime import (
-    CodexPluginInstaller,
-    PluginCacheConfig,
-)
+from lup.providers.codex.install import install_codex_plugin
 from lup.providers.codex.transcripts import CodexTranscripts
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import launched_member
@@ -1460,6 +1457,7 @@ def session_argv(
     devices: list[Device] = [],
     authenticate: Callable[[list[str], Path, bool], None] | None = None,
     member: LaunchedMember | None = None,
+    prepare: Callable[[list[str], Path], None] | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1534,6 +1532,8 @@ def session_argv(
                     )
                 ]
             )
+        if prepare is not None:
+            prepare([], config_home)
         if authenticate is not None:
             authenticate([cli], config_home, False)
         settle_boundary(
@@ -1603,6 +1603,8 @@ def session_argv(
         environment=environment,
         in_passing=True,
     )
+    if prepare is not None:
+        prepare(probing(opening), Path(harness.image.config_home))
     # A contained session sharing host loopback can receive a browser callback.
     # Device login is needed where that callback stays outside its namespace.
     if authenticate is not None:
@@ -1849,6 +1851,23 @@ def launch_claude(
             checkpoint(provider="claude")
 
 
+def prepare_codex_plugin(
+    prefix: list[str],
+    home: Path,
+    root: Path,
+    environment: EnvVars,
+    force: bool = False,
+    trusted: bool = False,
+) -> None:
+    """Prepare the home where the launch runs, through its own execution boundary."""
+    if not prefix:
+        install_codex_plugin(root, home, force, trusted)
+        return
+    assert CODEX_LOGIN.home_preparation is not None
+    command = [*prefix, *CODEX_LOGIN.home_preparation.command(root, home, force)]
+    typer.echo(str(sh.Command(command[0])(*command[1:], _env=environment)), nl=False)
+
+
 # For the reason spelled at `launch_claude`: the mode is one optional argument
 # among the ones that actually decide how a runtime starts.
 def launch_codex(
@@ -1907,9 +1926,6 @@ def launch_codex(
     selected_home = home.path
     if home.isolated:
         typer.echo(f"Using worktree-scoped Codex home: {selected_home}")
-    installer = CodexPluginInstaller(
-        PluginCacheConfig(codex_home=selected_home, marketplace=plugin.marketplace)
-    )
     # The subcommand leads, and everything the envelope carries follows it,
     # because a word placed after a positional session id would be read as
     # another one.
@@ -1953,14 +1969,13 @@ def launch_codex(
         if home.isolated and not sandbox.contained():
             store.publish(project_root())
 
-    try:
-        cache = installer.ensure(
-            project_root() / ".codex" / "plugins" / plugin.name,
-            project_root(),
-            force=force_install,
+    def prepare(prefix: list[str], native_home: Path) -> None:
+        prepare_codex_plugin(
+            prefix, native_home, project_root(), environment, force_install
         )
+
+    try:
         with opening as session:
-            typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             environment.update(session)
             argv = session_argv(
                 "codex",
@@ -1977,6 +1992,7 @@ def launch_codex(
                 mounts,
                 devices,
                 authenticate=authenticate,
+                prepare=prepare,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

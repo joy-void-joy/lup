@@ -1526,10 +1526,7 @@ def run_resolve(
             merge_hooks,
         )
 
-        from lup.providers.codex.harness_runtime import (
-            CodexPluginInstaller,
-            PluginCacheConfig,
-        )
+        from lup.providers.codex.install import install_codex_plugin
 
         from lup.providers.codex.home import CodexWorktreeHomeStore, select_codex_home
 
@@ -1554,10 +1551,8 @@ def run_resolve(
             home = select_codex_home(
                 None, environment, root, account.name, CodexWorktreeHomeStore()
             )
-            cache = CodexPluginInstaller(
-                PluginCacheConfig(codex_home=home.path, marketplace=plugin.marketplace)
-            ).ensure(root / ".codex" / "plugins" / plugin.name, root)
-            typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
+            if not resolver_spec.contain_actors:
+                install_codex_plugin(root, home.path, trusted=home.isolated)
             return {"CODEX_HOME": str(home.path)}
 
         session_environment = account.exported(
@@ -1694,7 +1689,7 @@ def run_resolve(
             if not contained_actors:
                 return None
             login = CLAUDE_LOGIN if adapter == "claude" else CODEX_LOGIN
-            config_home = selected_config_home(environment).directory
+            config_home = login.selected_home(environment)
             credential = login.credentials_path(config_home)
             return worker_cli(
                 worker_wrapper_path(state_root / resolved_run_id, concern_id, actor),
@@ -1895,6 +1890,7 @@ def run_resolve(
                     ),
                     cwd=cwd,
                     sandbox="workspace-write",
+                    containment="outer" if contained_actors else "none",
                     # Falls back to the program's own name, which is what this
                     # field already defaults to. Claude's seam takes ``None``
                     # for the same case instead, because its SDK searches for a
@@ -1993,6 +1989,7 @@ def run_resolve(
                     ),
                     cwd=cwd,
                     sandbox="read-only",
+                    containment="outer" if contained_actors else "none",
                     executable=actor_cli(
                         cwd,
                         reviewing,

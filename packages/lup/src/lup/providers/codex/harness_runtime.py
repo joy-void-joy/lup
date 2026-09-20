@@ -45,6 +45,34 @@ class PluginCacheEvidence(BaseModel, frozen=True):
     ready: bool
 
 
+class InstalledCodexPlugin(BaseModel, frozen=True, extra="ignore"):
+    """The fields a native plugin listing uses to identify an enabled revision."""
+
+    plugin_id: str = Field(alias="pluginId")
+    version: str
+    installed: bool
+    enabled: bool
+
+    def selects(self, selector: str, version: str) -> bool:
+        """Whether the runtime selected the exact revision being launched."""
+        return (
+            self.plugin_id == selector
+            and self.version == version
+            and self.installed
+            and self.enabled
+        )
+
+
+class CodexPluginListing(BaseModel, frozen=True, extra="ignore"):
+    """Installed plugins reported by the selected native runtime and home."""
+
+    installed: list[InstalledCodexPlugin] = []
+
+    def selects(self, selector: str, version: str) -> bool:
+        """Whether a native listing contains the requested enabled revision."""
+        return any(plugin.selects(selector, version) for plugin in self.installed)
+
+
 def digest_directory(root: Path, read_content: Callable[[Path], bytes]) -> str | None:
     """Hash deployable relative paths and modes with caller-normalized bytes."""
     if not root.is_dir():
@@ -325,6 +353,25 @@ class CodexPluginInstaller:
             )
         except (KeyError, TypeError):
             return False
+
+    def verify(self, evidence: PluginCacheEvidence, cwd: Path) -> None:
+        """Refuse a cache the native runtime does not discover as enabled."""
+        reported = sh.Command(str(self.executable))(
+            "plugin",
+            "list",
+            "--json",
+            "--marketplace",
+            self.config.marketplace,
+            _cwd=str(cwd),
+            _env=self.plugin_environment(),
+        )
+        listing = CodexPluginListing.model_validate_json(str(reported))
+        selector = f"{self.config.plugin}@{self.config.marketplace}"
+        if not listing.selects(selector, evidence.installed_root.name):
+            raise RuntimeError(
+                f"Codex does not discover {selector} at {evidence.installed_root} "
+                f"as installed and enabled in {self.config.codex_home}"
+            )
 
     def publish(self, source_root: Path, staged: PluginCacheConfig) -> None:
         """Retain every live path and merge only this native installation's state."""

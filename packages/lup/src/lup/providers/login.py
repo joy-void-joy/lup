@@ -18,11 +18,42 @@ from pydantic import BaseModel
 from lup.types import EnvVars, StringMap
 
 
+class HomePreparation(BaseModel, frozen=True):
+    """A shipped executable that prepares a runtime's private configuration home."""
+
+    executable: str
+
+    def command(self, root: Path, home: Path, force: bool = False) -> list[str]:
+        """Run installed library code in the checkout's own Python environment."""
+        return [
+            "uv",
+            "run",
+            "--locked",
+            "--directory",
+            str(root),
+            self.executable,
+            "--root",
+            str(root),
+            "--home",
+            str(home),
+            "--trust-project",
+            *(["--force"] if force else []),
+        ]
+
+
 class ProviderLogin(BaseModel, frozen=True):
     """One runtime's stored-login location, in that runtime's own words."""
 
     config_home_env: str
     """Environment variable pointing this runtime's CLI at a config home."""
+
+    home_preparation: HomePreparation | None = None
+    """Runtime-owned state required in a private home before its process starts.
+
+    Kept with the home declaration so a generic container builder cannot
+    select a runtime's home while forgetting the preparation that makes it usable.
+    A provider needing no private-home installation leaves this absent.
+    """
 
     credentials_file: str
     """What this runtime writes a completed login into, inside that home."""

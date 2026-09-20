@@ -17,6 +17,7 @@ from lup.providers.codex.hooks import (
     CodexApprovalResponder,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
+from lup.providers.selection import SessionContainment
 from lup.providers.codex.login import CODEX_HOME
 from lup.providers.codex.subagents import CodexSubagentTools
 from lup.policy.hooks import LupHooksConfig
@@ -91,6 +92,8 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     developer_instructions: str = ""
     cwd: Path
     executable: Path = CODEX_PROGRAM
+    containment: SessionContainment = "none"
+    """The boundary owning this executable's home; outer wrappers prepare theirs."""
     named_profile: str | None = None
     model_provider: str | None = None
     provider_config: JsonObject | None = None
@@ -133,6 +136,10 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
         the turn on its first command — so the combination is rejected at
         construction instead of at the first act.
         """
+        if self.containment == "outer" and self.executable == CODEX_PROGRAM:
+            raise ValueError(
+                "outer containment requires the prepared container executable"
+            )
         if self.delegated_tools is not None and (
             self.sandbox != "read-only" or self.approval_policy != "never"
         ):
@@ -757,9 +764,11 @@ class CodexSessionOpener:
                 },
             }
         )
-        if CODEX_HOME in config.environment:
+        if config.containment != "outer" and CODEX_HOME in config.environment:
             home = Path(config.environment[CODEX_HOME])
-            install_declared_policy(home, seed=CodexWorktreeHomeStore().derived(home))
+            install_declared_policy(
+                home, config.cwd, seed=CodexWorktreeHomeStore().derived(home)
+            )
         server = CodexAppServer(
             config.executable,
             arguments=(

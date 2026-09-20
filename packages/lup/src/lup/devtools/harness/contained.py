@@ -1874,23 +1874,23 @@ def contained_cli(
     terminal, so either other state would leave its runtime talking to a
     stream nothing reads.
     """
-    return written_wrapper(
-        wrapper,
-        contained_argv(
-            image,
-            manifest,
-            root,
-            editor_rendezvous,
-            credential,
-            login,
-            streams="piped",
-            sentinels=sentinels,
-            accessible=accessible,
-            lease=worker_lease(root) if lease is None else lease,
-            devices=devices,
-        ),
-        program,
+    opening = contained_argv(
+        image,
+        manifest,
+        root,
+        editor_rendezvous,
+        credential,
+        login,
+        streams="piped",
+        sentinels=sentinels,
+        accessible=accessible,
+        lease=worker_lease(root) if lease is None else lease,
+        devices=devices,
     )
+    if login.home_preparation is not None:
+        preparation = login.home_preparation.command(root, Path(image.config_home))
+        typer.echo(str(sh.Command(opening[0])(*opening[1:], *preparation)), nl=False)
+    return written_wrapper(wrapper, opening, program)
 
 
 def worker_cli(

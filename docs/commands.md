@@ -180,6 +180,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness profile add` | Register a runtime configuration home under a name. |
 | `harness profile use` | Select the profile a launch uses when none is named. |
 | `harness profile remove` | Forget a profile, leaving its configuration home on disk. |
+| `harness codex-plugin install` | Install the declared plugin and verify native discovery in the selected home. |
 
 ## `ledger`
 

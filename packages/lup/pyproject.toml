@@ -52,6 +52,8 @@ conversation = [
     "playwright>=1.62.0",
 ]
 
+[project.scripts]
+lup-codex-plugin = "lup.providers.codex.install:app"
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

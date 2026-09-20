@@ -208,6 +208,7 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         cwd=request.cwd,
         sandbox=codex_sandbox(request),
         executable=request.contained_program or CODEX_PROGRAM,
+        containment=request.containment,
         approval_policy="never",
         effort=(None if request.effort is None else CODEX_EFFORT[request.effort]),
         environment=request.environment,

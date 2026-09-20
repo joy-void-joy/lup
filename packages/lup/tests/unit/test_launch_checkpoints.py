@@ -1,6 +1,5 @@
 """Application checkpoints around both native harness launchers."""
 
-from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -111,8 +110,6 @@ def test_codex_checkpoints_before_preflight_and_after_close(
 ) -> None:
     events: list[str] = []
     home = Mock(path=tmp_path / "home", isolated=False)
-    installer = Mock()
-    installer.temporary.return_value = nullcontext(Mock(installed_root=tmp_path))
     store = Mock()
     preflight = Mock(
         side_effect=lambda *a, **k: events.append("ready") or launch.LaunchOpening()
@@ -134,7 +131,6 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda: store)
     monkeypatch.setattr(launch, "select_codex_home", lambda *args: home)
     monkeypatch.setattr(launch, "codex_login_preflight", lambda *args: None)
-    monkeypatch.setattr(launch, "CodexPluginInstaller", lambda _config: installer)
     monkeypatch.setattr(launch, "CodexTranscripts", lambda _home: Mock())
     monkeypatch.setattr(launch, "accessible_roots", lambda: [])
     monkeypatch.setattr(

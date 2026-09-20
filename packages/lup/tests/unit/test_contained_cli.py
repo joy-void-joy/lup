@@ -16,6 +16,7 @@ import pytest
 
 from lup.devtools.harness import contained
 from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.codex.login import CODEX_LOGIN
 from lup.sandbox.rail import Lease, worker_lease
 
 ARGV = ["podman", "run", "-i", "image"]
@@ -82,3 +83,47 @@ def test_the_streams_are_the_protocol_the_sdk_speaks(
     written(tmp_path, recorded)
 
     assert recorded.call_args.kwargs["streams"] == "piped"
+
+
+@pytest.mark.parametrize("worker", [False, True])
+def test_codex_prepares_the_container_home_before_a_wrapper_can_start(
+    tmp_path: Path,
+    recorded: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    worker: bool,
+) -> None:
+    root = tmp_path / "checkout"
+    root.mkdir()
+    image = Mock(config_home="/private/runtime-home")
+    execute = Mock(return_value="verified\n")
+    monkeypatch.setattr(sh, "Command", Mock(return_value=execute))
+    monkeypatch.setattr(contained, "worker_lease", lambda _root: Lease())
+    wrapper = tmp_path / "enter.sh"
+    if worker:
+        contained.worker_cli(
+            wrapper, image, Mock(), root, None, None, CODEX_LOGIN, "codex"
+        )
+    else:
+        contained.contained_cli(wrapper, image, Mock(), root, "codex", CODEX_LOGIN)
+    assert CODEX_LOGIN.home_preparation is not None
+    execute.assert_called_once_with(
+        *ARGV[1:],
+        *CODEX_LOGIN.home_preparation.command(root, Path("/private/runtime-home")),
+    )
+    assert wrapper.is_file()
+
+
+def test_a_failed_codex_home_preparation_never_publishes_a_wrapper(
+    tmp_path: Path,
+    recorded: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    execute = Mock(side_effect=RuntimeError("plugin missing"))
+    monkeypatch.setattr(sh, "Command", Mock(return_value=execute))
+    monkeypatch.setattr(contained, "worker_lease", lambda _root: Lease())
+    wrapper = tmp_path / "enter.sh"
+    with pytest.raises(RuntimeError, match="plugin missing"):
+        contained.contained_cli(
+            wrapper, Mock(config_home="/cfg"), Mock(), tmp_path, "codex", CODEX_LOGIN
+        )
+    assert not wrapper.exists()

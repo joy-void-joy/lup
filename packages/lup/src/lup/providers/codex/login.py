@@ -7,7 +7,7 @@ session runtime in to get them.
 
 from pathlib import Path
 
-from lup.providers.login import ProviderLogin
+from lup.providers.login import HomePreparation, ProviderLogin
 
 # lup: ignore[constant-declaration] — the environment variable Codex reads
 CODEX_HOME = "CODEX_HOME"
@@ -17,6 +17,7 @@ CODEX_LOGIN = ProviderLogin(
     credentials_file="auth.json",
     ambient_home=Path.home() / ".codex",
     home_subdir="codex-home",
+    home_preparation=HomePreparation(executable="lup-codex-plugin"),
 )
 """Where Codex stores a completed login, and how to select one.
 
