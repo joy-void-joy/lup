@@ -1,9 +1,11 @@
 """Prepare Codex's own home from a checkout, without opening an agent turn."""
 
 from pathlib import Path
+import sys
 from typing import Annotated
 
 import typer
+from pydantic import ValidationError
 
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.providers.codex.home import (
@@ -12,6 +14,7 @@ from lup.providers.codex.home import (
     trust_project,
 )
 from lup.providers.codex.marketplace import CodexMarketplace
+from lup.providers.codex.profile import CodexProfileSettings
 
 
 def install_codex_plugin(
@@ -46,8 +49,18 @@ def prepare(
     home: Annotated[Path, typer.Option("--home")],
     force: Annotated[bool, typer.Option("--force")] = False,
     trusted: Annotated[bool, typer.Option("--trust-project")] = False,
+    settings_stdin: Annotated[bool, typer.Option("--settings-stdin")] = False,
 ) -> None:
     """Prepare one native home from the installed library's implementation."""
+    if settings_stdin:
+        try:
+            CodexProfileSettings.model_validate_json(sys.stdin.read()).install(
+                home, enforce_policy=CodexMarketplace.declared(root) is not None
+            )
+        except (ValidationError, ValueError):
+            raise typer.BadParameter(
+                "Cannot prepare the selected Codex profile; its settings were not logged."
+            ) from None
     install_codex_plugin(root, home, force, trusted)
 
 

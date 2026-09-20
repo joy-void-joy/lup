@@ -13,9 +13,19 @@ so an application stores one the way it stores the runtime's name.
 
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lup.types import EnvVars, StringMap
+
+
+class NativeHomeScope(BaseModel, frozen=True):
+    """Stable native state identity for sessions with the same personal settings."""
+
+    key: str = Field(pattern=r"^[a-z0-9-]+$")
+
+    def volume_name(self, repository_volume: str) -> str:
+        """Partition persistent state without changing shared dependency caches."""
+        return f"{repository_volume}-{self.key}"
 
 
 class HomePreparation(BaseModel, frozen=True):
@@ -23,7 +33,9 @@ class HomePreparation(BaseModel, frozen=True):
 
     executable: str
 
-    def command(self, root: Path, home: Path, force: bool = False) -> list[str]:
+    def command(
+        self, root: Path, home: Path, force: bool = False, settings: bool = False
+    ) -> list[str]:
         """Run installed library code in the checkout's own Python environment."""
         return [
             "uv",
@@ -38,6 +50,7 @@ class HomePreparation(BaseModel, frozen=True):
             str(home),
             "--trust-project",
             *(["--force"] if force else []),
+            *(["--settings-stdin"] if settings else []),
         ]
 
 

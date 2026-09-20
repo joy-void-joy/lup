@@ -5,7 +5,8 @@ import hashlib
 import json
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -18,6 +19,15 @@ from lup.providers.codex.login import CODEX_LOGIN
 from lup.harness.contracts import CapabilityProbe
 from lup.harness.models import CapabilityEvidence
 from lup.types import EnvVars
+
+
+@contextmanager
+def codex_home_lock(home: Path) -> Iterator[None]:
+    """Serialize owned configuration writes with native plugin publication."""
+    home.mkdir(parents=True, exist_ok=True)
+    with (home / ".lup-plugin-install.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 class CodexCliEvidence(BaseModel, frozen=True):
@@ -282,9 +292,7 @@ class CodexPluginInstaller:
         self, source_root: Path, cwd: Path, force: bool = False
     ) -> PluginCacheEvidence:
         """Stage with the native CLI, then publish without pruning live revisions."""
-        self.config.codex_home.mkdir(parents=True, exist_ok=True)
-        with (self.config.codex_home / ".lup-plugin-install.lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        with codex_home_lock(self.config.codex_home):
             before = plugin_cache_evidence(source_root, self.config)
             if before.ready and self.registered(before) and not force:
                 return before

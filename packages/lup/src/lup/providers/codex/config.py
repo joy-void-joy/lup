@@ -45,7 +45,7 @@ class CodexProfileTransform(ConfigTransform[CodexSessionConfig]):
                 "environment": environment,
                 "named_profile": self.selection.named_profile,
             }
-        )
+        ).validated_for_app_server()
 
 
 class CodexProfileResolver(ProfileResolver[CodexSessionConfig]):

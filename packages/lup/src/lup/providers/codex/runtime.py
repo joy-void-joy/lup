@@ -176,6 +176,17 @@ class CodexSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
             )
         return self
 
+    def validated_for_app_server(self) -> "CodexSessionConfig":
+        """Refuse native capabilities before any process starts, without payloads."""
+        if self.named_profile is not None:
+            raise UnsupportedCapability(
+                "Codex app-server cannot select named profiles or apply all startup "
+                "settings through thread configuration. Configure the intended "
+                "CODEX_HOME/config.toml before opening, or supply explicit supported "
+                "session settings. Interactive Codex launches support named profiles."
+            )
+        return self
+
     def model_selection(self) -> JsonObject:
         """The model and the effort that goes with it — both, or neither.
 
@@ -938,7 +949,7 @@ class CodexSessionOpener:
     """Open one initialized app-server process per Lup session."""
 
     def __init__(self, config: CodexSessionConfig) -> None:
-        self.config = config
+        self.config = config.validated_for_app_server()
 
     @asynccontextmanager
     async def open_session(
@@ -969,11 +980,6 @@ class CodexSessionOpener:
             )
         server = CodexAppServer(
             config.executable,
-            arguments=(
-                ["--profile", config.named_profile]
-                if config.named_profile is not None
-                else None
-            ),
             environment=config.environment,
         )
         await server.start()

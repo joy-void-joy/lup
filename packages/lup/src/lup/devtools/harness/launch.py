@@ -22,7 +22,7 @@ import typer
 from pydantic import BaseModel, Field, ValidationError
 
 from lup.harness.devices import Device
-from lup.providers.login import ProviderLogin
+from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.contained import contained_argv
 from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
@@ -33,6 +33,8 @@ from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.account import read_account
 from lup.providers.codex.install import install_codex_plugin
+from lup.providers.codex.marketplace import CodexMarketplace
+from lup.providers.codex.profile import CodexProfileSettings
 from lup.providers.codex.transcripts import CodexTranscripts
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import launched_member
@@ -1458,6 +1460,7 @@ def session_argv(
     authenticate: Callable[[list[str], Path, bool], None] | None = None,
     member: LaunchedMember | None = None,
     prepare: Callable[[list[str], Path], None] | None = None,
+    state_scope: NativeHomeScope | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1584,6 +1587,7 @@ def session_argv(
         # This launch's flags lead and the machine's standing grants follow,
         # settled here beside the roots for the same reason they are.
         devices=[*devices, *granted_devices(told)],
+        state_scope=state_scope,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -1604,7 +1608,7 @@ def session_argv(
         in_passing=True,
     )
     if prepare is not None:
-        prepare(probing(opening), Path(harness.image.config_home))
+        prepare(probing(opening, stdin=True), Path(harness.image.config_home))
     # A contained session sharing host loopback can receive a browser callback.
     # Device login is needed where that callback stays outside its namespace.
     if authenticate is not None:
@@ -1858,14 +1862,31 @@ def prepare_codex_plugin(
     environment: EnvVars,
     force: bool = False,
     trusted: bool = False,
+    settings: CodexProfileSettings | None = None,
 ) -> None:
     """Prepare the home where the launch runs, through its own execution boundary."""
     if not prefix:
+        if settings is not None:
+            settings.install(
+                home, enforce_policy=CodexMarketplace.declared(root) is not None
+            )
         install_codex_plugin(root, home, force, trusted)
         return
     assert CODEX_LOGIN.home_preparation is not None
-    command = [*prefix, *CODEX_LOGIN.home_preparation.command(root, home, force)]
-    typer.echo(str(sh.Command(command[0])(*command[1:], _env=environment)), nl=False)
+    command = [
+        *prefix,
+        *CODEX_LOGIN.home_preparation.command(root, home, force, settings is not None),
+    ]
+    typer.echo(
+        str(
+            sh.Command(command[0])(
+                *command[1:],
+                _env=environment,
+                _in=settings.model_dump_json() if settings is not None else None,
+            )
+        ),
+        nl=False,
+    )
 
 
 # For the reason spelled at `launch_claude`: the mode is one optional argument
@@ -1924,14 +1945,26 @@ def launch_codex(
     store = CodexWorktreeHomeStore()
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path
+    selected_profile = (
+        CodexProfileSettings.capture(
+            selected_home, profile, as_base=sandbox.contained()
+        )
+        if profile is not None or sandbox.contained()
+        else None
+    )
     if home.isolated:
         typer.echo(f"Using worktree-scoped Codex home: {selected_home}")
     # The subcommand leads, and everything the envelope carries follows it,
     # because a word placed after a positional session id would be read as
     # another one.
     arguments: list[str] = [*codex_resume_arguments(resume), *envelope]
-    if profile is not None:
-        arguments.extend(["--profile", profile])
+    if selected_profile is not None and not selected_profile.as_base:
+        arguments.extend(
+            [
+                "--profile",
+                selected_profile.installed_name(),
+            ]
+        )
     selected_model = model or (mode.native_model("codex") if mode is not None else None)
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
@@ -1964,14 +1997,19 @@ def launch_codex(
             environment,
             command,
             headless=headless,
-            profile=profile,
+            profile=None if sandbox.contained() else profile,
         )
         if home.isolated and not sandbox.contained():
             store.publish(project_root())
 
     def prepare(prefix: list[str], native_home: Path) -> None:
         prepare_codex_plugin(
-            prefix, native_home, project_root(), environment, force_install
+            prefix,
+            native_home,
+            project_root(),
+            environment,
+            force_install,
+            settings=selected_profile,
         )
 
     try:
@@ -1993,6 +2031,11 @@ def launch_codex(
                 devices,
                 authenticate=authenticate,
                 prepare=prepare,
+                state_scope=(
+                    selected_profile.state_scope()
+                    if selected_profile is not None and selected_profile.as_base
+                    else None
+                ),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

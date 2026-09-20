@@ -55,7 +55,7 @@ from lup.harness.notice import Banner, Notice
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.harness.terminal import host_timezone
-from lup.providers.login import ProviderLogin
+from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.sandbox.rail import (
     AccessibleRoot,
@@ -104,7 +104,7 @@ def checkout_tag(root: Path) -> str:
     return f"lup-agent:{root.name}"
 
 
-def state_volume_name(root: Path) -> str:
+def state_volume_name(root: Path, scope: NativeHomeScope | None = None) -> str:
     """The volume carrying this project's container-side config home.
 
     Per repository, and keyed on the shared git directory because that is the
@@ -119,12 +119,14 @@ def state_volume_name(root: Path) -> str:
     artifacts: the trust a fresh config home would otherwise discard, the
     session state a ``--continue`` reopens, and the stored login.
 
-    What it costs is that worktrees of one repository share a config home,
-    so trust and session history are visible across them. That is the
-    arrangement a host home already has, and it is the trade the name makes
-    plain.
+    An explicit scope partitions this state by the selected settings. Sessions
+    with different base settings then cannot rewrite one another's home;
+    sessions with the same scope retain their native login and history.
     """
-    return f"lup-cfg-{repository_layout(root).name()}"
+    repository_volume = f"lup-cfg-{repository_layout(root).name()}"
+    return (
+        scope.volume_name(repository_volume) if scope is not None else repository_volume
+    )
 
 
 def environment_directory(root: Path, cache: Path | None = None) -> Path:
@@ -1573,6 +1575,7 @@ def contained_argv(
     accessible: list[AccessibleRoot] = [],
     lease: Lease | None = None,
     devices: list[Device] = [],
+    state_scope: NativeHomeScope | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1650,7 +1653,8 @@ def contained_argv(
     name_for_checkout(tag, checkout_tag(root), client)
     reached_at = start_egress(image.egress, root.name, client, root)
     said.add(image.egress.notice(root.name))
-    said.add(superseded_volume_notice(root, client, existing_volumes(client)))
+    if state_scope is None:
+        said.add(superseded_volume_notice(root, client, existing_volumes(client)))
     # Started before the container rather than beside it, because a pipe with
     # no reader blocks its writer: a sign-in that raced the listener would
     # hang on the one step the whole bridge exists to unblock.
@@ -1742,7 +1746,7 @@ def contained_argv(
         gid=root.stat().st_gid,
         writable=lease.writable,
         read_only=lease.read_only,
-        state_volume=state_volume_name(root),
+        state_volume=state_volume_name(root, state_scope),
         config_home_env=login.config_home_env,
         credential_file=login.credentials_file,
         credential_renewable=login.renewable,

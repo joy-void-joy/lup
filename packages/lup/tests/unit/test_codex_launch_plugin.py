@@ -13,6 +13,7 @@ from lup.harness.clipboard import ClipboardBridge
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.selection import codex_config
+from lup.providers.login import NativeHomeScope
 from lup.providers.selection import SessionRequest
 from lup.providers.codex.harness_runtime import (
     CodexPluginInstaller,
@@ -58,7 +59,7 @@ def test_plugin_preparation_uses_the_actual_home_before_authentication(
         prepare=calls.prepare,
         authenticate=calls.authenticate,
     )
-    prefix = ["podman", "run", "image"] if sandbox.contained() else []
+    prefix = ["podman", "run", "-i", "image"] if sandbox.contained() else []
     home = Path("/cfg") if sandbox.contained() else tmp_path
     calls.prepare.assert_called_once_with(prefix, home)
     assert calls.mock_calls[0][0] == "prepare"
@@ -84,6 +85,28 @@ def test_failed_plugin_preparation_stops_the_launch_before_authentication(
             prepare=Mock(side_effect=RuntimeError("plugin unavailable")),
         )
     authenticate.assert_not_called()
+
+
+def test_settings_scope_reaches_the_container_volume_builder(
+    tmp_path: Path,
+    boundary: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opening = Mock(return_value=["podman", "run", "-it", "image"])
+    monkeypatch.setattr(launch, "contained_argv", opening)
+    scope = NativeHomeScope(key="codex-fixture")
+    launch.session_argv(
+        "codex",
+        [],
+        boundary,
+        Mock(hooks=None),
+        tmp_path,
+        CODEX_LOGIN,
+        launch.LaunchSandbox.OUTER,
+        {},
+        state_scope=scope,
+    )
+    assert opening.call_args.kwargs["state_scope"] == scope
 
 
 def test_container_preparation_runs_the_owned_installer_in_the_same_boundary(
@@ -113,6 +136,7 @@ def test_container_preparation_runs_the_owned_installer_in_the_same_boundary(
         "--trust-project",
         "--force",
         _env={"FIXTURE": "yes"},
+        _in=None,
     )
 
 
