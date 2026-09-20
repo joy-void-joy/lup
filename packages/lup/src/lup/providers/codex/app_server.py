@@ -85,6 +85,7 @@ class CodexAppServer:
         self.process: sh.RunningCommand | None = None
         self.reader: asyncio.Task[None] | None = None
         self.watcher: asyncio.Task[None] | None = None
+        # lup: ignore[set-shape] — task identities have no additional record
         self.handlers: set[asyncio.Task[None]] = set()
         self.closing = False
         self.exit_error: Exception | None = None
@@ -136,7 +137,7 @@ class CodexAppServer:
                     "capabilities": {"experimentalApi": True},
                 },
             )
-        except BaseException:
+        except (Exception, asyncio.CancelledError):
             await self.close()
             raise
         self.notify("initialized", {})
@@ -144,9 +145,6 @@ class CodexAppServer:
     async def close(self) -> None:
         close_error: Exception | None = None
         self.closing = True
-        for handler in self.handlers:
-            handler.cancel()
-        await asyncio.gather(*self.handlers, return_exceptions=True)
         self.input.put(None)
         reader = self.reader
         self.reader = None
@@ -158,6 +156,9 @@ class CodexAppServer:
                 reader = None
             except Exception as error:
                 close_error = error
+        for handler in self.handlers:
+            handler.cancel()
+        await asyncio.gather(*self.handlers, return_exceptions=True)
         process = self.process
         self.process = None
         if process is not None:
@@ -265,7 +266,7 @@ class CodexAppServer:
         if self.disconnect_handler is not None:
             self.disconnect_handler(error)
 
-    def spawn_handler(self, awaitable: Awaitable[None]) -> None:
+    def spawn_handler(self, awaitable: Awaitable[None]) -> asyncio.Task[None]:
         """Own asynchronous request and notification work until connection close."""
 
         async def handle() -> None:
@@ -277,6 +278,7 @@ class CodexAppServer:
         task = asyncio.create_task(handle())
         self.handlers.add(task)
         task.add_done_callback(self.handlers.discard)
+        return task
 
     async def resolve_response(self, message: RpcMessage) -> None:
         if not isinstance(message.id, int):

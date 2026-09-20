@@ -567,9 +567,8 @@ class DecoratingSession(Session):
         self.usage = usage
         self.display = display
         self.continuation = continuation
-        self.pending: set[asyncio.Task[object]] = (
-            set()
-        )  # lup: ignore[set-shape] — owned task identities carry no further fields
+        # lup: ignore[set-shape] — owned task identities carry no further fields
+        self.pending: set[asyncio.Task[object]] = set()
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
