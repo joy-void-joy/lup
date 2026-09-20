@@ -130,6 +130,45 @@ class Migration(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["CODEX_COMMAND"],
+        reason="Codex queue delivery must select the target's verified home and execution scope.",
+        steps=[
+            MigrationStep(
+                instruction="Call wake(WakePath(...), message) rather than the raw "
+                "CODEX_COMMAND. Retain the native arrival hook's home and scope "
+                "when persisting a wake path. queued now takes that WakePath, "
+                "not a thread string; missing or foreign scope leaves durable mail pending."
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "DynamicToolCall",
+            "DynamicToolCall.thread_id",
+            "DynamicToolCall.turn_id",
+            "DynamicToolCall.call_id",
+            "DynamicToolCall.tool",
+            "DynamicToolCall.arguments",
+            "CodexSchemaRebindingError",
+            "dynamic_tool",
+        ],
+        reason="Codex typed output uses a per-turn native schema and portable validation, "
+        "so submission no longer installs a thread-lifetime dynamic tool.",
+        steps=[
+            MigrationStep(
+                instruction="Pass the output model and submission gate through TurnRequest. "
+                "Remove direct dynamic_tool/DynamicToolCall use for submission; expose "
+                "application tools through MCP. Untyped turns, changed schemas and resumed "
+                "threads are supported without catching CodexSchemaRebindingError."
+            ),
+            MigrationStep(
+                instruction="Configure correction on CodexSessionConfig to bound validation "
+                "retries. Handle StructuredOutputError for exhausted output validation, "
+                "and UnsupportedCapability for native controls that cannot be enforced."
+            ),
+        ],
+    ),
+    Migration(
         subjects=["REPOSITORY_URL", "GitSource.url"],
         reason="Repository identity is configured by each consumer; the library "
         "carries no hosting account or implicit upstream URL.",
