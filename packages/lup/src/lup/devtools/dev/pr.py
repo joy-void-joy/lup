@@ -161,12 +161,30 @@ class GhReview(BaseModel):
 
 class GhCheck(BaseModel):
     """One `statusCheckRollup` element: check runs carry `name`/`status`/
-    `conclusion`; legacy status contexts only `context`."""
+    `conclusion`; legacy status contexts carry `context`/`state`."""
 
     name: str = ""
     context: str = ""
     status: str = ""
     conclusion: str = ""
+    state: str = ""
+
+    def as_check(self) -> CheckInfo:
+        """Normalize GitHub's two check payloads before computing the rollup."""
+        status, conclusion = self.status, self.conclusion
+        if not status:
+            match self.state.upper():
+                case "SUCCESS":
+                    status, conclusion = "COMPLETED", "SUCCESS"
+                case "ERROR" | "FAILURE":
+                    status, conclusion = "COMPLETED", "FAILURE"
+                case _:
+                    status, conclusion = "PENDING", ""
+        return CheckInfo(
+            name=self.name or self.context or "unknown",
+            status=status,
+            conclusion=conclusion,
+        )
 
 
 class GhPrDetail(BaseModel):
@@ -417,14 +435,7 @@ def status(
         for r in detail.reviews
     ]
 
-    checks = [
-        CheckInfo(
-            name=c.name or c.context or "unknown",
-            status=c.status,
-            conclusion=c.conclusion,
-        )
-        for c in detail.checks
-    ]
+    checks = [check.as_check() for check in detail.checks]
 
     pr_info = PRInfo(
         number=pr_number,

@@ -92,3 +92,44 @@ def test_the_status_command_reports_the_unfinished_state(
 
     reported = json.loads(capsys.readouterr().out)
     assert reported["pr"]["checks_state"] == "running"
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("SUCCESS", "passing"),
+        ("FAILURE", "failing"),
+        ("ERROR", "failing"),
+        ("PENDING", "running"),
+        ("EXPECTED", "running"),
+    ],
+)
+def test_status_command_reads_legacy_status_contexts(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    state: str,
+    expected: str,
+) -> None:
+    scripted_gh(monkeypatch, [{"context": "external-ci", "state": state}])
+
+    pr.status(branch="feature", as_json=True)
+
+    reported = json.loads(capsys.readouterr().out)
+    assert reported["pr"]["checks_state"] == expected
+    assert reported["pr"]["checks"][0]["name"] == "external-ci"
+
+
+def test_failed_legacy_status_settles_a_mixed_rollup(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    scripted_gh(
+        monkeypatch,
+        [
+            {"context": "external-ci", "state": "ERROR"},
+            {"name": "tests", "status": "IN_PROGRESS", "conclusion": ""},
+        ],
+    )
+
+    pr.status(branch="feature", as_json=True)
+
+    assert json.loads(capsys.readouterr().out)["pr"]["checks_state"] == "failing"
