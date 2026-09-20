@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### A session an application opens can be walled
+
+`SessionRequest` could say how much a session may do and nothing about what
+confined it, so an application composing `Client` reached neither boundary
+the launcher already knew how to open: the sandbox settings each adapter
+carried were reachable only by building that adapter's configuration by
+hand, and the wrapper that runs a CLI inside a container was reachable only
+as a resolver actor's.
+
+`containment` is that axis, in the launcher's own three words. `inner`
+establishes the runtime's own sandbox, `outer` starts the runtime as the
+program named in `contained_program` and stands its own sandbox down inside
+the container, and `none` is the default — what every request meant before
+the field existed, so nothing an adopter holds changes until it asks.
+
+The two runtimes render it into what each has. Claude keeps autonomy and
+containment in two fields that decide nothing about each other. Codex has
+one field for both, and takes the narrower of what the wall asks and what
+the autonomy implies, so neither can widen what the other narrowed.
+`contained_cli` writes the program an `outer` request names, for either
+runtime, defaulting to the mounts that hold a session to the tree it was
+given.
+
 ## 0.3.0 — 2026-09-19
 
 Breaking reorganisation of the library's top level. Thirty-four entries became

@@ -248,6 +248,54 @@ expressible rather than merely avoided.
 
 ---
 
+## Containing a Session
+
+Every pattern above opens a session with a program behind it, and by default
+that program runs wherever the application does — a nested agent inside a
+tool call, a background agent on a wake, each member of a cohort. The wall
+around one is `SessionRequest.containment`, in the launcher's own three
+words, and it is `none` unless a request says otherwise.
+
+| Wall | What it opens | What a request carries |
+| --- | --- | --- |
+| `none` | The runtime as the application's own configuration leaves it | Nothing; the default |
+| `inner` | The runtime's own sandbox, established where the session runs | Nothing else |
+| `outer` | A container, with the runtime's own sandbox stood down inside it | `contained_program`, the program that enters it |
+
+**`inner` is one field on each runtime and means the same thing on both.**
+Claude receives the SDK's sandbox settings; Codex receives a sandbox mode.
+Because Codex says how much a session may do by saying how far it may reach,
+a request naming both a wall and an `autonomy` lands twice on one field
+there, and the narrower of the two wins — no degree of autonomy widens the
+wall, and the wall does not widen a session that was only meant to plan.
+
+**`outer` needs a program, because a container is not something a request
+can conjure.** The image, the mount table, the credential and the login are
+the application's, so it builds the wrapper with
+`lup.devtools.harness.contained.contained_cli` and names the result:
+
+```python
+program = contained_cli(
+    run_dir / "enter.sh", image, manifest, workspace, "claude", CLAUDE_LOGIN
+)
+request = SessionRequest(
+    cwd=workspace, containment="outer", contained_program=program
+)
+```
+
+Both runtimes take that path where they would have found their own CLI —
+Claude as `cli_path`, Codex as `executable` — so neither adapter learns
+anything about containers, and the session inside one is confined by mounts
+rather than by a judgement about what a command was going to do. The lease
+defaults to the tree the session was given; `lease_for` widens it to every
+checkout of the repository, and `demoted` takes the writes away.
+
+The resolver's actor cohort is this arrangement with an actor's lease
+(`worker_cli`), which is why a cohort's members can work the same repository
+at once without reaching each other's worktrees.
+
+---
+
 ## Deferred Tool Schemas (Tool Search)
 
 Claude harnesses (the CLI and the Agent SDK alike) stop loading every tool schema upfront once the combined schemas exceed a threshold — by default 10% of the model's context window (roughly 20k tokens at 200k). Beyond it, tools are **deferred**: the agent sees only names and must load a tool through the `ToolSearch` tool before calling it. This applies to built-in, MCP, and custom SDK tools.
