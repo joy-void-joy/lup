@@ -1,10 +1,12 @@
 """Native root identity binds only the launcher member that owns the worktree."""
 
 from pathlib import Path
+import io
+import sys
 
 import pytest
 
-from lup.coordination.bare.arrival import Arrival, bind
+from lup.coordination.bare.arrival import Arrival, bind, main
 from lup.coordination.bare.store import depart, session_actor, member_of
 from lup.coordination.identity import mint_member_id
 from lup.coordination.repository import RepositoryPeers
@@ -77,3 +79,15 @@ def test_arrival_rejects_member_path_traversal(tmp_path: Path) -> None:
     )
     assert not bind(tmp_path, "../parent", "codex", arrival)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_unexpected_hook_failure_is_visible_without_echoing_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["arrival", str(tmp_path), "member", "codex"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("malformed secret payload"))
+    main()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Native session wake binding failed (JSONDecodeError)" in captured.err
+    assert "secret" not in captured.err

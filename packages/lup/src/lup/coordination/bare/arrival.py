@@ -61,8 +61,12 @@ def main() -> None:
         root, member, runtime = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
         arrival: Arrival = json.load(sys.stdin)
         bind(root, member, runtime, arrival)
-    except Exception:
-        return
+    except Exception as error:
+        print(
+            f"Native session wake binding failed ({type(error).__name__}); "
+            "check the hook input and coordination store permissions.",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

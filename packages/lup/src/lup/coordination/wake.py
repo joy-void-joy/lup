@@ -83,9 +83,8 @@ class WakePath(BaseModel, frozen=True):
     ``session_id`` and drops the frame on a mismatch. Carried beside the
     handle rather than folded into it because it answers a different question:
     the handle says where to write, and this says who has to be there for the
-    write to count. Empty asks for no check, which is the honest reading of a
-    member that never said — and the reason Codex leaves it so, its queue
-    addressing a conversation by name rather than a file anybody could bind.
+    write to count. Empty asks for no check. Codex's native hook records its
+    session id too; the queue targets the handle directly.
     """
 
 
@@ -112,7 +111,10 @@ class Woken(BaseModel, frozen=True):
     """
 
     reached: bool
-    """Whether the member has been made to look, by this call."""
+    """Whether the native socket or queue accepted the message.
+
+    Queue acceptance alone does not prove that an idle session started a turn.
+    """
 
     reason: str = ""
     """Why nothing happened, empty where something did."""
