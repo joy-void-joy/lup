@@ -31,6 +31,7 @@ from pathlib import Path
 
 import sh
 import typer
+from lup.policy.identity import POLICY_ROOT_ENV
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.live import Live
@@ -1878,6 +1879,7 @@ def contained_cli(
     terminal, so either other state would leave its runtime talking to a
     stream nothing reads.
     """
+    root = root.resolve()
     opening = contained_argv(
         image,
         manifest,
@@ -1891,6 +1893,9 @@ def contained_cli(
         lease=worker_lease(root) if lease is None else lease,
         devices=devices,
     )
+    # Bind recovery to the same source used for home preparation, regardless
+    # of the caller's later working directory or inherited policy provenance.
+    opening.extend(["env", f"{POLICY_ROOT_ENV}={root}"])
     if login.home_preparation is not None:
         preparation = login.home_preparation.command(root, Path(image.config_home))
         typer.echo(str(sh.Command(opening[0])(*opening[1:], *preparation)), nl=False)

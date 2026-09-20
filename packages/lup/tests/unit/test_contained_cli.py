@@ -7,16 +7,20 @@ container started, which needs an engine no unit test has.
 """
 
 import os
+import sys
 
 import sh
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from pydantic import BaseModel
 
 from lup.devtools.harness import contained
+from lup.policy.identity import POLICY_ROOT_ENV
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.login import ProviderLogin
 from lup.sandbox.rail import Lease, worker_lease
 
 ARGV = ["podman", "run", "-i", "image"]
@@ -25,7 +29,7 @@ ARGV = ["podman", "run", "-i", "image"]
 @pytest.fixture
 def recorded(monkeypatch: pytest.MonkeyPatch) -> Mock:
     """The argv builder, stubbed, so the call it was made with can be read."""
-    builder = Mock(return_value=ARGV)
+    builder = Mock(side_effect=lambda *args, **kwargs: list(ARGV))
     monkeypatch.setattr(contained, "contained_argv", builder)
     return builder
 
@@ -108,6 +112,8 @@ def test_codex_prepares_the_container_home_before_a_wrapper_can_start(
     assert CODEX_LOGIN.home_preparation is not None
     execute.assert_called_once_with(
         *ARGV[1:],
+        "env",
+        f"{POLICY_ROOT_ENV}={root}",
         *CODEX_LOGIN.home_preparation.command(root, Path("/private/runtime-home")),
     )
     assert wrapper.is_file()
@@ -127,3 +133,80 @@ def test_a_failed_codex_home_preparation_never_publishes_a_wrapper(
             wrapper, Mock(config_home="/cfg"), Mock(), tmp_path, "codex", CODEX_LOGIN
         )
     assert not wrapper.exists()
+
+
+class NativeInvocation(BaseModel):
+    program: str
+    arguments: list[str]
+    policy_root: str
+    cwd: str
+
+
+@pytest.mark.parametrize(
+    "program,login", [("claude", CLAUDE_LOGIN), ("codex", CODEX_LOGIN)]
+)
+def test_rendered_wrapper_binds_policy_to_its_plugin_source_across_cwd_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    program: str,
+    login: ProviderLogin,
+) -> None:
+    root = tmp_path / "application with spaces"
+    root.mkdir()
+    workspace = tmp_path / "external scratch"
+    workspace.mkdir()
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    engine = binary / "engine"
+    engine.write_text('#!/bin/sh\nshift 3\nexec "$@"\n')
+    engine.chmod(0o755)
+    reporter = """
+import json
+import os
+import sys
+from pathlib import Path
+with open(os.environ["LUP_NATIVE_PROBE_RECORD"], "a") as record:
+    record.write(json.dumps({
+        "program": Path(sys.argv[0]).name, "arguments": sys.argv[1:],
+        "policy_root": os.environ["LUP_POLICY_ROOT"], "cwd": os.getcwd(),
+    }) + "\\n")
+"""
+    for name in (program, "uv"):
+        executable = binary / name
+        executable.write_text(f"#!{sys.executable}\n{reporter}")
+        executable.chmod(0o755)
+    log = tmp_path / "invocations.jsonl"
+    monkeypatch.setenv("PATH", os.pathsep.join([str(binary), os.defpath]))
+    monkeypatch.setenv("LUP_NATIVE_PROBE_RECORD", str(log))
+    monkeypatch.setenv(POLICY_ROOT_ENV, str(tmp_path / "unrelated ambient project"))
+    monkeypatch.setattr(
+        contained,
+        "contained_argv",
+        Mock(return_value=[str(engine), "run", "-i", "image"]),
+    )
+    monkeypatch.setattr(contained, "worker_lease", lambda _root: Lease())
+    monkeypatch.chdir(tmp_path)
+    wrapper = contained.contained_cli(
+        tmp_path / "enter.sh",
+        Mock(config_home="/cfg"),
+        Mock(),
+        Path(root.name),
+        program,
+        login,
+    )
+
+    sh.Command(str(wrapper))("argument with spaces", _cwd=str(workspace))
+
+    calls = [
+        NativeInvocation.model_validate_json(line)
+        for line in log.read_text().splitlines()
+    ]
+    assert all(call.policy_root == str(root) for call in calls)
+    assert calls[-1].program == program
+    assert calls[-1].arguments == ["argument with spaces"]
+    assert calls[-1].cwd == str(workspace)
+    if login.home_preparation is not None:
+        assert calls[0].program == "uv"
+        assert (
+            calls[0].arguments == login.home_preparation.command(root, Path("/cfg"))[1:]
+        )
