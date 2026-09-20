@@ -137,6 +137,27 @@ class RenderedMigrations(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["remembered_approval", "remembered_or_asked"],
+        reason="Native execution is observation, not reusable approval authority; "
+        "both native dispatchers require explicit single-use review receipts.",
+        steps=[
+            MigrationStep(
+                instruction="Remove approval-memory lookups from policy adapters. "
+                "Keep explicit reusable grants in their declared policy scope; "
+                "historical approvals.jsonl records have no such receipt and grant "
+                "no authority. note_ran records observed execution only."
+            ),
+            MigrationStep(
+                instruction="Regenerate both plugins. For unresolved native asks, "
+                "inspect the named review with dev questions show and answer or "
+                "reject it from an operator terminal. A recorded answer releases "
+                "one exact retry; native auto-mode and execution cannot answer it. "
+                "dev hooks approvals and forget inspect or retire observations "
+                "without changing authorization."
+            ),
+        ],
+    ),
+    Migration(
         subjects=["JoinDesk", "JoinDesk.__init__"],
         reason="Concurrent resolver joins require concern-owned checkpoint directories.",
         steps=[
