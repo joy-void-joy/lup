@@ -187,16 +187,16 @@ def test_a_request_costs_nothing_to_state_and_is_contained_when_opened(
     request = SessionRequest(cwd=workspace)
 
     assert runtime.login.config_home_env not in request.environment
-    assert runtime.login.config_home_env in runtime.contained(request).environment
+    assert runtime.login.config_home_env in runtime.homed(request).environment
 
 
 @pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
-def test_a_request_naming_no_workspace_has_nothing_to_be_contained_against(
+def test_a_request_naming_no_workspace_has_no_home_to_be_given(
     runtime: Runtime,
 ) -> None:
     request = SessionRequest()
 
-    assert runtime.contained(request) == request
+    assert runtime.homed(request) == request
 
 
 class GatedOutput(BaseModel):

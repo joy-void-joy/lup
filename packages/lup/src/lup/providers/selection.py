@@ -123,9 +123,9 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
     def session_factory(self, request: SessionRequest) -> Client:
         """Open a session factory for this runtime from a portable request."""
-        return self.open(self.contained(request))
+        return self.open(self.homed(request))
 
-    def contained(self, request: SessionRequest) -> SessionRequest:
+    def homed(self, request: SessionRequest) -> SessionRequest:
         """The same request, its sessions pointed at a home of the workspace's own.
 
         Derived when a session is opened rather than when a request is built.
@@ -137,7 +137,7 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
         through the other would point it at a directory no CLI there reads.
 
         A request naming no working directory is returned untouched — there
-        is no workspace to contain it against.
+        is no workspace to home it against.
         """
         if request.cwd is None:
             return request
