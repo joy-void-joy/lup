@@ -156,10 +156,9 @@ def test_the_rendered_guard_names_both_commits_when_they_have_parted(
 ) -> None:
     """The line a session is handed, over a branch built the way an update builds it."""
     upstream = repository(tmp_path / "upstream")
-    (upstream / "src" / "lup_template").mkdir(parents=True)
-    (upstream / "src" / "lup_template" / "serve.py").write_text("x = 1\n")
-    (upstream / "tests").mkdir()
-    (upstream / "tests" / "test_serve.py").write_text("assert True\n")
+    for root in scaffold.SCAFFOLD_ROOTS:
+        (upstream / root.upstream).mkdir(parents=True)
+        (upstream / root.upstream / "serve.py").write_text("x = 1\n")
     base = committed(upstream, "the scaffold")
 
     project = repository(tmp_path / "project")
