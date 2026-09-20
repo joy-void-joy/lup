@@ -64,6 +64,15 @@ type DisconnectHandler = Callable[[Exception], None]
 type OutgoingRpcMessage = RpcRequest | RpcNotification | RpcSuccess | RpcFailure
 
 
+def native_environment(overrides: EnvVars) -> EnvVars:
+    """Resolve the environment inherited by one native process boundary."""
+    environment = dict(
+        os.environ  # lup: ignore[os-environ] — native process boundary inheritance
+    )
+    environment.update(overrides)
+    return environment
+
+
 class CodexAppServer:
     """One initialized app-server process and routed JSON-RPC connection."""
 
@@ -103,11 +112,7 @@ class CodexAppServer:
         def receive_error(line: str) -> None:
             self.stderr.append(line)
 
-        environment = dict(
-            # lup: ignore[os-environ] — native process boundary inherits ambient variables
-            os.environ
-        )
-        environment.update(self.environment)
+        environment = native_environment(self.environment)
         command = sh.Command(str(self.executable))
         running = command(
             *self.arguments,

@@ -10,7 +10,7 @@ import lup.devtools.harness.launch as launch
 import lup.providers.codex.install as installation
 import lup.providers.codex.runtime as runtime
 from lup.harness.clipboard import ClipboardBridge
-from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.selection import codex_config
 from lup.providers.login import NativeHomeScope
@@ -228,3 +228,92 @@ async def test_custom_host_executables_still_need_host_policy_checks(
 def test_outer_boundary_requires_a_container_executable(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="prepared container executable"):
         runtime.CodexSessionConfig(cwd=tmp_path, containment="outer")
+
+
+@pytest.mark.parametrize("containment", ["none", "inner"])
+@pytest.mark.parametrize(
+    ("explicit", "ambient", "expected"),
+    [
+        ("explicit-home", "ambient-home", "explicit-home"),
+        (None, "ambient-home", "ambient-home"),
+        (None, None, "user-home/.codex"),
+        ("", "ambient-home", "user-home/.codex"),
+    ],
+)
+async def test_host_policy_and_process_use_the_same_resolved_native_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    containment: str,
+    explicit: str | None,
+    ambient: str | None,
+    expected: str,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+    if ambient is None:
+        monkeypatch.delenv(CODEX_HOME, raising=False)
+    else:
+        monkeypatch.setenv(CODEX_HOME, str(tmp_path / ambient))
+    environment = (
+        {CODEX_HOME: str(tmp_path / explicit) if explicit else ""}
+        if explicit is not None
+        else {}
+    )
+    calls = Mock()
+    monkeypatch.setattr(runtime, "install_declared_policy", calls.policy)
+    server = Mock(start=AsyncMock(), close=AsyncMock())
+    calls.server.return_value = server
+    monkeypatch.setattr(runtime, "CodexAppServer", calls.server)
+    config = runtime.CodexSessionConfig.model_validate(
+        {"cwd": tmp_path, "containment": containment, "environment": environment}
+    )
+
+    async with runtime.CodexSessionOpener(config).open_session():
+        server.start.assert_awaited_once()
+
+    home = tmp_path / expected
+    calls.policy.assert_called_once_with(home, tmp_path, seed=False)
+    assert calls.server.call_args.kwargs["environment"][CODEX_HOME] == str(home)
+    assert calls.mock_calls[0][0] == "policy"
+    assert calls.mock_calls[1][0] == "server"
+    assert config.environment == environment
+    server.close.assert_awaited_once()
+
+
+async def test_host_policy_failure_stops_before_constructing_the_native_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(CODEX_HOME, str(tmp_path / "codex-home"))
+    policy = Mock(side_effect=RuntimeError("declared plugin unavailable"))
+    native = Mock()
+    monkeypatch.setattr(runtime, "install_declared_policy", policy)
+    monkeypatch.setattr(runtime, "CodexAppServer", native)
+
+    with pytest.raises(RuntimeError, match="declared plugin unavailable"):
+        async with runtime.CodexSessionOpener(
+            runtime.CodexSessionConfig(cwd=tmp_path)
+        ).open_session():
+            pytest.fail("a policy failure must prevent native startup")
+
+    policy.assert_called_once_with(tmp_path / "codex-home", tmp_path, seed=False)
+    native.assert_not_called()
+
+
+async def test_a_project_without_declared_policy_opens_with_its_native_default_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(CODEX_HOME, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+    server = Mock(start=AsyncMock(), close=AsyncMock())
+    native = Mock(return_value=server)
+    monkeypatch.setattr(runtime, "CodexAppServer", native)
+    home = tmp_path / "user-home" / ".codex"
+
+    async with runtime.CodexSessionOpener(
+        runtime.CodexSessionConfig(cwd=tmp_path)
+    ).open_session():
+        server.start.assert_awaited_once()
+
+    assert home.is_dir()
+    assert list(home.iterdir()) == []
+    assert native.call_args.kwargs["environment"][CODEX_HOME] == str(home)
+    server.close.assert_awaited_once()

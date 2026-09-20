@@ -12,7 +12,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
+from lup.providers.codex.app_server import (
+    CodexAppServer,
+    RpcMessage,
+    RpcNotification,
+    native_environment,
+)
 from lup.providers.codex.hooks import (
     APPROVAL_METHODS,
     CodexApprovalResponder,
@@ -20,7 +25,7 @@ from lup.providers.codex.hooks import (
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
 from lup.providers.selection import SessionContainment
-from lup.providers.codex.login import CODEX_HOME
+from lup.providers.codex.login import CODEX_HOME, native_home
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
 from lup.providers.codex.subagents import CodexSubagentTools
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
@@ -985,10 +990,16 @@ class CodexSessionOpener:
                 },
             }
         )
-        if config.containment != "outer" and CODEX_HOME in config.environment:
-            home = Path(config.environment[CODEX_HOME])
+        if config.containment != "outer":
+            effective = native_environment(config.environment)
+            home = native_home(effective)
+            if not effective.get(CODEX_HOME):
+                home.mkdir(mode=0o700, parents=True, exist_ok=True)
             install_declared_policy(
                 home, config.cwd, seed=CodexWorktreeHomeStore().derived(home)
+            )
+            config = config.model_copy(
+                update={"environment": {**config.environment, CODEX_HOME: str(home)}}
             )
         server = CodexAppServer(
             config.executable,

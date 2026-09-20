@@ -8,6 +8,7 @@ session runtime in to get them.
 from pathlib import Path
 
 from lup.providers.login import HomePreparation, ProviderLogin
+from lup.types import EnvVars
 
 # lup: ignore[constant-declaration] — the environment variable Codex reads
 CODEX_HOME = "CODEX_HOME"
@@ -34,3 +35,17 @@ Codex's account API to validate or renew the selected login inside the session
 boundary, choosing browser login when its callback can reach the session and
 device authentication when the container holds a separate loopback interface.
 """
+
+
+def native_home(environment: EnvVars) -> Path:
+    """The home Codex selects from its effective process environment.
+
+    Codex ignores an empty CODEX_HOME and otherwise canonicalizes it. Its
+    default is the effective user's home with the adapter's declared suffix.
+    """
+    if configured := environment.get(CODEX_HOME):
+        return Path(configured).resolve()
+    # lup: ignore[dict-get] — HOME is an optional name in the process environment
+    user_home = environment.get("HOME")
+    base = Path(user_home) if user_home else Path.home()
+    return (base / CODEX_LOGIN.ambient_home.name).resolve()

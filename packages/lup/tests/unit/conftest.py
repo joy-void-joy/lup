@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from lup.workspace import paths
+from lup.providers.codex.login import CODEX_HOME
 from tests.unit.doubles import FakeAppServer
 
 LUP_PROJECT_VERSION = "1.2.3"
@@ -25,6 +26,9 @@ def tmp_lup_project(tmp_path: Path) -> Iterator[Path]:
 
 
 @pytest.fixture
-def fake_app_server(tmp_path: Path) -> FakeAppServer:
+def fake_app_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeAppServer:
     """A scriptable app-server child, rooted in this test's temporary directory."""
+    home = tmp_path / "codex-home"
+    home.mkdir()
+    monkeypatch.setenv(CODEX_HOME, str(home))
     return FakeAppServer(root=tmp_path)
