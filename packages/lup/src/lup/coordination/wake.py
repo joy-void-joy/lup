@@ -26,7 +26,9 @@ where lup puts the sockets so that case is rare rather than ordinary; this is
 what makes it harmless when it happens anyway.
 
 An unavailable native route leaves durable mail pending and reports why no
-wake was attempted. Queue acceptance does not prove an idle turn started.
+wake was attempted. An owned stdio coordination server can relay its own mail
+through the target's local queue. Queue acceptance does not prove an idle turn
+started.
 """
 
 import json
@@ -223,10 +225,10 @@ def queued(
             error_type="UnboundNativeRoute",
         )
     if path.scope != execution_scope():
-        # lup: defer: Add an owned execution bridge before supporting Codex wake across container boundaries.
+        # lup: solved: Add an owned execution bridge before supporting Codex wake across container boundaries.
         return Woken(
             reached=False,
-            reason="Codex wake cannot cross this execution boundary; durable mail remains pending until the peer next acts.",
+            reason="Direct Codex wake cannot cross this execution boundary; durable mail remains pending for the peer's owned inbox relay or its next activity.",
             error_type="ForeignExecutionScope",
         )
     try:
