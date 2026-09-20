@@ -49,6 +49,13 @@ class EmptyGh:
         return "[]"
 
 
+class SilentFailedPush:
+    """A failed transport need not write a diagnostic to stderr."""
+
+    def __call__(self, *arguments: str) -> str:
+        raise sh.ErrorReturnCode_128("git push", b"", b"")
+
+
 class UnreachableGit:
     """A git whose ls-remote never reaches the host."""
 
@@ -93,6 +100,24 @@ def test_a_push_that_landed_complains_about_nothing(
     assert reported["pushed"] is True
     assert reported["push_complaint"] == ""
     assert (tmp_path / "lup" / "branches" / "feat-thing.json").is_file()
+
+
+def test_a_silent_failed_push_stops_the_command_chain(
+    no_pr: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pr, "git", SilentFailedPush())
+
+    with pytest.raises(typer.Exit) as caught:
+        pr.push(force=False, as_json=True)
+
+    reported = json.loads(capsys.readouterr().out)
+    assert caught.value.exit_code == 1
+    assert reported["pushed"] is False
+    assert "128" in reported["push_complaint"]
+    assert not (tmp_path / "lup" / "branches" / "feat-thing.json").exists()
 
 
 def test_a_branch_the_remote_never_received_is_named_as_such(

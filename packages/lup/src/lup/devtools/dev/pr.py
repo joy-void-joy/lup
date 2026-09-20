@@ -769,14 +769,16 @@ def push(
     destination = f"refs/heads/{branch_name}:refs/heads/{branch_name}"
 
     complaint = ""
+    pushed = False
     try:
         forced = ["--force"] if force else []
         git("push", *forced, "origin", destination)
+        pushed = True
         records.remember(
             branch_name, records.BranchRecord(upstream=f"origin/{branch_name}")
         )
     except sh.ErrorReturnCode as e:
-        complaint = decode_stderr(e)
+        complaint = decode_stderr(e) or f"git push exited with status {e.exit_code}"
         typer.echo(f"Push failed: {complaint}", err=True)
 
     existing_pr = None
@@ -801,14 +803,14 @@ def push(
 
     result = PushResult(
         branch=branch_name,
-        pushed=not complaint,
+        pushed=pushed,
         force=force,
         existing_pr=existing_pr,
         push_complaint=complaint,
         upstream=records.recorded_upstream(branch_name),
     )
     output_result(result, as_json)
-    if complaint:
+    if not pushed:
         raise typer.Exit(1)
 
 
