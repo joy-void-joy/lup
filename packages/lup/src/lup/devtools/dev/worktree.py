@@ -10,6 +10,7 @@ import typer
 from pydantic import BaseModel
 
 import lup.devtools.dev.records as records
+from lup.coordination.repository import RepositoryPeers
 from lup.devtools.dev.git_guards import (
     DECLARED_GUARDS,
     GitGuard,
@@ -825,6 +826,28 @@ def list_worktrees() -> None:
     )
 
 
+def live_worktree_owners(path: Path) -> list[str]:
+    """Live launched sessions using a checkout, including one that is clean."""
+    return [
+        member.cli_name or member.actor.label()
+        for member in RepositoryPeers(path).present()
+        if member.running
+        and member.worktree
+        and Path(member.worktree).resolve() == path.resolve()
+    ]
+
+
+def refuse_live_worktree_removal(path: Path) -> None:
+    """Recheck ownership immediately before the irreversible removal."""
+    if owners := live_worktree_owners(path):
+        typer.echo(
+            f"Refusing to remove {path}: live sessions {', '.join(owners)} use it. "
+            "Wait for their departure; --force does not override live ownership.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
 def remove(name: str, force: bool) -> None:
     """Remove a git worktree.
 
@@ -847,6 +870,7 @@ def remove(name: str, force: bool) -> None:
         raise typer.Exit(1)
 
     try:
+        refuse_live_worktree_removal(path)
         args = ["worktree", "remove", str(path)]
         if force:
             args.append("--force")

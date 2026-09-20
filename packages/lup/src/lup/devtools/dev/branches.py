@@ -2070,6 +2070,8 @@ def outgrew_upstream(name: str) -> bool:
 
 def plan_worktree_step(path: str, stranded: bool, force: bool) -> PlannedAction:
     """Judge the worktree removal — the one irreversible step."""
+    from lup.devtools.dev.worktree import live_worktree_owners
+
     if stranded:
         return PlannedAction(
             description=f"Prune stranded worktree: {path}",
@@ -2077,6 +2079,12 @@ def plan_worktree_step(path: str, stranded: bool, force: bool) -> PlannedAction:
         )
 
     description = f"Remove worktree: {path}"
+    if owners := live_worktree_owners(Path(path)):
+        return PlannedAction(
+            description=description,
+            verdict="refused",
+            detail=f"live sessions {', '.join(owners)} use this checkout; wait for their departure",
+        )
     lock = locked_worktrees().get(path)
     if lock is not None:
         return PlannedAction(
@@ -2394,6 +2402,8 @@ def worktree_left_as_mount_point(path: str) -> bool:
 
 def run_deletion(plan: DeletionPlan, force: bool) -> None:
     """Carry out a plan whose preflight passed, reporting what actually ran."""
+    from lup.devtools.dev.worktree import refuse_live_worktree_removal
+
     completed: list[str] = []
 
     match plan:
@@ -2407,6 +2417,7 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
                     plan, completed, f"prune failed: {attributed_stderr(error)}"
                 )
         case DeletionPlan(worktree=str() as worktree):
+            refuse_live_worktree_removal(Path(worktree))
             try:
                 git("worktree", "remove", *(["--force"] if force else []), worktree)
                 typer.echo(f"Removed worktree: {worktree}")
