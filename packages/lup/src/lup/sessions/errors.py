@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.events import AnyTurnBlock, TurnIdentifiers
+from lup.sessions.events import AnyTurnBlock, TurnIdentifiers, TurnMessage
 from lup.types import Usage
 
 
@@ -23,6 +23,7 @@ class TurnFailure(BaseModel, frozen=True):
 
     message: str
     blocks: list[AnyTurnBlock] = []
+    messages: list[TurnMessage] = []
     usage: Usage = Field(default_factory=Usage)
     duration: timedelta = timedelta()
     identifiers: TurnIdentifiers | None = None
@@ -103,6 +104,10 @@ class TurnAbortedError(TurnError):
 
 class StructuredOutputError(TurnError):
     """A required valid submission was not produced."""
+
+
+class TurnContinuationError(TurnError):
+    """A completion hook requires bounded follow-up work before the turn may end."""
 
 
 class TurnAlreadyActiveError(RuntimeError):

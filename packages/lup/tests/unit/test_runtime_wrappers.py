@@ -24,6 +24,7 @@ from lup.sessions.errors import (
     StructuredOutputError,
     TurnFailure,
     TurnTimeoutError,
+    TurnContinuationError,
 )
 from lup.sessions.capabilities import EventStream, Steer
 from lup.sessions.events import (
@@ -34,6 +35,7 @@ from lup.sessions.events import (
     TurnIdentifiers,
     TurnId,
     TurnInput,
+    TurnRequest,
     TurnTextBlock,
     TurnToolCallBlock,
     TurnToolResultBlock,
@@ -584,7 +586,8 @@ class RecordingSteer(Steer):
 
 
 @pytest.mark.asyncio
-async def test_retry_joins_live_events_and_retargets_steer() -> None:
+@pytest.mark.parametrize("continuation", [False, True])
+async def test_retry_joins_live_events_and_retargets_steer(continuation: bool) -> None:
     binder = RecordingBinder()
     steered: list[str] = []
     first_drained = asyncio.Event()
@@ -603,6 +606,8 @@ async def test_retry_joins_live_events_and_retargets_steer() -> None:
         async def complete() -> CompletedTurn:
             if turn_sequence == 1:
                 await first_drained.wait()
+                if continuation:
+                    raise TurnContinuationError(TurnFailure(message="finish the tests"))
                 raise ProviderTurnError(TurnFailure(message="retry"))
             return CompletedTurn()
 
@@ -623,6 +628,7 @@ async def test_retry_joins_live_events_and_retargets_steer() -> None:
         recovery=RecoveryConfig(retries=1),
         correction=None,
         persistence=None,
+        continuation=CorrectionConfig(cycles=1) if continuation else None,
     )
     handle = await session.start(turn_request("hello"))
     events = handle.events
@@ -648,3 +654,60 @@ async def test_retry_joins_live_events_and_retargets_steer() -> None:
     assert steered == ["steer-2:focus"]
     assert result.output is None
     assert second_drained.is_set()
+
+
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize("always_block", [False, True])
+async def test_completion_hook_continuation_is_bounded_and_preserves_feedback(
+    typed: bool, always_block: bool
+) -> None:
+    binder = RecordingBinder()
+    prompts: list[str] = []
+    submissions = 0
+
+    async def start(text: str) -> AcceptedTurn:
+        prompts.append(text)
+        sequence = len(prompts)
+
+        async def complete() -> CompletedTurn:
+            nonlocal submissions
+            if sequence == 1 or always_block:
+                raise TurnContinuationError(
+                    TurnFailure(
+                        message="Run the missing verification",
+                        usage=Usage(input_tokens=3),
+                    )
+                )
+            if binder.current is not None:
+                binder.current.store.write(WrappedOutput(value=7))
+                submissions += 1
+            return CompletedTurn(usage=Usage(input_tokens=3))
+
+        return accepted(sequence, complete)
+
+    session = DecoratingSession(
+        ComposedSession(start, binder),
+        timeout=None,
+        budget=None,
+        recovery=None,
+        correction=None,
+        persistence=None,
+        continuation=CorrectionConfig(cycles=1, instruction="Finish the hook request."),
+    )
+    request = TurnRequest[WrappedOutput | None](
+        input=TurnInput(text="work"), output_type=WrappedOutput if typed else None
+    )
+    handle = await session.start(request)
+    if always_block:
+        with pytest.raises(TurnContinuationError) as raised:
+            await handle.turn.result()
+        assert raised.value.failure.usage.input_tokens == 6
+        assert submissions == 0
+    else:
+        result = await handle.turn.result()
+        assert result.usage.input_tokens == 6
+        assert result.output == (WrappedOutput(value=7) if typed else None)
+        assert submissions == int(typed)
+    assert len(prompts) == 2
+    assert "Run the missing verification" in prompts[1]
+    await session.close()
