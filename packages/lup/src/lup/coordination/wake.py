@@ -94,6 +94,11 @@ class WakePath(BaseModel, frozen=True):
     scope: str = ""
     """Execution identity proving this process can address that home and daemon."""
 
+    @property
+    def receiver_local(self) -> bool:
+        """Whether this transport can relay durable mail from its own boundary."""
+        return self.runtime == "codex"
+
 
 def declared_wake(
     runtime: str, handle: str, session: str = "", home: str = "", scope: str = ""
@@ -129,8 +134,17 @@ class Woken(BaseModel, frozen=True):
     reason: str = ""
     """Why nothing happened, empty where something did."""
 
+    error_type: str = ""
+    """Safe failure category for diagnostics that must not echo native arguments."""
 
-def wake(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
+
+def wake(
+    path: WakePath,
+    message: str,
+    cwd: Path | None = None,
+    *,
+    queue_timeout_seconds: float = 20.0,
+) -> Woken:
     """Make one member look at what is waiting.
 
     Never raises on a failed wake. The mail is already written by the time
@@ -141,7 +155,7 @@ def wake(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
     """
     match path.runtime:
         case "codex" if path.handle:
-            return queued(path, message, cwd)
+            return queued(path, message, cwd, queue_timeout_seconds)
         case "claude" if path.handle:
             return injected(Path(path.handle), message, path.session)
         case _:
@@ -195,7 +209,9 @@ def injected(
     return Woken(reached=True)
 
 
-def queued(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
+def queued(
+    path: WakePath, message: str, cwd: Path | None = None, timeout: float = 20.0
+) -> Woken:
     """Hand a message to Codex's queue; reached means the queue accepted it.
 
     Acceptance does not establish that an idle session started a turn.
@@ -204,12 +220,14 @@ def queued(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
         return Woken(
             reached=False,
             reason="Codex wake has no verified target home and execution scope; durable mail remains pending.",
+            error_type="UnboundNativeRoute",
         )
     if path.scope != execution_scope():
         # lup: defer: Add an owned execution bridge before supporting Codex wake across container boundaries.
         return Woken(
             reached=False,
             reason="Codex wake cannot cross this execution boundary; durable mail remains pending until the peer next acts.",
+            error_type="ForeignExecutionScope",
         )
     try:
         QUEUE_COMMAND(
@@ -221,10 +239,12 @@ def queued(path: WakePath, message: str, cwd: Path | None = None) -> Woken:
             "--message",
             message,
             _cwd=str(cwd) if cwd else None,
+            _timeout=timeout,
         )
     except Exception as failure:
         return Woken(
             reached=False,
             reason=f"codex queue did not reach {path.handle!r}: {failure}",
+            error_type=type(failure).__name__,
         )
     return Woken(reached=True)

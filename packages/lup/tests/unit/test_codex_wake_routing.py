@@ -49,6 +49,7 @@ def test_queue_selects_target_home_and_preserves_argument_boundaries(
         "--message",
         "look at durable mail",
         _cwd=str(tmp_path),
+        _timeout=20.0,
     )
 
 
