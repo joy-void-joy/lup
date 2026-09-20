@@ -54,8 +54,11 @@ part of probing.
 - {{ authentication_fixture }} covers account refresh, post-login verification,
   redacted failures, explicit unverified continuation, and the same host/container
   command boundary used for the session. These fixtures do not prove a live
-  model request or implicit MCP handshake. Named-profile account checks are
-  explicitly unavailable, not substituted with checks of the base configuration.
+  model request or implicit MCP handshake. Contained launches materialize the
+  selected base/profile settings in the actual home before checking its account.
+  Host CLI named-profile account checks remain explicitly unavailable because
+  `account/read` cannot select a profile. SDK named profiles are refused before
+  startup; use the intended configured home or explicit supported settings.
 
 ## Explicit release gaps
 
@@ -73,11 +76,11 @@ part of probing.
   app-server thread configuration cannot prove that per-subagent restriction;
   the restriction is never silently widened.
 - Both generated dispatchers map a session's declared identity to edit
-  autonomy, taking it from the launcher's environment and, on Claude, from the
-  hook payload as well. Deterministic dispatcher fixtures pin both channels
-  against the installed hook; live confirmation that a native payload carries
-  the agent identity is owed by the nightly lane. The environment channel needs
-  no such confirmation — the launcher writes what it declares.
+  autonomy, taking it from the launcher's environment or the native hook
+  payload. Captured Codex 0.155.1 tool events carry `agent_type`; dispatcher
+  fixtures verify that declared worker names receive their declared edit
+  allowance and human-owned files still require approval. Plugin-qualified
+  names are accepted only where the adapter declares that spelling.
 - Live authenticated provider smoke tests remain locally opt-in through the
   integration marker, run on the credentials-gated nightly lane, and are not
   inferred from unit fixtures.
