@@ -244,3 +244,30 @@ def test_setup_checkpoint_honors_the_committed_branch(
     found = sync.existing_upstream(project)
     assert found is not None
     assert sync.checkpoint(project, found) == expected
+
+
+def test_an_existing_cache_for_another_repository_cannot_be_read_or_mounted(
+    registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone = tmp_path / "cached"
+    git = initialized_repo(clone, tmp_path / "hooks")
+    commit_file(git, clone, "file", "base", "base")
+    git("remote", "add", "origin", str(tmp_path / "different"))
+    monkeypatch.setattr(sync, "cached_clone", lambda _name: clone)
+    (registry / "sync.json.local").write_text(
+        json.dumps(
+            {
+                "projects": [
+                    {
+                        "name": "source",
+                        "url": str(tmp_path / "wanted"),
+                        "mount": "ro",
+                    }
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(typer.Exit):
+        sync.status_cmd()
+    assert sync.accessible_roots(lambda _line: None) == []

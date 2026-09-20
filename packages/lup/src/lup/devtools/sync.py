@@ -485,15 +485,7 @@ def registered_upstream(
     """
     if not (path / ".git").exists() and not bare_repository(path):
         return Upstream(checkout=path)
-    url = proj.get("url", "")
-    pointing = registered_elsewhere(path, url)
-    if pointing:
-        report(
-            f"The registered checkout at {path} points at {pointing}, "
-            f"but '{proj['name']}' names {url}. Correct the registration "
-            "before fetching or reviewing it."
-        )
-        raise typer.Exit(1)
+    require_registered_origin(proj, path, report)
     branch = clone_branch(proj, path)
     attached = path / "tree" / branch
     remote = proj.get("review_from", "remote") == "remote" and bool(
@@ -566,7 +558,10 @@ def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     if path and Path(path).exists():
         return registered_upstream(proj, Path(path))
     repository = cached_clone(proj["name"])
-    return None if repository is None else clone_upstream(proj, repository)
+    if repository is None:
+        return None
+    require_registered_origin(proj, repository, typer.echo)
+    return clone_upstream(proj, repository)
 
 
 def openable(
@@ -821,6 +816,21 @@ def registered_elsewhere(repository: Path, url: str) -> str:
     return "" if not found or found == url else found
 
 
+def require_registered_origin(
+    proj: ProjectEntry, repository: Path, report: Callable[[str], None]
+) -> None:
+    """Verify a cached or explicit checkout before reading, fetching, or mounting."""
+    url = proj.get("url", "")
+    pointing = registered_elsewhere(repository, url)
+    if pointing:
+        report(
+            f"The registered checkout at {repository} points at {pointing}, "
+            f"but '{proj['name']}' names {url}. Correct the registration "
+            "before fetching or reviewing it."
+        )
+        raise typer.Exit(1)
+
+
 def ensure_local(
     proj: ProjectEntry,
     report: Callable[[str], None] = typer.echo,
@@ -872,15 +882,7 @@ def ensure_local(
         repository = bare_path(name)
         clone_bare(url, repository, report)
     else:
-        pointing = registered_elsewhere(repository, url)
-        if pointing:
-            report(
-                f"The clone at {repository} points at {pointing}, and '{name}' "
-                f"is registered as {url}. Two projects on this machine are "
-                "registering different repositories under one name; rename one "
-                "registration, or remove that directory to re-clone."
-            )
-            raise typer.Exit(1)
+        require_registered_origin(proj, repository, report)
         refresh(name, repository, report)
 
     branch = clone_branch(proj, repository)
