@@ -165,7 +165,7 @@ class RenamePlan(BaseModel):
     files: list[RenamedFile]
 
 
-class PositionInput(BaseModel):
+class PositionInput(BaseModel, extra="forbid"):
     """A symbol named by where it sits."""
 
     path: str = Field(
@@ -187,7 +187,7 @@ class RenameInput(PositionInput):
     new_name: str = Field(description="The identifier to rename the symbol to.")
 
 
-class DocumentInput(BaseModel):
+class DocumentInput(BaseModel, extra="forbid"):
     """A whole file to enumerate."""
 
     path: str = Field(
@@ -202,6 +202,44 @@ class DocumentInput(BaseModel):
 def path_of(uri: str) -> str:
     """The filesystem path a `file:` URI names."""
     return Path(unquote(urlparse(uri).path)).as_posix()
+
+
+def pointed(file: Path, params: PositionInput) -> None:
+    """Refuse a position that lands on no symbol at all.
+
+    A language server asked about whitespace answers nothing, and nothing
+    arrives as an empty result — which reads as *this symbol has no
+    references* rather than as *you did not name a symbol*. The two are
+    opposite conclusions and the caller cannot tell them apart, so the one
+    that is a mistake is refused here instead of being answered emptily.
+
+    The column defaults to zero, the first character of the line: right for
+    a name at the margin and whitespace for everything indented, so this
+    catches the mistake the default invites.
+
+    What it cannot catch is a column that lands inside the line on the wrong
+    token — a bracket, a keyword, a neighbouring name — because which
+    characters make a symbol is the language's answer and this module names
+    no language. An empty result from a position inside the line is a real
+    answer from the server, and stays one.
+    """
+    lines = file.read_text(encoding="utf-8").splitlines()
+    if not 1 <= params.line <= len(lines):
+        raise ToolError(
+            f"{file} has {len(lines)} lines, so line {params.line} is not one "
+            "of them. Line numbers are one-based, as list_symbols reports them."
+        )
+    line = lines[params.line - 1]
+    if params.column < len(line) and not line[params.column].isspace():
+        return
+    sits = "is past the end of" if params.column >= len(line) else "is whitespace in"
+    raise ToolError(
+        f"column {params.column} {sits} line {params.line} of {file}, so it "
+        f"names no symbol. The column is zero-based and points at the name "
+        f"itself, not at the line holding it:\n{line}\n"
+        "list_symbols reports the line a name is on; count its column from "
+        "the start of that line, counting the indentation."
+    )
 
 
 def sites_of(result: JsonValue) -> list[SymbolSite]:
@@ -302,6 +340,7 @@ def create_codeintel_tools(
 
     async def at_position(method: str, params: PositionInput) -> JsonValue:
         resolved = located(params.path)
+        pointed(resolved, params)
 
         async def run() -> JsonValue:
             async with lsp_session(
@@ -323,6 +362,7 @@ def create_codeintel_tools(
     @lup_tool(FIND_REFERENCES.description, name=FIND_REFERENCES.name)
     async def find_references(params: PositionInput) -> SiteList:
         resolved = located(params.path)
+        pointed(resolved, params)
 
         async def run() -> JsonValue:
             async with lsp_session(
@@ -375,6 +415,7 @@ def create_codeintel_tools(
     @lup_tool(RENAME_SYMBOL.description, name=RENAME_SYMBOL.name)
     async def rename_symbol(params: RenameInput) -> RenamePlan:
         resolved = located(params.path)
+        pointed(resolved, params)
 
         async def run() -> JsonValue:
             async with lsp_session(
