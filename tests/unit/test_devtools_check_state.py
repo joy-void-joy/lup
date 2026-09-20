@@ -72,19 +72,25 @@ def test_each_state_prints_its_own_marker() -> None:
     assert len(markers) == len(pr.ChecksState)
 
 
-def scripted_gh(monkeypatch: pytest.MonkeyPatch, checks: list[dict[str, str]]) -> None:
+def scripted_gh(
+    monkeypatch: pytest.MonkeyPatch, checks: list[dict[str, str]]
+) -> Recorder:
     """Answer the two `gh` queries `pr.status` makes, in the order it makes them."""
     listing = json.dumps([{"number": 193, "title": "feat: thing", "url": "u"}])
-    detail = json.dumps({"statusCheckRollup": checks, "reviews": []})
+    detail = json.dumps(
+        {"statusCheckRollup": checks, "reviews": [], "baseRefName": "release"}
+    )
     monkeypatch.setattr(utils, "repository_slug", lambda: "owner/name")
-    monkeypatch.setattr(pr, "gh", Recorder([listing, detail]))
+    recorder = Recorder([listing, detail])
+    monkeypatch.setattr(pr, "gh", recorder)
+    return recorder
 
 
 def test_the_status_command_reports_the_unfinished_state(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The JSON a sweep reads carries `running`, not a truthy field."""
-    scripted_gh(
+    recorder = scripted_gh(
         monkeypatch, [{"name": "check", "status": "IN_PROGRESS", "conclusion": ""}]
     )
 
@@ -92,6 +98,8 @@ def test_the_status_command_reports_the_unfinished_state(
 
     reported = json.loads(capsys.readouterr().out)
     assert reported["pr"]["checks_state"] == "running"
+    assert reported["pr"]["base_ref"] == "release"
+    assert "baseRefName" in recorder.calls[1][-1]
 
 
 @pytest.mark.parametrize(

@@ -211,6 +211,7 @@ class PRInfo(BaseModel):
     number: int
     title: str
     url: str
+    base_ref: str = ""
     review_decision: str
     mergeable: str
     checks_state: ChecksState
@@ -417,7 +418,7 @@ def status(
                 str(pr_number),
                 *repository_arguments(),
                 "--json",
-                "reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision",
+                "reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision,baseRefName",
             )
         )
     except sh.ErrorReturnCode as e:
@@ -441,6 +442,7 @@ def status(
         number=pr_number,
         title=pr_data.title,
         url=pr_data.url,
+        base_ref=detail.base_ref,
         review_decision=detail.review_decision,
         mergeable=detail.mergeable,
         checks_state=rollup_state(checks),
