@@ -14,6 +14,7 @@ from lup.policy.assets.host import approval_fingerprint, approvals_log
 from lup.policy.relay import Answer, QuestionRelay, ReceiptKind
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.types import JsonObject
+from tests.unit.native import codex_denial, codex_effect
 from tests.unit.repos import commit_file, initialized_repo
 
 
@@ -68,13 +69,7 @@ def native_call(
     if event == "PostToolUse":
         return "observed"
     if runtime == "codex":
-        # A blocked review exits 0 carrying a structured denial, because Codex
-        # drops the operator's warning on exit 2; every other refusal exits 2.
-        if result.exit_code == 2:
-            return "deny"
-        if not result.stdout:
-            return "allow"
-        return json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
+        return codex_effect(result)
     return json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
 
 
@@ -363,8 +358,8 @@ def test_external_review_recovery_commands_select_the_application_environment(
     monkeypatch.setenv(POLICY_ROOT_ENV, str(project))
     result = native_response(root, runtime)
     detail = (
-        result.stderr.decode()
-        if runtime == "codex" and result.exit_code == 2
+        codex_denial(result)
+        if runtime == "codex"
         else json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
     )
     (question,) = QuestionRelay(root / ".lup/questions.jsonl").pending()

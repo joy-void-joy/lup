@@ -15,6 +15,7 @@ import sh
 from lup.policy.relay import QuestionRelay
 from lup.policy.assets.host import review_hook_call
 from lup.types import JsonObject
+from tests.unit.native import codex_denial, codex_effect
 
 
 def hook(
@@ -48,21 +49,11 @@ def hook(
 
 
 def allowed(result: sh.RunningCommand) -> bool:
-    """Codex says nothing when it permits a call, and answers when it does not."""
-    return result.exit_code == 0 and not result.stdout
+    return codex_effect(result) == "allow"
 
 
 def denial(result: sh.RunningCommand) -> str:
-    """Read the supported native denial and its operator-visible warning."""
-    if result.exit_code == 2:
-        return result.stderr.decode()
-    assert result.exit_code == 0
-    rendered = json.loads(result.stdout)
-    output = rendered["hookSpecificOutput"]
-    assert output["permissionDecision"] == "deny"
-    assert output["hookEventName"] == "PreToolUse"
-    assert rendered["systemMessage"] == output["permissionDecisionReason"]
-    return output["permissionDecisionReason"]
+    return codex_denial(result)
 
 
 @pytest.fixture

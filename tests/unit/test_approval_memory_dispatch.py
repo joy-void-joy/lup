@@ -9,6 +9,7 @@ import sh
 
 from lup.policy.assets.host import approvals_log
 from lup.policy.relay import QuestionRelay
+from tests.unit.native import codex_effect
 from tests.unit.repos import commit_file, initialized_repo
 
 CLAUDE = Path(".claude/plugins/lup/hooks/scripts/policy.py")
@@ -69,18 +70,7 @@ def decision(answered: dict[str, object]) -> dict[str, object]:
 
 
 def refused(result: sh.RunningCommand) -> bool:
-    """Whether Codex blocked the call, over either of its two denial channels.
-
-    A parked review exits 0 carrying a structured denial, because Codex drops
-    the operator's warning on exit 2; an allowed call exits 0 saying nothing.
-    """
-    if result.exit_code == 2:
-        return True
-    if not result.stdout:
-        return False
-    return (
-        json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
-    )
+    return codex_effect(result) == "deny"
 
 
 def test_claude_spends_an_explicit_answer_once(repo: Path) -> None:
