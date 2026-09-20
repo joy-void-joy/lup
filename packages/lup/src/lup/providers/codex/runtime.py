@@ -9,7 +9,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.providers.codex.hooks import (
@@ -19,6 +19,7 @@ from lup.providers.codex.hooks import (
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
 from lup.providers.selection import SessionContainment
 from lup.providers.codex.login import CODEX_HOME
+from lup.providers.codex.output import CodexOutputContract, codex_output_contract
 from lup.providers.codex.subagents import CodexSubagentTools
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
@@ -594,17 +595,20 @@ class CodexConversationState:
         channel = CodexTurnChannel(thread_id)
         self.channel = channel
         submission = self.submission
+        output = codex_output_contract(submission.schema) if submission else None
         params: JsonObject = {
             "threadId": thread_id,
-            "input": [{"type": "text", "text": text}],
+            "input": [
+                {"type": "text", "text": output.prompt(text) if output else text}
+            ],
         }
         # The other half. A named model always brings one, so the home's own
         # effort never rides beside a model the home did not choose.
         selected = self.config.model_selection()
         if "effort" in selected:
             params["effort"] = selected["effort"]
-        if submission is not None:
-            params["outputSchema"] = submission.schema
+        if output is not None:
+            params["outputSchema"] = output.native
         result = await self.server.request("turn/start", params)
         response = CodexTurnResponse.model_validate(result)
         channel.turn_id = response.turn.id
@@ -615,8 +619,10 @@ class CodexConversationState:
 
         async def complete() -> CompletedTurn:
             completed = await channel.completed
-            if submission is not None:
-                await submit_completed_output(submission, completed, identifiers)
+            if submission is not None and output is not None:
+                await submit_completed_output(
+                    submission, output, completed, identifiers
+                )
             return completed
 
         return AcceptedTurn(
@@ -861,7 +867,10 @@ def create_codex(
 
 
 async def submit_completed_output(
-    submission: TurnSubmission, completed: CompletedTurn, identifiers: TurnIdentifiers
+    submission: TurnSubmission,
+    output: CodexOutputContract,
+    completed: CompletedTurn,
+    identifiers: TurnIdentifiers,
 ) -> None:
     """Validate a native final answer and retain actionable correction evidence."""
     text = next(
@@ -873,7 +882,7 @@ async def submit_completed_output(
         "",
     )
     try:
-        value = TypeAdapter(JsonValue).validate_json(text)
+        value = output.decode(text)
     except ValidationError as error:
         message = f"Final output is not valid JSON: {error}"
     else:

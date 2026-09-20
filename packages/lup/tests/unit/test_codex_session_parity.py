@@ -9,6 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
+from lup.providers.codex.output import CodexJsonEnvelope, codex_output_contract
 from lup.providers.codex.runtime import (
     CodexConversationState,
     CodexMcpServerConfig,
@@ -38,6 +39,67 @@ class Answer(BaseModel):
 
 class Score(BaseModel):
     score: int
+
+
+class FlexibleAnswer(BaseModel):
+    scores: dict[str, int]
+    note: str | None = None
+    count: int = 7
+
+
+@pytest.mark.parametrize("resume", [None, SessionId(value="thread-1")])
+async def test_enveloped_output_corrects_json_and_gates_without_losing_defaults(
+    tmp_path: Path, scripted_codex: "ScriptedCodex", resume: SessionId | None
+) -> None:
+    scripted_codex.answers.extend(
+        [
+            CodexJsonEnvelope(output_json="not JSON").model_dump_json(),
+            CodexJsonEnvelope(
+                output_json='{"scores":{"arbitrary/key":1}}'
+            ).model_dump_json(),
+            CodexJsonEnvelope(
+                output_json='{"scores":{"arbitrary/key":2}}'
+            ).model_dump_json(),
+            '{"answer":"direct"}',
+            "untyped",
+        ]
+    )
+
+    async def gate(value: BaseModel) -> SubmissionDecision:
+        if isinstance(value, FlexibleAnswer):
+            assert value.model_fields_set == {"scores"}
+            return SubmissionDecision(
+                accepted=value.scores == {"arbitrary/key": 2}, message="Use score two"
+            )
+        return SubmissionDecision(accepted=True)
+
+    config = CodexSessionConfig(
+        cwd=tmp_path, submission_gate_resolver=lambda _output: gate
+    )
+    async with create_codex(config).open(resume) as handle:
+        accepted = await handle.session.start(turn_request("score", FlexibleAnswer))
+        result = await accepted.turn.result()
+        assert result.output == FlexibleAnswer(scores={"arbitrary/key": 2})
+        assert result.usage.output_tokens == 6
+        assert len(result.messages) == 3
+        direct = await handle.session.start(turn_request("answer", Answer))
+        assert (await direct.turn.result()).output == Answer(answer="direct")
+        untyped = await handle.session.start(turn_request("continue"))
+        assert (await untyped.turn.result()).output is None
+    turns = [
+        params for method, params in scripted_codex.requests if method == "turn/start"
+    ]
+    assert turns[0]["outputSchema"] == CodexJsonEnvelope.model_json_schema()
+    assert "Use score two" in str(turns[2]["input"])
+    assert turns[0]["input"] == [
+        {
+            "type": "text",
+            "text": codex_output_contract(FlexibleAnswer.model_json_schema()).prompt(
+                "score"
+            ),
+        }
+    ]
+    assert "outputSchema" not in turns[-1]
 
 
 class ScriptedCodex(CodexAppServer):
@@ -163,9 +225,9 @@ async def test_output_schema_is_per_turn_across_untyped_and_changed_types(
     assert "dynamicTools" not in thread_requests[0][1]
     turns = [params for method, params in server.requests if method == "turn/start"]
     assert [turn.get("outputSchema") for turn in turns] == [
-        Answer.model_json_schema(),
+        {**Answer.model_json_schema(), "additionalProperties": False},
         None,
-        Score.model_json_schema(),
+        {**Score.model_json_schema(), "additionalProperties": False},
     ]
 
 
