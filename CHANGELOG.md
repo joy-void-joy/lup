@@ -2,6 +2,173 @@
 
 ## Unreleased
 
+### Native execution carries no reusable approval authority
+
+A native runtime exposes its own prompt's answer to no hook, so the policy
+read that answer off the two events a hook does see: the call was asked
+about, and then it ran. A call that ran was therefore treated as a call
+somebody approved — and Claude's auto mode has executed a native hook ask
+with nobody at the keyboard (#436), which makes that inference a grant no
+human gave.
+
+Approval memory is gone. `remembered_approval` and `remembered_or_asked` are
+removed from both policy adapters, and `note_asked`/`note_ran` now record an
+execution as `observed` rather than `approved`. Authority comes only from an
+explicit single-use review receipt: the call parks in `.lup/questions.jsonl`,
+an operator answers it by its id, and that answer releases one exact retry.
+Historical `approvals.jsonl` records carry no receipt and grant nothing;
+`dev hooks approvals` and `dev hooks forget` still read and retire those
+observations, without changing what is authorized.
+
+A receipt binds what was reviewed, not just the command: captured file
+preimages for every path the call would write, the resolved paths, the
+originating dispatcher's own bytes and the accepted destination policy. A
+changed file, payload or policy re-enters review rather than spending the
+old answer, and an execution whose tool or input differs from the reviewed
+one marks the receipt `in_doubt` instead of completing it.
+
+Codex answers a blocked review on stdout, as a structured denial carrying
+its reason, because the app-server drops `systemMessage` when a hook exits 2
+and that reason names the operator who can release the call. Every other
+refusal still takes exit 2, so exit status alone no longer separates a
+permitted call from a parked one — read the structured answer.
+
+### Native tool authority is explicit
+
+`SessionRequest.tools` and `ClaudeSessionConfig.tools` are `native_tools`,
+and the default grants nothing. `None` and `[]` both mean no built-in or
+inherited tool authority on either provider; pass an explicit sequence of
+`NativeToolGroup` values, or exact supported provider tool names, for what a
+session may actually reach. `NativeToolGroup.ALL` is the broad opt-in, and
+it is the only way to get what an ambient default used to hand over.
+
+Audit `create_client`, `create_claude`, `create_codex` and any directly
+constructed session config that relied on the old ambient grant. `@lup_tool`
+handlers in the factory's `tools=[...]` and explicit MCP servers in
+`tool_servers` need none of it — an application tool declaration is
+independent of native authority. `allowed_tools` selects automatic approval
+within declared authority and cannot grant a tool that authority withholds.
+
+Codex compiles the grant independently of its sandbox and applies it before
+the process starts rather than per thread, so a startup facility cannot
+introduce a tool the session did not ask for. It refuses `READ` and the
+exact `Read`, `Write` and `WebFetch` grants rather than approximating them:
+`SHELL`/`Bash` grants command execution and `WEB`/`WebSearch` grants hosted
+research, and neither silently substitutes for the others. Bounding model
+tool metadata needs an explicit or inherited model present in Codex's own
+catalog, which is read from the binary when a session opens.
+
+### Codex typed output rides each turn
+
+Typed output was a dynamic tool named `submit_output`, installed on
+`thread/start`. `dynamicTools` exists only there and persists for the
+thread's life, so a schema that changed mid-conversation could not be
+rebound without losing conversation identity — the sequence `None -> A -> A
+-> B -> None` was a declared release gap.
+
+Every typed `turn/start` now carries `outputSchema`, so a schema may change
+or disappear between turns and the native thread survives it. `dynamic_tool`
+and `SUBMISSION_TOOL` are gone; pass the output model and submission gate
+through `TurnRequest`, and configure `correction` on `CodexSessionConfig` to
+bound validation retries. Handle `StructuredOutputError` for exhausted
+validation and `UnsupportedCapability` for native controls Codex cannot
+enforce. Native requests use strict mode: compatible object schemas are
+closed, and anything else rides a strict `output_json` string carrier with
+the original schema preserved in the turn prompt and the original Pydantic
+validation applied to what comes back.
+
+The dynamic-tool channel now carries declared application tools alone.
+`CodexSessionConfig.application_tools` names `lup_app_*` tools whose handlers
+run in the hosting process under `@lup_tool` validation, and the channel
+stays silent for a session that declares none. Because it is still
+thread-scoped, resuming with a different application tool set is refused —
+`CodexSchemaRebindingError` now reports application-tool drift alone, and
+output schemas need no fresh thread.
+
+### An edit is judged by the policy of the repository it lands in
+
+An authorized edit into another checkout was judged by the policy of the
+session making it. It is now routed to the destination's own policy, bound
+to a verified evaluator snapshot, while the caller's boundary and identity
+are retained — and it fails closed when the destination policy or its Git
+ownership has changed. An operator can accept a changed destination policy
+without restarting, through `harness policy-refresh`. A repository with no
+explicit grant still meets the foreign-repository ask exactly as before.
+
+`shell_patch` is `lup.policy.kernel.review.literal_input(command,
+'apply_patch')`, which reads any literal single-argument or quoted-heredoc
+invocation rather than that one executable. `patch_review` takes the
+captured preconditions and the shell flag; a parked review never re-reads
+the working tree, because the bytes it was answered about are the bytes it
+holds.
+
+### Repository identity is the consumer's
+
+The library carried a hosting account and an implicit upstream URL.
+`REPOSITORY_URL` and the bare `GitSource` are gone: pass `url` when
+constructing `GitSource`, or call `repository_url(root)`. For CLI use, pass
+`dev library git --url <repository>`, keep an existing Git dependency pin,
+or configure the scaffold's named project in `sync.json.local` with its url
+or checkout path. Declare publication URLs in your own package metadata.
+Dependency tracker routing follows the configured library source; project
+issue routing continues to use its own origin.
+
+### Concurrent resolver joins, and what a resume replays
+
+`JoinDesk` takes the concern it belongs to: construct
+`JoinDesk(run_dir, concern_id)`. With the run stopped, move any existing
+`join/plan.json` and `join/progress.json` into `join/<concern_id>/` under
+the identity recorded in the plan. Dependency checkpoints no longer populate
+the integration-only `ResolveState.join_progress`.
+
+Around it, a run survives more of what interrupts it. An unfinished join
+parks on a durable question rather than dropping; admission into a running
+resolver is queued; a blocker repeated after an answer is retained; an
+interrupted integration and an incompatible actor binding are each
+reconciled explicitly rather than guessed at; run ownership is kept through
+host backoff; and a recheck verdict already settled is replayed on resume
+instead of being asked again. `resolve cost` reports run cost derived from
+the journal without mutating it, and reports incomplete turn timing as
+uncertain rather than as zero.
+
+### Review checkpoints are shared between sibling worktrees
+
+`ProjectEntry.review_from` and `ProjectEntry.last_synced_commit` changed:
+path registrations review fetched origin commits by default, and a review
+checkpoint is bound to the repository and ref reviewed, recorded under the
+common Git directory so every worktree of it reads the same one.
+
+For unpublished local work, set `review_from` to `local` in
+`sync.json.local`, or run `sync setup NAME /path/to/repo --review-from
+local`; a repository with no origin stays local. Check `sync status` for the
+selected review ref — a branchless registration matching the library Git
+source follows its consumed branch, and a reported source/branch mismatch is
+resolved before reviewing. After review, run `sync mark-synced NAME --at
+REVIEWED_SHA` with the immutable commit actually reviewed. An older
+`last_synced_commit` remains the seed until that shared checkpoint exists.
+
+### Codex peer wakes name a verified home
+
+Delivering to a Codex session needs the home and execution scope its arrival
+hook verified, not a bare command. Call `wake(WakePath(...), message)` rather
+than the raw `CODEX_COMMAND`, and retain the native arrival hook's home and
+scope when persisting a wake path. `queued` takes that `WakePath` rather than
+a thread string; a missing or foreign scope leaves durable mail pending
+instead of delivering it somewhere the sender never verified.
+
+### `Runtime.contained` is `Runtime.homed`
+
+`contained` named the configuration home a workspace's sessions are pointed
+at, while everywhere else in this library it names a container — and a
+session can now ask for one. Call `Runtime.homed(request)` where you called
+`Runtime.contained(request)`; nothing else about it moved, and a caller
+reaching it through `Runtime.session_factory` was never naming it. To find
+the call sites:
+
+```bash
+uv run lup-devtools dev py text '\.contained\('
+```
+
 ### Migrating personal Claude profile callers
 
 Two earlier public API changes have explicit migration records for adopters
