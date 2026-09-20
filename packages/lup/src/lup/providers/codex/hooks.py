@@ -44,6 +44,7 @@ import logging
 import re  # lup: ignore[import-re] — native hook matchers are explicitly regexes
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -57,6 +58,7 @@ from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
 from lup.policy.enforcement import NativeSemantics
 from lup.policy.models import SemanticTool
 from lup.types import JsonObject
+from lup.sessions.errors import UnsupportedCapability
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,33 @@ FILE_CHANGE_APPROVAL = "item/fileChange/requestApproval"
 
 APPROVAL_METHODS = (COMMAND_APPROVAL, FILE_CHANGE_APPROVAL)
 """Every server request this seam answers."""
+
+
+def codex_hook_approval_policy(
+    hooks: LupHooksConfig | None,
+) -> Literal["never", "on-request"]:
+    """Permit lifecycle observers and explicitly scoped native approval hooks.
+
+    An exact native method names the boundary its callback agrees to observe.
+    A wildcard or a portable tool name instead asks for coverage this channel
+    cannot provide. Inbox observers are a separate tagged delivery contract;
+    their neutral output never grants approval.
+    """
+    approvals = [] if hooks is None else hooks.pre_tool_use
+    declared = {*APPROVAL_METHODS, "|".join(APPROVAL_METHODS)}
+    policy: Literal["never", "on-request"] = "never"
+    for matcher in approvals:
+        if matcher.tag == "inbox" and matcher.matcher in {None, "", "*"}:
+            continue
+        if matcher.matcher not in declared:
+            raise UnsupportedCapability(
+                "Codex PreToolUse hooks require an explicit native approval scope: "
+                + ", ".join(APPROVAL_METHODS)
+                + ". Universal pre-execution interception requires the generated policy dispatcher."
+            )
+        policy = "on-request"
+    return policy
+
 
 ACCEPT = "accept"
 DECLINE = "decline"

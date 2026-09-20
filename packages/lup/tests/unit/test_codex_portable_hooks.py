@@ -6,9 +6,84 @@ import pytest
 
 from lup.policy.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHooksConfig
 from lup.providers.codex.hooks import APPROVAL_METHODS
+from lup.providers.codex.runtime import CodexSessionConfig, CodexSessionOpener
 from lup.providers.codex.selection import codex_config
 from lup.providers.selection import SessionRequest
 from lup.sessions.errors import UnsupportedCapability
+from lup.types import EnvVars
+from typing import Never
+
+
+@pytest.mark.parametrize("matcher", [None, "*", "Bash", "item/.*"])
+async def test_direct_opener_rejects_unenforceable_hooks_before_native_setup(
+    tmp_path: Path,
+    matcher: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def native_setup(_environment: EnvVars) -> Never:
+        pytest.fail("native setup must not run for unsupported hook coverage")
+
+    monkeypatch.setattr(
+        "lup.providers.codex.runtime.child_recursive_agent_allowance", native_setup
+    )
+    hooks = LupHooksConfig(pre_tool_use=[LupHookMatcher(matcher=matcher, hook=observe)])
+    config = CodexSessionConfig(cwd=tmp_path, hooks=hooks, approval_policy="never")
+    with pytest.raises(UnsupportedCapability, match="explicit native approval scope"):
+        async with CodexSessionOpener(config).open_session():
+            pytest.fail("unsupported session must not open")
+
+
+@pytest.mark.parametrize("approval_policy", [None, "never"])
+async def test_direct_pre_hooks_require_an_explicit_asking_policy(
+    tmp_path: Path,
+    approval_policy: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def native_setup(_environment: EnvVars) -> Never:
+        pytest.fail("native setup must not run when callbacks cannot be reached")
+
+    monkeypatch.setattr(
+        "lup.providers.codex.runtime.child_recursive_agent_allowance", native_setup
+    )
+    hooks = LupHooksConfig(
+        pre_tool_use=[LupHookMatcher(matcher=APPROVAL_METHODS[0], hook=observe)]
+    )
+    config = CodexSessionConfig.model_validate(
+        {"cwd": tmp_path, "hooks": hooks, "approval_policy": approval_policy}
+    )
+    with pytest.raises(UnsupportedCapability, match="explicit asking"):
+        async with CodexSessionOpener(config).open_session():
+            pytest.fail("unreachable callbacks must not open")
+
+
+@pytest.mark.parametrize("approval", [False, True])
+async def test_supported_direct_hooks_reach_setup_without_changing_approvals(
+    tmp_path: Path,
+    approval: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def native_setup(_environment: EnvVars) -> Never:
+        raise RuntimeError("reached native setup after hook validation")
+
+    monkeypatch.setattr(
+        "lup.providers.codex.runtime.child_recursive_agent_allowance", native_setup
+    )
+    observer = LupHookMatcher(hook=observe)
+    hooks = LupHooksConfig(post_tool_use=[observer], stop=[observer])
+    hooks.pre_tool_use = (
+        [LupHookMatcher(matcher=APPROVAL_METHODS[0], hook=observe)]
+        if approval
+        else [LupHookMatcher(hook=observe, tag="inbox")]
+    )
+    config = CodexSessionConfig(
+        cwd=tmp_path, hooks=hooks, approval_policy="on-request" if approval else "never"
+    )
+    with pytest.raises(
+        RuntimeError, match="reached native setup after hook validation"
+    ):
+        async with CodexSessionOpener(config).open_session():
+            pytest.fail("the native setup seam is replaced")
+    assert config.approval_policy == ("on-request" if approval else "never")
 
 
 async def observe(_event: LupHookInput) -> LupHookOutput:

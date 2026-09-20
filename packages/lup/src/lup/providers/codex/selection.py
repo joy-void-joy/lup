@@ -7,7 +7,8 @@ have no app-server equivalent and are refused rather than dropped.
 Portable PostToolUse and Stop hooks run on native lifecycle events. Tagged
 inbox observers also deliver on native activity without changing approvals.
 Other PreToolUse hooks must explicitly name one of the native approval
-methods, or the exact joined methods in :data:`APPROVAL_METHODS`; only those
+methods, or the exact joined methods in
+:data:`lup.providers.codex.hooks.APPROVAL_METHODS`; only those
 registrations enable approval requests. The app-server does not ask before
 every tool call, so broader pre-execution hooks are refused. The generated
 policy dispatcher enforces policy at the native PreToolUse boundary.
@@ -29,8 +30,7 @@ wanted; asking for governance it has no way to apply is not.
 from pathlib import Path
 from typing import Literal
 
-from lup.policy.hooks import LupHooksConfig
-from lup.providers.codex.hooks import APPROVAL_METHODS
+from lup.providers.codex.hooks import codex_hook_approval_policy
 from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.runtime import (
@@ -171,32 +171,6 @@ def codex_sandbox(request: SessionRequest) -> CodexSandbox | None:
         if mode is not None
     ]
     return min(asked, key=CODEX_SANDBOX_WIDTH.index, default=None)
-
-
-def codex_hook_approval_policy(
-    hooks: LupHooksConfig | None,
-) -> Literal["never", "on-request"]:
-    """Permit lifecycle observers and explicitly scoped native approval hooks.
-
-    An exact native method names the boundary its callback agrees to observe.
-    A wildcard or a portable tool name instead asks for coverage this channel
-    cannot provide. Inbox observers are a separate tagged delivery contract;
-    their neutral output never grants approval.
-    """
-    approvals = [] if hooks is None else hooks.pre_tool_use
-    declared = {*APPROVAL_METHODS, "|".join(APPROVAL_METHODS)}
-    policy: Literal["never", "on-request"] = "never"
-    for matcher in approvals:
-        if matcher.tag == "inbox" and matcher.matcher in {None, "", "*"}:
-            continue
-        if matcher.matcher not in declared:
-            raise UnsupportedCapability(
-                "Codex portable PreToolUse hooks require an explicit native approval scope: "
-                + ", ".join(APPROVAL_METHODS)
-                + ". Universal pre-execution interception requires the generated policy dispatcher."
-            )
-        policy = "on-request"
-    return policy
 
 
 def codex_config(request: SessionRequest) -> CodexSessionConfig:

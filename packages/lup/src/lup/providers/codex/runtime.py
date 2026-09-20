@@ -16,6 +16,7 @@ from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotifi
 from lup.providers.codex.hooks import (
     APPROVAL_METHODS,
     CodexApprovalResponder,
+    codex_hook_approval_policy,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
 from lup.providers.selection import SessionContainment
@@ -945,7 +946,13 @@ class CodexFork(ForkSession):
 
 
 class CodexSessionOpener:
-    """Open one initialized app-server process per Lup session."""
+    """Validate hook coverage before opening one app-server per Lup session.
+
+    Direct configuration has the same hook coverage contract as portable
+    selection. Native approval callbacks also require an explicit asking
+    policy; inheriting a policy could silently prevent every callback.
+    Lifecycle observers leave the selected approval policy untouched.
+    """
 
     def __init__(self, config: CodexSessionConfig) -> None:
         self.config = config.validated_for_app_server()
@@ -954,6 +961,12 @@ class CodexSessionOpener:
     async def open_session(
         self, resume: SessionId | None = None
     ) -> AsyncGenerator[SessionHandle]:
+        approval = codex_hook_approval_policy(self.config.hooks)
+        if approval == "on-request" and self.config.approval_policy in {None, "never"}:
+            raise UnsupportedCapability(
+                "Native approval-scoped PreToolUse hooks require an explicit asking "
+                "approval_policy; use 'on-request' so the app-server can call them."
+            )
         # Installed here rather than where the home is named: installing runs
         # a package manager, and a home is named wherever a request is merely
         # described. A session that opened without the policy it was meant to
