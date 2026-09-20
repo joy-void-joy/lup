@@ -8,6 +8,7 @@ it with work discovered while it ran.
 
 import asyncio
 import os
+from functools import partial
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 import sys
@@ -48,6 +49,7 @@ from lup.resolver.contracts import (
 )
 from lup.resolver.core import ASSEMBLY_QUESTION_ID, ResolverCore
 from lup.resolver.journal import Journal
+from lup.resolver.lifecycle import HostWait, drive_with_host_retries
 from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun
@@ -720,10 +722,11 @@ def report_environment_fault(
         typer.echo(f"  interrupted: {', '.join(fault.concerns)}")
     typer.echo("No concern was failed and no outcome was recorded.")
     typer.echo(
-        "It came back for this one until its retries ran out, so the host is "
-        "either still refusing or wants a person."
+        "For authentication or account allowance failures, re-login or switch "
+        "account; a reported reset time is not a required wait. For a transient "
+        "host failure, restore service before resuming."
     )
-    typer.echo("Fix the host, then continue with:")
+    typer.echo("Once the selected account and host are ready, continue with:")
     typer.echo(
         f"  uv run lup-devtools resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config"
@@ -1135,24 +1138,25 @@ def detach_resolve(detached: DetachedRun) -> None:
     # naming nothing actionable or an issue number naming nothing open, and
     # it meets it after this command has already reported a run started.
     admission_request(detached.admitted)
+    repository = ResolverStateRepository(root / ".lup/resolve", resolved)
+    if repository.held():
+        raise typer.BadParameter(f"resolver run {resolved!r} is already active")
     log = detached_log(root, resolved)
     arguments = detached.arguments()
     # One stream, not one path opened twice: sh opens `_out` and `_err`
     # separately, so naming the same file for both leaves two handles
     # truncating at offset zero and overwriting each other — losing exactly
     # the refusal this file exists to keep.
-    sh.Command(arguments[0])(
-        *arguments[1:],
-        _cwd=str(root),
-        _bg=True,
-        _bg_exc=False,
-        _new_session=True,
-        # Discarding both streams made a detached run that refused on its
-        # first step indistinguishable from one working quietly: the refusal
-        # went nowhere, and the run directory held no trace of it either.
-        _out=str(log),
-        _err_to_out=True,
-    )
+    with log.open("ab") as output:
+        sh.Command(arguments[0])(
+            *arguments[1:],
+            _cwd=str(root),
+            _bg=True,
+            _bg_exc=False,
+            _new_session=True,
+            _out=output,
+            _err_to_out=True,
+        )
     typer.echo(f"Run {resolved} started detached.")
     typer.echo(f"Its output: {log}")
     typer.echo(
@@ -2163,7 +2167,7 @@ def run_resolve(
                 )
             try:
                 if core.repository.exists():
-                    manifest = await core.resume()
+                    manifest = await core.resume_exclusive()
                 else:
                     intake = scanned_intake(root)
                     for carried in intake.carried:
@@ -2191,7 +2195,9 @@ def run_resolve(
                             '--admit "<the work, in your own words>".'
                         )
                         return
-                    manifest = await core.run(seeded)
+                    manifest = await core.run_exclusive(
+                        await seeded.inventory(core.plan_inventory)
+                    )
             except ResolverDrained as drained:
                 # Exit zero: an operator asked for this and got it, which is
                 # the command succeeding rather than the run failing.
@@ -2221,59 +2227,35 @@ def run_resolve(
                 typer.echo(f"commented on #{number}")
             typer.echo(manifest.model_dump_json(indent=2))
 
-        async def drive_through_host_faults() -> None:
-            """Come back to a refusing host until it answers, as a human would.
-
-            Parking on an exhausted allowance is correct and costs nothing —
-            no concern fails and no outcome is recorded — but somebody has to
-            notice, and one run was stopped this way about twenty times over
-            several days, each time waiting on a person rather than on the
-            allowance. The waiting is the part a person adds nothing to.
-
-            A fault only a person can clear still parks, but one a sibling's
-            token refresh could have faked is probed once first: concurrent
-            sessions share a credential file, so a rotation denies everyone
-            still holding the previous token in the same words a dead
-            credential uses. A session opened afresh reads the rotated file
-            and tells the two apart, where handing it straight back stops a
-            run nobody has to do anything about.
-            """
-            probed: str | None = None
-            for attempt in range(host_retries + 1):
-                try:
-                    await drive()
-                    return
-                except ResolverEnvironmentFault as fault:
-                    if needs_a_person(fault.cause):
-                        if probed == fault.cause or not may_be_a_rotation(fault.cause):
-                            report_environment_fault(fault, adapter, resolved_run_id)
-                            raise typer.Exit(code=75) from fault
-                        # Only against the same words twice running. An
-                        # ordinary refusal in between means the run got
-                        # somewhere, so the next rotation is its own fault
-                        # rather than the one already ruled on.
-                        probed = fault.cause
-                        typer.echo(
-                            f"[resolve] the host refused ({fault.cause}); a sibling "
-                            f"may have rotated the credential — one probe in "
-                            f"{auth_probe_delay:.0f}s"
-                        )
-                        await asyncio.sleep(auth_probe_delay)
-                        continue
-                    probed = None
-                    delay = host_retry_delay(attempt, host_retries, host_backoff)
-                    if delay is None:
-                        report_environment_fault(fault, adapter, resolved_run_id)
-                        raise typer.Exit(code=75) from fault
-                    typer.echo(
-                        f"[resolve] the host refused ({fault.cause}); "
-                        f"coming back in {delay / 60:.0f} min"
-                    )
-                    await asyncio.sleep(delay)
+        def announce_host_wait(wait: HostWait) -> None:
+            typer.echo(
+                f"[resolve] the host refused ({wait.cause}); {wait.mode} "
+                f"at {wait.retry_at.isoformat()}. The run remains active."
+            )
 
         async with spawned_supervisor(
             supervisor or SupervisorSpawn(), resolved_run_id, adapter
         ):
-            await drive_through_host_faults()
+            try:
+                if abort_reason is not None or (
+                    admission is not None and core.repository.exists()
+                ):
+                    await drive()
+                else:
+                    await drive_with_host_retries(
+                        drive,
+                        core.repository,
+                        retries=host_retries,
+                        retry_delay=partial(
+                            host_retry_delay, retries=host_retries, backoff=host_backoff
+                        ),
+                        auth_probe_delay=auth_probe_delay,
+                        needs_a_person=needs_a_person,
+                        may_be_a_rotation=may_be_a_rotation,
+                        announce=announce_host_wait,
+                    )
+            except ResolverEnvironmentFault as fault:
+                report_environment_fault(fault, adapter, resolved_run_id)
+                raise typer.Exit(code=75) from fault
 
     asyncio.run(execute())

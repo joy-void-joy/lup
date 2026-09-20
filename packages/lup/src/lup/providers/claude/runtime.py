@@ -313,6 +313,8 @@ def quota_exhausted(
 
 
 HUMAN_CLEARED_SIGNATURES: tuple[str, ...] = (
+    "account allowance exhausted",
+    "you've hit your session limit",
     "oauth access token has been revoked",
     "failed to authenticate",
     "authentication_error",
@@ -325,11 +327,10 @@ HUMAN_CLEARED_SIGNATURES: tuple[str, ...] = (
 )
 """Which host faults stay broken until a person does something.
 
-A dead credential and an empty balance do not come back on their own, so
-waiting one out is waiting forever. Every other refusal here — an exhausted
-allowance, a rate limit, an overloaded or unreachable upstream — clears with
-nobody doing anything, and those are worth waiting for rather than handing
-back to whoever has to notice.
+A dead credential, an empty balance and an exhausted account allowance need
+an operator's account choice. A reported allowance reset does not require
+waiting: re-login or account switching may clear it. Transient rate limits,
+overload and unreachable upstreams retain the caller's bounded retry policy.
 
 Our judgement rather than the provider's vocabulary, so a caller replaces it
 instead of forking this module. Over-matching costs a run that stops when it

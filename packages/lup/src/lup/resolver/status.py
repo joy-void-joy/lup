@@ -33,6 +33,7 @@ from lup.resolver.models import (
     RunTally,
 )
 from lup.resolver.recheck_desk import RecheckDesk
+from lup.resolver.lifecycle import HostWait, HostWaitStore
 from lup.resolver.state import ResolverStateRepository
 
 
@@ -210,6 +211,7 @@ class RunStatus(BaseModel, frozen=True):
     asks whether the run itself has come to rest.
     """
     unanswered: int = 0
+    host_wait: HostWait | None = None
     last: LastRecorded | None = None
     progress: PhaseProgress | None = None
     """The current phase's iterator, where the phase has one worth drawing."""
@@ -253,6 +255,8 @@ class RunStatus(BaseModel, frozen=True):
         """
         if not self.exists:
             return "no such run under this project's .lup/resolve"
+        if self.held and self.host_wait is not None:
+            return f"running, host {self.host_wait.mode} until {self.host_wait.retry_at.isoformat()}: {self.host_wait.cause}"
         if self.phase is None:
             return "initializing" if self.held else "stopped before initialization"
         if not self.held:
@@ -275,6 +279,7 @@ class RunStatus(BaseModel, frozen=True):
                 str(self.held),
                 str(self.phase),
                 str(self.unanswered),
+                str(self.host_wait),
                 # The phase's own progress is one of the four facts a reader
                 # waits on, and the statuses above move for neither phase that
                 # has it: every concern is already `integrating` and stays
@@ -556,10 +561,11 @@ def recheck_bar(state: ResolveState, run_dir: Path) -> PhaseProgress | None:
 def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
     """Everything the run directory can say about where this run stands."""
     held = repository.held()
+    host_wait = HostWaitStore(repository.root).read() if held else None
     if not repository.root.is_dir():
         return RunStatus(run_id=run_id, exists=False, held=held)
     if not repository.exists():
-        return RunStatus(run_id=run_id, exists=True, held=held)
+        return RunStatus(run_id=run_id, exists=True, held=held, host_wait=host_wait)
     state = repository.load()
     tally = Counter(item.status for item in state.progress)
     entry = journal_tail(repository.root)
@@ -572,6 +578,7 @@ def run_status(repository: ResolverStateRepository, run_id: str) -> RunStatus:
         exists=True,
         held=held,
         phase=state.phase,
+        host_wait=host_wait,
         counts=[
             StatusCount(status=status, concerns=count)
             for status, count in sorted(

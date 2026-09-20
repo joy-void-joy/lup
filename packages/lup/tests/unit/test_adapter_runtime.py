@@ -1804,9 +1804,10 @@ def test_a_failure_that_names_the_work_is_not_read_as_the_host() -> None:
     assert not environmental_fault("Command failed with exit code 1")
 
 
-def test_an_allowance_is_waited_out_where_a_credential_is_handed_back() -> None:
-    """Both stopped the same run; only one of them comes back on its own."""
-    assert not needs_a_person("You've hit your session limit · resets 4pm (Paris)")
+def test_account_refusals_are_handed_back_while_transient_faults_can_retry() -> None:
+    """Account changes can clear an allowance before a reported reset time."""
+    assert needs_a_person("You've hit your session limit · resets 4pm (Paris)")
+    assert needs_a_person("Claude account allowance exhausted until tomorrow")
     assert not needs_a_person("API Error: 429 rate_limit_error")
     assert not needs_a_person("Connection error")
 

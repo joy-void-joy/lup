@@ -146,6 +146,14 @@ retires only that conversation. Resume binds the current schemas in a fresh
 session; conversation memory is lost, while questions, answers, join checkpoints,
 worktrees and other actors remain intact. A live driver refuses rebinding.
 
+The launcher holds the run lease through transient host retries, including each
+backoff sleep. `resolve status` reports the refusal and next attempt time while
+that lease is held; a stale wait record cannot make a stopped process look live.
+Authentication and account allowance exhaustion stop for an operator to re-login
+or switch account. A provider's reported reset time is not a required waiting
+period. Detached resumes append to `detached.log`; a refused duplicate leaves the
+running process's history intact.
+
 For a new run, the composition root scans tracked files for actionable review
 notes and passes their source context to a read-only structured planning turn.
 The planner must assign every note exactly once to a generalized concern. If a
