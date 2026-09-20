@@ -77,6 +77,8 @@ function Block({ block, name, expand }: { block: AnyTurnBlock; name: string; exp
           <Body text={block.content} name={name} className="pre-body" expand={expand} />
         </div>
       );
+    case "native_activity":
+      return <div className="native-activity"><strong>{block.provider}: {block.activity}</strong><Body text={JSON.stringify(block.payload, null, 2)} name={name} className="pre-body" expand={expand} /></div>;
     default:
       return <div className="say muted">[{String((block as { type: string }).type)}]</div>;
   }
@@ -125,6 +127,7 @@ export function Entry({ entry, expand }: { entry: JournalEntry; expand: Expand }
           {event.message.blocks.map((block, index) => (
             <Block key={index} block={block} name={`${entry.seq}:${index}`} expand={expand} />
           ))}
+          {event.message.native && <details><summary>Native evidence</summary><Body text={JSON.stringify(event.message.native, null, 2)} name={`${entry.seq}:native`} className="pre-body" expand={expand} /></details>}
         </Note>
       );
     case "turn_started":

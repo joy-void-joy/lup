@@ -177,8 +177,10 @@ const record: JournalEntry[] = [
         { type: "text", text: "Reading the adapter." },
         { type: "tool_call", id: "call-1", name: "Read", arguments: { path: "src/adapter.py" } },
         { type: "tool_result", content: "no such file", is_error: true, tool_call_id: "call-1" },
+        { type: "native_activity", provider: "codex", activity: "contextCompaction", payload: { id: "compact-1", detail: "complete evidence" } },
       ],
       message_id: null,
+      native: { type: "agentMessage", memoryCitation: { path: "evidence.md" } },
       model: null,
       parent_tool_call_id: null,
       role: "assistant",
@@ -303,6 +305,10 @@ describe("the supervisor", () => {
     expect(drawn[0]).toContain("phase → workers");
     expect(drawn[1]).toContain("turn started");
     expect(drawn[2]).toContain("Reading the adapter.");
+    expect(drawn[2]).toContain("contextCompaction");
+    expect(drawn[2]).toContain("complete evidence");
+    expect(drawn[2]).toContain("Native evidence");
+    expect(drawn[2]).toContain("evidence.md");
     expect(drawn[2]).toContain("Read");
     expect(drawn[2]).toContain("src/adapter.py");
     expect(drawn[3]).toContain("beta → failed tests red");

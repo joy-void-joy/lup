@@ -112,6 +112,7 @@ type ObservableEventKind = Literal[
     "block_start",
     "block_delta",
     "message",
+    "native_activity",
     "reasoning",
     "tool_call",
     "tool_result",
@@ -570,6 +571,8 @@ def block_event_kind(block_type: str) -> ObservableEventKind:
             return "tool_call"
         case "tool_result":
             return "tool_result"
+        case "native_activity":
+            return "native_activity"
         case _:
             return "message"
 
@@ -656,6 +659,18 @@ class TurnRecorder:
         granularity would double every line of the transcript.
         """
         call_id = message.parent_tool_call_id
+        if message.native is not None:
+            target = (
+                self.journal
+                if call_id is None
+                else self.child_for(call_id, message.model)
+            )
+            target.emit(
+                "native_activity",
+                {"message": message.model_dump(mode="json")},
+                session_id=session_id,
+                turn_id=turn_id,
+            )
         if call_id is None:
             return
         child = self.child_for(call_id, message.model)
@@ -766,6 +781,9 @@ class JournalTurn[T: BaseModel | None](Turn[T]):
                     "message": failure.message,
                     "blocks": [
                         block.model_dump(mode="json") for block in failure.blocks
+                    ],
+                    "messages": [
+                        message.model_dump(mode="json") for message in failure.messages
                     ],
                     "usage": failure.usage.model_dump(mode="json"),
                 },

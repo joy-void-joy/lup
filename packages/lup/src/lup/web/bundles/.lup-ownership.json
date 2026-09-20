@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.3.0",
-  "source_digest": "ad6c8a217fc3f87a01a253f75bd9e1e121a23ea2dc9584bbd3b0008dca2141ed",
+  "source_digest": "21e9152964b257c3069efcabedd5a0257a4a20a1859219e0fd69181a3b12c52f",
   "target_requirements": [
     "bun"
   ],
@@ -14,24 +14,31 @@
       "executable": false
     },
     {
-      "path": "packages/lup/src/lup/web/bundles/explorer/assets/index-CHbZnTGC.js",
+      "path": "packages/lup/src/lup/web/bundles/explorer/assets/index-DSDCZJIe.js",
       "category": "generated",
-      "sha256": "b93aabd4467a389474a967308169c11e0d48f81d6107cd21bf14a141ebff383d",
-      "semantic_id": "web.explorer.assets/index-CHbZnTGC.js",
+      "sha256": "43dae0df2eefac2004f69edc95a172967881a763bfef8fbf0d302d9edd3b39ed",
+      "semantic_id": "web.explorer.assets/index-DSDCZJIe.js",
       "executable": false
     },
     {
       "path": "packages/lup/src/lup/web/bundles/explorer/export.html.j2",
       "category": "generated",
-      "sha256": "0c6d12537d8f9cd81a64a93dcf03b9138d7fd1bdbf5772755c6f8e16d9c2456f",
+      "sha256": "076c6ca45a155d9746c45f819a8b20443bdaac7f6a11c7f1147437054ae77ae7",
       "semantic_id": "web.explorer.export.html.j2",
       "executable": false
     },
     {
       "path": "packages/lup/src/lup/web/bundles/explorer/index.html",
       "category": "generated",
-      "sha256": "30ed6773a75debb07c6798c99547b500f0bd464be733b7c0568722bbc2304674",
+      "sha256": "43ecdd460f0b10913863885e0d98688e518d637ff9d026c0f5eadf6b65f465a8",
       "semantic_id": "web.explorer.index.html",
+      "executable": false
+    },
+    {
+      "path": "packages/lup/src/lup/web/bundles/supervisor/assets/index-B9FX5zd4.js",
+      "category": "generated",
+      "sha256": "9c06aa89a2321a65b40bb8f9ab8e92754303fb0488d285950e35e33bf4bf702d",
+      "semantic_id": "web.supervisor.assets/index-B9FX5zd4.js",
       "executable": false
     },
     {
@@ -42,16 +49,9 @@
       "executable": false
     },
     {
-      "path": "packages/lup/src/lup/web/bundles/supervisor/assets/index-c-sGjLKQ.js",
-      "category": "generated",
-      "sha256": "dce337097e1969f00a840f85bd6542c1752540e64b9740a438d1e93a98a37791",
-      "semantic_id": "web.supervisor.assets/index-c-sGjLKQ.js",
-      "executable": false
-    },
-    {
       "path": "packages/lup/src/lup/web/bundles/supervisor/index.html",
       "category": "generated",
-      "sha256": "16c0654a00d4b45597ec1b3188f59cd1ac13304053c93c7974c9d18b08464893",
+      "sha256": "fcee87e37953a8a0d2803913f43ed6af72fe7a5a7c5562b782fca582f261d148",
       "semantic_id": "web.supervisor.index.html",
       "executable": false
     },

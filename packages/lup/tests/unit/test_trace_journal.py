@@ -38,6 +38,26 @@ def journal_at(path: Path) -> TraceJournal:
     )
 
 
+def test_native_message_evidence_is_journaled_without_loss(tmp_path: Path) -> None:
+    path = tmp_path / "journal.jsonl"
+    native: JsonObject = {
+        "type": "agentMessage",
+        "id": "native-1",
+        "text": "hello",
+        "memoryCitation": {"entries": [{"path": "notes.md"}]},
+    }
+    message = TurnMessage(
+        role="assistant", blocks=[TurnTextBlock(text="hello")], native=native
+    )
+    TurnRecorder(journal_at(path)).record(
+        MessageCompletedEvent(identifiers=IDENTIFIERS, message=message)
+    )
+    events = read_observable_events(path)
+    assert len(events) == 1 and events[0].kind == "native_activity"
+    assert events[0].payload["message"] == message.model_dump(mode="json")
+    assert TurnMessage.model_validate(events[0].payload["message"]).native == native
+
+
 def test_a_key_that_names_a_secret_loses_its_value_at_any_depth() -> None:
     redaction = KeyRedaction()
     payload: JsonObject = {

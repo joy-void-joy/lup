@@ -333,8 +333,33 @@ class LupToolResultBlock(LupContentBlock):
         return f"TOOL_RESULT [{self.tool_use_id}]: {body}"
 
 
+class LupNativeActivityBlock(LupContentBlock):
+    """Provider activity retained without presenting it as speech or a tool call."""
+
+    type: Literal["native_activity"] = "native_activity"
+    provider: str
+    activity: str
+    payload: JsonObject
+
+    @property
+    def display_label(self) -> str:
+        return f"{self.provider}: {self.activity}"
+
+    @property
+    def display_body(self) -> str:
+        return json.dumps(self.payload, indent=2)
+
+    @property
+    def markdown_fence(self) -> str | None:
+        return "json"
+
+
 type MessageContentBlock = Annotated[
-    LupTextBlock | LupThinkingBlock | LupToolUseBlock | LupToolResultBlock,
+    LupTextBlock
+    | LupThinkingBlock
+    | LupToolUseBlock
+    | LupToolResultBlock
+    | LupNativeActivityBlock,
     Discriminator("type"),
 ]
 """One block as a message *field* validates it: the closed set, discriminated.

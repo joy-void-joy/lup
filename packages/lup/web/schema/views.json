@@ -114,6 +114,7 @@
     "AnyTurnBlock": {
       "discriminator": {
         "mapping": {
+          "native_activity": "#/$defs/TurnNativeActivityBlock",
           "text": "#/$defs/TurnTextBlock",
           "thinking": "#/$defs/TurnThinkingBlock",
           "tool_call": "#/$defs/TurnToolCallBlock",
@@ -133,6 +134,9 @@
         },
         {
           "$ref": "#/$defs/TurnToolResultBlock"
+        },
+        {
+          "$ref": "#/$defs/TurnNativeActivityBlock"
         }
       ]
     },
@@ -2370,6 +2374,17 @@
           "description": "Model the provider reports for this message, when it does",
           "title": "Model"
         },
+        "native": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonObject"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "parent_tool_call_id": {
           "anyOf": [
             {
@@ -2397,11 +2412,43 @@
       "required": [
         "role",
         "blocks",
+        "native",
         "parent_tool_call_id",
         "model",
         "message_id"
       ],
       "title": "TurnMessage",
+      "type": "object"
+    },
+    "TurnNativeActivityBlock": {
+      "additionalProperties": false,
+      "description": "Complete provider evidence with no equivalent portable content shape.",
+      "properties": {
+        "activity": {
+          "title": "Activity",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "type": {
+          "const": "native_activity",
+          "default": "native_activity",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "provider",
+        "activity",
+        "payload"
+      ],
+      "title": "TurnNativeActivityBlock",
       "type": "object"
     },
     "TurnStartedEvent": {
