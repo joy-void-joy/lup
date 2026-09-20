@@ -127,9 +127,8 @@ def test_codex_renders_what_it_can_spell(
     [
         {"tools": ["Read"]},
         {"allowed_tools": ["Read"]},
-        {"hooks": LupHooksConfig()},
     ],
-    ids=["tools", "allowed_tools", "hooks"],
+    ids=["tools", "allowed_tools"],
 )
 def test_codex_refuses_what_it_cannot_govern(
     request_kwargs: dict[str, object], tmp_path: Path

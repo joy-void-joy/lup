@@ -1,15 +1,16 @@
 """Codex as one selectable runtime.
 
 Codex decides autonomy with a sandbox rather than a permission mode over
-tools: this adapter drives the app-server, whose approval channel it does not
-implement, so a request is honoured by bounding what a session may reach
-instead of by asking. Four fields have no Codex spelling and are refused
-rather than dropped — ``tools``, ``allowed_tools`` and ``disallowed_tools``,
-which have no app-server equivalent, and ``hooks``, which Codex governs
-through the policy dispatcher its harness tree installs rather than per
-session. A caller that set one asked for something this runtime cannot do,
-and silence there would be a session running with less governance than it
-requested.
+tools. Session-level ``tools``, ``allowed_tools`` and ``disallowed_tools``
+have no app-server equivalent and are refused rather than dropped.
+
+Portable PostToolUse and Stop hooks run on native lifecycle events. Tagged
+inbox observers also deliver on native activity without changing approvals.
+Other PreToolUse hooks must explicitly name one of the native approval
+methods, or the exact joined methods in :data:`APPROVAL_METHODS`; only those
+registrations enable approval requests. The app-server does not ask before
+every tool call, so broader pre-execution hooks are refused. The generated
+policy dispatcher enforces policy at the native PreToolUse boundary.
 
 ``disallowed_tools`` is refused despite the dispatcher being able to deny a
 tool it can match, because that dispatcher is installed once per harness tree
@@ -28,6 +29,9 @@ wanted; asking for governance it has no way to apply is not.
 from pathlib import Path
 from typing import Literal
 
+from lup.policy.hooks import LupHooksConfig
+from lup.providers.codex.hooks import APPROVAL_METHODS
+from lup.sessions.errors import UnsupportedCapability
 from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.runtime import (
@@ -170,6 +174,32 @@ def codex_sandbox(request: SessionRequest) -> CodexSandbox | None:
     return min(asked, key=CODEX_SANDBOX_WIDTH.index, default=None)
 
 
+def codex_hook_approval_policy(
+    hooks: LupHooksConfig | None,
+) -> Literal["never", "on-request"]:
+    """Permit lifecycle observers and explicitly scoped native approval hooks.
+
+    An exact native method names the boundary its callback agrees to observe.
+    A wildcard or a portable tool name instead asks for coverage this channel
+    cannot provide. Inbox observers are a separate tagged delivery contract;
+    their neutral output never grants approval.
+    """
+    approvals = [] if hooks is None else hooks.pre_tool_use
+    declared = {*APPROVAL_METHODS, "|".join(APPROVAL_METHODS)}
+    policy: Literal["never", "on-request"] = "never"
+    for matcher in approvals:
+        if matcher.tag == "inbox" and matcher.matcher in {None, "", "*"}:
+            continue
+        if matcher.matcher not in declared:
+            raise UnsupportedCapability(
+                "Codex portable PreToolUse hooks require an explicit native approval scope: "
+                + ", ".join(APPROVAL_METHODS)
+                + ". Universal pre-execution interception requires the generated policy dispatcher."
+            )
+        policy = "on-request"
+    return policy
+
+
 def codex_config(request: SessionRequest) -> CodexSessionConfig:
     """Render a portable request into Codex's own session configuration.
 
@@ -192,7 +222,6 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
             ("tools", request.tools is not None),
             ("allowed_tools", bool(request.allowed_tools)),
             ("disallowed_tools", bool(request.disallowed_tools)),
-            ("hooks", request.hooks is not None),
         )
         if asked
     ]
@@ -223,7 +252,8 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         sandbox=codex_sandbox(request),
         executable=request.contained_program or CODEX_PROGRAM,
         containment=request.containment,
-        approval_policy="never",
+        approval_policy=codex_hook_approval_policy(request.hooks),
+        hooks=request.hooks,
         effort=(None if request.effort is None else CODEX_EFFORT[request.effort]),
         environment=request.environment,
         mcp_servers={
