@@ -41,6 +41,16 @@ What it does, in this order, and the order is the whole point:
 A conflicted merge stops it before the regeneration, deliberately: the trees
 are compiled from declarations the merge has not finished writing.
 
+**If the pinned branch was deleted**, the update names it before relocking.
+Keep the existing lock while checking which surviving branch contains the
+work. Fetch the configured upstream and compare the locked commit with the
+candidate's history; if commits were rebased, compare their patches rather
+than treating matching titles as proof. Ask the user which replacement to
+follow. Then run `uv run --no-sync lup-devtools dev library git --branch
+<replacement>` and `uv run --no-sync lup-devtools dev update`. A reviewed
+commit can instead be selected with `dev update --commit <sha>`. A transport
+failure is reported as unconfirmed reachability, never as a deleted branch.
+
 **If this project has never adopted a scaffold branch**, the update says so.
 Root one once, at the commit the project was stamped from:
 

@@ -115,6 +115,10 @@ def resolved_pin(
                 ref=commit,
             ),
         )
+    else:
+        source = library.read_git_source(root)
+        if source is not None:
+            source.require_available_branch()
     report(f"Resolving {distribution}...")
     uv("lock", "--upgrade-package", distribution, _cwd=str(root))
     return scaffold.pinned_commit(root, distribution)

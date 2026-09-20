@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+import sh
 import typer
 
 from lup.devtools.dev import library, scaffold, update
@@ -48,3 +49,38 @@ def test_an_unconfigured_revision_refuses_before_mutating_the_pin(
         update.resolved_pin(tmp_path, "lup", "revision", lambda _line: None)
     assert manifest.read_text() == original
     assert calls == []
+
+
+def test_deleted_branch_refuses_before_relocking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    remote = tmp_path / "remote"
+    sh.git("init", "--bare", str(remote))
+    manifest = tmp_path / "pyproject.toml"
+    original = f'[tool.uv.sources]\nlup = {{git = "{remote}", branch = "deleted"}}\n'
+    manifest.write_text(original)
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(update, "uv", lambda *args, **_kwargs: calls.append(args))
+
+    with pytest.raises(typer.BadParameter, match="--branch <replacement>"):
+        update.resolved_pin(tmp_path, "lup", "", lambda _line: None)
+
+    assert calls == []
+    assert manifest.read_text() == original
+
+
+def test_unreachable_remote_does_not_claim_branch_absence(tmp_path: Path) -> None:
+    source = library.GitSource(url=str(tmp_path / "unreachable"), ref="dev")
+
+    with pytest.raises(typer.BadParameter, match="absence is unconfirmed"):
+        source.require_available_branch()
+
+
+def test_existing_remote_branch_is_accepted(tmp_path: Path) -> None:
+    git = sh.git.bake(
+        "-C", str(tmp_path), "-c", "user.name=Test", "-c", "user.email=t@x"
+    )
+    git("init", "-b", "dev")
+    git("commit", "--allow-empty", "-m", "base")
+
+    library.GitSource(url=str(tmp_path), ref="dev").require_available_branch()

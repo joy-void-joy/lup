@@ -43,6 +43,7 @@ from typing import Literal, TypedDict, get_args
 from urllib.parse import urlsplit
 
 import httpx
+import sh
 import tomlkit
 import tomlkit.items
 import typer
@@ -55,7 +56,7 @@ from lup.execution.shell import git
 from lup.devtools.sync import load_projects
 from lup.harness.credential import parse_remote, remote_url, resolved_host
 from lup.devtools.project import Tracker
-from lup.devtools.utils import slug_from_remote
+from lup.devtools.utils import decode_stderr, slug_from_remote
 from lup.providers.routing import Provider
 
 # The three below spell where the vendored copy sits, which is a fact about
@@ -129,6 +130,35 @@ class GitSource(BaseModel, frozen=True):
     url: str = Field(min_length=1)
     ref_kind: GitRefKind = "branch"
     ref: str = "main"
+
+    def require_available_branch(self) -> None:
+        """Distinguish a deleted branch from a transport failure before relocking."""
+        if self.ref_kind != "branch":
+            return
+        try:
+            git.out(
+                "ls-remote",
+                "--exit-code",
+                "--heads",
+                self.url,
+                f"refs/heads/{self.ref}",
+            )
+        except sh.ErrorReturnCode as error:
+            if error.exit_code == 2:
+                raise typer.BadParameter(
+                    f"Pinned branch {self.ref!r} is absent at {self.url}. "
+                    "The existing lock remains usable. Inspect the remote branches "
+                    "and compare the locked commit with the intended replacement; "
+                    "then run `uv run --no-sync lup-devtools dev library git "
+                    "--branch <replacement>` and `uv run --no-sync lup-devtools "
+                    "dev update`, or `dev update --commit <reviewed-sha>`. "
+                    "No replacement branch was selected automatically."
+                ) from error
+            raise typer.BadParameter(
+                f"Could not verify pinned branch {self.ref!r} at {self.url}: "
+                f"{decode_stderr(error) or f'git exited {error.exit_code}'}. "
+                "Its absence is unconfirmed; restore remote access before updating."
+            ) from error
 
     def entry(self) -> tomlkit.items.InlineTable:
         """Render the ``[tool.uv.sources]`` value this source declares."""
