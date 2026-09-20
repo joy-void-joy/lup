@@ -137,6 +137,44 @@ class RenderedMigrations(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["ProjectEntry.review_from", "ProjectEntry.last_synced_commit"],
+        commit="1e185c85c94c04c2d5eb73c2e45e106294a2d0de",
+        reason=(
+            "path registrations review fetched origin commits by default and "
+            "review checkpoints are shared across sibling worktrees, bound to "
+            "the repository and ref reviewed"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "For unpublished local work, set review_from to local in "
+                    "sync.json.local, or run sync setup NAME /path/to/repo "
+                    "--review-from local. A repository with no origin remains "
+                    "local. Remote review fetches without moving the checkout."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Check sync status for the selected review ref. A branchless "
+                    "registration matching the library Git source follows its "
+                    "consumed branch; resolve any reported source/branch mismatch "
+                    "before reviewing commits."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "After review, run sync mark-synced NAME --at REVIEWED_SHA "
+                    "with the immutable commit actually reviewed. This records "
+                    "the checkpoint under the common Git directory for all "
+                    "worktrees, without fetching an existing upstream. An older "
+                    "last_synced_commit remains the seed until that shared "
+                    "checkpoint is recorded; changing the repository or ref "
+                    "requires reviewing and recording a checkpoint for that source."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=[
             "ClaudeProfileStore",
             "ClaudeProfileStore.homes_root",
