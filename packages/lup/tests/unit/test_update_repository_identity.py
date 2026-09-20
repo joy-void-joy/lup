@@ -84,3 +84,28 @@ def test_existing_remote_branch_is_accepted(tmp_path: Path) -> None:
     git("commit", "--allow-empty", "-m", "base")
 
     library.GitSource(url=str(tmp_path), ref="dev").require_available_branch()
+
+
+def test_update_diagnoses_deleted_pin_before_materializing_its_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    remote = tmp_path / "remote"
+    sh.git("init", "--bare", str(remote))
+    (tmp_path / "pyproject.toml").write_text(
+        f'[tool.uv.sources]\nlup = {{git = "{remote}", branch = "deleted"}}\n'
+    )
+
+    def unexpected_checkout(*_args) -> Path:
+        pytest.fail("must diagnose the pin before attempting its missing worktree")
+
+    monkeypatch.setattr(update, "upstream_checkout", unexpected_checkout)
+
+    with pytest.raises(typer.BadParameter, match="Pinned branch 'deleted' is absent"):
+        update.updated(
+            tmp_path,
+            scaffold.ScaffoldSource(),
+            "consumer",
+            "",
+            "lup",
+            lambda _line: None,
+        )

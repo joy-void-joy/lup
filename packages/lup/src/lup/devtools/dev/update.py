@@ -175,7 +175,6 @@ def updated(
     and a regeneration over half a merge produces an artifact matching neither
     side.
     """
-    repository = upstream_checkout(source.project, report)
     resolved = resolved_pin(root, distribution, commit, report, source.project)
     if not resolved:
         report(
@@ -184,6 +183,7 @@ def updated(
             f"(`dev library git --branch <branch>`) to update both halves."
         )
         return None
+    repository = upstream_checkout(source.project, report)
     report(f"Library at {short_sha(resolved)}; syncing the environment...")
     uv("sync", _cwd=str(root))
     already = scaffold.merged_at(root, source.branch)
