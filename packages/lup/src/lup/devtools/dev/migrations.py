@@ -128,7 +128,37 @@ class Migration(BaseModel, frozen=True):
         ]
 
 
-DECLARED: list[Migration] = []
+DECLARED: list[Migration] = [
+    Migration(
+        subjects=["Runtime.contained"],
+        reason=(
+            "`contained` named the configuration home a workspace's sessions "
+            "are pointed at, while everywhere else in this library it names a "
+            "container — and a session can now ask for one. The method takes "
+            "the word for what it does, `homed`, and the boundary keeps the "
+            "other"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call `Runtime.homed(request)` where you called "
+                    "`Runtime.contained(request)`; nothing else about it moved. "
+                    "A caller reaching it through `Runtime.session_factory` "
+                    "was never naming it and has nothing to change."
+                ),
+                command=[
+                    "uv",
+                    "run",
+                    "lup-devtools",
+                    "dev",
+                    "py",
+                    "text",
+                    "\\.contained\\(",
+                ],
+            ),
+        ],
+    ),
+]
 """Every break this library has taken since its last release, and what to do.
 
 Empty is the state to keep it in: an entry is added by the commit that breaks
