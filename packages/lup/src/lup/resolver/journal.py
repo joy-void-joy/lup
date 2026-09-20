@@ -24,6 +24,7 @@ from pydantic import BaseModel, TypeAdapter
 from lup.coordination.mail import MessageOutstandingEvent, MessagePostedEvent
 from lup.coordination.questions import QuestionAnswer
 from lup.coordination.refs import ActorRef
+from lup.coordination.sessions import ActorRecord
 from lup.channels.models import utc_now
 from lup.observability.journal import Journal as SharedJournal
 from lup.observability.journal import JournalRecord
@@ -278,6 +279,14 @@ class RunFailedEvent(BaseModel, frozen=True):
     reason: str
 
 
+class ActorBindingRetiredEvent(BaseModel, frozen=True):
+    """An operator authorized replacing this binding with a fresh conversation."""
+
+    type: Literal["actor_binding_retired"] = "actor_binding_retired"
+    previous: ActorRecord
+    reason: str
+
+
 type RunEvent = (
     PhaseChangedEvent
     | ConcernProgressedEvent
@@ -300,6 +309,7 @@ type RunEvent = (
     | LeaseDriftEvent
     | IntegrationRecoveredEvent
     | RunFailedEvent
+    | ActorBindingRetiredEvent
 )
 """What the run did, as opposed to what one actor's session did.
 

@@ -128,6 +128,13 @@ State lives at `<state-root>/<run-id>/` as an atomic schema-versioned
 agent rounds, reviews, and integration projections. Restart must load only that
 explicit run and verify recorded branches, commits, worktrees, and leases.
 
+A changed submission schema still refuses reuse of its actor's conversation.
+For a stopped run, `uv run lup-devtools resolve rebind-actor 'kind:id#round'
+--run-id RUN --reason 'schema change'` journals the complete prior binding and
+retires only that conversation. Resume binds the current schemas in a fresh
+session; conversation memory is lost, while questions, answers, join checkpoints,
+worktrees and other actors remain intact. A live driver refuses rebinding.
+
 For a new run, the composition root scans tracked files for actionable review
 notes and passes their source context to a read-only structured planning turn.
 The planner must assign every note exactly once to a generalized concern. If a

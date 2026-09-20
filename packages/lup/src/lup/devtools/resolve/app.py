@@ -24,6 +24,7 @@ from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.dev.issues import EXCLUDED_LABEL
 from lup.devtools.resolve.cost import show_cost
 from lup.devtools.resolve.recovery import recover_integration
+from lup.devtools.resolve.actors import rebind_actor
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
 from lup.devtools.supervisor.app import serve_supervisor
 from lup.devtools.supervisor.doors import (
@@ -70,6 +71,7 @@ def create_resolve_app(
     app.command("questions")(list_questions)
     app.command("answer")(answer_questions)
     app.command("actors")(list_actors)
+    app.command("rebind-actor")(rebind_actor)
     app.command("say")(say_to_actor)
     app.command("accept")(accept_verification)
     app.command("retire")(retire_concern)

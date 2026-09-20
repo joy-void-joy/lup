@@ -1,5 +1,31 @@
 {
   "$defs": {
+    "ActorBindingRetiredEvent": {
+      "additionalProperties": false,
+      "description": "An operator authorized replacing this binding with a fresh conversation.",
+      "properties": {
+        "previous": {
+          "$ref": "#/$defs/ActorRecord"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "type": {
+          "const": "actor_binding_retired",
+          "default": "actor_binding_retired",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "previous",
+        "reason"
+      ],
+      "title": "ActorBindingRetiredEvent",
+      "type": "object"
+    },
     "ActorIndex": {
       "additionalProperties": false,
       "description": "Every actor a run's record names, which is every trace it can open.",
@@ -16,6 +42,41 @@
         "actors"
       ],
       "title": "ActorIndex",
+      "type": "object"
+    },
+    "ActorRecord": {
+      "additionalProperties": false,
+      "description": "What one actor needs to be reattached after a park.\n\nThe digest is recorded here rather than pushed into the runtime because\nonly this side knows both halves of the comparison. A provider that\nrestores a resumed thread's tools from its own metadata never says what\nit restored, so the answerable question is whether *we* expect the same\nschema now that we expected before the park.",
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorRef"
+        },
+        "schema_digests": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Schema Digests",
+          "type": "object"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "actor",
+        "session",
+        "schema_digests"
+      ],
+      "title": "ActorRecord",
       "type": "object"
     },
     "ActorRef": {
@@ -1833,6 +1894,9 @@
         },
         {
           "$ref": "#/$defs/RunFailedEvent"
+        },
+        {
+          "$ref": "#/$defs/ActorBindingRetiredEvent"
         }
       ]
     },

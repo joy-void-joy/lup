@@ -217,6 +217,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `resolve questions` | List a run&#x27;s questions and what each one has been answered. |
 | `resolve answer` | Offer an answer to one or more of a run&#x27;s questions. |
 | `resolve actors` | List every actor this run has recorded, and what each has not read yet. |
+| `resolve rebind-actor` | Retire one binding so resume opens a fresh conversation with current schemas. |
 | `resolve say` | Tell one actor something. It reads this and keeps going. |
 | `resolve accept` | Accept one concern over one failing verification, on the human&#x27;s word. |
 | `resolve retire` | Retire one concern whose work was settled somewhere other than this run. |

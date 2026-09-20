@@ -457,7 +457,11 @@ class ActorSession:
         if named in seen and seen[named] != digest:
             raise ActorSchemaChangedError(
                 f"{self.actor.label()} resumed expecting a different {named} "
-                "than the one it was bound to"
+                "than the one it was bound to. Stop the owning run and explicitly "
+                "retire this actor's persisted conversation before rebinding. "
+                "For a resolver run, use `uv run lup-devtools resolve rebind-actor "
+                f"'{self.actor.label()}' --run-id <run-id> --reason '<schema change>'`; "
+                "this loses conversation memory but preserves run checkpoints and answers."
             )
         self.record = self.record.model_copy(
             update={"schema_digests": {**seen, named: digest}}
