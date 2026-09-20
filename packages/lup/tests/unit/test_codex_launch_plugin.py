@@ -213,6 +213,7 @@ async def test_custom_host_executables_still_need_host_policy_checks(
     monkeypatch.setattr(runtime, "install_declared_policy", policy)
     server = Mock()
     server.start = AsyncMock(side_effect=RuntimeError("stop before any session"))
+    server.close = AsyncMock()
     monkeypatch.setattr(runtime, "CodexAppServer", Mock(return_value=server))
     config = runtime.CodexSessionConfig.model_validate(
         {

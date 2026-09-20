@@ -19,6 +19,7 @@ from lup.providers.claude.runtime import (
     ClaudeSessionConfig,
     create_claude,
 )
+from lup.tools.native import NativeToolGroup, NativeTools
 from lup.providers.claude.subagents import model_alias as claude_model_alias
 from lup.providers.claude.subagents import subagent_tools as claude_subagent_tools
 from lup.providers.codex.config import (
@@ -32,6 +33,8 @@ from lup.providers.codex.runtime import (
 )
 from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
 from lup.providers.codex.subagents import subagent_tools as codex_subagent_tools
+from lup.providers.codex.selection import codex_config
+from lup.providers.selection import SessionRequest
 from lup.sessions.client import Client
 from lup.sessions.composition import submission_gate_resolver
 from lup.policy.hooks import LupHooksConfig
@@ -169,7 +172,7 @@ def provider_factory(
     model: str | None,
     system_prompt: str,
     cwd: Path,
-    tools: list[str] | None = None,
+    native_tools: NativeTools = None,
     tool_servers: dict[str, McpServerEntry] | None = None,
     allowed_tools: list[str] | None = None,
     hooks: LupHooksConfig | None = None,
@@ -198,8 +201,8 @@ def provider_factory(
     )
     if engine in ("claude", "claude-compat"):
         if role is not None:
-            tools = claude_subagent_tools(role)
-            allowed_tools = tools
+            native_tools = claude_subagent_tools(role)
+            allowed_tools = list(native_tools)
             if role.model != "inherit":
                 if compat_base_url() is not None:
                     raise ValueError(
@@ -214,7 +217,7 @@ def provider_factory(
             model=model,
             system_prompt=system_prompt,
             coding_harness_preset=coding_harness_preset,
-            tools=tools,
+            native_tools=native_tools,
             allowed_tools=allowed_tools or [],
             tool_servers=tool_servers or {},
             permission_mode=(
@@ -286,12 +289,8 @@ def provider_factory(
             ]
             if value is not None
         ]
-        if tools:
-            unsupported.append("tools")
         if allowed_tools:
             unsupported.append("allowed_tools")
-        if tool_servers:
-            unsupported.append("in-process tool_servers (declare codex_mcp_servers)")
         if subagents:
             unsupported.append("native subagents (serve run_subagent instead)")
         if unsupported:
@@ -303,7 +302,7 @@ def provider_factory(
             codex_subagent_tools(role)
             if role is not None
             else CodexSubagentTools()
-            if tools == []
+            if native_tools == []
             else None
         )
         if role is not None and role.model != "inherit":
@@ -314,6 +313,11 @@ def provider_factory(
             if engine != "codex":
                 raise ValueError("AGENT_MODEL is required for a compatible endpoint")
             model = CodexModelTiers().strongest
+        applications = codex_config(
+            SessionRequest(cwd=cwd, tool_servers=tool_servers or {})
+        )
+        if applications.mcp_servers.keys() & (codex_mcp_servers or {}).keys():
+            raise ValueError("tool_servers and codex_mcp_servers name the same server")
         config = CodexSessionConfig(
             model=model,
             developer_instructions=system_prompt,
@@ -337,9 +341,12 @@ def provider_factory(
                 settings.codex_effort or settings.reasoning_effort
             ),
             submission_gate_resolver=submission_gate,
-            mcp_servers=codex_mcp_servers or {},
+            mcp_servers={**applications.mcp_servers, **(codex_mcp_servers or {})},
+            application_tools=applications.application_tools,
+            companions=applications.companions,
             writable_roots=writable_roots or [],
             delegated_tools=delegated_tools,
+            native_tools=None if delegated_tools is not None else native_tools,
         )
         endpoint = compat_base_url()
         if engine in ("openai", "openai-compat"):
@@ -543,7 +550,7 @@ def build_session_factory(
     allowed_tools: list[str] = []
     submission_gate: SubmissionGate[AgentOutput] | None = None
     hooks = create_permission_hooks(notes.rw, notes.ro)
-    tools: list[str] | None = [] if toolless else None
+    native_tools: NativeTools = None if toolless else [NativeToolGroup.ALL]
     sandbox: Sandbox | None = None
     groups = declared_tool_groups()
 
@@ -659,7 +666,7 @@ def build_session_factory(
         model=model or settings.model,
         system_prompt=system_prompt,
         cwd=Path.cwd(),
-        tools=tools,
+        native_tools=native_tools,
         tool_servers=tool_servers,
         allowed_tools=allowed_tools,
         hooks=hooks,

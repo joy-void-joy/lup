@@ -41,6 +41,8 @@ def non_interactive_environment(
 
 LAUNCHER_DECIDED_ENV: list[str] = [
     "LUP_CONTAINED",
+    "LUP_BOUNDARY_NONCE",
+    "LUP_BOUNDARY_ROOT",
     "GIT_CONFIG_COUNT",
     MEMBER_ENV,
     NAME_ENV,

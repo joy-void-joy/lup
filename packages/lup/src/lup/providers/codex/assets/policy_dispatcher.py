@@ -21,6 +21,7 @@ than against the workspace.
 
 import json
 import os
+import shlex
 import sys
 from hashlib import sha256
 from pathlib import Path
@@ -54,16 +55,19 @@ from host import (
     file_diagnostics,
     note_ran,
     observe_hook_call,
+    policy_snapshot_digest,
     publish_edition,
     read_document,
     record_hook_evidence,
     repaired_directives,
+    routing_policy_identity,
     sandbox_active,
 )
 from kernel.decision import KernelDecision
-from kernel.lex import parse_shell
-from kernel.syntax import word_text
+import kernel.lex as shell_lex
+from kernel.review import copied_paths, literal_input
 from kernel.shell import auto_escape_matches
+import policy_data as declared_policy
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 from policy_data import DIAGNOSTICS_COMMAND, REPAIR_COMMAND
@@ -103,40 +107,6 @@ def joined(decisions):
             if decision.effect == effect:
                 return decision
     return KernelDecision("allow", "every patched file is declared safe")
-
-
-def shell_patch(command):
-    """Read one literal apply_patch invocation without hiding other shell effects."""
-    tree = parse_shell(command)
-    if isinstance(tree, KernelDecision):
-        return None
-    items = tree["items"]
-    if len(items) != 1 or items[0]["terminator"] == "&":
-        return None
-    pipelines = items[0]["andor"]["pipelines"]
-    if len(pipelines) != 1 or pipelines[0]["negated"]:
-        return None
-    commands = pipelines[0]["commands"]
-    if len(commands) != 1 or commands[0]["kind"] != "simple":
-        return None
-    invocation = commands[0]
-    words = invocation["words"]
-    if not words or word_text(words[0]) != "apply_patch":
-        return None
-    redirects = invocation["redirects"]
-    if len(words) == 2 and not redirects:
-        parts = words[1]["parts"]
-        if all(part["kind"] in ("single", "literal", "escaped") for part in parts):
-            return word_text(words[1])
-    if len(words) == 1 and len(redirects) == 1:
-        redirect = redirects[0]
-        if redirect["operator"] == "<<" and len(redirect["heredoc"]) == 1:
-            heredoc = redirect["heredoc"][0]
-            if heredoc["quoted"]:
-                return heredoc["body"]
-    raise ValueError(
-        "use one apply_patch with a single-quoted patch argument or quoted heredoc"
-    )
 
 
 def patch_changes(command, cwd):
@@ -192,7 +162,7 @@ def dispatch(payload, permission_request=False):
         or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     )
     if name == "Bash":
-        envelope = shell_patch(tool_input["command"])
+        envelope = literal_input(tool_input["command"], "apply_patch")
         if envelope is not None:
             return patch_decision(envelope, session_directory, autonomous)
         requested_escape = spent_escape(tool_input)
@@ -278,7 +248,7 @@ def queued_review(payload, decision):
     envelope = (
         command
         if name == "apply_patch"
-        else shell_patch(command)
+        else literal_input(command, "apply_patch")
         if name == "Bash"
         else None
     )
@@ -290,7 +260,35 @@ def queued_review(payload, decision):
         if envelope is not None
         else {}
     )
-    return reviewed_decision(
+    copied = copied_paths(command) if name == "Bash" else None
+    if copied is not None:
+        if not (cwd / copied["source"]).is_file():
+            raise ValueError("copy review requires a readable source file")
+    if name == "Bash":
+        paths = [
+            *shell_lex.shell_write_targets(command),
+            *shell_lex.shell_path_verb_targets(command, declared_policy.SHELL_RULES),
+            *shell_lex.shell_flag_write_targets(command, declared_policy.SHELL_RULES),
+            *(write["path"] for write in shell_lex.authored_writes(command)),
+            *(
+                path
+                for rewrite in shell_lex.shell_sed_rewrites(
+                    command, declared_policy.SHELL_RULES
+                )
+                for path in rewrite["targets"]
+            ),
+            *(copied.values() if copied is not None else []),
+        ]
+        for path in dict.fromkeys(paths):
+            target = cwd / path
+            if target.exists() and not target.is_file():
+                raise ValueError(
+                    "shell review requires regular files; use an exact patch"
+                )
+            before[target.resolve()] = (
+                target.read_text(encoding="utf-8") if target.exists() else None
+            )
+    reviewed = reviewed_decision(
         decision,
         cwd,
         payload["session_id"] if "session_id" in payload else "",
@@ -303,7 +301,17 @@ def queued_review(payload, decision):
         if "hook_event_name" in payload
         and payload["hook_event_name"] == "PermissionRequest"
         else "",
+        policy_identity=json.dumps(
+            [
+                routing_policy_identity(cwd),
+                policy_snapshot_digest(Path(__file__).parents[1]),
+                sha256(Path(__file__).read_bytes()).hexdigest(),
+            ]
+        ),
     )
+    # A blocked review carries a recovery naming who answers it and how, which
+    # reaches the operator on stdout; exit 2 would hand it to the model alone.
+    return reviewed, reviewed.effect == "deny"
 
 
 def remembered_run(payload):
@@ -338,7 +346,7 @@ def patch_stamps(payload):
     envelope = (
         command
         if name == "apply_patch"
-        else shell_patch(command)
+        else literal_input(command, "apply_patch")
         if name == "Bash"
         else None
     )
@@ -375,7 +383,9 @@ def observe(payload):
     if not command:
         return []
     name = payload["tool_name"] if "tool_name" in payload else ""
-    envelope = command if name == "apply_patch" else shell_patch(command)
+    envelope = (
+        command if name == "apply_patch" else literal_input(command, "apply_patch")
+    )
     if envelope is not None:
         directory = Path(root) if root else Path.cwd()
         snapshot = patch_snapshot(payload)
@@ -413,6 +423,7 @@ def observe(payload):
 def main():
     payload = {}
     permission_request = False
+    review_notice = False
     try:
         payload = json.load(sys.stdin)
         permission_request = (
@@ -449,7 +460,7 @@ def main():
         # Native approval mode does not prove who answers. Both judging events
         # require a recorded reviewer answer for this exact pending call.
         if decision.effect == "ask":
-            decision = queued_review(payload, decision)
+            decision, review_notice = queued_review(payload, decision)
         # A verdict from here places nothing: this hook answers, and the call
         # runs with the arguments the model wrote, so a placement is degraded
         # to its plain effect rather than carrying an intent no channel here
@@ -505,12 +516,24 @@ def main():
     if decision.effect in ("allow", "defer"):
         record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
         return
-    # Exit 2 turns the call back to the agent whatever its effect, so a
-    # question stopped here reaches the agent as a refusal does: reason and
-    # recovery both, since no approver reads this channel.
+    # A successful structured denial preserves the operator warning; exit 2
+    # discards systemMessage. Both routes stop the native tool invocation.
     detail = decision.addressed()
     # The journal is metadata-only: the reason names the refused input, which
     # for a fetch is the full URL, so it stays out of the metadata journal.
     record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
+    if review_notice:
+        json.dump(
+            {
+                "systemMessage": detail,
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": detail,
+                },
+            },
+            sys.stdout,
+        )
+        return
     sys.stderr.write(detail)
     raise SystemExit(2)

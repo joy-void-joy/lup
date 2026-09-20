@@ -131,7 +131,7 @@ Configuration loads through pydantic-settings in `src/lup_template/agent/config.
 
 `dev update` moves all three carriers — the pin, the generated trees, the copied half — to one upstream commit, and reports the conflicts and migrations it leaves. Nothing else moves them: a hand-port diverges silently, where a merge makes the next update cheap.
 
-**A defect upstream is fixed upstream**, in a worktree at `refs/<project>` and under *that* repository's gate — this session's hooks enforce this project's policy, not the one those files answer to — with the branch pinned here until it lands. Working around it in the copied half is a decision taken for every project that meets the same defect, and the one nobody else can see.
+**Fix upstream defects upstream**, in a `refs/<project>` worktree, under its gate, pinned here until it lands. Explicit grants use its accepted edit policy with this session's boundary and approvals; a parent mount or symlink grants no authority. `docs/permissions.md` covers operator refresh without restarting. A copied-half workaround hides the repair.
 
 ---
 

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import McpServerEntry
+from lup.tools.native import NativeTools, native_grants
 from lup.sessions.client import Client
 from lup.providers.login import ProviderLogin
 from lup.sessions.events import SubmissionGateResolver
@@ -69,7 +70,13 @@ words -- not a reason for a caller to state a boundary as an autonomy.
 """
 
 
-class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
+class SessionRequest(
+    BaseModel,
+    frozen=True,
+    arbitrary_types_allowed=True,
+    extra="forbid",
+    revalidate_instances="always",
+):
     """What an application asks of a session, before a runtime renders it."""
 
     model: str | None = None
@@ -95,12 +102,12 @@ class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
         ),
     )
 
-    tools: list[str] | None = None
+    native_tools: NativeTools = None
     allowed_tools: list[str] = []
     disallowed_tools: list[str] = []
     """The tools this session may not call, whoever else would admit them.
 
-    The third of three fields that read alike. ``tools`` is the roster a
+    The third of three fields that read alike. ``native_tools`` is the roster a
     session is given, ``allowed_tools`` the part of it that runs without
     being asked about, and this one a refusal that outranks both — which is
     what lets a caller say "everything except this" without enumerating
@@ -136,6 +143,7 @@ class SessionRequest(BaseModel, frozen=True, arbitrary_types_allowed=True):
         built a wrapper nothing starts, which reads as containment until
         somebody checks what the session actually ran in.
         """
+        native_grants(self.native_tools)
         match self.containment, self.contained_program:
             case "outer", None:
                 raise ValueError(
@@ -187,7 +195,7 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
 
     def session_factory(self, request: SessionRequest) -> Client:
         """Open a session factory for this runtime from a portable request."""
-        return self.open(self.homed(request))
+        return self.open(self.homed(SessionRequest.model_validate(request)))
 
     def homed(self, request: SessionRequest) -> SessionRequest:
         """The same request, its sessions pointed at a home of the workspace's own.

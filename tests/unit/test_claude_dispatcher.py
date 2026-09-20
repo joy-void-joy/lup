@@ -305,8 +305,28 @@ def foreign_verdict(path: Path, old: str, new: str, cwd: Path) -> tuple[str, str
     )
 
 
+def ownership_context(accessible: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Measure the file grant separately from the policy ownership under test."""
+    caller = accessible.parent / "caller"
+    initialized_repo(caller, accessible.parent / "caller-hooks")
+    ledger = caller / ".lup" / "preflight" / "ownership.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(
+        json.dumps(
+            {
+                "writable_roots": [str(caller), str(accessible)],
+                "read_only_roots": [],
+                "destination_policies": [],
+            }
+        )
+    )
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "ownership")
+    return caller
+
+
 def test_another_repositorys_file_is_not_judged_by_this_projects_conventions(
     other_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The defect #206 and #188 describe, at the dispatcher a session runs.
 
@@ -320,7 +340,7 @@ def test_another_repositorys_file_is_not_judged_by_this_projects_conventions(
         other_repository / "src" / "theirs.py",
         "value = 1",
         "from typing import Any",
-        Path.cwd(),
+        ownership_context(other_repository, monkeypatch),
     )
 
     assert effect == "deny"
@@ -419,6 +439,7 @@ def unversioned_directory(tmp_path: Path) -> Path:
 
 def test_a_note_written_outside_every_repository_is_not_this_projects_feedback(
     unversioned_directory: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A `# lup:` marker is this project's review instrument, not a syntax.
 
@@ -428,7 +449,8 @@ def test_a_note_written_outside_every_repository_is_not_this_projects_feedback(
     means an agent cannot write down a probe *of* this policy anywhere the
     policy is not, which is the one place such a probe belongs.
     """
-    effect, reason = note_verdict(str(unversioned_directory / "scratch.py"), Path.cwd())
+    caller = ownership_context(unversioned_directory, monkeypatch)
+    effect, reason = note_verdict(str(unversioned_directory / "scratch.py"), caller)
 
     assert effect == "allow"
     assert "feedback" not in reason

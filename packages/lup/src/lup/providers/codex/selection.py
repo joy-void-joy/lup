@@ -1,8 +1,18 @@
 """Codex as one selectable runtime.
 
-Codex decides autonomy with a sandbox rather than a permission mode over
-tools. Session-level ``tools``, ``allowed_tools`` and ``disallowed_tools``
-have no app-server equivalent and are refused rather than dropped.
+Codex decides autonomy with a sandbox, and native authority is compiled
+independently of it: ``native_tools`` names the built-in facilities a session
+may reach, and an unsupported exact grant fails before launch rather than
+being approximated. Declared application tools keep their Python handlers
+through the thread's dynamic tools, while explicitly external servers keep
+their subprocess transport. Session-level ``allowed_tools`` and
+``disallowed_tools`` have no app-server equivalent and are refused rather
+than dropped.
+
+Typed output rides ``outputSchema`` on each ``turn/start``, so a schema may
+change or disappear between turns without disturbing the thread. The
+dynamic-tool channel is thread-scoped and therefore carries application tools
+alone; changing those still requires a fresh session.
 
 Portable PostToolUse and Stop hooks run on native lifecycle events. Tagged
 inbox observers also deliver on native activity without changing approvals.
@@ -33,6 +43,7 @@ from typing import Literal
 from lup.providers.codex.hooks import codex_hook_approval_policy
 from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.runtime import (
     CODEX_PROGRAM,
     CodexEffort,
@@ -40,7 +51,7 @@ from lup.providers.codex.runtime import (
     CodexSessionConfig,
     create_codex,
 )
-from lup.tools.mcp import McpServerEntry, RawStdioServerConfig
+from lup.tools.mcp import LupMcpServerConfig, McpServerEntry, RawStdioServerConfig
 from lup.sessions.client import Client
 from lup.sessions.errors import UnsupportedCapability
 from lup.providers.selection import (
@@ -193,7 +204,6 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
     refused = [
         name
         for name, asked in (
-            ("tools", request.tools is not None),
             ("allowed_tools", bool(request.allowed_tools)),
             ("disallowed_tools", bool(request.disallowed_tools)),
         )
@@ -219,6 +229,16 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         )
     if request.cwd is None:
         raise ValueError("Codex sandboxes a session against a cwd; none was given")
+    application_tools = [
+        (f"lup_app_{name}__{tool.name}", tool)
+        for name, server in request.tool_servers.items()
+        if isinstance(server, LupMcpServerConfig)
+        for tool in server.tools
+    ]
+    if len({name for name, _tool in application_tools}) != len(application_tools):
+        raise ValueError(
+            "hosted server/tool names collide in Codex; rename the ambiguous server or tool"
+        )
     return CodexSessionConfig(
         model=request.model,
         developer_instructions=request.instructions,
@@ -231,11 +251,23 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         hooks=request.hooks,
         effort=(None if request.effort is None else CODEX_EFFORT[request.effort]),
         environment=request.environment,
+        native_tools=request.native_tools,
         mcp_servers={
             name: codex_mcp_server(name, server)
             for name, server in request.tool_servers.items()
+            if not isinstance(server, LupMcpServerConfig)
         },
-        writable_roots=[request.cwd],
+        application_tools=dict(application_tools),
+        companions=[
+            companion
+            for server in request.tool_servers.values()
+            if isinstance(server, LupMcpServerConfig)
+            for companion in server.companions
+        ],
+        writable_roots=[request.cwd]
+        if CodexNativeTools.compile(request.native_tools).write
+        or CodexNativeTools.compile(request.native_tools).shell
+        else [],
         submission_gate_resolver=request.submission_gate,
     )
 

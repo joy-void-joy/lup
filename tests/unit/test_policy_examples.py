@@ -42,8 +42,8 @@ async def attempted_call(
         for matcher in options.hooks["PreToolUse"]
         for hook in matcher.hooks
     ]
-    assert len(decisions) == 1
-    return decisions[0]
+    assert len(decisions) == 2
+    return decisions[0] or decisions[1]
 
 
 def permission(
@@ -82,13 +82,14 @@ async def test_fetch_example_allows_the_scope_it_declares() -> None:
     }
 
 
-async def test_fetch_example_asks_before_a_family_it_never_declared() -> None:
+async def test_fetch_example_denies_a_family_it_never_granted() -> None:
     decision = await attempted_call(
         semantic_policy.session_config(), "Bash", {"command": "git status"}
     )
 
     assert decision == permission(
-        "ask", "no shell policy is declared, so this call needs approval"
+        "deny",
+        "Tool 'Bash' is outside this session's explicit native_tools and tool_servers.",
     )
 
 

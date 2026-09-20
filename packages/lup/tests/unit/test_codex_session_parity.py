@@ -124,6 +124,8 @@ class ScriptedCodex(CodexAppServer):
     async def request(self, method: str, params: JsonObject) -> JsonValue:
         self.requests.append((method, params))
         match method:
+            case "config/read":
+                return {"config": {"mcp_servers": {}, "plugins": {}, "model": None}}
             case "thread/start" | "thread/resume":
                 return {"thread": {"id": "thread-1"}}
             case "turn/start":

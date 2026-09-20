@@ -68,6 +68,21 @@ def decision(answered: dict[str, object]) -> dict[str, object]:
     return specific
 
 
+def refused(result: sh.RunningCommand) -> bool:
+    """Whether Codex blocked the call, over either of its two denial channels.
+
+    A parked review exits 0 carrying a structured denial, because Codex drops
+    the operator's warning on exit 2; an allowed call exits 0 saying nothing.
+    """
+    if result.exit_code == 2:
+        return True
+    if not result.stdout:
+        return False
+    return (
+        json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    )
+
+
 def test_claude_spends_an_explicit_answer_once(repo: Path) -> None:
     assert decision(claude("PreToolUse", repo))["permissionDecision"] == "deny"
     relay = QuestionRelay(repo / ".lup/questions.jsonl")
@@ -109,7 +124,7 @@ def test_a_call_changed_on_the_way_through_approves_nothing(repo: Path) -> None:
 
 def test_codex_unexpected_execution_grants_no_authority(repo: Path) -> None:
     """Observed execution is diagnosed and leaves a retry needing an answer."""
-    assert codex("PreToolUse", repo).exit_code == 2
+    assert refused(codex("PreToolUse", repo))
     relay = QuestionRelay(repo / ".lup/questions.jsonl")
     (question,) = relay.pending()
 
@@ -118,7 +133,7 @@ def test_codex_unexpected_execution_grants_no_authority(repo: Path) -> None:
     assert "without a consumed approval receipt" in observed.stderr.decode()
     uncertain = relay.find(question.id)
     assert uncertain is not None and uncertain.state == "in_doubt"
-    assert codex("PreToolUse", repo).exit_code == 2
+    assert refused(codex("PreToolUse", repo))
 
 
 def test_claude_unexpected_execution_grants_no_authority(repo: Path) -> None:
@@ -130,10 +145,10 @@ def test_claude_unexpected_execution_grants_no_authority(repo: Path) -> None:
 
 
 def test_codex_spends_an_explicit_answer_once(repo: Path) -> None:
-    assert codex("PreToolUse", repo).exit_code == 2
+    assert refused(codex("PreToolUse", repo))
     relay = QuestionRelay(repo / ".lup/questions.jsonl")
     (question,) = relay.pending()
     relay.answer(question.id, "operator", True)
-    assert codex("PreToolUse", repo).exit_code == 0
+    assert not refused(codex("PreToolUse", repo))
     assert codex("PostToolUse", repo).exit_code == 0
-    assert codex("PreToolUse", repo).exit_code == 2
+    assert refused(codex("PreToolUse", repo))

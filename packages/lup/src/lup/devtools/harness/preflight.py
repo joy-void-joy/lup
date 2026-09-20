@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from lup.execution.shell import git
 from lup.harness.requirements import SENTINEL_VARIABLE
 from lup.policy.boundary import BoundaryPreflight
+from lup.policy.snapshots import DestinationPolicy, RepositoryPolicyAuthority
 from lup.types import EnvVars
 
 # lup: ignore[constant-declaration] — an identity this repository defines, and
@@ -43,6 +44,10 @@ from lup.types import EnvVars
 # named for a value and the dispatcher believes the ledger this names
 NONCE_VARIABLE = "LUP_BOUNDARY_NONCE"
 """Which ledger this session's dispatcher is entitled to believe."""
+
+# lup: ignore[constant-declaration] — the launcher-owned address of its nonce ledger
+ROOT_VARIABLE = "LUP_BOUNDARY_ROOT"
+"""The launch checkout, independent of a tool or preflight command's cwd."""
 
 
 class LaunchSentinels(BaseModel, frozen=True):
@@ -83,6 +88,9 @@ def record_preflight(
     sentinels: LaunchSentinels,
     root: Path,
     launch: Sequence[str] | None = None,
+    destination_policies: Sequence[DestinationPolicy] = (),
+    read_only_roots: Sequence[Path] = (),
+    destination_authorities: Sequence[RepositoryPolicyAuthority] = (),
 ) -> Path:
     """Write what this launch measured, in the shape a bare script can read.
 
@@ -120,6 +128,13 @@ def record_preflight(
                 "blocked": preflight.blocked(),
                 "writable_roots": [str(item) for item in boundary.writable_roots],
                 "managed_roots": [str(item) for item in boundary.managed_roots],
+                "read_only_roots": [str(item.resolve()) for item in read_only_roots],
+                "destination_policies": [
+                    row.model_dump_json() for row in destination_policies
+                ],
+                "destination_authorities": [
+                    row.model_dump_json() for row in destination_authorities
+                ],
                 "launch": list(launch if launch is not None else sys.argv[1:]),
             },
             indent=2,

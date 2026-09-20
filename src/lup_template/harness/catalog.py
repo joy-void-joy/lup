@@ -680,6 +680,8 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # Gitignored is not a substitute. The gate is who may write
                 # it, and nothing was asking.
                 Path("sync.json.local"),
+                Path(".lup/preflight"),
+                Path(".lup/policy-snapshots"),
                 # What the agent is allowed to do at all is declared here, and
                 # an agent that can widen its own policy without a question
                 # has a preference rather than a boundary. Protected so the

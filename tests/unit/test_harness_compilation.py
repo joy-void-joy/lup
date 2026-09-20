@@ -1929,8 +1929,10 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
         sandboxed=True,
         plugin_data=codex_data,
     )
-    assert codex.exit_code == 2
-    assert url.encode() in codex.stderr
+    assert codex.exit_code == 0
+    spoken = json.loads(codex.stdout)["hookSpecificOutput"]
+    assert spoken["permissionDecision"] == "deny"
+    assert url in spoken["permissionDecisionReason"]
     pending = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
     assert {question.operation.tool for question in pending} == {
         "WebFetch",
@@ -2160,10 +2162,12 @@ def test_generated_codex_pretool_never_treats_pending_requests_as_approval(
         **pretool,
         "tool_input": {"command": command.replace("180", "181")},
     }
-    assert codex_hook_result(mismatched, True, tmp_path).exit_code == 2
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
-    assert codex_hook_result(pretool, True, tmp_path).exit_code == 2
+    for proposed in (mismatched, pretool, pretool, pretool):
+        refused = codex_hook_result(proposed, True, tmp_path)
+        assert refused.exit_code == 0
+        output = json.loads(refused.stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "Review " in output["systemMessage"]
 
 
 def test_generated_codex_permission_request_denies_unapproved_code() -> None:
@@ -2682,8 +2686,12 @@ def test_generated_codex_hook_fails_closed_for_unknown_tools() -> None:
         _return_cmd=True,
     )
     assert isinstance(result, sh.RunningCommand)
-    assert result.exit_code == 2
-    assert b"unknown tool" in result.stderr
+    # The call is put to review, and a blocked review carries its reason on
+    # stdout so the operator sees it; Codex drops a warning sent with exit 2.
+    assert result.exit_code == 0
+    spoken = json.loads(result.stdout)["hookSpecificOutput"]
+    assert spoken["permissionDecision"] == "deny"
+    assert "unknown tool" in spoken["permissionDecisionReason"]
 
 
 def test_reconciliation_source_digest_rejects_a_stale_preimage(

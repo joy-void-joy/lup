@@ -151,6 +151,7 @@ class EditBatch(SemanticToolBase, frozen=True):
     """The complete set of file changes in one native edit operation."""
 
     changes: list[EditChange] = Field(min_length=1)
+    cwd: Path | None = None
 
     def decide_under(self, policies: "DeclaredPolicies") -> "Decision":
         if policies.edit is None:

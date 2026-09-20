@@ -173,6 +173,7 @@ def answering_session(cwd: Path, watch: ApprovalWatch) -> CodexSessionConfig:
         developer_instructions=INSTRUCTIONS,
         cwd=cwd,
         sandbox="workspace-write",
+        native_tools=["Bash"],
         approval_policy="on-request",
         hooks=watch.hooks(),
     )
@@ -191,6 +192,7 @@ def quiet_session(cwd: Path) -> CodexSessionConfig:
         developer_instructions=INSTRUCTIONS,
         cwd=cwd,
         sandbox="danger-full-access",
+        native_tools=["Bash"],
         approval_policy="never",
     )
 

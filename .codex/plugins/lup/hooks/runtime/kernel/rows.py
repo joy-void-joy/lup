@@ -1,8 +1,8 @@
 """Primitive row shapes the generated data file renders into."""
 
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, NotRequired
 
-from .decision import CheckpointRequirement, SandboxPlacement
+from .decision import CheckpointRequirement, SandboxPlacement, KernelDecision
 from .effects import EffectRow
 from .semantics import ReviewerRequirement
 
@@ -198,6 +198,8 @@ class RewrittenDocumentRow(TypedDict):
 
     resolution: ResolutionRow | None
     """What a checker settled about the rewritten text, where one was worth running."""
+    decision: NotRequired[KernelDecision]
+    """A host-resolved owner decision, including caller write restrictions."""
 
 
 class ImportBoundaryRow(TypedDict):

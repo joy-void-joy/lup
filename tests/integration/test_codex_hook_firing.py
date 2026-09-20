@@ -75,6 +75,7 @@ def personal_home_session(cwd: Path) -> CodexSessionConfig:
         developer_instructions=INSTRUCTIONS,
         cwd=cwd,
         sandbox="danger-full-access",
+        native_tools=["Bash"],
         approval_policy="never",
     )
 
@@ -92,6 +93,7 @@ def workspace_request(cwd: Path) -> SessionRequest:
         instructions=INSTRUCTIONS,
         cwd=cwd,
         autonomy="unattended",
+        native_tools=["Bash"],
     )
 
 

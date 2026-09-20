@@ -24,8 +24,10 @@ against the workspace.
 import json
 import shlex
 from pathlib import Path
+import policy_data as identity_policy
 
 from host import (
+    routed_edit_response,
     approval_fingerprint,
     contained,
     defers_unjudged,
@@ -60,6 +62,7 @@ from host import (
     worktree_path,
 )
 from kernel.decision import KernelDecision
+from kernel.policy_protocol import read_response, routing_failure
 from coordination import store
 from kernel.edit import (
     awaits_resolution,
@@ -132,6 +135,7 @@ def bash_decision(
     cwd: Path | None,
     relayed: bool = False,
     autonomous: bool = False,
+    agent_identity: str = "",
     park: bool = True,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
@@ -186,7 +190,9 @@ def bash_decision(
     reference = undo_snapshot(cwd, command)
     # Both halves of one reading: the documents a rewrite would leave, and why
     # the rest left none. Computed together so a target reaches exactly one.
-    reading = rewritten_documents(command, cwd or Path.cwd())
+    reading = rewritten_documents(
+        command, cwd or Path.cwd(), autonomous, agent_identity
+    )
     verdict = decide_shell(
         command,
         SHELL_RULES,
@@ -313,7 +319,7 @@ def bash_decision(
     # or an anti-pattern introduced is seen against what is actually there --
     # and the kernel reads nothing. Strongest wins, the rule every other join
     # in this policy uses.
-    authored = authored_review(command, cwd or Path.cwd(), autonomous)
+    authored = authored_review(command, cwd or Path.cwd(), autonomous, agent_identity)
     if authored is not None and STRENGTH.index(authored.effect) > STRENGTH.index(
         verdict.effect
     ):
@@ -366,6 +372,7 @@ def reviewed_decision(
     stage: str = "",
     predecessor: str = "",
     execution_payload: dict | None = None,
+    policy_identity: str = "",
 ) -> KernelDecision:
     """Only an explicit, single-use recorded answer can settle a native ask."""
     result = review_hook_call(
@@ -387,6 +394,7 @@ def reviewed_decision(
         json.dumps(execution_payload, sort_keys=True)
         if execution_payload is not None
         else None,
+        policy_identity,
     )
     if result["state"] == "approved":
         return decision.revised(effect="allow")
@@ -405,6 +413,10 @@ def reviewed_decision(
     prefix = [
         "uv",
         "run",
+        # The checkout holding the review queue, so the line runs from
+        # anywhere; the project, where declared, selects the application's CLI.
+        "--directory",
+        str(cwd),
         *(["--project", project] if project else []),
         "lup-devtools",
         "dev",
@@ -416,7 +428,7 @@ def reviewed_decision(
     return decision.revised(
         effect="deny",
         recovery=(
-            f"Review {identifier} is {result['state']}. In {cwd}, the operator can run "
+            f"Review {identifier} is {result['state']}. The operator can run "
             f"`{show}`, then `{answer}` or `{reject}`. "
             "After approval, retry this exact tool call; changed file contents require fresh review."
         ),
@@ -570,7 +582,9 @@ def resolution_of(
     return ResolutionRow(refuted=reply["refuted"], unresolved=reply["unresolved"])
 
 
-def rewritten_documents(command: str, cwd: Path) -> RewriteReading:
+def rewritten_documents(
+    command: str, cwd: Path, autonomous: bool = False, agent_identity: str = ""
+) -> RewriteReading:
     """What every in-place rewrite in this command would leave behind.
 
     The kernel names which files a screened rewrite would replace and this
@@ -614,11 +628,7 @@ def rewritten_documents(command: str, cwd: Path) -> RewriteReading:
                     UnproducedDocumentRow(target=target, cause="unreadable")
                 )
                 continue
-            path_text = worktree_path(target)
-            suffix = Path(path_text).suffix.lower()
-            antipatterns = (
-                ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
-            )
+            path_text = worktree_path(str((cwd / target).resolve()))
             foreign = foreign_repository(target, cwd)
             rows.append(
                 RewrittenDocumentRow(
@@ -627,20 +637,17 @@ def rewritten_documents(command: str, cwd: Path) -> RewriteReading:
                     before=before,
                     after=after,
                     foreign=foreign,
-                    outside_project=outside_this_project(target, cwd),
-                    # The same conditional an edit pays: a checker resolves
-                    # another repository's imports against another
-                    # repository's environment, and starting one to answer a
-                    # rule that will not be applied costs a language server's
-                    # second for nothing.
-                    resolution=resolution_of(
-                        resolved_refutations(path_text, after, RESOLUTION_COMMAND)
-                        if not foreign
-                        and awaits_resolution(
-                            before, after, antipatterns, suffix in (".py", ".pyi")
-                        )
-                        else None
+                    decision=edit_decision(
+                        target,
+                        before,
+                        after,
+                        True,
+                        autonomous,
+                        cwd=cwd,
+                        agent_identity=agent_identity,
                     ),
+                    outside_project=outside_this_project(target, cwd),
+                    resolution=None,
                 )
             )
     return RewriteReading(documents=rows, unproduced=unproduced)
@@ -654,6 +661,46 @@ def edit_decision(
     autonomous: bool,
     operation: str = "modify",
     cwd: Path | None = None,
+    agent_identity: str = "",
+) -> KernelDecision:
+    """Route an edit to its authorized owner while retaining the caller's boundary."""
+    path = str(((cwd or Path.cwd()) / path_text).resolve())
+    try:
+        response = routed_edit_response(
+            path,
+            before,
+            after,
+            path_exists,
+            autonomous,
+            operation,
+            cwd,
+            agent_identity or declared_identity(identity_policy.AGENT_IDENTITY_ENV),
+        )
+        if response is not None:
+            return read_response(json.loads(response))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return routing_failure(str(error))
+    return local_edit_decision(
+        path,
+        before,
+        after,
+        path_exists,
+        autonomous,
+        operation,
+        cwd,
+    )
+
+
+def local_edit_decision(
+    path_text: str,
+    before: str | None,
+    after: str | None,
+    path_exists: bool,
+    autonomous: bool,
+    operation: str = "modify",
+    cwd: Path | None = None,
+    allowances: list[str] | None = None,
+    resolve_external: bool = True,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -690,7 +737,8 @@ def edit_decision(
     # be applied, and pay a language server's second for the privilege.
     resolution = resolution_of(
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
-        if not outside_this_repository
+        if resolve_external
+        and not outside_this_repository
         and after is not None
         and awaits_resolution(before, after, rows, python_source)
         else None
@@ -705,7 +753,11 @@ def edit_decision(
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
-        allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
+        allowances=(
+            granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES)
+            if allowances is None
+            else allowances
+        ),
         python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
         resolution=resolution,
@@ -732,7 +784,9 @@ def edit_decision(
     )
 
 
-def authored_review(command: str, cwd: Path, autonomous: bool) -> KernelDecision | None:
+def authored_review(
+    command: str, cwd: Path, autonomous: bool, agent_identity: str = ""
+) -> KernelDecision | None:
     """What the edit gates say about a write whose content the command carries.
 
     :func:`written_review` is the same reading a moment too late. It exists
@@ -766,6 +820,7 @@ def authored_review(command: str, cwd: Path, autonomous: bool) -> KernelDecision
                 "modify" if write["append"] else "overwrite" if existing else "create"
             ),
             cwd=cwd,
+            agent_identity=agent_identity,
         )
         for write in authored_writes(command)
         for existing in [(cwd / write["path"]).is_file()]

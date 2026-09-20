@@ -389,6 +389,42 @@ failed` mid-commit.
 
 ## Edit decisions
 
+Edits in an explicitly mounted destination repository use that checkout's
+generated policy. The caller keeps its session identity, measured execution
+boundary, approval channel, and whole-shell restrictions. A writable parent
+directory alone grants no policy authority over unrelated nested repositories.
+Read-only mounts, including nested read-only paths, still withhold writes;
+canonical Git common-directory identities distinguish unrelated repositories
+and bind linked worktrees, separate Git directories, and submodules correctly.
+Autonomous edit grants require the same agent identity to be authorized by
+both policies. Claude's native agent type is carried to the owner; other calls
+use the declared session identity.
+
+At launch, `.lup/preflight/<nonce>.json` records exact destination grants and
+the digest of the generated evaluator and runtime source accepted for each.
+`LUP_BOUNDARY_ROOT` pins that ledger to the launch checkout when a command
+changes its working directory; changing directories never changes its grants.
+The evaluator runs from `.lup/policy-snapshots/<digest>`, with both source and
+snapshot checked before execution. Missing, malformed, incompatible, changed,
+or failing evaluators block the edit with a recovery diagnostic. Both native
+runtimes share this routing and aggregate every file, including both sides of
+a move; a denial wins over an approval request.
+
+Destination evaluation never starts an external resolver from the checkout.
+Rules requiring unavailable resolution retain their conservative review verdict.
+
+After regenerating a destination policy, an independent operator can accept
+its bytes without restarting the session. From the caller checkout, run
+`uv run lup-devtools harness policy-refresh --nonce <nonce> --repository <checkout>`.
+The same command can accept a newly created worktree only beneath an original
+explicit writable bare-repository mount, with the same Git common directory
+and a writable measured boundary. It never discovers unrelated nested
+repositories or extends the launch's filesystem grants. The requester cannot
+run this operator action, and the authority ledger and accepted snapshots are
+protected edit paths. These records prevent accidental inheritance and stale
+policy execution; they are mutable local bookkeeping, not authentication
+against a hostile process with the same filesystem authority.
+
 Edit decisions cover protected paths, marker changes, size, the canonical
 anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook
 emits no decision, so auto-accept applies while hard gates stay explicit.
@@ -495,6 +531,12 @@ the same recorded authority at both pre-tool and permission-request events;
 a pending or rejected review returns an explicit native denial. Neither
 native prompting nor observed execution is evidence of a human answer.
 
+Codex delivers that denial as a supported structured `deny` carrying
+`systemMessage`, so its app-server raises an operator-visible warning in
+`hook/completed` beside the agent's refusal. `codex exec --json` omits those
+hook events; its agent still receives the same refusal and review commands.
+Neither surface turns a policy question into an implicit approval.
+
 The operator runs `uv run lup-devtools dev questions show <id>` from the
 indicated checkout, then `uv run lup-devtools dev questions answer <id>
 --as operator` or `uv run lup-devtools dev questions reject <id> --as
@@ -504,11 +546,14 @@ requester authority to answer itself. Nested command paths are declared
 with `ShellOperationRule.parents`, and the deepest matching path decides.
 
 Approval releases one exact retry in the same session and directory.
-The hook re-runs policy, compares the payload and edited file preimages, then
-claims the approval exclusively before allowing execution. A changed file
-or payload requires another review. The receipt binds both the original
-request and the exact approved runtime input rewrite; observing a different
-executed input marks the receipt `in_doubt`. Rejection leaves the operation stopped.
+The hook re-runs policy, compares the payload, captured file preimages,
+resolved paths, originating dispatcher and policy bytes, and accepted
+destination policy bindings, then claims the approval exclusively before
+allowing execution. A changed file, payload or policy requires another
+review. The receipt binds both the original request and the exact approved
+runtime input rewrite; observing a different executed input marks the receipt
+`in_doubt`. Rejection leaves the operation stopped and delivers the
+operator's note.
 A crash after claiming approval does not make it reusable. Native sandbox
 restrictions still apply; queue approval does not change execution placement.
 Post-tool evidence marks a dispatched review completed, without claiming that
@@ -528,6 +573,13 @@ shell `apply_patch` with a single-quoted argument or a quoted heredoc reaches
 the same edit gates. Relative paths resolve against the hook payload's
 working directory. Add-file operations replacing existing files are judged
 as overwrites. Compound shell commands are never reduced to only their patch.
+Plain two-path `cp` commands capture both source and destination; changes to
+either invalidate approval. Every statically known shell write target also
+contributes its preimage, including redirections, authored content and in-place
+rewrites. The review diff uses the captured documents for
+patches and copies, so it remains the proposal submitted even if another writer
+changes the files before the operator opens it. Other shell commands display
+their exact command text rather than claiming a predicted file diff.
 
 
 ## Two markers change a decision
@@ -604,15 +656,21 @@ authority. `dev hooks approvals` shows these observations with that limitation;
 changing authorization. Explicit native review answers remain single-use in
 `dev questions`; an execution event cannot turn one into a permanent grant.
 
+The `uv` command reader resolves global options before the subcommand, including
+`--directory`, so relocating an operator-only queue command cannot make it an
+unclassified command that a contained session runs freely.
+
 ## Asking before spending a turn on it
 
-A denial is the ordinary way to learn a verdict, and it costs a turn. Three
+A denial is the ordinary way to learn a verdict, and it costs a turn. These
 commands answer the same question up front, against the declared policy
 rather than a reading of this page:
 
 ```bash
 uv run lup-devtools dev policy '<the command as you would run it>'
 uv run lup-devtools dev policy --kind fetch '<the URL>'
+uv run lup-devtools dev policy --kind edit '<the path>'
+uv run lup-devtools dev policy --kind edit-batch proposed-edits.json
 uv run lup-devtools dev vocabulary --provenance
 uv run lup-devtools dev hooks sweep
 ```
@@ -625,6 +683,15 @@ scopes and lists every one of them beneath the verdict, which is where the
 question a fetch outside them raises sends its reader. `dev vocabulary` prints every shell form the vocabulary
 judges and where each rule came from, which is the one to reach for when the
 question is "what *would* be allowed here" rather than "is this".
+
+An edit path is a path-only preview over unchanged content. Its output labels
+the proposed content and operation as unavailable; it is not approval of an
+unspecified edit. For a concrete verdict, `edit-batch` reads a JSON
+`EditBatch`: `{"changes": [{"path": "src/example.py", "before": "old\n",
+"after": "new\n", "operation": "modify"}]}`. Paths resolve against the
+calling checkout, and every preimage must match disk. Creations use null
+preimages and deletions null postimages. Both forms use the hook's destination
+authority and accepted policy snapshots, retaining the caller's write boundary.
 
 `hooks sweep` classifies a whole list at once and exits non-zero if any line
 is not a plain allow. With no file it reads the everyday corpus this project

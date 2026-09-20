@@ -22,6 +22,8 @@ so this page cannot come to name a version nothing was probed on.
 | Codex blocked edit | Codex CLI {{ codex_cli }} | Scheduled `test_codex_plugin_blocks_a_forbidden_apply_patch` installs the generated plugin in an isolated home and requests an anti-pattern edit through the real CLI | The `apply_patch` call is rejected, the target file remains unchanged, and the native session stays alive to report the rejection. A CLI version drift makes the nightly doctor fail until this observation is repeated. |
 | Codex app-server lifecycle | Codex CLI {{ codex_cli }} | Version-generated JSON Schema plus routed-notification fixtures; [Codex app server](https://developers.openai.com/codex/app-server) | `thread/start`, `thread/resume`, `thread/fork`, `turn/start`, `turn/steer`, and `turn/interrupt` exist; live notifications are distinct from completed replay. |
 | Codex typed output | Codex CLI {{ codex_cli }} | Version-generated `TurnStartParams`, `TurnSteerParams`, and `ItemCompletedNotification` fixtures; scripted adapter lifecycle tests; credential-free native requests captured by a local Responses endpoint | Every typed `turn/start` carries `outputSchema`. Native requests use strict mode without normalizing that schema. Lup closes compatible object schemas; other schemas use a strict `output_json` string carrier and preserve the original schema in the turn prompt. Lup decodes the JSON and applies the original Pydantic validation and submission gate. `CodexSessionConfig.correction` bounds correction turns with the rejection reason; usage, events, steering and interruption cover the logical turn. Untyped turns, schema changes and typed resume preserve the native thread. These fixtures do not prove a live model round-trip. |
+| Codex application tool binding | Codex CLI {{ codex_cli }} | Version-generated `ThreadStartParams`, `ThreadResumeParams`, and dynamic-tool call/response schemas; inert native resume fixture in `packages/lup/tests/integration/test_native_tool_controls.py` | Declared application tools ride `dynamicTools`, which only `thread/start` establishes, so resume cannot replace them and a differing persisted set is rejected before input. Typed output does not use this channel: it rides `outputSchema` per turn, so a schema may change or disappear without disturbing the thread. |
+| Explicit session tool authority | Claude Agent SDK {{ claude_sdk }} and Codex CLI {{ codex_cli }} | Adapter option fixtures in `packages/lup/tests/unit/test_native_tools.py`; native request capture in `packages/lup/tests/integration/test_claude_native_tools.py` and `packages/lup/tests/integration/test_native_tool_controls.py` | `native_tools=None` and `[]` grant no built-in or inherited tool authority. Explicit application tools still execute. The Codex fixture captures both top-level tools and `input.additional_tools`, verifies inherited servers do not start, rejects a fabricated shell call, and proves explicit grants advertise their native facility. Another fixture verifies the declared project hook still blocks a granted native call. `ALL` is an explicit broad built-in opt-in; unsupported exact grants fail before launch. |
 | Codex custom agents | Codex CLI {{ codex_cli }} | Generated TOML fixture parsing; [custom-agent documentation](https://developers.openai.com/codex/agent-configuration/subagents) | Portable agents render as project-scoped `.codex/agents/*.toml`, outside the plugin. |
 | Codex project guidance | Codex CLI {{ codex_cli }} | Generated root fixture; [AGENTS.md documentation](https://developers.openai.com/codex/agent-configuration/agents-md) | Portable repository guidance renders to root `AGENTS.md`. |
 
@@ -122,7 +124,19 @@ part of probing.
   therefore correct rather than a workaround. And `dev questions` is Codex's
   review surface rather than its fallback, which is what makes that surface's
   diff rendering load-bearing instead of a convenience. Issue #180 is this gap
-  met from a real session, and it has no native answer.
+  met from a real session; queue settlement requires an independent operator.
+
+  **Queue delivery is measured without a model or credentials** by
+  `tests/integration/test_codex_review_delivery.py`: an inert loopback Responses
+  endpoint requests a copy, the generated hook blocks it, and `hook/completed`
+  carries the review id and operator commands as a warning. A recorded operator
+  answer permits one exact retry; another retry asks again. The supported
+  `PreToolUse` `deny` plus `systemMessage` shape is documented in the
+  [official hooks reference](https://learn.chatgpt.com/docs/hooks).
+  Exiting 2 drops `systemMessage` on Codex CLI {{ codex_cli }}; successful
+  structured denial preserves both the warning and refusal. `codex exec --json`
+  omits hook notifications, so its agent-facing refusal remains the delivery
+  path on that surface.
 
   Both arms stay in the suite as `xfail(strict=True)`, so the day a vendor
   grows the channel they pass and the suite says so.

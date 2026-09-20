@@ -43,6 +43,7 @@ from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.policy.profiles import compile_boundary, depended_on, measured
+from lup.policy.snapshots import accept_destination_policies, destination_authorities
 from lup.sandbox.rail import AccessibleRoot, fleet_lease
 from lup.devtools.sync import accessible_roots, granted_devices
 from lup.harness.notice import Banner, Notice
@@ -91,6 +92,7 @@ from lup.devtools.harness.drift import (
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
+    ROOT_VARIABLE,
     exclude_sandbox_placeholders,
     record_preflight,
     release_ledger,
@@ -1381,6 +1383,7 @@ def settle_boundary(
     environment: EnvVars,
     banner: Banner,
     accessible: list[AccessibleRoot] = [],
+    runtime: str = "",
 ) -> BoundaryPreflight:
     """Compile what this launch promised, measure it, and refuse if it fell short.
 
@@ -1415,10 +1418,11 @@ def settle_boundary(
     """
     root = project_root()
     declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
+    lease = fleet_lease(root, accessible=accessible)
     boundary = compile_boundary(
         declared,
         contained=sandbox.contained(),
-        writable=list(fleet_lease(root, accessible=accessible).writable),
+        writable=list(lease.writable),
     )
     preflight = measured(boundary, depended_on(declared, sandbox.contained()), findings)
     said = preflight.opening()
@@ -1431,7 +1435,16 @@ def settle_boundary(
         )
     if said:
         banner.add([Notice(text=said, urgency="boundary")])
-    record_preflight(preflight, sentinels, root)
+    record_preflight(
+        preflight,
+        sentinels,
+        root,
+        destination_policies=accept_destination_policies(
+            root, accessible, lease, runtime
+        ),
+        read_only_roots=list(lease.read_only),
+        destination_authorities=destination_authorities(accessible, runtime),
+    )
     if not sandbox.contained():
         # No mounts, so no mount table -- and the one a contained launch left
         # behind describes a boundary this session is not behind. Attributing
@@ -1441,6 +1454,7 @@ def settle_boundary(
     environment.update(
         sentinels.within() if sandbox.contained() else sentinels.outside()
     )
+    environment[ROOT_VARIABLE] = str(root.resolve())
     return preflight
 
 
@@ -1549,6 +1563,7 @@ def session_argv(
             environment,
             banner,
             accessible,
+            runtime=cli,
         )
         say_opening(cleared, cleared.findings, transcript)
         return [cli, *arguments]
@@ -1627,7 +1642,14 @@ def session_argv(
     # from either alone would report a capability nothing asked about.
     measured_here = [*cleared.findings, *inside]
     settle_boundary(
-        plugin, sandbox, measured_here, sentinels, environment, banner, accessible
+        plugin,
+        sandbox,
+        measured_here,
+        sentinels,
+        environment,
+        banner,
+        accessible,
+        runtime=cli,
     )
     say_opening(cleared, measured_here, transcript)
     native = harness.image.clipboard.wrap(

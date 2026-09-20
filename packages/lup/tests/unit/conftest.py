@@ -8,10 +8,25 @@ import pytest
 
 from lup.workspace import paths
 from lup.providers.codex.login import CODEX_HOME
+from lup.providers.codex.native_tools import CodexNativeTools
 import lup.providers.codex.selection as codex_selection
 from tests.unit.doubles import FakeAppServer
 
 LUP_PROJECT_VERSION = "1.2.3"
+
+
+@pytest.fixture(autouse=True)
+def bundled_model_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opening a session reads the model catalog from the vendor's own binary.
+
+    No unit test owns a real Codex, so each would shell out to a path its own
+    fixture invented. A test about the catalog overrides this with its own.
+    """
+    monkeypatch.setattr(
+        CodexNativeTools,
+        "model_catalog",
+        lambda self, executable, environment, model: {"models": [{"slug": "known"}]},
+    )
 
 
 @pytest.fixture

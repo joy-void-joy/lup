@@ -35,6 +35,7 @@ from lup.harness.models import (
 )
 from lup.harness.validation import validated_tree
 from lup.policy.review import ReviewedFile
+from lup.policy.kernel.review import copied_paths, literal_input
 from lup.types import JsonObject
 
 
@@ -222,7 +223,9 @@ def compile_codex(source: Harness) -> ArtifactTree:
     return validated_tree(artifacts)
 
 
-def patch_review(command: str, cwd: Path) -> list[ReviewedFile]:
+def patch_review(
+    command: str, cwd: Path, preconditions: dict[Path, str | None], shell: bool
+) -> list[ReviewedFile]:
     """Decode a patch envelope into the before/after pairs a reviewer reads.
 
     Named here rather than at the surface that renders them, for the reason
@@ -249,13 +252,27 @@ def patch_review(command: str, cwd: Path) -> list[ReviewedFile]:
     def document(path: str) -> str | None:
         """What stood at one path, with absence kept apart from emptiness."""
         target = resolved(path)
-        return (
-            target.read_text(encoding="utf-8", errors="replace")
-            if target.is_file()
-            else None
-        )
+        if target not in preconditions:
+            raise ValueError(f"no captured preimage for {target}")
+        return preconditions[target]
 
     try:
+        if shell:
+            copied = copied_paths(command)
+            if copied is not None:
+                source, target = copied["source"], copied["target"]
+                return [
+                    ReviewedFile(
+                        path=resolved(target),
+                        before=document(target),
+                        after=document(source),
+                        overwrite=document(target) is not None,
+                    )
+                ]
+            envelope = literal_input(command, "apply_patch")
+            if envelope is None:
+                return []
+            command = envelope
         decoded = patched_files(command, document)
     except ValueError:
         # An envelope this cannot read is a question with no diff rather than

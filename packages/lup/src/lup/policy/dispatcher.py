@@ -100,6 +100,7 @@ DISPATCHER_STDLIB = (
     "hashlib",
     "csv",
     "fcntl",
+    "shlex",
     "urllib.parse",
     "typing",
 )
@@ -676,6 +677,55 @@ def compiled_docstring(declaration: DispatcherDeclaration) -> str:
         "Runs as a bare script beside its own runtime directory, reaching only\n"
         "the standard library and the kernel copied beside it.\n"
         '"""'
+    )
+
+
+def edit_evaluator_artifact(
+    plugin_root: Path,
+    declaration: DispatcherDeclaration,
+    semantic_id: str,
+) -> Artifact:
+    """Compile the owner-only protocol from the same host and decision sources."""
+    shared = source_half(SHARED_PACKAGE, SHARED_MEMBER)
+    decisions = source_half(SHARED_PACKAGE, DECISIONS_MEMBER)
+    evaluator = source_half(SHARED_PACKAGE, "policy_evaluator")
+    breaches = [
+        *import_breaches(declaration, shared, decisions, evaluator),
+        *host_purity_breaches(shared),
+        *stranded_breaches(shared, decisions),
+        *sharing_breaches(shared, decisions, evaluator),
+    ]
+    if breaches:
+        raise ValueError("; ".join(breaches))
+    prologue = evaluator.prologue()
+    body = (
+        "\n\n\n".join(
+            [
+                "\n".join(
+                    [
+                        prologue,
+                        *[
+                            segment
+                            for half in (shared, decisions)
+                            for segment in half.spliced_prologue(prologue)
+                        ],
+                    ]
+                ),
+                *[shared.source_of(node) for node in shared.functions()],
+                *[decisions.source_of(node) for node in decisions.functions()],
+                *[evaluator.source_of(node) for node in evaluator.functions()],
+                INVOCATION,
+            ]
+        )
+        + "\n"
+    )
+    return Artifact.generated(
+        path=plugin_root / "hooks/scripts/policy_evaluator.py",
+        body=body,
+        semantic_id=semantic_id,
+        banner=GeneratedBanner(
+            source="lup.policy.assets.policy_evaluator", command=REGENERATE_COMMAND
+        ),
     )
 
 

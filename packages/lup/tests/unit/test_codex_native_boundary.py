@@ -14,6 +14,7 @@ from lup.providers.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheEvidence,
 )
+from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.runtime import CodexSessionConfig, CodexSessionOpener
 
 
@@ -129,11 +130,18 @@ async def test_readiness_and_session_use_the_selected_executable_and_environment
     calls = [
         Invocation.model_validate_json(line) for line in record.read_text().splitlines()
     ]
-    assert [call.arguments for call in calls] == [
-        ["plugin", "list", "--json", "--marketplace", "application"],
-        ["app-server"],
-        *([] if hook_failure else [["app-server"]]),
-    ]
+    probe, *opened = [call.arguments for call in calls]
+    assert probe == ["plugin", "list", "--json", "--marketplace", "application"]
+    assert opened[0] == ["app-server"]
+    assert len(opened) == (1 if hook_failure else 2)
+    # Opening a session bounds the built-in facilities before the process
+    # starts and points it at a catalog compiled into its own temporary
+    # directory, so the declared controls and the subcommand are what is fixed.
+    declared = CodexNativeTools().arguments()
+    for arguments in opened[1:]:
+        assert arguments[: len(declared)] == declared
+        assert arguments[-1] == "app-server"
+        assert "model_catalog_json" in "".join(arguments[len(declared) : -1])
     assert all(call.home == str(home) for call in calls)
     assert all(call.marker == "selected" for call in calls)
     assert all(call.policy == str(project) for call in calls)

@@ -31,6 +31,250 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 
+def policy_snapshot_files(directory: Path) -> list[Path]:
+    """The executable source of one hermetic destination evaluator."""
+    evaluator = directory / "scripts" / "policy_evaluator.py"
+    runtime = directory / "runtime"
+    if not evaluator.is_file() or not (runtime / "policy_data.py").is_file():
+        raise ValueError(f"Generated policy evaluator is missing beneath {directory}")
+    entries = [
+        directory,
+        directory / "scripts",
+        evaluator,
+        runtime,
+        *runtime.rglob("*"),
+    ]
+    if any(item.is_symlink() for item in entries):
+        raise ValueError(f"Generated policy evaluator contains a symlink: {directory}")
+    if any(
+        item.is_file()
+        and item.suffix != ".py"
+        and item.name != "evidence.json"
+        and not (item.suffix == ".pyc" and item.parent.name == "__pycache__")
+        for item in entries
+    ):
+        raise ValueError(
+            f"Generated policy evaluator contains unsupported code: {directory}"
+        )
+    return sorted([evaluator, *runtime.rglob("*.py")])
+
+
+def policy_snapshot_digest(directory: Path) -> str:
+    """Bind the evaluator and every imported runtime source to accepted bytes."""
+    rows = [
+        [
+            str(item.relative_to(directory).as_posix()),
+            sha256(item.read_bytes()).hexdigest(),
+        ]
+        for item in policy_snapshot_files(directory)
+    ]
+    return sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def execution_write_refusal(path_text: str, root: Path | None) -> str:
+    """Keep the caller's measured mounts in force independently of policy ownership."""
+    boundary = measured_boundary(root)
+    writable = boundary["writable_roots"] if "writable_roots" in boundary else []
+    readonly = boundary["read_only_roots"] if "read_only_roots" in boundary else []
+    if not writable and not readonly:
+        return ""
+    path = ((root or Path.cwd()) / path_text).resolve()
+    matches = [
+        (len(Path(scope).parts), allowed)
+        for scopes, allowed in ((writable, True), (readonly, False))
+        for scope in scopes
+        if path.is_relative_to(Path(scope).resolve())
+    ]
+    if not matches or not min(
+        allowed for depth, allowed in matches if depth == max(row[0] for row in matches)
+    ):
+        return f"{path} is outside this launch's writable boundary"
+    return ""
+
+
+def destination_policy_binding(path_text: str, root: Path | None) -> str:
+    """Find one positively authorized repository binding, never infer one from a parent."""
+    path = ((root or Path.cwd()) / path_text).resolve()
+    owner = worktree_root(str(path))
+    repository = shared_git_directory(str(path))
+    boundary = measured_boundary(root)
+    rows = (
+        boundary["destination_policies"] if "destination_policies" in boundary else []
+    )
+    decoded = [json.loads(encoded) for encoded in rows]
+    for row in decoded:
+        if (
+            not isinstance(row, dict)
+            or "checkout" not in row
+            or not isinstance(row["checkout"], str)
+        ):
+            raise ValueError("malformed destination checkout identity")
+        checkout = Path(row["checkout"])
+        if not checkout.is_absolute() or str(checkout.resolve()) != str(checkout):
+            raise ValueError("destination checkout identity must be canonical")
+    checkouts = [
+        Path(row["checkout"])
+        for row in decoded
+        if path.is_relative_to(Path(row["checkout"]))
+    ]
+    expected = max(checkouts, key=lambda checkout: len(checkout.parts), default=None)
+    if expected is not None and str(expected) != owner:
+        raise ValueError("destination checkout identity changed or is missing")
+    if (
+        sum(
+            isinstance(row, dict) and "checkout" in row and row["checkout"] == owner
+            for row in decoded
+        )
+        > 1
+    ):
+        raise ValueError("ambiguous destination policy bindings")
+    for encoded, row in zip(rows, decoded, strict=True):
+        if not isinstance(row, dict):
+            raise ValueError("malformed destination policy binding")
+        if "checkout" not in row or "repository" not in row:
+            raise ValueError("incomplete destination policy binding")
+        if row["checkout"] != owner:
+            continue
+        if row["repository"] != repository:
+            raise ValueError("destination repository identity changed")
+        if root is not None and owner == worktree_root(str(root)):
+            return ""
+        if type(row["protocol"]) is not int or row["protocol"] != 1:
+            raise ValueError("unsupported destination policy protocol")
+        if "writable_roots" not in boundary or not boundary["writable_roots"]:
+            raise ValueError("destination authority has no measured writable boundary")
+        for name in ("writable_roots", "read_only_roots"):
+            if not isinstance(row[name], list) or not all(
+                isinstance(item, str) for item in row[name]
+            ):
+                raise ValueError(f"malformed destination {name}")
+            if any(
+                not Path(item).is_absolute() or str(Path(item).resolve()) != item
+                for item in row[name]
+            ):
+                raise ValueError(
+                    f"destination {name} must contain canonical absolute paths"
+                )
+        scopes = [
+            (len(Path(scope).parts), allowed)
+            for name, allowed in (("writable_roots", True), ("read_only_roots", False))
+            for scope in row[name]
+            if path.is_relative_to(Path(scope).resolve())
+        ]
+        if not scopes or not min(
+            allowed
+            for depth, allowed in scopes
+            if depth == max(item[0] for item in scopes)
+        ):
+            raise ValueError(f"{path} has no explicit writable destination grant")
+        for name in ("source", "snapshot", "digest", "error"):
+            if not isinstance(row[name], str):
+                raise ValueError(f"malformed destination policy {name}")
+        if row["error"]:
+            raise ValueError(row["error"])
+        for name in ("source", "snapshot"):
+            if policy_snapshot_digest(Path(row[name])) != row["digest"]:
+                raise ValueError(
+                    f"destination policy {name} changed; refresh its accepted snapshot"
+                )
+        return encoded
+    return ""
+
+
+def destination_evaluation(binding: str, request: str, timeout: float = 15) -> str:
+    """Run accepted bytes in isolation; return only the evaluator's protocol reply."""
+    row = json.loads(binding)
+    if not isinstance(row, dict) or not isinstance(row["snapshot"], str):
+        raise ValueError("malformed destination evaluator binding")
+    snapshot = Path(row["snapshot"])
+    if policy_snapshot_digest(snapshot) != row["digest"]:
+        raise ValueError("accepted destination policy snapshot changed")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            "-X",
+            "pycache_prefix=/dev/null/lup-policy",
+            str(snapshot / "scripts" / "policy_evaluator.py"),
+        ],
+        input=request,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(
+            f"destination policy evaluator failed: {result.stderr or result.stdout}"
+        )
+    if (
+        policy_snapshot_digest(snapshot) != row["digest"]
+        or policy_snapshot_digest(Path(row["source"])) != row["digest"]
+    ):
+        raise ValueError("destination policy changed during evaluation")
+    return result.stdout
+
+
+def routing_policy_identity(root: Path | None) -> str:
+    """Bind an approval to both accepted policies and the bytes currently present."""
+    boundary = measured_boundary(root)
+    rows = (
+        boundary["destination_policies"] if "destination_policies" in boundary else []
+    )
+    identities = list(rows)
+    for encoded in rows:
+        try:
+            row = json.loads(encoded)
+            if not isinstance(row, dict):
+                raise ValueError("malformed destination policy binding")
+            for name in ("source", "snapshot"):
+                identities.append(policy_snapshot_digest(Path(row[name])))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            identities.append(f"unavailable: {error}")
+    return sha256(json.dumps(identities, sort_keys=True).encode()).hexdigest()
+
+
+def routed_edit_response(
+    path_text: str,
+    before: str | None,
+    after: str | None,
+    path_exists: bool,
+    autonomous: bool,
+    operation: str,
+    root: Path | None,
+    agent_identity: str = "",
+) -> str | None:
+    """Resolve caller authority and run an accepted foreign owner, without native effects."""
+    path = str(((root or Path.cwd()) / path_text).resolve())
+    refusal = execution_write_refusal(path, root)
+    if refusal:
+        raise ValueError(refusal)
+    if root is None:
+        return None
+    binding = destination_policy_binding(path, root)
+    if not binding:
+        return None
+    row = json.loads(binding)
+    request = {
+        "protocol": 1,
+        "path": path,
+        "before": before,
+        "after": after,
+        "path_exists": path_exists,
+        "autonomous": autonomous,
+        "agent_identity": agent_identity,
+        "operation": operation,
+        "cwd": str(root or Path.cwd()),
+        "owner": row["checkout"],
+    }
+    try:
+        return destination_evaluation(binding, json.dumps(request))
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("destination policy evaluator timed out") from error
+
+
 def sandbox_active() -> bool:
     """Whether the launcher confined this session to an OS sandbox."""
     environ = os.environ  # lup: ignore[os-environ]
@@ -44,7 +288,8 @@ def measured_boundary(
 
     Read back from the ledger that launch wrote, and only from the one it
     named: ``LUP_BOUNDARY_NONCE`` says which file this session is entitled to
-    believe. That is what the nonce is for. A ledger left by some other launch
+    believe, and ``LUP_BOUNDARY_ROOT`` pins the launch checkout even when a
+    tool or preflight command runs elsewhere. A ledger left by some other launch
     is a measurement of some other session, and reading it would be the same
     class of wrong answer as a ledger at a constant path, arrived at from the
     other direction.
@@ -56,7 +301,11 @@ def measured_boundary(
     """
     environ = os.environ  # lup: ignore[os-environ]
     nonce = environ["LUP_BOUNDARY_NONCE"] if "LUP_BOUNDARY_NONCE" in environ else ""
-    if root is None or not nonce:
+    if "LUP_BOUNDARY_ROOT" in environ:
+        root = Path(environ["LUP_BOUNDARY_ROOT"])
+        if not root.is_absolute() or str(root.resolve()) != str(root):
+            return {}
+    if root is None or not nonce or Path(nonce).name != nonce or nonce in {".", ".."}:
         return {}
     try:
         raw = (root / ledger / f"{nonce}.json").read_text()
@@ -372,6 +621,7 @@ def review_hook_call(
     stage: str = "",
     predecessor: str = "",
     execution_payload: str | None = None,
+    policy_identity: str = "",
 ) -> dict[Literal["state", "id", "reason"], str]:
     """Park a call or spend its explicit, single-use reviewer answer.
 
@@ -403,6 +653,8 @@ def review_hook_call(
             purpose,
             reviewer,
             expected,
+            policy_identity,
+            {path: str(Path(path).resolve()) for path in before},
         ],
         sort_keys=True,
     )
@@ -488,7 +740,13 @@ def review_hook_call(
             append_review_record(log, json.dumps(entry, sort_keys=True))
             return {"state": "approved", "id": entry["id"], "reason": ""}
     if entry is not None and entry["state"] in ("pending", "rejected"):
-        return {"state": entry["state"], "id": entry["id"], "reason": entry["reason"]}
+        answer = entry["answer"] if "answer" in entry else None
+        note = answer["note"] if answer and "note" in answer else ""
+        return {
+            "state": entry["state"],
+            "id": entry["id"],
+            "reason": note or entry["reason"],
+        }
     identifier = os.urandom(16).hex()
     entry = {
         "id": identifier,
@@ -940,21 +1198,14 @@ def shared_git_directory(path_text: str) -> str:
     root = worktree_root(path_text)
     if not root:
         return ""
-    marker = Path(root) / ".git"
-    if marker.is_dir():
-        return str(marker)
-    try:
-        named = marker.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-    gitdir = named.removeprefix("gitdir:").strip()
-    if not gitdir:
-        return ""
-    # `<common>/worktrees/<name>` — two levels up in either layout.
-    linked = Path(gitdir)
-    if len(linked.parents) < 2:
-        return ""
-    return str(linked.parents[1])
+    result = subprocess.run(
+        ["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    return str(Path(result.stdout.strip()).resolve()) if result.returncode == 0 else ""
 
 
 def boundary_description(

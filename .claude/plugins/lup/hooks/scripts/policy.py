@@ -36,6 +36,8 @@ import subprocess
 from typing import Literal
 from urllib.parse import urlsplit
 import shlex
+import policy_data as identity_policy
+from kernel.policy_protocol import read_response, routing_failure
 from coordination import store
 from kernel.edit import (
     awaits_resolution,
@@ -99,6 +101,250 @@ from policy_data import (
 )
 
 
+def policy_snapshot_files(directory: Path) -> list[Path]:
+    """The executable source of one hermetic destination evaluator."""
+    evaluator = directory / "scripts" / "policy_evaluator.py"
+    runtime = directory / "runtime"
+    if not evaluator.is_file() or not (runtime / "policy_data.py").is_file():
+        raise ValueError(f"Generated policy evaluator is missing beneath {directory}")
+    entries = [
+        directory,
+        directory / "scripts",
+        evaluator,
+        runtime,
+        *runtime.rglob("*"),
+    ]
+    if any(item.is_symlink() for item in entries):
+        raise ValueError(f"Generated policy evaluator contains a symlink: {directory}")
+    if any(
+        item.is_file()
+        and item.suffix != ".py"
+        and item.name != "evidence.json"
+        and not (item.suffix == ".pyc" and item.parent.name == "__pycache__")
+        for item in entries
+    ):
+        raise ValueError(
+            f"Generated policy evaluator contains unsupported code: {directory}"
+        )
+    return sorted([evaluator, *runtime.rglob("*.py")])
+
+
+def policy_snapshot_digest(directory: Path) -> str:
+    """Bind the evaluator and every imported runtime source to accepted bytes."""
+    rows = [
+        [
+            str(item.relative_to(directory).as_posix()),
+            sha256(item.read_bytes()).hexdigest(),
+        ]
+        for item in policy_snapshot_files(directory)
+    ]
+    return sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def execution_write_refusal(path_text: str, root: Path | None) -> str:
+    """Keep the caller's measured mounts in force independently of policy ownership."""
+    boundary = measured_boundary(root)
+    writable = boundary["writable_roots"] if "writable_roots" in boundary else []
+    readonly = boundary["read_only_roots"] if "read_only_roots" in boundary else []
+    if not writable and not readonly:
+        return ""
+    path = ((root or Path.cwd()) / path_text).resolve()
+    matches = [
+        (len(Path(scope).parts), allowed)
+        for scopes, allowed in ((writable, True), (readonly, False))
+        for scope in scopes
+        if path.is_relative_to(Path(scope).resolve())
+    ]
+    if not matches or not min(
+        allowed for depth, allowed in matches if depth == max(row[0] for row in matches)
+    ):
+        return f"{path} is outside this launch's writable boundary"
+    return ""
+
+
+def destination_policy_binding(path_text: str, root: Path | None) -> str:
+    """Find one positively authorized repository binding, never infer one from a parent."""
+    path = ((root or Path.cwd()) / path_text).resolve()
+    owner = worktree_root(str(path))
+    repository = shared_git_directory(str(path))
+    boundary = measured_boundary(root)
+    rows = (
+        boundary["destination_policies"] if "destination_policies" in boundary else []
+    )
+    decoded = [json.loads(encoded) for encoded in rows]
+    for row in decoded:
+        if (
+            not isinstance(row, dict)
+            or "checkout" not in row
+            or not isinstance(row["checkout"], str)
+        ):
+            raise ValueError("malformed destination checkout identity")
+        checkout = Path(row["checkout"])
+        if not checkout.is_absolute() or str(checkout.resolve()) != str(checkout):
+            raise ValueError("destination checkout identity must be canonical")
+    checkouts = [
+        Path(row["checkout"])
+        for row in decoded
+        if path.is_relative_to(Path(row["checkout"]))
+    ]
+    expected = max(checkouts, key=lambda checkout: len(checkout.parts), default=None)
+    if expected is not None and str(expected) != owner:
+        raise ValueError("destination checkout identity changed or is missing")
+    if (
+        sum(
+            isinstance(row, dict) and "checkout" in row and row["checkout"] == owner
+            for row in decoded
+        )
+        > 1
+    ):
+        raise ValueError("ambiguous destination policy bindings")
+    for encoded, row in zip(rows, decoded, strict=True):
+        if not isinstance(row, dict):
+            raise ValueError("malformed destination policy binding")
+        if "checkout" not in row or "repository" not in row:
+            raise ValueError("incomplete destination policy binding")
+        if row["checkout"] != owner:
+            continue
+        if row["repository"] != repository:
+            raise ValueError("destination repository identity changed")
+        if root is not None and owner == worktree_root(str(root)):
+            return ""
+        if type(row["protocol"]) is not int or row["protocol"] != 1:
+            raise ValueError("unsupported destination policy protocol")
+        if "writable_roots" not in boundary or not boundary["writable_roots"]:
+            raise ValueError("destination authority has no measured writable boundary")
+        for name in ("writable_roots", "read_only_roots"):
+            if not isinstance(row[name], list) or not all(
+                isinstance(item, str) for item in row[name]
+            ):
+                raise ValueError(f"malformed destination {name}")
+            if any(
+                not Path(item).is_absolute() or str(Path(item).resolve()) != item
+                for item in row[name]
+            ):
+                raise ValueError(
+                    f"destination {name} must contain canonical absolute paths"
+                )
+        scopes = [
+            (len(Path(scope).parts), allowed)
+            for name, allowed in (("writable_roots", True), ("read_only_roots", False))
+            for scope in row[name]
+            if path.is_relative_to(Path(scope).resolve())
+        ]
+        if not scopes or not min(
+            allowed
+            for depth, allowed in scopes
+            if depth == max(item[0] for item in scopes)
+        ):
+            raise ValueError(f"{path} has no explicit writable destination grant")
+        for name in ("source", "snapshot", "digest", "error"):
+            if not isinstance(row[name], str):
+                raise ValueError(f"malformed destination policy {name}")
+        if row["error"]:
+            raise ValueError(row["error"])
+        for name in ("source", "snapshot"):
+            if policy_snapshot_digest(Path(row[name])) != row["digest"]:
+                raise ValueError(
+                    f"destination policy {name} changed; refresh its accepted snapshot"
+                )
+        return encoded
+    return ""
+
+
+def destination_evaluation(binding: str, request: str, timeout: float = 15) -> str:
+    """Run accepted bytes in isolation; return only the evaluator's protocol reply."""
+    row = json.loads(binding)
+    if not isinstance(row, dict) or not isinstance(row["snapshot"], str):
+        raise ValueError("malformed destination evaluator binding")
+    snapshot = Path(row["snapshot"])
+    if policy_snapshot_digest(snapshot) != row["digest"]:
+        raise ValueError("accepted destination policy snapshot changed")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            "-X",
+            "pycache_prefix=/dev/null/lup-policy",
+            str(snapshot / "scripts" / "policy_evaluator.py"),
+        ],
+        input=request,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(
+            f"destination policy evaluator failed: {result.stderr or result.stdout}"
+        )
+    if (
+        policy_snapshot_digest(snapshot) != row["digest"]
+        or policy_snapshot_digest(Path(row["source"])) != row["digest"]
+    ):
+        raise ValueError("destination policy changed during evaluation")
+    return result.stdout
+
+
+def routing_policy_identity(root: Path | None) -> str:
+    """Bind an approval to both accepted policies and the bytes currently present."""
+    boundary = measured_boundary(root)
+    rows = (
+        boundary["destination_policies"] if "destination_policies" in boundary else []
+    )
+    identities = list(rows)
+    for encoded in rows:
+        try:
+            row = json.loads(encoded)
+            if not isinstance(row, dict):
+                raise ValueError("malformed destination policy binding")
+            for name in ("source", "snapshot"):
+                identities.append(policy_snapshot_digest(Path(row[name])))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            identities.append(f"unavailable: {error}")
+    return sha256(json.dumps(identities, sort_keys=True).encode()).hexdigest()
+
+
+def routed_edit_response(
+    path_text: str,
+    before: str | None,
+    after: str | None,
+    path_exists: bool,
+    autonomous: bool,
+    operation: str,
+    root: Path | None,
+    agent_identity: str = "",
+) -> str | None:
+    """Resolve caller authority and run an accepted foreign owner, without native effects."""
+    path = str(((root or Path.cwd()) / path_text).resolve())
+    refusal = execution_write_refusal(path, root)
+    if refusal:
+        raise ValueError(refusal)
+    if root is None:
+        return None
+    binding = destination_policy_binding(path, root)
+    if not binding:
+        return None
+    row = json.loads(binding)
+    request = {
+        "protocol": 1,
+        "path": path,
+        "before": before,
+        "after": after,
+        "path_exists": path_exists,
+        "autonomous": autonomous,
+        "agent_identity": agent_identity,
+        "operation": operation,
+        "cwd": str(root or Path.cwd()),
+        "owner": row["checkout"],
+    }
+    try:
+        return destination_evaluation(binding, json.dumps(request))
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("destination policy evaluator timed out") from error
+
+
 def sandbox_active() -> bool:
     """Whether the launcher confined this session to an OS sandbox."""
     environ = os.environ  # lup: ignore[os-environ]
@@ -112,7 +358,8 @@ def measured_boundary(
 
     Read back from the ledger that launch wrote, and only from the one it
     named: ``LUP_BOUNDARY_NONCE`` says which file this session is entitled to
-    believe. That is what the nonce is for. A ledger left by some other launch
+    believe, and ``LUP_BOUNDARY_ROOT`` pins the launch checkout even when a
+    tool or preflight command runs elsewhere. A ledger left by some other launch
     is a measurement of some other session, and reading it would be the same
     class of wrong answer as a ledger at a constant path, arrived at from the
     other direction.
@@ -124,7 +371,11 @@ def measured_boundary(
     """
     environ = os.environ  # lup: ignore[os-environ]
     nonce = environ["LUP_BOUNDARY_NONCE"] if "LUP_BOUNDARY_NONCE" in environ else ""
-    if root is None or not nonce:
+    if "LUP_BOUNDARY_ROOT" in environ:
+        root = Path(environ["LUP_BOUNDARY_ROOT"])
+        if not root.is_absolute() or str(root.resolve()) != str(root):
+            return {}
+    if root is None or not nonce or Path(nonce).name != nonce or nonce in {".", ".."}:
         return {}
     try:
         raw = (root / ledger / f"{nonce}.json").read_text()
@@ -440,6 +691,7 @@ def review_hook_call(
     stage: str = "",
     predecessor: str = "",
     execution_payload: str | None = None,
+    policy_identity: str = "",
 ) -> dict[Literal["state", "id", "reason"], str]:
     """Park a call or spend its explicit, single-use reviewer answer.
 
@@ -471,6 +723,8 @@ def review_hook_call(
             purpose,
             reviewer,
             expected,
+            policy_identity,
+            {path: str(Path(path).resolve()) for path in before},
         ],
         sort_keys=True,
     )
@@ -556,7 +810,13 @@ def review_hook_call(
             append_review_record(log, json.dumps(entry, sort_keys=True))
             return {"state": "approved", "id": entry["id"], "reason": ""}
     if entry is not None and entry["state"] in ("pending", "rejected"):
-        return {"state": entry["state"], "id": entry["id"], "reason": entry["reason"]}
+        answer = entry["answer"] if "answer" in entry else None
+        note = answer["note"] if answer and "note" in answer else ""
+        return {
+            "state": entry["state"],
+            "id": entry["id"],
+            "reason": note or entry["reason"],
+        }
     identifier = os.urandom(16).hex()
     entry = {
         "id": identifier,
@@ -1008,21 +1268,14 @@ def shared_git_directory(path_text: str) -> str:
     root = worktree_root(path_text)
     if not root:
         return ""
-    marker = Path(root) / ".git"
-    if marker.is_dir():
-        return str(marker)
-    try:
-        named = marker.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-    gitdir = named.removeprefix("gitdir:").strip()
-    if not gitdir:
-        return ""
-    # `<common>/worktrees/<name>` — two levels up in either layout.
-    linked = Path(gitdir)
-    if len(linked.parents) < 2:
-        return ""
-    return str(linked.parents[1])
+    result = subprocess.run(
+        ["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    return str(Path(result.stdout.strip()).resolve()) if result.returncode == 0 else ""
 
 
 def boundary_description(
@@ -2275,6 +2528,7 @@ def bash_decision(
     cwd: Path | None,
     relayed: bool = False,
     autonomous: bool = False,
+    agent_identity: str = "",
     park: bool = True,
 ) -> KernelDecision:
     """Judge one shell command against the declared vocabulary.
@@ -2329,7 +2583,9 @@ def bash_decision(
     reference = undo_snapshot(cwd, command)
     # Both halves of one reading: the documents a rewrite would leave, and why
     # the rest left none. Computed together so a target reaches exactly one.
-    reading = rewritten_documents(command, cwd or Path.cwd())
+    reading = rewritten_documents(
+        command, cwd or Path.cwd(), autonomous, agent_identity
+    )
     verdict = decide_shell(
         command,
         SHELL_RULES,
@@ -2456,7 +2712,7 @@ def bash_decision(
     # or an anti-pattern introduced is seen against what is actually there --
     # and the kernel reads nothing. Strongest wins, the rule every other join
     # in this policy uses.
-    authored = authored_review(command, cwd or Path.cwd(), autonomous)
+    authored = authored_review(command, cwd or Path.cwd(), autonomous, agent_identity)
     if authored is not None and STRENGTH.index(authored.effect) > STRENGTH.index(
         verdict.effect
     ):
@@ -2509,6 +2765,7 @@ def reviewed_decision(
     stage: str = "",
     predecessor: str = "",
     execution_payload: dict | None = None,
+    policy_identity: str = "",
 ) -> KernelDecision:
     """Only an explicit, single-use recorded answer can settle a native ask."""
     result = review_hook_call(
@@ -2530,6 +2787,7 @@ def reviewed_decision(
         json.dumps(execution_payload, sort_keys=True)
         if execution_payload is not None
         else None,
+        policy_identity,
     )
     if result["state"] == "approved":
         return decision.revised(effect="allow")
@@ -2548,6 +2806,10 @@ def reviewed_decision(
     prefix = [
         "uv",
         "run",
+        # The checkout holding the review queue, so the line runs from
+        # anywhere; the project, where declared, selects the application's CLI.
+        "--directory",
+        str(cwd),
         *(["--project", project] if project else []),
         "lup-devtools",
         "dev",
@@ -2559,7 +2821,7 @@ def reviewed_decision(
     return decision.revised(
         effect="deny",
         recovery=(
-            f"Review {identifier} is {result['state']}. In {cwd}, the operator can run "
+            f"Review {identifier} is {result['state']}. The operator can run "
             f"`{show}`, then `{answer}` or `{reject}`. "
             "After approval, retry this exact tool call; changed file contents require fresh review."
         ),
@@ -2713,7 +2975,9 @@ def resolution_of(
     return ResolutionRow(refuted=reply["refuted"], unresolved=reply["unresolved"])
 
 
-def rewritten_documents(command: str, cwd: Path) -> RewriteReading:
+def rewritten_documents(
+    command: str, cwd: Path, autonomous: bool = False, agent_identity: str = ""
+) -> RewriteReading:
     """What every in-place rewrite in this command would leave behind.
 
     The kernel names which files a screened rewrite would replace and this
@@ -2757,11 +3021,7 @@ def rewritten_documents(command: str, cwd: Path) -> RewriteReading:
                     UnproducedDocumentRow(target=target, cause="unreadable")
                 )
                 continue
-            path_text = worktree_path(target)
-            suffix = Path(path_text).suffix.lower()
-            antipatterns = (
-                ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
-            )
+            path_text = worktree_path(str((cwd / target).resolve()))
             foreign = foreign_repository(target, cwd)
             rows.append(
                 RewrittenDocumentRow(
@@ -2770,20 +3030,17 @@ def rewritten_documents(command: str, cwd: Path) -> RewriteReading:
                     before=before,
                     after=after,
                     foreign=foreign,
-                    outside_project=outside_this_project(target, cwd),
-                    # The same conditional an edit pays: a checker resolves
-                    # another repository's imports against another
-                    # repository's environment, and starting one to answer a
-                    # rule that will not be applied costs a language server's
-                    # second for nothing.
-                    resolution=resolution_of(
-                        resolved_refutations(path_text, after, RESOLUTION_COMMAND)
-                        if not foreign
-                        and awaits_resolution(
-                            before, after, antipatterns, suffix in (".py", ".pyi")
-                        )
-                        else None
+                    decision=edit_decision(
+                        target,
+                        before,
+                        after,
+                        True,
+                        autonomous,
+                        cwd=cwd,
+                        agent_identity=agent_identity,
                     ),
+                    outside_project=outside_this_project(target, cwd),
+                    resolution=None,
                 )
             )
     return RewriteReading(documents=rows, unproduced=unproduced)
@@ -2797,6 +3054,46 @@ def edit_decision(
     autonomous: bool,
     operation: str = "modify",
     cwd: Path | None = None,
+    agent_identity: str = "",
+) -> KernelDecision:
+    """Route an edit to its authorized owner while retaining the caller's boundary."""
+    path = str(((cwd or Path.cwd()) / path_text).resolve())
+    try:
+        response = routed_edit_response(
+            path,
+            before,
+            after,
+            path_exists,
+            autonomous,
+            operation,
+            cwd,
+            agent_identity or declared_identity(identity_policy.AGENT_IDENTITY_ENV),
+        )
+        if response is not None:
+            return read_response(json.loads(response))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return routing_failure(str(error))
+    return local_edit_decision(
+        path,
+        before,
+        after,
+        path_exists,
+        autonomous,
+        operation,
+        cwd,
+    )
+
+
+def local_edit_decision(
+    path_text: str,
+    before: str | None,
+    after: str | None,
+    path_exists: bool,
+    autonomous: bool,
+    operation: str = "modify",
+    cwd: Path | None = None,
+    allowances: list[str] | None = None,
+    resolve_external: bool = True,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
 
@@ -2833,7 +3130,8 @@ def edit_decision(
     # be applied, and pay a language server's second for the privilege.
     resolution = resolution_of(
         resolved_refutations(path_text, after, RESOLUTION_COMMAND)
-        if not outside_this_repository
+        if resolve_external
+        and not outside_this_repository
         and after is not None
         and awaits_resolution(before, after, rows, python_source)
         else None
@@ -2848,7 +3146,11 @@ def edit_decision(
         path_roles=PATH_ROLES,
         maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
-        allowances=granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES),
+        allowances=(
+            granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES)
+            if allowances is None
+            else allowances
+        ),
         python_source=python_source,
         acceptance_guard=ACCEPTANCE_GUARD,
         resolution=resolution,
@@ -2875,7 +3177,9 @@ def edit_decision(
     )
 
 
-def authored_review(command: str, cwd: Path, autonomous: bool) -> KernelDecision | None:
+def authored_review(
+    command: str, cwd: Path, autonomous: bool, agent_identity: str = ""
+) -> KernelDecision | None:
     """What the edit gates say about a write whose content the command carries.
 
     :func:`written_review` is the same reading a moment too late. It exists
@@ -2909,6 +3213,7 @@ def authored_review(command: str, cwd: Path, autonomous: bool) -> KernelDecision
                 "modify" if write["append"] else "overwrite" if existing else "create"
             ),
             cwd=cwd,
+            agent_identity=agent_identity,
         )
         for write in authored_writes(command)
         for existing in [(cwd / write["path"]).is_file()]
@@ -3211,11 +3516,10 @@ def dispatch(payload):
     # once, because the shell path and the edit path ask the same question of
     # it and a second read is a second place it can be forgotten.
     session_directory = session_root(payload)
-    agent_type = payload["agent_type"] if "agent_type" in payload else ""
-    autonomous = (
-        agent_type in AUTONOMOUS_AGENT_IDENTITIES
-        or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
-    )
+    agent_identity = (
+        payload["agent_type"] if "agent_type" in payload else ""
+    ) or declared_identity(AGENT_IDENTITY_ENV)
+    autonomous = agent_identity in AUTONOMOUS_AGENT_IDENTITIES
     if name == "Bash":
         unsandboxed = spent_escape(tool_input)
         # A command names no file it will write, so what it changed can only
@@ -3238,6 +3542,7 @@ def dispatch(payload):
             # command carrying its own content reaches the same gates.
             autonomous=autonomous,
             park=False,
+            agent_identity=agent_identity,
         )
     if name == "WebFetch":
         # The same directory the shell branch reads its boundary from: the
@@ -3261,6 +3566,7 @@ def dispatch(payload):
                 autonomous,
                 "modify",
                 session_directory,
+                agent_identity=agent_identity,
             ),
             path,
             session_directory,
@@ -3277,6 +3583,7 @@ def dispatch(payload):
                 autonomous,
                 "overwrite" if exists else "create",
                 session_directory,
+                agent_identity=agent_identity,
             ),
             path,
             session_directory,

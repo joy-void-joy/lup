@@ -281,29 +281,90 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
-        subjects=[
-            "DynamicToolCall",
-            "DynamicToolCall.thread_id",
-            "DynamicToolCall.turn_id",
-            "DynamicToolCall.call_id",
-            "DynamicToolCall.tool",
-            "DynamicToolCall.arguments",
-            "CodexSchemaRebindingError",
-            "dynamic_tool",
-        ],
+        subjects=["dynamic_tool", "SUBMISSION_TOOL"],
         reason="Codex typed output uses a per-turn native schema and portable validation, "
-        "so submission no longer installs a thread-lifetime dynamic tool.",
+        "so submission no longer installs a thread-lifetime dynamic tool. The "
+        "dynamic-tool channel carries declared application tools only.",
         steps=[
             MigrationStep(
                 instruction="Pass the output model and submission gate through TurnRequest. "
-                "Remove direct dynamic_tool/DynamicToolCall use for submission; expose "
-                "application tools through MCP. Untyped turns, changed schemas and resumed "
-                "threads are supported without catching CodexSchemaRebindingError."
+                "Remove direct dynamic_tool use for submission; declare application tools "
+                "in CodexSessionConfig.application_tools, which DynamicToolCall still "
+                "carries. Untyped turns and changed output schemas need no fresh thread, "
+                "so CodexSchemaRebindingError now reports application-tool drift alone."
             ),
             MigrationStep(
                 instruction="Configure correction on CodexSessionConfig to bound validation "
                 "retries. Handle StructuredOutputError for exhausted output validation, "
                 "and UnsupportedCapability for native controls that cannot be enforced."
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["shell_patch", "patch_review"],
+        reason="Native hook reviews bind captured documents and policy bytes; "
+        "Codex approvals remain single-use.",
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Regenerate both native plugins. Replace direct shell_patch callers "
+                    "with lup.policy.kernel.review.literal_input(command, 'apply_patch'). "
+                    "Pass captured preconditions and the shell flag to patch_review; "
+                    "never re-read the working tree for a parked review."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "SessionRequest.tools",
+            "ClaudeSessionConfig.tools",
+            "create_client",
+            "create_claude",
+            "create_codex",
+            "SessionRequest",
+            "ClaudeSessionConfig",
+            "CodexSessionConfig",
+        ],
+        reason=(
+            "Native tool authority is explicit. The native_tools default None "
+            "grants no built-in or inherited tools on either provider; an "
+            "application tool declaration remains independent of that authority."
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Rename SessionRequest.tools and ClaudeSessionConfig.tools "
+                    "to native_tools. Audit create_client, create_claude, "
+                    "create_codex and direct session configs that relied on "
+                    "ambient tools: pass an explicit sequence of NativeToolGroup "
+                    "values or exact supported provider tool names. Use "
+                    "NativeToolGroup.ALL only where broad built-in authority "
+                    "is intended; None and [] both grant nothing."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Keep @lup_tool handlers in the factory tools=[...] argument "
+                    "and explicit MCP servers in tool_servers. Neither requires "
+                    "native_tools. allowed_tools selects automatic approval "
+                    "within declared authority and cannot grant a missing tool. "
+                    "Remove inherited setting sources and provider overrides "
+                    "that could widen authority. Codex rejects READ and exact "
+                    "Read, Write or WebFetch grants; use its supported facilities "
+                    "only when their broader semantics are intended."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Resume a Codex thread only with the same application tools "
+                    "and compatible native authority; native grants may narrow "
+                    "on resume. Start a fresh session when application tools "
+                    "change: the native resume protocol cannot replace dynamic "
+                    "tools. Output schemas ride each turn and need no fresh "
+                    "thread. Codex requires an explicit or inherited model "
+                    "present in its native catalog to bound model tool metadata."
+                )
             ),
         ],
     ),

@@ -113,6 +113,7 @@ from lup_template.harness.catalog import (
     declared_test_roots,
     portable_harness,
 )
+from tests.unit.repos import initialized_repo
 
 SHELL_RULES = declared_hook_set().resolved_shell_rules()
 """This project's vocabulary as the runtime resolves it, not as it is declared.
@@ -401,9 +402,7 @@ def test_import_ownership_resolves_absolute_paths_in_their_own_worktree(
     tmp_path: Path, path: str, effect: str
 ) -> None:
     repository = tmp_path / "sibling"
-    marker = repository / ".git"
-    marker.mkdir(parents=True)
-    (marker / "HEAD").write_text("ref: refs/heads/fixture\n", encoding="utf-8")
+    initialized_repo(repository, tmp_path / "hooks")
     policy = EditPolicy(
         protected=[], import_boundaries=native_import_boundaries(application_roots())
     )
@@ -415,7 +414,8 @@ def test_import_ownership_resolves_absolute_paths_in_their_own_worktree(
                     before="",
                     after="import openai\n",
                 )
-            ]
+            ],
+            cwd=repository,
         )
     )
     assert decision.effect == effect
@@ -504,6 +504,15 @@ executables is on it."""
 SHELL_POLICY_CASES = [
     DecisionCase(input="env MODE=test python script.py", effect="deny"),
     DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
+    DecisionCase(input="uv run --env-file .env python -c 'x'", effect="deny"),
+    DecisionCase(
+        input="uv run --with-requirements reqs.txt python -c 'x'", effect="deny"
+    ),
+    DecisionCase(input="uv run -w requests python tmp/oneoff.py", effect="ask"),
+    DecisionCase(input="uv run -wrequests pytest", effect="ask"),
+    DecisionCase(input="uv run --env-file .env pytest", effect="ask"),
+    DecisionCase(input="uv run --with-requirements reqs.txt pytest", effect="ask"),
+    DecisionCase(input="uv run --index https://example.com pytest", effect="ask"),
     # A script file is the ladder's rung for computing something once, and it
     # is allowed wherever it sits: the refusal is about inline code leaving
     # nothing behind to read, which a file does not do. A scratch root reaches
@@ -519,6 +528,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="uv run python -m http.server", effect="deny"),
     DecisionCase(input="uv run -m http.server", effect="deny"),
     DecisionCase(input="uv run python", effect="deny"),
+    DecisionCase(
+        input="uv --unknown-option run lup-devtools dev questions answer abc --as operator",
+        effect="deny",
+        sandboxed=True,
+    ),
+    DecisionCase(input="uv --directory --quiet run pytest", effect="deny"),
+    DecisionCase(
+        input="uv --directory /example run python -c 'x'", effect="deny", sandboxed=True
+    ),
+    DecisionCase(input="uv --directory /example run pytest", effect="allow"),
     # A declared root admits every module beneath it, in both spellings that
     # reach one, because what runs is this project's own reviewed source.
     DecisionCase(input="uv run -m examples.monitored_run plan", effect="allow"),
@@ -2845,6 +2864,39 @@ def test_redirecting_over_a_file_costs_what_deleting_it_costs(
     assert effect("echo x > README.md") == "ask"
 
 
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "uv run --with pytest",
+        "uv run --with=pytest",
+        "uv run --with-editable .",
+        "uv run --with-requirements requirements.txt",
+        "uv run --env-file .env",
+        "uv run -w pytest",
+        "uv --directory /example run --with pytest",
+        "uv run --extra test --with pytest",
+        "uv run --index https://example.com --with pytest",
+        "uv run --with pytest env",
+        "uv run --with pytest uv run",
+        "uv run uv run --with pytest",
+    ],
+)
+@pytest.mark.parametrize("executable", ["lup-devtools", "/example/bin/lup-devtools"])
+@pytest.mark.parametrize(
+    "arguments", ["dev questions answer abc --as operator", "harness policy-refresh"]
+)
+def test_uv_source_options_cannot_soften_operator_only_commands(
+    runner: str, executable: str, arguments: str
+) -> None:
+    policy = semantic_policy_for(declared_hook_set())
+    for prefix in ("", "# lup: escalate[decision]: user agreed\n"):
+        decision = policy.decide(
+            ShellCommand(command=f"{prefix}{runner} {executable} {arguments}")
+        )
+        assert decision.effect == "deny"
+        assert "a requesting agent cannot" in decision.reason
+
+
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
     policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
 
@@ -4095,6 +4147,7 @@ def test_fragment_edits_are_judged_as_the_documents_they_produce(
     text is seen as a document, which is the point.
     """
     monkeypatch.chdir(tmp_path)
+    initialized_repo(tmp_path, tmp_path / "hooks")
     Path("content.py").write_text(
         'TABLE = """\nA note spells itself as # lup: fix this here.\n"""\n',
         encoding="utf-8",
@@ -4814,6 +4867,7 @@ def test_a_test_the_bun_suite_collects_is_written_whole_without_a_question(
     source beside it, a backup of the test, and a stem bun does not collect
     ask as any production file does.
     """
+    initialized_repo(tmp_path, tmp_path / "hooks")
     policy = semantic_policy_for(declared_hook_set())
 
     def written(target: str) -> str:
@@ -4822,7 +4876,7 @@ def test_a_test_the_bun_suite_collects_is_written_whole_without_a_question(
 
     def created(target: str) -> str:
         change = EditChange(path=Path(target), after=typescript_module(35))
-        return policy.decide(EditBatch(changes=[change])).effect
+        return policy.decide(EditBatch(changes=[change], cwd=tmp_path)).effect
 
     explorer = "packages/lup/web/src/explorer"
     for test in (f"{explorer}/mount.test.tsx", f"{explorer}/narrow.test.ts"):

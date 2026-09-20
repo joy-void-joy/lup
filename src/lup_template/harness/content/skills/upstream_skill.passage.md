@@ -49,9 +49,26 @@ Edit in that worktree, and run **lup's** gate there rather than this project's:
 uv run --directory refs/lup/tree/fix-<name> lup-devtools dev check
 ```
 
-This session's hooks enforce *this* project's policy, which is not the policy
-those files are held to. A change that passes here and fails there is a change
-that cannot land upstream.
+An explicitly granted destination worktree is judged by its own generated
+policy, while this session retains its measured boundary and approval channel.
+The launch records the accepted evaluator bytes; a writable parent directory
+or a `refs/` symlink alone supplies no repository policy grant.
+
+Generate both native trees in a newly created worktree before editing it.
+When the launch explicitly mounted the writable bare lup repository, an
+operator can accept that worktree's policy without restarting this session.
+From the adopter checkout, the operator runs:
+
+```bash
+uv run lup-devtools harness policy-refresh --nonce <launch-nonce> --repository <canonical-worktree-path>
+```
+
+This accepts only a worktree inside the original mount and belonging to that
+same Git repository. It is also the recovery after accepted generated policy
+changes: regenerate there, then have the operator refresh its snapshot. The
+requesting agent cannot approve replacement policy itself. A worktree outside
+the original mount needs a launch granting that path. Run the upstream gate
+even when its hook allows an edit; its checks also cover the completed branch.
 
 Two conventions of lup's that are easy to miss from outside it:
 

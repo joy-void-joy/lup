@@ -68,7 +68,13 @@ def native_call(
     if event == "PostToolUse":
         return "observed"
     if runtime == "codex":
-        return "deny" if result.exit_code == 2 else "allow"
+        # A blocked review exits 0 carrying a structured denial, because Codex
+        # drops the operator's warning on exit 2; every other refusal exits 2.
+        if result.exit_code == 2:
+            return "deny"
+        if not result.stdout:
+            return "allow"
+        return json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
     return json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
 
 
@@ -340,8 +346,12 @@ def test_external_workspace_preserves_application_human_owned_paths(
     tool = "Write" if runtime == "claude" else "apply_patch"
     assert native_call(root, runtime, tool=tool, arguments=arguments) == "deny"
     (question,) = QuestionRelay(root / ".lup/questions.jsonl").pending()
-    assert "different repository" in question.reason
+    # The application is a registered destination, so its own policy judges the
+    # write and names the gate it met; an unregistered repository still meets
+    # the foreign-repository ask, which test_destination_policy_routing pins.
+    assert "human-authored" in question.reason
     assert question.preconditions == {path: before}
+    assert path.read_text() == before
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex"])
@@ -354,13 +364,15 @@ def test_external_review_recovery_commands_select_the_application_environment(
     result = native_response(root, runtime)
     detail = (
         result.stderr.decode()
-        if runtime == "codex"
+        if runtime == "codex" and result.exit_code == 2
         else json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
     )
     (question,) = QuestionRelay(root / ".lup/questions.jsonl").pending()
     prefix = [
         "uv",
         "run",
+        "--directory",
+        str(root),
         "--project",
         str(project),
         "lup-devtools",

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "4e7400b8ca8ddd1a450dd184e8929750603821adc4b5af79cec87e35d25a20af",
+  "source_digest": "200d48474d45789eeb057631f5f16dd5d3a4d720013c70da6a15aec3f8529d87",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -191,7 +191,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "d77aaa38a2443405a4385461d5ed88ec5a7effc034bd58ec374683254e2be6ee",
+      "sha256": "55f8221ff446cf5083c5068978aae1bd4b5aa878644e0e433c55dcc805fb6199",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -259,6 +259,20 @@
       "executable": false
     },
     {
+      "path": ".codex/plugins/lup/hooks/runtime/kernel/policy_protocol.py",
+      "category": "generated",
+      "sha256": "02b62f92e73b9f3d4e9fb4163fc1be0b4c8f9bc2346fe6017ae0498ee2b38a01",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/hooks/runtime/kernel/review.py",
+      "category": "generated",
+      "sha256": "2cbed960ac81bda8658a7b9d47e70b51d0ad8eb280012f9fdedaaeaeb8f9b8a1",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
+    },
+    {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/roles.py",
       "category": "generated",
       "sha256": "509f83a2b38bf41334bf93c1a0d08aff88bcb006c2ddc11771ec5dca1834d285",
@@ -268,7 +282,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "16f5e84cfaec1d4a3651df5b79379473841919e67f438bba1d54497af77ecf6b",
+      "sha256": "1bcaa06c26e4cd9fe342bdc07bece509fcba56f82155c54bc98421334ae69f15",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -331,14 +345,14 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "df5b8672ad970bb80fcad9724fdefddc845597a26b5f12812d5e88428d78e8b0",
+      "sha256": "021f031e30406b91372311691ab465efaad87e144dfb43a98f92b309b7eaf8a0",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "3b4a996e3d767db5fabbf1250e48fec88f11eec3de4d96403e2487159df0ba09",
+      "sha256": "a4923cae984d03a727741426f3119075650cc4c6bd2d5f6e328740ddfa9bd468",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -387,7 +401,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "493b954eecc9a5c461db651d38e8f7f3899c3951bb4114745dc3a74d3b86418c",
+      "sha256": "6a9e70093c561876b7cbeaf828a40338b6baeb9c368c12a262980f44e4aab572",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -397,6 +411,13 @@
       "sha256": "d1cfb6d3ed4c2f2054933374c2e4f784ac238f8522e132dd5adad7df02b43dfc",
       "semantic_id": "hooks.lup-policy",
       "executable": true
+    },
+    {
+      "path": ".codex/plugins/lup/hooks/scripts/policy_evaluator.py",
+      "category": "generated",
+      "sha256": "c9e73183fa2ad142e4bc84916f6903ca1ac91b5635ee0ceb449613c192d4a166",
+      "semantic_id": "hooks.lup-policy",
+      "executable": false
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/subagent_cleanup.sh",
@@ -660,7 +681,7 @@
     {
       "path": ".codex/plugins/lup/skills/upstream/SKILL.md",
       "category": "generated",
-      "sha256": "5f152c1b5865de48e937311e163a25476f5c74eb7557500150ad93ae728ceb96",
+      "sha256": "b48ae07e63f6ff9a9f1ca416deff3146b14f3df79e2429409990ee4649b1d004",
       "semantic_id": "skill.upstream",
       "executable": false
     },
@@ -681,7 +702,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "bd99217f16bffd8b50ef57352b19dddf207b3f9b4383622fa126097cd0963895",
+      "sha256": "ccaa5653c46596c23bc057ace0411dcbd85a58ec71c66dd6e880a99a4967c252",
       "semantic_id": "harness.guidance",
       "executable": false
     }

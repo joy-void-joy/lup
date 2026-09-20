@@ -7,8 +7,14 @@ the caller's mapping.
 """
 
 import os
+import json
+from pathlib import Path
+
+import pytest
 
 from lup.coordination.identity import LaunchedMember
+from lup.devtools.harness.preflight import NONCE_VARIABLE, ROOT_VARIABLE
+from lup.policy.assets.host import measured_boundary
 from lup.providers.identity import RUNTIME_DECIDED_ENV
 from lup.harness.environment import (
     NON_INTERACTIVE_SHELL_ENV,
@@ -81,3 +87,19 @@ def test_the_suite_cannot_reach_the_session_that_is_running_it() -> None:
             f"{name} survived into the suite, so anything calling wake() here"
             " would reach whoever is running it"
         )
+
+
+def test_launcher_isolation_removes_the_live_write_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / ".lup/preflight"
+    directory.mkdir(parents=True)
+    (directory / "live.json").write_text(json.dumps({"writable_roots": ["/live"]}))
+    monkeypatch.setenv(NONCE_VARIABLE, "live")
+    monkeypatch.setenv(ROOT_VARIABLE, str(tmp_path))
+    assert measured_boundary(tmp_path)["writable_roots"] == ["/live"]
+    for name in launcher_decided_names(os.environ):
+        monkeypatch.delenv(name, raising=False)
+    assert measured_boundary(tmp_path) == {}
+    assert ROOT_VARIABLE not in os.environ

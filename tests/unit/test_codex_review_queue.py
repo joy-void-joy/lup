@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 import sh
 
 from lup.policy.relay import QuestionRelay
+from lup.policy.assets.host import review_hook_call
 from lup.types import JsonObject
 
 
@@ -45,6 +47,24 @@ def hook(
     return result
 
 
+def allowed(result: sh.RunningCommand) -> bool:
+    """Codex says nothing when it permits a call, and answers when it does not."""
+    return result.exit_code == 0 and not result.stdout
+
+
+def denial(result: sh.RunningCommand) -> str:
+    """Read the supported native denial and its operator-visible warning."""
+    if result.exit_code == 2:
+        return result.stderr.decode()
+    assert result.exit_code == 0
+    rendered = json.loads(result.stdout)
+    output = rendered["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    assert output["hookEventName"] == "PreToolUse"
+    assert rendered["systemMessage"] == output["permissionDecisionReason"]
+    return output["permissionDecisionReason"]
+
+
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
@@ -66,20 +86,20 @@ def test_document_replacement_waits_for_review_then_runs_once(
         command = f"# lup: escalate[decision]: replace the agreed design\napply_patch <<'PATCH'\n{command}\nPATCH"
     tool = "Bash" if shell else "apply_patch"
     stopped = hook(root, command, tool=tool)
-    assert stopped.exit_code == 2
-    assert b"not classified" not in stopped.stderr
+    detail = denial(stopped)
+    assert "not classified" not in detail
     store = QuestionRelay(root / ".lup/questions.jsonl")
     (question,) = store.pending()
     assert question.operation.requester == "requester"
     assert question.preconditions == {root / "DESIGN.md": "# Previous design\n"}
-    assert question.id.encode() in stopped.stderr
-    assert hook(root, command, tool=tool).exit_code == 2
+    assert question.id in detail
+    assert denial(hook(root, command, tool=tool))
     assert len(store.pending()) == 1
     store.answer(question.id, "operator", True)
     assert hook(root, command, tool=tool).exit_code == 0
     dispatched = store.find(question.id)
     assert dispatched is not None and dispatched.state == "dispatched"
-    assert hook(root, command, tool=tool).exit_code == 2
+    assert denial(hook(root, command, tool=tool))
 
 
 def test_pending_native_prompt_is_never_an_approval(root: Path) -> None:
@@ -89,7 +109,7 @@ def test_pending_native_prompt_is_never_an_approval(root: Path) -> None:
     assert decision["behavior"] == "deny"
     (question,) = QuestionRelay(root / ".lup/questions.jsonl").pending()
     assert question.id in decision["message"]
-    assert hook(root, replacement()).exit_code == 2
+    assert question.id in denial(hook(root, replacement()))
 
 
 @pytest.mark.parametrize("approved", [False, True])
@@ -98,14 +118,15 @@ def test_real_sandbox_escalation_requires_explicit_permission_review(
 ) -> None:
     command = "# lup: escalate[sandbox]: inspect the host\nls"
     store = QuestionRelay(root / ".lup/questions.jsonl")
-    assert hook(root, command, tool="Bash").exit_code == 2
+    assert denial(hook(root, command, tool="Bash"))
     pending = hook(root, command, tool="Bash", event="PermissionRequest")
     decision = json.loads(pending.stdout)["hookSpecificOutput"]["decision"]
     assert decision["behavior"] == "deny"
     (question,) = store.pending()
     assert question.id in decision["message"]
     store.answer(question.id, "operator", approved)
-    assert hook(root, command, tool="Bash").exit_code == (0 if approved else 2)
+    retry = hook(root, command, tool="Bash")
+    assert allowed(retry) if approved else denial(retry)
     retried = hook(root, command, tool="Bash", event="PermissionRequest")
     assert json.loads(retried.stdout)["hookSpecificOutput"]["decision"]["behavior"] == (
         "allow" if approved else "deny"
@@ -172,11 +193,11 @@ def test_host_executor_deferral_reaches_explicit_permission_review(
 def test_one_review_covers_both_events_for_one_identified_invocation(
     root: Path,
 ) -> None:
-    assert hook(root, replacement()).exit_code == 2
+    assert denial(hook(root, replacement()))
     store = QuestionRelay(root / ".lup/questions.jsonl")
     (question,) = store.pending()
     store.answer(question.id, "operator", True)
-    assert hook(root, replacement()).exit_code == 0
+    assert allowed(hook(root, replacement()))
     response = hook(root, replacement(), event="PermissionRequest")
     assert response.exit_code == 0
     assert json.loads(response.stdout) == {
@@ -191,7 +212,7 @@ def test_one_review_covers_both_events_for_one_identified_invocation(
         json.loads(replay.stdout)["hookSpecificOutput"]["decision"]["behavior"]
         == "deny"
     )
-    assert hook(root, replacement()).exit_code == 2
+    assert denial(hook(root, replacement()))
 
 
 @pytest.mark.parametrize("preapproved", [False, True])
@@ -203,7 +224,7 @@ def test_concurrent_permission_events_cannot_spend_an_answer_twice(
     (question,) = store.pending()
     store.answer(question.id, "operator", True)
     if preapproved:
-        assert hook(root, replacement()).exit_code == 0
+        assert allowed(hook(root, replacement()))
     with ThreadPoolExecutor(max_workers=2) as workers:
         responses = list(
             workers.map(
@@ -227,7 +248,7 @@ def test_event_handoff_requires_the_same_identified_exact_operation(
     store = QuestionRelay(root / ".lup/questions.jsonl")
     (question,) = store.pending()
     store.answer(question.id, "operator", True)
-    assert hook(root, replacement()).exit_code == 0
+    assert allowed(hook(root, replacement()))
     command = replacement()
     session = "requester"
     call_id = "call-one"
@@ -258,7 +279,7 @@ def test_event_handoff_never_infers_a_missing_or_corrupt_primary_claim(
     store = QuestionRelay(root / ".lup/questions.jsonl")
     (question,) = store.pending()
     store.answer(question.id, "operator", True)
-    assert hook(root, replacement()).exit_code == 0
+    assert allowed(hook(root, replacement()))
     claim = root / ".lup/review-claims" / question.id
     if damage == "missing":
         claim.unlink()
@@ -274,10 +295,10 @@ def test_rejection_does_not_create_another_question(root: Path) -> None:
     hook(root, replacement())
     store = QuestionRelay(root / ".lup/questions.jsonl")
     (question,) = store.pending()
-    store.answer(question.id, "operator", False)
+    store.answer(question.id, "operator", False, "Keep the original design")
     refused = hook(root, replacement())
-    assert refused.exit_code == 2
-    assert b"rejected" in refused.stderr
+    assert "rejected" in denial(refused)
+    assert "Keep the original design" in denial(refused)
     assert len(store.questions()) == 1
 
 
@@ -295,12 +316,23 @@ def test_approval_does_not_follow_a_changed_operation(root: Path, change: str) -
         command = command.replace("All decisions.", "Different decisions.")
     if change == "session":
         session = "another-requester"
-    assert hook(root, command, session=session).exit_code == 2
+    assert denial(hook(root, command, session=session))
     approved = store.find(question.id)
     assert approved is not None and approved.state == "approved"
 
 
-def test_requester_cannot_answer_its_own_question(root: Path) -> None:
+@pytest.mark.parametrize(
+    "runner",
+    [
+        ["uv", "run"],
+        ["uv", "--directory", "/example", "run"],
+        ["uv", "--directory=/example", "run"],
+        ["uv", "--quiet", "--color", "never", "--directory", "/example", "run"],
+    ],
+)
+def test_requester_cannot_answer_its_own_question(
+    root: Path, runner: list[str]
+) -> None:
     hook(root, replacement())
     store = QuestionRelay(root / ".lup/questions.jsonl")
     (question,) = store.pending()
@@ -310,9 +342,38 @@ def test_requester_cannot_answer_its_own_question(root: Path) -> None:
         refused = hook(
             root,
             prefix
-            + f"uv run lup-devtools dev questions answer {question.id} --as operator",
+            + shlex.join(
+                [
+                    *runner,
+                    "lup-devtools",
+                    "dev",
+                    "questions",
+                    "answer",
+                    question.id,
+                    "--as",
+                    "operator",
+                ]
+            ),
             tool="Bash",
         )
+        assert refused.exit_code == 2
+        assert b"cannot approve" in refused.stderr
+        located = shlex.join(
+            [
+                "uv",
+                "run",
+                "--directory",
+                str(root),
+                "lup-devtools",
+                "dev",
+                "questions",
+                "answer",
+                question.id,
+                "--as",
+                "operator",
+            ]
+        )
+        refused = hook(root, prefix + located, tool="Bash")
         assert refused.exit_code == 2
         assert b"cannot approve" in refused.stderr
 
@@ -334,9 +395,90 @@ def test_shell_patch_recognition_never_hides_other_commands(
     root: Path, suffix: str
 ) -> None:
     command = f"apply_patch <<'PATCH'\n{replacement()}\nPATCH{suffix}"
-    assert hook(root, command, tool="Bash").exit_code == 2
+    assert denial(hook(root, command, tool="Bash"))
 
 
 def test_unquoted_shell_patch_is_not_interpreted_as_literal(root: Path) -> None:
     command = f"apply_patch <<PATCH\n{replacement()}\nPATCH"
-    assert hook(root, command, tool="Bash").exit_code == 2
+    assert denial(hook(root, command, tool="Bash"))
+
+
+@pytest.mark.parametrize("changed", ["source", "destination"])
+def test_copy_approval_binds_both_documents(root: Path, changed: str) -> None:
+    source = root / "proposal.md"
+    source.write_text("# Agreed design\n")
+    command = "# lup: escalate[decision]: install the reviewed design\ncp proposal.md DESIGN.md"
+    assert denial(hook(root, command, tool="Bash"))
+    store = QuestionRelay(root / ".lup/questions.jsonl")
+    (question,) = store.pending()
+    assert question.preconditions == {
+        source: "# Agreed design\n",
+        root / "DESIGN.md": "# Previous design\n",
+    }
+    store.answer(question.id, "operator", True)
+    target = source if changed == "source" else root / "DESIGN.md"
+    target.write_text("# Another document\n")
+    assert denial(hook(root, command, tool="Bash"))
+    assert len(store.pending()) == 1
+    approved = store.find(question.id)
+    assert approved is not None and approved.state == "approved"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat > DESIGN.md <<'DOC'\n# Replacement\nDOC",
+        "echo replacement > DESIGN.md",
+        "sed -i 's/old/new/' DESIGN.md",
+    ],
+)
+def test_shell_write_approval_binds_existing_document(root: Path, command: str) -> None:
+    target = root / "DESIGN.md"
+    before = "# lup: old\n" if command.startswith("sed ") else "# Previous design\n"
+    target.write_text(before)
+    command = f"# lup: escalate[decision]: review this document change\n{command}"
+    assert denial(hook(root, command, tool="Bash"))
+    store = QuestionRelay(root / ".lup/questions.jsonl")
+    (question,) = store.pending()
+    assert question.preconditions == {target: before}
+    store.answer(question.id, "operator", True)
+    target.write_text(before + "# Another writer\n")
+    assert denial(hook(root, command, tool="Bash"))
+    assert len(store.pending()) == 1
+    approved = store.find(question.id)
+    assert approved is not None and approved.state == "approved"
+
+
+def test_policy_identity_changes_require_another_review(root: Path) -> None:
+    arguments = (
+        root,
+        "requester",
+        "apply_patch",
+        "{}",
+        "{}",
+        "review",
+        "edit",
+        "",
+        "human_only",
+    )
+    first = review_hook_call(*arguments, policy_identity="original-policy")
+    store = QuestionRelay(root / ".lup/questions.jsonl")
+    store.answer(first["id"], "operator", True)
+    changed = review_hook_call(*arguments, policy_identity="replacement-policy")
+    assert changed["state"] == "pending"
+    assert changed["id"] != first["id"]
+    assert (
+        review_hook_call(*arguments, policy_identity="original-policy")["state"]
+        == "approved"
+    )
+
+
+def test_review_notice_quotes_the_checkout(root: Path) -> None:
+    nested = root / "checkout with 'quotes' and $substitution"
+    nested.mkdir()
+    (nested / "DESIGN.md").write_text("# Previous design\n")
+    notice = denial(hook(nested, replacement()))
+    assert "uv run --directory '" in notice
+    assert "questions show" in notice
+    assert "questions answer" in notice
+    assert "questions reject" in notice
