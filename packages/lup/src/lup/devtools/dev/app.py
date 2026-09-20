@@ -1224,16 +1224,33 @@ def create_dev_app(
     ) -> None:
         """Print the relocation that repoints an importer across a range.
 
-        Derived from two surfaces rather than read from a record: every name
-        that survived somewhere else votes for the module pair it moved
-        between, so the map costs nothing to keep and cannot go stale.
+        Derived from two surfaces rather than read from a record, so the map
+        costs nothing to keep and cannot go stale: a module that declares
+        none of its own names any more, all of them now in one other module,
+        becomes a pair. A module still declaring some of them has not moved
+        however many of its names turn up elsewhere, and a pair for it would
+        be applied silently and break every import of a name that stayed — so
+        what cannot be spelled as a pair is spelled out instead, name by
+        name, for a reader to judge and repoint by hand.
         """
-        moves = surfaces_over(over).module_moves()
-        if not moves:
+        divergence = surfaces_over(over)
+        moves = divergence.module_moves()
+        unmapped = divergence.unmapped_modules()
+        if not moves and not unmapped:
             typer.echo(f"no module moved over {over}")
             return
-        pairs = " ".join(f"{old}={new}" for old, new in sorted(moves.items()))
-        typer.echo(f"uv run lup-devtools dev relocate {pairs}")
+        if moves:
+            pairs = " ".join(f"{old}={new}" for old, new in sorted(moves.items()))
+            typer.echo(f"uv run lup-devtools dev relocate {pairs}")
+        if unmapped:
+            typer.echo(
+                f"{len(unmapped)} module(s) no pair can repoint, since `dev "
+                f"relocate` respells a whole module path. Where their names "
+                f"resolve now — a name declared elsewhere may have moved there, "
+                f"or two modules may have chosen one word:"
+            )
+            for move in unmapped:
+                typer.echo(f"  {move.spelled()}")
 
     @migrate_app.command("pending")
     def migrate_pending_cmd(
