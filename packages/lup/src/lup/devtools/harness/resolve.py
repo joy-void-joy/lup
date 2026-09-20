@@ -32,6 +32,7 @@ from lup.tools.mcp import (
     create_mcp_server,
     serve_stdio,
 )
+from lup.tools.native import NativeToolGroup
 from lup.policy.grants import LeaseGrants, allowance_grants_environment
 from lup.policy.identity import agent_identity_environment
 from lup.harness.environment import non_interactive_environment
@@ -1827,6 +1828,7 @@ def run_resolve(
                     ClaudeSessionConfig(
                         model=session_model,
                         system_prompt="Execute the persisted Lup resolver assignment.",
+                        native_tools=[NativeToolGroup.ALL],
                         cwd=cwd,
                         add_dirs=[cwd, *toolchain_writable_paths()],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
@@ -1890,6 +1892,7 @@ def run_resolve(
             return create_codex(
                 CodexSessionConfig(
                     model=session_model,
+                    native_tools=[NativeToolGroup.ALL],
                     developer_instructions=(
                         "Execute the persisted Lup resolver assignment."
                     ),
@@ -1961,9 +1964,9 @@ def run_resolve(
                         system_prompt=(
                             "Independently review the persisted resolver change."
                         ),
+                        native_tools=[NativeToolGroup.READ, NativeToolGroup.SHELL],
                         cwd=cwd,
                         add_dirs=[cwd],
-                        plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
                         environment=reviewer_environment_for,
                         # A reviewer is read-only by design, so its lease is
                         # the worker's with nothing writable rather than a
@@ -1984,6 +1987,7 @@ def run_resolve(
             return create_codex(
                 CodexSessionConfig(
                     model=session_model,
+                    native_tools=[NativeToolGroup.WEB, NativeToolGroup.SHELL],
                     approval_policy="on-request",
                     hooks=merge_hooks(
                         create_permission_hooks([], [cwd]), context.hooks

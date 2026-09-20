@@ -25,6 +25,7 @@ from lup import (
     create_claude,    # open Claude sessions, configured
     create_codex,     # open Codex sessions, configured
     create_client,    # route a model id to whichever serves it
+    NativeToolGroup,  # explicit groups of built-in tool authority
     Client,   # what a constructor returns
     SessionHandle,    # an opened session, plus optional fork capability
     TurnHandle,       # an accepted turn, plus optional events/interrupt/steer
@@ -76,6 +77,58 @@ against the wrong vendor and fails later, in that vendor's vocabulary.
 All three resolve their adapter on first access, so `import lup` costs roughly
 80 ms and pulls neither provider SDK. Naming a constructor imports its adapter;
 opening a session is what finally reaches the vendor's own package.
+
+## Native tools
+
+`native_tools` defaults to `None` on all three constructors, `SessionRequest`,
+and both provider session configs. `None` and an empty sequence grant no
+built-in tools and inherit no ambient tool inventory. A caller opts in with
+`NativeToolGroup` values or exact names supported by its provider:
+
+```python
+from lup import NativeToolGroup, create_claude, create_codex
+
+reader = create_claude(native_tools=[NativeToolGroup.READ])
+executor = create_codex(native_tools=[NativeToolGroup.SHELL])
+```
+
+The groups are `READ`, `WEB`, `WRITE`, `SHELL`, and `ALL`. `ALL` explicitly
+grants the runtime's broad built-in inventory; it does not promise every
+experimental facility or grant ambient application integrations. Groups
+compose, and unknown or unenforceable grants fail before a session starts.
+Permission patterns such as `Bash(*)` are not native tool identities.
+
+| Grant | Claude | Codex |
+|---|---|---|
+| `NativeToolGroup.READ` | `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch` | Rejected: reading through a shell would grant execution |
+| `NativeToolGroup.WEB` | `WebFetch`, `WebSearch` | Native web search |
+| `NativeToolGroup.WRITE` | `Write`, `Edit`, `NotebookEdit` | Patch application |
+| `NativeToolGroup.SHELL` | `Bash`, `TaskOutput`, `TaskStop` | Shell execution |
+| Exact names | Includes `Read`, `WebFetch`, `Write`, `Bash` | `Bash`, `WebSearch`, `apply_patch`; `Read`, `Write`, and `WebFetch` are rejected |
+
+The constructor's `tools=[...]` argument supplies application `@lup_tool`
+handlers independently. Those handlers still work with `native_tools=None`:
+Claude hosts them through MCP, and Codex dispatches them through its in-process
+dynamic-tool handlers. `tool_servers` remains the explicit MCP-server
+declaration. Typed submission remains available with no native tools.
+`allowed_tools` controls automatic approval within the declared authority;
+`disallowed_tools` narrows it. Neither adds an undeclared tool.
+
+Explicit session hooks remain attached when native tools are granted. Codex
+enables the verified declared project policy plugin for an explicit native grant while keeping
+unrelated inherited plugins disabled. Provider settings and extra arguments
+that could widen the requested authority are rejected, including altered
+copies of validated configurations.
+
+Codex requires the selected model to appear in its native model catalog so
+the adapter can bound the tool metadata attached to model requests. An unknown
+explicit or inherited model is rejected before input.
+
+A Codex thread's dynamic tool and submission schemas are fixed at thread
+creation. Resume requires matching application tools and submission schemas;
+native grants may narrow on resume. Start a fresh session when application
+tools or output schemas require another dynamic binding.
+The adapter rejects an incompatible resume before sending user input.
 
 ## Layering
 

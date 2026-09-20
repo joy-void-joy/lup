@@ -145,6 +145,59 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
+        subjects=[
+            "SessionRequest.tools",
+            "ClaudeSessionConfig.tools",
+            "create_client",
+            "create_claude",
+            "create_codex",
+            "SessionRequest",
+            "ClaudeSessionConfig",
+            "CodexSessionConfig",
+        ],
+        reason=(
+            "Native tool authority is explicit. The native_tools default None "
+            "grants no built-in or inherited tools on either provider; an "
+            "application tool declaration remains independent of that authority."
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Rename SessionRequest.tools and ClaudeSessionConfig.tools "
+                    "to native_tools. Audit create_client, create_claude, "
+                    "create_codex and direct session configs that relied on "
+                    "ambient tools: pass an explicit sequence of NativeToolGroup "
+                    "values or exact supported provider tool names. Use "
+                    "NativeToolGroup.ALL only where broad built-in authority "
+                    "is intended; None and [] both grant nothing."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Keep @lup_tool handlers in the factory tools=[...] argument "
+                    "and explicit MCP servers in tool_servers. Neither requires "
+                    "native_tools. allowed_tools selects automatic approval "
+                    "within declared authority and cannot grant a missing tool. "
+                    "Remove inherited setting sources and provider overrides "
+                    "that could widen authority. Codex rejects READ and exact "
+                    "Read, Write or WebFetch grants; use its supported facilities "
+                    "only when their broader semantics are intended."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Resume a Codex thread only with the same application tool "
+                    "and submission schemas and compatible native authority; "
+                    "native grants may narrow on resume. Start a fresh session "
+                    "when application tools or output schemas change: the "
+                    "native resume protocol cannot replace dynamic tools. "
+                    "Codex requires an explicit or inherited model present in "
+                    "its native catalog to bound model tool metadata."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=["Runtime.contained"],
         reason=(
             "`contained` named the configuration home a workspace's sessions "

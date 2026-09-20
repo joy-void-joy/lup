@@ -228,6 +228,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             ClaudeSessionConfig(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Execute the persisted Lup resolver assignment.",
+                native_tools=["all"],
                 cwd=context.root,
                 add_dirs=[context.root],
                 tool_servers={"resolver": server},
@@ -242,6 +243,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             ClaudeSessionConfig(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Independently review the persisted resolver change.",
+                native_tools=["read", "shell"],
                 cwd=context.root,
                 add_dirs=[context.root],
                 hooks=context.hooks,

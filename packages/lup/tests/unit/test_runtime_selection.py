@@ -75,6 +75,7 @@ def test_claude_renders_the_whole_request(
             cwd=tmp_path,
             autonomy="unattended",
             allowed_tools=["Read"],
+            native_tools=["Read"],
             max_turns=3,
             environment={"KEEP": "1"},
             hooks=LupHooksConfig(),
@@ -109,6 +110,7 @@ def test_codex_renders_what_it_can_spell(
             instructions="be brief",
             cwd=tmp_path,
             autonomy="accept_edits",
+            native_tools=["Bash"],
             tool_servers={"group": {"command": "uv", "args": ["run", "tools"]}},
         )
     )
@@ -125,11 +127,10 @@ def test_codex_renders_what_it_can_spell(
 @pytest.mark.parametrize(
     "request_kwargs",
     [
-        {"tools": ["Read"]},
         {"allowed_tools": ["Read"]},
         {"hooks": LupHooksConfig()},
     ],
-    ids=["tools", "allowed_tools", "hooks"],
+    ids=["allowed_tools", "hooks"],
 )
 def test_codex_refuses_what_it_cannot_govern(
     request_kwargs: dict[str, object], tmp_path: Path

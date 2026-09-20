@@ -46,6 +46,8 @@ from lup.providers.codex.runtime import (
     notification_turn_id,
 )
 from lup.policy.hooks import create_permission_hooks
+from lup.tools.native import NativeToolGroup
+from lup.providers.codex.native_tools import CodexNativeTools
 from lup.sessions.errors import ProviderTurnError, TurnInterruptedError
 from lup.types import JsonObject, JsonValue, SubagentSpec
 from lup.sessions.events import (
@@ -117,7 +119,7 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
         "append": "Project rules",
     }
     assert options.hooks is not None
-    assert len(options.hooks["PreToolUse"]) == 1
+    assert len(options.hooks["PreToolUse"]) == 2
     assert options.include_partial_messages
 
 
@@ -134,7 +136,10 @@ def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
     lease = tmp_path / "lease" / ".claude" / "plugins" / "lup"
     options = build_claude_options(
         ClaudeSessionConfig(
-            model="claude", cwd=tmp_path / "lease", plugin_dirs=[lease]
+            model="claude",
+            cwd=tmp_path / "lease",
+            plugin_dirs=[lease],
+            native_tools=[NativeToolGroup.ALL],
         ),
         binding=lambda: None,
         resume=None,
@@ -173,7 +178,7 @@ def test_claude_isolation_knobs_reach_native_options() -> None:
     }
 
 
-def test_claude_isolation_knobs_default_to_native_behavior() -> None:
+def test_claude_isolation_knobs_default_to_no_inherited_tools() -> None:
     options = build_claude_options(
         ClaudeSessionConfig(model="claude"),
         binding=lambda: None,
@@ -182,7 +187,9 @@ def test_claude_isolation_knobs_default_to_native_behavior() -> None:
     )
 
     assert options.max_buffer_size is None
-    assert options.setting_sources is None
+    assert options.setting_sources == []
+    assert options.tools == []
+    assert options.strict_mcp_config
     assert options.extra_args == {}
 
 
@@ -273,6 +280,7 @@ def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
                     model="balanced",
                 )
             ],
+            native_tools=["Agent", "WebSearch"],
         ),
         binding=lambda: None,
         resume=None,
@@ -304,8 +312,11 @@ def test_codex_thread_config_contains_project_mcp_and_writable_roots(
     parameters = state.thread_parameters()
 
     assert parameters["config"] == {
+        **CodexNativeTools().configuration(),
         "mcp_servers": {
             "notes": {
+                "enabled": True,
+                "required": True,
                 "command": "uv",
                 "args": ["run", "serve-tools", "--server", "notes"],
                 "env": {"LUP_SESSION_DIR": str(tmp_path / "session")},
@@ -319,6 +330,7 @@ def test_codex_thread_config_uses_app_server_approval_spelling(tmp_path: Path) -
     config = CodexSessionConfig(
         cwd=tmp_path,
         approval_policy="on-request",
+        native_tools=[NativeToolGroup.SHELL],
         hooks=create_permission_hooks([], []),
     )
     state = CodexConversationState(config, CodexAppServer(Path("codex")), None)

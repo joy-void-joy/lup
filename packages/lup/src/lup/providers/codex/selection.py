@@ -1,15 +1,11 @@
 """Codex as one selectable runtime.
 
-Codex decides autonomy with a sandbox rather than a permission mode over
-tools: this adapter drives the app-server, whose approval channel it does not
-implement, so a request is honoured by bounding what a session may reach
-instead of by asking. Four fields have no Codex spelling and are refused
-rather than dropped — ``tools``, ``allowed_tools`` and ``disallowed_tools``,
-which have no app-server equivalent, and ``hooks``, which Codex governs
-through the policy dispatcher its harness tree installs rather than per
-session. A caller that set one asked for something this runtime cannot do,
-and silence there would be a session running with less governance than it
-requested.
+Native authority is compiled independently of the sandbox. Hosted tools retain
+their Python handlers through dynamic tools, while explicitly external servers
+keep their subprocess transport. Unsupported exact native grants fail before
+launch. Portable ``allowed_tools``, ``disallowed_tools`` and general ``hooks``
+are refused: Codex's approval channel cannot reproduce all those semantics.
+The provider config separately supports hooks that answer approval requests.
 
 ``disallowed_tools`` is refused despite the dispatcher being able to deny a
 tool it can match, because that dispatcher is installed once per harness tree
@@ -30,6 +26,7 @@ from typing import Literal
 
 from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.runtime import (
     CODEX_PROGRAM,
     CodexEffort,
@@ -37,7 +34,7 @@ from lup.providers.codex.runtime import (
     CodexSessionConfig,
     create_codex,
 )
-from lup.tools.mcp import McpServerEntry, RawStdioServerConfig
+from lup.tools.mcp import LupMcpServerConfig, McpServerEntry, RawStdioServerConfig
 from lup.sessions.client import Client
 from lup.providers.selection import (
     Runtime,
@@ -188,7 +185,6 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
     refused = [
         name
         for name, asked in (
-            ("tools", request.tools is not None),
             ("allowed_tools", bool(request.allowed_tools)),
             ("disallowed_tools", bool(request.disallowed_tools)),
             ("hooks", request.hooks is not None),
@@ -202,6 +198,16 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         )
     if request.cwd is None:
         raise ValueError("Codex sandboxes a session against a cwd; none was given")
+    application_tools = [
+        (f"lup_app_{name}__{tool.name}", tool)
+        for name, server in request.tool_servers.items()
+        if isinstance(server, LupMcpServerConfig)
+        for tool in server.tools
+    ]
+    if len({name for name, _tool in application_tools}) != len(application_tools):
+        raise ValueError(
+            "hosted server/tool names collide in Codex; rename the ambiguous server or tool"
+        )
     return CodexSessionConfig(
         model=request.model,
         developer_instructions=request.instructions,
@@ -211,11 +217,23 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         approval_policy="never",
         effort=(None if request.effort is None else CODEX_EFFORT[request.effort]),
         environment=request.environment,
+        native_tools=request.native_tools,
         mcp_servers={
             name: codex_mcp_server(name, server)
             for name, server in request.tool_servers.items()
+            if not isinstance(server, LupMcpServerConfig)
         },
-        writable_roots=[request.cwd],
+        application_tools=dict(application_tools),
+        companions=[
+            companion
+            for server in request.tool_servers.values()
+            if isinstance(server, LupMcpServerConfig)
+            for companion in server.companions
+        ],
+        writable_roots=[request.cwd]
+        if CodexNativeTools.compile(request.native_tools).write
+        or CodexNativeTools.compile(request.native_tools).shell
+        else [],
         submission_gate_resolver=request.submission_gate,
     )
 

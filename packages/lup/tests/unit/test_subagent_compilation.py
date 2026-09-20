@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from lup.providers.claude.subagents import model_alias, subagent_tools as claude_tools
 from lup.providers.codex.app_server import CodexAppServer
 from lup.providers.codex.runtime import CodexConversationState, CodexSessionConfig
+from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.subagents import CodexModelTiers, subagent_tools as codex_tools
 from lup.sessions.events import SessionId
 from lup.types import JsonObject, JsonValue, ModelTier, SubagentCapability, SubagentSpec
@@ -125,8 +126,9 @@ async def test_codex_disables_inherited_mcp_before_start(
         "developerInstructions": "",
         "sandbox": "read-only",
         "approvalPolicy": "never",
+        "dynamicTools": [],
         "config": {
-            **config.delegated_tools.configuration(),
+            **CodexNativeTools(shell=True, images=True).configuration(),
             "mcp_servers": {"ambient-writer": {"enabled": False}},
         },
     }

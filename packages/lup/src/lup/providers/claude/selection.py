@@ -91,7 +91,7 @@ def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
     return ClaudeSessionConfig(
         model=request.model,
         system_prompt=request.instructions,
-        tools=request.tools,
+        native_tools=request.native_tools,
         allowed_tools=request.allowed_tools,
         disallowed_tools=request.disallowed_tools,
         tool_servers=request.tool_servers,

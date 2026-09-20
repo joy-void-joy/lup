@@ -67,6 +67,7 @@ def session_config() -> ClaudeSessionConfig:
     """Carry the enforcing hooks into the session the factory will open."""
     return ClaudeSessionConfig(
         model="claude-opus-5",
+        native_tools=["Bash"],
         system_prompt="Run what you are asked to run and report what happened.",
         hooks=policy_hooks(),
         sandbox=SANDBOX,

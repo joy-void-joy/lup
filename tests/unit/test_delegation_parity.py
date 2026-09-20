@@ -75,13 +75,13 @@ async def test_served_roles_execute_on_the_selected_engine(
     if engine == "claude":
         assert isinstance(config, ClaudeSessionConfig)
         assert config.model == "opus"
-        assert config.tools == [
+        assert config.native_tools == [
             "Read",
             "Glob",
             "Grep",
             *(["WebSearch", "WebFetch"] if name == "researcher" else []),
         ]
-        assert config.allowed_tools == config.tools
+        assert config.allowed_tools == config.native_tools
         assert config.setting_sources == []
     else:
         assert isinstance(config, CodexSessionConfig)
@@ -95,7 +95,7 @@ async def test_served_roles_execute_on_the_selected_engine(
 
 def test_native_and_served_claude_roles_share_the_compiler() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(subagents=get_subagent_specs()),
+        ClaudeSessionConfig(subagents=get_subagent_specs(), native_tools=["all"]),
         binding=lambda: None,
         resume=None,
         session_id=None,
@@ -233,7 +233,7 @@ async def test_reviewer_compiles_on_both_engines(
         )
     else:
         assert isinstance(config, ClaudeSessionConfig)
-        assert config.tools == ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
+        assert config.native_tools == ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
 
 
 @pytest.mark.parametrize("failure", ["error", "missing"])
