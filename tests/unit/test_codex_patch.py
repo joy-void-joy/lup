@@ -188,6 +188,42 @@ def patch_payload(envelope: str) -> JsonObject:
 
 
 class TestDispatchedPatches:
+    @pytest.mark.parametrize(
+        ("agent_type", "effect"),
+        [
+            ("", "ask"),
+            ("default", "ask"),
+            ("resolver-worker", "allow"),
+            ("lup:resolver-worker", "ask"),
+        ],
+    )
+    def test_native_worker_identity_releases_only_declared_edit_rules(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        agent_type: str,
+        effect: str,
+    ) -> None:
+        root = worktree(tmp_path / "feature")
+        monkeypatch.delenv("LUP_AGENT_IDENTITY", raising=False)
+        dispatcher = bundled_dispatcher()
+        additions = "\n".join(f"+value_{index} = {index}" for index in range(8))
+        payload = {
+            **patch_payload(
+                f"*** Begin Patch\n*** Add File: module.py\n{additions}\n*** End Patch"
+            ),
+            "cwd": str(root),
+            "agent_type": agent_type,
+        }
+
+        decision = dispatcher.dispatch(payload)
+
+        assert decision.effect == effect
+        payload["tool_input"] = {
+            "command": "*** Begin Patch\n*** Add File: README.md\n+# Title\n*** End Patch"
+        }
+        assert dispatcher.dispatch(payload).effect == "ask"
+
     @pytest.mark.parametrize("shell", [False, True])
     def test_post_patch_checks_only_its_paths_without_replaying_old_context(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: bool

@@ -2959,7 +2959,11 @@ def dispatch(payload, permission_request=False):
     # things: how a patch is judged, and whether a refusal has a route to
     # name. Read once at the top rather than inside the branch that needed it
     # first, since both branches need it now.
-    autonomous = declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
+    agent_type = payload["agent_type"] if "agent_type" in payload else ""
+    autonomous = (
+        agent_type in AUTONOMOUS_AGENT_IDENTITIES
+        or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
+    )
     if name == "Bash":
         envelope = shell_patch(tool_input["command"])
         if envelope is not None:
