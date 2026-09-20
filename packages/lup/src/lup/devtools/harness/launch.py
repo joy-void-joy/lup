@@ -41,6 +41,7 @@ from lup.coordination.repository import launched_member
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
+from lup.policy.identity import POLICY_ROOT_ENV
 from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.sandbox.rail import AccessibleRoot, fleet_lease
 from lup.devtools.sync import accessible_roots, granted_devices
@@ -1502,6 +1503,7 @@ def session_argv(
     # every session they start — two peers answering to one id, which is the
     # one thing the durable id exists to rule out.
     environment.update((member or launched_member(project_root())).environment())
+    environment[POLICY_ROOT_ENV] = str(project_root())
 
     # Settled once and handed to everything that needs it. Resolving a
     # registration can clone it, so a second resolution would be a second
@@ -1580,6 +1582,7 @@ def session_argv(
             ),
             MEMBER_ENV,
             NAME_ENV,
+            POLICY_ROOT_ENV,
         ],
         banner=banner,
         sentinels=sentinels,
