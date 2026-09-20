@@ -101,8 +101,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev hooks sweep` | Classify a list of commands at once, and exit non-zero if any is not allowed. |
 | `dev hooks roots` | List the path roles and protected roots the declaration carries. |
 | `dev hooks learn` | Review the commands the policy declined to interrupt about. |
-| `dev hooks approvals` | List the exact calls an approval is remembered for, and since when. |
-| `dev hooks forget` | Retire a remembered approval, so the next identical call asks again. |
+| `dev hooks approvals` | List execution observations, including unverified historical approvals. |
+| `dev hooks forget` | Retire an execution observation without changing authorization. |
 | `dev py info` | Inspect a Python object — adapts to modules, classes, functions, values. |
 | `dev py source` | View source code for a Python object, or a package file tree with --tree. |
 | `dev py imports` | Show what a module imports, or what imports it (--reverse). |

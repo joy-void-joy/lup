@@ -1,19 +1,9 @@
 """The durable record and single authority for every final ask.
 
-One authority, three renderings. A detached session's question is answered
-through this record directly; a supervised worker's reaches its supervisor
-through the same record; an interactive session's is rendered by the
-provider's native prompt acting as this relay's *renderer*, with the record
-still holding the receipt. That the interactive case looks like a native
-prompt is a rendering fact, not a second authority — which is what makes
-"provider auto-mode cannot answer a Lup ask" enforceable rather than hopeful.
-
-The receipts are asymmetric, and the asymmetry is a measured provider fact
-rather than a design choice: a native prompt reports an approval by executing
-the call, and reports a rejection by nothing at all. So approval is *observed*
-from the execution of the exact call and rejection is *inferred* from its
-absence, and the record says which it was. Anything that reads a rejection as
-if it were reported would be reading something no provider sends.
+Detached, supervised and interactive sessions require an explicit recorded
+answer. Native execution and a pending native prompt supply no authority.
+Generated hooks refuse an unresolved ask and name the operator commands that
+inspect and answer it; an exact retry consumes the recorded answer once.
 
 Two invariants hold everywhere:
 
@@ -61,12 +51,9 @@ key or an authoritative status query; nothing else may guess.
 type ReceiptKind = Literal["observed", "inferred", "recorded"]
 """How an answer reached this record, which decides how much it can be trusted.
 
-``recorded`` is somebody answering through the relay: the strongest, because
-the answer and the question met in one place. ``observed`` is an approval read
-from the execution of the exact call under a native prompt. ``inferred`` is a
-rejection read from that execution not happening, which is the only signal a
-native prompt gives for "no" — and saying so is what keeps a silence from
-being written down as a decision somebody made.
+``recorded`` is somebody answering through the relay. Historical ``observed``
+and ``inferred`` entries describe native behavior, not a person's answer;
+neither can release a native retry.
 """
 
 
@@ -205,6 +192,8 @@ class PersistentQuestion(BaseModel, frozen=True):
     expires: datetime | None = None
     completed: datetime | None = None
     outcome: str = ""
+    execution_id: str = ""
+    """Native invocation observed after dispatch; never an authority receipt."""
 
     def answerable_by(self, principal: str) -> bool:
         """Whether this principal may answer, which the requester never may.
@@ -388,5 +377,15 @@ class QuestionRelay:
         if entry.state != "approved":
             raise ValueError(
                 f"question {question!r} is {entry.state}, so nothing may be dispatched"
+            )
+        answer = entry.answer
+        if (
+            answer is None
+            or not answer.approved
+            or answer.receipt != "recorded"
+            or answer.principal == entry.operation.requester
+        ):
+            raise ValueError(
+                f"question {question!r} has no recorded independent approval"
             )
         return entry

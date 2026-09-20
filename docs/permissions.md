@@ -504,11 +504,12 @@ inside a shell tool call never reaches the dispatcher that judges it.
 
 ## Native hook review queue
 
-A runtime that cannot turn a pre-tool policy question into a native prompt
-parks the exact call in `.lup/questions.jsonl`. The refusal names its review
-id and the commands to inspect, approve, or reject it. Codex uses this
-fallback: its pre-tool event runs before native approval, and a pending
-native permission event is not evidence that anyone approved the call.
+Both native dispatchers park unresolved policy asks in `.lup/questions.jsonl`
+and refuse execution until an explicit answer is recorded. The refusal names
+the review id and commands to inspect, approve, or reject it. Claude auto mode
+has executed a native hook ask without a human prompt (#436); Codex pre-tool
+review precedes native approval. Neither native prompting nor observed
+execution is evidence of a human answer.
 
 The operator runs `uv run lup-devtools dev questions show <id>` from the
 indicated checkout, then `uv run lup-devtools dev questions answer <id>
@@ -519,11 +520,15 @@ requester authority to answer itself. Nested command paths are declared
 with `ShellOperationRule.parents`, and the deepest matching path decides.
 
 Approval releases one exact retry in the same session and directory.
-The hook re-runs policy, compares the payload and patch preimages, then
+The hook re-runs policy, compares the payload and edited file preimages, then
 claims the approval exclusively before allowing execution. A changed file
 or payload requires another review. Rejection leaves the operation stopped.
 A crash after claiming approval does not make it reusable. Native sandbox
 restrictions still apply; queue approval does not change execution placement.
+Post-tool evidence marks a dispatched review completed, without claiming that
+the operation's effects succeeded. Execution against an unresolved review is
+recorded as `in_doubt` and diagnosed. A missing matching event leaves dispatch
+unresolved; it never makes the answer reusable.
 
 Native patches are decoded into file transitions before review. A standalone
 shell `apply_patch` with a single-quoted argument or a quoted heredoc reaches
@@ -597,23 +602,14 @@ reference. A scope table, a rule index, the marker grammar: each is the same
 on every occurrence and read on none, so a question names where it is
 pulled from — `dev policy`, this page — rather than repeating it.
 
-## An answer is remembered
+## Execution does not grant authority
 
-A question the author answered yes to is not asked again for the same exact
-call: the same command or URL, from the same checkout. The runtime's prompt
-exposes its answer to no hook, so the memory is read off the two events a
-hook does see — the call was asked about, and then it ran — and it is keyed
-on the input the tool actually ran with, so a call changed on the way
-through is a different call. Exact, never a prefix: `git push --delete
-origin topic` approved once approves that line and nothing else, and the
-same line from another checkout is another call. An edit is not remembered,
-because its exact call includes the document it replaces, which the first
-application changed. A refusal is never remembered, since only a question can
-be answered. The memory is `.lup/hooks/approvals.jsonl` beside the checkout;
-`dev hooks approvals` lists it, and `dev hooks forget <prefix or exact
-call>` retires one, after which the next identical call asks again. `dev
-policy` reads the declaration and not this memory, and says so under a
-question.
+`.lup/hooks/approvals.jsonl` contains execution observations. Historical records
+labelled `approved` carry no explicit reusable grant and are never read as
+authority. `dev hooks approvals` shows these observations with that limitation;
+`dev hooks forget <prefix or exact call>` retires an observation without
+changing authorization. Explicit native review answers remain single-use in
+`dev questions`; an execution event cannot turn one into a permanent grant.
 
 ## Asking before spending a turn on it
 

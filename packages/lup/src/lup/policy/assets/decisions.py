@@ -21,6 +21,7 @@ beside, which is why this file is type-checked against that tree rather than
 against the workspace.
 """
 
+import json
 from pathlib import Path
 
 from host import (
@@ -28,7 +29,6 @@ from host import (
     contained,
     defers_unjudged,
     note_asked,
-    remembered_approval,
     delivers,
     measured_boundary,
     unleased_write_targets,
@@ -50,6 +50,7 @@ from host import (
     rewritten_text,
     record_deferral,
     record_question,
+    review_hook_call,
     committed_text,
     resolved_refutations,
     tracked_write_targets,
@@ -315,16 +316,10 @@ def bash_decision(
         verdict.effect
     ):
         verdict = authored
-    # Before the relay, because a question the author already answered for
-    # this exact call is not a question, and parking it would hand the queue
-    # one nobody needs to answer.
     if verdict.effect == "ask":
-        verdict = remembered_or_asked(verdict, cwd, "shell", command)
-    # Parked before anything is rendered, because the relay is the durable
-    # record every final ask is written to and the provider's own prompt is
-    # that record's renderer rather than a second authority. Written here, at
-    # the one call site both runtimes pass through, so neither can reach a
-    # question the queue does not hold.
+        note_asked(cwd, approval_fingerprint("shell", command, cwd), "shell", command)
+    # In-process callers park here; native dispatchers park the complete tool
+    # payload with their file preconditions at their own decoding boundary.
     if verdict.effect == "ask" and park:
         record_question(
             cwd,
@@ -355,6 +350,56 @@ def bash_decision(
         verdict.sandbox,
         verdict.escalated,
         checkpoint=verdict.checkpoint,
+    )
+
+
+def reviewed_decision(
+    decision: KernelDecision,
+    cwd: Path,
+    session: str,
+    tool: str,
+    arguments: dict,
+    preconditions: dict[Path, str | None],
+    execution_id: str = "",
+) -> KernelDecision:
+    """Only an explicit, single-use recorded answer can settle a native ask."""
+    result = review_hook_call(
+        cwd,
+        session,
+        tool,
+        json.dumps(arguments, sort_keys=True),
+        json.dumps(
+            {str(path): before for path, before in preconditions.items()},
+            sort_keys=True,
+        ),
+        decision.reason,
+        decision.rule,
+        decision.purpose or "",
+        decision.reviewer,
+        execution_id,
+    )
+    if result["state"] == "approved":
+        return decision.revised(effect="allow")
+    if result["state"] == "rejected":
+        return decision.revised(
+            effect="deny",
+            recovery=f"Review {result['id']} was rejected: {result['reason']}. Revise the proposal before retrying.",
+        )
+    identifier = result["id"]
+    if not identifier:
+        return decision.revised(
+            effect="deny",
+            recovery=f"Review queue unavailable: {result['reason']}. Run this operation from an operator terminal.",
+        )
+    return decision.revised(
+        effect="deny",
+        recovery=(
+            f"Review {identifier} is {result['state']}. In {cwd}, the operator can run "
+            f"'uv run lup-devtools dev questions show {identifier}', then "
+            f"'uv run lup-devtools dev questions answer {identifier} --as operator' "
+            f"or 'uv run lup-devtools dev questions reject {identifier} --as operator'. "
+            "After approval, retry this exact tool call; changed file contents require fresh review."
+        ),
     )
 
 
@@ -398,30 +443,7 @@ def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
     )
     if verdict.effect != "ask":
         return verdict
-    return remembered_or_asked(verdict, root, "fetch", url)
-
-
-def remembered_or_asked(
-    verdict: KernelDecision, root: Path | None, kind: str, subject: str
-) -> KernelDecision:
-    """The author's earlier answer to this exact call, or the question written down.
-
-    A question answered yes once is answered the same way for the same call
-    from the same checkout. The runtime's prompt exposes its answer to no
-    hook, so the memory is read off the two events a hook does see: the call
-    was asked about, and then it ran. Exact, never a prefix -- `git push
-    --delete origin topic` approved once approves that line and nothing else,
-    and the same line from another checkout is another call. Listed by `dev
-    hooks approvals`, retired by `dev hooks forget`; a refusal is never
-    remembered, because only a question can be answered.
-    """
-    fingerprint = approval_fingerprint(kind, subject, root)
-    approved = remembered_approval(root, fingerprint)
-    if approved:
-        return verdict.revised(
-            effect="allow", reason=f"approved {approved[:10]}: {verdict.reason}"
-        )
-    note_asked(root, fingerprint, kind, subject)
+    note_asked(root, approval_fingerprint("fetch", url, root), "fetch", url)
     return verdict
 
 

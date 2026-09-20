@@ -21,21 +21,21 @@ CODEX_DELIVERY: list[DeliveryFact] = [
         guarantee="ask_survives_auto_mode",
         provider="codex",
         mechanism=(
-            "the PermissionRequest hook answers before the native approval flow,"
-            " and an unanswered request reaches the operator rather than a mode"
+            "the generated PreToolUse hook refuses unresolved asks and requires"
+            " an explicit recorded reviewer answer before allowing one exact retry"
         ),
-        standing="documented",
+        standing="measured",
         fallback=(
-            "a run with no operator reaches no reviewer, which the settlement"
-            " order refuses rather than carrying — containment is not review"
+            "generated-dispatcher fixtures verify the receipt gate; native"
+            " permission requests and execution never supply approval authority"
         ),
     ),
     DeliveryFact(
         guarantee="exact_call_resumes",
         provider="codex",
         mechanism=(
-            "an approval is correlated by tool_use_id and consumed once, so a"
-            " later PreToolUse for a different call finds no approval"
+            "an operator answer releases one retry with the same session,"
+            " directory, payload, policy reason and edited file preimages"
         ),
         standing="measured",
         fallback=(
@@ -78,9 +78,9 @@ CODEX_DELIVERY: list[DeliveryFact] = [
     DeliveryFact(
         guarantee="rejection_receipt",
         provider="codex",
-        mechanism="",
-        standing="absent",
-        fallback="inferred from absence and recorded as inferred, as on Claude",
+        mechanism="an explicit rejection is recorded by the review queue",
+        standing="measured",
+        fallback="absence of native execution supplies no answer",
     ),
     DeliveryFact(
         guarantee="hook_failure_is_closed",

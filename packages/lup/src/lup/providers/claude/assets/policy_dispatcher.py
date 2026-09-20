@@ -43,6 +43,7 @@ from decisions import (
     placed_document,
     placed_edit_text,
     refused_tool_decision,
+    reviewed_decision,
     session_contained,
     spawn_decision,
     written_review,
@@ -53,6 +54,7 @@ from host import (
     declared_identity,
     file_diagnostics,
     note_ran,
+    observe_hook_call,
     publish_edition,
     read_document,
     record_hook_evidence,
@@ -240,6 +242,7 @@ def dispatch(payload):
             # The same identity the edit branches below are given, because a
             # command carrying its own content reaches the same gates.
             autonomous=autonomous,
+            park=False,
         )
     if name == "WebFetch":
         # The same directory the shell branch reads its boundary from: the
@@ -441,13 +444,33 @@ def rendered(decision, payload, placed, attached):
     )
 
 
-def remembered_run(payload):
-    """A call that was asked about and then ran was answered yes: write it down.
+def queued_review(payload, decision):
+    """Bind a native retry to its exact payload and edited document preimage."""
+    cwd = session_root(payload) or Path.cwd()
+    tool_input = payload["tool_input"]
+    path = (
+        (cwd / tool_input["file_path"]).resolve()
+        if payload["tool_name"] in ("Edit", "Write")
+        else None
+    )
+    before = (
+        {path: path.read_text(encoding="utf-8") if path.exists() else None}
+        if path is not None
+        else {}
+    )
+    return reviewed_decision(
+        decision.placed(escapable=True, contained=session_contained(cwd)),
+        cwd,
+        payload["session_id"] if "session_id" in payload else "",
+        payload["tool_name"],
+        tool_input,
+        before,
+        payload["tool_use_id"] if "tool_use_id" in payload else "",
+    )
 
-    Read off the input the tool actually ran with rather than the one that
-    was judged, so a call somebody changed on the way through is a different
-    call and approves nothing.
-    """
+
+def remembered_run(payload):
+    """Record what executed; a native execution event conveys no authority."""
     name = payload["tool_name"] if "tool_name" in payload else ""
     tool_input = payload["tool_input"] if "tool_input" in payload else {}
     subject = approval_subject(name, tool_input)
@@ -503,6 +526,8 @@ def main():
     failed = False
     try:
         payload = json.load(sys.stdin)
+        if not isinstance(payload, dict):
+            raise ValueError("hook input must be an object")
         record_hook_evidence(plugin_data_root(), payload, "started")
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         # Watching and deciding are separate events, and this one returns
@@ -511,7 +536,13 @@ def main():
         # approval prompt for work already done.
         if event == "PostToolUse":
             remembered_run(payload)
-            found = observe(payload)
+            found = observe_hook_call(
+                session_root(payload) or Path.cwd(),
+                payload["session_id"] if "session_id" in payload else "",
+                payload["tool_name"],
+                payload["tool_input"],
+                payload["tool_use_id"] if "tool_use_id" in payload else "",
+            ) + observe(payload)
             # Structured feedback reaches the agent beside the completed tool.
             # A file diagnostic is a successful check, so it exits normally.
             if found:
@@ -527,6 +558,8 @@ def main():
         decision = dispatch(payload)
         placed = placed_input(payload)
         attached = attachment(payload["tool_name"], session_root(payload))
+        if decision.effect == "ask":
+            decision = queued_review(payload, decision)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -535,12 +568,10 @@ def main():
     # interrupt still passes through as the BaseException it is.
     except Exception as error:
         failed = True
-        decision = KernelDecision(
-            "ask", f"Malformed hook input requires approval: {error}"
-        )
+        decision = KernelDecision("deny", f"Lup could not judge this call: {error}")
         record_hook_evidence(
             plugin_data_root(),
-            payload,
+            payload if isinstance(payload, dict) else {},
             "failed",
             "error",
             f"{type(error).__name__}: {error}",
@@ -551,6 +582,17 @@ def main():
                 sys.stdout,
             )
             return
+        json.dump(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": decision.reason,
+                }
+            },
+            sys.stdout,
+        )
+        return
     json.dump(rendered(decision, payload, placed, attached), sys.stdout)
     if not failed:
         detail = decision.reason if decision.effect == "deny" else None

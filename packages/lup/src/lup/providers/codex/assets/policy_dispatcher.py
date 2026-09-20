@@ -42,6 +42,7 @@ from decisions import (
     fetch_decision,
     named_claim_recorded,
     refused_tool_decision,
+    reviewed_decision,
     session_contained,
     spawn_decision,
     written_review,
@@ -52,11 +53,11 @@ from host import (
     declared_identity,
     file_diagnostics,
     note_ran,
+    observe_hook_call,
     publish_edition,
     read_document,
     record_hook_evidence,
     repaired_directives,
-    review_hook_call,
     sandbox_active,
 )
 from kernel.decision import KernelDecision
@@ -283,55 +284,25 @@ def queued_review(payload, decision):
     )
     before = (
         {
-            str(Path(change.path).resolve()): change.before
+            Path(change.path).resolve(): change.before
             for change in patch_changes(envelope, cwd)
         }
         if envelope is not None
         else {}
     )
-    result = review_hook_call(
+    return reviewed_decision(
+        decision,
         cwd,
         payload["session_id"] if "session_id" in payload else "",
         name,
-        json.dumps(tool_input, sort_keys=True),
-        json.dumps(before, sort_keys=True),
-        decision.reason,
-        decision.rule,
-        decision.purpose,
-        decision.reviewer,
-    )
-    if result["state"] == "approved":
-        return decision.revised(effect="allow")
-    if result["state"] == "rejected":
-        return decision.revised(
-            effect="deny",
-            recovery=f"Review {result['id']} was rejected: {result['reason']}. Revise the proposal before retrying.",
-        )
-    identifier = result["id"]
-    if not identifier:
-        return decision.revised(
-            effect="deny",
-            recovery=f"Review queue unavailable: {result['reason']}. Run this operation from an operator terminal.",
-        )
-    return decision.revised(
-        effect="deny",
-        recovery=(
-            f"Review {identifier} is {result['state']}. In {cwd}, the operator can run "
-            f"'uv run lup-devtools dev questions show {identifier}', then "
-            f"'uv run lup-devtools dev questions answer {identifier} --as operator' "
-            f"or 'uv run lup-devtools dev questions reject {identifier} --as operator'. "
-            "After approval, retry this exact tool call; changed file contents require fresh review."
-        ),
+        tool_input,
+        before,
+        payload["tool_use_id"] if "tool_use_id" in payload else "",
     )
 
 
 def remembered_run(payload):
-    """A call that was asked about and then ran was answered yes: write it down.
-
-    The same reading the Claude half makes, off the same two events: read
-    from the input the tool actually ran with, so a call somebody changed on
-    the way through is a different call and approves nothing.
-    """
+    """Record what executed; a native execution event conveys no authority."""
     name = payload["tool_name"] if "tool_name" in payload else ""
     tool_input = payload["tool_input"] if "tool_input" in payload else {}
     subject = approval_subject(name, tool_input)
@@ -446,7 +417,13 @@ def main():
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
             remembered_run(payload)
-            found = observe(payload)
+            found = observe_hook_call(
+                Path(payload["cwd"]) if "cwd" in payload else Path.cwd(),
+                payload["session_id"] if "session_id" in payload else "",
+                payload["tool_name"],
+                payload["tool_input"],
+                payload["tool_use_id"] if "tool_use_id" in payload else "",
+            ) + observe(payload)
             # Codex receives post-tool findings through stderr and exit 2.
             # A clean result needs no feedback.
             if found:

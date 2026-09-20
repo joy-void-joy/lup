@@ -17,6 +17,7 @@ from lup.policy.relay import (
     PersistentQuestion,
     Principal,
     QuestionRelay,
+    ReceiptKind,
     SupervisorChain,
 )
 
@@ -169,19 +170,24 @@ def test_a_safe_outer_call_carrying_a_different_inner_one_is_a_different_operati
     assert nested.fingerprint() != swapped.fingerprint()
 
 
-def test_a_rejection_records_that_it_was_inferred(tmp_path: Path) -> None:
-    """No provider reports a rejection, so nothing may claim one was reported.
-
-    A native prompt says yes by executing the call and says no by nothing at
-    all. Writing that silence down as a decision somebody made would be
-    recording something no provider sent, so the receipt says which it was.
-    """
+def test_a_historical_rejection_retains_its_inferred_provenance(tmp_path: Path) -> None:
+    """Historical observations remain distinguishable from explicit answers."""
     relay, _ = parked(tmp_path)
 
     refused = relay.answer("q-1", "person", approved=False, receipt="inferred")
 
     assert refused.answer is not None
     assert (refused.answer.approved, refused.answer.receipt) == (False, "inferred")
+
+
+@pytest.mark.parametrize("receipt", ["observed", "inferred"])
+def test_unrecorded_answers_are_never_dispatchable(
+    tmp_path: Path, receipt: ReceiptKind
+) -> None:
+    relay, _ = parked(tmp_path)
+    relay.answer("q-1", "person", approved=True, receipt=receipt)
+    with pytest.raises(ValueError, match="no recorded independent approval"):
+        relay.dispatchable("q-1")
 
 
 def test_only_an_approved_question_reaches_the_executor(tmp_path: Path) -> None:

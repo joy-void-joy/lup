@@ -300,6 +300,7 @@ def review_hook_call(
     rule: str,
     purpose: str,
     reviewer: str,
+    execution_id: str = "",
 ) -> dict[Literal["state", "id", "reason"], str]:
     """Park a native call or spend its explicit, single-use reviewer answer."""
     if not session:
@@ -349,6 +350,7 @@ def review_hook_call(
             entry = None
         else:
             entry["state"] = "dispatched"
+            entry["execution_id"] = execution_id
             with log.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, sort_keys=True) + "\n")
             return {"state": "approved", "id": entry["id"], "reason": ""}
@@ -365,6 +367,7 @@ def review_hook_call(
         "eligible": [],
         "chain_resolved": False,
         "state": "pending",
+        "execution_id": execution_id,
         "created": datetime.now(UTC).isoformat(),
         "preconditions": before,
         "resumption": "native_retry",
@@ -382,6 +385,54 @@ def review_hook_call(
     with log.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
     return {"state": "pending", "id": identifier, "reason": reason}
+
+
+def observe_hook_call(
+    root: Path, session: str, tool: str, arguments: dict, execution_id: str
+) -> list[str]:
+    """Reconcile execution with its receipt without inferring authorization."""
+    log = root / ".lup/questions.jsonl"
+    if not session or not log.exists():
+        return []
+    entries = {
+        entry["id"]: entry
+        for line in log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+        for entry in [json.loads(line)]
+    }
+    matches = [
+        entry
+        for entry in entries.values()
+        if entry.get("resumption") == "native_retry"
+        and entry["operation"]["session"] == session
+        and entry["operation"]["cwd"] == str(root)
+        and entry["operation"]["tool"] == tool
+        and (
+            entry.get("execution_id") == execution_id
+            if execution_id
+            else entry["operation"]["payload"] == arguments
+        )
+        and entry["state"] in ("pending", "approved", "rejected", "dispatched")
+    ]
+    if not matches:
+        return []
+    entry = matches[-1]
+    authorized = entry["state"] == "dispatched"
+    entry["state"] = "completed" if authorized else "in_doubt"
+    entry["completed"] = datetime.now(UTC).isoformat()
+    entry["outcome"] = (
+        "Native execution observed; effect success is not verified."
+        if authorized
+        else "Native execution observed without a consumed approval receipt."
+    )
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    if authorized:
+        return []
+    return [
+        f"Lup review {entry['id']}: execution was observed without a consumed "
+        f"approval receipt. Inspect {log}; this observation grants no authority."
+    ]
 
 
 def record_question(
@@ -549,7 +600,7 @@ def record_deferral(
 
 
 def approvals_log(root: Path) -> Path:
-    """Where the answers a question received are remembered, beside the checkout.
+    """Where execution observations are retained beside the checkout.
 
     Append-only, for the reason the question relay is: the failure this
     survives is a crash between two writes, and a file rewritten in place has
@@ -562,13 +613,13 @@ def approvals_log(root: Path) -> Path:
 
 
 def approval_fingerprint(kind: str, subject: str, root: Path | None) -> str:
-    """One exact call as the memory keys it: what it does, and from where.
+    """One observed subject: what it does, and from where.
 
     The kind and the text are the whole of what was judged -- a command, a
     URL -- and the checkout it runs from is the third term, because the same
     command means something else in another tree. What is deliberately left
-    out is the session: an answer is the author's, and the author is the same
-    person in the next session.
+    out is the session: this audit groups repeated subjects and grants no
+    authority. Review receipts bind separately to the requesting session.
     """
     material = json.dumps([kind, subject, str(root) if root else ""], sort_keys=True)
     return sha256(material.encode()).hexdigest()
@@ -629,25 +680,8 @@ def noted_approval(root: Path | None, entry: dict) -> bool:
     return True
 
 
-def remembered_approval(root: Path | None, fingerprint: str) -> str:
-    """When this exact call was answered yes, or ``""`` where it never was.
-
-    Forgetting is a later line, so a call retired with `dev hooks forget`
-    answers as one nobody ever approved.
-    """
-    latest = approval_states(root)
-    if fingerprint not in latest or latest[fingerprint]["state"] != "approved":
-        return ""
-    return str(latest[fingerprint]["at"])
-
-
 def note_asked(root: Path | None, fingerprint: str, kind: str, subject: str) -> None:
-    """Write down that this call was put to somebody, once per standing.
-
-    What makes the later observation an answer: a call that ran without ever
-    having been asked about was permitted by a rule, and remembering it would
-    be remembering nothing anybody decided.
-    """
+    """Record a policy question without granting authority to execute it."""
     latest = approval_states(root)
     if fingerprint in latest and latest[fingerprint]["state"] == "asked":
         return
@@ -665,25 +699,22 @@ def note_asked(root: Path | None, fingerprint: str, kind: str, subject: str) -> 
 
 
 def note_ran(root: Path | None, fingerprint: str) -> str:
-    """A call that was asked about and then ran was answered yes: remember it.
-
-    The runtime exposes the answer to no hook, so the answer is read off the
-    two events a hook does see. Only a standing question becomes an approval:
-    a call already remembered stays as it was, and one never asked about is
-    left alone.
-    """
+    """Record execution as an observation, never as reusable authorization."""
     latest = approval_states(root)
     if fingerprint not in latest or latest[fingerprint]["state"] != "asked":
         return ""
     when = datetime.now(UTC).isoformat()
-    noted_approval(root, {**latest[fingerprint], "state": "approved", "at": when})
+    noted_approval(root, {**latest[fingerprint], "state": "observed", "at": when})
     return when
 
 
 def forget_approval(root: Path | None, fingerprint: str) -> bool:
-    """Retire one remembered approval, so the next identical call asks again."""
+    """Retire an execution observation; it grants no authority either way."""
     latest = approval_states(root)
-    if fingerprint not in latest or latest[fingerprint]["state"] != "approved":
+    if fingerprint not in latest or latest[fingerprint]["state"] not in (
+        "approved",
+        "observed",
+    ):
         return False
     return noted_approval(
         root,

@@ -42,18 +42,14 @@ def test_a_guarantee_with_no_mechanism_still_states_what_happens() -> None:
             assert fact.fallback, fact.guarantee
 
 
-def test_no_adapter_claims_to_report_a_rejection() -> None:
-    """No provider sends one, so nothing may record one as reported.
-
-    A native prompt says yes by executing the call and says no by nothing at
-    all. Both adapters state the mechanism as absent and both infer, which is
-    what keeps a silence from being written down as a decision somebody made.
-    """
+def test_adapters_record_explicit_rejections_without_inferring_native_answers() -> None:
+    """Only an explicit queue answer supplies a rejection receipt."""
     for facts in (CLAUDE_DELIVERY, CODEX_DELIVERY):
         receipt = next(fact for fact in facts if fact.guarantee == "rejection_receipt")
 
-        assert not receipt.carried()
-        assert "inferred" in receipt.fallback
+        assert receipt.carried()
+        assert "explicit rejection" in receipt.mechanism
+        assert "execution supplies no answer" in receipt.fallback
 
 
 def test_the_placement_gap_is_the_one_the_preflight_answers() -> None:

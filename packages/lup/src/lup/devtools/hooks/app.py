@@ -373,21 +373,19 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
     def approvals_command(
         as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
     ) -> None:
-        """List the exact calls an approval is remembered for, and since when.
+        """List execution observations, including unverified historical approvals.
 
-        A question the author answered yes to is not asked again for the
-        same exact call from the same checkout. This is that memory, read
-        back: one line per call, with the fingerprint `forget` takes.
+        These records grant no reusable authority. Explicit, single-use answers
+        and their disposition are shown by ``dev questions``.
         """
         held = remembered(project_root())
         if as_json:
             output_json([item.model_dump() for item in held])
             return
         if not held:
-            typer.echo(
-                "Nothing remembered — no question here was answered yes and run."
-            )
+            typer.echo("No execution observations recorded.")
             return
+        typer.echo("Execution observations only; historical approvals are unverified.")
         for item in held:
             typer.echo(
                 f"{item.fingerprint[:12]}  {item.at[:10]}  {item.kind}  {item.subject}"
@@ -404,7 +402,7 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
             ),
         ],
     ) -> None:
-        """Retire a remembered approval, so the next identical call asks again."""
+        """Retire an execution observation without changing authorization."""
         gone = forget(project_root(), selector)
         if not gone:
             typer.echo(f"Nothing remembered matches {selector!r}.", err=True)

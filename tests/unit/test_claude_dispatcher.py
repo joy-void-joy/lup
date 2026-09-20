@@ -20,6 +20,7 @@ import sh
 from lup.providers.claude.hooks import claude_placed_input
 from lup.policy.grants import allowance_grants_environment, write_allowance_grants
 from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
+from lup.policy.relay import QuestionRelay
 from lup.policy.kernel.decision import (
     CONTAINED_ESCAPE_NOTICE,
     SANDBOX_ESCAPE_NOTICE,
@@ -68,6 +69,17 @@ def edit_payload(path: str, old: str, new: str, replace_all: bool) -> JsonObject
     }
 
 
+@pytest.mark.parametrize(
+    "payload", [None, [], {}, {"tool_name": "Bash", "tool_input": {}}]
+)
+def test_malformed_payload_fails_closed(payload: object) -> None:
+    decision = decide(payload)
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "deny"
+    assert "could not judge" in str(specific["permissionDecisionReason"])
+
+
 def test_a_replace_all_edit_is_judged_rather_than_refused() -> None:
     """Every occurrence is spliced, so the rules decide instead of erroring.
 
@@ -86,7 +98,7 @@ def test_a_preimage_that_is_absent_is_still_a_malformed_edit() -> None:
     decision = decide(edit_payload(MULTI_SITE, "no-such-text", "x", True))
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
-    assert specific["permissionDecision"] == "ask"
+    assert specific["permissionDecision"] == "deny"
     assert "does not occur" in str(specific["permissionDecisionReason"])
 
 
@@ -95,7 +107,7 @@ def test_an_ambiguous_single_edit_still_requires_an_unambiguous_preimage() -> No
     decision = decide(edit_payload(MULTI_SITE, "PathRoleRow", "RoleRow", False))
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
-    assert specific["permissionDecision"] == "ask"
+    assert specific["permissionDecision"] == "deny"
     assert "exactly once" in str(specific["permissionDecisionReason"])
 
 
@@ -136,7 +148,9 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
     assert "small safe edit" in str(guarded["permissionDecisionReason"])
 
 
-def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author() -> None:
+def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author(
+    tmp_path: Path,
+) -> None:
     """The gate rewrites the call instead of making the author budget columns.
 
     An inline directive whose reason outgrows the line is what pushes an agent
@@ -144,15 +158,21 @@ def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author() -> N
     above, so the reason survives whole and nobody had to choose.
     """
     reason = "a justification long enough that keeping it inline outgrows the line"
-    decision = decide(
-        edit_payload(
-            "packages/lup/src/lup/devtools/dev/antipatterns.py",
+    payload = {
+        **edit_payload(
+            str(Path("packages/lup/src/lup/devtools/dev/antipatterns.py").resolve()),
             "from lup.devtools.utils import output_json",
             f"from typing import Any  # lup: ignore[any-type] — {reason}",
             False,
-        )
-    )
-
+        ),
+        "cwd": str(tmp_path),
+        "session_id": "requester",
+    }
+    decide(payload)
+    relay = QuestionRelay(tmp_path / ".lup/questions.jsonl")
+    (question,) = relay.pending()
+    relay.answer(question.id, "operator", True)
+    decision = decide(payload)
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     placed = specific["updatedInput"]
@@ -227,7 +247,7 @@ def test_absolute_paths_resolve_against_their_worktree_not_the_launch_directory(
     guarded = under_test["hookSpecificOutput"]
     assert isinstance(asked, dict)
     assert isinstance(guarded, dict)
-    assert asked["permissionDecision"] == "ask"
+    assert asked["permissionDecision"] == "deny"
     assert guarded["permissionDecision"] == "allow"
     assert "small safe edit" in str(guarded["permissionDecisionReason"])
 
@@ -303,7 +323,7 @@ def test_another_repositorys_file_is_not_judged_by_this_projects_conventions(
         Path.cwd(),
     )
 
-    assert effect == "ask"
+    assert effect == "deny"
     assert "different repository" in reason
     assert "Any" not in reason
 
@@ -427,7 +447,7 @@ def test_a_note_in_this_repositorys_own_file_is_judged_however_it_is_spelled() -
     relative = note_verdict(NOTE_SITE, Path.cwd())
 
     assert absolute == relative
-    assert absolute[0] == "ask"
+    assert absolute[0] == "deny"
     assert "inline review feedback" in absolute[1]
 
 
@@ -566,7 +586,7 @@ def test_removing_an_untracked_file_still_asks(delete_repo: Path) -> None:
     """Nothing holds a copy, so nothing could restore it afterwards."""
     effect, _reason = effect_from("rm untracked.py", delete_repo)
 
-    assert effect == "ask"
+    assert effect == "deny"
 
 
 def test_removing_a_directory_asks_where_no_capture_covers_it(
@@ -582,7 +602,7 @@ def test_removing_a_directory_asks_where_no_capture_covers_it(
     """
     effect, reason = effect_from("rm -rf src", delete_repo)
 
-    assert effect == "ask"
+    assert effect == "deny"
     assert "nothing in the command bounds what it holds" in reason
     assert "never granted" not in reason
 
@@ -610,7 +630,7 @@ def test_an_ignored_file_holding_the_only_copy_still_asks(delete_repo: Path) -> 
     for path in (".env.local", "notes/traces/session.jsonl", ".lup/run/state.json"):
         effect, _reason = effect_from(f"rm {path}", delete_repo)
 
-        assert effect == "ask", path
+        assert effect == "deny", path
 
 
 def test_a_delete_at_the_cap_is_granted(delete_repo: Path) -> None:
@@ -639,7 +659,7 @@ def test_a_sweep_of_restorable_files_asks_even_though_each_is_restorable(
 
     effect, _reason = effect_from(f"rm {named}", delete_repo)
 
-    assert effect == "ask"
+    assert effect == "deny"
 
 
 def test_writing_a_generated_plugin_tree_is_refused_by_absolute_path(
@@ -670,7 +690,7 @@ def test_an_unreadable_target_asks_instead_of_letting_the_edit_through() -> None
 
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
-    assert specific["permissionDecision"] == "ask"
+    assert specific["permissionDecision"] == "deny"
 
 
 def test_a_remote_read_runs_where_the_boundary_already_grants_it() -> None:
@@ -785,7 +805,7 @@ def test_a_grant_made_after_a_session_started_releases_its_very_next_call(
     """
     document = tmp_path / "grants.json"
     launched = session_environment(document)
-    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "deny"
 
     write_allowance_grants(document, [ConcernAllowance.NEW_DEVTOOLS_MODULE])
 
@@ -803,7 +823,7 @@ def test_a_grant_taken_back_stops_releasing_its_gate_just_as_immediately(
 
     write_allowance_grants(document, [])
 
-    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "deny"
 
 
 def test_a_grant_made_before_the_session_started_is_honoured_too(
@@ -823,8 +843,8 @@ def test_a_session_holding_no_grant_sees_the_unchanged_lattice(
     empty = tmp_path / "grants.json"
     write_allowance_grants(empty, [])
 
-    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(None)) == "ask"
-    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(empty)) == "ask"
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(None)) == "deny"
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(empty)) == "deny"
 
 
 def test_one_leases_grant_cannot_release_a_siblings_gate(tmp_path: Path) -> None:
@@ -835,7 +855,7 @@ def test_one_leases_grant_cannot_release_a_siblings_gate(tmp_path: Path) -> None
 
     launched = session_environment(tmp_path / "mine.json")
 
-    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "deny"
 
 
 def test_a_stale_environment_cannot_grant_what_the_document_does_not(
@@ -854,7 +874,7 @@ def test_a_stale_environment_cannot_grant_what_the_document_does_not(
         "LUP_CONCERN_ALLOWANCES": '["new-devtools-module"]',
     }
 
-    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "deny"
 
 
 def bundled_dispatcher() -> ModuleType:
@@ -1104,7 +1124,7 @@ def test_the_one_loss_the_snapshot_cannot_hold_still_asks(delete_repo: Path) -> 
     """
     effect, _reason = snapshotting_effect("git clean -fdx", delete_repo)
 
-    assert effect == "ask"
+    assert effect == "deny"
 
 
 def test_a_write_the_gates_already_read_is_not_reported_again(tmp_path: Path) -> None:
@@ -1143,7 +1163,7 @@ def test_an_effect_no_boundary_here_reaches_still_asks(delete_repo: Path) -> Non
     """
     effect, _reason = snapshotting_effect("git push --delete origin feat", delete_repo)
 
-    assert effect == "ask"
+    assert effect == "deny"
 
 
 CONTAINED_LEDGER = {
@@ -1211,7 +1231,7 @@ def test_a_container_whose_placement_went_unmeasured_still_asks(
     """
     unmeasured = {**CONTAINED_LEDGER, "delivered": ["question_relay"]}
 
-    assert unjudged_effect_under(unmeasured, tmp_path, monkeypatch) == "ask"
+    assert unjudged_effect_under(unmeasured, tmp_path, monkeypatch) == "deny"
 
 
 def escalated_reason_under(
@@ -1237,13 +1257,18 @@ def escalated_reason_under(
     payload = {
         **bash_payload("# lup: escalate[sandbox]: the host has it\nls"),
         "cwd": str(root),
+        "session_id": "requester",
     }
+    decide_from(payload, root)
+    relay = QuestionRelay(root / ".lup/questions.jsonl")
+    (question,) = relay.pending()
+    relay.answer(question.id, "operator", True)
     specific = decide_from(payload, root)["hookSpecificOutput"]
     assert isinstance(specific, dict)
     rewritten = specific["updatedInput"] if "updatedInput" in specific else None
     return (
         str(specific["permissionDecision"]),
-        str(specific["permissionDecisionReason"]),
+        question.reason,
         rewritten,
     )
 
@@ -1258,7 +1283,7 @@ def test_an_approved_crossing_on_a_host_is_described_as_leaving_for_it(
     """
     effect, reason, rewritten = escalated_reason_under(None, tmp_path, monkeypatch)
 
-    assert effect == "ask"
+    assert effect == "allow"
     assert reason.endswith(SANDBOX_ESCAPE_NOTICE)
     assert isinstance(rewritten, dict)
     assert rewritten["dangerouslyDisableSandbox"] is True
@@ -1280,7 +1305,7 @@ def test_an_approved_crossing_inside_a_container_is_described_as_staying(
         CONTAINED_LEDGER, tmp_path, monkeypatch
     )
 
-    assert effect == "ask"
+    assert effect == "allow"
     assert reason.endswith(CONTAINED_ESCAPE_NOTICE)
     assert isinstance(rewritten, dict)
     assert rewritten["dangerouslyDisableSandbox"] is True
@@ -1301,7 +1326,9 @@ def test_a_write_announces_what_its_own_prompt_will_not_show() -> None:
     """
     carrying = "value: Any = 1  # lup: ignore[any-type]\n"
     decision = decide(created("src/lup_template/zz_probe.py", carrying))
-    announcement = decision["systemMessage"]
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    announcement = specific["permissionDecisionReason"]
 
     assert isinstance(announcement, str)
     assert "arrives carrying antipattern suppressions" in announcement
