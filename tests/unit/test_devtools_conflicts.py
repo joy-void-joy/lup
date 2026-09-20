@@ -13,6 +13,7 @@ workflow has to run there through the launcher the documentation names.
 import io
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -287,6 +288,38 @@ def test_conflict_workflow_does_not_import_the_project_application(
     report = json.loads(str(output))
     assert report["operation"] == "merge"
     assert report["conflicted_files"] == [conflicts.MANIFEST]
+
+
+def test_conflict_repair_survives_the_reported_kernel_module_conflict(
+    documented_launcher: sh.Command, tmp_path: Path
+) -> None:
+    shadow = tmp_path / "shadow"
+    library = Path(conflicts.__file__).parents[2]
+    shutil.copytree(
+        library, shadow / "lup", ignore=shutil.ignore_patterns("__pycache__")
+    )
+    broken = shadow / "lup/policy/kernel/edit.py"
+    broken.write_text("<<<<<<< HEAD\n=======\n>>>>>>> feature\n")
+    environment = {**os.environ, "PYTHONPATH": str(shadow)}
+    status = json.loads(
+        str(
+            documented_launcher("git", "conflict", "status", "--json", _env=environment)
+        )
+    )
+    assert status["operation"] == "merge"
+    audit = json.loads(
+        str(
+            documented_launcher(
+                "git",
+                "conflict",
+                "audit",
+                conflicts.MANIFEST,
+                "--json",
+                _env=environment,
+            )
+        )
+    )
+    assert audit["files"][0]["path"] == conflicts.MANIFEST
 
 
 def test_a_started_command_resolves_the_conflicted_project_as_its_root(
