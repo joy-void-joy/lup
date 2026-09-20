@@ -667,8 +667,9 @@ Claude reports post-edit diagnostics through its
 exit 0 with `decision: "block"` and a `reason`. This gives the agent the findings
 beside the completed edit. It does not undo the edit or report a crashed hook.
 Diagnostics name the file, line, severity, and message. Codex delivers its
-post-tool findings through stderr and exit 2; its edit events provide only
-the working directory, so per-file type checks run under Claude only.
+post-tool findings through stderr and exit 2. Its patch parser reads every
+touched path without replaying the old file contents, so both runtimes run
+the same per-file repairs and type checks after an edit, including moves.
 
 Both plugins register a short command invoking the generated
 `hooks/scripts/policy.sh`. That guard runs `policy.py`, preserves its output

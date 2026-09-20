@@ -30,7 +30,7 @@ from pathlib import Path
 # distribution. Naming it as a search path is what lets the imports below
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from codex_patch import patched_files
+from codex_patch import patched_files, patched_paths
 from decisions import (
     edit_claim_decision,
     unconfined_by_declaration,
@@ -39,6 +39,7 @@ from decisions import (
     claim_window_closed,
     claim_window_opened,
     fetch_decision,
+    named_claim_recorded,
     refused_tool_decision,
     session_contained,
     spawn_decision,
@@ -48,10 +49,12 @@ from host import (
     approval_fingerprint,
     approval_subject,
     declared_identity,
+    file_diagnostics,
     note_ran,
     publish_edition,
     read_document,
     record_hook_evidence,
+    repaired_directives,
     review_hook_call,
     sandbox_active,
 )
@@ -61,6 +64,7 @@ from kernel.syntax import word_text
 from kernel.shell import auto_escape_matches
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
+from policy_data import DIAGNOSTICS_COMMAND, REPAIR_COMMAND
 
 
 def hook_environment():
@@ -333,31 +337,7 @@ def remembered_run(payload):
 
 
 def observe(payload):
-    """Record which checkout an edit landed in, and decide nothing.
-
-    Codex reads the directory it ran in, where Claude reads the edited file.
-    Not a lesser answer here, and not an available one either way: Codex
-    names its files inside the patch envelope, and the parser that decodes
-    one validates its context against the document on disk — which this
-    event runs after the patch already rewrote. Re-decoding it here would
-    fail on exactly the edits it was called for. Codex hands over its
-    working directory instead, which Claude's hook is promised nothing
-    about, and that is the same fact one step coarser.
-
-    Coarser is enough to say which checkout is being edited and not enough
-    to type-check what changed, so Codex records the edition and Claude also
-    reports diagnostics. Checking the directory instead would answer every
-    patch with every finding in the tree, most of them about files this
-    edit never touched.
-
-    A shell command is not coarser here, and gets the same reading Claude's
-    does. The envelope problem above is about a *patch*, whose files this
-    event can no longer decode; a command carries its own text, names its
-    write targets in that text, and the files it wrote are on disk to be
-    read. So the gates a shell write could never reach before it ran are put
-    to its result here, which is what lets the verdict beforehand answer
-    from the path alone.
-    """
+    """Record each patched path and run the shared post-edit checks."""
     root = payload["cwd"] if "cwd" in payload else ""
     if root:
         publish_edition(root)
@@ -365,6 +345,18 @@ def observe(payload):
     command = tool_input["command"] if "command" in tool_input else ""
     if not command:
         return []
+    name = payload["tool_name"] if "tool_name" in payload else ""
+    envelope = command if name == "apply_patch" else shell_patch(command)
+    if envelope is not None:
+        directory = Path(root) if root else Path.cwd()
+        findings = []
+        for path in patched_paths(envelope):
+            target = str(directory / path)
+            publish_edition(target)
+            named_claim_recorded(target, directory)
+            findings.extend(repaired_directives(target, REPAIR_COMMAND))
+            findings.extend(file_diagnostics(target, DIAGNOSTICS_COMMAND))
+        return findings
     # What the command changed, read against the snapshot its own PreToolUse
     # took, and contested where another session had a window open across it.
     claim_window_closed(Path(root) if root else None)

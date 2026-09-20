@@ -161,16 +161,18 @@ class PatchParser:
     lines: list[str]
     index: int
     files: list[PatchedFile]
-    read_document: Callable[[str], str | None]
+    paths: list[str]
+    read_document: Callable[[str], str | None] | None
 
     def __init__(
         self,
         text: str,
-        read_document: Callable[[str], str | None],
+        read_document: Callable[[str], str | None] | None = None,
     ) -> None:
         self.lines = text.strip().splitlines()
         self.index = 1
         self.files = list()
+        self.paths = list()
         self.read_document = read_document
         if not self.lines or self.lines[0].strip() != BEGIN:
             raise ValueError("patch envelope is missing its Begin Patch header")
@@ -187,6 +189,8 @@ class PatchParser:
 
     def current_document(self, path: str) -> str | None:
         """Read a path after accounting for earlier sections in this envelope."""
+        if self.read_document is None:
+            raise RuntimeError("Reading patch documents requires a document reader")
         for change in reversed(self.files):
             if change.path == path:
                 return change.after
@@ -220,6 +224,9 @@ class PatchParser:
             self.index += 1
         if not body:
             raise ValueError(f"Add File section for {path!r} has no added lines")
+        self.paths.append(path)
+        if self.read_document is None:
+            return
         before = self.current_document(path)
         self.record(
             path,
@@ -231,11 +238,14 @@ class PatchParser:
     def parse_delete(self) -> None:
         """Parse a Delete File section and require its preimage to exist."""
         path = self.path(DELETE)
+        self.paths.append(path)
+        self.index += 1
+        if self.read_document is None:
+            return
         before = self.current_document(path)
         if before is None:
             raise ValueError(f"patch deletes a file that does not exist: {path}")
         self.record(path, before, None)
-        self.index += 1
 
     def parse_chunks(self) -> list[ChangeChunk]:
         """Parse update chunks up to the next file section."""
@@ -298,6 +308,13 @@ class PatchParser:
         chunks = self.parse_chunks()
         if destination is None and not chunks:
             raise ValueError(f"Update File section for {source!r} is empty")
+        if destination == source:
+            raise ValueError("a Move to path must differ from its source")
+        self.paths.append(source)
+        if destination is not None:
+            self.paths.append(destination)
+        if self.read_document is None:
+            return
         before = self.current_document(source)
         if before is None:
             raise ValueError(f"patch updates a file that does not exist: {source}")
@@ -305,8 +322,6 @@ class PatchParser:
         if destination is None:
             self.record(source, before, after)
             return
-        if destination == source:
-            raise ValueError("a Move to path must differ from its source")
         destination_before = self.current_document(destination)
         self.record(source, before, None)
         self.record(destination, destination_before, after)
@@ -328,7 +343,7 @@ class PatchParser:
                 self.parse_update()
                 continue
             raise ValueError(f"unsupported patch section: {header!r}")
-        if not self.files:
+        if not self.paths:
             raise ValueError("patch envelope declares no file changes")
         return self.files
 
@@ -345,3 +360,15 @@ def patched_files(
     rather than a decision made on a misread patch.
     """
     return PatchParser(text, read_document).parse()
+
+
+def patched_paths(text: str) -> list[str]:
+    """Read every touched path from patch syntax without requiring preimages.
+
+    Post-tool hooks inspect an already-applied patch: source files may have
+    moved or disappeared, and update contexts describe the previous document.
+    The same grammar validates its sections without replaying their changes.
+    """
+    parser = PatchParser(text)
+    parser.parse()
+    return list(dict.fromkeys(parser.paths))
