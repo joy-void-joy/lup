@@ -96,7 +96,9 @@ local-only ones. `sync setup` writes that registration. `sync mark-synced`
 stores a checkpoint under the repository's common Git directory, so every
 sibling worktree reads the same review progress. Existing `last_synced_commit`
 values are used until a shared checkpoint is recorded; the shared record wins
-over stale local values and is bound to its upstream URL and reviewed ref.
+over stale local values and is bound to its reviewed ref and source: the
+origin URL for fetched reviews, or the local Git repository for unpublished
+work. Two independent local clones keep separate unpublished checkpoints.
 
 `sync fetch` refreshes remote-tracking refs without moving a local branch or
 touching work in an attached checkout. `sync status` names the exact ref it
