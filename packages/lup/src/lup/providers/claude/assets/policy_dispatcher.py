@@ -444,7 +444,7 @@ def rendered(decision, payload, placed, attached):
     )
 
 
-def queued_review(payload, decision):
+def queued_review(payload, decision, placed):
     """Bind a native retry to its exact payload and edited document preimage."""
     cwd = session_root(payload) or Path.cwd()
     tool_input = payload["tool_input"]
@@ -458,6 +458,8 @@ def queued_review(payload, decision):
         if path is not None
         else {}
     )
+    proposed = rendered(decision.revised(effect="allow"), payload, placed, "")
+    expected = proposed["hookSpecificOutput"].get("updatedInput", tool_input)
     return reviewed_decision(
         decision.placed(escapable=True, contained=session_contained(cwd)),
         cwd,
@@ -466,6 +468,7 @@ def queued_review(payload, decision):
         tool_input,
         before,
         payload["tool_use_id"] if "tool_use_id" in payload else "",
+        execution_payload=expected,
     )
 
 
@@ -559,7 +562,7 @@ def main():
         placed = placed_input(payload)
         attached = attachment(payload["tool_name"], session_root(payload))
         if decision.effect == "ask":
-            decision = queued_review(payload, decision)
+            decision = queued_review(payload, decision, placed)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -595,7 +598,11 @@ def main():
         return
     json.dump(rendered(decision, payload, placed, attached), sys.stdout)
     if not failed:
-        detail = decision.reason if decision.effect == "deny" else None
+        detail = (
+            decision.reason
+            if decision.effect == "deny" and payload["tool_name"] != "WebFetch"
+            else None
+        )
         record_hook_evidence(
             plugin_data_root(), payload, "completed", decision.effect, detail
         )

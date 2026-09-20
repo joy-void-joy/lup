@@ -17,6 +17,7 @@ from lup.coordination.repository import RepositoryPeers
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.peers import decide_foreign_claim, settled_with_claim
 from lup.policy.peer_policy import erase_peer_policy
+from lup.policy.relay import QuestionRelay
 from lup.types import JsonObject
 from tests.unit.repos import commit_file, initialized_repo
 
@@ -32,7 +33,7 @@ def joined(work: Path, hooks: Path) -> RepositoryPeers:
     return RepositoryPeers(work)
 
 
-def decide(payload: object, member: str) -> JsonObject:
+def decide(payload: JsonObject, member: str) -> JsonObject:
     """Run the generated dispatcher as one member of the roster."""
     return json.loads(
         str(
@@ -40,7 +41,9 @@ def decide(payload: object, member: str) -> JsonObject:
                 "-I",
                 "-S",
                 str(DISPATCHER),
-                _in=json.dumps(payload),
+                _in=json.dumps(
+                    {"session_id": member, "hook_event_name": "PreToolUse", **payload}
+                ),
                 _env={
                     "PATH": "/usr/bin:/bin",
                     "HOME": str(Path.home()),
@@ -126,8 +129,20 @@ def test_an_edit_under_another_session_s_claim_asks_and_names_the_holder(
     decision = decide(edit_payload(work / "a.py", "value = 1", "value = 2", work), mine)
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
-    assert specific["permissionDecision"] == "ask"
+    assert specific["permissionDecision"] == "deny"
     assert "feat-rewriting" in str(specific["permissionDecisionReason"])
+    relay = QuestionRelay(work / ".lup/questions.jsonl")
+    (question,) = relay.pending()
+    assert "feat-rewriting" in question.reason
+    assert question.preconditions == {work / "a.py": "value = 1\n"}
+    relay.answer(question.id, "operator", True)
+    approved = decide(edit_payload(work / "a.py", "value = 1", "value = 2", work), mine)
+    allowed = approved["hookSpecificOutput"]
+    assert isinstance(allowed, dict) and allowed["permissionDecision"] == "allow"
+    retried = decide(edit_payload(work / "a.py", "value = 1", "value = 2", work), mine)
+    pending = retried["hookSpecificOutput"]
+    assert isinstance(pending, dict) and pending["permissionDecision"] == "deny"
+    assert "feat-rewriting" in str(pending["permissionDecisionReason"])
 
 
 def test_a_session_is_not_asked_about_a_path_it_holds_itself(tmp_path: Path) -> None:
@@ -210,7 +225,10 @@ def test_a_claim_the_sweep_vacated_no_longer_asks(tmp_path: Path) -> None:
     peers.touched(holder, work / "a.py")
     asked = decide(edit_payload(work / "a.py", "value = 1", "value = 2", work), mine)
     assert isinstance(asked["hookSpecificOutput"], dict)
-    assert asked["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert asked["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "feat-rewriting" in str(
+        asked["hookSpecificOutput"]["permissionDecisionReason"]
+    )
 
     # The claim ends with the path, and the file written in its place is
     # somebody else's state rather than this holder's: nothing is swept, and
@@ -221,4 +239,5 @@ def test_a_claim_the_sweep_vacated_no_longer_asks(tmp_path: Path) -> None:
     decision = decide(edit_payload(work / "a.py", "value = 1", "value = 2", work), mine)
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "allow"
     assert "feat-rewriting" not in str(specific.get("permissionDecisionReason", ""))

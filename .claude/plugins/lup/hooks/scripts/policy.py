@@ -439,6 +439,7 @@ def review_hook_call(
     execution_id: str = "",
     stage: str = "",
     predecessor: str = "",
+    execution_payload: str | None = None,
 ) -> dict[Literal["state", "id", "reason"], str]:
     """Park a call or spend its explicit, single-use reviewer answer.
 
@@ -454,9 +455,23 @@ def review_hook_call(
             "reason": "the hook carries no session_id",
         }
     payload = json.loads(arguments)
+    expected = (
+        json.loads(execution_payload) if execution_payload is not None else payload
+    )
     before = json.loads(preconditions)
     material = json.dumps(
-        [session, str(root), tool, payload, before, reason, rule, purpose, reviewer],
+        [
+            session,
+            str(root),
+            tool,
+            payload,
+            before,
+            reason,
+            rule,
+            purpose,
+            reviewer,
+            expected,
+        ],
         sort_keys=True,
     )
     fingerprint = sha256(material.encode()).hexdigest()
@@ -554,6 +569,7 @@ def review_hook_call(
         "chain_resolved": False,
         "state": "pending",
         "execution_id": execution_id,
+        "execution_payload": expected,
         "created": datetime.now(UTC).isoformat(),
         "preconditions": before,
         "resumption": "native_retry",
@@ -579,36 +595,49 @@ def observe_hook_call(
     if not session or not log.exists():
         return []
     entries = native_review_records(log)
+
+    def same_call(entry):
+        expected = entry.get("execution_payload")
+        return entry["operation"]["tool"] == tool and arguments == (
+            entry["operation"]["payload"] if expected is None else expected
+        )
+
     matches = [
         entry
         for entry in entries.values()
         if entry["operation"]["session"] == session
         and entry["operation"]["cwd"] == str(root)
-        and entry["operation"]["tool"] == tool
         and (
             "execution_id" in entry and entry["execution_id"] == execution_id
             if execution_id
-            else entry["operation"]["payload"] == arguments
+            else entry["operation"]["tool"] == tool
+            and (entry["operation"]["payload"] == arguments or same_call(entry))
         )
         and entry["state"] in ("pending", "approved", "rejected", "dispatched")
     ]
     if not matches:
         return []
     entry = matches[-1]
-    authorized = entry["state"] == "dispatched"
+    matches_call = same_call(entry)
+    authorized = entry["state"] == "dispatched" and matches_call
+    problem = (
+        "with a tool or payload different from the reviewed call"
+        if entry["state"] == "dispatched" and not matches_call
+        else "without a consumed approval receipt"
+    )
     entry["state"] = "completed" if authorized else "in_doubt"
     entry["completed"] = datetime.now(UTC).isoformat()
     entry["outcome"] = (
         "Native execution observed; effect success is not verified."
         if authorized
-        else "Native execution observed without a consumed approval receipt."
+        else f"Native execution observed {problem}."
     )
     append_review_record(log, json.dumps(entry, sort_keys=True))
     if authorized:
         return []
     return [
-        f"Lup review {entry['id']}: execution was observed without a consumed "
-        f"approval receipt. Inspect {log}; this observation grants no authority."
+        f"Lup review {entry['id']}: execution was observed {problem}. "
+        f"Inspect {log}; this observation grants no authority."
     ]
 
 
@@ -2479,6 +2508,7 @@ def reviewed_decision(
     execution_id: str = "",
     stage: str = "",
     predecessor: str = "",
+    execution_payload: dict | None = None,
 ) -> KernelDecision:
     """Only an explicit, single-use recorded answer can settle a native ask."""
     result = review_hook_call(
@@ -2497,6 +2527,9 @@ def reviewed_decision(
         execution_id,
         stage,
         predecessor,
+        json.dumps(execution_payload, sort_keys=True)
+        if execution_payload is not None
+        else None,
     )
     if result["state"] == "approved":
         return decision.revised(effect="allow")
@@ -3406,7 +3439,7 @@ def rendered(decision, payload, placed, attached):
     )
 
 
-def queued_review(payload, decision):
+def queued_review(payload, decision, placed):
     """Bind a native retry to its exact payload and edited document preimage."""
     cwd = session_root(payload) or Path.cwd()
     tool_input = payload["tool_input"]
@@ -3420,6 +3453,8 @@ def queued_review(payload, decision):
         if path is not None
         else {}
     )
+    proposed = rendered(decision.revised(effect="allow"), payload, placed, "")
+    expected = proposed["hookSpecificOutput"].get("updatedInput", tool_input)
     return reviewed_decision(
         decision.placed(escapable=True, contained=session_contained(cwd)),
         cwd,
@@ -3428,6 +3463,7 @@ def queued_review(payload, decision):
         tool_input,
         before,
         payload["tool_use_id"] if "tool_use_id" in payload else "",
+        execution_payload=expected,
     )
 
 
@@ -3521,7 +3557,7 @@ def main():
         placed = placed_input(payload)
         attached = attachment(payload["tool_name"], session_root(payload))
         if decision.effect == "ask":
-            decision = queued_review(payload, decision)
+            decision = queued_review(payload, decision, placed)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
@@ -3557,7 +3593,11 @@ def main():
         return
     json.dump(rendered(decision, payload, placed, attached), sys.stdout)
     if not failed:
-        detail = decision.reason if decision.effect == "deny" else None
+        detail = (
+            decision.reason
+            if decision.effect == "deny" and payload["tool_name"] != "WebFetch"
+            else None
+        )
         record_hook_evidence(
             plugin_data_root(), payload, "completed", decision.effect, detail
         )

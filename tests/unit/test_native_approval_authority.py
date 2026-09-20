@@ -14,6 +14,7 @@ from lup.policy.assets.host import approval_fingerprint, approvals_log
 from lup.policy.relay import Answer, QuestionRelay, ReceiptKind
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.types import JsonObject
+from tests.unit.repos import commit_file, initialized_repo
 
 
 def native_response(
@@ -23,9 +24,11 @@ def native_response(
     *,
     tool: str = "Bash",
     arguments: JsonObject | None = None,
+    execution_id: str = "",
 ) -> sh.RunningCommand:
     payload: JsonObject = {
         "session_id": "requester",
+        "tool_use_id": execution_id,
         "cwd": str(root),
         "hook_event_name": event,
         "tool_name": tool,
@@ -57,8 +60,11 @@ def native_call(
     *,
     tool: str = "Bash",
     arguments: JsonObject | None = None,
+    execution_id: str = "",
 ) -> str:
-    result = native_response(root, runtime, event, tool=tool, arguments=arguments)
+    result = native_response(
+        root, runtime, event, tool=tool, arguments=arguments, execution_id=execution_id
+    )
     if event == "PostToolUse":
         return "observed"
     if runtime == "codex":
@@ -123,6 +129,152 @@ def test_exact_answer_cannot_be_reused_after_execution(
     completed = relay.find(question.id)
     assert completed is not None and completed.state == "completed"
     assert native_call(root, runtime) == "deny"
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("change", ["none", "payload", "tool"])
+def test_identified_execution_matches_the_approved_tool_and_input(
+    root: Path, runtime: str, change: str
+) -> None:
+    arguments: JsonObject = {"command": "git push origin --delete reviewed-topic"}
+    assert (
+        native_call(root, runtime, arguments=arguments, execution_id="call-one")
+        == "deny"
+    )
+    relay = QuestionRelay(root / ".lup/questions.jsonl")
+    (question,) = relay.pending()
+    relay.answer(question.id, "operator", True)
+    assert (
+        native_call(root, runtime, arguments=arguments, execution_id="call-one")
+        == "allow"
+    )
+    dispatched = relay.find(question.id)
+    assert dispatched is not None and dispatched.execution_payload is not None
+    expected = dispatched.execution_payload
+    tool = "Bash"
+    executed: JsonObject
+    match change:
+        case "payload":
+            executed = {
+                **expected,
+                "command": "git push origin --delete unreviewed-topic",
+            }
+        case "tool":
+            tool = "WebFetch" if runtime == "claude" else "web_fetch"
+            executed = {"url": "https://unreviewed.example.test/private"}
+        case _:
+            executed = expected
+    observed = native_response(
+        root,
+        runtime,
+        "PostToolUse",
+        tool=tool,
+        arguments=executed,
+        execution_id="call-one",
+    )
+    recorded = relay.find(question.id)
+    assert recorded is not None
+    assert recorded.operation.payload == arguments
+    assert recorded.execution_payload == expected
+    if change == "none":
+        assert recorded.state == "completed"
+        assert observed.exit_code == 0
+    else:
+        assert recorded.state == "in_doubt"
+        assert "tool or payload different from the reviewed call" in recorded.outcome
+        if runtime == "codex":
+            assert observed.exit_code == 2
+            detail = observed.stderr.decode()
+        else:
+            result = json.loads(observed.stdout)
+            assert result["decision"] == "block"
+            detail = result["reason"]
+        assert "tool or payload different from the reviewed call" in detail
+        assert "grants no authority" in detail
+    assert (
+        native_call(root, runtime, arguments=arguments, execution_id="call-two")
+        == "deny"
+    )
+
+
+@pytest.mark.parametrize("tool", ["Bash", "Edit"])
+@pytest.mark.parametrize("changed", [False, True])
+def test_claude_observation_accepts_only_the_exact_emitted_rewrite(
+    root: Path, tool: str, changed: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    monkeypatch.delenv("LUP_SANDBOX_ACTIVE", raising=False)
+    foreign = root.parent / f"{root.name}-foreign"
+    git = initialized_repo(foreign, root / "no-hooks")
+    commit_file(
+        git,
+        foreign,
+        "example.py",
+        '"""Fixture module."""\n\nfrom pathlib import Path\n',
+        "seed",
+    )
+    path = foreign / "example.py"
+    arguments: JsonObject = (
+        {"command": "# lup: escalate[sandbox]: inspect the host\nls"}
+        if tool == "Bash"
+        else {
+            "file_path": str(path),
+            "old_string": "from pathlib import Path",
+            "new_string": (
+                "from typing import Any  # lup: ignore[any-type] — "
+                "a justification long enough that keeping it inline outgrows the line"
+            ),
+        }
+    )
+    assert (
+        native_call(
+            root, "claude", tool=tool, arguments=arguments, execution_id="rewritten"
+        )
+        == "deny"
+    )
+    relay = QuestionRelay(root / ".lup/questions.jsonl")
+    (question,) = relay.pending()
+    relay.answer(question.id, "operator", True)
+    allowed = native_response(
+        root, "claude", tool=tool, arguments=arguments, execution_id="rewritten"
+    )
+    specific = json.loads(allowed.stdout)["hookSpecificOutput"]
+    assert specific["permissionDecision"] == "allow"
+    expected = specific["updatedInput"]
+    assert expected != arguments
+    dispatched = relay.find(question.id)
+    assert dispatched is not None
+    assert dispatched.operation.payload == arguments
+    assert dispatched.execution_payload == expected
+    executed = (
+        {
+            **expected,
+            **(
+                {"dangerouslyDisableSandbox": not expected["dangerouslyDisableSandbox"]}
+                if tool == "Bash"
+                else {"old_string": "a different preimage"}
+            ),
+        }
+        if changed
+        else expected
+    )
+    native_response(
+        root,
+        "claude",
+        "PostToolUse",
+        tool=tool,
+        arguments=executed,
+        execution_id="rewritten",
+    )
+    completed = relay.find(question.id)
+    assert completed is not None
+    assert completed.state == ("in_doubt" if changed else "completed")
+    assert (
+        native_call(
+            root, "claude", tool=tool, arguments=arguments, execution_id="again"
+        )
+        == "deny"
+    )
 
 
 def test_claude_document_review_is_bound_to_the_preimage(root: Path) -> None:

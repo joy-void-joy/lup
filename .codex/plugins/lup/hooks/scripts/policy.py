@@ -440,6 +440,7 @@ def review_hook_call(
     execution_id: str = "",
     stage: str = "",
     predecessor: str = "",
+    execution_payload: str | None = None,
 ) -> dict[Literal["state", "id", "reason"], str]:
     """Park a call or spend its explicit, single-use reviewer answer.
 
@@ -455,9 +456,23 @@ def review_hook_call(
             "reason": "the hook carries no session_id",
         }
     payload = json.loads(arguments)
+    expected = (
+        json.loads(execution_payload) if execution_payload is not None else payload
+    )
     before = json.loads(preconditions)
     material = json.dumps(
-        [session, str(root), tool, payload, before, reason, rule, purpose, reviewer],
+        [
+            session,
+            str(root),
+            tool,
+            payload,
+            before,
+            reason,
+            rule,
+            purpose,
+            reviewer,
+            expected,
+        ],
         sort_keys=True,
     )
     fingerprint = sha256(material.encode()).hexdigest()
@@ -555,6 +570,7 @@ def review_hook_call(
         "chain_resolved": False,
         "state": "pending",
         "execution_id": execution_id,
+        "execution_payload": expected,
         "created": datetime.now(UTC).isoformat(),
         "preconditions": before,
         "resumption": "native_retry",
@@ -580,36 +596,49 @@ def observe_hook_call(
     if not session or not log.exists():
         return []
     entries = native_review_records(log)
+
+    def same_call(entry):
+        expected = entry.get("execution_payload")
+        return entry["operation"]["tool"] == tool and arguments == (
+            entry["operation"]["payload"] if expected is None else expected
+        )
+
     matches = [
         entry
         for entry in entries.values()
         if entry["operation"]["session"] == session
         and entry["operation"]["cwd"] == str(root)
-        and entry["operation"]["tool"] == tool
         and (
             "execution_id" in entry and entry["execution_id"] == execution_id
             if execution_id
-            else entry["operation"]["payload"] == arguments
+            else entry["operation"]["tool"] == tool
+            and (entry["operation"]["payload"] == arguments or same_call(entry))
         )
         and entry["state"] in ("pending", "approved", "rejected", "dispatched")
     ]
     if not matches:
         return []
     entry = matches[-1]
-    authorized = entry["state"] == "dispatched"
+    matches_call = same_call(entry)
+    authorized = entry["state"] == "dispatched" and matches_call
+    problem = (
+        "with a tool or payload different from the reviewed call"
+        if entry["state"] == "dispatched" and not matches_call
+        else "without a consumed approval receipt"
+    )
     entry["state"] = "completed" if authorized else "in_doubt"
     entry["completed"] = datetime.now(UTC).isoformat()
     entry["outcome"] = (
         "Native execution observed; effect success is not verified."
         if authorized
-        else "Native execution observed without a consumed approval receipt."
+        else f"Native execution observed {problem}."
     )
     append_review_record(log, json.dumps(entry, sort_keys=True))
     if authorized:
         return []
     return [
-        f"Lup review {entry['id']}: execution was observed without a consumed "
-        f"approval receipt. Inspect {log}; this observation grants no authority."
+        f"Lup review {entry['id']}: execution was observed {problem}. "
+        f"Inspect {log}; this observation grants no authority."
     ]
 
 
@@ -2480,6 +2509,7 @@ def reviewed_decision(
     execution_id: str = "",
     stage: str = "",
     predecessor: str = "",
+    execution_payload: dict | None = None,
 ) -> KernelDecision:
     """Only an explicit, single-use recorded answer can settle a native ask."""
     result = review_hook_call(
@@ -2498,6 +2528,9 @@ def reviewed_decision(
         execution_id,
         stage,
         predecessor,
+        json.dumps(execution_payload, sort_keys=True)
+        if execution_payload is not None
+        else None,
     )
     if result["state"] == "approved":
         return decision.revised(effect="allow")

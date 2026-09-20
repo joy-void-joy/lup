@@ -365,6 +365,7 @@ def reviewed_decision(
     execution_id: str = "",
     stage: str = "",
     predecessor: str = "",
+    execution_payload: dict | None = None,
 ) -> KernelDecision:
     """Only an explicit, single-use recorded answer can settle a native ask."""
     result = review_hook_call(
@@ -383,6 +384,9 @@ def reviewed_decision(
         execution_id,
         stage,
         predecessor,
+        json.dumps(execution_payload, sort_keys=True)
+        if execution_payload is not None
+        else None,
     )
     if result["state"] == "approved":
         return decision.revised(effect="allow")

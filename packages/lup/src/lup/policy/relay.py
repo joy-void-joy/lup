@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from lup.policy.assets.host import append_review_record, review_records
 from lup.policy.kernel.semantics import ReviewPurpose, ReviewerRequirement
 from lup.policy.operations import Operation
+from lup.types import JsonObject
 
 type QuestionState = Literal[
     "pending",
@@ -194,6 +195,8 @@ class PersistentQuestion(BaseModel, frozen=True):
     outcome: str = ""
     execution_id: str = ""
     """Native invocation observed after dispatch; never an authority receipt."""
+    execution_payload: JsonObject | None = None
+    """Exact approved native rewrite; the operation retains the requested input."""
 
     def answerable_by(self, principal: str) -> bool:
         """Whether this principal may answer, which the requester never may.

@@ -506,7 +506,9 @@ with `ShellOperationRule.parents`, and the deepest matching path decides.
 Approval releases one exact retry in the same session and directory.
 The hook re-runs policy, compares the payload and edited file preimages, then
 claims the approval exclusively before allowing execution. A changed file
-or payload requires another review. Rejection leaves the operation stopped.
+or payload requires another review. The receipt binds both the original
+request and the exact approved runtime input rewrite; observing a different
+executed input marks the receipt `in_doubt`. Rejection leaves the operation stopped.
 A crash after claiming approval does not make it reusable. Native sandbox
 restrictions still apply; queue approval does not change execution placement.
 Post-tool evidence marks a dispatched review completed, without claiming that

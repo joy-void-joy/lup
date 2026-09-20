@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from lup.tools.lsp.tools import CODEINTEL_TOOL_DECLARATIONS
 from lup.policy.identity import AGENT_IDENTITY_ENV
+from lup.policy.relay import QuestionRelay
 from lup.types import JsonObject
 from lup.providers.claude.harness import CLAUDE_DISPATCHER, ClaudeSpellings
 from lup.providers.claude.login import CLAUDE_LOGIN
@@ -208,6 +209,7 @@ class CodexPermissionDecision(BaseModel, frozen=True):
     """Validated permission decision emitted by the Codex dispatcher."""
 
     behavior: Literal["allow", "deny"]
+    message: str = ""
 
 
 class CodexPermissionHookOutput(BaseModel, frozen=True):
@@ -1907,7 +1909,7 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
     and they stay out, as does everything else in the call.
     """
     url = "https://docs.example.test:8443/private/page?token=do-not-record"
-    body: JsonObject = {"hook_event_name": "PreToolUse"}
+    body: JsonObject = {"hook_event_name": "PreToolUse", "cwd": str(tmp_path)}
     body.update(session_id="session-four", tool_use_id="tool-four")
     claude_data, codex_data = tmp_path / "claude", tmp_path / "codex"
     script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
@@ -1920,13 +1922,21 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
     )
     assert isinstance(claude, sh.RunningCommand)
     rendered = ClaudeHookOutput.model_validate_json(claude.stdout)
-    assert rendered.hook_specific_output.permission_decision == "ask"
+    assert rendered.hook_specific_output.permission_decision == "deny"
+    assert url in rendered.hook_specific_output.permission_decision_reason
     codex = codex_hook_result(
         {**body, "tool_name": "web_fetch", "tool_input": {"url": url}},
         sandboxed=True,
         plugin_data=codex_data,
     )
     assert codex.exit_code == 2
+    assert url.encode() in codex.stderr
+    pending = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
+    assert {question.operation.tool for question in pending} == {
+        "WebFetch",
+        "web_fetch",
+    }
+    assert all(question.operation.payload == {"url": url} for question in pending)
 
     for data_root in (claude_data, codex_data):
         written = (data_root / "hook-events.jsonl").read_text(encoding="utf-8")
@@ -2062,23 +2072,27 @@ def test_generated_codex_permission_request_allows_safe_assignment(
 
 
 @pytest.mark.parametrize(
-    "command,expected_exit",
+    "command,reason",
     [
-        ("# lup: escalate: required diagnostic\npython -c 1", 0),
-        ("PATH=/tmp git status", 0),
+        (
+            "# lup: escalate[decision]: required diagnostic\npython -c 1",
+            "bare interpreter",
+        ),
+        ("PATH=/tmp git status", "security-sensitive variable PATH"),
         # An invalid identifier is not an assignment, so the shell would run a
         # program literally named `1BAD=constant` — which the vocabulary lists
-        # nowhere. Exit 0 with no output declines the decision rather than
-        # granting it, leaving Codex's own flow to put it to the user.
-        ("1BAD=constant git status", 0),
+        # nowhere. Its native permission event must deny until explicitly reviewed.
+        ("1BAD=constant git status", "1BAD=constant"),
     ],
 )
 def test_generated_codex_permission_request_preserves_assignment_guards(
-    command: str, expected_exit: int
+    tmp_path: Path, command: str, reason: str
 ) -> None:
     script = Path(".codex/plugins/lup/hooks/scripts/policy.py").resolve()
     body = {
         "hook_event_name": "PermissionRequest",
+        "session_id": "assignment-requester",
+        "cwd": str(tmp_path),
         "tool_name": "Bash",
         "tool_input": {"command": command},
     }
@@ -2088,8 +2102,15 @@ def test_generated_codex_permission_request_preserves_assignment_guards(
         _return_cmd=True,
     )
     assert isinstance(result, sh.RunningCommand)
-    assert result.exit_code == expected_exit
-    assert result.stdout == b""
+    assert result.exit_code == 0
+    decision = CodexPermissionOutput.model_validate_json(
+        result.stdout
+    ).hook_specific_output.decision
+    assert decision.behavior == "deny"
+    assert reason in decision.message
+    (question,) = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
+    assert question.id in decision.message
+    assert question.operation.payload == {"command": command}
 
 
 def test_generated_codex_pretool_never_treats_pending_requests_as_approval(
@@ -2112,9 +2133,22 @@ def test_generated_codex_pretool_never_treats_pending_requests_as_approval(
     }
     requested = codex_hook_result(permission, sandboxed=True, plugin_data=tmp_path)
     assert requested.exit_code == 0
-    assert requested.stdout == b""
+    decision = CodexPermissionOutput.model_validate_json(
+        requested.stdout
+    ).hook_specific_output.decision
+    assert decision.behavior == "deny"
+    store = QuestionRelay(tmp_path / ".lup/questions.jsonl")
+    (question,) = store.pending()
+    assert question.id in decision.message
+    assert question.operation.payload == permission["tool_input"]
     requested_again = codex_hook_result(permission, True, tmp_path)
     assert requested_again.exit_code == 0
+    repeated = CodexPermissionOutput.model_validate_json(
+        requested_again.stdout
+    ).hook_specific_output.decision
+    assert repeated.behavior == "deny"
+    assert question.id in repeated.message
+    assert store.pending() == [question]
 
     pretool: JsonObject = {
         **common,
@@ -2145,8 +2179,12 @@ def test_generated_codex_permission_request_denies_unapproved_code() -> None:
         _return_cmd=True,
     )
     assert isinstance(result, sh.RunningCommand)
-    assert result.exit_code == 2
-    assert b"bare interpreter" in result.stderr
+    assert result.exit_code == 0
+    decision = CodexPermissionOutput.model_validate_json(
+        result.stdout
+    ).hook_specific_output.decision
+    assert decision.behavior == "deny"
+    assert "bare interpreter" in decision.message
 
 
 def test_generated_codex_hook_refuses_the_declared_calls() -> None:
@@ -2227,7 +2265,7 @@ def test_generated_claude_hook_allows_managed_skill_scripts(
     assert decision(f"sh {workspace_script}") == "deny"
 
 
-def test_generated_claude_hook_refuses_the_declared_calls() -> None:
+def test_generated_claude_hook_refuses_the_declared_calls(tmp_path: Path) -> None:
     """The refusal this repository declares, as the shipped hook enforces it.
 
     Routing is half the mechanism and the declared rows are the other half,
@@ -2238,7 +2276,12 @@ def test_generated_claude_hook_refuses_the_declared_calls() -> None:
     script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
 
     def decision(name: str, payload: JsonObject) -> ClaudeHookDecision:
-        body = {"tool_name": name, "tool_input": payload}
+        body = {
+            "tool_name": name,
+            "tool_input": payload,
+            "cwd": str(tmp_path),
+            "session_id": "artifact-requester",
+        }
         result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
         assert isinstance(result, sh.RunningCommand)
         return ClaudeHookOutput.model_validate_json(result.stdout).hook_specific_output
@@ -2250,10 +2293,19 @@ def test_generated_claude_hook_refuses_the_declared_calls() -> None:
     narrowed = decision("Skill", {"skill": "artifact-design"})
     assert narrowed.permission_decision == "deny"
 
-    escalated = decision(
-        "Artifact", {"content": "# lup: escalate: the user asked for a page\npage"}
-    )
-    assert escalated.permission_decision == "ask"
+    proposal: JsonObject = {
+        "content": "# lup: escalate[decision]: the user asked for a page\npage"
+    }
+    escalated = decision("Artifact", proposal)
+    assert escalated.permission_decision == "deny"
+    store = QuestionRelay(tmp_path / ".lup/questions.jsonl")
+    (question,) = store.pending()
+    assert question.id in escalated.permission_decision_reason
+    assert "the user asked for a page" in question.reason
+    assert question.operation.payload == proposal
+    store.answer(question.id, "operator", True)
+    assert decision("Artifact", proposal).permission_decision == "allow"
+    assert decision("Artifact", proposal).permission_decision == "deny"
 
 
 def test_generated_claude_hook_leaves_every_other_skill_to_the_runtime() -> None:
@@ -2483,13 +2535,14 @@ def test_compilation_refuses_a_dispatcher_that_breaks_its_declaration() -> None:
         compile_dispatcher(unregistered)
 
 
-AUTONOMY_PROBE = {
-    "tool_name": "Write",
-    "tool_input": {
-        "file_path": "packages/lup/src/lup/generated_probe.py",
-        "content": "".join(f"VALUE_{index} = {index}\n" for index in range(8)),
-    },
-}
+AUTONOMY_PROBE = "".join(f"VALUE_{index} = {index}\n" for index in range(8))
+
+
+@pytest.fixture
+def autonomy_checkout(tmp_path: Path) -> Path:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git/HEAD").write_text("ref: refs/heads/feature\n")
+    return tmp_path
 
 
 def hook_environment(identity: str | None) -> EnvVars:
@@ -2509,11 +2562,19 @@ def hook_environment(identity: str | None) -> EnvVars:
 
 
 def hook_decision(
-    payload: JsonObject, agent_type: str | None = None, identity: str | None = None
+    payload: JsonObject,
+    root: Path,
+    agent_type: str | None = None,
+    identity: str | None = None,
 ) -> ClaudeHookDecision:
     """Run the installed Claude hook over one payload and identity pair."""
     script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
-    body = payload if agent_type is None else {**payload, "agent_type": agent_type}
+    body = {
+        **payload,
+        "session_id": "autonomy-requester",
+        "cwd": str(root),
+        **({} if agent_type is None else {"agent_type": agent_type}),
+    }
     result = sh.Command(str(script))(
         _in=json.dumps(body),
         _env=hook_environment(identity),
@@ -2524,51 +2585,93 @@ def hook_decision(
     return output.hook_specific_output
 
 
-def autonomy_effect(agent_type: str | None = None, identity: str | None = None) -> str:
+def autonomy_decision(
+    root: Path, agent_type: str | None = None, identity: str | None = None
+) -> ClaudeHookDecision:
     return hook_decision(
-        AUTONOMY_PROBE, agent_type=agent_type, identity=identity
-    ).permission_decision
+        {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(root / "packages/lup/src/lup/generated_probe.py"),
+                "content": AUTONOMY_PROBE,
+            },
+        },
+        root,
+        agent_type=agent_type,
+        identity=identity,
+    )
 
 
-def test_generated_claude_hook_maps_agent_type_to_editor_autonomy() -> None:
-    assert autonomy_effect() == "ask"
-    assert autonomy_effect(agent_type="implementer") == "ask"
-    assert autonomy_effect(agent_type="resolver-worker") == "allow"
-    assert autonomy_effect(agent_type="lup:resolver-worker") == "allow"
+def test_generated_claude_hook_maps_agent_type_to_editor_autonomy(
+    autonomy_checkout: Path,
+) -> None:
+    tmp_path = autonomy_checkout
+    for agent_type in (None, "implementer"):
+        decision = autonomy_decision(tmp_path, agent_type=agent_type)
+        assert decision.permission_decision == "deny"
+        (question,) = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
+        assert question.id in decision.permission_decision_reason
+        assert "written whole" in question.reason
+        assert question.operation.payload["content"] == AUTONOMY_PROBE
+    for agent_type in ("resolver-worker", "lup:resolver-worker"):
+        assert (
+            autonomy_decision(tmp_path, agent_type=agent_type).permission_decision
+            == "allow"
+        )
 
 
-def test_generated_claude_hook_maps_declared_identity_to_editor_autonomy() -> None:
+def test_generated_claude_hook_maps_declared_identity_to_editor_autonomy(
+    autonomy_checkout: Path,
+) -> None:
     """The resolver's worker is a top-level session, so `agent_type` is empty.
 
     Autonomy has to reach it through the identity its launcher declared, or
     the mechanism is unreachable on the one path that needs it.
     """
-    assert autonomy_effect(identity="") == "ask"
-    assert autonomy_effect(identity="implementer") == "ask"
-    assert autonomy_effect(identity="resolver-worker") == "allow"
-    assert autonomy_effect(identity="lup:resolver-worker") == "allow"
+    tmp_path = autonomy_checkout
+    for identity in ("", "implementer"):
+        decision = autonomy_decision(tmp_path, identity=identity)
+        assert decision.permission_decision == "deny"
+        (question,) = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
+        assert question.id in decision.permission_decision_reason
+        assert "written whole" in question.reason
+        assert question.operation.payload["content"] == AUTONOMY_PROBE
+    for identity in ("resolver-worker", "lup:resolver-worker"):
+        assert (
+            autonomy_decision(tmp_path, identity=identity).permission_decision
+            == "allow"
+        )
 
 
-def test_generated_claude_hook_asks_for_human_owned_readme_edits() -> None:
+def test_generated_claude_hook_requires_review_for_human_owned_readme_edits(
+    autonomy_checkout: Path,
+) -> None:
     """Autonomy is a release of named rules, never a blanket bypass.
 
     Both channels are checked: an identity that grants autonomy through the
     environment must not buy anything the payload channel would not.
     """
+    tmp_path = autonomy_checkout
+    readme = tmp_path / "README.md"
+    readme.write_text("# Operator-authored design\n")
     payload = {
         "tool_name": "Write",
         "tool_input": {
-            "file_path": str(Path("README.md").resolve()),
+            "file_path": str(readme),
             "content": "# Rewritten by an agent\n",
         },
     }
-    assert hook_decision(payload).permission_decision == "ask"
     for granted in (
-        hook_decision(payload, agent_type="resolver-worker"),
-        hook_decision(payload, identity="resolver-worker"),
+        hook_decision(payload, tmp_path),
+        hook_decision(payload, tmp_path, agent_type="resolver-worker"),
+        hook_decision(payload, tmp_path, identity="resolver-worker"),
     ):
-        assert granted.permission_decision == "ask"
+        assert granted.permission_decision == "deny"
         assert "human-authored" in granted.permission_decision_reason
+        (question,) = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
+        assert question.id in granted.permission_decision_reason
+        assert question.requirement == "human_only"
+        assert question.preconditions == {readme: "# Operator-authored design\n"}
 
 
 def test_generated_codex_hook_fails_closed_for_unknown_tools() -> None:
