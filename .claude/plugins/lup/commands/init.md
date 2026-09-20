@@ -497,7 +497,22 @@ Start a `Monitor` over `uv run lup-devtools dev check`. Each line it emits arriv
 
 3. Run `uv run lup --help` to verify CLI
 4. Verify the feedback loop command references the right scripts
-5. Regenerate both harnesses and check that the rendered guidance accurately describes the domain
+5. Declare the domain's external programs in `harness/content/requirements.py`
+   using `Requirement`: name their purpose, execution location, smallest real
+   operation, failure consequence, and recovery. Run
+   `uv run lup-devtools harness requirements` to exercise host prerequisites,
+   including the disposable Python sandbox. A daemon answering is not proof
+   that an expression evaluates. For container sessions, also run
+   `uv run lup-devtools harness requirements --inside --launch-only`; full
+   `--inside` checks additionally exercise a native model turn and require its
+   configured login. Report any unexercised checks explicitly.
+6. Repair authorized local prerequisites and rerun their checks. Where the
+   report names an endpoint override, missing service, group membership, or
+   session restart, give that specific recovery; do not call setup complete
+   merely because the executable exists. Host administration and a fresh
+   login session remain actions for the operator when this session cannot
+   perform them.
+7. Regenerate both harnesses and check that the rendered guidance accurately describes the domain
 
 ## After Initialization
 

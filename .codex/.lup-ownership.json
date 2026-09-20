@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "f9ab33a19169fb111901e24b907940f9f0710cedd62d010a94e560487d102164",
+  "source_digest": "4e7400b8ca8ddd1a450dd184e8929750603821adc4b5af79cec87e35d25a20af",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -387,7 +387,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "13220ae8bb5ec5fc4a173bba2df0d63c2c3b100c6f509aba05828b711f64c185",
+      "sha256": "a06d6eb915a0d65aa51a27e30c44ae3ffbd2c654a9c3575477e8554391e9608e",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -436,7 +436,7 @@
     {
       "path": ".codex/plugins/lup/skills/close/SKILL.md",
       "category": "generated",
-      "sha256": "6dff3171a3493b9cb2dcbdb44c94e517db542a2e581c960d5a7dcb3c7f14cb73",
+      "sha256": "dbbba09f127c10a928bce6737e0f0723336bf9615c688c9c302e85a8b5d43056",
       "semantic_id": "skill.close",
       "executable": false
     },
@@ -548,14 +548,14 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "393a1a7712e7a37d79fa5d570c8de0a34ffcb51179ee741357bbf21589132b4b",
+      "sha256": "e9c6cca9603ee28575c450bc9db5cc7eb5bc695ca11a0bcf0566d50326d4384c",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "24b5b64a41b99712c3f92d720d6546e647450e78bcc81df953eb2774f20fd982",
+      "sha256": "c8c407ba1c32a841c3f377f317b2b57267115f13148761c788f209ceac11eba8",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -597,7 +597,7 @@
     {
       "path": ".codex/plugins/lup/skills/rebase/SKILL.md",
       "category": "generated",
-      "sha256": "f561c58148891e0e84541684d312a507094a4e9583e979b133488d10cfcbda06",
+      "sha256": "d90394afa096e795f569379f609065c54e155ed33fcd406342740649a62b1e74",
       "semantic_id": "skill.rebase",
       "executable": false
     },
