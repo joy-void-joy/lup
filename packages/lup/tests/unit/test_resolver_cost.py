@@ -14,6 +14,7 @@ from lup.resolver.journal import (
     JournalEntry,
     RunEvent,
     RunFailedEvent,
+    RecheckReusedEvent,
 )
 from lup.sessions.events import (
     SessionId,
@@ -95,8 +96,11 @@ def test_failure_closes_activity_and_retains_exact_reason_and_incomplete_counts(
 
     report = cost_report(entries)
 
-    assert report.active_seconds == 60
+    assert report.active_seconds == 0
+    assert report.uncertain_seconds == 60
     assert report.idle_seconds == 6950
+    assert report.peak_concurrency == 0
+    assert len(report.unresolved_intervals) == 5
     assert {failure.reason: failure.count for failure in report.failures} == {
         "Not logged in": 2,
         "OAuth revoked": 1,
@@ -123,6 +127,49 @@ def test_anomalies_do_not_fabricate_completed_turns() -> None:
     assert report.actors[0].total_seconds == 20
     assert report.peak_concurrency == 1
     assert report.idle_seconds == 10
+
+
+def test_unclosed_turn_does_not_make_later_resume_or_silence_active() -> None:
+    entries = [
+        recorded(0, 0, "worker", started("crashed")),
+        recorded(1, 7200, "run", RecheckReusedEvent(concerns=[], commit="resume")),
+        recorded(2, 7210, "worker", started("resumed")),
+        recorded(3, 7220, "worker", completed("resumed")),
+        recorded(4, 8000, "run", RecheckReusedEvent(concerns=[], commit="later")),
+    ]
+
+    report = cost_report(entries)
+
+    assert report.wall_seconds == 8000
+    assert report.active_seconds == 10
+    assert report.uncertain_seconds == 7990
+    assert report.idle_seconds == 0
+    assert report.peak_concurrency == report.actors[0].peak_concurrency == 1
+    assert report.actors[0].unfinished == 1
+    assert len(report.unresolved_intervals) == 1
+    interval = report.unresolved_intervals[0]
+    assert interval.started == entries[0] and interval.ended == entries[-1]
+    assert interval.outcome == "unfinished"
+    assert report.idle_gaps == []
+
+
+def test_missing_start_does_not_fabricate_idle_before_completion() -> None:
+    entries = [
+        recorded(0, 0, "run", RecheckReusedEvent(concerns=[], commit="resume")),
+        recorded(1, 100, "worker", completed()),
+        recorded(2, 1000, "worker", started("two")),
+        recorded(3, 1010, "worker", completed("two")),
+    ]
+
+    report = cost_report(entries)
+
+    assert report.active_seconds == 10
+    assert report.uncertain_seconds == 100
+    assert report.idle_seconds == 900
+    assert report.unresolved_intervals[0].outcome == "missing_start"
+    assert len(report.anomalies) == 1
+    assert report.idle_gaps[0].preceding == entries[1]
+    assert report.idle_gaps[0].seconds == 900
 
 
 def test_empty_single_event_and_backward_timestamps_are_explicit() -> None:

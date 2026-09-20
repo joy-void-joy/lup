@@ -10,7 +10,7 @@ from lup.channels.stream import Stream
 from lup.coordination.refs import ActorRef
 from lup.devtools.resolve import cost
 from lup.resolver.cost import CostReport
-from lup.resolver.journal import ENTRY_ADAPTER, JournalEntry
+from lup.resolver.journal import ENTRY_ADAPTER, JournalEntry, RunFailedEvent
 from lup.sessions.events import (
     SessionId,
     TurnCompletedEvent,
@@ -71,3 +71,41 @@ def test_cost_reports_an_unknown_run_without_creating_one(
     assert result.exit_code != 0
     assert "no resolver journal" in result.output
     assert not (tmp_path / "absent").exists()
+
+
+def test_cost_exposes_uncertainty_and_full_bounds_in_json_and_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cost, "resolve_state_root", lambda: tmp_path)
+    stream = Stream(tmp_path / "interrupted" / "journal.jsonl", ENTRY_ADAPTER)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    ids = TurnIdentifiers(session=SessionId(value="s"), turn=TurnId(value="crashed"))
+    for seq, event in enumerate(
+        [
+            TurnStartedEvent(identifiers=ids),
+            RunFailedEvent(reason="Complete failure evidence from the journal"),
+        ]
+    ):
+        stream.append(
+            JournalEntry(
+                seq=seq,
+                at=start + timedelta(seconds=seq * 7200),
+                actor=ActorRef(kind="worker", id="one"),
+                event=event,
+            )
+        )
+    arguments = ["resolve", "cost", "--run-id", "interrupted"]
+    result = CliRunner().invoke(app, [*arguments, "--json"])
+    assert result.exit_code == 0, result.output
+    report = CostReport.model_validate_json(result.output)
+    assert report.active_seconds == report.idle_seconds == report.peak_concurrency == 0
+    assert report.uncertain_seconds == 7200
+    assert report.unresolved_intervals[0].ended.event == RunFailedEvent(
+        reason="Complete failure evidence from the journal"
+    )
+    displayed = CliRunner().invoke(app, arguments)
+    assert displayed.exit_code == 0, displayed.output
+    assert "uncertain 2h" in displayed.output
+    assert "peak concurrent completed turns 0" in displayed.output
+    assert "2026-01-01T00:00:00+00:00 → 2026-01-01T02:00:00+00:00" in displayed.output
+    assert "Complete failure evidence from the journal" in displayed.output

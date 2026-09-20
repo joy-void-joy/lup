@@ -22,8 +22,10 @@ def rendered_cost(report: CostReport) -> list[str]:
     lines = [
         f"Observed: {report.started_at.isoformat()} → {report.ended_at.isoformat()}",
         f"Wall {duration(report.wall_seconds)} · active {duration(report.active_seconds)} "
-        f"· idle {duration(report.idle_seconds)} · peak concurrent turns {report.peak_concurrency}",
-        "Active time is the union of recorded turn intervals; actor totals include overlap.",
+        f"· idle {duration(report.idle_seconds)} · uncertain {duration(report.uncertain_seconds)} "
+        f"· peak concurrent completed turns {report.peak_concurrency}",
+        "Active time and peak concurrency use matched starts/completions; actor totals include overlap.",
+        "Unresolved intervals supply no activity proof. Their time outside completed turns is uncertain.",
         format_table(
             (
                 "Actor",
@@ -31,7 +33,7 @@ def rendered_cost(report: CostReport) -> list[str]:
                 "Mean",
                 "Max",
                 "Total",
-                "Peak",
+                "Completed peak",
                 "Unfinished",
                 "Interrupted",
             ),
@@ -61,6 +63,15 @@ def rendered_cost(report: CostReport) -> list[str]:
             f"{gap.preceding.event.model_dump_json()}"
             for gap in report.idle_gaps
         ],
+        "Unresolved turn bounds (may overlap completed activity):",
+        *[
+            f"  {interval.key.actor.label()} {interval.key.identifiers.model_dump_json()} "
+            f"{interval.outcome}: {interval.started.at.isoformat()} → {interval.ended.at.isoformat()} "
+            f"(#{interval.started.seq} → #{interval.ended.seq}); "
+            f"from {interval.started.event.model_dump_json()} "
+            f"through {interval.ended.event.model_dump_json()}"
+            for interval in report.unresolved_intervals
+        ],
         *[f"Evidence anomaly: {message}" for message in report.anomalies],
     ]
     return lines
@@ -76,7 +87,7 @@ def show_cost(
         bool, typer.Option("--json", help="Emit typed timing evidence")
     ] = False,
 ) -> None:
-    """Report observed wall time, activity, actor turns, failures, and idle gaps."""
+    """Report journal timing, unresolved intervals, actor turns, failures, and idle gaps."""
     try:
         report = read_cost(
             resolve_state_root() / run_id, timedelta(seconds=gap_seconds)
