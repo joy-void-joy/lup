@@ -10,6 +10,7 @@ import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.subagents import CodexModelTiers
 from lup.providers.drift_prompt import drift_hook
+from lup.providers.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.roster_prompt import (
     departure_hook,
     folded,
@@ -823,6 +824,18 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 "hooks": [policy_hook],
             }
         ]
+        delivery = [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": delivery_command("PLUGIN_ROOT"),
+                        "timeout": 10,
+                    }
+                ],
+            }
+        ]
         # Two folds under the one event, kept side by side rather than merged:
         # who else is here, and whether what this project is built on still
         # stands at one commit. Both are context and neither can refuse, so
@@ -875,6 +888,8 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     event: (
                         observed
                         if event == CODEX_DISPATCHER.observation_event
+                        else [*decided, *delivery]
+                        if event == "PreToolUse"
                         else decided
                     )
                     for event in CODEX_DISPATCHER.hook_events
@@ -919,6 +934,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     Path(f".codex/plugins/{self.plugin_name}"), source.id
                 ),
                 *roster.artifacts,
+                *delivery_artifacts(
+                    Path(f".codex/plugins/{self.plugin_name}"), source.id
+                ),
                 *departure.artifacts,
                 *cleanup.artifacts,
                 *store_artifacts(Path(f".codex/plugins/{self.plugin_name}"), source.id),

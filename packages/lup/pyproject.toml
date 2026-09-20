@@ -98,6 +98,10 @@ pythonVersion = "3.14"
 # the compiler links in rather than ships, so an asset resolves it against the
 # canonical module both scripts are compiled from.
 [[tool.pyright.executionEnvironments]]
+root = "src/lup/providers/assets"
+extraPaths = ["../../.claude/plugins/lup/hooks/runtime", "../../.codex/plugins/lup/hooks/runtime"]
+
+[[tool.pyright.executionEnvironments]]
 root = "src/lup/providers/claude/assets"
 extraPaths = ["../../.claude/plugins/lup/hooks/runtime", "src/lup/policy/assets"]
 

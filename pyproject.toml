@@ -135,6 +135,10 @@ extraPaths = [
 ]
 
 [[tool.pyright.executionEnvironments]]
+root = "packages/lup/src/lup/providers/assets"
+extraPaths = [".claude/plugins/lup/hooks/runtime", ".codex/plugins/lup/hooks/runtime"]
+
+[[tool.pyright.executionEnvironments]]
 root = "packages/lup/src/lup/providers/claude/assets"
 extraPaths = [
     ".claude/plugins/lup/hooks/runtime",

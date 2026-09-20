@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
-from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
+from lup.providers.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.drift_prompt import drift_hook
 from lup.providers.subagent_cleanup import cleanup_hooks
 from lup.providers.roster_prompt import (

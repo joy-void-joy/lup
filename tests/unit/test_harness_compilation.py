@@ -691,12 +691,14 @@ def test_codex_recipe_registers_semantic_permission_approval() -> None:
 
     hook_config = artifacts[Path(".codex/plugins/lup/hooks/hooks.json")].content
     assert '"PermissionRequest"' in hook_config
-    # The dispatcher's own events, because the prompt event registers the
-    # roster's fold beside the policy and never the policy guard itself.
-    for command in registered_hook_commands(hook_config, CODEX_DISPATCHER.hook_events):
+    # Tool events carry the policy and native mailbox delivery; the prompt
+    # event carries the separate roster fold.
+    commands = registered_hook_commands(hook_config, CODEX_DISPATCHER.hook_events)
+    for command in commands:
         assert "uv" not in shlex.split(command)
-        assert "hooks/scripts/policy.sh" in command
+        assert "hooks/scripts/" in command
         assert REGENERATE_COMMAND not in command
+    assert any("hooks/scripts/policy.sh" in command for command in commands)
     assert artifacts[Path(".codex/plugins/lup/hooks/scripts/policy.sh")].executable
 
 

@@ -408,7 +408,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/coordination_delivery.py",
       "category": "generated",
-      "sha256": "190f0f98edcb49816df816f1f4f3489a864bda885fdfb4726fa591e00a7d58a2",
+      "sha256": "927a4707e522e5401f651236de3cb634a7ec559d1587cbfef9d88e079b849d46",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -625,7 +625,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/coordination_delivery.sh",
       "category": "generated",
-      "sha256": "fc2c6b27983951da1ba4a2bc3fd0f3136c82dff05bd40342c57e760197ef7e4e",
+      "sha256": "f1278dab1c57c2f15ff642c1365053abbc408f36af22d821f0add58ecabc702a",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
