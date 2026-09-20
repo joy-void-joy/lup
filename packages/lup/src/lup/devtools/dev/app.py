@@ -775,6 +775,12 @@ def create_dev_app(
 
     @app.command("undo")
     def undo_cmd(
+        repair: Annotated[
+            bool,
+            typer.Option(
+                "--repair", help="Quarantine empty undo refs that break Git fetch"
+            ),
+        ] = False,
         take: Annotated[
             str,
             typer.Option("--take", help="Snapshot the tree now, naming why"),
@@ -788,7 +794,7 @@ def create_dev_app(
             typer.Option("--keep", help="Keep at most this many snapshots"),
         ] = None,
     ) -> None:
-        """List the recoverable snapshots of this tree, or take and expire them.
+        """List, take, expire, or repair recoverable snapshots of this tree.
 
         Restoring is deliberately not offered here. Putting a snapshot back
         overwrites present work with past work -- the same class of act as
@@ -797,6 +803,22 @@ def create_dev_app(
         currently there.
         """
         root = project_root()
+        if repair:
+            try:
+                for path in undo.repair_refs(root):
+                    typer.echo(f"quarantined broken undo ref: {path}")
+            except OSError as error:
+                typer.echo(
+                    f"Undo repair stopped: {error}. Check active ref locks and directory permissions before retrying.",
+                    err=True,
+                )
+                raise typer.Exit(1) from error
+            return
+        for damaged in undo.damaged_refs(root):
+            typer.echo(
+                f"Broken undo ref {damaged.ref}; run `dev undo --repair` before fetching.",
+                err=True,
+            )
         if take:
             taken = undo.snapshot(root, take)
             typer.echo(

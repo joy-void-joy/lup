@@ -1359,6 +1359,7 @@ def git_answers(
     # lup: ignore[dict-str-payload] — variable names are an open set the caller
     # supplies, not an enumerable one this signature could name
     overrides: dict[str, str] | None = None,
+    input_text: str | None = None,
 ) -> list[str] | None:
     """One Git invocation's lines, or None when Git cannot answer.
 
@@ -1381,6 +1382,7 @@ def git_answers(
             capture_output=True,
             text=True,
             check=False,
+            input=input_text,
             env={**environ, **overrides} if overrides else None,
         )
     except OSError:
@@ -1574,13 +1576,25 @@ def undo_snapshot(
     held = tree[0][:12]
     where = namespace or undo_namespace()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
-    for stale in (
-        git_answers(["for-each-ref", "--format=%(refname)", where], root) or []
-    ):
-        if stale.endswith(f"-{held}"):
-            git_answers(["update-ref", "-d", stale], root)
+    retired = [
+        f"delete {stale}"
+        for stale in (
+            git_answers(["for-each-ref", "--format=%(refname)", where], root) or []
+        )
+        if stale.endswith(f"-{held}")
+    ]
     reference = f"{where}/{stamp}-{held}"
-    if git_answers(["update-ref", reference, commit[0]], root) is None:
+    transaction = "\n".join(
+        ["start", f"create {reference} {commit[0]}", *retired, "prepare", "commit", ""]
+    )
+    if (
+        git_answers(
+            ["-c", "core.fsync=reference", "update-ref", "--stdin"],
+            root,
+            input_text=transaction,
+        )
+        is None
+    ):
         return ""
     if cold:
         undo_expire(root, namespace=where)

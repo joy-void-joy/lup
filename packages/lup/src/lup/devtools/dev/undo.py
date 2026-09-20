@@ -56,6 +56,7 @@ line edited costs about 10 KB, which is why they expire.
 
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -190,6 +191,56 @@ def snapshot(
         (item for item in points(root, namespace) if item.ref == reference),
         None,
     )
+
+
+class DamagedUndoRef(BaseModel, frozen=True):
+    """A loose undo ref that contains no object id, retained for diagnosis."""
+
+    ref: str
+    path: Path
+
+
+def empty_undo_ref(path: Path) -> bool:
+    """Whether a regular ref file is empty or holds only a null object id."""
+    if path.is_symlink() or not path.is_file():
+        return False
+    content = path.read_bytes().strip()
+    return not content or (len(content) in {40, 64} and content == b"0" * len(content))
+
+
+def damaged_refs(root: Path) -> list[DamagedUndoRef]:
+    """Find the broken loose refs Git omits from its ordinary undo listing."""
+    common = Path(
+        git.out(
+            "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+    )
+    return [
+        DamagedUndoRef(ref=path.relative_to(common).as_posix(), path=path)
+        for path in (common / UNDO_NAMESPACE).rglob("*")
+        if not path.name.endswith(".lock") and empty_undo_ref(path)
+    ]
+
+
+def repair_refs(root: Path) -> list[Path]:
+    """Quarantine empty undo refs under Git's write lock, preserving their bytes."""
+    repaired: list[Path] = []
+    for damaged in damaged_refs(root):
+        lock = damaged.path.with_name(f"{damaged.path.name}.lock")
+        with lock.open("x"):
+            try:
+                if not empty_undo_ref(damaged.path):
+                    continue
+                common = damaged.path.parents[len(Path(damaged.ref).parts) - 1]
+                destination = (
+                    common / "lup" / "undo-damaged" / uuid4().hex / damaged.path.name
+                )
+                destination.parent.mkdir(parents=True)
+                damaged.path.replace(destination)
+                repaired.append(destination)
+            finally:
+                lock.unlink()
+    return repaired
 
 
 def points(root: Path, namespace: str = UNDO_NAMESPACE) -> list[UndoPoint]:

@@ -55,7 +55,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev refutations` | Resolve one file&#x27;s proposed content and report what it refutes. |
 | `dev directives` | Measure every `# lup: ignore` against the canonical inline placement. |
 | `dev report-friction` | File or correct workflow friction, on the tracker that owns the fix. |
-| `dev undo` | List the recoverable snapshots of this tree, or take and expire them. |
+| `dev undo` | List, take, expire, or repair recoverable snapshots of this tree. |
 | `dev history` | Trace a symbol through every branch, past this tree&#x27;s own snapshots. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
