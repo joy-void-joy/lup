@@ -276,7 +276,6 @@ class MaterialQuestion(Question, frozen=True):
     """
 
     concern_id: str
-    recheck_commit: str | None = None
     allowances: list[ConcernAllowance] = Field(
         default=[],
         description=(
