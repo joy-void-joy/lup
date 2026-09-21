@@ -1144,13 +1144,31 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
         for c in ranked[1:]
         if (c.distance, c.is_ancestor) == (best.distance, best.is_ancestor)
     ]
-    if tied:
-        typer.echo("Ambiguous base branch. Candidates:", err=True)
-        for c in [best, *tied]:
-            typer.echo(f"  {c.name} ({c.distance} commits ahead)", err=True)
-        raise typer.Exit(1)
+    if not tied:
+        return best
 
-    return best
+    # A tie is two answers, not none, and exiting over it stopped every caller
+    # rather than the one that could not proceed on a guess — which is how a
+    # clone with two siblings at one distance had its quality gate refuse to
+    # run at all, on a branch with nothing wrong with it.
+    #
+    # The integration branch settles it where it is among the candidates,
+    # since that is where work lands and what a branch nobody recorded was
+    # most likely cut from; otherwise the ranking's own first answer stands,
+    # which is stable because the candidate order is git's, by name. Either
+    # way the tie is named and the answer is reported as `guessed`, so a
+    # caller that must not act on one — `pr sync-base` declines to merge —
+    # still declines.
+    integration = get_integration_branch()
+    settled = next((c for c in [best, *tied] if c.name == integration), best)
+    typer.echo(
+        "Ambiguous base branch, equally close to "
+        + ", ".join(f"{c.name} ({c.distance} commits ahead)" for c in [best, *tied])
+        + f".\nTaking {settled.name}. Name the base with --base <branch> where "
+        "that is wrong, or record it once so nothing has to be guessed again.",
+        err=True,
+    )
+    return settled
 
 
 class RemoteMeasure(BaseModel, ABC, frozen=True):

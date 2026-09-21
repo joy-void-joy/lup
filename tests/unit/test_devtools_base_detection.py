@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 import sh
-import typer
 
 from lup.devtools.dev import branches
 from lup.devtools.dev import records
@@ -117,16 +116,22 @@ def test_the_logged_cut_resolves_what_topology_could_not(
     assert candidate.source == "created"
 
 
-def test_topology_tie_stays_ambiguous_with_nothing_logged(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_topology_tie_takes_the_integration_branch_and_says_it_did(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The same tie, on a branch whose cut git never recorded.
+    """A tie with nothing logged is two answers, and it used to be fatal.
 
     `core.logAllRefUpdates` is off for the creation alone, which is the
     condition a bare clone is in by default — so the creation goes unlogged
-    while the later commit still logs, exactly as it does for a branch cut
-    against a git directory rather than from one of its worktrees. Topology
-    is then all there is, and it has two equally good answers.
+    while the later commit still logs, exactly as for a branch cut against a
+    git directory rather than from one of its worktrees. Topology is then all
+    there is, and `main` and `feature` are equally close.
+
+    Exiting there stopped every caller rather than the one that could not
+    proceed on a guess, and in this clone that made the quality gate refuse to
+    run at all on an ordinary branch. `main` is where work lands, so it
+    settles the tie; the tie is still named, and the answer is still reported
+    `guessed` so `pr sync-base` still declines to merge onto it.
     """
     git = repo_git(repo)
     git("branch", "feature")
@@ -136,8 +141,14 @@ def test_topology_tie_stays_ambiguous_with_nothing_logged(
 
     monkeypatch.chdir(repo)
     assert branches.created_from("topic") == ""
-    with pytest.raises(typer.Exit):
-        branches.detect_base_branch("topic")
+    candidate = branches.detect_base_branch("topic")
+
+    assert candidate.name == "main"
+    assert candidate.source == "guessed"
+    complaint = capsys.readouterr().err
+    assert "Ambiguous base branch" in complaint
+    assert "feature" in complaint
+    assert "Taking main" in complaint
 
 
 def test_stale_record_falls_back_to_guessing(
