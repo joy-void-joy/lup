@@ -1,7 +1,9 @@
 {
   "projects": [
     {
-      "name": "lup"
+      "name": "lup",
+      "required": true,
+      "mount": "rw"
     }
   ]
 }
