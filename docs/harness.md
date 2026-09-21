@@ -256,6 +256,7 @@ owns the subject, then regenerate.
 - /lup:meta — Review and modify the generated harness trees, brainstorm improvements interactively
 - /lup:modify-command — Modify an existing slash command based on a description or delta
 - /lup:principle — Propagate a general principle across the entire repo
+- /lup:profile — Read, select, and switch the account a session runs as
 - /lup:rebase — Clean up commit history on the feature branch and open/update a PR
 - /lup:refactor — Rewrite a file or folder from scratch while respecting coding conventions
 - /lup:refactor-tools — Audit SDK agent tools and subagents — find gaps, overlaps, and refactoring opportunities

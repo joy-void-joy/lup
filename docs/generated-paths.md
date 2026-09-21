@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 120 artifacts
+## `claude` — 121 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -48,6 +48,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/commands/meta.md` | lup_template.harness.content.skills.meta |
 | `.claude/plugins/lup/commands/modify-command.md` | lup.harness.content.skills.modify_command |
 | `.claude/plugins/lup/commands/principle.md` | lup.harness.content.skills.principle |
+| `.claude/plugins/lup/commands/profile.md` | lup.harness.content.skills.profile |
 | `.claude/plugins/lup/commands/rebase.md` | lup.harness.content.skills.rebase |
 | `.claude/plugins/lup/commands/refactor-tools.md` | lup.harness.content.skills.refactor_tools |
 | `.claude/plugins/lup/commands/refactor.md` | lup.harness.content.skills.refactor |
@@ -133,7 +134,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 100 artifacts
+## `codex` — 101 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -224,6 +225,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/skills/meta/SKILL.md` | lup_template.harness.content.skills.meta |
 | `.codex/plugins/lup/skills/modify-command/SKILL.md` | lup.harness.content.skills.modify_command |
 | `.codex/plugins/lup/skills/principle/SKILL.md` | lup.harness.content.skills.principle |
+| `.codex/plugins/lup/skills/profile/SKILL.md` | lup.harness.content.skills.profile |
 | `.codex/plugins/lup/skills/rebase/SKILL.md` | lup.harness.content.skills.rebase |
 | `.codex/plugins/lup/skills/refactor-tools/SKILL.md` | lup.harness.content.skills.refactor_tools |
 | `.codex/plugins/lup/skills/refactor/SKILL.md` | lup.harness.content.skills.refactor |
