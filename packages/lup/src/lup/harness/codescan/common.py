@@ -52,8 +52,15 @@ suppression there is not a reasoned exception, it is the defect with a comment
 on it. Those are refused, and the message says to write the replacement.
 """
 
-type RuleContext = Literal["code", "comment"]
-"""The syntactic surface a scan rule inspects: masked code, or comment text."""
+type RuleContext = Literal["code", "comment", "prose"]
+"""The syntactic surface a scan rule inspects.
+
+``code`` is the masked source, where a name quoted in a sentence trips
+nothing. ``comment`` is comment text, which the suppression directives are
+written in and which no other rule reads. ``prose`` is what a person reads as
+a sentence — comments and docstrings both — because a rule about how prose is
+written has no reason to care which of the two carried it.
+"""
 
 RULE_CONTEXTS: tuple[RuleContext, ...] = get_args(RuleContext.__value__)
 """Every context a rule may declare, read off the alias that names them.
@@ -628,6 +635,7 @@ class LineProjections(BaseModel):
     tokenized: bool
     code: list[str]
     commented: list[str]
+    prose: list[str]
 
     @classmethod
     def parse(cls, text: str, typescript: bool = False) -> Self:
@@ -636,11 +644,18 @@ class LineProjections(BaseModel):
             tokenized=masked["comment_columns"] is not None,
             code=masked["code"],
             commented=masked["commented"],
+            prose=masked["prose"],
         )
 
     def scan_text(self, line_no: int, context: RuleContext) -> str:
         """The stripped text a rule of `context` scans at 1-based `line_no`."""
-        lines = self.code if context == "code" else self.commented
+        match context:
+            case "code":
+                lines = self.code
+            case "prose":
+                lines = self.prose
+            case _:
+                lines = self.commented
         return lines[line_no - 1].strip()
 
 

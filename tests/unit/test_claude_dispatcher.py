@@ -1365,3 +1365,33 @@ def test_a_shell_prompt_is_not_told_twice() -> None:
     decision = decide({"tool_name": "Bash", "tool_input": {"command": "rm -rf src"}})
 
     assert "systemMessage" not in decision
+
+
+@pytest.mark.parametrize(
+    ("prose", "refused"),
+    [
+        ('"""Reflection gate, previously a flag on the session."""', True),
+        ('"""Reflection gate, one verdict per output."""', False),
+        ("# previously a flag on the session", True),
+        ("# one verdict per output", False),
+    ],
+    ids=["docstring-prior-state", "docstring-clean", "comment-prior-state", "clean"],
+)
+def test_prose_narrating_a_change_is_refused_wherever_it_is_written(
+    prose: str, refused: bool
+) -> None:
+    """The gate reads a sentence wherever one is written.
+
+    A docstring carries no inline directive, so the whole-file audit skips it
+    and this gate is the only surface that reads it. Covered here rather than
+    by the rule's own examples, which both surfaces have to answer and one of
+    them structurally cannot.
+    """
+    anchor = "class ReflectionGate"
+    target = "packages/lup/src/lup/orchestration/reflection.py"
+    decision = decide(edit_payload(target, anchor, f"{prose}\n{anchor}", False))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    reason = str(specific["permissionDecisionReason"])
+    assert ("historical-voice" in reason) is refused

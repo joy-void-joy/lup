@@ -93,6 +93,8 @@ from lup.harness.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
+    HISTORICAL_VOICE_RE,
+    historical_voice_sites,
     namedtuple_sites,
     noqa_sites,
     pyright_ignore_sites,
@@ -269,6 +271,43 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         ],
         message="Never use # noqa — fix the lint issue properly",
         context="comment",
+    ),
+    AntiPattern(
+        id="historical-voice",
+        pattern=HISTORICAL_VOICE_RE,
+        matcher=Matcher(select=historical_voice_sites),
+        examples=[
+            RuleExample(
+                code="# the home a launch selects, previously read from the environment",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="# the receipt this replaced is gone; see #436 for why",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="# the home a launch selects",
+                verdict="cleared",
+            ),
+            RuleExample(
+                code='colour = "#264F78"  # the terminal selection background',
+                verdict="cleared",
+            ),
+            RuleExample(
+                code="# the key used to select a home",
+                verdict="cleared",
+            ),
+        ],
+        message=(
+            "A comment or docstring says what the code is, not how it came to "
+            "be: a phrase about a prior state, or an issue number standing in "
+            "for the reason, dates the moment it is read rather than the "
+            "moment it was written. Say what holds now; the change belongs in "
+            "the commit message, and a decision worth keeping belongs where it "
+            "is looked up. Where an external tracker's number is the reason a "
+            "workaround exists, `# lup: ignore[historical-voice]` carries it"
+        ),
+        context="prose",
     ),
     AntiPattern(
         id="generic-base",
