@@ -1182,6 +1182,13 @@ def create_dev_app(
         under the library that just landed. A conflicted merge stops the run
         and says what to resolve, because everything after it is compiled from
         declarations the merge has not finished writing.
+
+        Run again over a resolved merge, it finishes that pass rather than
+        starting a new one: the pin stays where the interrupted pass put it,
+        the merge is concluded here, and the copied half is compiled again
+        against the declaration the resolution wrote — which is how a
+        resolution that widens what this project takes from upstream lands
+        what it widened.
         """
         update_mod.updated(
             project_root(),
