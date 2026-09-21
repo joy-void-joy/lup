@@ -862,7 +862,15 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # `uv`, which locks its cache whenever it resolves dependencies
                 # — which a changed pyproject.toml forces, and an integration
                 # merge is what changes pyproject.toml.
-                writable_paths=["~/.cache/uv"],
+                #
+                # `/tmp` is where a session puts what it is not keeping: a
+                # command's captured output, a scratch script, the scratchpad
+                # its runtime hands it. It is POSIX's own disposable root and
+                # holds nothing this policy protects, so it is granted for
+                # every machine rather than met one redirect at a time — and
+                # undeclared it refuses the write while the classifier allows
+                # it, which reads as a broken command rather than a boundary.
+                writable_paths=["~/.cache/uv", "/tmp"],
                 excluded_commands=EXCLUDED_COMMANDS,
             ),
         ),
