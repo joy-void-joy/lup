@@ -317,7 +317,7 @@
     {
       "path": ".claude/plugins/lup/commands/update.md",
       "category": "generated",
-      "sha256": "14f9613db3c646e75969d82317622be7c78401af29c2b1dbeef93aef514d98d9",
+      "sha256": "a83a186ad86947f361188ce83dbfc20fb2c3d28cc1fa46745ec46a867ff982b9",
       "semantic_id": "skill.update",
       "executable": false
     },

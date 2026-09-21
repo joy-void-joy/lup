@@ -611,7 +611,7 @@
     {
       "path": ".codex/plugins/lup/skills/update/SKILL.md",
       "category": "generated",
-      "sha256": "de2e8f710c82e0720a93d11d7f98506f20ccffe3bdd36f78d6dcd22a81f02b9a",
+      "sha256": "858d96f20af4caf523e1ce1c01bc7cb671eb3f197ffb3c14285f0591f577aeeb",
       "semantic_id": "skill.update",
       "executable": false
     },
