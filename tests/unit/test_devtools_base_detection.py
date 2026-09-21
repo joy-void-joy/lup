@@ -2,12 +2,17 @@
 
 Worktree creation records its base in ``<common>/lup/branches/<name>.json``,
 and the ``branch.<name>.lup-base`` config key it was written under before
-still answers; detection prefers either over topological guessing. Both
-spellings are exercised here, because a clone whose records were never
-adopted has to keep behaving as it did. Topology alone cannot recover
-the creation point — once branches share tips or the parent merges on, every
-candidate looks alike and the nearest one wins regardless of where the branch
-was really cut.
+still answers; detection prefers either over everything else. Both spellings
+are exercised here, because a clone whose records were never adopted has to
+keep behaving as it did. Topology alone cannot recover the creation point —
+once branches share tips or the parent merges on, every candidate looks alike
+and the nearest one wins regardless of where the branch was really cut.
+
+Between the two sits the cut git logged for itself, which is what a branch
+made with plain ``git`` has instead of a record, and which is reported as its
+own source because it is a byproduct rather than a statement. It is missing
+often enough to be worth pinning missing: a tie that the log resolves and the
+same tie with nothing logged are both here.
 """
 
 from pathlib import Path
@@ -90,15 +95,47 @@ def test_an_integration_branch_that_moved_on_still_wins_over_a_stale_ancestor(
     assert candidate.distance == 2
 
 
-def test_topology_tie_stays_ambiguous_without_a_record(
+def test_the_logged_cut_resolves_what_topology_could_not(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`main` and `feature` are both one commit behind `topic`, so distance
+    cannot choose between them — and git logged which one `topic` was cut
+    from, so nothing has to.
+
+    Reported as `created` rather than `recorded`: nobody stated this, git
+    wrote it down on the way past, and a reader deciding how much to trust an
+    answer needs the two kept apart.
+    """
     git = repo_git(repo)
     git("branch", "feature")
     git("switch", "-c", "topic", "feature")
     commit_named_file(repo, "t1.txt")
 
     monkeypatch.chdir(repo)
+    candidate = branches.detect_base_branch("topic")
+    assert candidate.name == "feature"
+    assert candidate.source == "created"
+
+
+def test_topology_tie_stays_ambiguous_with_nothing_logged(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same tie, on a branch whose cut git never recorded.
+
+    `core.logAllRefUpdates` is off for the creation alone, which is the
+    condition a bare clone is in by default — so the creation goes unlogged
+    while the later commit still logs, exactly as it does for a branch cut
+    against a git directory rather than from one of its worktrees. Topology
+    is then all there is, and it has two equally good answers.
+    """
+    git = repo_git(repo)
+    git("branch", "feature")
+    git("-c", "core.logAllRefUpdates=false", "branch", "topic", "feature")
+    git("switch", "topic")
+    commit_named_file(repo, "t1.txt")
+
+    monkeypatch.chdir(repo)
+    assert branches.created_from("topic") == ""
     with pytest.raises(typer.Exit):
         branches.detect_base_branch("topic")
 

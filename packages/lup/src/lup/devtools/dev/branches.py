@@ -923,15 +923,20 @@ def unlanded_siblings(
 class BaseCandidate(BaseModel):
     """A candidate base branch, measured against the branch under test.
 
-    ``source`` states whether the name came from the base recorded at
-    worktree creation or from topological guessing.
+    ``source`` states where the name came from, and the three are ordered by
+    how much weight they carry. ``recorded`` is the base lup wrote at worktree
+    creation: somebody's statement of intent. ``created`` is the cut git
+    logged in the branch's own reflog: a byproduct, and evidence rather than
+    authority — :func:`created_from` says what it cannot answer for.
+    ``guessed`` is topology, which cannot recover a creation point at all and
+    is the one a caller has to confirm before acting on it.
     """
 
     name: str
     distance: int
     merge_base: str
     is_ancestor: bool
-    source: Literal["recorded", "guessed"] = "guessed"
+    source: Literal["recorded", "created", "guessed"] = "guessed"
 
 
 def recorded_base(branch: str) -> str | None:
@@ -941,6 +946,71 @@ def recorded_base(branch: str) -> str | None:
     a record exists at all and an empty string is a name nothing carries.
     """
     return records.recorded_base(branch) or None
+
+
+# lup: ignore[constant-declaration] — git's own reflog wording, which `git
+# branch`, `git switch -c` and `git worktree add -b` all write, and not a
+# spelling anything here chooses
+CREATION_ENTRY = "branch: Created from "
+
+
+def created_from(branch: str) -> str:
+    """The branch git logged this one as cut from, empty where it logged none.
+
+    `branch: Created from <ref>` is the first reflog entry git writes for a
+    new branch, and `git branch`, `git switch -c` and `git worktree add -b`
+    all write it — measured on git 2.55, all three. So a branch made with
+    plain git answers here, where lup's own record answers only for a branch
+    made by lup's own command. That is the whole point of asking: a base
+    should not depend on which command happened to cut the branch.
+
+    **Evidence, not authority, and empty is unremarkable.** Four ways it says
+    nothing, none of them a fault worth reporting:
+
+    - A bare clone does not log ref updates: `core.logAllRefUpdates` defaults
+      to false without a working tree, so a branch cut by running git against
+      the git directory itself carries no entry, while the same command run
+      from one of its worktrees does. A repository kept as a git directory
+      with worktrees beside it — which is how a machine holds several
+      checkouts of one project — is in that case by default.
+    - Reflogs expire, at 90 days for a reachable entry, and the creation is
+      the oldest entry a branch has.
+    - They are per-clone and never fetched, so nobody else's clone can answer
+      about a branch this one cut.
+    - The entry names whatever ref the command was given, which may be `HEAD`
+      or a bare commit rather than a branch.
+
+    So this ranks below the written record, which is a deliberate statement,
+    and a caller reads its absence as "ask topology" rather than as anything
+    being wrong.
+
+    A branch name is the only answer taken. `HEAD` names wherever the creating
+    checkout stood and leaves a later reader nothing to measure, a
+    remote-tracking ref answers as the local branch it tracks, and a bare
+    commit is a base no `pr sync-base` could fetch.
+    """
+    from lup.devtools.dev.worktree import branch_exists
+
+    logged = git.lines("reflog", "show", "--format=%gs", f"refs/heads/{branch}")
+    cut = next(
+        (
+            entry.removeprefix(CREATION_ENTRY)
+            for entry in reversed(logged)
+            if entry.startswith(CREATION_ENTRY)
+        ),
+        "",
+    )
+    if branch_exists(cut):
+        return cut
+    # A remote's own prefix, stripped from the list of remotes rather than at
+    # the first slash: `feat/x` is one branch name and `origin/dev` is two
+    # things, and only the second is somebody else's copy of a local branch.
+    tracked = (
+        stripped
+        for remote in git.lines("remote")
+        if (stripped := cut.removeprefix(f"{remote}/")) != cut
+    )
+    return next((name for name in tracked if branch_exists(name)), "")
 
 
 def decayed_base_complaint(branch: str, recorded: str, *, present: bool) -> str:
@@ -965,9 +1035,10 @@ def decayed_base_complaint(branch: str, recorded: str, *, present: bool) -> str:
     )
     return (
         f"{branch} records {recorded} as its base, {cause}. "
-        "Guessing from topology instead, which is what a branch carrying no "
-        "record does — so whatever reads this cannot tell the two apart, and "
-        "a command that refuses a guessed base will refuse this one.\n"
+        "Falling back to the cut git logged, and to topology where it logged "
+        "none — so whatever reads this cannot tell a record that decayed from "
+        "a branch that never carried one, and a command that refuses a "
+        "guessed base will refuse this one.\n"
         f"Name the base with --base <branch> to settle it, or write "
         f'{{"base": "<branch>"}} into {records.record_location(branch)}, '
         "beneath the git directory every worktree of this repository shares."
@@ -979,11 +1050,14 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
 
     A base recorded at worktree creation (:mod:`lup.devtools.dev.records`) wins
     outright — topology cannot recover the creation point once the parent
-    has merged on. Without a record, every local branch is measured by its
-    merge-base distance and the nearest wins, with ancestry breaking a tie
-    between equals and disqualifying nobody: an integration branch that has
-    taken a commit since the cut is not an ancestor, and that is the ordinary
-    state of one rather than a reason to rule it out.
+    has merged on. The cut git logged comes next, which is what lets a branch
+    made with plain ``git worktree add -b`` answer at all, and which
+    :func:`created_from` leaves empty often enough that its absence is
+    ordinary. Without either, every local branch is measured by its merge-base
+    distance and the nearest wins, with ancestry breaking a tie between equals
+    and disqualifying nobody: an integration branch that has taken a commit
+    since the cut is not an ancestor, and that is the ordinary state of one
+    rather than a reason to rule it out.
 
     A record whose branch has since been deleted is the one case where
     winning outright and having nothing to say are the same code path, so it
@@ -1024,6 +1098,16 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
         typer.echo(
             decayed_base_complaint(effective, recorded, present=present), err=True
         )
+
+    # What git logged when the branch was cut: a fact about this branch rather
+    # than a reading of the shape around it, so it is taken ahead of topology
+    # and behind the record, which is somebody saying what they meant. Its
+    # absence is the ordinary case for half the ways a branch is made, and is
+    # passed over without a word.
+    cut = created_from(effective)
+    logged = measure(cut) if cut in local_branches else None
+    if logged is not None:
+        return logged.model_copy(update={"source": "created"})
 
     candidates = [m for c in local_branches if (m := measure(c)) is not None]
 

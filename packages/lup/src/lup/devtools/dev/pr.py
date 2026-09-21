@@ -286,7 +286,13 @@ class MergeResult(PRResult):
 class SyncBaseResult(PRResult):
     feature_branch: str
     base_branch: str
-    base_source: Literal["explicit", "recorded", "guessed"]
+    base_source: Literal["explicit", "created", "recorded", "guessed"]
+    """Where the base came from, which decides whether anything was merged.
+
+    Reaches a caller reading the JSON as well as one reading the terminal,
+    since it is the difference between a merge that did not happen and one
+    that was not needed.
+    """
     merged: bool
     conflicts: list[str]
 
@@ -359,10 +365,17 @@ def output_result(result: PRResult, as_json: bool) -> None:
 
 
 class DetectedBase(BaseModel):
-    """The auto-detected base branch and how its name was determined."""
+    """The auto-detected base branch and how its name was determined.
+
+    ``created`` sits with ``recorded`` rather than with ``guessed``, which is
+    what decides whether :func:`sync_base` merges. Both name a base somebody
+    or something wrote down at the moment of the cut; topology names one
+    read off the shape of the graph afterwards, and only that reading is
+    unsafe to merge onto without a caller confirming it.
+    """
 
     name: str
-    source: Literal["recorded", "guessed"]
+    source: Literal["recorded", "created", "guessed"]
 
 
 def find_base_branch() -> DetectedBase:
@@ -663,7 +676,7 @@ def sync_base(
     because a warning on stderr does not reach one reading the JSON.
     """
     feature = current_branch()
-    base_source: Literal["explicit", "recorded", "guessed"] = "explicit"
+    base_source: Literal["explicit", "created", "recorded", "guessed"] = "explicit"
     if base:
         base_branch = base
     else:
