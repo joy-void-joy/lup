@@ -302,6 +302,44 @@ def merged_at(root: Path, branch: str) -> str:
     return compiled_at(root, base)
 
 
+def tree_at(root: Path, commit: str) -> str:
+    """The tree one commit holds, so two commits' contents can be compared.
+
+    What a branch decision is made on rather than the commit id: two compiles
+    of one scaffold record identical trees and differing commits, because a
+    commit carries its parent and the time it was written.
+    """
+    return git.out("-C", str(root), "rev-parse", f"{commit}^{{tree}}")
+
+
+class RecordedScaffold(BaseModel, frozen=True):
+    """One compiled scaffold written into the repository, on no branch yet."""
+
+    tree: str
+    """The tree object ``write-tree`` recorded, in full."""
+
+    built: CompiledScaffold
+    """What was compiled into it, for the message a commit of it carries."""
+
+
+def recorded_scaffold(
+    root: Path,
+    repository: Path,
+    source: ScaffoldSource,
+    package: str,
+    commit: str,
+) -> RecordedScaffold:
+    """Compile ``scaffold(commit)`` and record it as a tree of this repository.
+
+    Recorded before any branch moves, because whether the branch should move
+    at all is answered by comparing this tree with the one already there.
+    """
+    with TemporaryDirectory() as holding:
+        contents = Path(holding) / "scaffold"
+        built = compiled(repository, commit, source, package, contents)
+        return RecordedScaffold(tree=written_tree(root, contents), built=built)
+
+
 def advanced(
     root: Path,
     repository: Path,
@@ -315,14 +353,32 @@ def advanced(
     on it where there is. Either way the scaffold tree replaces the branch's
     whole tree, because a file upstream deleted has to leave the scaffold or
     the merge would go on reintroducing it.
+
+    A compile landing exactly what the branch already holds — the same tree,
+    of the same upstream commit — records nothing and hands back the head
+    standing there. What the scaffold is depends on the project's declaration
+    as much as on the commit, so the same commit is compiled again whenever
+    that declaration moves, which is what resolving a scaffold conflict does;
+    and where neither moved, a second commit of identical bytes would advance
+    the branch without advancing what it holds, leaving a merge for git to
+    report with nothing in it. Both halves are read, because the trailer is
+    part of what a scaffold commit carries: an upstream commit that changed
+    nothing in the copied trees compiles the same tree under a new name, and
+    the branch has to take that name or every later reading of what this
+    project merged is a commit behind.
     """
-    with TemporaryDirectory() as holding:
-        contents = Path(holding) / "scaffold"
-        built = compiled(repository, commit, source, package, contents)
-        tree = written_tree(root, contents)
+    holding = recorded_scaffold(root, repository, source, package, commit)
     head = branch_head(root, source.branch)
+    if (
+        head
+        and holding.tree == tree_at(root, head)
+        and compiled_at(root, head) == commit
+    ):
+        return head
     parents = [head] if head else []
-    recorded_commit = recorded(root, tree, scaffold_message(source, built), parents)
+    recorded_commit = recorded(
+        root, holding.tree, scaffold_message(source, holding.built), parents
+    )
     git(
         "-C",
         str(root),
@@ -432,12 +488,59 @@ def planned(root: Path, branch: str) -> MergePlan:
     )
 
 
+def unresolved(root: Path) -> list[str]:
+    """Every path this checkout's merge still holds unmerged in its index.
+
+    The index rather than the working tree, because that is what git answers
+    a commit with: a file edited into shape and not added back is resolved to
+    its reader and unmerged to git, and it is git that refuses the commit.
+    """
+    return git.lines("-C", str(root), "diff", "--name-only", "--diff-filter=U")
+
+
+def merging(root: Path) -> str:
+    """The commit a merge standing in this checkout is bringing in, or nothing.
+
+    Git writes ``MERGE_HEAD`` when a merge stops for a resolution and removes
+    it when the merge commit lands, so this is what says a merge is still
+    open — and whose commit it is open on, which is how an update tells its
+    own interrupted pass from a merge somebody else started.
+    """
+    return git.out(
+        "-C",
+        str(root),
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "MERGE_HEAD",
+        _ok_code=[0, 1],
+    )
+
+
+def concluded(root: Path) -> str:
+    """Commit the merge standing in this checkout, and hand back the commit.
+
+    Git's own prepared message, so the commit reads as the merge it is. And
+    ``--no-verify``, which is not a way around a gate: a commit concluding a
+    merge is mid-transaction by exactly the definition the drift guard cannot
+    be satisfied at, since the generated trees are compiled from declarations
+    the resolution has just rewritten and the regeneration that settles them
+    comes after. Git draws the same line — a merge it completes on its own
+    runs ``pre-merge-commit`` rather than ``pre-commit`` — so the guard sees
+    only the merges somebody had to resolve by hand, and the commit after
+    this one is read by it as always.
+    """
+    git("-C", str(root), "commit", "--no-verify", "--no-edit")
+    return git.out("-C", str(root), "rev-parse", "HEAD")
+
+
 def merged(root: Path, source: ScaffoldSource) -> MergeOutcome:
     """Merge the scaffold branch into this checkout, and say what happened.
 
     The one operation here that touches the working tree, and it is an
-    ordinary merge: what it leaves conflicted is resolved and committed the
-    way every other conflict in this repository is.
+    ordinary merge: what it leaves conflicted is resolved the way every other
+    conflict in this repository is, and concluded by the update that started
+    it rather than by hand.
     """
     plan = planned(root, source.branch)
     git(
@@ -448,10 +551,7 @@ def merged(root: Path, source: ScaffoldSource) -> MergeOutcome:
         f"refs/heads/{source.branch}",
         _ok_code=[0, 1],
     )
-    return MergeOutcome(
-        plan=plan,
-        conflicted=git.lines("-C", str(root), "diff", "--name-only", "--diff-filter=U"),
-    )
+    return MergeOutcome(plan=plan, conflicted=unresolved(root))
 
 
 def locked_git_source(root: Path, distribution: str) -> str:

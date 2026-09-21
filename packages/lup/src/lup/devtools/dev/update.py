@@ -152,6 +152,105 @@ def regenerated(root: Path, report: Callable[[str], None]) -> None:
     uv("run", "lup-devtools", "harness", "generate", "all", _cwd=str(root))
 
 
+def settled(
+    root: Path,
+    repository: Path,
+    source: scaffold.ScaffoldSource,
+    package: str,
+    commit: str,
+    already: str,
+    report: Callable[[str], None],
+) -> scaffold.MergeOutcome | None:
+    """Merge ``scaffold(commit)`` as the declaration standing now compiles it.
+
+    The compile is a pure function of the upstream commit *and* this project's
+    own declaration of what it takes, so both halves have to be read here
+    rather than the commit alone. Where neither moved, the branch does not
+    either and there is nothing to merge; where the declaration moved — which
+    is what resolving a scaffold conflict does — the same commit compiles a
+    wider or narrower tree, and merging it is how the difference arrives.
+
+    Nothing is regenerated after a conflicted merge: the trees are compiled
+    from declarations the merge has not finished writing, and a regeneration
+    over half a merge produces an artifact matching neither side.
+    """
+    standing = scaffold.branch_head(root, source.branch)
+    head = scaffold.advanced(root, repository, source, package, commit)
+    if head == standing and already == commit:
+        report(f"The copied half is already merged at {short_sha(commit)}.")
+        regenerated(root, report)
+        return None
+    outcome = scaffold.merged(root, source)
+    report(f"Copied half: {outcome.spelled()}.")
+    for line in owed_since(already, repository, report):
+        report(line)
+    for path in outcome.conflicted:
+        report(f"  conflicted  {path}")
+    if not outcome.complete():
+        report(
+            "Resolve those, `git add` them, and run `dev update` again: that "
+            "pass concludes the merge and compiles the copied half against "
+            "the declaration your resolution wrote, so an upstream path this "
+            "project stops declining arrives in the same pass. Nothing is "
+            "regenerated before then — the native trees are compiled from "
+            "declarations the merge has not finished writing."
+        )
+        return outcome
+    regenerated(root, report)
+    return outcome
+
+
+def resumed(
+    root: Path,
+    repository: Path,
+    source: scaffold.ScaffoldSource,
+    package: str,
+    standing: str,
+    report: Callable[[str], None],
+) -> scaffold.MergeOutcome | None:
+    """Finish the scaffold merge left standing here, at the commit it carries.
+
+    Resolving a scaffold conflict is where a project decides what of upstream
+    it wants, so it is also where :attr:`ScaffoldSource.declined` changes —
+    and the scaffold commit under the standing merge was compiled from the
+    declaration that resolution has just replaced. A path it stopped
+    declining is in neither side of that merge, which is why the resolution
+    cannot be the end of the pass: the merge is concluded here and the copied
+    half compiled again against what the resolution wrote, so the two agree
+    without a commit nobody is in a position to make in between.
+
+    The pin is not moved. This pass finishes the one an earlier pass started,
+    so its commit is the one the standing merge already carries, read back off
+    that scaffold commit's own trailer rather than resolved a second time.
+    """
+    if standing != scaffold.branch_head(root, source.branch):
+        report(
+            f"A merge of {short_sha(standing)} is standing in this checkout "
+            f"and it is not {source.branch}'s. Finish or abort it before "
+            "updating: git holds one merge at a time, and the copied half "
+            "arrives as one."
+        )
+        return None
+    held = scaffold.unresolved(root)
+    if held:
+        report(f"The merge of {source.branch} is still unresolved:")
+        for path in held:
+            report(f"  conflicted  {path}")
+        report(
+            "Resolve those and `git add` them, then run `dev update` again. "
+            "Nothing is compiled while the index holds a conflict, because "
+            "what the resolution writes is what the copied half is compiled "
+            "against."
+        )
+        return scaffold.MergeOutcome(
+            plan=scaffold.planned(root, source.branch), conflicted=held
+        )
+    taken = scaffold.compiled_at(root, standing)
+    report(f"Concluding the merge of {source.branch} at {short_sha(taken)}...")
+    scaffold.concluded(root)
+    return settled(root, repository, source, package, taken, taken, report)
+
+
 def updated(
     root: Path,
     source: scaffold.ScaffoldSource,
@@ -163,12 +262,15 @@ def updated(
     """Move every carrier to one upstream commit, and say what it cost.
 
     Nothing is answered before the pin moves, because the pin is what decides
-    the commit. Nothing is regenerated after a conflicted merge either: the
-    trees are compiled from declarations the merge has not finished writing,
-    and a regeneration over half a merge produces an artifact matching neither
-    side.
+    the commit — except where a merge of the copied half is already standing
+    in the checkout. Then this pass is the second half of an earlier one: the
+    commit was decided there, and re-resolving the pin now would move the
+    carriers out from under a merge that is only part-way applied.
     """
     repository = upstream_checkout(source.project, report)
+    standing = scaffold.merging(root)
+    if standing:
+        return resumed(root, repository, source, package, standing, report)
     resolved = resolved_pin(root, distribution, commit, report)
     if not resolved:
         report(
@@ -180,26 +282,7 @@ def updated(
     report(f"Library at {short_sha(resolved)}; syncing the environment...")
     uv("sync", _cwd=str(root))
     already = scaffold.merged_at(root, source.branch)
-    if already == resolved:
-        report(f"The copied half is already merged at {short_sha(resolved)}.")
-        regenerated(root, report)
-        return None
-    scaffold.advanced(root, repository, source, package, resolved)
-    outcome = scaffold.merged(root, source)
-    report(f"Copied half: {outcome.spelled()}.")
-    for line in owed_since(already, repository, report):
-        report(line)
-    for path in outcome.conflicted:
-        report(f"  conflicted  {path}")
-    if not outcome.complete():
-        report(
-            "Resolve those, commit the merge, and run `dev update` again: the "
-            "native trees are compiled from declarations the merge has not "
-            "finished writing."
-        )
-        return outcome
-    regenerated(root, report)
-    return outcome
+    return settled(root, repository, source, package, resolved, already, report)
 
 
 def adopted(

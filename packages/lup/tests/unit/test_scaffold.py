@@ -57,10 +57,18 @@ def upstream_at_base(tmp_path: Path) -> tuple[Path, str]:
     return root, git.out("-C", str(root), "rev-parse", "HEAD")
 
 
-def adopter_from(tmp_path: Path, upstream: Path, base: str) -> Path:
-    """A project stamped out of ``scaffold(base)``, with a domain of its own."""
+def adopter_from(
+    tmp_path: Path, upstream: Path, base: str, source: ScaffoldSource = SOURCE
+) -> Path:
+    """A project stamped out of ``scaffold(base)``, with a domain of its own.
+
+    ``source`` is what that project took, so a project that declined one of
+    upstream's modules is stamped without it — the state every later reading
+    of a decline has to start from, since a declined path is absent from the
+    project and from every scaffold commit alike.
+    """
     root = repository(tmp_path / "adopter")
-    compiled(upstream, base, SOURCE, PACKAGE, root)
+    compiled(upstream, base, source, PACKAGE, root)
     wrote(root, "src/demo/domain.py", "answer = 42\n")
     wrote(root, "README.md", "the adopter's own\n")
     committed(root, "stamped out")
@@ -143,6 +151,35 @@ def test_an_update_is_a_merge_against_the_commit_the_project_was_stamped_from(
     assert (adopter / "src" / "demo" / "domain.py").read_text(
         encoding="utf-8"
     ) == "answer = 43\n"
+
+
+def test_a_compile_of_what_the_branch_already_holds_records_nothing(
+    tmp_path: Path,
+) -> None:
+    """The branch advances on what it holds, not on having been asked again.
+
+    An update compiles the copied half whenever the project's declaration of
+    what it takes may have moved, which is every pass — so a pass where
+    neither the commit nor the declaration moved has to leave the branch
+    where it is. A second commit of identical bytes would give git a merge to
+    report with nothing in it.
+    """
+    upstream, base = upstream_at_base(tmp_path)
+    adopter = adopter_from(tmp_path, upstream, base)
+    rooted = adopt(adopter, upstream, SOURCE, PACKAGE, base)
+
+    again = advanced(adopter, upstream, SOURCE, PACKAGE, base)
+    widened = advanced(
+        adopter,
+        upstream,
+        SOURCE.model_copy(update={"declined": ["tests/test_demonstration.py"]}),
+        PACKAGE,
+        base,
+    )
+
+    assert again == rooted
+    assert widened != rooted
+    assert compiled_at(adopter, widened) == base
 
 
 def test_the_merge_base_carries_which_upstream_commit_was_taken(
