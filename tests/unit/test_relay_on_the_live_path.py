@@ -6,7 +6,9 @@ compiled dispatcher does not use, and the compiled dispatcher is what a native
 session actually runs.
 
 So this drives the emitted script — not a renderer, not the canonical policy —
-and reads the queue back through the surface a reviewer reads it through.
+and reads the queue back through the surface a reviewer reads it through. The
+script is Codex's, because a runtime with an ask effect renders the question
+instead of parking it, and the queue is what the other one falls back to.
 """
 
 import json
@@ -21,7 +23,7 @@ from lup.types import JsonObject
 
 RUNNER = CliRunner()
 
-DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
+DISPATCHER = Path(".codex/plugins/lup/hooks/scripts/policy.py")
 
 
 def judged(command: str, cwd: Path) -> JsonObject:
@@ -38,7 +40,9 @@ def judged(command: str, cwd: Path) -> JsonObject:
         _in=json.dumps(payload), _ok_code=[0, 2], _cwd=str(cwd), _return_cmd=True
     )
     assert isinstance(result, sh.RunningCommand)
-    return json.loads(result.stdout)
+    # A permitted call is answered by saying nothing, so there is no verdict
+    # document to read back — only the absence of one.
+    return json.loads(result.stdout) if result.stdout else {}
 
 
 def test_a_question_the_dispatcher_reaches_is_parked_in_the_relay(
@@ -119,8 +123,7 @@ def test_a_reviewer_can_answer_what_the_dispatcher_parked(tmp_path: Path) -> Non
     assert settled.state == "approved"
     assert settled.answer is not None
     assert settled.answer.note == "force-with-lease"
-    approved = judged("git push --delete origin feat", tmp_path)["hookSpecificOutput"]
-    assert isinstance(approved, dict) and approved["permissionDecision"] == "allow"
+    assert judged("git push --delete origin feat", tmp_path) == {}
     retried = judged("git push --delete origin feat", tmp_path)["hookSpecificOutput"]
     assert isinstance(retried, dict) and retried["permissionDecision"] == "deny"
     (pending,) = relay(tmp_path).pending()
@@ -154,8 +157,7 @@ def test_approved_question_cannot_release_a_changed_call(tmp_path: Path) -> None
         "hookSpecificOutput"
     ]
     assert isinstance(changed, dict) and changed["permissionDecision"] == "deny"
-    approved = judged(original, tmp_path)["hookSpecificOutput"]
-    assert isinstance(approved, dict) and approved["permissionDecision"] == "allow"
+    assert judged(original, tmp_path) == {}
 
 
 def test_an_answer_the_dispatcher_could_not_scope_says_so(tmp_path: Path) -> None:

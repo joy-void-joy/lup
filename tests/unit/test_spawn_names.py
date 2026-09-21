@@ -151,16 +151,9 @@ def test_an_escalated_spawn_becomes_the_question_the_caller_asked_for(
 
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
-    assert specific["permissionDecision"] == "deny"
+    assert specific["permissionDecision"] == "ask"
     assert "measuring the hook" in str(specific["permissionDecisionReason"])
-    relay = QuestionRelay(tmp_path / ".lup/questions.jsonl")
-    (question,) = relay.pending()
-    assert "measuring the hook" in question.reason
-    relay.answer(question.id, "operator", True)
-    approved = decide(payload)["hookSpecificOutput"]
-    assert isinstance(approved, dict) and approved["permissionDecision"] == "allow"
-    retried = decide(payload)["hookSpecificOutput"]
-    assert isinstance(retried, dict) and retried["permissionDecision"] == "deny"
+    assert QuestionRelay(tmp_path / ".lup/questions.jsonl").pending() == []
 
 
 def test_a_project_requiring_no_name_leaves_every_spawn_alone() -> None:

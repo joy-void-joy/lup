@@ -538,15 +538,21 @@ inherit whatever the operator had exported. A hook script is spawned by the
 runtime with the runtime's environment, so an agent exporting the variable
 inside a shell tool call never reaches the dispatcher that judges it.
 
-## Native hook review queue
+## Where a native ask is put
 
-Both native dispatchers park unresolved policy asks in `.lup/questions.jsonl`
-and refuse execution until an explicit answer is recorded. The refusal names
-the review id and commands to inspect, approve, or reject it. Claude auto mode
-has executed a native hook ask without a human prompt (#436). Codex requires
-the same recorded authority at both pre-tool and permission-request events;
-a pending or rejected review returns an explicit native denial. Neither
-native prompting nor observed execution is evidence of a human answer.
+A policy ask goes to the person through whatever channel the runtime has.
+Claude renders it as a native permission request carrying the reason that
+earned it, and parks nothing. Codex has no ask effect at its pre-tool
+boundary, so it parks the call in `.lup/questions.jsonl` and refuses execution
+until an explicit answer is recorded, at both pre-tool and permission-request
+events; the refusal names the review id and the commands to inspect, approve
+or reject it, and a pending or rejected review returns an explicit denial.
+
+What a rendered ask rests on is the session answering to a person. An autonomy
+mode answers on the session's behalf, including for the operations the
+`human_only` reviewer reserves, and no field in the hook payload separates a
+prompt somebody saw from one a mode settled. Observed execution is evidence of
+neither: it records that a call ran and confers no authority over the next.
 
 Codex delivers that denial as a supported structured `deny` carrying
 `systemMessage`, so its app-server raises an operator-visible warning in

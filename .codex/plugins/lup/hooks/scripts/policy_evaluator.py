@@ -857,16 +857,22 @@ def observe_hook_call(
             else entry["operation"]["tool"] == tool
             and (entry["operation"]["payload"] == arguments or same_call(entry))
         )
-        and entry["state"] in ("pending", "approved", "rejected", "dispatched")
+        and entry["state"]
+        in ("pending", "approved", "rejected", "dispatched", "prompted")
     ]
     if not matches:
         return []
     entry = matches[-1]
     matches_call = same_call(entry)
-    authorized = entry["state"] == "dispatched" and matches_call
+    # `prompted` is the runtime's own dialog answering for a call whose effect
+    # a checkpoint restores: authority nobody recorded, so what is checked here
+    # is only that what ran is what was shown. A receipt proves who answered;
+    # this proves the document and the input did not move underneath them.
+    settled = entry["state"] in ("dispatched", "prompted")
+    authorized = settled and matches_call
     problem = (
         "with a tool or payload different from the reviewed call"
-        if entry["state"] == "dispatched" and not matches_call
+        if settled and not matches_call
         else "without a consumed approval receipt"
     )
     entry["state"] = "completed" if authorized else "in_doubt"

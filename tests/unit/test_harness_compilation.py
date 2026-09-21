@@ -1922,7 +1922,7 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
     )
     assert isinstance(claude, sh.RunningCommand)
     rendered = ClaudeHookOutput.model_validate_json(claude.stdout)
-    assert rendered.hook_specific_output.permission_decision == "deny"
+    assert rendered.hook_specific_output.permission_decision == "ask"
     assert url in rendered.hook_specific_output.permission_decision_reason
     codex = codex_hook_result(
         {**body, "tool_name": "web_fetch", "tool_input": {"url": url}},
@@ -1933,11 +1933,9 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
     spoken = json.loads(codex.stdout)["hookSpecificOutput"]
     assert spoken["permissionDecision"] == "deny"
     assert url in spoken["permissionDecisionReason"]
+    # Only the runtime without an ask effect parks; the other one asked.
     pending = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
-    assert {question.operation.tool for question in pending} == {
-        "WebFetch",
-        "web_fetch",
-    }
+    assert {question.operation.tool for question in pending} == {"web_fetch"}
     assert all(question.operation.payload == {"url": url} for question in pending)
 
     for data_root in (claude_data, codex_data):
@@ -2300,16 +2298,12 @@ def test_generated_claude_hook_refuses_the_declared_calls(tmp_path: Path) -> Non
     proposal: JsonObject = {
         "content": "# lup: escalate[decision]: the user asked for a page\npage"
     }
+    # The marker exists to turn a refusal into the question its caller asked
+    # for, and the question is put where the caller's reader already is.
     escalated = decision("Artifact", proposal)
-    assert escalated.permission_decision == "deny"
-    store = QuestionRelay(tmp_path / ".lup/questions.jsonl")
-    (question,) = store.pending()
-    assert question.id in escalated.permission_decision_reason
-    assert "the user asked for a page" in question.reason
-    assert question.operation.payload == proposal
-    store.answer(question.id, "operator", True)
-    assert decision("Artifact", proposal).permission_decision == "allow"
-    assert decision("Artifact", proposal).permission_decision == "deny"
+    assert escalated.permission_decision == "ask"
+    assert "the user asked for a page" in escalated.permission_decision_reason
+    assert QuestionRelay(tmp_path / ".lup/questions.jsonl").pending() == []
 
 
 def test_generated_claude_hook_leaves_every_other_skill_to_the_runtime() -> None:
@@ -2612,11 +2606,9 @@ def test_generated_claude_hook_maps_agent_type_to_editor_autonomy(
     tmp_path = autonomy_checkout
     for agent_type in (None, "implementer"):
         decision = autonomy_decision(tmp_path, agent_type=agent_type)
-        assert decision.permission_decision == "deny"
-        (question,) = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
-        assert question.id in decision.permission_decision_reason
-        assert "written whole" in question.reason
-        assert question.operation.payload["content"] == AUTONOMY_PROBE
+        assert decision.permission_decision == "ask"
+        assert "written whole" in decision.permission_decision_reason
+        assert QuestionRelay(tmp_path / ".lup/questions.jsonl").pending() == []
     for agent_type in ("resolver-worker", "lup:resolver-worker"):
         assert (
             autonomy_decision(tmp_path, agent_type=agent_type).permission_decision
@@ -2635,11 +2627,9 @@ def test_generated_claude_hook_maps_declared_identity_to_editor_autonomy(
     tmp_path = autonomy_checkout
     for identity in ("", "implementer"):
         decision = autonomy_decision(tmp_path, identity=identity)
-        assert decision.permission_decision == "deny"
-        (question,) = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
-        assert question.id in decision.permission_decision_reason
-        assert "written whole" in question.reason
-        assert question.operation.payload["content"] == AUTONOMY_PROBE
+        assert decision.permission_decision == "ask"
+        assert "written whole" in decision.permission_decision_reason
+        assert QuestionRelay(tmp_path / ".lup/questions.jsonl").pending() == []
     for identity in ("resolver-worker", "lup:resolver-worker"):
         assert (
             autonomy_decision(tmp_path, identity=identity).permission_decision
@@ -2670,12 +2660,10 @@ def test_generated_claude_hook_requires_review_for_human_owned_readme_edits(
         hook_decision(payload, tmp_path, agent_type="resolver-worker"),
         hook_decision(payload, tmp_path, identity="resolver-worker"),
     ):
-        assert granted.permission_decision == "deny"
+        assert granted.permission_decision == "ask"
         assert "human-authored" in granted.permission_decision_reason
-        (question,) = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
-        assert question.id in granted.permission_decision_reason
-        assert question.requirement == "human_only"
-        assert question.preconditions == {readme: "# Operator-authored design\n"}
+        assert QuestionRelay(tmp_path / ".lup/questions.jsonl").pending() == []
+        assert readme.read_text(encoding="utf-8") == "# Operator-authored design\n"
 
 
 def test_generated_codex_hook_fails_closed_for_unknown_tools() -> None:

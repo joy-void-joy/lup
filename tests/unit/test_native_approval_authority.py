@@ -15,7 +15,6 @@ from lup.policy.relay import Answer, QuestionRelay, ReceiptKind
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.types import JsonObject
 from tests.unit.native import codex_denial, codex_effect
-from tests.unit.repos import commit_file, initialized_repo
 
 
 def native_response(
@@ -80,7 +79,7 @@ def root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 def test_unexpected_execution_never_authorizes_retry(root: Path, runtime: str) -> None:
     before = native_call(root, runtime)
     assert before in ("ask", "deny")
@@ -91,7 +90,7 @@ def test_unexpected_execution_never_authorizes_retry(root: Path, runtime: str) -
     assert native_call(root, runtime) == before
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 @pytest.mark.parametrize("state", ["approved", "observed"])
 def test_unproven_legacy_record_never_authorizes(
     root: Path, runtime: str, state: Literal["approved", "observed"]
@@ -117,7 +116,7 @@ def test_unproven_legacy_record_never_authorizes(
     assert native_call(root, runtime) in ("ask", "deny")
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 def test_exact_answer_cannot_be_reused_after_execution(
     root: Path, runtime: str
 ) -> None:
@@ -132,7 +131,7 @@ def test_exact_answer_cannot_be_reused_after_execution(
     assert native_call(root, runtime) == "deny"
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 @pytest.mark.parametrize("change", ["none", "payload", "tool"])
 def test_identified_execution_matches_the_approved_tool_and_input(
     root: Path, runtime: str, change: str
@@ -198,101 +197,7 @@ def test_identified_execution_matches_the_approved_tool_and_input(
     )
 
 
-@pytest.mark.parametrize("tool", ["Bash", "Edit"])
-@pytest.mark.parametrize("changed", [False, True])
-def test_claude_observation_accepts_only_the_exact_emitted_rewrite(
-    root: Path, tool: str, changed: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
-    monkeypatch.delenv("LUP_SANDBOX_ACTIVE", raising=False)
-    foreign = root.parent / f"{root.name}-foreign"
-    git = initialized_repo(foreign, root / "no-hooks")
-    commit_file(
-        git,
-        foreign,
-        "example.py",
-        '"""Fixture module."""\n\nfrom pathlib import Path\n',
-        "seed",
-    )
-    path = foreign / "example.py"
-    arguments: JsonObject = (
-        {"command": "# lup: escalate[sandbox]: inspect the host\nls"}
-        if tool == "Bash"
-        else {
-            "file_path": str(path),
-            "old_string": "from pathlib import Path",
-            "new_string": (
-                "from typing import Any  # lup: ignore[any-type] — "
-                "a justification long enough that keeping it inline outgrows the line"
-            ),
-        }
-    )
-    assert (
-        native_call(
-            root, "claude", tool=tool, arguments=arguments, execution_id="rewritten"
-        )
-        == "deny"
-    )
-    relay = QuestionRelay(root / ".lup/questions.jsonl")
-    (question,) = relay.pending()
-    relay.answer(question.id, "operator", True)
-    allowed = native_response(
-        root, "claude", tool=tool, arguments=arguments, execution_id="rewritten"
-    )
-    specific = json.loads(allowed.stdout)["hookSpecificOutput"]
-    assert specific["permissionDecision"] == "allow"
-    expected = specific["updatedInput"]
-    assert expected != arguments
-    dispatched = relay.find(question.id)
-    assert dispatched is not None
-    assert dispatched.operation.payload == arguments
-    assert dispatched.execution_payload == expected
-    executed = (
-        {
-            **expected,
-            **(
-                {"dangerouslyDisableSandbox": not expected["dangerouslyDisableSandbox"]}
-                if tool == "Bash"
-                else {"old_string": "a different preimage"}
-            ),
-        }
-        if changed
-        else expected
-    )
-    native_response(
-        root,
-        "claude",
-        "PostToolUse",
-        tool=tool,
-        arguments=executed,
-        execution_id="rewritten",
-    )
-    completed = relay.find(question.id)
-    assert completed is not None
-    assert completed.state == ("in_doubt" if changed else "completed")
-    assert (
-        native_call(
-            root, "claude", tool=tool, arguments=arguments, execution_id="again"
-        )
-        == "deny"
-    )
-
-
-def test_claude_document_review_is_bound_to_the_preimage(root: Path) -> None:
-    path = root / "README.md"
-    path.write_text("Original document.\n")
-    arguments: JsonObject = {"file_path": str(path), "content": "Replacement.\n"}
-    assert native_call(root, "claude", tool="Write", arguments=arguments) == "deny"
-    relay = QuestionRelay(root / ".lup/questions.jsonl")
-    (question,) = relay.pending()
-    assert question.preconditions == {path: "Original document.\n"}
-    relay.answer(question.id, "operator", True)
-    path.write_text("Another writer's document.\n")
-    assert native_call(root, "claude", tool="Write", arguments=arguments) == "deny"
-    assert len(relay.questions()) == 2
-
-
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 def test_simultaneous_native_retries_consume_only_one_answer(
     root: Path, runtime: str
 ) -> None:
@@ -305,7 +210,7 @@ def test_simultaneous_native_retries_consume_only_one_answer(
     assert sorted(results) == ["allow", "deny"]
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 @pytest.mark.parametrize("receipt", ["observed", "inferred"])
 def test_unrecorded_answer_does_not_release_a_native_retry(
     root: Path, runtime: str, receipt: ReceiptKind
@@ -317,7 +222,7 @@ def test_unrecorded_answer_does_not_release_a_native_retry(
     assert native_call(root, runtime) == "deny"
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 def test_external_workspace_preserves_application_human_owned_paths(
     root: Path, runtime: str
 ) -> None:
@@ -349,7 +254,7 @@ def test_external_workspace_preserves_application_human_owned_paths(
     assert path.read_text() == before
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 def test_external_review_recovery_commands_select_the_application_environment(
     root: Path, runtime: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -387,7 +292,7 @@ def test_external_review_recovery_commands_select_the_application_environment(
     assert native_call(root, runtime) == "allow"
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 @pytest.mark.parametrize("tail", [b'{"id":', b"\xff", b'[]\n{}\n{"id":'])
 def test_damaged_review_log_retains_later_answers_and_observations(
     root: Path, runtime: str, tail: bytes
@@ -410,7 +315,7 @@ def test_damaged_review_log_retains_later_answers_and_observations(
     assert native_call(root, runtime) == "deny"
 
 
-@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("runtime", ["codex"])
 def test_unterminated_approval_never_becomes_authority_on_later_append(
     root: Path, runtime: str
 ) -> None:
@@ -435,3 +340,37 @@ def test_unterminated_approval_never_becomes_authority_on_later_append(
     assert native_call(root, runtime) == "deny"
     relay.answer(question.id, "operator", True)
     assert native_call(root, runtime) == "allow"
+
+
+def test_a_protected_path_edit_asks_where_its_author_is_working(root: Path) -> None:
+    """The question reaches the prompt, and nothing is parked for it.
+
+    An unprompted yes here changes a file git already holds, against a
+    preimage this same event captured, so a receipt buys nothing the author's
+    own channel does not.
+    """
+    target = Path("src/lup_template/harness/catalog.py").resolve()
+    arguments: JsonObject = {
+        "file_path": str(target),
+        "old_string": "excluded_commands=EXCLUDED_COMMANDS,",
+        "new_string": "excluded_commands=EXCLUDED_COMMANDS,  # reviewed",
+    }
+    assert native_call(root, "claude", tool="Edit", arguments=arguments) == "ask"
+    assert QuestionRelay(root / ".lup/questions.jsonl").pending() == []
+    assert "# reviewed" not in target.read_text(encoding="utf-8")
+
+
+def test_the_question_a_verdict_asks_reaches_the_prompt(root: Path) -> None:
+    """Every ask this runtime raises is rendered, including the widest one.
+
+    Removing a remote ref is what the reviewer axis reserves for a person, and
+    it is asked for in the session's own prompt rather than parked: whoever
+    the session answers to answers this, which in an autonomy mode is that
+    mode. Pinned because it is the edge of what the channel is trusted for.
+    """
+    arguments: JsonObject = {"command": "git push --delete origin topic"}
+    answer = native_response(root, "claude", tool="Bash", arguments=arguments)
+    spoken = json.loads(answer.stdout)["hookSpecificOutput"]
+    assert spoken["permissionDecision"] == "ask"
+    assert "remote ref" in spoken["permissionDecisionReason"]
+    assert QuestionRelay(root / ".lup/questions.jsonl").pending() == []

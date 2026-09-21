@@ -20,7 +20,6 @@ import sh
 from lup.providers.claude.hooks import claude_placed_input
 from lup.policy.grants import allowance_grants_environment, write_allowance_grants
 from lup.policy.identity import AGENT_IDENTITY_ENV, ConcernAllowance
-from lup.policy.relay import QuestionRelay
 from lup.policy.kernel.decision import (
     CONTAINED_ESCAPE_NOTICE,
     SANDBOX_ESCAPE_NOTICE,
@@ -168,10 +167,6 @@ def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author(
         "cwd": str(tmp_path),
         "session_id": "requester",
     }
-    decide(payload)
-    relay = QuestionRelay(tmp_path / ".lup/questions.jsonl")
-    (question,) = relay.pending()
-    relay.answer(question.id, "operator", True)
     decision = decide(payload)
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
@@ -247,7 +242,7 @@ def test_absolute_paths_resolve_against_their_worktree_not_the_launch_directory(
     guarded = under_test["hookSpecificOutput"]
     assert isinstance(asked, dict)
     assert isinstance(guarded, dict)
-    assert asked["permissionDecision"] == "deny"
+    assert asked["permissionDecision"] == "ask"
     assert guarded["permissionDecision"] == "allow"
     assert "small safe edit" in str(guarded["permissionDecisionReason"])
 
@@ -343,7 +338,7 @@ def test_another_repositorys_file_is_not_judged_by_this_projects_conventions(
         ownership_context(other_repository, monkeypatch),
     )
 
-    assert effect == "deny"
+    assert effect == "ask"
     assert "different repository" in reason
     assert "Any" not in reason
 
@@ -469,7 +464,7 @@ def test_a_note_in_this_repositorys_own_file_is_judged_however_it_is_spelled() -
     relative = note_verdict(NOTE_SITE, Path.cwd())
 
     assert absolute == relative
-    assert absolute[0] == "deny"
+    assert absolute[0] == "ask"
     assert "inline review feedback" in absolute[1]
 
 
@@ -608,7 +603,7 @@ def test_removing_an_untracked_file_still_asks(delete_repo: Path) -> None:
     """Nothing holds a copy, so nothing could restore it afterwards."""
     effect, _reason = effect_from("rm untracked.py", delete_repo)
 
-    assert effect == "deny"
+    assert effect == "ask"
 
 
 def test_removing_a_directory_asks_where_no_capture_covers_it(
@@ -624,7 +619,7 @@ def test_removing_a_directory_asks_where_no_capture_covers_it(
     """
     effect, reason = effect_from("rm -rf src", delete_repo)
 
-    assert effect == "deny"
+    assert effect == "ask"
     assert "nothing in the command bounds what it holds" in reason
     assert "never granted" not in reason
 
@@ -652,7 +647,7 @@ def test_an_ignored_file_holding_the_only_copy_still_asks(delete_repo: Path) -> 
     for path in (".env.local", "notes/traces/session.jsonl", ".lup/run/state.json"):
         effect, _reason = effect_from(f"rm {path}", delete_repo)
 
-        assert effect == "deny", path
+        assert effect == "ask", path
 
 
 def test_a_delete_at_the_cap_is_granted(delete_repo: Path) -> None:
@@ -681,7 +676,7 @@ def test_a_sweep_of_restorable_files_asks_even_though_each_is_restorable(
 
     effect, _reason = effect_from(f"rm {named}", delete_repo)
 
-    assert effect == "deny"
+    assert effect == "ask"
 
 
 def test_writing_a_generated_plugin_tree_is_refused_by_absolute_path(
@@ -827,7 +822,7 @@ def test_a_grant_made_after_a_session_started_releases_its_very_next_call(
     """
     document = tmp_path / "grants.json"
     launched = session_environment(document)
-    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "deny"
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
 
     write_allowance_grants(document, [ConcernAllowance.NEW_DEVTOOLS_MODULE])
 
@@ -845,7 +840,7 @@ def test_a_grant_taken_back_stops_releasing_its_gate_just_as_immediately(
 
     write_allowance_grants(document, [])
 
-    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "deny"
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
 
 
 def test_a_grant_made_before_the_session_started_is_honoured_too(
@@ -865,8 +860,8 @@ def test_a_session_holding_no_grant_sees_the_unchanged_lattice(
     empty = tmp_path / "grants.json"
     write_allowance_grants(empty, [])
 
-    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(None)) == "deny"
-    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(empty)) == "deny"
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(None)) == "ask"
+    assert effect_under(NEW_DEVTOOLS_MODULE, session_environment(empty)) == "ask"
 
 
 def test_one_leases_grant_cannot_release_a_siblings_gate(tmp_path: Path) -> None:
@@ -877,7 +872,7 @@ def test_one_leases_grant_cannot_release_a_siblings_gate(tmp_path: Path) -> None
 
     launched = session_environment(tmp_path / "mine.json")
 
-    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "deny"
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
 
 
 def test_a_stale_environment_cannot_grant_what_the_document_does_not(
@@ -896,7 +891,7 @@ def test_a_stale_environment_cannot_grant_what_the_document_does_not(
         "LUP_CONCERN_ALLOWANCES": '["new-devtools-module"]',
     }
 
-    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "deny"
+    assert effect_under(NEW_DEVTOOLS_MODULE, launched) == "ask"
 
 
 def bundled_dispatcher() -> ModuleType:
@@ -1146,7 +1141,7 @@ def test_the_one_loss_the_snapshot_cannot_hold_still_asks(delete_repo: Path) -> 
     """
     effect, _reason = snapshotting_effect("git clean -fdx", delete_repo)
 
-    assert effect == "deny"
+    assert effect == "ask"
 
 
 def test_a_write_the_gates_already_read_is_not_reported_again(tmp_path: Path) -> None:
@@ -1185,7 +1180,7 @@ def test_an_effect_no_boundary_here_reaches_still_asks(delete_repo: Path) -> Non
     """
     effect, _reason = snapshotting_effect("git push --delete origin feat", delete_repo)
 
-    assert effect == "deny"
+    assert effect == "ask"
 
 
 CONTAINED_LEDGER = {
@@ -1253,7 +1248,7 @@ def test_a_container_whose_placement_went_unmeasured_still_asks(
     """
     unmeasured = {**CONTAINED_LEDGER, "delivered": ["question_relay"]}
 
-    assert unjudged_effect_under(unmeasured, tmp_path, monkeypatch) == "deny"
+    assert unjudged_effect_under(unmeasured, tmp_path, monkeypatch) == "ask"
 
 
 def escalated_reason_under(
@@ -1281,16 +1276,12 @@ def escalated_reason_under(
         "cwd": str(root),
         "session_id": "requester",
     }
-    decide_from(payload, root)
-    relay = QuestionRelay(root / ".lup/questions.jsonl")
-    (question,) = relay.pending()
-    relay.answer(question.id, "operator", True)
     specific = decide_from(payload, root)["hookSpecificOutput"]
     assert isinstance(specific, dict)
     rewritten = specific["updatedInput"] if "updatedInput" in specific else None
     return (
         str(specific["permissionDecision"]),
-        question.reason,
+        str(specific["permissionDecisionReason"]),
         rewritten,
     )
 
@@ -1305,7 +1296,7 @@ def test_an_approved_crossing_on_a_host_is_described_as_leaving_for_it(
     """
     effect, reason, rewritten = escalated_reason_under(None, tmp_path, monkeypatch)
 
-    assert effect == "allow"
+    assert effect == "ask"
     assert reason.endswith(SANDBOX_ESCAPE_NOTICE)
     assert isinstance(rewritten, dict)
     assert rewritten["dangerouslyDisableSandbox"] is True
@@ -1327,7 +1318,7 @@ def test_an_approved_crossing_inside_a_container_is_described_as_staying(
         CONTAINED_LEDGER, tmp_path, monkeypatch
     )
 
-    assert effect == "allow"
+    assert effect == "ask"
     assert reason.endswith(CONTAINED_ESCAPE_NOTICE)
     assert isinstance(rewritten, dict)
     assert rewritten["dangerouslyDisableSandbox"] is True

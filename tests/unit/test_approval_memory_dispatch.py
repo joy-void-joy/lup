@@ -73,23 +73,12 @@ def refused(result: sh.RunningCommand) -> bool:
     return codex_effect(result) == "deny"
 
 
-def test_claude_spends_an_explicit_answer_once(repo: Path) -> None:
-    assert decision(claude("PreToolUse", repo))["permissionDecision"] == "deny"
-    relay = QuestionRelay(repo / ".lup/questions.jsonl")
-    (question,) = relay.pending()
-    relay.answer(question.id, "operator", True)
-    allowed = decision(claude("PreToolUse", repo))
-    assert allowed["permissionDecision"] == "allow"
-    assert "removing a remote ref" in str(allowed["permissionDecisionReason"])
-
-    assert claude("PostToolUse", repo) == {}
-
-    again = decision(claude("PreToolUse", repo))
-    assert again["permissionDecision"] == "deny"
-    completed = relay.find(question.id)
-    assert completed is not None and completed.state == "completed"
-    (pending,) = relay.pending()
-    assert pending.id != question.id
+def test_claude_renders_the_question_rather_than_parking_it(repo: Path) -> None:
+    """The verdict goes out as an ask, carrying the reason that earned it."""
+    asked = decision(claude("PreToolUse", repo))
+    assert asked["permissionDecision"] == "ask"
+    assert "removing a remote ref" in str(asked["permissionDecisionReason"])
+    assert QuestionRelay(repo / ".lup/questions.jsonl").pending() == []
 
 
 def test_a_call_that_ran_without_asking_leaves_no_memory(repo: Path) -> None:
@@ -103,12 +92,12 @@ def test_a_call_that_ran_without_asking_leaves_no_memory(repo: Path) -> None:
 
 def test_a_call_changed_on_the_way_through_approves_nothing(repo: Path) -> None:
     """An unmatched execution cannot answer the pending original proposal."""
-    assert decision(claude("PreToolUse", repo))["permissionDecision"] == "deny"
+    assert refused(codex("PreToolUse", repo))
     relay = QuestionRelay(repo / ".lup/questions.jsonl")
     (question,) = relay.pending()
-    claude("PostToolUse", repo, f"{COMMAND} --dry-run")
+    codex("PostToolUse", repo, f"{COMMAND} --dry-run")
 
-    assert decision(claude("PreToolUse", repo))["permissionDecision"] == "deny"
+    assert refused(codex("PreToolUse", repo))
     assert relay.pending() == [question]
 
 
@@ -124,14 +113,6 @@ def test_codex_unexpected_execution_grants_no_authority(repo: Path) -> None:
     uncertain = relay.find(question.id)
     assert uncertain is not None and uncertain.state == "in_doubt"
     assert refused(codex("PreToolUse", repo))
-
-
-def test_claude_unexpected_execution_grants_no_authority(repo: Path) -> None:
-    assert decision(claude("PreToolUse", repo))["permissionDecision"] == "deny"
-    observed = claude("PostToolUse", repo)
-    assert observed["decision"] == "block"
-    assert "without a consumed approval receipt" in str(observed["reason"])
-    assert decision(claude("PreToolUse", repo))["permissionDecision"] == "deny"
 
 
 def test_codex_spends_an_explicit_answer_once(repo: Path) -> None:

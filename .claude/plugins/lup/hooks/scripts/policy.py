@@ -873,16 +873,22 @@ def observe_hook_call(
             else entry["operation"]["tool"] == tool
             and (entry["operation"]["payload"] == arguments or same_call(entry))
         )
-        and entry["state"] in ("pending", "approved", "rejected", "dispatched")
+        and entry["state"]
+        in ("pending", "approved", "rejected", "dispatched", "prompted")
     ]
     if not matches:
         return []
     entry = matches[-1]
     matches_call = same_call(entry)
-    authorized = entry["state"] == "dispatched" and matches_call
+    # `prompted` is the runtime's own dialog answering for a call whose effect
+    # a checkpoint restores: authority nobody recorded, so what is checked here
+    # is only that what ran is what was shown. A receipt proves who answered;
+    # this proves the document and the input did not move underneath them.
+    settled = entry["state"] in ("dispatched", "prompted")
+    authorized = settled and matches_call
     problem = (
         "with a tool or payload different from the reviewed call"
-        if entry["state"] == "dispatched" and not matches_call
+        if settled and not matches_call
         else "without a consumed approval receipt"
     )
     entry["state"] = "completed" if authorized else "in_doubt"
@@ -3746,34 +3752,6 @@ def rendered(decision, payload, placed, attached):
     )
 
 
-def queued_review(payload, decision, placed):
-    """Bind a native retry to its exact payload and edited document preimage."""
-    cwd = session_root(payload) or Path.cwd()
-    tool_input = payload["tool_input"]
-    path = (
-        (cwd / tool_input["file_path"]).resolve()
-        if payload["tool_name"] in ("Edit", "Write")
-        else None
-    )
-    before = (
-        {path: path.read_text(encoding="utf-8") if path.exists() else None}
-        if path is not None
-        else {}
-    )
-    proposed = rendered(decision.revised(effect="allow"), payload, placed, "")
-    expected = proposed["hookSpecificOutput"].get("updatedInput", tool_input)
-    return reviewed_decision(
-        decision.placed(escapable=True, contained=session_contained(cwd)),
-        cwd,
-        payload["session_id"] if "session_id" in payload else "",
-        payload["tool_name"],
-        tool_input,
-        before,
-        payload["tool_use_id"] if "tool_use_id" in payload else "",
-        execution_payload=expected,
-    )
-
-
 def remembered_run(payload):
     """Record what executed; a native execution event conveys no authority."""
     name = payload["tool_name"] if "tool_name" in payload else ""
@@ -3863,8 +3841,16 @@ def main():
         decision = dispatch(payload)
         placed = placed_input(payload)
         attached = attachment(payload["tool_name"], session_root(payload))
-        if decision.effect == "ask":
-            decision = queued_review(payload, decision, placed)
+        # An ask is rendered here, because this runtime has a channel for a
+        # question: the prompt, where the person already is. A recorded
+        # receipt is what a runtime with no ask effect falls back to, which
+        # is Codex's PreToolUse, and a question put where nobody is standing
+        # is read by nobody.
+        #
+        # The limit this accepts: an autonomy mode can answer the prompt
+        # itself, and no field here says whether a person saw one. The verdict
+        # reaches whoever the session is answering to, which in that mode is
+        # the mode.
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and the traceback exit reaches
