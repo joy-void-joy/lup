@@ -6,6 +6,7 @@ change reported twice, and a run that never lands because nothing told it the
 population was gone.
 """
 
+import json
 import socket
 from pathlib import Path
 from threading import Event, Thread
@@ -134,18 +135,38 @@ def test_nudging_wakes_a_peer_through_its_inbox_and_says_so_for_one_without(
     listener.listen(8)
     listener.settimeout(0.1)
     stopping = Event()
+    arrived = Event()
+    delivered: list[str] = []
 
     def serve_until_stopped() -> None:
+        """Accept, read each connection to its end, then close — as an inbox does.
+
+        Reading before closing is what keeps this out of a race with the
+        nudge's own write. An accepted connection closed unread makes that
+        write fail with `[Errno 32] Broken pipe`, which the nudge then reports
+        as nothing listening at the path: three failures in twelve runs of
+        this file under `-n auto`, none standing alone, because which of the
+        two got there first was the scheduler's to decide.
+
+        What was read is kept and asserted on below, so the read is held in
+        place by a failing test rather than by this paragraph.
+        """
         while not stopping.is_set():
             try:
                 connection, _ = listener.accept()
             except TimeoutError:
                 continue
-            connection.close()
+            with connection, connection.makefile("r", encoding="utf-8") as frames:
+                delivered.extend(frames)
+            arrived.set()
 
     serving = Thread(target=serve_until_stopped)
     serving.start()
     nudges = [event for event in watcher.tick() if isinstance(event, Nudged)]
+    # Waited for rather than assumed: the connection sits in the backlog until
+    # something accepts it, so stopping the thread on the way past would leave
+    # whether anything was read up to which thread ran next.
+    reached_the_inbox = arrived.wait(timeout=5)
     stopping.set()
     serving.join(timeout=5)
     listener.close()
@@ -153,6 +174,13 @@ def test_nudging_wakes_a_peer_through_its_inbox_and_says_so_for_one_without(
     by_address = {nudge.address: nudge.outcome for nudge in nudges}
     assert by_address["claude"].reached
     assert "declared no wake path" in by_address["silent"].reason
+    # One nudge per look, so one frame, and it carries the peer's own user
+    # turn — which is what makes an idle session take a turn rather than
+    # merely record something.
+    assert reached_the_inbox
+    [frame] = [json.loads(line) for line in delivered]
+    assert frame["type"] == "user"
+    assert "look" in frame["message"]["content"]
 
 
 def test_the_run_lands_when_the_roster_is_empty(tmp_path: Path) -> None:
