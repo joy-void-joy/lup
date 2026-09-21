@@ -82,6 +82,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev library use` | Resolve lup from the package index, or from the vendored copy. |
 | `dev library git` | Resolve lup from its repository, for use before a release is published. |
 | `dev scaffold compile` | Materialize upstream&#x27;s copied half at one commit, under this name. |
+| `dev scaffold fit` | Measure which upstream commit this project&#x27;s copied half corresponds to. |
 | `dev scaffold adopt` | Root the scaffold branch, once, at the commit this project came from. |
 | `dev model-config census` | Enumerate every `model_config` declaration by right-hand-side shape. |
 | `dev model-config aliases` | List every shared configuration alias, and who imports each one. |
