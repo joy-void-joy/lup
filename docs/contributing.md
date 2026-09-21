@@ -221,11 +221,18 @@ its remote-tracking ref, so refreshing is a fetch and nothing in the clone is
 reset over.
 
 The base the branch is cut from is recorded against it, because topology
-cannot recover a creation point once the parent has merged on. It is read
-from the checkout you run in, so a detached HEAD has nothing to read: rather
-than record nothing and let a later reader guess, creation refuses and asks
-for `--base <branch>`, or `--no-record` to say deliberately that this branch
-has no base worth keeping.
+cannot recover a creation point once the parent has merged on. A fresh branch
+takes the integration branch, where work lands — but the checkout you run in
+is often a worktree on a branch of its own, and continuing *that* work is as
+real an intent as starting new work beside it. Both arrive as the same
+command, so where the checkout carries commits the integration branch lacks,
+creation asks which you mean and names both spellings of `--base <branch>`,
+before there is a branch to reset. Where it carries none, the two bases are
+one line and the integration branch's tip is taken without a word.
+
+A detached HEAD has nothing to read at all: rather than record nothing and
+let a later reader guess, creation refuses and asks for `--base <branch>`, or
+`--no-record` to say deliberately that this branch has no base worth keeping.
 
 The command prints the path and does not move whoever ran it. **Launch a
 session rooted at that path**; do not relocate a running one. The difference

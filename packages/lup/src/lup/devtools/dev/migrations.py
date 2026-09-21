@@ -158,6 +158,44 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["BranchBase.notice"],
+        reason=(
+            "`notice` narrated the base a worktree had already been cut from, "
+            "which is advice nobody can act on without an undo. A base the "
+            "command cannot guess is settled before the branch exists now, and "
+            "`refusal` is what says so: a message the command exits on rather "
+            "than one trailing a worktree that is already there"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read `BranchBase.refusal()` where you read "
+                    "`BranchBase.notice()`, and exit on it: it is empty "
+                    "wherever the base is settled, and where it is not it "
+                    "names both spellings of `--base` for the caller to "
+                    "re-run with."
+                ),
+                command=[
+                    "uv",
+                    "run",
+                    "lup-devtools",
+                    "dev",
+                    "py",
+                    "text",
+                    "\\.notice\\(",
+                ],
+            ),
+            MigrationStep(
+                instruction=(
+                    "Pass `branch` when you construct a `BranchBase`, which "
+                    "the refusal names the contested branch by, and `ahead` "
+                    "from `commits_ahead(current, integration)`, which is the "
+                    "measurement deciding whether the two bases differ at all."
+                ),
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
