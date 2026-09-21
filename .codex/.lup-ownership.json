@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "200d48474d45789eeb057631f5f16dd5d3a4d720013c70da6a15aec3f8529d87",
+  "source_digest": "6ddf0350e089a6dfda9d8fe17981361b0fc3c9a2c24e53c3fbef2a3fa97f40b9",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -613,6 +613,13 @@
       "category": "generated",
       "sha256": "a18280cc7c16316e105183769452c3c64469209b1dc2972dbddd1a72afef38c5",
       "semantic_id": "skill.principle",
+      "executable": false
+    },
+    {
+      "path": ".codex/plugins/lup/skills/profile/SKILL.md",
+      "category": "generated",
+      "sha256": "5dd95c3507606444258beac480406f939b9eaa2f3ae333c94dbf38ec85ec6fd3",
+      "semantic_id": "skill.profile",
       "executable": false
     },
     {
