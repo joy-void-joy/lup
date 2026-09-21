@@ -37,9 +37,14 @@ not here:
 uv run --directory refs/lup/tree/<branch> lup-devtools git worktree create fix-<name>
 ```
 
-If `refs/lup` does not resolve, the project is tracked for review and not for
-writing. `uv run lup-devtools sync setup lup <path> --mount rw` widens that,
-and it is a protected edit: put it to the user rather than writing it.
+If `refs/lup` does not resolve, this machine has not answered the requirement
+`sync.json` declares. `uv run lup-devtools sync status` names what is missing
+and the command for it: `sync remote lup <url>` for the URL this machine
+fetches from, `sync setup lup /path/to/repo` for a checkout it already has,
+then `sync fetch lup`. Both write `sync.json.local`, which is a protected
+edit: put it to the user rather than writing it. A registration the tracked
+file does not mount is tracked for review and not for writing, and widening
+that is a tracked edit and the user's too.
 
 ## 3. Make the change under lup's gate
 

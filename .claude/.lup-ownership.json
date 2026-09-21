@@ -324,7 +324,7 @@
     {
       "path": ".claude/plugins/lup/commands/upstream.md",
       "category": "generated",
-      "sha256": "8b3dd292ce0dfea413b96c1970029bf63d346a79b6d3a320b7603c172cf7b52f",
+      "sha256": "79e8ec9b408532d72398c4b8672ed6e8a4c54c94eb950c36bd1220c12bf4d0c1",
       "semantic_id": "skill.upstream",
       "executable": false
     },
@@ -709,7 +709,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "5d995aae94163c74d27522cbc4287c0ae0d73c93c6e99b81d992313e94efdfe0",
+      "sha256": "f5cfe9e1e82278db14f297ffd63e4654b680d5b7b509962de265b10ab6bed0b9",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -835,7 +835,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "bcd3cfe99c8b330dcc122715786009dac2b065348f1241c5d7a937e07bd53368",
+      "sha256": "dd4b0b304400ce36ff8cd1fcca14751ccd1dff342aae6f69d22de56ccae21da2",
       "semantic_id": "docs.template",
       "executable": false
     },
