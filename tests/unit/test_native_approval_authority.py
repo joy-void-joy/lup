@@ -222,10 +222,16 @@ def test_unrecorded_answer_does_not_release_a_native_retry(
     assert native_call(root, runtime) == "deny"
 
 
-@pytest.mark.parametrize("runtime", ["codex"])
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
 def test_external_workspace_preserves_application_human_owned_paths(
     root: Path, runtime: str
 ) -> None:
+    """The gate holds from a workspace that is not the application's own.
+
+    Each runtime meets it through the channel it has, so the assertion names
+    both: a question the session renders, or the receipt that stands in for
+    one. What neither may do is write the file.
+    """
     path = Path("README.md").resolve()
     before = path.read_text()
     content = before + "\nReviewed addition.\n"
@@ -244,13 +250,21 @@ def test_external_workspace_preserves_application_human_owned_paths(
         }
     )
     tool = "Write" if runtime == "claude" else "apply_patch"
-    assert native_call(root, runtime, tool=tool, arguments=arguments) == "deny"
-    (question,) = QuestionRelay(root / ".lup/questions.jsonl").pending()
+    answer = native_response(root, runtime, tool=tool, arguments=arguments)
+    relay = QuestionRelay(root / ".lup/questions.jsonl")
     # The application is a registered destination, so its own policy judges the
-    # write and names the gate it met; an unregistered repository still meets
-    # the foreign-repository ask, which test_destination_policy_routing pins.
-    assert "human-authored" in question.reason
-    assert question.preconditions == {path: before}
+    # write and names the gate it met; an unregistered repository meets the
+    # foreign-repository ask, which test_destination_policy_routing pins.
+    if runtime == "claude":
+        spoken = json.loads(answer.stdout)["hookSpecificOutput"]
+        assert spoken["permissionDecision"] == "ask"
+        assert "human-authored" in spoken["permissionDecisionReason"]
+        assert relay.pending() == []
+    else:
+        assert codex_effect(answer) == "deny"
+        (question,) = relay.pending()
+        assert "human-authored" in question.reason
+        assert question.preconditions == {path: before}
     assert path.read_text() == before
 
 
