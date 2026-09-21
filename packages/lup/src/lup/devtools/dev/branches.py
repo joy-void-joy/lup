@@ -979,10 +979,11 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
 
     A base recorded at worktree creation (:mod:`lup.devtools.dev.records`) wins
     outright — topology cannot recover the creation point once the parent
-    has merged on. Without a record, prefers ancestor branches (the natural
-    parent in a two-tier model) over siblings. Among ancestors, picks the
-    one with the fewest commits ahead (``distance``). Falls back to
-    non-ancestors when no ancestor exists.
+    has merged on. Without a record, every local branch is measured by its
+    merge-base distance and the nearest wins, with ancestry breaking a tie
+    between equals and disqualifying nobody: an integration branch that has
+    taken a commit since the cut is not an ancestor, and that is the ordinary
+    state of one rather than a reason to rule it out.
 
     A record whose branch has since been deleted is the one case where
     winning outright and having nothing to say are the same code path, so it
@@ -1024,21 +1025,41 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
             decayed_base_complaint(effective, recorded, present=present), err=True
         )
 
-    measured = [m for c in local_branches if (m := measure(c)) is not None]
-    ancestors = [m for m in measured if m.is_ancestor]
-
-    # Prefer ancestors — they are the natural base. With none, every measured
-    # candidate is a non-ancestor, so `measured` IS the sibling fallback.
-    candidates = ancestors or measured
+    candidates = [m for c in local_branches if (m := measure(c)) is not None]
 
     if not candidates:
         typer.echo("Could not determine base branch.", err=True)
         raise typer.Exit(1)
 
-    ranked = sorted(candidates, key=lambda c: c.distance)
+    # Every measured candidate is ranked, and ancestry only breaks a tie among
+    # equals. It used to filter: ancestors were taken and, where any existed,
+    # every non-ancestor was dropped before distance was consulted at all.
+    #
+    # That disqualified the integration branch for the ordinary reason a
+    # branch is not an ancestor — it moved on. A feature branch whose `dev`
+    # has taken one commit since the cut has no ancestor in `dev` at all, so
+    # `dev` was excluded and whichever stale sibling happened to sit in the
+    # branch's history won however far away it was. Measured: a branch whose
+    # real base was 0 symbols away was judged against a sibling 747 commits
+    # off, and the gate reported 137 capabilities gone that nothing had
+    # touched.
+    #
+    # Distance is the merge-base distance, which needs no ancestry to be
+    # meaningful and is what makes a moved-on integration branch comparable
+    # again. Ancestry survives as a tiebreaker because a candidate sitting
+    # inside this branch's history is the likelier parent of two equals, which
+    # is all the evidence it ever was.
+    ranked = sorted(candidates, key=lambda c: (c.distance, not c.is_ancestor))
     best = ranked[0]
 
-    tied = [c for c in ranked[1:] if c.distance == best.distance]
+    # Equal on both keys, not on distance alone: a candidate the tiebreaker
+    # already settled is an answer, and reporting it as ambiguous would put
+    # the ranking's own decision back to the caller.
+    tied = [
+        c
+        for c in ranked[1:]
+        if (c.distance, c.is_ancestor) == (best.distance, best.is_ancestor)
+    ]
     if tied:
         typer.echo("Ambiguous base branch. Candidates:", err=True)
         for c in [best, *tied]:

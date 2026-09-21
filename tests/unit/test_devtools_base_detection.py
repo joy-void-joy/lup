@@ -55,6 +55,41 @@ def test_recorded_base_resolves_what_topology_cannot(
     assert candidate.source == "recorded"
 
 
+def test_an_integration_branch_that_moved_on_still_wins_over_a_stale_ancestor(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure that made a stale sibling the baseline for a whole branch.
+
+    `stale-sibling` sits at a commit older than the fork point, so its tip is
+    inside `topic`'s history and it counts as an ancestor. `main` has taken a
+    commit since the cut, so it is not one — which is the ordinary state of an
+    integration branch, not a disqualification. While ancestry filtered rather
+    than ranked, `main` was dropped before distance was consulted and the far
+    ancestor won: measured on a real branch as a base 747 commits off, against
+    which the gate reported 137 capabilities gone that nothing had touched.
+
+    Distance decides instead, and it is merge-base distance, which needs no
+    ancestry to mean anything. The merge base is asserted too, because that is
+    the commit a surface is actually judged from.
+    """
+    git = repo_git(repo)
+    git("branch", "stale-sibling")
+    commit_named_file(repo, "fork.txt")
+    fork_point = str(git("rev-parse", "HEAD")).strip()
+    git("switch", "-c", "topic")
+    commit_named_file(repo, "t1.txt")
+    commit_named_file(repo, "t2.txt")
+    git("switch", "main")
+    commit_named_file(repo, "m1.txt")
+
+    monkeypatch.chdir(repo)
+    candidate = branches.detect_base_branch("topic")
+    assert candidate.name == "main"
+    assert not candidate.is_ancestor
+    assert candidate.merge_base == fork_point
+    assert candidate.distance == 2
+
+
 def test_topology_tie_stays_ambiguous_without_a_record(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
