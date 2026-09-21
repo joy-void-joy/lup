@@ -1130,7 +1130,9 @@ def create_dev_app(
         The pure function the update rests on, exposed so it can be looked at:
         what an update would merge, written to a directory rather than to a
         branch. `--decline` asks what a wider selection would produce without
-        declaring it first, which is how a project decides what to declare.
+        declaring it first, which is how a project decides what to declare —
+        including whether it is coherent, since a selection taking one half of
+        a declaration and declining the other is refused here.
         """
         declared_source = adopted_source()
         source = declared_source.model_copy(
