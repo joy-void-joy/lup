@@ -19,14 +19,16 @@ line, and the same line is what the gate and the prompt-time fold report.
 from collections.abc import Callable
 from pathlib import Path
 
+import sh
 import typer
 from pydantic import BaseModel
 
 import lup.devtools.dev.library as library
 import lup.devtools.dev.migrations as migrations
 import lup.devtools.dev.scaffold as scaffold
+from lup.formats.banner import REGENERATE_COMMAND
 from lup.devtools.sync import ensure_local, find_project
-from lup.devtools.utils import short_sha, uv
+from lup.devtools.utils import decode_stderr, short_sha, uv
 
 
 class CarrierDrift(BaseModel, frozen=True):
@@ -147,9 +149,26 @@ def regenerated(root: Path, report: Callable[[str], None]) -> None:
     the library imported here is the one that was installed when the command
     started — the very version this update exists to replace. Regenerating
     in-process would write the old library's trees and report them as current.
+
+    A subprocess that refuses says why in the words generation itself refused
+    with, and those are relayed whole rather than folded into an exception
+    about an exit status: every carrier has moved by the time this runs, so
+    what is left to act on is one declaration, and the reader needs to be
+    told which.
     """
     report("Regenerating the native trees...")
-    uv("run", "lup-devtools", "harness", "generate", "all", _cwd=str(root))
+    try:
+        uv("run", "lup-devtools", "harness", "generate", "all", _cwd=str(root))
+    except sh.ErrorReturnCode as refusal:
+        report("The native trees were not regenerated. Generation refused:")
+        for line in decode_stderr(refusal).splitlines():
+            report(f"  {line}")
+        report(
+            "Every other carrier has moved and the merge has landed, so what "
+            f"is left is the declaration named above. Fix it, then run "
+            f"`{REGENERATE_COMMAND}`."
+        )
+        raise typer.Exit(1) from refusal
 
 
 def settled(
