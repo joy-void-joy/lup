@@ -1,10 +1,11 @@
 """Registry resolution and reachability tests for `lup-devtools sync`.
 
-The sync registry contract: sync.json(.local) is the canonical pair, and a
-registration says a project may be *reviewed*. What says it may be *opened*
-is a `mount` written on the entry, which is a separate claim and is never
-defaulted — sync.json is committed scaffold, so a default there would decide
-what every project adopting this template can reach.
+The sync registry contract: sync.json(.local) is the canonical pair, split by
+whose fact each key is. The tracked half says which repository a name means,
+whether this project can work without it, and what a session may reach of it;
+the local half says where this machine keeps it and which transport gets
+there. A registration says a project may be *reviewed*; what says it may be
+*opened* is a `mount`, which is a separate claim and is never defaulted.
 """
 
 import json
@@ -18,8 +19,11 @@ from lup.devtools import sync
 from tests.unit.repos import commit_file, git_in, initialized_repo
 
 
-def write_registry(path: Path) -> None:
-    path.write_text(json.dumps({"projects": [{"name": "lup"}]}) + "\n")
+def tracked(registry_root: Path, *projects: dict) -> None:
+    """Write these entries as the registrations every machine shares."""
+    (registry_root / "sync.json").write_text(
+        json.dumps({"projects": list(projects)}) + "\n"
+    )
 
 
 @pytest.fixture
@@ -412,3 +416,251 @@ def test_a_session_with_no_recorded_launch_gets_no_reopening(
     out = capsys.readouterr().out
     assert "takes effect at the next launch" in out
     assert "Reopen this conversation" not in out
+
+
+def located(entry: sync.ProjectEntry) -> sync.LocatedProject:
+    """One registration this machine failed to locate, as the reading of it."""
+    return sync.LocatedProject(entry=entry)
+
+
+def cloned_with_origin(remote: Path, repository: Path, origin: str) -> None:
+    """A bare clone of `remote` whose origin is spelled the way `origin` is.
+
+    A forge cannot be reached from a test, and what these exercise is not the
+    network but the comparison: a clone carrying the right history under an
+    ssh spelling, and one carrying somebody else's under a plausible one, are
+    the two cases the refusal has to tell apart.
+    """
+    repository.parent.mkdir(parents=True, exist_ok=True)
+    sh.Command("git")("clone", "--bare", str(remote), str(repository), _tty_out=False)
+    sync.git_in(str(repository), "remote", "set-url", "origin", origin)
+
+
+def test_a_tracked_requirement_nobody_answered_is_reported_with_its_command(
+    registry_root: Path, cache: Path, remote: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The gap a fresh checkout used to discover at the point of use.
+
+    A tracked entry saying the project cannot work without that repository is
+    the one thing that makes its absence a result: status names it, says what
+    would answer it, and exits nonzero, rather than printing `not cloned` in
+    a column and leaving the next command to fail.
+    """
+    tracked(registry_root, {"name": "up", "required": True, "url": str(remote)})
+
+    with pytest.raises(typer.Exit):
+        sync.status_cmd()
+
+    out = capsys.readouterr().out
+    assert "'up' is required by this project" in out
+    assert "uv run lup-devtools sync fetch up" in out
+
+
+def test_a_requirement_with_nowhere_to_read_it_from_names_both_halves(
+    registry_root: Path, cache: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """What the shipped scaffold looks like on a machine that answered nothing.
+
+    The tracked half declares the need and names no account; the machine owes
+    a transport or a path, so the report is what to write and where, not a
+    complaint that a URL is missing.
+    """
+    tracked(registry_root, {"name": "up", "required": True})
+
+    with pytest.raises(typer.Exit):
+        sync.status_cmd()
+
+    out = capsys.readouterr().out
+    assert "no url in sync.json" in out
+    assert "no remote or path in sync.json.local" in out
+    assert "uv run lup-devtools sync remote up <url>" in out
+    assert "uv run lup-devtools sync setup up /path/to/repo" in out
+
+
+def test_fetch_materializes_a_requirement_whose_review_is_ignored(
+    registry_root: Path, cache: Path, remote: Path
+) -> None:
+    """`ignore` withholds a review and never withholds the repository.
+
+    Being the upstream of this project is a reason not to read its commits
+    back, and no reason at all for a workflow that needs the checkout to find
+    nothing there.
+    """
+    tracked(registry_root, {"name": "up", "required": True, "url": str(remote)})
+    registered(registry_root, {"name": "up", "ignore": True})
+
+    sync.fetch_cmd(None)
+
+    assert (cache / "up.git" / "tree" / "main" / "file.txt").read_text() == (
+        "revision 2\n"
+    )
+
+
+def test_the_mount_table_carries_a_project_the_tracked_half_declares(
+    registry_root: Path, cache: Path, remote: Path
+) -> None:
+    """A mount is the project's claim, so the committed half may make it.
+
+    Still never defaulted: this entry writes it. What the tracked half buys
+    is that the claim is made once for every machine instead of being widened
+    on each one by whoever meets the absence first — and it hands out nothing
+    until this machine says where the project is, which is the URL here.
+    """
+    tracked(
+        registry_root,
+        {"name": "up", "required": True, "mount": "rw", "url": str(remote)},
+    )
+
+    roots = sync.accessible_roots(lambda said: None)
+
+    assert [(root.path, root.writable) for root in roots] == [
+        (cache / "up.git" / "tree" / "main", True)
+    ]
+
+
+def test_an_ssh_clone_of_an_https_registration_is_one_repository(
+    registry_root: Path, cache: Path, remote: Path
+) -> None:
+    """The ordinary arrangement, which the old comparison read as a conflict.
+
+    The tracked file holds the canonical https URL because that is what every
+    machine shares; this machine's keys are ssh, so its clone reaches the
+    same history at `git@...`. Nothing is wrong, and the registration needs
+    no place to hide the machine's spelling in.
+    """
+    tracked(registry_root, {"name": "up", "url": "https://example.test/owner/repo"})
+    registered(
+        registry_root, {"name": "up", "remote": "git@example.test:owner/repo.git"}
+    )
+    cloned_with_origin(remote, cache / "up.git", "git@example.test:owner/repo.git")
+
+    found = sync.existing_upstream(sync.find_project("up"))
+
+    assert found is not None
+    assert found.checkout == cache / "up.git"
+
+
+def test_two_different_repositories_under_one_name_are_still_refused(
+    registry_root: Path, cache: Path, remote: Path
+) -> None:
+    """And the refusal says which file holds which half of the answer.
+
+    Accepting a transport is not relaxing the check: a clone of somebody
+    else's repository under this name would be reviewed as this one, mounted
+    as this one and committed into as this one. What changes is that the
+    reader is told the file and the edit rather than to correct
+    "the registration".
+    """
+    tracked(registry_root, {"name": "up", "url": "https://example.test/owner/repo"})
+    cloned_with_origin(
+        remote, cache / "up.git", "git@example.test:someone-else/repo.git"
+    )
+    said: list[str] = []
+
+    with pytest.raises(typer.Exit):
+        sync.existing_upstream(sync.find_project("up"))
+
+    with pytest.raises(typer.Exit):
+        sync.require_registered_origin(
+            sync.find_project("up"), cache / "up.git", said.append
+        )
+
+    message = "\n".join(said)
+    assert "someone-else/repo" in message
+    assert "set \"url\" on the 'up' entry in sync.json" in message
+    assert f"remove {cache / 'up.git'}" in message
+    assert "register them under two names" in message
+
+
+def test_a_transport_naming_another_repository_is_refused_where_it_is_written(
+    registry_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Checked as the claim is made, like a device grant is exercised as it is.
+
+    The alternative is a clone of the wrong history made on the strength of a
+    typo, and a review of it under a name that means something else.
+    """
+    tracked(registry_root, {"name": "up", "url": "https://example.test/owner/repo"})
+
+    with pytest.raises(typer.Exit):
+        sync.set_remote("up", "git@example.test:someone-else/repo.git")
+
+    out = capsys.readouterr().out
+    assert "does not name the repository 'up' is registered as" in out
+    assert "register it under its own name" in out
+    assert sync.local_file().exists() is False
+
+
+def test_a_transport_this_machine_reaches_it_over_is_recorded_locally(
+    registry_root: Path,
+) -> None:
+    """The machine's half goes to the machine's file, and nowhere else."""
+    tracked(registry_root, {"name": "up", "url": "https://example.test/owner/repo"})
+
+    sync.set_remote("up", "ssh://git@example.test/owner/repo.git")
+
+    assert json.loads(sync.local_file().read_text())["projects"] == [
+        {"name": "up", "remote": "ssh://git@example.test/owner/repo.git"}
+    ]
+    assert json.loads(sync.sync_file().read_text())["projects"] == [
+        {"name": "up", "url": "https://example.test/owner/repo"}
+    ]
+    assert sync.transport_url(sync.find_project("up")) == (
+        "ssh://git@example.test/owner/repo.git"
+    )
+    assert sync.registered_repository(sync.find_project("up")) == (
+        "https://example.test/owner/repo"
+    )
+
+
+def test_the_scaffold_itself_does_not_owe_the_requirement_it_ships(
+    registry_root: Path,
+) -> None:
+    """`sync.json` in the template is the file an adopter receives.
+
+    The scaffold is the upstream of every registration it ships, so the
+    requirement is the adopter's to answer and the tree that wrote it has
+    nothing to clone. A requirement in the machine's own local file is owed
+    here like any other.
+    """
+    tracked(registry_root, {"name": "lup", "required": True})
+    (registry_root / "pyproject.toml").write_text("[tool.lup]\ntemplate = true\n")
+
+    assert sync.unmet_requirements([located(sync.find_project("lup"))]) == []
+
+    registered(registry_root, {"name": "mine", "required": True})
+
+    assert [
+        found.name
+        for found in sync.unmet_requirements([located(p) for p in sync.load_projects()])
+    ] == ["mine"]
+
+
+def test_a_requirement_naming_this_repository_is_met_by_standing_in_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A project registered at its own origin needs no second copy of itself.
+
+    Read off origin rather than off a key somebody has to remember to write,
+    and on identity rather than spelling, so the ssh origin of an https
+    registration answers it too.
+    """
+    own = tmp_path / "own"
+    git = initialized_repo(own, tmp_path / "hooks")
+    git("remote", "add", "origin", "https://example.test/owner/repo")
+    monkeypatch.setattr(sync, "project_root", lambda: own)
+    (own / "sync.json").write_text(
+        json.dumps(
+            {
+                "projects": [
+                    {
+                        "name": "itself",
+                        "required": True,
+                        "url": "git@example.test:owner/repo.git",
+                    }
+                ]
+            }
+        )
+    )
+
+    assert sync.unmet_requirements([located(sync.find_project("itself"))]) == []
