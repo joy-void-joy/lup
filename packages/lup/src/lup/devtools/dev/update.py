@@ -165,7 +165,7 @@ def regenerated(root: Path, report: Callable[[str], None]) -> None:
             report(f"  {line}")
         report(
             "Every other carrier has moved and the merge has landed, so what "
-            f"is left is the declaration named above. Fix it, then run "
+            "is left is the declaration named above. Fix it, then run "
             f"`{REGENERATE_COMMAND}`."
         )
         raise typer.Exit(1) from refusal
