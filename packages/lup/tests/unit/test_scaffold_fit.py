@@ -25,6 +25,7 @@ from lup.devtools.dev.scaffold import branch_head, merged_at
 from lup.devtools.dev.scaffold_fit import (
     candidates,
     measured,
+    restated,
     neighbourhood,
     strided,
     surveyed,
@@ -114,8 +115,14 @@ def test_the_reading_counts_what_this_checkout_carries_of_one_commit(
     stamped = measured(adopter, upstream, SOURCE, PACKAGE, base)
     later = measured(adopter, upstream, SOURCE, PACKAGE, head)
 
-    assert stamped.spelled() == "7 of 7 compiled file(s) identical, 7 carried"
-    assert later.spelled() == "5 of 8 compiled file(s) identical, 7 carried"
+    # Everything the scaffold holds at the stamped commit is here byte
+    # for byte; the later one compiles a module this copy never had and
+    # edits others, so it is wider and less of it matches.
+    assert stamped.identical == stamped.compiled == stamped.carried
+    assert later.compiled > stamped.compiled
+    assert later.carried == stamped.carried
+    assert later.identical < later.compiled
+    assert later.share() < stamped.share()
     assert later.subject == "the pulse, and a new module"
 
 
@@ -206,8 +213,9 @@ def test_a_base_equal_to_the_resolved_pin_is_refused_before_anything_is_rooted(
     said = str(refusal.value)
     assert "is the commit the library pin already resolves to" in said
     assert "0 fast-forwarded, 0 merged clean, 0 conflicted" in said
-    assert f"{short_sha(base)} (the scaffold) reads 7 of 7" in said
-    assert "`--accept-fit 5`" in said
+    stamped = measured(adopter, upstream, SOURCE, PACKAGE, base)
+    assert f"{short_sha(base)} (the scaffold) reads {stamped.spelled()}" in said
+    assert f"`{restated(measured(adopter, upstream, SOURCE, PACKAGE, head))}`" in said
     assert branch_head(adopter, SOURCE.branch) == ""
 
 
@@ -225,7 +233,11 @@ def test_a_base_the_copy_matches_is_accepted_and_becomes_the_merge_base(
     update.adopted(adopter, SOURCE, PACKAGE, base, said.append)
 
     assert merged_at(adopter, SOURCE.branch) == base
-    assert f"scaffold({short_sha(base)}) against this checkout: 7 of 7" in said[0]
+    stamped = measured(adopter, upstream, SOURCE, PACKAGE, base)
+    assert (
+        f"scaffold({short_sha(base)}) against this checkout: {stamped.spelled()}"
+        in said[0]
+    )
 
 
 def test_a_base_given_short_is_rooted_at_the_commit_it_names(
@@ -255,10 +267,12 @@ def test_a_base_the_measurement_argues_against_is_refused_and_answerable(
 
     said = str(refusal.value)
     assert "fits this checkout poorly" in said
-    assert f"{short_sha(base)} (the scaffold) reads 7 of 7" in said
+    stamped = measured(adopter, upstream, SOURCE, PACKAGE, base)
+    assert f"{short_sha(base)} (the scaffold) reads {stamped.spelled()}" in said
     assert branch_head(adopter, SOURCE.branch) == ""
 
-    update.adopted(adopter, SOURCE, PACKAGE, head, print, 5)
+    reads = measured(adopter, upstream, SOURCE, PACKAGE, head).identical
+    update.adopted(adopter, SOURCE, PACKAGE, head, print, reads)
 
     assert merged_at(adopter, SOURCE.branch) == head
 
@@ -272,12 +286,15 @@ def test_an_accepted_fit_that_misstates_the_reading_is_refused(
     head = upstream_moved_on(upstream)
     adopting(monkeypatch, upstream)
 
+    reads = measured(adopter, upstream, SOURCE, PACKAGE, head)
+    misstated = reads.identical + 1
+
     with pytest.raises(typer.BadParameter) as refusal:
-        update.adopted(adopter, SOURCE, PACKAGE, head, print, 6)
+        update.adopted(adopter, SOURCE, PACKAGE, head, print, misstated)
 
     said = str(refusal.value)
-    assert "--accept-fit 6 is not what this base reads" in said
-    assert "`--accept-fit 5`" in said
+    assert f"--accept-fit {misstated} is not what this base reads" in said
+    assert f"`{restated(reads)}`" in said
     assert branch_head(adopter, SOURCE.branch) == ""
 
 
