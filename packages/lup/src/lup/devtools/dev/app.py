@@ -398,6 +398,15 @@ def create_dev_app(
                 "the loop while a change is moving, not the bar a commit passes",
             ),
         ] = False,
+        base: Annotated[
+            str | None,
+            typer.Option(
+                "--base",
+                help="Judge removed capabilities from the merge base with this "
+                "ref instead of the one detection reaches, for a checkout whose "
+                "base it cannot work out",
+            ),
+        ] = None,
     ) -> None:
         """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
         declarations = declared()
@@ -442,6 +451,7 @@ def create_dev_app(
             ledger=ledger,
             scaffold_source=declarations.scaffold,
             spread=declarations.spread,
+            migration_base=check.named_gate_base(base) if base is not None else None,
         )
 
     # -- test command --
