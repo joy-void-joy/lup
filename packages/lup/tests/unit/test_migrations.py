@@ -132,18 +132,21 @@ def test_the_profile_split_recipe_preserves_an_existing_registry(
     assert AccountFile(registry).resolve_config_dir() == personal
 
 
-def test_the_historical_profile_breaks_have_commit_scoped_recovery() -> None:
-    """Both reported imports are covered without warning already-updated pins."""
-    missing = [
-        Capability(
-            identity="ClaudeProfileStore", location="lup.adapters.claude.profile_store"
-        ),
-        Capability(identity="CLAUDE_CONFIG_DIR", location="lup.adapters.claude.config"),
-    ]
+def test_every_standing_declaration_says_what_a_caller_does_about_it() -> None:
+    """The property that holds of the window whatever is in it, including nothing.
 
-    assert unnamed(missing, DECLARED) == []
-    for capability in missing:
-        migration = next(item for item in DECLARED if item.covers(capability))
-        assert migration.commit
-        assert migration.steps
-        assert "lup.providers.claude" in "\n".join(migration.spelled())
+    Asserting the *contents* of ``DECLARED`` cannot survive a release, because
+    emptying that list is what a release does: this named two capabilities by
+    their retired import paths and failed the moment they shipped, which made
+    the release the one commit the suite could not accept. What is worth
+    pinning is true of any window — a break somebody declared carries steps a
+    caller can act on, and one scoped to a commit says which.
+
+    Vacuous while the window is empty, and that is the honest reading: there
+    are no pending breaks to check between a release and the next declaration.
+    """
+    for migration in DECLARED:
+        assert migration.subjects
+        assert migration.steps, f"{migration.subjects} declares no step to take"
+        assert migration.reason
+        assert all(step.instruction for step in migration.steps)
