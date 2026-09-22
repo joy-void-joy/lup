@@ -413,6 +413,15 @@ suppressed at the site with `# lup: ignore[<rule>]` and a standing reason.
   whatever the example used as a placeholder, and put an approval in front of
   the sentence explaining it. The same reading the note scanner already
   applied to a marker now answers for a directive, in every language.
+- `dev release` empties the declared-break list into a form the release after
+  it can read. It wrote the annotated assignment and looked for the bare one,
+  so a release crashed on the output of the release before it, with the
+  changelog and version already written — a failure that could only arrive one
+  release late. The round trip is pinned now, since a release's own output is
+  the next release's input.
+- `dev comments --retire` asks before deleting a claimed-resolved note. It is
+  the one step of the verify-solved pass nothing undoes, and `/lup:release`
+  runs that pass before cutting, so no claim reaches a version unverified.
 - `ledger migrate` copies a kind's journal lines and blobs into the placement
   its mapping now declares, for a kind moved after records already exist. The
   source lines stay: the committed journal is merged by git's union driver, so
