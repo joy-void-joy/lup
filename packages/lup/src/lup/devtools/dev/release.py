@@ -161,6 +161,23 @@ def with_version(text: str, version: str) -> str:
     return tomlkit.dumps(document)
 
 
+def declares_the_list(node: ast.stmt) -> bool:
+    """Whether this statement is the ``DECLARED`` assignment, either spelling.
+
+    ``DECLARED = [...]`` is an ``Assign`` and ``DECLARED: list[Migration] =
+    [...]`` an ``AnnAssign``, which are different nodes carrying the same
+    declaration — and the emptied form this module writes is the annotated
+    one, so a reader that knew only the bare shape could not find its own
+    output.
+    """
+    if isinstance(node, ast.AnnAssign):
+        return isinstance(node.target, ast.Name) and node.target.id == "DECLARED"
+    return isinstance(node, ast.Assign) and any(
+        isinstance(target, ast.Name) and target.id == "DECLARED"
+        for target in node.targets
+    )
+
+
 def cleared_declarations(text: str) -> str:
     """That module's text with its ``DECLARED`` list emptied.
 
@@ -173,17 +190,18 @@ def cleared_declarations(text: str) -> str:
     Everything else in the file stays, the docstring above the list included:
     what is emptied is the window of breaks not yet in a release, and the
     module explaining what such a window is for outlives every release.
+
+    Both assignment forms are read, because this writes the annotated one and
+    a reader that took only the bare form could not find what it had just
+    produced. The first release after one that emptied the list crashed on
+    its own output — every release is the one that annotates it, so the
+    failure arrives exactly once and always at the next release.
     """
     tree = ast.parse(text)
     spans = [
         node
         for node in tree.body
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "DECLARED"
-            for target in node.targets
-        )
-        and node.end_lineno is not None
+        if declares_the_list(node) and node.end_lineno is not None
     ]
     if not spans:
         raise KeyError("no DECLARED assignment to empty")
